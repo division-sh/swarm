@@ -108,6 +108,60 @@ func TestResolveFailsClosedForRootPinOutputWithoutTargetMechanism(t *testing.T) 
 	}
 }
 
+func TestResolveAllowsRootPinOutputWithRootConnectAuthority(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testRootConnectPinRoutingSource(),
+		EventType: "root.ready",
+	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", result.Failure)
+	}
+	if result.Broadcast {
+		t.Fatal("root connect authority should not lower to producer broadcast")
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want EventBus RoutePlan authority", got)
+	}
+}
+
+func TestResolveFailsClosedForRootProducerBroadcastCommonCompositionPath(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testRootConnectPinRoutingSource(),
+		EventType: "root.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Broadcast: true,
+		},
+	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureProducerBroadcastCommonPath {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerBroadcastCommonPath)
+	}
+	if result.Broadcast {
+		t.Fatal("root producer broadcast repaired a canonical root connect route")
+	}
+}
+
+func TestResolveFailsClosedForRootProducerTargetCommonCompositionPath(t *testing.T) {
+	result := Resolve(ResolutionInput{
+		Source:    testRootConnectPinRoutingSource(),
+		EventType: "root.ready",
+		Emit: runtimecontracts.EmitSpec{
+			Target: runtimecontracts.EmitTargetSpec{
+				Flow:  "consumer",
+				Match: map[string]runtimecontracts.ExpressionValue{"entity_id": runtimecontracts.RefExpression("payload.entity_id")},
+			},
+		},
+	}, events.NewProjectionEvent("", "root.ready", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
+
+	if result.Failure != FailureProducerTargetCommonPath {
+		t.Fatalf("Failure = %q, want %q", result.Failure, FailureProducerTargetCommonPath)
+	}
+	if got := result.Event.TargetRoute(); !got.Empty() {
+		t.Fatalf("Event target = %#v, want empty on root producer target common path", got)
+	}
+}
+
 func TestResolveFailsClosedForProducerTargetCommonCompositionPath(t *testing.T) {
 	result := Resolve(ResolutionInput{
 		Source:    testProducerCommonPathSource(),
@@ -602,6 +656,64 @@ func testRootPinRoutingSource() semanticview.Source {
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"root.ready": {},
+		},
+	})
+}
+
+func testRootConnectPinRoutingSource() semanticview.Source {
+	consumer := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:   "consumer",
+			Flow: "consumer",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{
+					EventPins: []runtimecontracts.FlowInputEventPin{{
+						Name:  "ready",
+						Event: "root.ready",
+					}},
+				},
+			},
+		},
+		Path: "consumer",
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					EventPins: []runtimecontracts.FlowOutputEventPin{{
+						Name:  "root_ready",
+						Event: "root.ready",
+					}},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"root.ready": {},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"consumer": consumer.Schema,
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			FlowInputs: map[string][]string{
+				"consumer": {"root.ready"},
+			},
+			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
+				"consumer": {{Name: "ready", Event: "root.ready"}},
+			},
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+				From: ".root_ready",
+				To:   "consumer.ready",
+			}},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{consumer},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"consumer": &consumer,
+			},
 		},
 	})
 }

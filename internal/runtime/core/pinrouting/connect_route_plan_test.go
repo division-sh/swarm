@@ -128,6 +128,80 @@ func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansRootProducerToStaticReceiver(t *testing.T) {
+	source := testRootConnectRoutePlanSource([]runtimecontracts.FlowOutputEventPin{{
+		Name:  "root_ready",
+		Event: "root.ready",
+	}}, []connectRoutePlanFlow{
+		{
+			id:   "consumer",
+			mode: "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "ready",
+				Event: "root.ready",
+			}},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From:     ".root_ready",
+		To:       "consumer.ready",
+		Delivery: "one",
+	}})
+
+	plans, issues := LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if !plan.Source.Root {
+		t.Fatalf("Source.Root = false, want true: %#v", plan.Source)
+	}
+	if got, want := plan.Source.FlowID, ""; got != want {
+		t.Fatalf("Source.FlowID = %q, want root empty flow id", got)
+	}
+	if got, want := plan.Source.Pin, "root_ready"; got != want {
+		t.Fatalf("Source.Pin = %q, want %q", got, want)
+	}
+	if got, want := plan.Source.ResolvedEvent, "root.ready"; got != want {
+		t.Fatalf("Source.ResolvedEvent = %q, want %q", got, want)
+	}
+	if got, want := plan.Receiver.FlowID, "consumer"; got != want {
+		t.Fatalf("Receiver.FlowID = %q, want %q", got, want)
+	}
+	if plan.Target.FlowInstance != "consumer" {
+		t.Fatalf("Target.FlowInstance = %q, want consumer", plan.Target.FlowInstance)
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansRejectsRootReceiverEndpoint(t *testing.T) {
+	source := testRootConnectRoutePlanSource([]runtimecontracts.FlowOutputEventPin{{
+		Name:  "root_ready",
+		Event: "root.ready",
+	}}, []connectRoutePlanFlow{
+		{
+			id:   "producer",
+			mode: "static",
+			outputs: []runtimecontracts.FlowOutputEventPin{{
+				Name:  "ready",
+				Event: "root.ready",
+			}},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From: "producer.ready",
+		To:   ".root_ready",
+	}})
+
+	plans, issues := LowerCompositionConnectRoutePlans(source)
+	if len(plans) != 0 {
+		t.Fatalf("plans = %#v, want none", plans)
+	}
+	if len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverRootUnsupported {
+		t.Fatalf("issues = %#v, want receiver_root_unsupported", issues)
+	}
+}
+
 func TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{
@@ -438,6 +512,10 @@ type connectRoutePlanFlow struct {
 }
 
 func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
+	return testRootConnectRoutePlanSource(nil, flows, connects)
+}
+
+func testRootConnectRoutePlanSource(rootOutputs []runtimecontracts.FlowOutputEventPin, flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
 	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
 	inputPins := make(map[string][]runtimecontracts.FlowInputEventPin, len(flows))
@@ -476,6 +554,17 @@ func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtime
 		flowSchemas[flow.id] = view.Schema
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Outputs: runtimecontracts.FlowOutputPins{
+					Events:    outputEventNames(rootOutputs),
+					EventPins: rootOutputs,
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"root.ready": {},
+		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			FlowInputs:          flowInputs,
 			FlowOutputs:         flowOutputs,

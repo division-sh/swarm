@@ -185,6 +185,66 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscr
 	}
 }
 
+func TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget(t *testing.T) {
+	source := connectRoutePlanRootProducerStaticSource()
+	store := newTargetRouteMemoryStore()
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	receiverCarriers := eb.RouteTable().Resolve("consumer/root.ready")
+	if !subscriberListContainsRouteSource(receiverCarriers, "consumer-node", "consumer", "receiver_carrier") {
+		t.Fatalf("receiver carrier route consumer/root.ready = %#v, want consumer-node receiver_carrier", receiverCarriers)
+	}
+	eventID := uuid.NewString()
+	evt := events.NewProjectionEvent(eventID,
+		events.EventType("root.ready"), "", "", json.RawMessage(`{"entity_id":"entity-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node",
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: "consumer",
+			EntityID:     runtimeflowidentity.EntityID("consumer"),
+		},
+	}
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched root connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) {
+		t.Fatalf("route plan delivery routes = %#v, want %#v", routePlan.DeliveryRoutes(), want)
+	}
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, want) {
+		t.Fatalf("preflight delivery routes = %#v, want %#v", plan.DeliveryRoutes, want)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
+		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
+	}
+	if got := store.scopes[eventID]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
+		t.Fatalf("committed replay scope = %q, want subscribed", got)
+	}
+	if got := store.receipts[eventID]; got != "processed" {
+		t.Fatalf("pipeline receipt = %q, want processed", got)
+	}
+}
+
 func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanPrecedesLegacyDescriptorPolicy(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
 		From:     "producer.deploy_done",
@@ -1043,6 +1103,43 @@ func connectRoutePlanStaticSource(connect runtimecontracts.FlowPackageConnect) s
 			},
 		},
 	}, []runtimecontracts.FlowPackageConnect{connect}))
+}
+
+func connectRoutePlanRootProducerStaticSource() semanticview.Source {
+	bundle := connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
+		{
+			id:   "consumer",
+			mode: "static",
+			inputs: []runtimecontracts.FlowInputEventPin{{
+				Name:  "ready",
+				Event: "root.ready",
+			}},
+			nodes: map[string]runtimecontracts.SystemNodeContract{
+				"consumer-node": {
+					ID:            "consumer-node",
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"root.ready": {}},
+				},
+			},
+		},
+	}, []runtimecontracts.FlowPackageConnect{{
+		From:     ".root_ready",
+		To:       "consumer.ready",
+		Delivery: "one",
+	}})
+	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
+		Pins: runtimecontracts.FlowPins{
+			Outputs: runtimecontracts.FlowOutputPins{
+				EventPins: []runtimecontracts.FlowOutputEventPin{{
+					Name:  "root_ready",
+					Event: "root.ready",
+				}},
+			},
+		},
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"root.ready": {},
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func connectRoutePlanStaticDeliveryRoute() events.DeliveryRoute {

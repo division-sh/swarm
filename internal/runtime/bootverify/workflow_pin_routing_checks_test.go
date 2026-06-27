@@ -299,6 +299,50 @@ func TestPinTargetResolution_AllowsRootExplicitBroadcastOptOut(t *testing.T) {
 	}
 }
 
+func TestPinTargetResolution_AllowsRootPinOutputThroughRootConnect(t *testing.T) {
+	bundle := loadPinRoutingRootConnectBundle(t, `
+      emit:
+        event: root.ready
+        fields:
+          entity_id: payload.entity_id
+`)
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if reportContains(report.Errors(), "pin_target_resolution", "root") {
+		t.Fatalf("root connect should satisfy root pin target proof, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_FailsClosedForRootProducerBroadcastCommonPath(t *testing.T) {
+	bundle := loadPinRoutingRootConnectBundle(t, `
+      emit:
+        event: root.ready
+        fields:
+          entity_id: payload.entity_id
+        broadcast: true
+`)
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_broadcast_common_path_forbidden") {
+		t.Fatalf("expected root producer_broadcast_common_path_forbidden, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_FailsClosedForRootProducerTargetCommonPath(t *testing.T) {
+	bundle := loadPinRoutingRootConnectBundle(t, `
+      emit:
+        event: root.ready
+        fields:
+          entity_id: payload.entity_id
+        target:
+          flow: consumer
+          match:
+            entity_id: payload.entity_id
+`)
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "producer_target_common_path_forbidden") {
+		t.Fatalf("expected root producer_target_common_path_forbidden, got %#v", report.Errors())
+	}
+}
+
 func TestPinTargetResolution_ChecksRootNodeWhenFlowNodeIDCollides(t *testing.T) {
 	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
 		rootNodes:        pinRoutingVerifyNodeYAML("shared-node", "root.start", "root.ready", false),
@@ -685,6 +729,75 @@ flows: []
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "extras", "nodes.yaml"), defaultPinRoutingFixtureYAML(opts.extrasNodes))
 	writePinRoutingVerifyFile(t, filepath.Join(root, "extras", "agents.yaml"), defaultPinRoutingFixtureYAML(opts.extrasAgents))
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func loadPinRoutingRootConnectBundle(t *testing.T, emitBlock string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
+name: pin-routing-root-connect
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+  - from: .root_ready
+    to: consumer.ready
+    delivery: one
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), `
+name: pin-routing-root-connect
+pins:
+  inputs:
+    events: [root.start]
+  outputs:
+    events:
+      - name: root_ready
+        event: root.ready
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "events.yaml"), `
+root.start:
+  entity_id: text
+root.ready:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "nodes.yaml"), `
+root-node:
+  id: root-node
+  execution_type: system_node
+  event_handlers:
+    root.start:
+`+emitBlock+`
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: ready
+        event: root.ready
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+root.ready:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

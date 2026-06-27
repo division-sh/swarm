@@ -95,16 +95,26 @@ func parseFlowPackagePinRef(raw string) (FlowPackagePinRef, error) {
 	if raw == "" {
 		return FlowPackagePinRef{}, fmt.Errorf("pin reference is required")
 	}
+	if strings.HasPrefix(raw, ".") {
+		pin := strings.TrimSpace(strings.TrimPrefix(raw, "."))
+		if pin == "" {
+			return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use .{root_pin_name} or {flow_id}.{pin_name}", raw)
+		}
+		return FlowPackagePinRef{
+			Root: true,
+			Pin:  pin,
+		}, nil
+	}
 	idx := strings.Index(raw, ".")
 	if idx <= 0 || idx >= len(raw)-1 {
-		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use {flow_id}.{pin_name}", raw)
+		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use .{root_pin_name} or {flow_id}.{pin_name}", raw)
 	}
 	ref := FlowPackagePinRef{
 		FlowID: strings.TrimSpace(raw[:idx]),
 		Pin:    strings.TrimSpace(raw[idx+1:]),
 	}
 	if ref.FlowID == "" || ref.Pin == "" {
-		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use non-empty flow and pin names", raw)
+		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use .{root_pin_name} or non-empty flow and pin names", raw)
 	}
 	return ref, nil
 }

@@ -399,19 +399,30 @@ func (b *WorkflowContractBundle) FlowInputEvents(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.FlowInputs[strings.TrimSpace(flowID)]...)
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" && b.RootSchema != nil {
+		return append([]string{}, b.RootSchema.Pins.Inputs.Events...)
+	}
+	return append([]string{}, b.Semantics.FlowInputs[flowID]...)
 }
 func (b *WorkflowContractBundle) FlowOutputEvents(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.FlowOutputs[strings.TrimSpace(flowID)]...)
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" && b.RootSchema != nil {
+		return append([]string{}, b.RootSchema.Pins.Outputs.Events...)
+	}
+	return append([]string{}, b.Semantics.FlowOutputs[flowID]...)
 }
 func (b *WorkflowContractBundle) FlowInputEventPins(flowID string) []FlowInputEventPin {
 	if b == nil {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "" && b.RootSchema != nil {
+		return semanticInputEventPins(b.RootSchema.Pins.Inputs)
+	}
 	if pins := b.Semantics.FlowInputEventPins[flowID]; len(pins) > 0 {
 		return cloneFlowInputEventPins(pins)
 	}
@@ -425,6 +436,9 @@ func (b *WorkflowContractBundle) FlowOutputEventPins(flowID string) []FlowOutput
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "" && b.RootSchema != nil {
+		return semanticOutputEventPins(b.RootSchema.Pins.Outputs)
+	}
 	if pins := b.Semantics.FlowOutputEventPins[flowID]; len(pins) > 0 {
 		return cloneFlowOutputEventPins(pins)
 	}
@@ -466,7 +480,7 @@ func (b *WorkflowContractBundle) CompositionConnects() []FlowPackageConnect {
 func (b *WorkflowContractBundle) CompositionConnectsTo(flowID, pinName string) []FlowPackageConnect {
 	flowID = strings.TrimSpace(flowID)
 	pinName = strings.TrimSpace(pinName)
-	if b == nil || flowID == "" || pinName == "" {
+	if b == nil || pinName == "" {
 		return nil
 	}
 	var out []FlowPackageConnect
@@ -475,7 +489,7 @@ func (b *WorkflowContractBundle) CompositionConnectsTo(flowID, pinName string) [
 		if err != nil {
 			continue
 		}
-		if ref.FlowID == flowID && ref.Pin == pinName {
+		if flowPackagePinRefMatches(ref, flowID, pinName) {
 			out = append(out, connect)
 		}
 	}
@@ -484,7 +498,7 @@ func (b *WorkflowContractBundle) CompositionConnectsTo(flowID, pinName string) [
 func (b *WorkflowContractBundle) CompositionConnectsFrom(flowID, pinName string) []FlowPackageConnect {
 	flowID = strings.TrimSpace(flowID)
 	pinName = strings.TrimSpace(pinName)
-	if b == nil || flowID == "" || pinName == "" {
+	if b == nil || pinName == "" {
 		return nil
 	}
 	var out []FlowPackageConnect
@@ -493,11 +507,23 @@ func (b *WorkflowContractBundle) CompositionConnectsFrom(flowID, pinName string)
 		if err != nil {
 			continue
 		}
-		if ref.FlowID == flowID && ref.Pin == pinName {
+		if flowPackagePinRefMatches(ref, flowID, pinName) {
 			out = append(out, connect)
 		}
 	}
 	return out
+}
+
+func flowPackagePinRefMatches(ref FlowPackagePinRef, flowID, pinName string) bool {
+	flowID = strings.TrimSpace(flowID)
+	pinName = strings.TrimSpace(pinName)
+	if pinName == "" {
+		return false
+	}
+	if ref.Root {
+		return flowID == "" && strings.TrimSpace(ref.Pin) == pinName
+	}
+	return strings.TrimSpace(ref.FlowID) == flowID && strings.TrimSpace(ref.Pin) == pinName
 }
 func (b *WorkflowContractBundle) FlowReadPins(flowID string) []string {
 	if b == nil {
@@ -948,8 +974,15 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 
 func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Scope {
 	flowID = strings.TrimSpace(flowID)
-	if b == nil || flowID == "" {
+	if b == nil {
 		return eventidentity.Scope{}
+	}
+	if flowID == "" {
+		return eventidentity.Scope{
+			LocalEvents:  b.rootLocalEvents(),
+			InputEvents:  b.FlowInputEvents(""),
+			OutputEvents: b.FlowOutputEvents(""),
+		}
 	}
 	view, ok := b.FlowViewByID(flowID)
 	if !ok || view == nil {
@@ -961,6 +994,41 @@ func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Sco
 		InputEvents:  append([]string{}, view.Schema.Pins.Inputs.Events...),
 		OutputEvents: append([]string{}, view.Schema.Pins.Outputs.Events...),
 	}
+}
+
+func (b *WorkflowContractBundle) rootLocalEvents() []string {
+	if b == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	appendEvent := func(eventType string) {
+		eventType = strings.TrimSpace(eventType)
+		if eventType == "" {
+			return
+		}
+		if _, ok := seen[eventType]; ok {
+			return
+		}
+		seen[eventType] = struct{}{}
+		out = append(out, eventType)
+	}
+	if b.RootSchema != nil {
+		for _, eventType := range b.RootSchema.Pins.Inputs.Events {
+			appendEvent(eventType)
+		}
+		for _, eventType := range b.RootSchema.Pins.Outputs.Events {
+			appendEvent(eventType)
+		}
+		if autoEmit := strings.TrimSpace(b.RootSchema.AutoEmitOnCreate.Event); autoEmit != "" {
+			appendEvent(autoEmit)
+		}
+	}
+	for eventType := range b.Events {
+		appendEvent(eventType)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (b *WorkflowContractBundle) flowEventDescendants(flowID string) []eventidentity.DescendantScope {

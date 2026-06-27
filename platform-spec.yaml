@@ -665,9 +665,9 @@ contract_formats:
           unsupported_or_split:
             business_field_descriptor_targets: 'Declared top-level receiver entity fields with indexed: true are implemented by #1479; nested entity paths, arbitrary, undeclared, unindexed, config, and instance business-field descriptor targets remain split to #1466 or later gated children.'
             agent_node_emitter_parity: 'Closed by #1474: generated agent emit tools and node/system emits for supported connected output pins consume the same EventBus RoutePlan authority from lowered parent connect facts.'
-            producer_target_broadcast_retirement: 'Closed by #1475 for loaded flow-scope target.flow/match and broadcast:true common-path package composition; broader root/package composition-first closure remains #1466.'
+            producer_target_broadcast_retirement: 'Closed by #1475 for loaded flow-scope target.flow/match and broadcast:true common-path package composition; #1508 adds explicit package-root producer endpoints and retires root producer target/broadcast common-path composition when root connect authority applies.'
             selected_contract_runfork_readiness: 'Tracked under #1466/watchlist; not closed by #1473.'
-            parent_composition_routing_closure: '#1466 remains open.'
+            parent_composition_routing_closure: '#1466 remains open until root-connect #1508 closeout is merged and audited.'
         inputs:
           event_identity:
             fields:
@@ -1666,12 +1666,14 @@ handler_specification:
           and {flow, match, allow_fanout}. This field is not payload and is the only producer-authored path that may ask
           the platform to populate event.target or event.target_set. It is not the common consumer-routing surface for
           parent-composed flow packages; common cross-flow delivery is owned by parent connect lowering. A loaded flow-scope
-          producer target that selects a loaded package receiver input for the same pin-declared output or a receiver flow
-          reached by the parent connect graph is invalid common-path routing, not an escape hatch.
+          producer target, or package-root producer target from a root output pin consumed by an explicit root connect endpoint,
+          that selects a loaded package receiver input for the same pin-declared output or a receiver flow reached by the parent
+          connect graph is invalid common-path routing, not an escape hatch.
         broadcast: optional boolean. Only true is meaningful. For a pin-declared output, broadcast:true is an explicit
           producer-authored opt-out escape hatch that leaves event.target absent. Parent-authored broadcast/fan-out uses
-          connect lowering rather than producer broadcast. Loaded flow-scope producer broadcast is invalid when it is used
-          as package-internal delivery to known receiver input pins that require parent connect topology.
+          connect lowering rather than producer broadcast. Loaded flow-scope producer broadcast, and package-root producer
+          broadcast from a root output pin consumed by an explicit root connect endpoint, is invalid when it is used as
+          package-internal delivery to receiver input pins that require parent connect topology.
       pin_routing_activation:
         rule: Pin routing activates if and only if the emitted event is declared in the emitter flow's schema.yaml pins.outputs.events.
         ad_hoc_emits: Emits not declared in pins.outputs.events are ordinary event-loop emits and do not require target or broadcast.
@@ -1681,8 +1683,8 @@ handler_specification:
           parent-composed receiver-input routing. No silent fallback to event-type broadcast is allowed.
         explicit_target_precedence: Producer target is an exceptional dynamic-routing escape hatch, not the common route
           owner for parent-composed topology. Lowered parent connect remains the common source authority for connected pins;
-          loaded flow-scope producer target/broadcast on the common path must be removed or fail closed even if a parent
-          connect is also present. Structural binding writes event.target only when the emit site has no explicit target,
+          loaded flow-scope producer target/broadcast and package-root producer target/broadcast on the common path must
+          be removed or fail closed even if a parent connect is also present. Structural binding writes event.target only when the emit site has no explicit target,
           no lowered connect target applies, and broadcast:true is absent.
       target_forms:
         sender: Copy inbound event.source into the new event.target. Sender is the immediate inbound sender, not a chain ancestor.
@@ -1698,11 +1700,12 @@ handler_specification:
         target_unknown_flow: target.flow names a flow outside the loaded registry.
         target_sender_no_inbound: target:sender is used where no inbound event source can exist.
         target_sender_empty_source: target:sender is used where inbound source is statically external or empty.
-        producer_target_common_path_forbidden: A loaded flow-scope producer target.flow/match selects a loaded package
-          receiver input for the same pin-declared output or a receiver flow reached by the parent connect graph;
-          parent connect is the required route owner.
-        producer_broadcast_common_path_forbidden: Loaded flow-scope broadcast:true is used as package-internal delivery to
-          known receiver input pins for the same pin-declared output or connected output pin; parent connect broadcast/fan-out is the required route owner.
+        producer_target_common_path_forbidden: A loaded flow-scope producer or package-root producer target.flow/match
+          selects a loaded package receiver input for the same pin-declared output or a receiver flow reached by the
+          parent connect graph; parent connect is the required route owner.
+        producer_broadcast_common_path_forbidden: Loaded flow-scope or package-root broadcast:true is used as package-internal
+          delivery to receiver input pins for the same pin-declared output or connected output pin; parent connect
+          broadcast/fan-out is the required route owner.
       single_emit_handler_rule: 'A handler top-level emit is valid only when the handler has exactly one possible emit site.
         If the handler also declares rules, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity.
         Payload ownership must move to the active emit site.'
@@ -2132,8 +2135,10 @@ engine:
       - source fallback for explicit broadcast or legacy external paths
       explicit_target_escape_hatch: Producer target is only an exceptional dynamic-routing escape hatch. It must not be
         treated as the common parent-composed routing owner and must not replace lowered parent connect as the common source
-        authority for connected pins. target.flow/match from a loaded flow-scope producer that selects a loaded package
-        receiver input for the same pin-declared output or a receiver flow reached by the parent connect graph is illegal common-path composition routing, including when a parent connect or alias/adapter connect also exists.
+        authority for connected pins. target.flow/match from a loaded flow-scope producer, or from a package-root
+        producer output pin consumed by explicit root connect authority, that selects a loaded package receiver input for
+        the same pin-declared output or a receiver flow reached by the parent connect graph is illegal common-path
+        composition routing, including when a parent connect or alias/adapter connect also exists.
       fail_closed: A pin-declared output that has no lowered parent connect route, no explicit target escape hatch, no structural
         ParentRoute, no eligible static child delivery-entity route, and no broadcast:true is invalid.
       no_silent_broadcast_fallback: Missing, malformed, ambiguous, or unreachable targets must fail with a typed reason.
@@ -2146,9 +2151,10 @@ engine:
         is explicit because a parent can have many children of the same flow type.
       flow_match: |
         `target: { flow, match }` resolves target.flow plus declared entity-field matches to exactly one target instance.
-        Zero matches and more than one match fail closed at publish time. From loaded flow-scope producers, it is forbidden
-        as package-internal composition routing when target.flow has a receiver input for the same pin-declared output event or is reached by the parent connect graph;
-        parent connect owns that route.
+        Zero matches and more than one match fail closed at publish time. From loaded flow-scope producers, or package-root
+        producers whose output pin is consumed by explicit root connect authority, it is forbidden as package-internal composition
+        routing when target.flow has a receiver input for the same pin-declared output event or is reached by the parent
+        connect graph; parent connect owns that route.
       flow_match_allow_fanout: |
         `target: { flow, match, allow_fanout: true }` is the explicit dynamic fan-out escape hatch for flow/match targeting.
         It permits more than one matched recipient. Parent-authored fan-out should use connect topology. Publish-time
@@ -2159,8 +2165,9 @@ engine:
       broadcast: |
         `broadcast: true` is the producer-authored explicit opt-out escape hatch for pin-declared output routing. It leaves
         event.target absent and uses the ordinary no-target event-type delivery path. Parent-authored broadcast/fan-out should
-        use connect topology and lower to concrete route-plan facts. From loaded flow-scope producers, broadcast:true is
-        forbidden when it functions as package-internal delivery to loaded receiver input pins for the same pin-declared output or connected output pin.
+        use connect topology and lower to concrete route-plan facts. From loaded flow-scope producers, or package-root
+        producers whose output pin is consumed by explicit root connect authority, broadcast:true is forbidden when it functions as
+        package-internal delivery to loaded receiver input pins for the same pin-declared output or connected output pin.
     structural_binding:
       precedence_guard: Structural binding is lower precedence than lowered parent connect and the explicit target escape
         hatch. It may write event.target only for a child-to-parent pin output when no lowered parent connect target applies,
@@ -2220,11 +2227,12 @@ engine:
         target_unknown_flow: target.flow does not exist in the loaded flow registry.
         target_sender_no_inbound: target:sender appears on a handler whose only triggers cannot supply inbound source.
         target_sender_empty_source: target:sender appears on a handler subscribed only to external-sourced events with empty source.
-        producer_target_common_path_forbidden: A loaded flow-scope producer target.flow/match selects a loaded package
-          receiver input for the same pin-declared output or a receiver flow reached by the parent connect graph;
-          parent connect is the required route owner.
-        producer_broadcast_common_path_forbidden: Loaded flow-scope broadcast:true is used as package-internal delivery to
-          known receiver input pins for the same pin-declared output or connected output pin; parent connect broadcast/fan-out is the required route owner.
+        producer_target_common_path_forbidden: A loaded flow-scope producer or package-root producer target.flow/match
+          selects a loaded package receiver input for the same pin-declared output or a receiver flow reached by the
+          parent connect graph; parent connect is the required route owner.
+        producer_broadcast_common_path_forbidden: Loaded flow-scope or package-root broadcast:true is used as package-internal
+          delivery to receiver input pins for the same pin-declared output or connected output pin; parent connect
+          broadcast/fan-out is the required route owner.
       publish_time_dead_letter:
         target_unreachable_no_subscriber: Target resolution finds no recipient for the requested target.
         target_unreachable_terminated: Target or ParentRoute referred to an instance that no longer exists.
@@ -4236,8 +4244,8 @@ engine:
         escape hatch, structural ParentRoute eligibility, eligible static child delivery-entity route, or broadcast:true;
         has malformed target syntax; references an unknown target.flow; uses
         target:sender where no inbound source can exist; uses target:sender only on external-sourced inputs with empty
-        source; or uses loaded flow-scope producer target/broadcast as package-internal delivery to a known receiver input
-        where parent connect is required.
+        source; or uses loaded flow-scope or package-root producer target/broadcast as package-internal delivery to a
+        receiver input where parent connect is required.
       when: boot-only
     - id: redundant_in_topology_select_entity
       severity: warning
@@ -4956,10 +4964,11 @@ flow_model:
           location: parent package.yaml connect
           canonical_form: >
             `connect` is a list of structured connections. Each entry binds one producer output pin to one receiver
-            input pin, optionally names an alias/adapter, and declares or confirms delivery topology. `from` and `to`
-            use flow-id plus local pin names, not handler keys and not runtime instance paths.
+            input pin, optionally names an alias/adapter, and declares or confirms delivery topology. `from` uses either
+            flow-id plus local pin name or the explicit package-root endpoint form `.{root_output_pin_name}`. `to` uses
+            flow-id plus local input pin name in this slice. Connect refs are not handler keys and not runtime instance paths.
           fields:
-            from: Required producer reference `{producer_flow_id}.{output_pin_name}`.
+            from: Required producer reference `{producer_flow_id}.{output_pin_name}` or package-root producer reference `.{root_output_pin_name}`.
             to: Required receiver reference `{receiver_flow_id}.{input_pin_name}`.
             adapter: Optional named payload/event adapter when producer output and receiver input names or payload keys differ.
             map: Optional explicit map from receiver address keys to source/target expressions. Required when inference would be ambiguous or names differ.
@@ -4974,6 +4983,9 @@ flow_model:
                   vertical_id:
                     source: payload.vertical_id
                     target: entity.vertical_id
+              - from: .root_ready
+                to: operating.root_ready
+                delivery: one
       ownership_split:
         output_pins: Output pins own producer event identity and public producer interface only.
         input_pins: Input pins own receiver interface and receiver address resolution requirements.
@@ -4982,9 +4994,12 @@ flow_model:
         route_plan: Runtime RoutePlan owns publish-time concrete recipient authority after lowering; it consumes authored topology and MUST NOT reconstruct it from live subscribers.
         producer_emit_target: Producer `emit.target` owns only exceptional dynamic routing and MUST NOT be used as the common parent-composed routing surface.
       analyzer_verify_requirements:
-        producer_flow_exists: The `from` flow must exist in the loaded package registry.
-        producer_output_pin_exists: The `from` pin must exist in the producer schema output event pins.
+        producer_flow_exists: The `from` flow must exist in the loaded package registry unless `from` is the explicit
+          package-root endpoint form `.{root_output_pin_name}`.
+        producer_output_pin_exists: The `from` pin must exist in the producer schema output event pins; for package-root
+          endpoints it must exist in root schema.yaml pins.outputs.events.
         receiver_flow_exists: The `to` flow must exist in the loaded package registry.
+        receiver_root_unsupported: Root receiver endpoints are not supported by #1508; `to` must name a loaded receiver flow input pin.
         receiver_input_pin_exists: The `to` pin must exist in the receiver schema input event pins.
         event_alias_or_adapter_valid: Differing local event names or payload keys require an explicit alias/adapter or unambiguous bind-derived alias; raw same-name fallback is not valid for declared imported package pins.
         output_carries_address_key: The producer output event payload or envelope must carry every receiver address key required by the target input pin, or the connect entry must map it explicitly.
@@ -4998,7 +5013,7 @@ flow_model:
         owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering
         consumes:
         - parent package.yaml connect entries
-        - producer output pin event identity
+        - producer output pin event identity, including explicit package-root `.pin_name` output endpoints
         - receiver addressed input pin rules
         - import-boundary pin alias bindings
         - explicit adapter/map entries
@@ -5028,7 +5043,7 @@ flow_model:
             producer broadcast, or structural ParentRoute.
           artifact_fields:
             package_key: Parent package key that authored the connect entry when available.
-            producer_endpoint: Producer semantic flow id/path, output pin name, local output event identity, and scoped resolved event identity.
+            producer_endpoint: Producer semantic flow id/path or package-root marker, output pin name, local output event identity, and scoped resolved event identity.
             receiver_endpoint: Receiver semantic flow id/path/mode, input pin name, local receiver event identity, and scoped resolved event identity.
             adapter_and_map: Explicit adapter plus sorted address-key map entries used for alias/key adaptation.
             delivery: one, many, broadcast, or reply after analyzer/default inference.
@@ -5052,6 +5067,7 @@ flow_model:
           - connect_pin_ref_invalid
           - producer_flow_missing
           - producer_output_pin_missing
+          - receiver_root_unsupported
           - receiver_flow_missing
           - receiver_input_pin_missing
           - receiver_address_rule_missing
@@ -5139,9 +5155,9 @@ flow_model:
             the producer target/broadcast writer; the producer route must be
             removed or proven to be a different escape hatch. Parent connect
             remains the topology owner and EventBus RoutePlan remains the
-            concrete delivery authority. Root-level producer target/broadcast composition remains
-            a #1466/root-connect source-authority residual, not part of this
-            closed child slice.
+            concrete delivery authority. Root-level producer target/broadcast composition
+            is closed separately by implementation_slice_1508 when an explicit root connect
+            endpoint consumes the package-root output pin.
           consumes:
           - loaded flow-scope producer output pin event identity
           - authored emit target/broadcast syntax
@@ -5158,6 +5174,45 @@ flow_model:
           - connected agent/node output pins continue through EventBus RoutePlan without relay nodes or producer target/broadcast
           does_not_close:
           - '#1466 composition-first parent closure'
+        implementation_slice_1508:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/contracts.FlowPackageConnect plus internal/runtime/core/pinrouting.ConnectRoutePlan and ProducerRouteCommonPathFailure
+          rule: |
+            Parent connect may name a package-root producer output pin with
+            `from: .{root_output_pin_name}`. That root endpoint is a first-class
+            source-authority fact: contracts parsing, semanticview connect lookups,
+            bootverify composition validation, pin target resolution, EventBus
+            lowered ConnectRoutePlan consumption, and delivery persistence MUST all
+            consume the same explicit connect owner. A package-root producer emit
+            target.flow/match or broadcast:true is invalid common-path topology when
+            an explicit root connect consumes that output pin and routes to the
+            same loaded receiver flow. Runtime must fail closed before producer
+            target/broadcast can repair or override the canonical root connect
+            decision. Root receiver endpoints are not supported in this slice and
+            fail closed as receiver_root_unsupported.
+          root_endpoint_syntax:
+            producer: '`.{root_output_pin_name}` in connect.from names root schema.yaml pins.outputs.events only.'
+            receiver: 'Unsupported in #1508; connect.to must name `{receiver_flow_id}.{input_pin_name}`.'
+          consumes:
+          - root schema.yaml pins.outputs.events
+          - parent package.yaml connect.from `.{root_output_pin_name}` entries
+          - receiver flow input pin declarations and addressed-input route-plan lowering
+          - root producer authored emit target/broadcast syntax
+          produces:
+          - typed root ConnectRoutePlan producer endpoints
+          - producer_target_common_path_forbidden for root target.flow/match common-path composition where root connect authority applies
+          - producer_broadcast_common_path_forbidden for root broadcast:true common-path composition where root connect authority applies
+          - receiver_root_unsupported for attempted root connect receivers
+          proof_obligations:
+          - semanticview exposes root connect facts through CompositionConnectsFrom("", pin)
+          - bootverify accepts root outputs with root connect and no producer target/broadcast
+          - bootverify rejects root producer target.flow/match and broadcast:true when root connect authority applies
+          - EventBus persists delivery rows and subscribed replay scope from lowered root ConnectRoutePlan authority
+          - existing loaded flow-scope connect/target/broadcast regressions remain covered
+          does_not_close:
+          - '#1479 business-field descriptor/index materialization'
+          - '#1450 broader package policy/grants/final e2e work'
+          - 'root connect receiver semantics'
           - '#1474 already closed generated agent/node EventBus RoutePlan consumption'
           - '#1479 already closed declared indexed business-field descriptor materialization'
         implementation_slice_1485:
@@ -8803,7 +8858,8 @@ static_analyzer:
         delivery-entity routing, or explicit broadcast opt-out. Agent emit_events declarations do not require producer
         target, broadcast:true, or relay-node workarounds when parent connect supplies route authority. Loaded flow-scope
         producer target/broadcast that selects a known package receiver input for the same pin-declared output is rejected
-        as common-path composition routing; parent connect is the route owner.
+        as common-path composition routing; package-root producer target/broadcast is rejected the same way when an
+        explicit root connect endpoint consumes that root output pin. Parent connect is the route owner.
       applies_to:
       - handler top-level single-emit
       - rules entries
@@ -8826,8 +8882,9 @@ static_analyzer:
         - flow_match
         - flow_match_allow_fanout
         rule: Target form must be syntactically valid and reference loaded flow topology where statically known. flow_match
-          target forms from loaded flow-scope producers are invalid when they select a loaded package receiver input for the
-          same pin-declared output or a receiver flow reached by the parent connect graph instead of acting as a genuine
+          target forms from loaded flow-scope producers, or package-root producers whose output pin is consumed by
+          explicit root connect authority, are invalid when they select a loaded package receiver input for the same
+          pin-declared output or a receiver flow reached by the parent connect graph instead of acting as a genuine
           dynamic escape hatch.
       fanout_representation:
         rule: flow_match_allow_fanout resolves to event.target_set, not singular event.target. The runtime must persist concrete
@@ -8837,12 +8894,14 @@ static_analyzer:
           child/template instances that will record full ParentRoute at create_flow_instance time.
       static_child_delivery_entity:
         rule: Nested static child flows without a materialized instance row may use the current delivery entity as the only
-          implicit target route for pin-declared outputs; root static flows still require an explicit target or broadcast:true.
+          implicit target route for pin-declared outputs; root static flows require lowered root connect authority,
+          explicit target, or broadcast:true. When explicit root connect authority consumes the root output pin,
+          producer target/broadcast is no longer accepted as common topology.
           This path is not ParentRoute metadata and must not fall back to inbound event.source.
       explicit_broadcast:
         rule: broadcast:true is a deliberate opt-out and is the only no-target form accepted for a pin-declared output when
           no loaded package receiver input consumes the same output event and no parent connect graph edge consumes the
-          output pin from a loaded flow-scope producer. Parent-composed broadcast/fan-out uses connect.
+          output pin from a loaded flow-scope producer or package-root producer. Parent-composed broadcast/fan-out uses connect.
     static_failure_reasons:
       target_required_missing: No lowered parent connect route, no explicit target escape hatch, no structural ParentRoute
         eligibility, no eligible static child delivery-entity route, and no broadcast:true.
@@ -8850,11 +8909,12 @@ static_analyzer:
       target_unknown_flow: target.flow is not present in the loaded flow registry.
       target_sender_no_inbound: target:sender is used from a handler whose only triggers cannot supply inbound event.source.
       target_sender_empty_source: target:sender is used only from external-sourced event types with empty source.
-      producer_target_common_path_forbidden: A loaded flow-scope producer target.flow/match selects a loaded package
-        receiver input for the same pin-declared output or a receiver flow reached by the parent connect graph;
-        parent connect is the required route owner.
-      producer_broadcast_common_path_forbidden: Loaded flow-scope broadcast:true is used as package-internal delivery to
-        known receiver input pins for the same pin-declared output or connected output pin; parent connect broadcast/fan-out is the required route owner.
+      producer_target_common_path_forbidden: A loaded flow-scope producer or package-root producer target.flow/match
+        selects a loaded package receiver input for the same pin-declared output or a receiver flow reached by the
+        parent connect graph; parent connect is the required route owner.
+      producer_broadcast_common_path_forbidden: Loaded flow-scope or package-root broadcast:true is used as package-internal
+        delivery to receiver input pins for the same pin-declared output or connected output pin; parent connect
+        broadcast/fan-out is the required route owner.
     runtime_failure_reasons:
       publish_time_dead_letter:
       - target_unreachable_no_subscriber
