@@ -517,14 +517,27 @@ func importBoundaryResolveWildcardGrantSource(source Source, parent ProjectScope
 	}
 	parent.Key = normalizeImportPackageKey(parent.Key)
 	var matches [][]importBoundaryWildcardScope
+	seenMatches := map[string]struct{}{}
+	appendMatch := func(key string, scopes []importBoundaryWildcardScope) {
+		key = strings.TrimSpace(key)
+		if key == "" || len(scopes) == 0 {
+			return
+		}
+		if _, ok := seenMatches[key]; ok {
+			return
+		}
+		seenMatches[key] = struct{}{}
+		matches = append(matches, scopes)
+	}
 	for _, site := range importBoundarySites(parent) {
 		if strings.TrimSpace(site.FlowID) != raw {
 			continue
 		}
 		if flow, ok := source.FlowScopeByID(site.FlowID); ok {
-			matches = append(matches, []importBoundaryWildcardScope{{
+			flowID := strings.TrimSpace(flow.ID)
+			appendMatch("flow:"+flowID, []importBoundaryWildcardScope{{
 				Kind:        "flow",
-				ID:          strings.TrimSpace(flow.ID),
+				ID:          flowID,
 				PackageKey:  normalizeImportPackageKey(site.PackageKey),
 				Path:        importBoundaryBasePathForFlow(source, flow.ID),
 				LocalEvents: importBoundaryFlowLocalEventSet(source, flow),
@@ -538,9 +551,10 @@ func importBoundaryResolveWildcardGrantSource(source Source, parent ProjectScope
 		if !importBoundaryPackageInSubtree(flow.PackageKey, parent.Key) {
 			continue
 		}
-		matches = append(matches, []importBoundaryWildcardScope{{
+		flowID := strings.TrimSpace(flow.ID)
+		appendMatch("flow:"+flowID, []importBoundaryWildcardScope{{
 			Kind:        "flow",
-			ID:          strings.TrimSpace(flow.ID),
+			ID:          flowID,
 			PackageKey:  normalizeImportPackageKey(flow.PackageKey),
 			Path:        importBoundaryBasePathForFlow(source, flow.ID),
 			LocalEvents: importBoundaryFlowLocalEventSet(source, flow),
@@ -550,7 +564,7 @@ func importBoundaryResolveWildcardGrantSource(source Source, parent ProjectScope
 	if project, ok := projectByKey[normalizeImportPackageKey(raw)]; ok && importBoundaryPackageInSubtree(project.Key, parent.Key) {
 		scopes := importBoundaryPackageWildcardScopes(source, project, flowByPackage)
 		if len(scopes) > 0 {
-			matches = append(matches, scopes)
+			appendMatch("package:"+normalizeImportPackageKey(project.Key), scopes)
 		}
 	}
 	switch len(matches) {
