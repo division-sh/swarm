@@ -32,6 +32,35 @@ func checkFlowPackagePinBindAliasValidation(c *checkerContext) []Finding {
 	return findings
 }
 
+func checkFlowPackageDependencyBinding(c *checkerContext) []Finding {
+	var findings []Finding
+	for _, issue := range semanticview.ImportBoundaryDependencyIssues(c.source) {
+		findings = append(findings, Finding{
+			CheckID:  "flow_package_dependency_binding",
+			Severity: SeverityHardInvalidity,
+			Message:  flowPackageDependencyBindingMessage(issue),
+			Location: strings.TrimSpace(issue.ChildPackageKey),
+		})
+	}
+	return findings
+}
+
+func flowPackageDependencyBindingMessage(issue semanticview.ImportBoundaryDependencyIssue) string {
+	dependency := strings.TrimSpace(issue.Dependency)
+	if dependency == "" {
+		dependency = "<empty>"
+	}
+	message := strings.TrimSpace(issue.Message)
+	if message == "" {
+		message = strings.TrimSpace(issue.Kind)
+	}
+	ref := strings.TrimSpace(issue.Reference)
+	if ref != "" {
+		return fmt.Sprintf("imported package %s dependency %s binding %s via %s is invalid: %s", strings.TrimSpace(issue.ChildPackageKey), dependency, ref, strings.TrimSpace(issue.ImportLabel), message)
+	}
+	return fmt.Sprintf("imported package %s dependency %s via %s is invalid: %s", strings.TrimSpace(issue.ChildPackageKey), dependency, strings.TrimSpace(issue.ImportLabel), message)
+}
+
 func flowPackagePinBindAliasMessage(issue semanticview.ImportBoundaryPinAliasIssue) string {
 	direction := strings.TrimSpace(issue.Direction)
 	if direction == "" {
@@ -140,16 +169,17 @@ func flowPackageImportCompletenessFindings(parent, child semanticview.ProjectSco
 		kind     string
 		required []string
 		bindings map[string]string
+		defaults map[string]runtimecontracts.PolicyValue
 	}{
 		{kind: "input", required: requires.Inputs, bindings: site.Bind.Inputs},
 		{kind: "output", required: requires.Outputs, bindings: site.Bind.Outputs},
-		{kind: "policy", required: requires.Policy, bindings: site.Bind.Policy},
+		{kind: "policy", required: requires.Policy, bindings: site.Bind.Policy, defaults: requires.PolicyDefaults},
 		{kind: "credential", required: requires.Credentials, bindings: site.Bind.Credentials},
 	}
 
 	var findings []Finding
 	for _, check := range checks {
-		missing := missingFlowPackageBindings(check.required, check.bindings)
+		missing := missingFlowPackageBindings(check.required, check.bindings, check.defaults)
 		if len(missing) == 0 {
 			continue
 		}
@@ -163,7 +193,7 @@ func flowPackageImportCompletenessFindings(parent, child semanticview.ProjectSco
 	return findings
 }
 
-func missingFlowPackageBindings(required []string, bindings map[string]string) []string {
+func missingFlowPackageBindings(required []string, bindings map[string]string, defaults map[string]runtimecontracts.PolicyValue) []string {
 	out := make([]string, 0)
 	for _, item := range required {
 		item = strings.TrimSpace(item)
@@ -171,6 +201,9 @@ func missingFlowPackageBindings(required []string, bindings map[string]string) [
 			continue
 		}
 		if strings.TrimSpace(bindings[item]) == "" {
+			if _, ok := defaults[item]; ok {
+				continue
+			}
 			out = append(out, item)
 		}
 	}

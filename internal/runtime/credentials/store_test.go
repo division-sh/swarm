@@ -120,6 +120,69 @@ func TestListDescriptors_IndexesToolsMCPServersAndWebSearchProvider(t *testing.T
 	}
 }
 
+func TestBuildRequirementIndex_IndexesImportedPackageCredentialBindings(t *testing.T) {
+	repoRoot := credentialsRepoRootForTest(t)
+	root := t.TempDir()
+	writeCredentialsFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: credential-binding
+version: "1.0.0"
+flows:
+  - id: alpha
+    flow: alpha
+    mode: static
+    bind:
+      credentials:
+        provider_key: tenant_alpha_key
+  - id: beta
+    flow: beta
+    mode: static
+    bind:
+      credentials:
+        provider_key: tenant_beta_key
+`)
+	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: credential-binding\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeCredentialsFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	for _, flowID := range []string{"alpha", "beta"} {
+		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "package.yaml"), `
+name: worker-package
+version: "1.0.0"
+requires:
+  credentials: [provider_key]
+`)
+		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
+		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
+		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "tools.yaml"), `
+call_provider:
+  handler_type: http
+  credentials: [provider_key]
+  http:
+    method: GET
+    url: https://provider.example.test
+`)
+		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
+		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	index := BuildRequirementIndex(semanticview.Wrap(bundle))
+
+	if refs := index["provider_key"]; len(refs) != 0 {
+		t.Fatalf("raw package credential handle indexed as deployment key: %#v", refs)
+	}
+	if refs := index["tenant_alpha_key"]; len(refs) != 1 || refs[0].Kind != "tool" || refs[0].Name != "call_provider" {
+		t.Fatalf("tenant_alpha_key refs = %#v, want call_provider tool", refs)
+	}
+	if refs := index["tenant_beta_key"]; len(refs) != 1 || refs[0].Kind != "tool" || refs[0].Name != "call_provider" {
+		t.Fatalf("tenant_beta_key refs = %#v, want call_provider tool", refs)
+	}
+}
+
 func TestDefaultFilePath_UsesSwarmConfigDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -140,5 +203,24 @@ func TestDefaultFilePath_UsesSwarmConfigDir(t *testing.T) {
 	}
 	if !strings.HasPrefix(path, configRoot) {
 		t.Fatalf("expected credential path under temp config dir %q, got %q", configRoot, path)
+	}
+}
+
+func credentialsRepoRootForTest(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
+}
+
+func writeCredentialsFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
 	}
 }

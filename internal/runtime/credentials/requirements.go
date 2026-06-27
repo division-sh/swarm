@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -32,18 +33,12 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 	if source == nil {
 		return index
 	}
-	for name, entry := range source.ToolEntries() {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			continue
-		}
-		for _, key := range entry.Credentials {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			index[key] = append(index[key], Requirement{Kind: "tool", Name: name})
-		}
+	appendToolRequirements(index, source, "", source.ToolEntries())
+	for _, scope := range source.ProjectScopes() {
+		appendToolRequirements(index, source, strings.TrimSpace(scope.OwningFlowID), scope.Tools)
+	}
+	for _, scope := range source.FlowScopes() {
+		appendToolRequirements(index, source, strings.TrimSpace(scope.ID), scope.Tools)
 	}
 	if value, ok := semanticview.PolicyValueForFlow(source, "", "mcp_servers"); ok {
 		for name, key := range parseMCPServerCredentialKeys(value.Value) {
@@ -67,6 +62,30 @@ func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement 
 		index[key] = normalizeRequirements(refs)
 	}
 	return index
+}
+
+func appendToolRequirements(index map[string][]Requirement, source semanticview.Source, flowID string, entries map[string]runtimecontracts.ToolSchemaEntry) {
+	for name, entry := range entries {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		for _, key := range entry.Credentials {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
+			if mapped && strings.TrimSpace(storeKey) == "" {
+				continue
+			}
+			storeKey = strings.TrimSpace(storeKey)
+			if storeKey == "" {
+				continue
+			}
+			index[storeKey] = append(index[storeKey], Requirement{Kind: "tool", Name: name})
+		}
+	}
 }
 
 func Describe(ctx context.Context, store Store, source semanticview.Source, key string) (Descriptor, error) {

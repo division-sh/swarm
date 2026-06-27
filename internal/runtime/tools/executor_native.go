@@ -141,7 +141,7 @@ func (e *Executor) execNativeWriteFile(ctx context.Context, actor models.AgentCo
 	}, nil
 }
 
-func (e *Executor) execNativeWebSearch(ctx context.Context, _ models.AgentConfig, input any) (any, error) {
+func (e *Executor) execNativeWebSearch(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	var in nativeWebSearchInput
 	if err := decodeToolInput(input, &in); err != nil {
 		return nil, err
@@ -150,7 +150,7 @@ func (e *Executor) execNativeWebSearch(ctx context.Context, _ models.AgentConfig
 	if query == "" {
 		return nil, fmt.Errorf("web_search.query is required")
 	}
-	cfg, err := e.resolveWebSearchProviderConfig()
+	cfg, err := e.resolveWebSearchProviderConfig(actor)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (e *Executor) execNativeWebSearch(ctx context.Context, _ models.AgentConfig
 	}
 	credentialValue := ""
 	if strings.TrimSpace(cfg.CredentialsKey) != "" {
-		credentials, err := e.resolveToolCredentials(ctx, []string{cfg.CredentialsKey})
+		credentials, err := e.resolveToolCredentialsForActor(ctx, actor, []string{cfg.CredentialsKey})
 		if err != nil {
 			return nil, err
 		}
@@ -437,18 +437,28 @@ func hostFileErrorMessage(err error) string {
 	}
 }
 
-func (e *Executor) resolveWebSearchProviderConfig() (webSearchProviderConfig, error) {
+func (e *Executor) resolveWebSearchProviderConfig(actor models.AgentConfig) (webSearchProviderConfig, error) {
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
-	return resolveWebSearchProviderConfigFromSource(source)
+	flowID := ""
+	if source != nil && strings.TrimSpace(actor.ID) != "" {
+		if agentSource, ok := source.AgentContractSource(actor.ID); ok {
+			flowID = strings.TrimSpace(agentSource.FlowID)
+		}
+	}
+	return resolveWebSearchProviderConfigFromSourceForFlow(source, flowID)
 }
 
 func resolveWebSearchProviderConfigFromSource(source semanticview.Source) (webSearchProviderConfig, error) {
+	return resolveWebSearchProviderConfigFromSourceForFlow(source, "")
+}
+
+func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source, flowID string) (webSearchProviderConfig, error) {
 	if source == nil {
 		return webSearchProviderConfig{}, fmt.Errorf("web_search provider is unavailable without a workflow source")
 	}
-	value, ok := semanticview.PolicyValueForFlow(source, "", "web_search_provider")
+	value, ok := semanticview.PolicyValueForFlow(source, strings.TrimSpace(flowID), "web_search_provider")
 	if !ok {
 		return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider is not configured")
 	}

@@ -95,12 +95,79 @@ connect:
 	}
 }
 
+func TestProjectPackageDocumentDecode_PreservesPolicyRequiresDefaults(t *testing.T) {
+	var doc ProjectPackageDocument
+	if err := yaml.Unmarshal([]byte(`
+name: package-boundary
+requires:
+  policy:
+    provider.threshold:
+      type: number
+      description: Non-secret provider threshold.
+      default: 0.8
+    provider.mode: {}
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := strings.Join(doc.Requires.Policy, ","); got != "provider.threshold,provider.mode" {
+		t.Fatalf("Requires.Policy = %q", got)
+	}
+	threshold, ok := doc.Requires.PolicyDefaults["provider.threshold"]
+	if !ok {
+		t.Fatalf("provider.threshold default missing: %#v", doc.Requires.PolicyDefaults)
+	}
+	if got, ok := threshold.Value.(float64); !ok || got != 0.8 {
+		t.Fatalf("provider.threshold default = %#v, want 0.8", threshold.Value)
+	}
+	if _, ok := doc.Requires.PolicyDefaults["provider.mode"]; ok {
+		t.Fatalf("provider.mode unexpectedly has a default: %#v", doc.Requires.PolicyDefaults["provider.mode"])
+	}
+}
+
+func TestProjectPackageDocumentDecode_ListPolicyRequiresAreRequiredNoDefault(t *testing.T) {
+	var doc ProjectPackageDocument
+	if err := yaml.Unmarshal([]byte(`
+name: package-boundary
+requires:
+  policy: [provider.threshold]
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := strings.Join(doc.Requires.Policy, ","); got != "provider.threshold" {
+		t.Fatalf("Requires.Policy = %q", got)
+	}
+	if len(doc.Requires.PolicyDefaults) != 0 {
+		t.Fatalf("PolicyDefaults = %#v, want none", doc.Requires.PolicyDefaults)
+	}
+}
+
 func TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape(t *testing.T) {
 	tests := []struct {
 		name    string
 		body    string
 		wantErr string
 	}{
+		{
+			name: "unknown policy requirement option",
+			body: `
+name: invalid
+requires:
+  policy:
+    provider.threshold:
+      fallback: 0.8
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+		{
+			name: "policy requirement must be mapping",
+			body: `
+name: invalid
+requires:
+  policy:
+    provider.threshold: 0.8
+`,
+			wantErr: "policy requirement must be a mapping",
+		},
 		{
 			name: "unknown requires field",
 			body: `

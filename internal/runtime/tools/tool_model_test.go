@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -75,6 +79,107 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 	}
 	if got, ok := result["status"].(int); !ok || got != 200 {
 		t.Fatalf("status = %#v, want 200", result["status"])
+	}
+}
+
+func TestExecutor_HTTPToolUsesImportedPackageCredentialBinding(t *testing.T) {
+	var sawAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		if want := "Bearer tenant-secret"; sawAuth != want {
+			t.Fatalf("Authorization = %q, want %q", sawAuth, want)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
+		serverURL:      server.URL,
+		credentialBind: "        provider_key: tenant_provider_key\n",
+	})
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), "tenant_provider_key", "tenant-secret"); err != nil {
+		t.Fatalf("Set tenant_provider_key: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:    "worker-agent",
+		Tools: []string{"send_provider"},
+	})
+
+	out, err := exec.Execute(ctx, "send_provider", map[string]any{})
+	if err != nil {
+		t.Fatalf("Execute(send_provider): %v", err)
+	}
+	if got := out.(map[string]any)["ok"]; got != true {
+		t.Fatalf("result ok = %#v, want true", got)
+	}
+}
+
+func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("HTTP server should not be called when imported credential binding is missing")
+	}))
+	defer server.Close()
+
+	source := loadToolImportDependencySource(t, toolImportDependencyOptions{serverURL: server.URL})
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), "provider_key", "ambient-secret"); err != nil {
+		t.Fatalf("Set provider_key: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	ctx := models.WithActor(context.Background(), models.AgentConfig{
+		ID:    "worker-agent",
+		Tools: []string{"send_provider"},
+	})
+
+	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
+	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
+		t.Fatalf("Execute(send_provider) err = %v, want missing binding fail-closed", err)
+	}
+}
+
+func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testing.T) {
+	source := loadToolImportDependencySource(t, toolImportDependencyOptions{
+		credentialBind: "        provider_key: tenant_provider_key\n",
+		policyRequires: `  policy:
+    web_search_provider:
+      default:
+        provider: brave
+        credentials_key: provider_key
+        max_results_default: 3
+`,
+	})
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), "tenant_provider_key", "native-secret"); err != nil {
+		t.Fatalf("Set tenant_provider_key: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, Credentials: store})
+	actor := models.AgentConfig{ID: "worker-agent", NativeTools: models.NativeToolConfig{WebSearch: true}}
+
+	cfg, err := exec.resolveWebSearchProviderConfig(actor)
+	if err != nil {
+		t.Fatalf("resolveWebSearchProviderConfig: %v", err)
+	}
+	if cfg.Provider != "brave" || cfg.CredentialsKey != "provider_key" || cfg.MaxResultsDefault != 3 {
+		t.Fatalf("web search cfg = %+v, want imported policy default provider_key", cfg)
+	}
+	creds, err := exec.resolveToolCredentialsForActor(context.Background(), actor, []string{cfg.CredentialsKey})
+	if err != nil {
+		t.Fatalf("resolveToolCredentialsForActor: %v", err)
+	}
+	if got := creds["provider_key"]; got != "native-secret" {
+		t.Fatalf("provider_key credential = %#v, want native-secret from bound deployment key", got)
 	}
 }
 
@@ -257,4 +362,100 @@ func mustToolConfigJSON(t *testing.T, value any) json.RawMessage {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	return raw
+}
+
+type toolImportDependencyOptions struct {
+	serverURL      string
+	credentialBind string
+	policyRequires string
+}
+
+func loadToolImportDependencySource(t *testing.T, opts toolImportDependencyOptions) semanticview.Source {
+	t.Helper()
+	repoRoot := toolsRepoRootForTest(t)
+	root := t.TempDir()
+	bindCredentials := ""
+	if strings.TrimSpace(opts.credentialBind) != "" {
+		bindCredentials = "      credentials:\n" + opts.credentialBind
+	}
+	policyRequires := opts.policyRequires
+	if strings.TrimSpace(policyRequires) == "" {
+		policyRequires = "  policy: [web_search_provider]\n"
+	}
+	serverURL := strings.TrimSpace(opts.serverURL)
+	if serverURL == "" {
+		serverURL = "https://provider.example.test"
+	}
+	writeToolFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: tool-import-dependencies
+version: "1.0.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+    bind:
+`+bindCredentials)
+	writeToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: tool-import-dependencies\n")
+	writeToolFixtureFile(t, filepath.Join(root, "policy.yaml"), `
+web_search_provider:
+  provider: brave
+  credentials_key: provider_key
+`)
+	writeToolFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeToolFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeToolFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeToolFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
+name: worker-package
+version: "1.0.0"
+requires:
+`+policyRequires+`  credentials: [provider_key]
+`)
+	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
+	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
+	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
+worker-agent:
+  id: worker-agent
+  model: regular
+  tools: [send_provider]
+`)
+	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), `
+send_provider:
+  handler_type: http
+  credentials: [provider_key]
+  input_schema:
+    type: object
+  http:
+    method: GET
+    url: `+serverURL+`
+    headers:
+      Authorization: Bearer {{credentials.provider_key}}
+  response_mapping:
+    ok: '{{response.body.ok}}'
+`)
+	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func toolsRepoRootForTest(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
+}
+
+func writeToolFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
 }

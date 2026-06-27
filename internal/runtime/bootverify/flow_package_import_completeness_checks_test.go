@@ -25,6 +25,101 @@ func TestRun_FlowPackageImportCompletenessAcceptsFullyBoundFlowPackage(t *testin
 	}
 }
 
+func TestRun_FlowPackageDependencyBindingAcceptsDeclaredPolicyDefault(t *testing.T) {
+	root := writeFlowPackageImportCompletenessFixture(t, flowPackageImportFixtureOptions{
+		importKind: "flow",
+		bind: strings.ReplaceAll(
+			allFlowPackageBindingsYAML(),
+			"      policy:\n        provider.threshold: parent.policy.provider.threshold\n",
+			"",
+		),
+		requires: `requires:
+  inputs: [work.requested]
+  outputs: [work.completed]
+  policy:
+    provider.threshold:
+      default: 0.8
+  credentials: [provider_token]
+`,
+	})
+	source := loadFlowPackageImportCompletenessSource(t, root)
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.HardInvalidities(), "flow_package_import_completeness", "required policy bindings provider.threshold") {
+		t.Fatalf("policy default should satisfy import completeness, got %#v", report.HardInvalidities())
+	}
+	if reportContains(report.HardInvalidities(), "flow_package_dependency_binding", "provider.threshold") {
+		t.Fatalf("policy default should satisfy dependency binding, got %#v", report.HardInvalidities())
+	}
+}
+
+func TestRun_FlowPackageDependencyBindingFailsClosedOnInvalidPolicyCredentialBindings(t *testing.T) {
+	tests := []struct {
+		name        string
+		bind        string
+		requires    string
+		wantMessage string
+	}{
+		{
+			name: "missing policy binding without default ignores same-name parent policy",
+			bind: strings.ReplaceAll(
+				allFlowPackageBindingsYAML(),
+				"      policy:\n        provider.threshold: parent.policy.provider.threshold\n",
+				"",
+			),
+			requires:    allFlowPackageRequiresYAML(),
+			wantMessage: "declared package policy dependency has no import binding or package default",
+		},
+		{
+			name: "unsupported policy reference",
+			bind: strings.ReplaceAll(
+				allFlowPackageBindingsYAML(),
+				"parent.policy.provider.threshold",
+				"global.policy.provider.threshold",
+			),
+			requires:    allFlowPackageRequiresYAML(),
+			wantMessage: "policy binding must reference parent.policy.<path> or policy.<path>",
+		},
+		{
+			name: "unknown credential binding",
+			bind: strings.ReplaceAll(
+				allFlowPackageBindingsYAML(),
+				"        provider_token: parent_provider_token\n",
+				"        provider_token: parent_provider_token\n        undeclared_token: stray_key\n",
+			),
+			requires:    allFlowPackageRequiresYAML(),
+			wantMessage: "credential bind key is not declared",
+		},
+		{
+			name: "missing credential binding",
+			bind: strings.ReplaceAll(
+				allFlowPackageBindingsYAML(),
+				"        provider_token: parent_provider_token\n",
+				"",
+			),
+			requires:    allFlowPackageRequiresYAML(),
+			wantMessage: "declared package credential dependency has no import binding",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeFlowPackageImportCompletenessFixture(t, flowPackageImportFixtureOptions{
+				importKind: "flow",
+				bind:       tc.bind,
+				requires:   tc.requires,
+			})
+			source := loadFlowPackageImportCompletenessSource(t, root)
+
+			report := Run(context.Background(), source, Options{})
+
+			if !reportContains(report.HardInvalidities(), "flow_package_dependency_binding", tc.wantMessage) {
+				t.Fatalf("expected flow_package_dependency_binding %q, got %#v", tc.wantMessage, report.HardInvalidities())
+			}
+		})
+	}
+}
+
 func TestRun_FlowPackageImportCompletenessFailsClosedOnMissingBindings(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -43,7 +138,7 @@ func TestRun_FlowPackageImportCompletenessFailsClosedOnMissingBindings(t *testin
 		},
 		{
 			name:        "policy",
-			bind:        strings.ReplaceAll(allFlowPackageBindingsYAML(), "        provider.threshold: parent.policy.threshold\n", ""),
+			bind:        strings.ReplaceAll(allFlowPackageBindingsYAML(), "        provider.threshold: parent.policy.provider.threshold\n", ""),
 			wantMessage: "required policy bindings provider.threshold",
 		},
 		{
@@ -226,7 +321,7 @@ func allFlowPackageBindingsYAML() string {
       outputs:
         work.completed: parent.work_completed
       policy:
-        provider.threshold: parent.policy.threshold
+        provider.threshold: parent.policy.provider.threshold
       credentials:
         provider_token: parent_provider_token
 `

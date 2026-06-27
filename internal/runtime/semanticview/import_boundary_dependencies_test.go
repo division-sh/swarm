@@ -1,0 +1,160 @@
+package semanticview
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+)
+
+func TestImportBoundaryPolicyResolutionUsesBindingThenPackageDefault(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
+		policyBind: "        provider.threshold: parent.policy.provider.threshold\n",
+		policyRequires: `  policy:
+    provider.threshold: {}
+    provider.mode:
+      default: strict
+`,
+		credentialRequires: "  credentials: [provider_key]\n",
+		credentialBind:     "        provider_key: tenant_provider_key\n",
+	})
+
+	if got, ok := PolicyValueForFlow(source, "worker", "provider.threshold"); !ok || got.Value != 0.91 {
+		t.Fatalf("provider.threshold = (%#v, %v), want bound parent value 0.91", got.Value, ok)
+	}
+	if got, ok := PolicyValueForFlow(source, "worker", "provider.mode"); !ok || got.Value != "strict" {
+		t.Fatalf("provider.mode = (%#v, %v), want package default strict", got.Value, ok)
+	}
+	if _, ok := PolicyValueForFlow(source, "worker", "provider.parent_only"); ok {
+		t.Fatal("imported flow inherited parent-only policy key without explicit binding")
+	}
+	if got, ok := PolicyValueForFlow(source, "worker", "provider.package_only"); !ok || got.Value != "visible" {
+		t.Fatalf("provider.package_only = (%#v, %v), want child local package policy", got.Value, ok)
+	}
+}
+
+func TestImportBoundaryPolicyResolutionFailsClosedWithoutBindingOrDefaultEvenWithParentSameName(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
+		policyRequires:     "  policy: [provider.threshold]\n",
+		credentialRequires: "  credentials: [provider_key]\n",
+		credentialBind:     "        provider_key: tenant_provider_key\n",
+	})
+
+	issues := ImportBoundaryDependencyIssues(source)
+	if !importBoundaryDependencyIssueContains(issues, "missing_policy_binding", "provider.threshold") {
+		t.Fatalf("expected missing_policy_binding for provider.threshold, got %#v", issues)
+	}
+	if _, ok := PolicyValueForFlow(source, "worker", "provider.threshold"); ok {
+		t.Fatal("unbound imported policy key resolved through ambient parent same-name policy")
+	}
+}
+
+func TestImportBoundaryPolicyResolutionDoesNotInheritParentPolicyForUndeclaredKeys(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
+		credentialRequires: "  credentials: [provider_key]\n",
+		credentialBind:     "        provider_key: tenant_provider_key\n",
+	})
+
+	if _, ok := PolicyValueForFlow(source, "worker", "provider.parent_only"); ok {
+		t.Fatal("imported flow inherited undeclared parent policy through dependency context")
+	}
+	if got, ok := PolicyValueForFlow(source, "worker", "provider.package_only"); !ok || got.Value != "visible" {
+		t.Fatalf("provider.package_only = (%#v, %v), want child local package policy", got.Value, ok)
+	}
+}
+
+func TestImportBoundaryCredentialStoreKeyRequiresDeclaredBinding(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
+		policyRequires:     "  policy: [provider.threshold]\n",
+		policyBind:         "        provider.threshold: parent.policy.provider.threshold\n",
+		credentialRequires: "  credentials: [provider_key]\n",
+		credentialBind:     "        provider_key: tenant_provider_key\n",
+	})
+
+	if got, mapped := CredentialStoreKeyForFlow(source, "worker", "provider_key"); !mapped || got != "tenant_provider_key" {
+		t.Fatalf("CredentialStoreKeyForFlow(provider_key) = (%q, %v), want tenant_provider_key, mapped", got, mapped)
+	}
+	if got, mapped := CredentialStoreKeyForFlow(source, "worker", "undeclared_key"); !mapped || got != "" {
+		t.Fatalf("CredentialStoreKeyForFlow(undeclared_key) = (%q, %v), want empty mapped fail-closed", got, mapped)
+	}
+	if got, mapped := CredentialStoreKeyForFlow(source, "", "provider_key"); mapped || got != "provider_key" {
+		t.Fatalf("root CredentialStoreKeyForFlow(provider_key) = (%q, %v), want raw unmapped key", got, mapped)
+	}
+}
+
+func importBoundaryDependencyIssueContains(issues []ImportBoundaryDependencyIssue, kind, dependency string) bool {
+	for _, issue := range issues {
+		if issue.Kind == kind && issue.Dependency == dependency {
+			return true
+		}
+	}
+	return false
+}
+
+type importBoundaryDependencyFixtureOptions struct {
+	policyRequires     string
+	policyBind         string
+	credentialRequires string
+	credentialBind     string
+}
+
+func loadImportBoundaryDependencyFixture(t *testing.T, opts importBoundaryDependencyFixtureOptions) Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := t.TempDir()
+
+	bindPolicy := ""
+	if opts.policyBind != "" {
+		bindPolicy = "      policy:\n" + opts.policyBind
+	}
+	bindCredentials := ""
+	if opts.credentialBind != "" {
+		bindCredentials = "      credentials:\n" + opts.credentialBind
+	}
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: import-boundary-dependencies
+version: "1.0.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+    bind:
+`+bindPolicy+bindCredentials)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-boundary-dependencies\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), `
+provider:
+  threshold: 0.91
+  parent_only: leaked
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
+name: worker-package
+version: "1.0.0"
+requires:
+`+opts.policyRequires+opts.credentialRequires)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), `
+provider:
+  threshold: child-local
+  mode: child-local
+  package_only: visible
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return Wrap(bundle)
+}

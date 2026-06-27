@@ -13,11 +13,12 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 var toolTemplatePattern = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
 
-func (e *Executor) execHTTPTool(ctx context.Context, _ models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 	if tool.HTTP == nil {
 		return nil, fmt.Errorf("http tool %s is missing http configuration", tool.Name)
 	}
@@ -28,7 +29,7 @@ func (e *Executor) execHTTPTool(ctx context.Context, _ models.AgentConfig, tool 
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	credentials, err := e.resolveToolCredentials(ctx, tool.Credentials)
+	credentials, err := e.resolveToolCredentialsForActor(ctx, actor, tool.Credentials)
 	if err != nil {
 		return nil, err
 	}
@@ -145,29 +146,63 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 	return resolveTemplateTree(tool.ResponseMapping, responseEnv)
 }
 
-func (e *Executor) execMCPTool(ctx context.Context, _ models.AgentConfig, tool RegisteredTool, input any) (any, error) {
+func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 	if e.mcpClient == nil {
 		return nil, fmt.Errorf("mcp client is not configured")
 	}
-	return e.mcpClient.Call(ctx, tool.Name, input)
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	return e.mcpClient.CallWithCredentialKeyResolver(ctx, tool.Name, input, func(key string) (string, error) {
+		storeKey, mapped := semanticview.CredentialStoreKeyForActor(source, actor.ID, key)
+		if mapped && strings.TrimSpace(storeKey) == "" {
+			return "", fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
+		}
+		return storeKey, nil
+	})
 }
 
 func (e *Executor) resolveToolCredentials(ctx context.Context, keys []string) (map[string]any, error) {
+	return e.resolveToolCredentialsWithMapper(ctx, keys, func(key string) (string, error) { return key, nil })
+}
+
+func (e *Executor) resolveToolCredentialsForActor(ctx context.Context, actor models.AgentConfig, keys []string) (map[string]any, error) {
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	return e.resolveToolCredentialsWithMapper(ctx, keys, func(key string) (string, error) {
+		storeKey, mapped := semanticview.CredentialStoreKeyForActor(source, actor.ID, key)
+		if mapped && strings.TrimSpace(storeKey) == "" {
+			return "", fmt.Errorf("credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
+		}
+		return storeKey, nil
+	})
+}
+
+func (e *Executor) resolveToolCredentialsWithMapper(ctx context.Context, keys []string, mapKey func(string) (string, error)) (map[string]any, error) {
 	out := make(map[string]any, len(keys))
 	for _, key := range keys {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
+		storeKey, err := mapKey(key)
+		if err != nil {
+			return nil, err
+		}
+		storeKey = strings.TrimSpace(storeKey)
+		if storeKey == "" {
+			return nil, fmt.Errorf("credential %q does not resolve to a deployment credential key", key)
+		}
 		if e.credentials == nil {
 			return nil, fmt.Errorf("credential store is not configured")
 		}
-		value, ok, err := e.credentials.Get(ctx, key)
+		value, ok, err := e.credentials.Get(ctx, storeKey)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			return nil, fmt.Errorf("missing credential %q", key)
+			return nil, fmt.Errorf("missing credential %q", storeKey)
 		}
 		out[key] = value
 	}
