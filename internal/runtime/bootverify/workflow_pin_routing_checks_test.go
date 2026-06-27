@@ -138,6 +138,18 @@ func TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect
 	}
 }
 
+func TestPinTargetResolution_DoesNotTreatMergedFlowAgentAsRootEmitSite(t *testing.T) {
+	bundle := loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t, "shared.ready", "shared.ready", []string{"shared.ready"}, pinRoutingProducerRouteConnect())
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if reportContains(report.Errors(), "pin_target_resolution", "root agent emit_events on agent producer-agent") {
+		t.Fatalf("flow-scoped agent was evaluated as root: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "pin_target_resolution", "producer-agent") {
+		t.Fatalf("parent connect should satisfy the real flow-scoped agent emit_events site, got %#v", report.Errors())
+	}
+}
+
 func TestPinTargetResolution_FailsClosedForFlowScopedAgentEmitEventsWithoutRouteAuthority(t *testing.T) {
 	bundle := loadPinRoutingProducerAgentRouteBundleForEvents(t, "shared.ready", "shared.ready")
 
@@ -145,6 +157,23 @@ func TestPinTargetResolution_FailsClosedForFlowScopedAgentEmitEventsWithoutRoute
 	if !reportContains(report.Errors(), "pin_target_resolution", "flow producer agent emit_events on agent producer-agent") ||
 		!reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
 		t.Fatalf("expected agent emit_events target_required_missing, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_ChecksProjectScopeAgentUnderOwningFlow(t *testing.T) {
+	bundle := loadPinRoutingVerifySourceFixture(t, pinRoutingVerifySourceFixture{
+		extrasAgents: `
+extras-agent:
+  id: extras-agent
+  role: producer
+  emit_events:
+    - support.ready
+`,
+	})
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "flow support agent emit_events on agent extras-agent") ||
+		!reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
+		t.Fatalf("expected project-scope agent under support flow to fail closed, got %#v", report.Errors())
 	}
 }
 
@@ -472,6 +501,10 @@ consumer:
 }
 
 func loadPinRoutingProducerAgentRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+	return loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t, producerOutputEvent, consumerInputEvent, nil, connectBlocks...)
+}
+
+func loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t *testing.T, producerOutputEvent, consumerInputEvent string, rootOutputEvents []string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
@@ -486,7 +519,16 @@ flows:
     flow: consumer
     mode: static
 `+strings.Join(connectBlocks, ""))
-	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: pin-routing-producer-agent-route\n")
+	rootSchema := "name: pin-routing-producer-agent-route\n"
+	if len(rootOutputEvents) > 0 {
+		rootSchema = `
+name: pin-routing-producer-agent-route
+pins:
+  outputs:
+    events: [` + strings.Join(rootOutputEvents, ", ") + `]
+`
+	}
+	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
@@ -579,6 +621,7 @@ type pinRoutingVerifySourceFixture struct {
 	rootNodes        string
 	supportFlowNodes string
 	extrasNodes      string
+	extrasAgents     string
 }
 
 func loadPinRoutingVerifySourceFixture(t *testing.T, opts pinRoutingVerifySourceFixture) *runtimecontracts.WorkflowContractBundle {
@@ -641,6 +684,7 @@ version: "1.0.0"
 flows: []
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "extras", "nodes.yaml"), defaultPinRoutingFixtureYAML(opts.extrasNodes))
+	writePinRoutingVerifyFile(t, filepath.Join(root, "extras", "agents.yaml"), defaultPinRoutingFixtureYAML(opts.extrasAgents))
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

@@ -167,9 +167,20 @@ func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitS
 			})
 		}
 	}
-	rootAgents := source.AgentEntries()
-	for _, agentID := range sortedSetKeysLocal(rootAgents) {
-		appendAgent("", agentID, rootAgents[agentID])
+	projectScopes := append([]semanticview.ProjectScope{}, source.ProjectScopes()...)
+	sort.SliceStable(projectScopes, func(i, j int) bool {
+		if strings.TrimSpace(projectScopes[i].Key) != strings.TrimSpace(projectScopes[j].Key) {
+			return strings.TrimSpace(projectScopes[i].Key) < strings.TrimSpace(projectScopes[j].Key)
+		}
+		return strings.TrimSpace(projectScopes[i].OwningFlowID) < strings.TrimSpace(projectScopes[j].OwningFlowID)
+	})
+	for _, scope := range projectScopes {
+		if pinRoutingAgentSkipsProjectScope(scope) {
+			continue
+		}
+		for _, agentID := range sortedSetKeysLocal(scope.Agents) {
+			appendAgent(scope.OwningFlowID, agentID, scope.Agents[agentID])
+		}
 	}
 	flowScopes := append([]semanticview.FlowScope{}, source.FlowScopes()...)
 	sort.SliceStable(flowScopes, func(i, j int) bool {
@@ -186,6 +197,12 @@ func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitS
 			appendAgent(scope.ID, agentID, scope.Agents[agentID])
 		}
 	}
+	if len(projectScopes) == 0 && len(flowScopes) == 0 {
+		rootAgents := source.AgentEntries()
+		for _, agentID := range sortedSetKeysLocal(rootAgents) {
+			appendAgent("", agentID, rootAgents[agentID])
+		}
+	}
 	sort.SliceStable(sites, func(i, j int) bool {
 		if sites[i].FlowID != sites[j].FlowID {
 			return sites[i].FlowID < sites[j].FlowID
@@ -196,6 +213,10 @@ func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitS
 		return sites[i].EventType < sites[j].EventType
 	})
 	return sites
+}
+
+func pinRoutingAgentSkipsProjectScope(scope semanticview.ProjectScope) bool {
+	return strings.TrimSpace(scope.Key) == "." && strings.TrimSpace(scope.OwningFlowID) != ""
 }
 
 func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding {
