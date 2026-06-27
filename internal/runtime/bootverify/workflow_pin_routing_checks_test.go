@@ -129,6 +129,25 @@ func TestPinTargetResolution_FailsClosedForUnknownProducerTargetFlowEvenWithPare
 	}
 }
 
+func TestPinTargetResolution_AllowsFlowScopedAgentEmitEventsThroughParentConnect(t *testing.T) {
+	bundle := loadPinRoutingProducerAgentRouteBundleForEvents(t, "shared.ready", "shared.ready", pinRoutingProducerRouteConnect())
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if reportContains(report.Errors(), "pin_target_resolution", "producer-agent") {
+		t.Fatalf("parent connect should satisfy agent emit_events output pin target proof, got %#v", report.Errors())
+	}
+}
+
+func TestPinTargetResolution_FailsClosedForFlowScopedAgentEmitEventsWithoutRouteAuthority(t *testing.T) {
+	bundle := loadPinRoutingProducerAgentRouteBundleForEvents(t, "shared.ready", "shared.ready")
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if !reportContains(report.Errors(), "pin_target_resolution", "flow producer agent emit_events on agent producer-agent") ||
+		!reportContains(report.Errors(), "pin_target_resolution", "target_required_missing") {
+		t.Fatalf("expected agent emit_events target_required_missing, got %#v", report.Errors())
+	}
+}
+
 func TestPinTargetResolution_AllowsExplicitTargetEscapeHatches(t *testing.T) {
 	for _, tt := range []struct {
 		name      string
@@ -415,6 +434,93 @@ producer-node:
     producer.start:
 `+producerHandlerBody+`
 `)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [`+consumerInputEvent+`]
+  outputs:
+    events: [consumer.done]
+`)
+	consumerEvents := `
+consumer.start:
+  entity_id: text
+`
+	if consumerInputEvent != "consumer.start" {
+		consumerEvents += consumerInputEvent + `:
+  entity_id: text
+`
+	}
+	consumerEvents += `consumer.done:
+  entity_id: text
+`
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), consumerEvents)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+consumer:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func loadPinRoutingProducerAgentRouteBundleForEvents(t *testing.T, producerOutputEvent, consumerInputEvent string, connectBlocks ...string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
+name: pin-routing-producer-agent-route
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+`+strings.Join(connectBlocks, ""))
+	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: pin-routing-producer-agent-route\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [producer.start]
+  outputs:
+    events: [`+producerOutputEvent+`]
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
+producer.start:
+  entity_id: text
+`+producerOutputEvent+`:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), `
+producer:
+  entity_id: text
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), `
+producer-agent:
+  id: producer-agent
+  role: producer
+  emit_events:
+    - `+producerOutputEvent+`
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
 name: consumer
 initial_state: pending

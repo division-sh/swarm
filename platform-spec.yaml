@@ -4232,9 +4232,9 @@ engine:
     - id: pin_target_resolution
       severity: error
       scope: per-emit-site
-      trigger: A pin-declared output emit lacks a lowered parent connect route, explicit target escape hatch, structural
-        ParentRoute eligibility, eligible static child delivery-entity route, or broadcast:true; has malformed target syntax;
-        references an unknown target.flow; uses
+      trigger: A pin-declared output emit or agent emit_events declaration lacks a lowered parent connect route, explicit target
+        escape hatch, structural ParentRoute eligibility, eligible static child delivery-entity route, or broadcast:true;
+        has malformed target syntax; references an unknown target.flow; uses
         target:sender where no inbound source can exist; uses target:sender only on external-sourced inputs with empty
         source; or uses loaded flow-scope producer target/broadcast as package-internal delivery to a known receiver input
         where parent connect is required.
@@ -5121,7 +5121,7 @@ flow_model:
           does_not_close:
           - '#1475 producer target/broadcast retirement'
           - '#1466 composition-first parent closure'
-          - '#1444 final turnkey composition behavior'
+          - '#1444 static verifier coverage, later closed by static_analyzer.slice_3a_pin_target_resolution.implementation_slice_1444'
         implementation_slice_1475:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.ProducerRouteCommonPathFailure consumed by internal/runtime/bootverify and runtime pin-route resolution
@@ -5280,7 +5280,7 @@ flow_model:
         wildcard_scoping: '#1454 remains separate.'
         final_e2e_package_proof: '#1455 remains separate.'
         route_explain_describe: '#1442 tooling remains separate.'
-        agent_output_pin_runtime_failure: '#1444 must be re-audited against this source authority before runtime implementation.'
+        agent_output_pin_static_verify: '#1444 closes static bootverify coverage for agent emit_events under composition-first route authority; runtime generated-agent route-plan admission closed by #1474.'
   nesting:
     description: 'Flows nest recursively. A flow''s package.yaml declares child flows in its flows: list. Each child is a
       directory under flows/ with the same structure. There is no depth limit. The platform discovers flows by walking the
@@ -8797,17 +8797,20 @@ static_analyzer:
     - contract_formats.event_schema.strict_payload_contract.envelope_identity
     canonical_replacement: flow_model.flow_package.composition_routing.analyzer_verify_requirements
     scope:
-      description: For every system-node emit site whose emitted event is declared in the emitter flow's pins.outputs.events,
-        verify that the authored contract supplies lowered parent connect topology, a valid target escape hatch, structural
-        binding only when no lowered connect route applies, eligible static child delivery-entity routing, or explicit broadcast
-        opt-out. Loaded flow-scope producer target/broadcast that selects a known package receiver input for the same
-        pin-declared output is rejected as common-path composition routing; parent connect is the route owner.
+      description: For every system-node emit site or agent emit_events declaration whose emitted event is declared in the
+        emitter flow's pins.outputs.events, verify that the authored contract supplies lowered parent connect topology,
+        a valid target escape hatch, structural binding only when no lowered connect route applies, eligible static child
+        delivery-entity routing, or explicit broadcast opt-out. Agent emit_events declarations do not require producer
+        target, broadcast:true, or relay-node workarounds when parent connect supplies route authority. Loaded flow-scope
+        producer target/broadcast that selects a known package receiver input for the same pin-declared output is rejected
+        as common-path composition routing; parent connect is the route owner.
       applies_to:
       - handler top-level single-emit
       - rules entries
       - on_complete branches
       - accumulate.on_timeout
       - fan_out per-item emit
+      - agent emit_events declarations
       excludes:
       - runtime instance liveness
       - payload-dependent target.match cardinality
@@ -8866,6 +8869,38 @@ static_analyzer:
       - producer_broadcast_common_path_forbidden
     rule: Emit hard invalidity for every statically detectable missing or malformed accepted pin route source. Runtime failure
       reasons cover the cases boot verification cannot prove; no case may silently fall back to broadcast.
+    implementation_slice_1444:
+      status: merge_bearing_static_verify_behavior
+      canonical_code_owner: internal/runtime/bootverify.checkPinTargetResolution with pinRoutingAgentEmitSites
+      rule: |
+        Agent emit_events declarations that name a pin-declared output event are
+        static emit sites for pin_target_resolution. They consume the same
+        composition-first route authority as node/system emits: lowered parent
+        connect, structural ParentRoute/static child delivery-entity eligibility,
+        or a spec-authorized explicit dynamic escape hatch. A lowered parent
+        connect is sufficient and MUST NOT require producer target, broadcast:true,
+        relay nodes, raw same-name fallback, or live-subscription compatibility
+        fallback. If no accepted route proof exists, verification fails closed
+        before runtime with target_required_missing.
+      consumes:
+      - root/project agent emit_events declarations
+      - flow-scoped agent emit_events declarations
+      - flow pins.outputs.events event identity
+      - lowered parent connect proof from flow_model.flow_package.composition_routing
+      - existing node/system pin_target_resolution target validation owner
+      produces:
+      - agent emit_events pin-declared output coverage on cmd/swarm verify
+      - connected agent output-pin verification success without producer target/broadcast/relay requirements
+      - unconnected or unsupported agent output-pin verification failure with pin_target_resolution
+      proof_obligations:
+      - flow-scoped agent emit_events with a parent connect output route verifies successfully
+      - flow-scoped agent emit_events without parent connect, structural route, static child delivery-entity route, or explicit dynamic escape fails with target_required_missing
+      - node/system pin_target_resolution behavior remains unchanged
+      - fixture contracts that intentionally test prompt/tool/agent delivery behavior do not declare stale output pins unless they also provide route authority
+      does_not_close:
+      - broad #1466 composition-first parent closure
+      - #1474 runtime generated-agent EventBus RoutePlan admission, already closed separately
+      - marketplace/address-key or other final turnkey composition behavior outside static verify coverage
   slice_3a1_composition_connect_validation:
     id: composition_connect_validation
     domain: semantic_validity

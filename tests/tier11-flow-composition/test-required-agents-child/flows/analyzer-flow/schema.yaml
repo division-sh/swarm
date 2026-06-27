@@ -11,4 +11,4 @@ pins:
   inputs:
     events: [analysis.requested]
   outputs:
-    events: [analysis.done]
+    events: []
