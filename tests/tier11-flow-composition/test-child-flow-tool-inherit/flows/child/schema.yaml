@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [child.task]
   outputs:
-    events: [child.result]
+    events: []

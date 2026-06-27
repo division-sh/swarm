@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -33,6 +34,20 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		}
 		if site.Spec.Target.Normalized().Kind == runtimecontracts.EmitTargetKindSender && pinRoutingEventExternalSource(c.source, site.FlowID, site.HandlerEvent) {
 			findings = append(findings, pinTargetFinding(site, "target_sender_empty_source"))
+		}
+	}
+	for _, site := range pinRoutingAgentEmitSites(c.source) {
+		if !runtimepinrouting.PinDeclaredOutput(c.source, site.FlowID, site.EventType) {
+			continue
+		}
+		spec := runtimecontracts.EmitSpec{Event: site.EventType}
+		connectedOutput := compositionConnectsFromOutputEvent(c.source, site.FlowID, spec.EventType())
+		structuralParent := pinRoutingStructuralParentRouteEligible(c.source, site.FlowID)
+		if connectedOutput {
+			structuralParent = true
+		}
+		if failure := runtimepinrouting.ValidateTargetSpec(c.source, site.FlowID, spec, structuralParent); failure != "" {
+			findings = append(findings, pinTargetAgentFinding(site, string(failure)))
 		}
 	}
 	return findings
@@ -114,6 +129,75 @@ func pinRoutingEmitSites(source semanticview.Source) []semanticview.AuthoredEmit
 	return semanticview.AuthoredEmitSites(source)
 }
 
+type pinRoutingAgentEmitSite struct {
+	FlowID    string
+	AgentID   string
+	EventType string
+}
+
+func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitSite {
+	if source == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	sites := []pinRoutingAgentEmitSite{}
+	appendAgent := func(flowID, agentID string, entry runtimecontracts.AgentRegistryEntry) {
+		flowID = strings.TrimSpace(flowID)
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			agentID = strings.TrimSpace(entry.ID)
+		}
+		if agentID == "" {
+			return
+		}
+		for _, rawEventType := range entry.EmitEvents {
+			eventType := strings.TrimSpace(rawEventType)
+			if eventType == "" {
+				continue
+			}
+			key := flowID + "\x00" + agentID + "\x00" + eventType
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			sites = append(sites, pinRoutingAgentEmitSite{
+				FlowID:    flowID,
+				AgentID:   agentID,
+				EventType: eventType,
+			})
+		}
+	}
+	rootAgents := source.AgentEntries()
+	for _, agentID := range sortedSetKeysLocal(rootAgents) {
+		appendAgent("", agentID, rootAgents[agentID])
+	}
+	flowScopes := append([]semanticview.FlowScope{}, source.FlowScopes()...)
+	sort.SliceStable(flowScopes, func(i, j int) bool {
+		if strings.TrimSpace(flowScopes[i].ID) != strings.TrimSpace(flowScopes[j].ID) {
+			return strings.TrimSpace(flowScopes[i].ID) < strings.TrimSpace(flowScopes[j].ID)
+		}
+		if strings.TrimSpace(flowScopes[i].Path) != strings.TrimSpace(flowScopes[j].Path) {
+			return strings.TrimSpace(flowScopes[i].Path) < strings.TrimSpace(flowScopes[j].Path)
+		}
+		return strings.TrimSpace(flowScopes[i].PackageKey) < strings.TrimSpace(flowScopes[j].PackageKey)
+	})
+	for _, scope := range flowScopes {
+		for _, agentID := range sortedSetKeysLocal(scope.Agents) {
+			appendAgent(scope.ID, agentID, scope.Agents[agentID])
+		}
+	}
+	sort.SliceStable(sites, func(i, j int) bool {
+		if sites[i].FlowID != sites[j].FlowID {
+			return sites[i].FlowID < sites[j].FlowID
+		}
+		if sites[i].AgentID != sites[j].AgentID {
+			return sites[i].AgentID < sites[j].AgentID
+		}
+		return sites[i].EventType < sites[j].EventType
+	})
+	return sites
+}
+
 func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding {
 	scope := fmt.Sprintf("flow %s", site.FlowID)
 	location := site.FlowID
@@ -125,6 +209,21 @@ func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding
 		CheckID:  "pin_target_resolution",
 		Severity: "error",
 		Message:  fmt.Sprintf("%s %s on node %s emits pin-declared output %s without valid target mechanism: %s", scope, site.Site, site.NodeID, site.Spec.EventType(), reason),
+		Location: location,
+	}
+}
+
+func pinTargetAgentFinding(site pinRoutingAgentEmitSite, reason string) Finding {
+	scope := fmt.Sprintf("flow %s", site.FlowID)
+	location := site.FlowID
+	if strings.TrimSpace(site.FlowID) == "" {
+		scope = "root"
+		location = "root"
+	}
+	return Finding{
+		CheckID:  "pin_target_resolution",
+		Severity: "error",
+		Message:  fmt.Sprintf("%s agent emit_events on agent %s emits pin-declared output %s without valid target mechanism: %s", scope, site.AgentID, site.EventType, reason),
 		Location: location,
 	}
 }

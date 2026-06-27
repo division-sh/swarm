@@ -155,8 +155,13 @@ func TestPlatformSpecCompositionRoutingDemotesProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "accepted_target_mechanisms", "structural_parent_route", "rule"), "no lowered parent connect route applies")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "no lowered connect route applies")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "eligible static child delivery-entity")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "agent emit_events")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "scope", "description"), "do not require producer")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "producer_target_common_path_forbidden"), "parent connect is the required route owner")
 	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "static_failure_reasons", "producer_broadcast_common_path_forbidden"), "parent connect broadcast/fan-out")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "Agent emit_events declarations")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "rule"), "MUST NOT require producer target")
+	assertScalarContains(t, mustYAMLPath(t, pinTargetResolution, "implementation_slice_1444", "canonical_code_owner"), "pinRoutingAgentEmitSites")
 }
 
 func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t *testing.T) {
@@ -179,6 +184,7 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "safe same-name sibling")
 
 	pinTargetResolution := mustSequenceMappingByScalarField(t, checks, "id", "pin_target_resolution")
+	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "agent emit_events")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "lowered parent connect route")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "explicit target escape hatch")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "eligible static child delivery-entity route")
