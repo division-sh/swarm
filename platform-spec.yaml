@@ -4922,6 +4922,83 @@ flow_model:
       locked_design: '#1476'
       parent_tracker: '#1537'
       spec_authority_slice: '#1538'
+    locked_design_coverage:
+      status: exhaustive_against_locked_1476_design
+      rule: >
+        This ledger enumerates every major section of the locked #1476
+        decision. Rows marked `specified_by_1538` are captured normatively by
+        this owner. Rows marked `split_to_child` are intentionally not
+        implemented by #1538 and must remain tracked by the named child before
+        #1537 can close.
+      rows:
+      - id: locked_principle
+        locked_design_section: Locked principle
+        coverage: specified_by_1538
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.locked_principle
+      - id: locked_mental_model
+        locked_design_section: Locked mental model
+        coverage: specified_by_1538
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.vocabulary
+      - id: authoring_decision_rubric
+        locked_design_section: Authoring decision rubric
+        coverage: specified_by_1538
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.authoring_decision_rubric
+      - id: composition_model
+        locked_design_section: Composition model
+        coverage: split_to_child
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.composition_model
+        implementation_trackers:
+        - '#1544'
+        - '#1545'
+        - '#1546'
+      - id: delivery_vs_contained_state_update
+        locked_design_section: Delivery vs contained-state update
+        coverage: split_to_child
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.contained_state_model
+        implementation_tracker: '#1548'
+      - id: escape_hatches
+        locked_design_section: What stays as escape hatch
+        coverage: specified_by_1538
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.escape_hatches
+      - id: immediate_platform_surface
+        locked_design_section: Immediate platform surface to build toward
+        coverage: split_to_child
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.analyzer_obligations
+        implementation_trackers:
+        - '#1539'
+        - '#1543'
+        - '#1544'
+        - '#1545'
+        - '#1546'
+        - '#1548'
+      - id: empire_migration_framing
+        locked_design_section: Empire migration framing
+        coverage: split_to_child
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.migration_model
+        implementation_trackers:
+        - '#1552'
+        - '#1553'
+        - '#1554'
+      - id: analyzer_obligations
+        locked_design_section: Analyzer obligations
+        coverage: split_to_child
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.analyzer_obligations
+        implementation_trackers:
+        - '#1539'
+        - '#1543'
+        - '#1544'
+        - '#1545'
+        - '#1546'
+        - '#1547'
+        - '#1548'
+        - '#1551'
+      - id: first_pilots
+        locked_design_section: First pilots
+        coverage: split_to_child
+        owner: platform-spec.yaml#flow_model.flow_instance_authoring.pilot_model
+        implementation_trackers:
+        - '#1552'
+        - '#1553'
     vocabulary:
       flow_definition: Contract/type for a reusable flow.
       flow_instance: One running process, case, job, or service instance.
@@ -4944,6 +5021,28 @@ flow_model:
       - list/map = contained local state on the primary entity
       - child/template flow instance = independently addressable lifecycle
       - singleton coordinator = shared policy, aggregate state, or cross-instance learning
+    authoring_decision_rubric:
+      status: merge_bearing_authoring_guidance
+      rule: >
+        Authors should not choose among overlapping routing/entity primitives.
+        They first classify whether state is a flow instance, contained data,
+        shared coordination state, or an explicit escape hatch.
+      decisions:
+      - id: template_flow_instance
+        when: >
+          The item has independent states, timers, retries, callbacks,
+          terminality, direct routing, audit, independent agent assignment, or
+          another independently addressable lifecycle.
+        use: child/template flow instance
+      - id: contained_state
+        when: The item is just data owned by the current process or service.
+        use: typed field/list/map on the primary entity
+      - id: singleton_coordinator
+        when: The flow coordinates, summarizes, or learns across many instances.
+        use: singleton coordinator with real shared state or policy
+      - id: promotion_line
+        when: A map/list item starts behaving like a routable recipient.
+        use: promote it to a child/template flow instance
     template_instance_model:
       status: spec_vocabulary_only
       implementation_tracker: '#1543'
@@ -4975,6 +5074,14 @@ flow_model:
         output keys and receiver instance keys. This section names the authoring
         model; composition-routing and RoutePlan remain the canonical owners
         for topology lowering and publish-time delivery authority.
+      public_target_revision:
+        keep:
+        - pin aliasing
+        - import boundaries
+        - resolver plumbing
+        - fail-closed verification
+        revise: parent-owned correlate_by/cardinality as the main authoring syntax
+        prefer: connect + instance key mapping + explicit delivery
       split_children:
         output_pin_key_carries: '#1544'
         connect_to_instance_route_planning: '#1545'
@@ -5016,6 +5123,40 @@ flow_model:
           advanced database-like flows. Normal in-topology composition should
           route to the receiving flow instance through parent `connect` and
           instance keys instead.
+      producer_emit_target:
+        status: exotic_dynamic_routing_escape_hatch
+        implementation_tracker: '#1547'
+        rule: >
+          Producer `emit.target` remains only for genuinely exotic dynamic
+          routing. It is not authoritative for normal parent-owned composition,
+          where `connect`, instance keys, and RoutePlan authority own delivery.
+      custom_adapters:
+        status: explicit_adapter_escape_hatch
+        implementation_tracker: '#1546'
+        rule: >
+          Custom adapters remain valid when interface names or key names differ.
+          They must be explicit parent-owned mappings, not implicit receiver
+          entity selection or producer-owned target matching.
+    migration_model:
+      status: child_tracked
+      rule: >
+        Existing static multi-entity flows must not be migrated blindly to
+        template flows. The target shape depends on whether the keyed item
+        needs platform state-machine machinery, cross-flow addressability, or
+        only contained data plus shared coordination.
+      implementation_trackers:
+        template_pilot: '#1552'
+        singleton_map_pilot: '#1553'
+        static_multi_entity_escape_hatch_policy: '#1554'
+    pilot_model:
+      status: child_tracked
+      rule: >
+        The locked design requires both a template pilot and a singleton+map
+        pilot before broad migration, because one migration cannot validate
+        both sides of the authoring model.
+      implementation_trackers:
+        template_pilot: '#1552'
+        singleton_map_pilot: '#1553'
     analyzer_obligations:
       status: child_tracked
       rule: >
@@ -5026,7 +5167,9 @@ flow_model:
         primary_entity_inference: '#1539'
         instance_key_verification: '#1543'
         output_key_carries_verification: '#1544'
+        connect_to_instance_route_plans: '#1545'
         connect_key_mapping: '#1546'
+        ambiguous_key_rejection: '#1545'
         select_entity_demotion: '#1547'
         typed_map_list_update_verification: '#1548'
         expand_minimize_tooling: '#1551'

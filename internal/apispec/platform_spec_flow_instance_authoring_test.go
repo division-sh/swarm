@@ -24,6 +24,32 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		assertScalarContains(t, locked, want)
 	}
 
+	coverage := mustMappingValue(t, authoring, "locked_design_coverage")
+	assertScalarValue(t, mustMappingValue(t, coverage, "status"), "exhaustive_against_locked_1476_design")
+	assertScalarContains(t, mustMappingValue(t, coverage, "rule"), "every major section of the locked #1476")
+	coverageRows := mustMappingValue(t, coverage, "rows")
+	for _, tc := range []struct {
+		id       string
+		coverage string
+	}{
+		{"locked_principle", "specified_by_1538"},
+		{"locked_mental_model", "specified_by_1538"},
+		{"authoring_decision_rubric", "specified_by_1538"},
+		{"composition_model", "split_to_child"},
+		{"delivery_vs_contained_state_update", "split_to_child"},
+		{"escape_hatches", "specified_by_1538"},
+		{"immediate_platform_surface", "split_to_child"},
+		{"empire_migration_framing", "split_to_child"},
+		{"analyzer_obligations", "split_to_child"},
+		{"first_pilots", "split_to_child"},
+	} {
+		row := mustSequenceMappingByScalarField(t, coverageRows, "id", tc.id)
+		assertScalarValue(t, mustMappingValue(t, row, "coverage"), tc.coverage)
+		if !hasMappingKey(row, "owner") {
+			t.Fatalf("locked_design_coverage row %s missing owner", tc.id)
+		}
+	}
+
 	vocabulary := mustMappingValue(t, authoring, "vocabulary")
 	for _, key := range []string{
 		"flow_definition",
@@ -39,6 +65,23 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		if !hasMappingKey(vocabulary, key) {
 			t.Fatalf("flow_instance_authoring.vocabulary missing %s", key)
 		}
+	}
+
+	rubric := mustMappingValue(t, authoring, "authoring_decision_rubric")
+	assertScalarValue(t, mustMappingValue(t, rubric, "status"), "merge_bearing_authoring_guidance")
+	for _, tc := range []struct {
+		id       string
+		wantUse  string
+		wantWhen string
+	}{
+		{"template_flow_instance", "child/template flow instance", "independent states"},
+		{"contained_state", "typed field/list/map on the primary entity", "just data owned"},
+		{"singleton_coordinator", "singleton coordinator with real shared state or policy", "learns across many instances"},
+		{"promotion_line", "promote it to a child/template flow instance", "routable recipient"},
+	} {
+		decision := mustSequenceMappingByScalarField(t, mustMappingValue(t, rubric, "decisions"), "id", tc.id)
+		assertScalarContains(t, mustMappingValue(t, decision, "when"), tc.wantWhen)
+		assertScalarValue(t, mustMappingValue(t, decision, "use"), tc.wantUse)
 	}
 
 	normal := mustMappingValue(t, authoring, "normal_model")
@@ -70,6 +113,8 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, composition, "canonical_routing_owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
 	assertScalarValue(t, mustMappingValue(t, composition, "route_plan_owner"), "platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Parent `connect` routes across flow instances")
+	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "revise"), "parent-owned correlate_by/cardinality as the main authoring syntax")
+	assertScalarValue(t, mustYAMLPath(t, composition, "public_target_revision", "prefer"), "connect + instance key mapping + explicit delivery")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "output_pin_key_carries"), "#1544")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_to_instance_route_planning"), "#1545")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_key_adapters"), "#1546")
@@ -93,6 +138,25 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, selectEntity, "implementation_tracker"), "#1547")
 	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "external ingress, legacy migration")
 	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "Normal in-topology composition")
+	producerTarget := mustMappingValue(t, escapeHatches, "producer_emit_target")
+	assertScalarValue(t, mustMappingValue(t, producerTarget, "status"), "exotic_dynamic_routing_escape_hatch")
+	assertScalarValue(t, mustMappingValue(t, producerTarget, "implementation_tracker"), "#1547")
+	assertScalarContains(t, mustMappingValue(t, producerTarget, "rule"), "genuinely exotic dynamic routing")
+	customAdapters := mustMappingValue(t, escapeHatches, "custom_adapters")
+	assertScalarValue(t, mustMappingValue(t, customAdapters, "implementation_tracker"), "#1546")
+	assertScalarContains(t, mustMappingValue(t, customAdapters, "rule"), "explicit parent-owned mappings")
+
+	migration := mustMappingValue(t, authoring, "migration_model")
+	assertScalarValue(t, mustMappingValue(t, migration, "status"), "child_tracked")
+	assertScalarContains(t, mustMappingValue(t, migration, "rule"), "must not be migrated blindly")
+	assertScalarValue(t, mustYAMLPath(t, migration, "implementation_trackers", "template_pilot"), "#1552")
+	assertScalarValue(t, mustYAMLPath(t, migration, "implementation_trackers", "singleton_map_pilot"), "#1553")
+	assertScalarValue(t, mustYAMLPath(t, migration, "implementation_trackers", "static_multi_entity_escape_hatch_policy"), "#1554")
+	pilot := mustMappingValue(t, authoring, "pilot_model")
+	assertScalarValue(t, mustMappingValue(t, pilot, "status"), "child_tracked")
+	assertScalarContains(t, mustMappingValue(t, pilot, "rule"), "both a template pilot and a singleton+map")
+	assertScalarValue(t, mustYAMLPath(t, pilot, "implementation_trackers", "template_pilot"), "#1552")
+	assertScalarValue(t, mustYAMLPath(t, pilot, "implementation_trackers", "singleton_map_pilot"), "#1553")
 
 	analyzer := mustMappingValue(t, authoring, "analyzer_obligations")
 	assertScalarValue(t, mustMappingValue(t, analyzer, "status"), "child_tracked")
@@ -104,7 +168,9 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		{"primary_entity_inference", "#1539"},
 		{"instance_key_verification", "#1543"},
 		{"output_key_carries_verification", "#1544"},
+		{"connect_to_instance_route_plans", "#1545"},
 		{"connect_key_mapping", "#1546"},
+		{"ambiguous_key_rejection", "#1545"},
 		{"select_entity_demotion", "#1547"},
 		{"typed_map_list_update_verification", "#1548"},
 		{"expand_minimize_tooling", "#1551"},
