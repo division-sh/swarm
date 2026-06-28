@@ -133,10 +133,13 @@ vocabulary:
       causes prefix-based ownership bugs. Using scope key where instance path is needed causes
       cross-instance state leakage. The runtime MUST use the correct identity for each context.'
     flow_entity_id: 'The canonical entity identity within a flow is scoped by the concrete instance
-      path, but cardinality depends on the flow kind. A static flow instance may create many
-      entity_state rows over time; a template flow instance typically owns one entity_state row.
-      The runtime MUST NOT maintain competing identities for the same entity row or blur flow-instance
-      identity with entity identity.'
+      path, but cardinality depends on the authoring model. Under the normal
+      flow-instance-centered authoring model, a flow instance owns one primary
+      state entity. Advanced/legacy static multi-entity escape hatches may
+      create many entity_state rows over time; template flow instances use the
+      instance identity plus their primary entity. The runtime MUST NOT maintain
+      competing identities for the same entity row or blur flow-instance identity
+      with entity identity.'
   state:
     description: 'A named state in a workflow. An entity (e.g. a ticket, an order, a document) is always in exactly one
       state. States belong to phases for grouping. Some states are terminal (no outgoing transitions).
@@ -1371,10 +1374,12 @@ handler_specification:
         with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
           values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
-      note_on_static_flows: 'For static flows (scoring, validation), create_entity is the mechanism for entity creation.
-        Without it, the first event arriving from outside the flow has no entity to write to unless the runtime creates one
-        implicitly. create_entity makes this explicit and unambiguous. For dynamic instances (mode: template), entity
-        creation happens in create_flow_instance step 9 — create_entity is not needed on those flows.'
+      note_on_static_flows: 'For advanced/legacy static multi-entity flows, create_entity is the explicit mechanism for entity
+        creation. Without it, the first event arriving from outside the flow has no entity to write to unless the runtime
+        creates one implicitly. create_entity makes this explicit and unambiguous for those escape-hatch flows. Under the
+        normal flow-instance-centered authoring model, process/case/job state should be modeled as a flow instance with
+        one primary entity. For dynamic instances (mode: template), entity creation happens in create_flow_instance step
+        9 — create_entity is not needed on those flows.'
     select_entity:
       field: select_entity
       type: object
@@ -4900,6 +4905,136 @@ flow_model:
   description: A Flow is the universal building block. Every level of the system is a flow — from the root flow down to the
     smallest sub-flow. A flow can contain child flows. The root flow is what others call "the root flow." There is no separate
     project concept (removed).
+  flow_instance_authoring:
+    status: merge_bearing_source_authority
+    promoted_by: '#1538'
+    parent_tracker: '#1537'
+    owner: platform-spec.yaml#flow_model.flow_instance_authoring
+    locked_principle: >
+      Swarm's default authoring model is flow-instance-centered. A normal flow
+      instance owns one primary state entity. Cross-flow composition routes to
+      flow instances through `connect` and instance keys. Lists and maps are
+      contained state inside the primary entity. Authors promote contained state
+      to child/template flows only when it needs independent lifecycle, routing,
+      timers, retries, agents, or audit. Static multi-entity flows remain an
+      advanced/legacy escape hatch, not the common path.
+    source_context:
+      locked_design: '#1476'
+      parent_tracker: '#1537'
+      spec_authority_slice: '#1538'
+    vocabulary:
+      flow_definition: Contract/type for a reusable flow.
+      flow_instance: One running process, case, job, or service instance.
+      primary_entity: Durable state object owned by one normal flow instance.
+      contained_state: Typed scalar, list, or map data owned inside the primary entity.
+      child_template_flow: Independently routable or lifecycle-owning child/template flow instance.
+      singleton_coordinator: Static shared-policy, aggregate-state, or cross-instance-learning owner.
+      connect: Parent-owned flow-instance wiring over declared pins and keys.
+      interface: Reusable structural contract over pins, payloads, and keys.
+      analyzer: The verifier/compiler that expands compact authoring and rejects ambiguity.
+    normal_model:
+      rule: >
+        The normal unit of durable workflow state is the flow instance, not an
+        arbitrary entity row inside a static service flow. A normal flow
+        instance owns exactly one primary state entity; handlers update that
+        local state unless a separately declared child/template flow owns an
+        independent sub-lifecycle.
+      identity_ladder:
+      - field = scalar state on the primary entity
+      - list/map = contained local state on the primary entity
+      - child/template flow instance = independently addressable lifecycle
+      - singleton coordinator = shared policy, aggregate state, or cross-instance learning
+    template_instance_model:
+      status: spec_vocabulary_only
+      implementation_tracker: '#1543'
+      declaration_surface:
+      - 'mode: template'
+      - 'instance.by'
+      - 'on_missing: create | reject'
+      - 'on_conflict: reject | reuse'
+      rule: >
+        Template flow instances are the common shape for process/case/job state
+        that needs independent lifecycle, routing, timers, retries, agents, or
+        audit. Instance-key verification and runtime semantics are tracked by
+        #1543 and are not implemented by #1538.
+    primary_entity_model:
+      status: spec_vocabulary_only
+      implementation_tracker: '#1539'
+      inference_rule: >
+        If exactly one entity type exists for a normal flow, the platform may
+        infer it as the primary entity. If more than one entity type exists,
+        the author must declare the primary entity explicitly or opt into an
+        advanced/legacy multi-entity escape hatch. Verification and runtime
+        inference are tracked by #1539 and are not implemented by #1538.
+    composition_model:
+      status: references_existing_owner
+      canonical_routing_owner: platform-spec.yaml#flow_model.flow_package.composition_routing
+      route_plan_owner: platform-spec.yaml#contract_formats.event_schema.routing_derivation.route_plan_authority
+      rule: >
+        Parent `connect` routes across flow instances using declared producer
+        output keys and receiver instance keys. This section names the authoring
+        model; composition-routing and RoutePlan remain the canonical owners
+        for topology lowering and publish-time delivery authority.
+      split_children:
+        output_pin_key_carries: '#1544'
+        connect_to_instance_route_planning: '#1545'
+        connect_key_adapters: '#1546'
+    contained_state_model:
+      status: spec_vocabulary_only
+      implementation_tracker: '#1548'
+      rule: >
+        Typed lists and maps are contained state inside the primary entity.
+        They are not cross-flow route targets and MUST NOT be addressed through
+        parent `connect`. If a contained item needs independent lifecycle,
+        routing, timers, retries, agents, audit, callbacks, terminality, or
+        durable idempotency identity, it must be promoted to a child/template
+        flow instance instead of remaining only a list/map item.
+    singleton_coordinator_model:
+      status: spec_vocabulary_only
+      implementation_tracker: '#1549'
+      rule: >
+        Singleton/coordinator flows are valid when the flow owns real shared
+        policy, aggregate state, or cross-instance learning. They are not a
+        backdoor for accidental shared agent memory or arbitrary multi-entity
+        routing inside a static flow.
+    escape_hatches:
+      static_multi_entity_flows:
+        status: advanced_legacy_escape_hatch
+        implementation_tracker: '#1554'
+        rule: >
+          Static flows that create, select, or own multiple entity rows remain
+          possible only as explicit advanced/legacy escape hatches. They are not
+          the default authoring model and must not be used to avoid declaring
+          template instances, contained state, child flows, or singleton
+          coordinator ownership.
+      select_entity:
+        status: retained_escape_hatch_pending_child
+        implementation_tracker: '#1547'
+        rule: >
+          `select_entity` and `select_or_create_entity` remain acquisition
+          primitives for external ingress, legacy migration, and explicit
+          advanced database-like flows. Normal in-topology composition should
+          route to the receiving flow instance through parent `connect` and
+          instance keys instead.
+    analyzer_obligations:
+      status: child_tracked
+      rule: >
+        The analyzer owns safe expansion of compact authoring and rejection of
+        ambiguity. #1538 records the obligations as source authority only; each
+        behavior is implemented by its child issue.
+      children:
+        primary_entity_inference: '#1539'
+        instance_key_verification: '#1543'
+        output_key_carries_verification: '#1544'
+        connect_key_mapping: '#1546'
+        select_entity_demotion: '#1547'
+        typed_map_list_update_verification: '#1548'
+        expand_minimize_tooling: '#1551'
+    non_goals:
+    - '#1538 does not implement verifier/runtime behavior.'
+    - '#1538 does not migrate Empire contracts.'
+    - '#1538 does not implement typed map/list operations.'
+    - '#1538 does not close the #1537 parent.'
   flow_package:
     description: A flow is a directory with a standard file set. package.yaml is the manifest — it declares identity, child
       flows, and handoffs. All other files are optional depending on what the flow does.
