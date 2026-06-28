@@ -7970,6 +7970,20 @@ platform_events:
     - Wildcard subscriptions that match platform.* events (e.g., platform.* subscription pattern)
     - Flow schema.yaml pins.inputs.events listing platform.* events (flows MAY declare them as inputs to receive routing)
     - Product subscriptions, handlers, or input pins that reference non-platform.* catalog-owned events such as mailbox.item_decided
+  schema_authority_ref_syntax:
+    description: >-
+      platform_events.catalog entries use schema_authority refs to identify the parsed platform-spec.yaml owner for each
+      payload schema. A schema_authority ref with prefix platform-spec.yaml# is parsed as explicit path syntax, not as prose.
+      Dot segments select normal YAML mapping keys. Bracketed literal segments select an exact YAML mapping key and MUST be
+      used when the key itself contains dots, such as platform event names.
+    grammar:
+      simple_segment: Normal YAML mapping key segment separated by dots, for example engine.error_model.dead_letter_schema.
+      bracketed_literal_segment: '["literal.key"] selects the exact YAML mapping key literal.key without splitting on dots.'
+      fail_closed: Invalid syntax, empty segments, unterminated brackets, unquoted bracket literals, and missing owners are
+        parsed-invalid. Implementations and conformance tests MUST NOT recover by joining dot segments heuristically.
+    examples:
+      dotted_event_key: 'platform-spec.yaml#platform_events.catalog["platform.boot"].payload'
+      simple_owner: platform-spec.yaml#engine.error_model.dead_letter_schema
   catalog:
     platform.dead_letter:
       description: Failed event after retry exhaustion or chain depth overflow.
@@ -7994,7 +8008,7 @@ platform_events:
       note: Full payload schema defined in platform_tables. Not duplicated here.
     platform.agent_failed:
       description: Agent session failed after retry.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_failed.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.agent_failed"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8012,7 +8026,7 @@ platform_events:
       produced_by_type: platform
     platform.agent_panic:
       description: Agent session panicked with unrecoverable error.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_panic.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.agent_panic"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8030,7 +8044,7 @@ platform_events:
       produced_by_type: platform
     platform.event_quarantined:
       description: Poison event quarantined after repeated handler failures on different entities.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.event_quarantined.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.event_quarantined"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8046,7 +8060,7 @@ platform_events:
       produced_by_type: platform
     platform.dead_letter_escalation:
       description: Dead letter volume or pattern crossed escalation threshold.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.dead_letter_escalation.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.dead_letter_escalation"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8062,7 +8076,7 @@ platform_events:
       produced_by_type: platform
     platform.run_stalled:
       description: Runtime detected a running run that has crossed the stalled-run escalation threshold according to the canonical run diagnosis projection.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.run_stalled.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.run_stalled"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8095,7 +8109,7 @@ platform_events:
         via the internal admin reset source. Builder/dashboard reset_state is retired and MUST NOT emit this event. NOT
         emitted on crash recovery or automatic recovery fallback — those use platform.recovery_failed if they fail, or normal
         boot if they succeed.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.reset.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.reset"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8113,7 +8127,7 @@ platform_events:
         source: external (platform admin CLI)
     platform.auth_required:
       description: Agent or tool call blocked pending authorization.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.auth_required.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.auth_required"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8140,7 +8154,7 @@ platform_events:
     platform.budget_threshold_crossed:
       description: LLM spend crossed a configured threshold. The platform monitors spend_ledger against policy-defined thresholds
         and emits this event when a boundary is crossed. One event with a level field — no separate events per level.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.budget_threshold_crossed.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.budget_threshold_crossed"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8168,7 +8182,7 @@ platform_events:
         such as MCP/tool execution is rejected fail-closed while paused. In-flight events already dispatched complete their handler
         execution and commit. Agent sessions in progress complete their current turn; new agent invocations for queued work are
         deferred until resume.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.paused.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.paused"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8184,7 +8198,7 @@ platform_events:
       description: Runtime ingress left paused state. Queued event-producing ingress is eligible for normal EventBus dispatch
         exactly once through the canonical delivery/idempotency owners. Synchronous request/response ingress may execute again
         after resume.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.resumed.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.resumed"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8200,7 +8214,7 @@ platform_events:
       description: Operator-issued directive accepted by the runtime for an agent. This is the authoritative persisted root
         event for directive-started or directive-targeted work; BoardStep and all child emissions inherit this event's run_id
         and source_event_id. It is persisted before agent execution and is not defined by the legacy board.directive helper.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_directive.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.agent_directive"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8228,7 +8242,7 @@ platform_events:
       produced_by_type: platform
     platform.agent_started:
       description: Agent session created and ready to process events.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.agent_started.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.agent_started"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8250,7 +8264,7 @@ platform_events:
     platform.boot:
       description: Platform boot completed successfully. Emitted after validation passes, runtime boot/recovery decisions are made,
         nodes/agents are started, and the boot event is published before the runtime becomes ready.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.boot.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.boot"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8289,7 +8303,7 @@ platform_events:
     platform.inbound_recorded:
       description: External event received and persisted. Emitted when an event enters the system from an external source
         (API, webhook, admin CLI).
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.inbound_recorded.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.inbound_recorded"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -8307,7 +8321,7 @@ platform_events:
       produced_by_type: platform
     platform.recovery_failed:
       description: Crash recovery failed during event replay. Unrecoverable state.
-      schema_authority: platform-spec.yaml#platform_events.catalog.platform.recovery_failed.payload
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.recovery_failed"].payload'
       producer_evidence:
         produced_by_type: platform
         locations:
