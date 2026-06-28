@@ -5125,11 +5125,18 @@ flow_model:
           instance keys instead.
       producer_emit_target:
         status: exotic_dynamic_routing_escape_hatch
-        implementation_tracker: '#1547'
+        implementation_tracker: '#1545'
+        adjacent_authority: platform-spec.yaml#flow_model.flow_package.composition_routing.emit_target_escape_hatch
+        adapter_boundary_tracker: '#1546'
         rule: >
           Producer `emit.target` remains only for genuinely exotic dynamic
           routing. It is not authoritative for normal parent-owned composition,
           where `connect`, instance keys, and RoutePlan authority own delivery.
+          The existing composition-routing `emit_target_escape_hatch` owner
+          remains authoritative for permitted dynamic target forms and limits;
+          #1545 owns the route-planning proof that normal instance-key
+          composition cannot be rescued by producer target/broadcast, and #1546
+          owns explicit key-adapter overlap.
       custom_adapters:
         status: explicit_adapter_escape_hatch
         implementation_tracker: '#1546'
