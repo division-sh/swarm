@@ -34,6 +34,26 @@ func TestImportBoundaryPolicyResolutionUsesBindingThenPackageDefault(t *testing.
 	}
 }
 
+func TestImportBoundaryPolicyResolutionReportsOwnerForBindingAndPackageDefault(t *testing.T) {
+	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
+		policyBind: "        provider.threshold: parent.policy.provider.threshold\n",
+		policyRequires: `  policy:
+    provider.threshold: {}
+    provider.mode:
+      default: strict
+`,
+		credentialRequires: "  credentials: [provider_key]\n",
+		credentialBind:     "        provider_key: tenant_provider_key\n",
+	})
+
+	if got, ok := PolicyValueForFlowWithOwner(source, "worker", "provider.threshold"); !ok || got.Value.Value != 0.91 || got.OwnerKey != "root" {
+		t.Fatalf("provider.threshold resolution = (%#v, %v), want root-owned bound value 0.91", got, ok)
+	}
+	if got, ok := PolicyValueForFlowWithOwner(source, "worker", "provider.mode"); !ok || got.Value.Value != "strict" || got.OwnerKey != "package:flows/worker" {
+		t.Fatalf("provider.mode resolution = (%#v, %v), want package-owned default strict", got, ok)
+	}
+}
+
 func TestImportBoundaryPolicyResolutionUsesResolvedParentPolicyForNestedBinding(t *testing.T) {
 	source := loadNestedImportBoundaryPolicyFixture(t)
 

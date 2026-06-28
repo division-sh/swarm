@@ -467,6 +467,43 @@ func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
 	recorder.requireGapAtLeast(t, 25*time.Millisecond)
 }
 
+func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(t *testing.T) {
+	var recorder dispatchTimeRecorder
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		recorder.record()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{{"title": "T", "link": "https://example.test", "summary": "S"}},
+		})
+	}))
+	defer server.Close()
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		WorkflowSource: rateLimitedNativeWebSearchSiblingFlowSource(server.URL),
+	})
+	first := models.WithActor(context.Background(), models.AgentConfig{
+		ID:          "alpha-agent",
+		FlowPath:    "alpha/instance-1",
+		NativeTools: models.NativeToolConfig{WebSearch: true},
+	})
+	if _, err := exec.Execute(first, "web_search", map[string]any{"query": "alpha"}); err != nil {
+		t.Fatalf("first sibling Execute(web_search): %v", err)
+	}
+	second := models.WithActor(context.Background(), models.AgentConfig{
+		ID:          "beta-agent",
+		FlowPath:    "beta/instance-1",
+		NativeTools: models.NativeToolConfig{WebSearch: true},
+	})
+	_, err := exec.Execute(second, "web_search", map[string]any{"query": "beta"})
+	runtimeErr, ok := AsRuntimeError(err)
+	if !ok || runtimeErr == nil || runtimeErr.Code != externalDispatchRateLimitedCode {
+		t.Fatalf("second sibling Execute(web_search) err = %v, want rate_limited runtime error", err)
+	}
+	if got := len(recorder.timesSnapshot()); got != 1 {
+		t.Fatalf("outbound web_search requests = %d, want shared inherited-policy bucket to block second dispatch", got)
+	}
+}
+
 type dispatchTimeRecorder struct {
 	mu    sync.Mutex
 	times []time.Time
@@ -553,6 +590,44 @@ func rateLimitedNativeWebSearchSource(provider, rateLimit, maxWait string, custo
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"web_search_provider": {Value: root},
 		}},
+	})
+}
+
+func rateLimitedNativeWebSearchSiblingFlowSource(serverURL string) semanticview.Source {
+	rootPolicy := runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+		"web_search_provider": {Value: map[string]any{
+			"provider":            "custom",
+			"max_results_default": 2,
+			"rate_limit":          "1/s",
+			"rate_limit_max_wait": "0s",
+			"response_path":       "items",
+			"field_mapping":       map[string]any{"title": "title", "url": "link", "snippet": "summary"},
+			"http": map[string]any{
+				"method": "GET",
+				"url":    serverURL + "?q={{input.query}}&count={{input.max_results}}",
+			},
+		}},
+	}}
+	root := runtimecontracts.FlowContractView{
+		Policy: rootPolicy,
+		Children: []runtimecontracts.FlowContractView{
+			{Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha"}, Path: "alpha"},
+			{Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta"}, Path: "beta"},
+		},
+	}
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: rootPolicy,
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"alpha": &root.Children[0],
+				"beta":  &root.Children[1],
+			},
+			ByPath: map[string]*runtimecontracts.FlowContractView{
+				"alpha": &root.Children[0],
+				"beta":  &root.Children[1],
+			},
+		},
 	})
 }
 

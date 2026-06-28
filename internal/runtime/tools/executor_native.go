@@ -46,7 +46,7 @@ type webSearchProviderConfig struct {
 	HTTP              *runtimecontracts.HTTPToolSpec
 	ResponsePath      string
 	FieldMapping      map[string]string
-	FlowID            string
+	PolicyOwnerKey    string
 	RateLimit         externalDispatchRateLimitConfig
 }
 
@@ -458,10 +458,11 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 	if source == nil {
 		return webSearchProviderConfig{}, fmt.Errorf("web_search provider is unavailable without a workflow source")
 	}
-	value, ok := semanticview.PolicyValueForFlow(source, strings.TrimSpace(flowID), "web_search_provider")
+	resolution, ok := semanticview.PolicyValueForFlowWithOwner(source, strings.TrimSpace(flowID), "web_search_provider")
 	if !ok {
 		return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider is not configured")
 	}
+	value := resolution.Value
 	root, ok := normalizeAnyMap(value.Value)
 	if !ok {
 		return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider must be a mapping")
@@ -472,7 +473,7 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 		MaxResultsDefault: asInt(root["max_results_default"]),
 		ResponsePath:      strings.TrimSpace(asString(root["response_path"])),
 		FieldMapping:      map[string]string{},
-		FlowID:            strings.TrimSpace(flowID),
+		PolicyOwnerKey:    strings.TrimSpace(resolution.OwnerKey),
 	}
 	rateLimit, _, err := parseExternalDispatchRateLimit(asString(root["rate_limit"]), asString(root["rate_limit_max_wait"]))
 	if err != nil {

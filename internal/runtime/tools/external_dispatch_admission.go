@@ -249,15 +249,15 @@ func (e *Executor) webSearchExternalDispatchPolicy(cfg webSearchProviderConfig) 
 		return externalDispatchAdmissionPolicy{}
 	}
 	source := e.workflowSourceForAdmission()
-	flowID := strings.TrimSpace(cfg.FlowID)
-	if flowID == "" {
-		flowID = "root"
+	ownerKey := strings.TrimSpace(cfg.PolicyOwnerKey)
+	if ownerKey == "" {
+		ownerKey = "root"
 	}
 	provider := strings.TrimSpace(cfg.Provider)
 	bucketKey := strings.Join([]string{
 		externalDispatchScopeNativeWebSearch,
 		externalDispatchSourceKey(source),
-		flowID,
+		ownerKey,
 		provider,
 	}, ":")
 	return externalDispatchAdmissionPolicy{
