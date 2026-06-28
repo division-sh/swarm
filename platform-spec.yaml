@@ -3835,7 +3835,10 @@ engine:
               external tool-provider dispatch admission model and apply only to platform-owned HTTP
               provider requests for hardcoded Brave/Serper/Tavily providers and custom provider.http
               requests. Provider-native CLI web_search and LLM-provider API calls do not consume this
-              bucket.
+              bucket. Bucket identity is keyed by workflow source, the effective policy owner/provenance
+              that supplied the `policy.web_search_provider` declaration, and provider. Inherited root or
+              ancestor provider declarations therefore share one provider bucket across child flows; caller
+              flow becomes a bucket dimension only when that flow owns or overrides the provider declaration.
         file_io:
           description: Read and write files within workspace mounts. On the shipped CLI runtime, file_io is provider-native
             and maps to callable read_file/write_file operations on the same turn. /workspace is read-write, /data is read-only,
