@@ -196,6 +196,18 @@ contract_formats:
     - flows/
     rule: A flow with no agents needs no prompts/. A flow with no handlers needs no nodes.yaml. A flow with no events needs
       no events.yaml.
+  flow_schema:
+    description: Canonical `schema.yaml` flow declaration surface for state machine and pin declarations.
+    owner_file: contracts/flows/<flow>/schema.yaml
+    bundle_scope_exception: contracts/schema.yaml for the root flow
+    owned_concepts:
+    - initial_state
+    - terminal_states
+    - states
+    - pins.inputs.events
+    - pins.outputs.events
+    rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
+      owner. Runtime liveness and temporal progress are separate runtime concerns.
   entity_schema:
     description: |
       `package.yaml.entity_schema` is retired. Authoritative entity
@@ -971,10 +983,20 @@ rule:
     declared_is_authority: |
       Writers and readers conform to the declared contract. Writer drift,
       reader drift, and dead contract fields are verification failures.
+    bidirectional_verification: |
+      Verification must check both sides of declared structure: every
+      platform-visible writer must target declared contract fields, and every
+      platform-visible reader must resolve through declared contract fields.
+      Writer-only or reader-only proof is incomplete.
     universal_presence: |
       Every declared entity field is always readable with a type-valid
       value. Explicit `initial:` or the type default provides the value
       when no writer has populated the field yet.
+    required_by_default_uniform_with_events: |
+      Declared entity fields and event payload fields are required and
+      type-checked by default unless an explicit supported contract form
+      states otherwise. Readers and writers must not infer optionality from
+      sparse runtime rows, absent historical writes, or prompt prose.
     lifecycle_vs_field_presence: |
       The state machine is the authority for entity lifecycle. It is not
       the authority for field-level "was this written yet" semantics;
@@ -1529,74 +1551,6 @@ handler_specification:
         emit: string or object — event to emit, optionally with local fields payload construction
       _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
         condition executes.
-  expression_context:
-    description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
-      rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
-      data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
-      are contract errors.'
-    namespaces:
-      entity:
-        resolves_to: 'entity_state row for the current entity. entity.X reads entity_state.fields->>X.
-          entity.current_state reads entity_state.current_state. entity.gates.X reads entity_state.gates->>X.'
-        populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
-          (agent tool), and create_entity (initial field population).'
-        read_model:
-          declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
-          undeclared_fields: Referencing an undeclared entity field is a contract error.
-          presence_checks: has(entity.X) and == null / != null comparisons are valid, but they are not required for declared fields.
-        does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
-          collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
-          only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
-          To persist a strict typed downstream copy, declare an entity field materialize_from; the runtime projection
-          step owns that write.'
-      accumulated:
-        resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
-          representing one accumulated event payload. Available only in on_complete conditions and filter
-          expressions — these run after accumulation completes.'
-        usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
-          accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
-          (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
-        not_available_in: 'guard.check — guards run before accumulation. data_accumulation.expression — runs
-          before accumulation. rules.condition — rules are an alternative to on_complete, not used after
-          accumulation.'
-        projection_boundary: |
-          `materialize_from` consumes accumulated items through the source
-          named type's typed view. Runtime accumulator metadata and event
-          payload extras outside the source named type are stripped before
-          writing the entity field and are not addressable as `source.*`.
-      fan_out:
-        resolves_to: 'Handler context produced by the fan_out step. fan_out.count is the number of items
-          that were dispatched. Populated after fan_out executes, before data_accumulation.'
-        available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
-          state. Example: expression: fan_out.count writes the dispatch count to an entity field for
-          downstream accumulation tracking (expected_from: entity.search_expected_count).'
-        not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
-          fields written by data_accumulation instead.'
-        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    expression:\
-          \ fan_out.count"
-      payload:
-        resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
-          JSONB payload.'
-      policy:
-        resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
-          (or root policy.yaml if not overridden at flow level).'
-    boot_validation:
-      description: 'The platform MUST validate entity field references at boot against the declared entity contract.
-        Declared entity fields are always readable; the boot check is declaration and type resolution, not sparse-field
-        initializer proof.'
-      checks:
-        declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
-        nested_type_resolution: Nested paths must resolve through named types to a declared field.
-        filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
-        query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, fan_out)
-          are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
-          when a supported scoped operand is unavailable in the handler context.
-      rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
-        presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
-        relevant for business meaning, but not for raw field readability.'
-      severity: error (boot fails)
-      example_violation: 'A guard references entity.build_complexity, but the inferred entity contract does not declare
-        build_complexity. Correct usage is to declare the field on the entity contract or stop reading it.'
     advances_to:
       field: advances_to
       type: string
@@ -1919,6 +1873,74 @@ handler_specification:
         defaults to the node ID. Explicit declaration is recommended for clarity.
       type: string
       example: build_evidence
+  expression_context:
+    description: 'Defines the namespaces available in CEL expressions used in guard.check, on_complete.condition,
+      rules.condition, data_accumulation.expression, and filter.condition. Each namespace resolves to a specific
+      data source. Declared entity fields are universally readable at a type-valid value; undeclared field references
+      are contract errors.'
+    namespaces:
+      entity:
+        resolves_to: 'entity_state row for the current entity. entity.X reads entity_state.fields->>X.
+          entity.current_state reads entity_state.current_state. entity.gates.X reads entity_state.gates->>X.'
+        populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
+          (agent tool), and create_entity (initial field population).'
+        read_model:
+          declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
+          undeclared_fields: Referencing an undeclared entity field is a contract error.
+          presence_checks: has(entity.X) and == null / != null comparisons are valid, but they are not required for declared fields.
+        does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
+          collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
+          only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
+          To persist a strict typed downstream copy, declare an entity field materialize_from; the runtime projection
+          step owns that write.'
+      accumulated:
+        resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
+          representing one accumulated event payload. Available only in on_complete conditions and filter
+          expressions — these run after accumulation completes.'
+        usage: 'accumulated.filter(d, <condition>) — filter items by predicate. accumulated.size() — count items.
+          accumulated.map(d, d.field) — extract field values. Item fields match the inbound event payload fields
+          (e.g., d.dimension, d.score, d.tier for score.dimension_complete).'
+        not_available_in: 'guard.check — guards run before accumulation. data_accumulation.expression — runs
+          before accumulation. rules.condition — rules are an alternative to on_complete, not used after
+          accumulation.'
+        projection_boundary: |
+          `materialize_from` consumes accumulated items through the source
+          named type's typed view. Runtime accumulator metadata and event
+          payload extras outside the source named type are stripped before
+          writing the entity field and are not addressable as `source.*`.
+      fan_out:
+        resolves_to: 'Handler context produced by the fan_out step. fan_out.count is the number of items
+          that were dispatched. Populated after fan_out executes, before data_accumulation.'
+        available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
+          state. Example: expression: fan_out.count writes the dispatch count to an entity field for
+          downstream accumulation tracking (expected_from: entity.search_expected_count).'
+        not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
+          fields written by data_accumulation instead.'
+        usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    expression:\
+          \ fan_out.count"
+      payload:
+        resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
+          JSONB payload.'
+      policy:
+        resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
+          (or root policy.yaml if not overridden at flow level).'
+    boot_validation:
+      description: 'The platform MUST validate entity field references at boot against the declared entity contract.
+        Declared entity fields are always readable; the boot check is declaration and type resolution, not sparse-field
+        initializer proof.'
+      checks:
+        declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
+        nested_type_resolution: Nested paths must resolve through named types to a declared field.
+        filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
+        query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, fan_out)
+          are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
+          when a supported scoped operand is unavailable in the handler context.
+      rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal
+        presence semantics provide the runtime value via explicit initial or type default. Dynamic writes remain
+        relevant for business meaning, but not for raw field readability.'
+      severity: error (boot fails)
+      example_violation: 'A guard references entity.build_complexity, but the inferred entity contract does not declare
+        build_complexity. Correct usage is to declare the field on the entity contract or stop reading it.'
   node_specification:
     node_fields:
       description: Top-level fields on a system node declaration.
@@ -9297,7 +9319,7 @@ static_analyzer:
     spec_basis:
     - entity_contracts.accumulator_entity_projection
     - handler_specification.handler_fields.accumulate
-    - canonical_invariants.no_structural_primitive_elides_type_discipline
+    - design_principles.no_structural_primitive_elides_type_discipline
     rule: |
       Verify every `materialize_from` field through the shared projection
       resolver. Hard invalidity if the reference is malformed, the source node
