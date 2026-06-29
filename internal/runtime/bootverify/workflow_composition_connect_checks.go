@@ -77,8 +77,13 @@ func validateCompositionConnect(source semanticview.Source, connect runtimecontr
 		))
 	}
 
-	findings = append(findings, validateCompositionConnectDelivery(connect, inputPin, receiverSchema, to.FlowID)...)
-	findings = append(findings, validateCompositionConnectAddress(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)...)
+	instanceKeyFindings := validateCompositionConnectInstanceKey(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)
+	findings = append(findings, validateCompositionConnectDelivery(connect, inputPin, receiverSchema, to.FlowID, len(instanceKeyFindings) == 0)...)
+	if len(instanceKeyFindings) > 0 {
+		findings = append(findings, instanceKeyFindings...)
+	} else {
+		findings = append(findings, validateCompositionConnectAddress(source, connect, outputPin, inputPin, from.FlowID, to.FlowID)...)
+	}
 	return findings
 }
 
@@ -145,7 +150,7 @@ func compositionConnectEventCompatible(source semanticview.Source, connect runti
 	return false
 }
 
-func validateCompositionConnectDelivery(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverSchema runtimecontracts.FlowSchemaDocument, receiverFlowID string) []Finding {
+func validateCompositionConnectDelivery(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverSchema runtimecontracts.FlowSchemaDocument, receiverFlowID string, hasInstanceKeyRoute bool) []Finding {
 	var findings []Finding
 	delivery := strings.TrimSpace(connect.Delivery)
 	if delivery == "" && inputPin.Address != nil {
@@ -160,8 +165,8 @@ func validateCompositionConnectDelivery(connect runtimecontracts.FlowPackageConn
 		findings = append(findings, compositionConnectFinding(connect, "reply_lineage_missing", "reply delivery requires a reply lineage declaration", receiverFlowID))
 	}
 	if inputPin.Address == nil {
-		if compositionReceiverAddressRequired(receiverSchema) && delivery != "broadcast" {
-			findings = append(findings, compositionConnectFinding(connect, "receiver_address_rule_missing", fmt.Sprintf("receiver flow %s requires an addressed input pin", receiverFlowID), receiverFlowID))
+		if compositionReceiverAddressRequired(receiverSchema) && !hasInstanceKeyRoute && delivery != "broadcast" {
+			findings = append(findings, compositionConnectFinding(connect, "receiver_route_key_missing", fmt.Sprintf("receiver flow %s requires a matching instance key route or an explicit addressed input pin", receiverFlowID), receiverFlowID))
 		}
 		return findings
 	}
@@ -191,6 +196,61 @@ func validateCompositionConnectDelivery(connect runtimecontracts.FlowPackageConn
 
 func compositionReceiverAddressRequired(schema runtimecontracts.FlowSchemaDocument) bool {
 	return strings.EqualFold(strings.TrimSpace(schema.Mode), "template")
+}
+
+func validateCompositionConnectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
+	if inputPin.Address != nil {
+		return nil
+	}
+	if strings.TrimSpace(connect.Delivery) == "broadcast" {
+		return nil
+	}
+	receiverSchema, ok := source.FlowSchemaByID(receiverFlowID)
+	if !ok || !compositionReceiverAddressRequired(receiverSchema) {
+		return nil
+	}
+	if len(connect.Map) > 0 {
+		for key := range connect.Map {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_unsupported", fmt.Sprintf("connect map key %s is a renamed-key adapter surface and is tracked separately from same-name instance-key routing", key), receiverFlowID)}
+		}
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		return []Finding{compositionConnectFinding(connect, "receiver_instance_key_unavailable", "receiver instance key owner is unavailable for this semantic source", receiverFlowID)}
+	}
+	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlowID)
+	if err != nil {
+		return []Finding{compositionConnectFinding(connect, "receiver_instance_key_invalid", err.Error(), receiverFlowID)}
+	}
+	outputKey := strings.TrimSpace(outputPin.Key)
+	if outputKey == "" {
+		return []Finding{compositionConnectFinding(connect, "output_key_missing", "producer output pin must declare key before it can route to a receiver instance key", producerFlowID)}
+	}
+	carries := outputPinCarries(outputPin)
+	if !stringSliceContains(carries, outputKey) {
+		return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", fmt.Sprintf("producer output pin key %s must also be listed in carries", outputKey), producerFlowID)}
+	}
+	if !stringSliceContains(instance.By, outputKey) {
+		return []Finding{compositionConnectFinding(connect, "instance_key_mismatch", fmt.Sprintf("producer output key %s does not match receiver instance.by %v", outputKey, instance.By), receiverFlowID)}
+	}
+	for _, field := range instance.By {
+		field = strings.TrimSpace(field)
+		if !stringSliceContains(carries, field) {
+			return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", fmt.Sprintf("producer output pin carries must include receiver instance.by field %s", field), producerFlowID)}
+		}
+		sourceType, err := outputPinKeyCarriesSourceType(source, producerFlowID, outputPin, "payload."+field)
+		if err != nil {
+			return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", err.Error(), producerFlowID)}
+		}
+		targetType, err := compositionConnectTargetType(source, receiverFlowID, "entity."+field)
+		if err != nil {
+			return []Finding{compositionConnectFinding(connect, "receiver_instance_key_invalid", err.Error(), receiverFlowID)}
+		}
+		if !compositionConnectTypesCompatible(sourceType, targetType) {
+			return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("source payload.%s type %s is incompatible with receiver instance.by field entity.%s type %s", field, sourceType, field, targetType), receiverFlowID)}
+		}
+	}
+	return nil
 }
 
 func validateCompositionConnectAddress(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
@@ -383,4 +443,17 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func stringSliceContains(values []string, needle string) bool {
+	needle = strings.TrimSpace(needle)
+	if needle == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == needle {
+			return true
+		}
+	}
+	return false
 }
