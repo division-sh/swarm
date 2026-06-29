@@ -92,8 +92,9 @@ type ConnectRoutePlanInstanceKey struct {
 }
 
 type ConnectRoutePlanInstanceKeyMapping struct {
-	Source string
-	Target string
+	Source   string
+	Target   string
+	Explicit bool
 }
 
 type ConnectRoutePlan struct {
@@ -358,7 +359,12 @@ func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input Connect
 		if source == "" || target == "" {
 			return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverAddressRuleMissing}
 		}
-		value := firstMatchValue(input.MatchValues, source, "payload."+source)
+		value := ""
+		if mapping.Explicit {
+			value = firstMatchValue(input.MatchValues, "payload."+source)
+		} else {
+			value = firstMatchValue(input.MatchValues, source, "payload."+source)
+		}
 		if value == "" {
 			return ConnectRoutePlanMaterialization{Failure: ConnectFailureAddressValueMissing}
 		}
@@ -534,7 +540,7 @@ func connectInstanceKeyMaterializationMappings(instanceKey *ConnectRoutePlanInst
 			if source == "" || target == "" {
 				continue
 			}
-			out = append(out, ConnectRoutePlanInstanceKeyMapping{Source: source, Target: target})
+			out = append(out, ConnectRoutePlanInstanceKeyMapping{Source: source, Target: target, Explicit: mapping.Explicit})
 		}
 		return out
 	}
@@ -564,7 +570,7 @@ func connectInstanceKeyMappings(adapter runtimecontracts.FlowPackageConnectInsta
 			if !stringListContains(carries, source) || !stringListContains(receiverFields, target) {
 				return nil, false
 			}
-			mappings = append(mappings, ConnectRoutePlanInstanceKeyMapping{Source: source, Target: target})
+			mappings = append(mappings, ConnectRoutePlanInstanceKeyMapping{Source: source, Target: target, Explicit: true})
 		}
 		return mappings, true
 	}
