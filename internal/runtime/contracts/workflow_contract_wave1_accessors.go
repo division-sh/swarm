@@ -12,8 +12,6 @@ type PrimaryEntityContract struct {
 	EntityType string
 	Contract   EntityContract
 	Types      TypeCatalogDocument
-	Explicit   bool
-	Inferred   bool
 }
 
 func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
@@ -203,21 +201,11 @@ func resolvePrimaryEntityContract(flowID, declared string, entities EntityContra
 	label := defaultPrimaryEntityFlowLabel(flowID)
 	keys := sortedEntityContractKeys(entities)
 	if declared != "" {
-		contract, ok := entities[declared]
-		if !ok {
-			return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s declares primary entity %q but available entity types are %s", label, declared, primaryEntityTypeList(keys))
-		}
-		return PrimaryEntityContract{
-			FlowID:     flowID,
-			EntityType: declared,
-			Contract:   cloneEntityContract(contract),
-			Types:      cloneTypeCatalogDocument(types),
-			Explicit:   true,
-		}, nil
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s uses schema.yaml entity %q, but normal flow authoring has a single entity authority: declare exactly one flow entity type in entities.yaml and do not restate it in schema.yaml", label, declared)
 	}
 	switch len(keys) {
 	case 0:
-		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s has no declared entity types; stateful normal flows must declare exactly one primary entity or be explicitly stateless/template", label)
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template", label)
 	case 1:
 		entityType := keys[0]
 		return PrimaryEntityContract{
@@ -225,10 +213,9 @@ func resolvePrimaryEntityContract(flowID, declared string, entities EntityContra
 			EntityType: entityType,
 			Contract:   cloneEntityContract(entities[entityType]),
 			Types:      cloneTypeCatalogDocument(types),
-			Inferred:   true,
 		}, nil
 	default:
-		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s declares multiple entity types %s; schema.yaml entity: <Type> is required unless an approved advanced/static multi-entity escape hatch is explicitly implemented", label, strings.Join(keys, ", "))
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s declares multiple entity types %s; normal flow authoring supports exactly one entity type", label, strings.Join(keys, ", "))
 	}
 }
 
@@ -242,13 +229,6 @@ func sortedEntityContractKeys(entities EntityContractsDocument) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func primaryEntityTypeList(keys []string) string {
-	if len(keys) == 0 {
-		return "<none>"
-	}
-	return strings.Join(keys, ", ")
 }
 
 func defaultPrimaryEntityFlowLabel(flowID string) string {

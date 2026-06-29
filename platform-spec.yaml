@@ -205,13 +205,13 @@ contract_formats:
     bundle_scope_exception: contracts/schema.yaml for the root flow
     owned_concepts:
     - initial_state
-    - entity
     - terminal_states
     - states
     - pins.inputs.events
     - pins.outputs.events
-    rule: Flow reachability, declared state membership, primary entity declaration, and flow-local pin event declarations
-      resolve against this parsed owner. Runtime liveness and temporal progress are separate runtime concerns.
+    rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
+      owner. Runtime liveness and temporal progress are separate runtime concerns. Entity ownership is not selected in
+      schema.yaml for normal flows; the single flow-owned `entities.yaml` entry is authoritative.
   entity_schema:
     description: |
       `package.yaml.entity_schema` is retired. Authoritative entity
@@ -1170,19 +1170,16 @@ entity_contracts:
       `_unused_reason`; the two may not coexist.
   one_entity_type_per_flow: |
     For normal flow-instance-centered authoring (stateful schemas with no
-    static/template mode), a stateful normal flow must resolve exactly one
-    primary entity. If exactly one entity type exists in the flow's
-    entities.yaml, the platform infers it as the primary entity. If more than
-    one entity type exists, schema.yaml must declare `entity: <Type>` to
-    select the primary entity unless a separately approved advanced/static
-    multi-entity escape hatch is explicitly implemented. A missing, unknown,
-    or ambiguous primary entity is fail-closed. Static package/service flows
-    remain a separate classification unless they explicitly declare
-    schema.entity or flow-scoped entity contracts, in which case the same
-    primary-entity resolver validates the declaration. The old Wave 1 rule
-    that rejected every multi-entity flow only because more than one entity
-    type existed is no longer authoritative by itself; the authoritative rule
-    is primary-entity resolution plus explicit escape-hatch policy.
+    static/template mode), a stateful normal flow declares exactly one entity
+    type in its flow-owned entities.yaml. That single entity type is the
+    flow's primary entity; there is no normal-flow primary/secondary split and
+    no schema.yaml `entity: <Type>` selector. A missing entity type, multiple
+    entity types, or a schema-level entity selector is fail-closed. Static
+    package/service flows, template instance-key behavior, and any future
+    advanced/static multi-entity escape hatch remain separate explicit
+    classifications; they are not silent fallback semantics for normal flows.
+    The old Wave 1 rule is preserved as a product decision for normal flow
+    authoring, not as a temporary limitation.
   state_machine_link:
     description: |
       State is flow-scoped and declared in schema.yaml. The entity
@@ -5072,24 +5069,24 @@ flow_model:
     primary_entity_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1539'
-      declaration_surface: 'schema.yaml entity: <Type>'
+      declaration_surface: 'exactly one flow-owned entities.yaml entry'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowPrimaryEntity
-      inference_rule: >
-        If exactly one entity type exists for a normal flow, the platform
-        infers it as the primary entity. If more than one entity type exists,
-        the author must declare the primary entity explicitly with `entity:
-        <Type>` or opt into a separately approved advanced/legacy multi-entity
-        escape hatch. Missing, unknown, or ambiguous primary entities fail
-        closed. Verification and direct runtime consumers consume the same
-        canonical resolver.
+      single_entity_rule: >
+        If exactly one entity type exists for a normal flow, that entity type
+        is the primary entity. More than one entity type is invalid for normal
+        flow authoring; authors must split flows, use contained state, or use a
+        separately approved advanced/static multi-entity classification.
+        `schema.yaml entity` is not a supported selector because it would
+        restate entity ownership in a second file. Missing, duplicate, or
+        restated entity ownership fails closed. Verification and direct runtime
+        consumers consume the same canonical resolver.
       stateful_presence_rule: >
         A stateful normal flow (stateful schema with no static/template mode)
-        must resolve a primary entity. Stateless flows, static package/service
-        flows, and template-flow instance-key behavior remain separate
-        explicit classifications and are not silently rescued by handler
-        acquisition, route planning, or entity-tool fallback. Static flows that
-        explicitly declare schema.entity or flow-scoped entity contracts still
-        validate through the canonical primary-entity resolver.
+        must resolve exactly one entity type. Stateless flows, static
+        package/service flows, and template-flow instance-key behavior remain
+        separate explicit classifications and are not silently rescued by
+        handler acquisition, route planning, entity-tool fallback, or a
+        schema-level entity selector.
     composition_model:
       status: references_existing_owner
       canonical_routing_owner: platform-spec.yaml#flow_model.flow_package.composition_routing

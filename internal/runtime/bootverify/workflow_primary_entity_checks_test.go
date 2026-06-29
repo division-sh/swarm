@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestRun_InfersSinglePrimaryEntityForStatefulNormalFlow(t *testing.T) {
+func TestRun_UsesSingleEntityAsPrimaryForStatefulNormalFlow(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
 initial_state: pending
@@ -24,32 +24,6 @@ pins:
 `, `
 vertical:
   name: text
-`)
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Errors(), "primary_entity_validation", "") {
-		t.Fatalf("unexpected primary_entity_validation error: %#v", report.Errors())
-	}
-}
-
-func TestRun_AllowsExplicitPrimaryEntityForMultipleFlowEntityTypes(t *testing.T) {
-	bundle := loadPrimaryEntityFixtureBundle(t, `
-name: scoring
-entity: vertical
-initial_state: pending
-states: [pending, done]
-terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
-`, `
-vertical:
-  name: text
-campaign:
-  title: text
 `)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
