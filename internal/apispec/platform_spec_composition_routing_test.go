@@ -109,6 +109,24 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		t.Fatal("implementation_slice_1545 must classify instance-key materialization as non-authoritative for explicit parent broadcast")
 	}
 
+	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
+	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "merge_bearing_runtime_behavior")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey.Mappings")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "connectRoutePlanResolver")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "connect.using.instance.source")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "connect.using.instance.target")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "Same-name key/carries")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "`connect.map` remains the explicit addressed-input map concept")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1546, "consumes"), "FlowPackageConnect.Using.Instance source/target adapter evidence") {
+		t.Fatal("implementation_slice_1546 must consume parsed using.instance adapter evidence")
+	}
+	if !sequenceContainsScalar(mustMappingValue(t, slice1546, "produces"), "ConnectRoutePlan.InstanceKey.Mappings for scalar and composite renamed keys") {
+		t.Fatal("implementation_slice_1546 must produce explicit instance-key mappings")
+	}
+	if !sequenceContainsScalar(mustMappingValue(t, slice1546, "non_authoritative_for_this_slice"), "connect.map as addressless template instance-key adapter authority") {
+		t.Fatal("implementation_slice_1546 must mark connect.map non-authoritative for addressless template instance-key adapters")
+	}
+
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
 	assertScalarValue(t, mustMappingValue(t, slice1475, "status"), "merge_bearing_runtime_behavior")
 	assertScalarContains(t, mustMappingValue(t, slice1475, "canonical_code_owner"), "ProducerRouteCommonPathFailure")

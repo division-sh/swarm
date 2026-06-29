@@ -315,6 +315,10 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 			if err := value.Decode(&out.Adapter); err != nil {
 				return fmt.Errorf("connect.adapter: %w", err)
 			}
+		case "using":
+			if err := value.Decode(&out.Using); err != nil {
+				return fmt.Errorf("connect.using: %w", err)
+			}
 		case "map":
 			if err := value.Decode(&out.Map); err != nil {
 				return fmt.Errorf("connect.map: %w", err)
@@ -333,6 +337,101 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*c = out.normalized()
 	return nil
+}
+
+func (u *FlowPackageConnectUsing) UnmarshalYAML(node *yaml.Node) error {
+	if u == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*u = FlowPackageConnectUsing{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("connect using must be a mapping")
+	}
+	var out FlowPackageConnectUsing
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "instance":
+			if err := value.Decode(&out.Instance); err != nil {
+				return fmt.Errorf("connect.using.instance: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: connect using field %q not in platform spec", key)
+		}
+	}
+	*u = out.normalized()
+	return nil
+}
+
+func (a *FlowPackageConnectInstanceAdapter) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*a = FlowPackageConnectInstanceAdapter{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("connect.using.instance must be a mapping")
+	}
+	out := FlowPackageConnectInstanceAdapter{Declared: true}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "source":
+			source, err := decodeStringListNodePreserveOrder(value)
+			if err != nil {
+				return fmt.Errorf("connect.using.instance.source: %w", err)
+			}
+			out.Source = source
+		case "target":
+			target, err := decodeStringListNodePreserveOrder(value)
+			if err != nil {
+				return fmt.Errorf("connect.using.instance.target: %w", err)
+			}
+			out.Target = target
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: connect using instance field %q not in platform spec", key)
+		}
+	}
+	*a = out.normalized()
+	return nil
+}
+
+func decodeStringListNodePreserveOrder(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			return nil, nil
+		}
+		return []string{strings.TrimSpace(node.Value)}, nil
+	case yaml.SequenceNode:
+		var values []string
+		if err := node.Decode(&values); err != nil {
+			return nil, err
+		}
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" {
+				out = append(out, value)
+			}
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("unsupported string list yaml node kind %d", node.Kind)
+	}
 }
 
 func (m *FlowPackageConnectMap) UnmarshalYAML(node *yaml.Node) error {

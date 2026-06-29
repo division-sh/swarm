@@ -5251,6 +5251,48 @@ flow_model:
           target/broadcast, direct delivery, raw subscribers, RouteTable lookup,
           handler lookup, delivery rows, or replay/readback rows as the route
           selector. Renamed key adapters remain #1546.
+      connect_key_adapters:
+        status: merge_bearing_contract_runtime_behavior
+        implementation_tracker: '#1546'
+        canonical_code_owner: internal/runtime/contracts.FlowPackageConnect.Using.Instance + internal/runtime/bootverify.validateCompositionConnectInstanceKeyAdapter + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings
+        syntax: connect.using.instance.source / connect.using.instance.target
+        rule: >
+          Parent `connect` MAY adapt renamed producer output key evidence to a
+          receiver template `instance.by` key only through
+          `connect.using.instance`. The adapter is parent-owned route
+          evidence: `source` names top-level producer payload fields declared by
+          the output pin `carries`, `target` names the receiver template
+          `instance.by` fields, and the ordered mapping becomes the lowered
+          ConnectRoutePlan instance-key materialization rule. Same-name
+          producer/receiver key fields remain valid without adapter syntax.
+          Renamed key routes without explicit adapter evidence fail closed.
+          `connect.map` is not adapter authority for addressless template
+          instance-key routing and MUST NOT repair this class.
+        supported_shapes:
+          scalar: >
+            A scalar adapter maps exactly one producer source field to exactly
+            one receiver target field. Both fields must exist, be unique in the
+            mapping, and have compatible schema types.
+          composite: >
+            Composite adapters map the full ordered receiver `instance.by`
+            field set. `source` and `target` lists must have equal cardinality,
+            every target must appear in receiver `instance.by`, every receiver
+            key target must be covered exactly once, and every source must be
+            carried by the producer output pin.
+        fail_closed:
+        - missing source or target adapter side
+        - source/target cardinality mismatch
+        - duplicate source or target fields
+        - source field missing from producer carries or event schema
+        - target field missing from receiver entity schema or instance.by
+        - producer/receiver key type incompatibility
+        - using.instance declared on addressed-input, broadcast, or non-template receiver routes
+        non_authoritative_paths:
+        - connect.map for addressless template instance-key adapters
+        - receiver input-pin address rules for this addressless instance-key class
+        - producer target.match or broadcast:true
+        - raw/live subscriber lookup before lowered route identity
+        - delivery rows, replay rows, or readback rows as route producers
       output_pin_key_carries_contract:
         status: merge_bearing_contract_behavior
         implementation_tracker: '#1544'
@@ -5713,7 +5755,7 @@ flow_model:
             - entity_id / entity.entity_id
             - flow_instance / instance.flow_instance
             - instance_id / instance.instance_id
-            - entity.<field> when the receiver entity contract declares that top-level field with indexed: true
+            - 'entity.<field> when the receiver entity contract declares that top-level field with indexed: true'
             unsupported_descriptor_targets: Nested entity paths, undeclared or unindexed entity fields, config.<field>, instance.<field>, and other arbitrary business fields remain fail-closed unless a later approved spec+runtime child promotes a typed descriptor/index owner for those forms.
         implementation_slice_1545:
           status: merge_bearing_runtime_behavior
@@ -5787,6 +5829,64 @@ flow_model:
             - recovery or retry work
             - agent/node delivery parity
             - producer target/broadcast retirement
+        implementation_slice_1546:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings + internal/runtime/bus.connectRoutePlanResolver
+          rule: |
+            Renamed parent connect into an addressless template receiver MUST
+            lower `connect.using.instance.source` /
+            `connect.using.instance.target` adapter evidence
+            into explicit ConnectRoutePlan instance-key mappings. Runtime
+            materialization MUST read key values from the mapped producer source
+            payload fields and stamp them under the receiver canonical
+            `instance.by` target fields before matching receiver-scoped
+            descriptors and producing delivery routes. Same-name key/carries
+            routes remain valid without adapter noise. Renamed routes without
+            adapter evidence, incomplete/ambiguous adapter shapes, unsupported
+            declaration surfaces, or missing source payload values fail closed
+            with zero executable routes and no raw subscriber fallback.
+
+            `connect.map` remains the explicit addressed-input map concept and
+            is not instance-key adapter authority for addressless template
+            receivers. No legacy map, receiver address rule, producer target,
+            broadcast:true, RouteTable lookup, delivery row, replay row, or
+            readback row may repair a missing or invalid instance-key adapter.
+          consumes:
+          - FlowPackageConnect.Using.Instance source/target adapter evidence
+          - producer output pin key/carries evidence
+          - receiver template instance.by fields
+          - matched inbound event payload source fields
+          - receiver-scoped active flow-instance descriptors
+          produces:
+          - ConnectRoutePlan.InstanceKey.Mappings for scalar and composite renamed keys
+          - route_plan_instance_key_adapter_invalid for unsupported adapter declarations
+          - route_plan_address_value_missing when mapped source payload values are missing
+          non_authoritative_for_this_slice:
+          - connect.map as addressless template instance-key adapter authority
+          - receiver input-pin address rules for this addressless instance-key adapter class
+          - receiver select_entity/select_or_create_entity
+          - producer target.match
+          - producer broadcast:true
+          - direct delivery
+          - raw/live subscribers before selected target identity
+          - handler lookup before selected target identity
+          - delivery rows, replay rows, or readback rows as route producers
+          split_or_adjacent:
+            same_name_instance_key_route_planning: '#1545'
+            select_entity_demote_warn_error: '#1547'
+            explicit_addressed_input_descriptor_routing: '#1479'
+          failure_reasons:
+          - connect_key_adapter_missing_source
+          - connect_key_adapter_missing_target
+          - connect_key_adapter_cardinality
+          - connect_key_adapter_duplicate_source
+          - connect_key_adapter_duplicate_target
+          - connect_key_adapter_source_missing
+          - connect_key_adapter_target_missing
+          - connect_key_adapter_partial
+          - key_types_incompatible
+          - route_plan_instance_key_adapter_invalid
+          - route_plan_address_value_missing
         implementation_slice_1473:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver

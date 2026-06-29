@@ -199,14 +199,24 @@ func compositionReceiverAddressRequired(schema runtimecontracts.FlowSchemaDocume
 }
 
 func validateCompositionConnectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
+	adapter := connect.Using.Instance
 	if inputPin.Address != nil {
+		if adapter.Declared {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance is valid only for addressless template receiver instance-key routes", receiverFlowID)}
+		}
 		return nil
 	}
 	if strings.TrimSpace(connect.Delivery) == "broadcast" {
+		if adapter.Declared {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance is incompatible with delivery broadcast", receiverFlowID)}
+		}
 		return nil
 	}
 	receiverSchema, ok := source.FlowSchemaByID(receiverFlowID)
 	if !ok || !compositionReceiverAddressRequired(receiverSchema) {
+		if adapter.Declared {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_invalid", "connect.using.instance requires a template receiver", receiverFlowID)}
+		}
 		return nil
 	}
 	if len(connect.Map) > 0 {
@@ -230,6 +240,9 @@ func validateCompositionConnectInstanceKey(source semanticview.Source, connect r
 	if !stringSliceContains(carries, outputKey) {
 		return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", fmt.Sprintf("producer output pin key %s must also be listed in carries", outputKey), producerFlowID)}
 	}
+	if adapter.Declared {
+		return validateCompositionConnectInstanceKeyAdapter(source, connect, adapter, carries, instance.By, outputPin, producerFlowID, receiverFlowID)
+	}
 	if !stringSliceContains(instance.By, outputKey) {
 		return []Finding{compositionConnectFinding(connect, "instance_key_mismatch", fmt.Sprintf("producer output key %s does not match receiver instance.by %v", outputKey, instance.By), receiverFlowID)}
 	}
@@ -248,6 +261,53 @@ func validateCompositionConnectInstanceKey(source semanticview.Source, connect r
 		}
 		if !compositionConnectTypesCompatible(sourceType, targetType) {
 			return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("source payload.%s type %s is incompatible with receiver instance.by field entity.%s type %s", field, sourceType, field, targetType), receiverFlowID)}
+		}
+	}
+	return nil
+}
+
+func validateCompositionConnectInstanceKeyAdapter(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, adapter runtimecontracts.FlowPackageConnectInstanceAdapter, carries, receiverFields []string, outputPin runtimecontracts.FlowOutputEventPin, producerFlowID, receiverFlowID string) []Finding {
+	sources := normalizedConnectAdapterFields(adapter.Source)
+	targets := normalizedConnectAdapterFields(adapter.Target)
+	if len(sources) == 0 {
+		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_missing_source", "connect.using.instance.source is required", receiverFlowID)}
+	}
+	if len(targets) == 0 {
+		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_missing_target", "connect.using.instance.target is required", receiverFlowID)}
+	}
+	if len(sources) != len(targets) {
+		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_cardinality", fmt.Sprintf("connect.using.instance source count %d must equal target count %d", len(sources), len(targets)), receiverFlowID)}
+	}
+	if duplicate := duplicateString(sources); duplicate != "" {
+		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_duplicate_source", fmt.Sprintf("connect.using.instance.source contains duplicate field %s", duplicate), producerFlowID)}
+	}
+	if duplicate := duplicateString(targets); duplicate != "" {
+		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_duplicate_target", fmt.Sprintf("connect.using.instance.target contains duplicate field %s", duplicate), receiverFlowID)}
+	}
+	receiverFields = normalizedConnectAdapterFields(receiverFields)
+	for _, targetField := range targets {
+		if !stringSliceContains(receiverFields, targetField) {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_target_missing", fmt.Sprintf("adapter target field %s is not declared in receiver instance.by %v", targetField, receiverFields), receiverFlowID)}
+		}
+	}
+	if len(targets) != len(receiverFields) || !sameStringSet(targets, receiverFields) {
+		return []Finding{compositionConnectFinding(connect, "connect_key_adapter_partial", fmt.Sprintf("connect.using.instance.target must map every receiver instance.by field %v", receiverFields), receiverFlowID)}
+	}
+	for idx, sourceField := range sources {
+		targetField := targets[idx]
+		if !stringSliceContains(carries, sourceField) {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_source_missing", fmt.Sprintf("adapter source field %s is not declared in producer output carries %v", sourceField, carries), producerFlowID)}
+		}
+		sourceType, err := outputPinCarriedPayloadFieldType(source, producerFlowID, outputPin, sourceField)
+		if err != nil {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_source_missing", err.Error(), producerFlowID)}
+		}
+		targetType, err := compositionConnectTargetType(source, receiverFlowID, "entity."+targetField)
+		if err != nil {
+			return []Finding{compositionConnectFinding(connect, "connect_key_adapter_target_missing", err.Error(), receiverFlowID)}
+		}
+		if !compositionConnectTypesCompatible(sourceType, targetType) {
+			return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("adapter source payload.%s type %s is incompatible with receiver instance.by field entity.%s type %s", sourceField, sourceType, targetField, targetType), receiverFlowID)}
 		}
 	}
 	return nil
@@ -382,6 +442,59 @@ func compositionConnectTypesCompatible(sourceType, targetType string) bool {
 	sourceType = compositionConnectTypeFamily(sourceType)
 	targetType = compositionConnectTypeFamily(targetType)
 	return sourceType != "" && targetType != "" && sourceType == targetType
+}
+
+func normalizedConnectAdapterFields(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, field := range in {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
+func duplicateString(in []string) string {
+	seen := map[string]struct{}{}
+	for _, item := range in {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			return item
+		}
+		seen[item] = struct{}{}
+	}
+	return ""
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := map[string]struct{}{}
+	for _, item := range left {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return false
+		}
+		seen[item] = struct{}{}
+	}
+	for _, item := range right {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			return false
+		}
+		if _, ok := seen[item]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func compositionConnectTypeFamily(raw string) string {

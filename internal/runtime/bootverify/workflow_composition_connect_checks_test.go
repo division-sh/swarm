@@ -87,6 +87,186 @@ func TestRun_AllowsCompositeTemplateInstanceKeyCompositionConnectWithoutAddress(
 	}
 }
 
+func TestRun_AllowsRenamedTemplateInstanceKeyCompositionConnectWithUsingInstance(t *testing.T) {
+	tests := []struct {
+		name string
+		opts compositionConnectAdapterFixtureOptions
+	}{
+		{
+			name: "scalar renamed key",
+			opts: compositionConnectAdapterFixtureOptions{
+				sourceFields:       []compositionConnectAdapterField{{Name: "source_vertical_id", Type: "string"}},
+				outputKey:          "source_vertical_id",
+				outputCarries:      "[source_vertical_id]",
+				receiverInstanceBy: "vertical_id",
+				receiverFields:     []compositionConnectAdapterField{{Name: "vertical_id", Type: "string"}},
+				usingSource:        "source_vertical_id",
+				usingTarget:        "vertical_id",
+			},
+		},
+		{
+			name: "complete composite renamed key",
+			opts: compositionConnectAdapterFixtureOptions{
+				sourceFields: []compositionConnectAdapterField{
+					{Name: "source_vertical_id", Type: "string"},
+					{Name: "region_code", Type: "string"},
+				},
+				outputKey:          "source_vertical_id",
+				outputCarries:      "[source_vertical_id, region_code]",
+				receiverInstanceBy: "[vertical_id, region]",
+				receiverFields: []compositionConnectAdapterField{
+					{Name: "vertical_id", Type: "string"},
+					{Name: "region", Type: "string"},
+				},
+				usingSource: "[source_vertical_id, region_code]",
+				usingTarget: "[vertical_id, region]",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeCompositionConnectAdapterBootverifyFixture(t, tc.opts)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if reportContains(report.Errors(), "composition_connect_validation", "") {
+				t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+			}
+			if reportContains(report.Errors(), "template_instance_validation", "") {
+				t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
+			}
+			if reportContains(report.Errors(), "output_pin_key_carries_validation", "") {
+				t.Fatalf("unexpected output_pin_key_carries_validation error: %#v", report.Errors())
+			}
+		})
+	}
+}
+
+func TestRun_FailsClosedForInvalidRenamedTemplateInstanceKeyAdapters(t *testing.T) {
+	base := compositionConnectAdapterFixtureOptions{
+		sourceFields: []compositionConnectAdapterField{
+			{Name: "source_vertical_id", Type: "string"},
+			{Name: "region_code", Type: "string"},
+		},
+		outputKey:          "source_vertical_id",
+		outputCarries:      "[source_vertical_id, region_code]",
+		receiverInstanceBy: "[vertical_id, region]",
+		receiverFields: []compositionConnectAdapterField{
+			{Name: "vertical_id", Type: "string"},
+			{Name: "region", Type: "string"},
+		},
+		usingSource: "[source_vertical_id, region_code]",
+		usingTarget: "[vertical_id, region]",
+	}
+	tests := []struct {
+		name      string
+		mutate    func(*compositionConnectAdapterFixtureOptions)
+		want      string
+		wantExtra string
+	}{
+		{
+			name: "missing adapter for renamed key",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.omitUsing = true
+			},
+			want: "instance_key_mismatch",
+		},
+		{
+			name: "missing source",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingSource = ""
+			},
+			want: "connect_key_adapter_missing_source",
+		},
+		{
+			name: "missing target",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingTarget = ""
+			},
+			want: "connect_key_adapter_missing_target",
+		},
+		{
+			name: "source not carried",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingSource = "[source_vertical_id, missing_region]"
+			},
+			want:      "connect_key_adapter_source_missing",
+			wantExtra: "missing_region",
+		},
+		{
+			name: "target not instance key",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingTarget = "[vertical_id, missing_region]"
+			},
+			want:      "connect_key_adapter_target_missing",
+			wantExtra: "missing_region",
+		},
+		{
+			name: "partial composite mapping",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingSource = "source_vertical_id"
+				o.usingTarget = "vertical_id"
+			},
+			want: "connect_key_adapter_partial",
+		},
+		{
+			name: "source target cardinality mismatch",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingSource = "[source_vertical_id, region_code]"
+				o.usingTarget = "vertical_id"
+			},
+			want: "connect_key_adapter_cardinality",
+		},
+		{
+			name: "duplicate source mapping",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingSource = "[source_vertical_id, source_vertical_id]"
+			},
+			want: "connect_key_adapter_duplicate_source",
+		},
+		{
+			name: "duplicate target mapping",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.usingTarget = "[vertical_id, vertical_id]"
+			},
+			want: "connect_key_adapter_duplicate_target",
+		},
+		{
+			name: "incompatible adapter types",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.sourceFields[0].Type = "integer"
+			},
+			want: "key_types_incompatible",
+		},
+		{
+			name: "old connect map remains invalid for addressless template receiver",
+			mutate: func(o *compositionConnectAdapterFixtureOptions) {
+				o.omitUsing = true
+				o.includeLegacyMap = true
+			},
+			want: "connect_key_adapter_unsupported",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := base.clone()
+			tc.mutate(&opts)
+			root := writeCompositionConnectAdapterBootverifyFixture(t, opts)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+			}
+			if tc.wantExtra != "" && !reportContains(report.Errors(), "composition_connect_validation", tc.wantExtra) {
+				t.Fatalf("expected composition_connect_validation detail %q, got %#v", tc.wantExtra, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -431,6 +611,30 @@ type compositionConnectFixtureOptions struct {
 	consumerTemplateInstance       bool
 	consumerTemplateInstanceBy     string
 	consumerTemplateInstanceRegion bool
+}
+
+type compositionConnectAdapterField struct {
+	Name string
+	Type string
+}
+
+type compositionConnectAdapterFixtureOptions struct {
+	sourceFields       []compositionConnectAdapterField
+	outputKey          string
+	outputCarries      string
+	receiverInstanceBy string
+	receiverFields     []compositionConnectAdapterField
+	usingSource        string
+	usingTarget        string
+	omitUsing          bool
+	includeLegacyMap   bool
+}
+
+func (o compositionConnectAdapterFixtureOptions) clone() compositionConnectAdapterFixtureOptions {
+	out := o
+	out.sourceFields = append([]compositionConnectAdapterField(nil), o.sourceFields...)
+	out.receiverFields = append([]compositionConnectAdapterField(nil), o.receiverFields...)
+	return out
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
@@ -995,10 +1199,145 @@ func compositionConnectConsumerRegionEntitySchema(opts compositionConnectFixture
 	if !opts.consumerTemplateInstanceRegion {
 		return ""
 	}
-	return `  region:
-    type: string
-    _unused_reason: composite template instance key proof field
-`
+	return "  region:\n" +
+		"    type: string\n" +
+		"    _unused_reason: composite template instance key proof field\n"
+}
+
+func writeCompositionConnectAdapterBootverifyFixture(t *testing.T, opts compositionConnectAdapterFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	outputKey := firstTestValue(opts.outputKey, "source_vertical_id")
+	outputCarries := firstTestValue(opts.outputCarries, "["+outputKey+"]")
+	receiverInstanceBy := firstTestValue(opts.receiverInstanceBy, "vertical_id")
+	usingBlock := ""
+	if !opts.omitUsing {
+		usingBlock = "\n" +
+			"    using:\n" +
+			"      instance:\n" +
+			"        source: " + opts.usingSource + "\n" +
+			"        target: " + opts.usingTarget
+	}
+	legacyMapBlock := ""
+	if opts.includeLegacyMap {
+		legacyMapBlock = "\n" +
+			"    map:\n" +
+			"      vertical_id:\n" +
+			"        source: payload." + outputKey + "\n" +
+			"        target: entity.vertical_id"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: composition-connect-adapter-bootverify
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: template
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_completed
+    delivery: one`+usingBlock+legacyMapBlock+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: composition-connect-adapter-bootverify\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: `+outputKey+`
+        carries: `+outputCarries+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
+deploy.requested:
+`+compositionConnectAdapterFieldsSchema(opts.sourceFields)+`deploy.done:
+`+compositionConnectAdapterFieldsSchema(opts.sourceFields))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  subscribes_to: [deploy.requested]
+  event_handlers:
+    deploy.requested:
+      emit:
+        event: deploy.done
+        fields:
+`+compositionConnectAdapterEmitFields(opts.sourceFields))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: template
+instance:
+  by: `+receiverInstanceBy+`
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.done
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+deploy.done:
+`+compositionConnectAdapterFieldsSchema(opts.sourceFields))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+deployment:
+`+compositionConnectAdapterEntityFields(opts.receiverFields))
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	return root
+}
+
+func compositionConnectAdapterFieldsSchema(fields []compositionConnectAdapterField) string {
+	if len(fields) == 0 {
+		return "  source_vertical_id: string\n"
+	}
+	var out strings.Builder
+	for _, field := range fields {
+		name := firstTestValue(field.Name, "source_vertical_id")
+		typ := firstTestValue(field.Type, "string")
+		out.WriteString("  " + name + ": " + typ + "\n")
+	}
+	return out.String()
+}
+
+func compositionConnectAdapterEmitFields(fields []compositionConnectAdapterField) string {
+	if len(fields) == 0 {
+		return "          source_vertical_id: payload.source_vertical_id\n"
+	}
+	var out strings.Builder
+	for _, field := range fields {
+		name := firstTestValue(field.Name, "source_vertical_id")
+		out.WriteString("          " + name + ": payload." + name + "\n")
+	}
+	return out.String()
+}
+
+func compositionConnectAdapterEntityFields(fields []compositionConnectAdapterField) string {
+	if len(fields) == 0 {
+		return "  vertical_id:\n    type: string\n    _unused_reason: connect adapter receiver instance-key proof field\n"
+	}
+	var out strings.Builder
+	for _, field := range fields {
+		name := firstTestValue(field.Name, "vertical_id")
+		typ := firstTestValue(field.Type, "string")
+		out.WriteString("  " + name + ":\n    type: " + typ + "\n    _unused_reason: connect adapter receiver instance-key proof field\n")
+	}
+	return out.String()
 }
 
 func firstTestValue(values ...string) string {

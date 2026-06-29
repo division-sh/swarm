@@ -86,10 +86,38 @@ func (c FlowPackageConnect) normalized() FlowPackageConnect {
 		From:       strings.TrimSpace(c.From),
 		To:         strings.TrimSpace(c.To),
 		Adapter:    strings.TrimSpace(c.Adapter),
+		Using:      c.Using.normalized(),
 		Map:        cloneFlowPackageConnectMap(c.Map),
 		Delivery:   strings.TrimSpace(c.Delivery),
 		Reply:      normalizeStringMap(c.Reply),
 	}
+}
+
+func (u FlowPackageConnectUsing) normalized() FlowPackageConnectUsing {
+	return FlowPackageConnectUsing{
+		Instance: u.Instance.normalized(),
+	}
+}
+
+func (a FlowPackageConnectInstanceAdapter) normalized() FlowPackageConnectInstanceAdapter {
+	return FlowPackageConnectInstanceAdapter{
+		Declared: a.Declared,
+		Source:   normalizeStringListPreserveOrder(a.Source),
+		Target:   normalizeStringListPreserveOrder(a.Target),
+	}
+}
+
+func normalizeStringListPreserveOrder(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func parseFlowPackagePinRef(raw string) (FlowPackagePinRef, error) {
