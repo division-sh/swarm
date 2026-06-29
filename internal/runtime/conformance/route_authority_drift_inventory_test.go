@@ -152,6 +152,20 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 			},
 			want: "inventory implementation_issues missing #1495",
 		},
+		{
+			name: "route plan discriminant child issue must stay visible",
+			mutate: func(inventory *routeAuthorityDriftInventory) {
+				inventory.ImplementationIssues = []int{1364, 1494, 1495, 1496}
+			},
+			want: "inventory implementation_issues missing #1545",
+		},
+		{
+			name: "connect key adapter child issue must stay visible",
+			mutate: func(inventory *routeAuthorityDriftInventory) {
+				inventory.ImplementationIssues = []int{1364, 1494, 1495, 1496, 1545}
+			},
+			want: "inventory implementation_issues missing #1546",
+		},
 	}
 
 	for _, tc := range tests {
@@ -249,7 +263,7 @@ func validateRouteAuthorityDriftInventoryWithCorpus(root string, corpus *routeAu
 	if inventory.Issue != 1364 {
 		problems = append(problems, fmt.Sprintf("inventory issue = #%d, want #1364", inventory.Issue))
 	}
-	for _, issue := range []int{1364, 1494, 1495, 1496} {
+	for _, issue := range []int{1364, 1494, 1495, 1496, 1545, 1546} {
 		if !routeAuthorityDriftHasInt(inventory.ImplementationIssues, issue) {
 			problems = append(problems, fmt.Sprintf("inventory implementation_issues missing #%d", issue))
 		}
