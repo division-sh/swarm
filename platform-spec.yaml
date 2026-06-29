@@ -4287,9 +4287,9 @@ engine:
       scope: per-output-pin-and-emit-site
       trigger: A connected producer output pin that participates in instance-key composition is missing key/carries evidence,
         declares ambiguous, duplicate, undeclared, or non-scalar carried fields, or an authored producer emit site cannot
-        statically prove every declared key/carries payload field. Agent emit_events declarations for key/carries output
-        pins and auto_emit_on_create declarations for key/carries output pins fail closed until a static payload construction
-        surface exists.
+        statically prove every declared key/carries payload field. Agent emit_events declarations, root or flow
+        auto_emit_on_create declarations, and workflow timers for key/carries output pins fail closed until a static payload
+        construction surface exists.
       when: boot-only
     - id: input_pin_wiring
       severity: warning
@@ -5226,9 +5226,9 @@ flow_model:
           producer interface evidence and MUST include the key. The verifier
           type-checks those fields against the producer event schema and
           requires supported node emit sites to statically construct them.
-          Agent `emit_events` and `auto_emit_on_create` declarations that name
-          key/carries output pins fail closed until an explicit static payload
-          construction surface is available.
+          Agent `emit_events`, root or flow `auto_emit_on_create`, and workflow
+          timer declarations that name key/carries output pins fail closed until
+          an explicit static payload construction surface is available.
         non_authoritative_paths: >
           Event payload schema fields, connect.map source expressions, receiver
           address rules, producer target.match, broadcast:true, raw/direct
@@ -9612,7 +9612,8 @@ static_analyzer:
       - fan_out per-item emit
       - guard on_fail: escalate
       - agent emit_events declarations
-      - auto_emit_on_create declarations
+      - root and flow auto_emit_on_create declarations
+      - workflow timer declarations
       excludes:
       - RoutePlan runtime lowering and EventBus dispatch, tracked by #1545
       - renamed-key adapters, tracked by #1546
@@ -9628,7 +9629,8 @@ static_analyzer:
       carried_fields_are_scalar: Key/carries fields must be scalar key material, not list/object payloads.
       node_emit_payload_proves_fields: Supported node emit sites must include every key/carries field in emit.fields.
       agent_emit_payload_fails_closed: Agent emit_events for key/carries output pins fail closed until static payload construction exists.
-      auto_emit_payload_fails_closed: auto_emit_on_create for key/carries output pins fails closed until activation config payload proof exists.
+      auto_emit_payload_fails_closed: Root and flow auto_emit_on_create for key/carries output pins fails closed until activation config payload proof exists.
+      timer_payload_fails_closed: Workflow timers for key/carries output pins fail closed until timer payload construction proof exists.
     old_non_authoritative_paths: >
       Event payload schema alone, connect.map source, receiver input-pin address
       rules, target.match, broadcast:true, direct/raw subscribers, RouteTable, or

@@ -200,6 +200,7 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "missing key/carries evidence")
 	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "Agent emit_events")
 	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "auto_emit_on_create")
+	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "workflow timers")
 
 	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
 	validatePins := mustSequenceMappingByScalarField(t, bootSteps, "name", "validate_pins")

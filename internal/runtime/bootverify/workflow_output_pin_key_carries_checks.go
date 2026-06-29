@@ -30,6 +30,7 @@ func checkOutputPinKeyCarriesValidation(c *checkerContext) []Finding {
 	findings = append(findings, validateOutputPinKeyCarriesNodeEmitSites(source)...)
 	findings = append(findings, validateOutputPinKeyCarriesAgentEmitSites(source)...)
 	findings = append(findings, validateOutputPinKeyCarriesAutoEmitSites(source)...)
+	findings = append(findings, validateOutputPinKeyCarriesTimerSites(source)...)
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Location != findings[j].Location {
 			return findings[i].Location < findings[j].Location
@@ -115,6 +116,15 @@ func validateOutputPinKeyCarriesAutoEmitSites(source semanticview.Source) []Find
 		return nil
 	}
 	var findings []Finding
+	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
+		eventType := strings.TrimSpace(bundle.RootSchema.AutoEmitOnCreate.Event)
+		for _, pin := range outputPinKeyCarriesPinsForEvent(source, "", eventType) {
+			if len(outputPinRequiredFields(pin)) == 0 {
+				continue
+			}
+			findings = append(findings, outputPinKeyCarriesFinding("", pin, "auto_emit_payload_unproven", fmt.Sprintf("root auto_emit_on_create declares output pin %s event %s, but activation config payload cannot be statically proven for key/carries fields %s", pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
+		}
+	}
 	for _, scope := range source.FlowScopes() {
 		flowID := strings.TrimSpace(scope.ID)
 		eventType := strings.TrimSpace(scope.AutoEmitEvent)
@@ -126,6 +136,27 @@ func validateOutputPinKeyCarriesAutoEmitSites(source semanticview.Source) []Find
 				continue
 			}
 			findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "auto_emit_payload_unproven", fmt.Sprintf("auto_emit_on_create declares output pin %s event %s, but activation config payload cannot be statically proven for key/carries fields %s", pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
+		}
+	}
+	return findings
+}
+
+func validateOutputPinKeyCarriesTimerSites(source semanticview.Source) []Finding {
+	if source == nil {
+		return nil
+	}
+	var findings []Finding
+	for _, timer := range source.WorkflowTimers() {
+		flowID := strings.TrimSpace(timer.FlowID)
+		eventType := strings.TrimSpace(timer.Event)
+		if eventType == "" {
+			continue
+		}
+		for _, pin := range outputPinKeyCarriesPinsForEvent(source, flowID, eventType) {
+			if len(outputPinRequiredFields(pin)) == 0 {
+				continue
+			}
+			findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "timer_payload_unproven", fmt.Sprintf("workflow timer %s declares output pin %s event %s, but timer payload construction cannot be statically proven for key/carries fields %s", strings.TrimSpace(timer.ID), pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
 		}
 	}
 	return findings
