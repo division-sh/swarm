@@ -111,6 +111,68 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (i *FlowTemplateInstanceDeclaration) UnmarshalYAML(node *yaml.Node) error {
+	if i == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("template instance must be a mapping")
+	}
+	var out FlowTemplateInstanceDeclaration
+	for idx := 0; idx+1 < len(node.Content); idx += 2 {
+		key := strings.TrimSpace(node.Content[idx].Value)
+		value := node.Content[idx+1]
+		switch key {
+		case "":
+			continue
+		case "by":
+			by, err := decodeTemplateInstanceByNode(value)
+			if err != nil {
+				return err
+			}
+			out.By = by
+		case "on_missing":
+			if err := value.Decode(&out.OnMissing); err != nil {
+				return fmt.Errorf("template instance on_missing: %w", err)
+			}
+			out.OnMissing = strings.TrimSpace(out.OnMissing)
+		case "on_conflict":
+			if err := value.Decode(&out.OnConflict); err != nil {
+				return fmt.Errorf("template instance on_conflict: %w", err)
+			}
+			out.OnConflict = strings.TrimSpace(out.OnConflict)
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: template instance field %q not in platform spec", key)
+		}
+	}
+	*i = out
+	return nil
+}
+
+func decodeTemplateInstanceByNode(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		return []string{strings.TrimSpace(node.Value)}, nil
+	case yaml.SequenceNode:
+		out := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item == nil || item.Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("template instance by entries must be strings")
+			}
+			out = append(out, strings.TrimSpace(item.Value))
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("template instance by must be a string or sequence")
+	}
+}
+
 func decodeFlowInputPinEventsNode(node *yaml.Node) ([]string, []FlowInputEventPin, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil, nil

@@ -5057,8 +5057,9 @@ flow_model:
         when: A map/list item starts behaving like a routable recipient.
         use: promote it to a child/template flow instance
     template_instance_model:
-      status: spec_vocabulary_only
+      status: merge_bearing_contract_behavior
       implementation_tracker: '#1543'
+      canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowTemplateInstance
       declaration_surface:
       - 'mode: template'
       - 'instance.by'
@@ -5067,8 +5068,32 @@ flow_model:
       rule: >
         Template flow instances are the common shape for process/case/job state
         that needs independent lifecycle, routing, timers, retries, agents, or
-        audit. Instance-key verification and runtime semantics are tracked by
-        #1543 and are not implemented by #1538.
+        audit. #1543 owns the receiver template-instance declaration and verifier
+        contract: `mode: template` flows MUST declare `instance.by`,
+        `on_missing`, and `on_conflict`; runtime route-plan lowering remains
+        tracked by #1545.
+      primary_entity_dependency: >
+        `instance.by` is checked against the flow primary entity resolved by
+        internal/runtime/contracts.WorkflowContractBundle.ResolveFlowPrimaryEntity.
+        `schema.yaml entity` is not a secondary entity selector and remains
+        invalid for normal flow authoring.
+      key_rule: >
+        Each `instance.by` entry names a top-level scalar or enum field on the
+        primary entity. Empty fields, duplicate fields, nested paths, undeclared
+        fields, and non-scalar/non-enum fields fail verification. Composite key
+        material is ordered exactly as declared in `instance.by` so identity is
+        deterministic and unambiguous.
+      policy_rule: >
+        `on_missing` is required and MUST be `create` or `reject`. `on_conflict`
+        is required and MUST be `reject` or `reuse`. Missing or unsupported
+        policy values fail closed during verification.
+      non_authoritative_paths: >
+        Flow input-pin `address`, receiver `select_entity` /
+        `select_or_create_entity`, producer `target`, producer `broadcast:true`,
+        direct delivery, and `create_flow_instance.instance_id_from` are not the
+        normal template instance-key authority for #1537 composition. They may
+        survive only as explicit sibling/escape-hatch surfaces owned by their
+        tracked issues.
     primary_entity_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1539'

@@ -4169,6 +4169,10 @@ portfolio-node:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
 mode: template
+instance:
+  by: product_id
+  on_missing: create
+  on_conflict: reject
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, waiting, ready]
@@ -4328,11 +4332,20 @@ portfolio-node:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
+mode: template
+instance:
+  by: product_id
+  on_missing: create
+  on_conflict: reject
 initial_state: initializing
 terminal_states: [ready]
 states: [initializing, spawning, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
+product:
+  product_id: text
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
 opco.product_initialization_requested:
@@ -4348,6 +4361,11 @@ lifecycle-orchestrator:
   produces: [component_scaffold.spawn_requested]
   event_handlers:
     opco.product_initialization_requested:
+      data_accumulation:
+        source_event: opco.product_initialization_requested
+        writes:
+          - source_field: product_id
+            target_field: product_id
       emit:
         event: component_scaffold.spawn_requested
         fields:

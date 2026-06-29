@@ -239,6 +239,7 @@ var bootCheckRegistry = []Check{
 	{ID: "expression_field_reference_validation", Severity: "warning", Run: checkExpressionFieldReferenceValidation},
 	{ID: "entity_reader_coverage", Severity: SeverityLintEvidence, Run: checkEntityReaderCoverage},
 	{ID: "primary_entity_validation", Severity: "error", Run: checkPrimaryEntityValidation},
+	{ID: "template_instance_validation", Severity: "error", Run: checkTemplateInstanceValidation},
 	{ID: "cross_surface_named_type_use", Severity: SeverityLintEvidence, Run: checkCrossSurfaceNamedTypeUse},
 	{ID: "transition_ownership_validation", Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Severity: "error", Run: checkEventRuntimeWiringValidation},

@@ -1,5 +1,10 @@
 name: worker-flow
 namespace: worker-flow
+mode: template
+instance:
+  by: entity_id
+  on_missing: create
+  on_conflict: reject
 initial_state: idle
 terminal_states: [complete]
 states: [idle, complete]

@@ -1,5 +1,10 @@
 name: worker
 namespace: worker
+mode: template
+instance:
+  by: name
+  on_missing: create
+  on_conflict: reject
 initial_state: ready
 terminal_states: [done]
 states: [ready, done]

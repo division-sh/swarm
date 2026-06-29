@@ -291,6 +291,65 @@ pins:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDeclaration(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: template-flow
+mode: template
+instance:
+  by: [scope, scope_id, artifact_type]
+  on_missing: create
+  on_conflict: reject
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := doc.Mode, "template"; got != want {
+		t.Fatalf("Mode = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(doc.Instance.By, ","), "scope,scope_id,artifact_type"; got != want {
+		t.Fatalf("Instance.By = %q, want %q", got, want)
+	}
+	if got, want := doc.Instance.OnMissing, "create"; got != want {
+		t.Fatalf("Instance.OnMissing = %q, want %q", got, want)
+	}
+	if got, want := doc.Instance.OnConflict, "reject"; got != want {
+		t.Fatalf("Instance.OnConflict = %q, want %q", got, want)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDuplicateKeysForResolver(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: template-flow
+mode: template
+instance:
+  by: [tenant_id, tenant_id]
+  on_missing: reject
+  on_conflict: reuse
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := strings.Join(doc.Instance.By, ","), "tenant_id,tenant_id"; got != want {
+		t.Fatalf("Instance.By = %q, want duplicate-preserving %q", got, want)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_RejectsUnsupportedTemplateInstanceFields(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: invalid-template
+mode: template
+instance:
+  by: account_id
+  on_missing: create
+  on_conflict: reject
+  fallback: legacy
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
 func TestHandlerRuleEntryDecode_RejectsLegacyComputeExpressionShorthand(t *testing.T) {
 	var rule HandlerRuleEntry
 	err := yaml.Unmarshal([]byte(`

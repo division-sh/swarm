@@ -1,0 +1,7 @@
+worker:
+  max_retries:
+    type: integer
+    _unused_reason: lifecycle config fixture proof field
+  timeout_ms:
+    type: integer
+    _unused_reason: lifecycle config fixture proof field
