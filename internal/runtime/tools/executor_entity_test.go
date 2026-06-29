@@ -2776,8 +2776,8 @@ terminal_states: [closed]
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", root, err)
 	}
-	if got, _, ok := bundle.FlowOwnedEntityContract(flowID); !ok || strings.TrimSpace(got) != entityType {
-		t.Fatalf("FlowOwnedEntityContract(%q) = (%q, ok=%v), want %q", flowID, got, ok, entityType)
+	if got, _, ok := bundle.FlowPrimaryEntityContract(flowID); !ok || strings.TrimSpace(got) != entityType {
+		t.Fatalf("FlowPrimaryEntityContract(%q) = (%q, ok=%v), want %q", flowID, got, ok, entityType)
 	}
 	return bundle
 }

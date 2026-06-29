@@ -84,12 +84,12 @@ vertical.shortlisted:
 	if _, ok := flowTypes.Types["ScoreBreakdown"]; !ok {
 		t.Fatal("expected scoring flow-local type")
 	}
-	entityType, entity, ok := bundle.FlowOwnedEntityContract("scoring")
+	entityType, entity, ok := bundle.FlowPrimaryEntityContract("scoring")
 	if !ok {
-		t.Fatal("expected scoring owned entity contract")
+		t.Fatal("expected scoring primary entity contract")
 	}
 	if entityType != "vertical" {
-		t.Fatalf("FlowOwnedEntityContract entity type = %q", entityType)
+		t.Fatalf("FlowPrimaryEntityContract entity type = %q", entityType)
 	}
 	if got := entity.Fields["review_count"].Type; got != "integer" {
 		t.Fatalf("review_count type = %q", got)
