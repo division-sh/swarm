@@ -334,6 +334,23 @@ instance:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_PreservesEmptyTemplateInstancePresence(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: template-flow
+mode: static
+instance: {}
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !doc.Instance.Declared {
+		t.Fatal("Instance.Declared = false, want explicit empty declaration preserved")
+	}
+	if doc.Instance.Empty() {
+		t.Fatal("Instance.Empty() = true for explicit empty declaration, want false")
+	}
+}
+
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedTemplateInstanceFields(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`

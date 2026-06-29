@@ -211,6 +211,19 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 			wantErr:  "on_missing",
 		},
 		{
+			name: "non scalar key field",
+			schema: FlowSchemaDocument{
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"tags"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tags": {Type: "[text]"}}}},
+			wantErr:  "scalar or enum",
+		},
+		{
 			name: "non template",
 			schema: FlowSchemaDocument{
 				Mode: "static",

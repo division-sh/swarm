@@ -80,13 +80,108 @@ func validateTemplateInstanceBy(flowID string, fields []string, primary PrimaryE
 		if _, ok := seen[field]; ok {
 			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q is duplicated; composite keys must be unambiguous", flowID, field)
 		}
-		if _, ok := primary.Contract.Fields[field]; !ok {
+		decl, ok := primary.Contract.Fields[field]
+		if !ok {
 			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q is not declared on primary entity %s", flowID, field, primary.EntityType)
+		}
+		kind := templateInstanceFieldLeafKind(primary, decl.Type)
+		if kind != "scalar" && kind != "enum" {
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q must resolve to a scalar or enum primary-entity field", flowID, field)
 		}
 		seen[field] = struct{}{}
 		out = append(out, field)
 	}
 	return out, nil
+}
+
+func templateInstanceFieldLeafKind(primary PrimaryEntityContract, typeRef string) string {
+	switch {
+	case templateInstanceIsTextType(typeRef):
+		return "scalar"
+	case templateInstanceIsIntegerType(primary.Types, typeRef):
+		return "scalar"
+	case templateInstanceIsNumericType(primary.Types, typeRef):
+		return "scalar"
+	case templateInstanceIsBooleanType(primary.Types, typeRef):
+		return "scalar"
+	case templateInstanceIsJSONObjectType(primary.Types, typeRef):
+		return "object"
+	case templateInstanceIsJSONArrayType(primary.Types, typeRef):
+		return "list"
+	case templateInstanceIsTimestampType(primary.Types, typeRef):
+		return "scalar"
+	case templateInstanceIsUUIDType(primary.Types, typeRef):
+		return "scalar"
+	case templateInstanceIsEnumType(primary.Types, typeRef):
+		return "enum"
+	case templateInstanceIsNamedType(primary.Types, typeRef):
+		return "object"
+	case templateInstanceIsListType(typeRef):
+		return "list"
+	default:
+		return ""
+	}
+}
+
+func templateInstanceTypeName(types TypeCatalogDocument, typeRef string) string {
+	typeRef = strings.TrimSpace(typeRef)
+	if scalar, ok := types.Scalars[typeRef]; ok {
+		return strings.TrimSpace(scalar.Base)
+	}
+	return typeRef
+}
+
+func templateInstanceIsNamedType(types TypeCatalogDocument, typeRef string) bool {
+	_, ok := types.Types[templateInstanceTypeName(types, typeRef)]
+	return ok
+}
+
+func templateInstanceIsEnumType(types TypeCatalogDocument, typeRef string) bool {
+	_, ok := types.Enums[templateInstanceTypeName(types, typeRef)]
+	return ok
+}
+
+func templateInstanceIsTextType(typeRef string) bool {
+	typeRef = strings.ToLower(strings.TrimSpace(typeRef))
+	return typeRef == "text" || typeRef == "string"
+}
+
+func templateInstanceIsIntegerType(types TypeCatalogDocument, typeRef string) bool {
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "integer")
+}
+
+func templateInstanceIsNumericType(types TypeCatalogDocument, typeRef string) bool {
+	raw := strings.ToLower(strings.TrimSpace(templateInstanceTypeName(types, typeRef)))
+	return raw == "numeric" || raw == "number" || raw == "float" || raw == "double" || raw == "real" || strings.HasPrefix(raw, "numeric(")
+}
+
+func templateInstanceIsBooleanType(types TypeCatalogDocument, typeRef string) bool {
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "boolean")
+}
+
+func templateInstanceIsJSONObjectType(types TypeCatalogDocument, typeRef string) bool {
+	raw := strings.ToLower(strings.TrimSpace(templateInstanceTypeName(types, typeRef)))
+	return raw == "json" || raw == "object"
+}
+
+func templateInstanceIsJSONArrayType(types TypeCatalogDocument, typeRef string) bool {
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "array")
+}
+
+func templateInstanceIsTimestampType(types TypeCatalogDocument, typeRef string) bool {
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "timestamp")
+}
+
+func templateInstanceIsUUIDType(types TypeCatalogDocument, typeRef string) bool {
+	return strings.EqualFold(templateInstanceTypeName(types, typeRef), "uuid")
+}
+
+func templateInstanceIsListType(typeRef string) bool {
+	typeRef = strings.TrimSpace(typeRef)
+	return strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">") ||
+		strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]") ||
+		strings.HasSuffix(typeRef, "[]") ||
+		strings.HasPrefix(typeRef, "[]")
 }
 
 func validateTemplateInstancePolicy(flowID, field, value string, allowed ...string) (string, error) {
