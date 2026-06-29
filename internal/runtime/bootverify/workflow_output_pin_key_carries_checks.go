@@ -29,6 +29,7 @@ func checkOutputPinKeyCarriesValidation(c *checkerContext) []Finding {
 	}
 	findings = append(findings, validateOutputPinKeyCarriesNodeEmitSites(source)...)
 	findings = append(findings, validateOutputPinKeyCarriesAgentEmitSites(source)...)
+	findings = append(findings, validateOutputPinKeyCarriesAutoEmitSites(source)...)
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Location != findings[j].Location {
 			return findings[i].Location < findings[j].Location
@@ -104,6 +105,27 @@ func validateOutputPinKeyCarriesDeclaration(source semanticview.Source, flowID s
 		}
 		if !outputPinScalarType(typ) {
 			findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "payload_field_not_scalar", fmt.Sprintf("producer output event %s payload field %s type %s is not a scalar key type", pin.EventType(), field, typ)))
+		}
+	}
+	return findings
+}
+
+func validateOutputPinKeyCarriesAutoEmitSites(source semanticview.Source) []Finding {
+	if source == nil {
+		return nil
+	}
+	var findings []Finding
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		eventType := strings.TrimSpace(scope.AutoEmitEvent)
+		if flowID == "" || eventType == "" {
+			continue
+		}
+		for _, pin := range outputPinKeyCarriesPinsForEvent(source, flowID, eventType) {
+			if len(outputPinRequiredFields(pin)) == 0 {
+				continue
+			}
+			findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "auto_emit_payload_unproven", fmt.Sprintf("auto_emit_on_create declares output pin %s event %s, but activation config payload cannot be statically proven for key/carries fields %s", pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
 		}
 	}
 	return findings
