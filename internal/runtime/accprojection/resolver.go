@@ -332,7 +332,7 @@ func declaredMaterializedFields(source semanticview.Source, bundle *runtimecontr
 		if flowID == "" {
 			continue
 		}
-		entityType, contract, ok := bundle.FlowOwnedEntityContract(flowID)
+		entityType, contract, ok := bundle.FlowPrimaryEntityContract(flowID)
 		if !ok {
 			continue
 		}

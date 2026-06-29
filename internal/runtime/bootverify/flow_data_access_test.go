@@ -66,8 +66,8 @@ func TestRun_ValidatesFlowDataAccessDeclarations(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasFlowDataAccessCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 59 {
-		t.Fatalf("bootCheckRegistry count = %d, want 59", got)
+	if got := len(bootCheckRegistry); got != 60 {
+		t.Fatalf("bootCheckRegistry count = %d, want 60", got)
 	}
 }
 

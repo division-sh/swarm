@@ -105,9 +105,13 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "independent lifecycle")
 
 	primaryEntity := mustMappingValue(t, authoring, "primary_entity_model")
+	assertScalarValue(t, mustMappingValue(t, primaryEntity, "status"), "merge_bearing_contract_behavior")
 	assertScalarValue(t, mustMappingValue(t, primaryEntity, "implementation_tracker"), "#1539")
+	assertScalarValue(t, mustMappingValue(t, primaryEntity, "declaration_surface"), "schema.yaml entity: <Type>")
+	assertScalarValue(t, mustMappingValue(t, primaryEntity, "canonical_code_owner"), "internal/runtime/contracts.WorkflowContractBundle.ResolveFlowPrimaryEntity")
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "inference_rule"), "exactly one entity type")
 	assertScalarContains(t, mustMappingValue(t, primaryEntity, "inference_rule"), "advanced/legacy multi-entity escape hatch")
+	assertScalarContains(t, mustMappingValue(t, primaryEntity, "stateful_presence_rule"), "stateful normal flow")
 
 	composition := mustMappingValue(t, authoring, "composition_model")
 	assertScalarValue(t, mustMappingValue(t, composition, "canonical_routing_owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")

@@ -41,20 +41,18 @@ func wave1EntityContractForFlow(source semanticview.Source, flowID string) wave1
 		return view
 	}
 	if view.FlowID == "" {
-		root := bundle.RootEntityContracts()
-		if len(root) == 1 {
-			for entityType, contract := range root {
-				view.EntityType = strings.TrimSpace(entityType)
-				view.Contract = contract
-				view.Types = bundle.RootTypeCatalog()
-				view.Defined = true
-				return view
-			}
+		entityType, contract, ok := bundle.RootPrimaryEntityContract()
+		if ok {
+			view.EntityType = strings.TrimSpace(entityType)
+			view.Contract = contract
+			view.Types = bundle.RootTypeCatalog()
+			view.Defined = true
+			return view
 		}
 		view.Types = bundle.RootTypeCatalog()
 		return view
 	}
-	entityType, contract, ok := bundle.FlowOwnedEntityContract(view.FlowID)
+	entityType, contract, ok := bundle.FlowPrimaryEntityContract(view.FlowID)
 	if !ok {
 		view.Types = bundle.ResolvedTypeCatalogForFlow(view.FlowID)
 		return view
