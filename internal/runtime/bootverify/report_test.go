@@ -68,7 +68,7 @@ func TestRun_FailsClosedForInvalidExternalDispatchRateLimit(t *testing.T) {
 	}
 }
 
-func TestRun_MapsMissingDiscoveredMCPToolToToolResolutionWarning(t *testing.T) {
+func TestRun_FailsClosedForMissingDiscoveredMCPTool(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -127,12 +127,15 @@ func TestRun_MapsMissingDiscoveredMCPToolToToolResolutionWarning(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{CheckMCPReachable: true})
 
-	if !reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
-		t.Fatalf("expected tool_resolution warning for undiscovered mcp tool, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "required_mcp_tool_availability", "infra.missing") {
+		t.Fatalf("expected required_mcp_tool_availability hard invalidity for undiscovered mcp tool, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
+		t.Fatalf("did not expect required mcp tool to fall back to tool_resolution warning, got %#v", report.Warnings())
 	}
 }
 
-func TestRun_MapsMissingContractMCPToolToToolResolutionWarning(t *testing.T) {
+func TestRun_FailsClosedForMissingContractMCPTool(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -189,8 +192,105 @@ func TestRun_MapsMissingContractMCPToolToToolResolutionWarning(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{CheckMCPReachable: true})
 
-	if !reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
-		t.Fatalf("expected tool_resolution warning for undiscovered contract mcp tool, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "required_mcp_tool_availability", "infra.missing") {
+		t.Fatalf("expected required_mcp_tool_availability hard invalidity for undiscovered contract mcp tool, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "tool_resolution", "infra.missing") {
+		t.Fatalf("did not expect required contract mcp tool to fall back to tool_resolution warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_FailsClosedForRequiredMCPToolWhenDiscoveryFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("Decode request: %v", err)
+		}
+		switch req["method"] {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+					"serverInfo":      map[string]any{"name": "infra", "version": "1.0.0"},
+				},
+			})
+		case "notifications/initialized":
+			_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "result": map[string]any{}})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0",
+				"id":      req["id"],
+				"error": map[string]any{
+					"code":    -32000,
+					"message": "catalog unavailable",
+				},
+			})
+		default:
+			t.Fatalf("unexpected mcp method %v", req["method"])
+		}
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {Tools: []string{"infra.ping"}},
+		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"mcp_servers": {
+				Value: map[string]any{
+					"infra": map[string]any{
+						"transport": "http",
+						"url":       server.URL,
+						"prefix":    "infra",
+					},
+				},
+			},
+		}},
+	})
+
+	report := Run(context.Background(), source, Options{CheckMCPReachable: true})
+
+	if !reportContains(report.Errors(), "required_mcp_tool_availability", "infra.ping") {
+		t.Fatalf("expected required_mcp_tool_availability hard invalidity for failed required mcp discovery, got %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "mcp_server_reachable", "catalog unavailable") {
+		t.Fatalf("expected optional inventory reachability warning to remain visible, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_FailsClosedForPrefixOnlyRequiredMCPToolWhenDiscoveryDisabled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("MCP server should not be contacted when CheckMCPReachable is false")
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {Tools: []string{"infra.ping"}},
+		},
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"mcp_servers": {
+				Value: map[string]any{
+					"infra": map[string]any{
+						"transport": "http",
+						"url":       server.URL,
+						"prefix":    "infra",
+					},
+				},
+			},
+		}},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "required_mcp_tool_availability", "infra.ping") {
+		t.Fatalf("expected required_mcp_tool_availability hard invalidity without catalog proof, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "tool_resolution", "infra.ping") {
+		t.Fatalf("did not expect prefix-only required mcp tool to fall back to tool_resolution warning, got %#v", report.Warnings())
 	}
 }
 

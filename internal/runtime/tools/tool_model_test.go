@@ -498,6 +498,34 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 	}
 }
 
+func TestExecutor_ToolDefinitionsForActor_ExcludesContractMCPWithoutDiscovery(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {ID: "agent-1", Tools: []string{"infra.ping"}},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"infra.ping": {
+				Description: "Authored MCP tool should not create runtime availability",
+				HandlerType: "mcp",
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object",
+				},
+			},
+		},
+	})
+
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	defs := exec.ToolDefinitionsForActor(models.AgentConfig{ID: "agent-1", Tools: []string{"infra.ping"}})
+
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	if containsToolName(names, "infra.ping") {
+		t.Fatalf("did not expect authored handler_type mcp entry without discovery proof to be delivered, got %v", names)
+	}
+}
+
 func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
