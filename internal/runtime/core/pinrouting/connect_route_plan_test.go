@@ -190,6 +190,55 @@ func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *tes
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansBroadcastBeatsInstanceKey(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t, "broadcast")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if got, want := plan.ResolutionKind, ConnectResolutionBroadcast; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
+	}
+	if plan.InstanceKey != nil {
+		t.Fatalf("InstanceKey = %#v, want nil for explicit parent broadcast", plan.InstanceKey)
+	}
+	if got, want := plan.Source.Key, "vertical_id"; got != want {
+		t.Fatalf("Source.Key = %q, want retained producer key evidence", got)
+	}
+
+	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"vertical_id": "v-1"},
+		Descriptors: []Descriptor{
+			{EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
+			{EntityID: "ent-3", FlowInstance: "other/three", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+		},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	}
+	if len(materialized.TargetSet) != 2 {
+		t.Fatalf("TargetSet = %#v, want both receiver-scoped descriptors", materialized.TargetSet)
+	}
+	if materialized.TargetSet[0].FlowInstance != "consumer/one" || materialized.TargetSet[1].FlowInstance != "consumer/two" {
+		t.Fatalf("TargetSet = %#v, want consumer/one and consumer/two without payload-key filtering", materialized.TargetSet)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{
@@ -803,6 +852,10 @@ deployment:
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
+	return writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t, "one")
+}
+
+func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, delivery string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -819,7 +872,7 @@ flows:
 connect:
   - from: producer.deploy_done
     to: consumer.deploy_completed
-    delivery: one
+    delivery: `+delivery+`
 `)
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-package\n")
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")

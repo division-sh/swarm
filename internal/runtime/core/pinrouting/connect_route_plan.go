@@ -185,7 +185,7 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: failure, Detail: strings.TrimSpace(connect.Delivery)}
 	}
 	address := connectAddress(connect, inputPin)
-	instanceKey := connectInstanceKey(source, connect, outputPin, inputPin, to.FlowID)
+	instanceKey := connectInstanceKey(source, connect, outputPin, inputPin, delivery, to.FlowID)
 	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && delivery != ConnectDeliveryBroadcast {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: to.FlowID}
 	}
@@ -449,8 +449,8 @@ func connectAddress(connect runtimecontracts.FlowPackageConnect, inputPin runtim
 	return &out
 }
 
-func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, receiverFlowID string) *ConnectRoutePlanInstanceKey {
-	if source == nil || len(connect.Map) > 0 || inputPin.Address != nil {
+func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) *ConnectRoutePlanInstanceKey {
+	if source == nil || len(connect.Map) > 0 || inputPin.Address != nil || delivery == ConnectDeliveryBroadcast {
 		return nil
 	}
 	bundle, ok := semanticview.Bundle(source)
@@ -488,11 +488,11 @@ func connectResolutionKind(scope semanticview.FlowScope, delivery ConnectRoutePl
 	if address != nil {
 		return ConnectResolutionAddress
 	}
-	if instanceKey != nil {
-		return ConnectResolutionInstanceKey
-	}
 	if delivery == ConnectDeliveryBroadcast {
 		return ConnectResolutionBroadcast
+	}
+	if instanceKey != nil {
+		return ConnectResolutionInstanceKey
 	}
 	return ""
 }

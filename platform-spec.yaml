@@ -5693,7 +5693,13 @@ flow_model:
             adapter_and_map: Explicit adapter plus sorted address-key map entries used for alias/key adaptation.
             delivery: one, many, broadcast, or reply after analyzer/default inference.
             target_kind: target for singular delivery, target_set for fanout/broadcast, reply for reply-lineage delivery.
-            resolution_kind: static, address, instance_key, or broadcast; materialization MUST consume this discriminant and MUST NOT select route authority from nil-field ordering.
+            resolution_kind: |
+              static, address, instance_key, or broadcast; materialization MUST
+              consume this discriminant and MUST NOT select route authority from
+              nil-field ordering. Explicit addressed-input routes remain
+              `address`; explicit parent-authored `delivery: broadcast` remains
+              `broadcast` for addressless fan-out and MUST NOT be shadowed by
+              producer key/carries or receiver instance.by evidence.
             address_rule: Receiver-owned address key, source expression, target expression, cardinality, and mode when runtime descriptor materialization is required.
             instance_key_rule: Receiver-owned template instance fields, on_missing, and on_conflict when an addressless template receiver is selected by producer key/carries plus receiver instance.by.
             reply_lineage: 'The explicit reply lineage map for delivery: reply.'
@@ -5724,7 +5730,11 @@ flow_model:
             pin declares `address`, lowering MUST keep `ResolutionKind: address`
             and MUST NOT also select the addressless instance-key route; the
             addressed-input descriptor model remains the canonical owner for
-            that explicit addressed surface.
+            that explicit addressed surface. If the parent connect declares
+            `delivery: broadcast`, lowering MUST keep `ResolutionKind: broadcast`
+            for addressless template fan-out and MUST NOT select instance-key
+            materialization even when producer key/carries and receiver
+            instance.by evidence are present.
 
             Runtime materialization MUST derive key material from the inbound
             event payload using TemplateInstanceContract.CanonicalKeyMaterial,
@@ -5737,6 +5747,7 @@ flow_model:
             MUST fail closed with zero executable routes.
           non_authoritative_for_this_slice:
           - receiver input-pin address for the addressless normal instance-key path
+          - receiver instance-key materialization for explicit parent-authored broadcast fan-out
           - receiver select_entity/select_or_create_entity
           - producer target.match
           - producer broadcast:true
