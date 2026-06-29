@@ -240,6 +240,19 @@ func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
 	}
 }
 
+func TestOutputPinKeyCarriesPinsForEventIgnoresPublicPinName(t *testing.T) {
+	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	source := semanticview.Wrap(bundle)
+
+	if got := outputPinKeyCarriesPinsForEvent(source, "producer", "deploy_done"); len(got) != 0 {
+		t.Fatalf("output pins for public pin name deploy_done = %#v, want none", got)
+	}
+	if got := outputPinKeyCarriesPinsForEvent(source, "producer", "deploy.done"); len(got) != 1 || got[0].PinName() != "deploy_done" {
+		t.Fatalf("output pins for emitted event deploy.done = %#v, want deploy_done pin", got)
+	}
+}
+
 func TestRun_AllowsImportBoundaryAliasAsConnectEventAdapter(t *testing.T) {
 	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{
 		consumerRequiresInput: true,

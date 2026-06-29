@@ -248,10 +248,9 @@ func outputPinKeyCarriesPinsForEvent(source semanticview.Source, flowID, eventTy
 	resolvedEvent := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
 	var out []runtimecontracts.FlowOutputEventPin
 	for _, pin := range source.FlowOutputEventPins(flowID) {
-		pinName := eventidentity.Normalize(pin.PinName())
 		pinEvent := eventidentity.Normalize(pin.EventType())
 		pinResolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, pin.EventType()))
-		if normalizedEvent == pinName || normalizedEvent == pinEvent || (resolvedEvent != "" && resolvedEvent == pinResolved) {
+		if normalizedEvent == pinEvent || (resolvedEvent != "" && resolvedEvent == pinResolved) {
 			out = append(out, pin)
 		}
 	}
