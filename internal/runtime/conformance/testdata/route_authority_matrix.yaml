@@ -322,14 +322,19 @@ rows:
       - {kind: issue, issue: 1473}
       - {kind: issue, issue: 1494}
       - {kind: issue, issue: 1545}
+      - {kind: issue, issue: 1546}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansBroadcastBeatsInstanceKey}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansFailsClosedForInvalidRenamedInstanceKeyAdapter}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanBroadcastIgnoresInstanceKeyFiltering}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKeySourceGap}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
     notes: >
       ConnectRoutePlan is a typed route-intent input, not an untracked string

@@ -814,9 +814,18 @@ type FlowPackageConnect struct {
 	From       string                           `yaml:"from"`
 	To         string                           `yaml:"to"`
 	Adapter    string                           `yaml:"adapter"`
+	Using      FlowPackageConnectUsing          `yaml:"using"`
 	Map        map[string]FlowPackageConnectMap `yaml:"map"`
 	Delivery   string                           `yaml:"delivery"`
 	Reply      map[string]string                `yaml:"reply"`
+}
+type FlowPackageConnectUsing struct {
+	Instance FlowPackageConnectInstanceAdapter `yaml:"instance"`
+}
+type FlowPackageConnectInstanceAdapter struct {
+	Declared bool     `yaml:"-"`
+	Source   []string `yaml:"source"`
+	Target   []string `yaml:"target"`
 }
 type FlowPackageConnectMap struct {
 	Source string `yaml:"source"`

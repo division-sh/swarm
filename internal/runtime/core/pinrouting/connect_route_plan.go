@@ -55,6 +55,7 @@ const (
 	ConnectFailureTargetUnsupported          ConnectRoutePlanFailure = "route_plan_target_unsupported"
 	ConnectFailureTargetUnresolved           ConnectRoutePlanFailure = "route_plan_target_unresolved"
 	ConnectFailureTargetAmbiguous            ConnectRoutePlanFailure = "route_plan_target_ambiguous"
+	ConnectFailureInstanceKeyAdapterInvalid  ConnectRoutePlanFailure = "route_plan_instance_key_adapter_invalid"
 )
 
 type ConnectRoutePlanEndpoint struct {
@@ -85,8 +86,14 @@ type ConnectRoutePlanMapEntry struct {
 
 type ConnectRoutePlanInstanceKey struct {
 	Fields     []string
+	Mappings   []ConnectRoutePlanInstanceKeyMapping
 	OnMissing  string
 	OnConflict string
+}
+
+type ConnectRoutePlanInstanceKeyMapping struct {
+	Source string
+	Target string
 }
 
 type ConnectRoutePlan struct {
@@ -185,7 +192,10 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: failure, Detail: strings.TrimSpace(connect.Delivery)}
 	}
 	address := connectAddress(connect, inputPin)
-	instanceKey := connectInstanceKey(source, connect, outputPin, inputPin, delivery, to.FlowID)
+	instanceKey, instanceKeyIssue := connectInstanceKey(source, connect, outputPin, inputPin, delivery, to.FlowID)
+	if instanceKeyIssue.Failure != "" {
+		return ConnectRoutePlan{}, instanceKeyIssue
+	}
 	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && delivery != ConnectDeliveryBroadcast {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: to.FlowID}
 	}
@@ -341,16 +351,18 @@ func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input Connect
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverAddressRuleMissing}
 	}
 	values := make(map[string]any, len(instanceKey.Fields))
-	for _, field := range instanceKey.Fields {
-		field = strings.TrimSpace(field)
-		if field == "" {
+	mappings := connectInstanceKeyMaterializationMappings(instanceKey)
+	for _, mapping := range mappings {
+		source := strings.TrimSpace(mapping.Source)
+		target := strings.TrimSpace(mapping.Target)
+		if source == "" || target == "" {
 			return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverAddressRuleMissing}
 		}
-		value := firstMatchValue(input.MatchValues, field, "payload."+field)
+		value := firstMatchValue(input.MatchValues, source, "payload."+source)
 		if value == "" {
 			return ConnectRoutePlanMaterialization{Failure: ConnectFailureAddressValueMissing}
 		}
-		values[field] = value
+		values[target] = value
 	}
 	keyMaterial, err := (runtimecontracts.TemplateInstanceContract{
 		FlowID: plan.Receiver.FlowID,
@@ -449,36 +461,141 @@ func connectAddress(connect runtimecontracts.FlowPackageConnect, inputPin runtim
 	return &out
 }
 
-func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) *ConnectRoutePlanInstanceKey {
-	if source == nil || len(connect.Map) > 0 || inputPin.Address != nil || delivery == ConnectDeliveryBroadcast {
-		return nil
+func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
+	adapter := connect.Using.Instance
+	if source == nil {
+		return nil, ConnectRoutePlanIssue{}
+	}
+	if inputPin.Address != nil {
+		if adapter.Declared {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "connect.using.instance requires an addressless receiver input"}
+		}
+		return nil, ConnectRoutePlanIssue{}
+	}
+	if delivery == ConnectDeliveryBroadcast {
+		if adapter.Declared {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "connect.using.instance is incompatible with delivery broadcast"}
+		}
+		return nil, ConnectRoutePlanIssue{}
+	}
+	if len(connect.Map) > 0 {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "connect.map is not instance-key adapter authority; use connect.using.instance"}
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
-		return nil
+		return nil, ConnectRoutePlanIssue{}
 	}
 	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlowID)
 	if err != nil {
-		return nil
+		if adapter.Declared {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: err.Error()}
+		}
+		return nil, ConnectRoutePlanIssue{}
 	}
 	outputKey := strings.TrimSpace(outputPin.Key)
 	if outputKey == "" {
-		return nil
+		if adapter.Declared {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "producer output pin key is required for connect.using.instance"}
+		}
+		return nil, ConnectRoutePlanIssue{}
 	}
 	carries := normalizedPinCarries(outputPin.Carries)
-	if !stringListContains(carries, outputKey) || !stringListContains(instance.By, outputKey) {
-		return nil
-	}
-	for _, field := range instance.By {
-		if !stringListContains(carries, field) {
-			return nil
+	if !stringListContains(carries, outputKey) {
+		if adapter.Declared {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "producer output pin carries must include key before connect.using.instance can route"}
 		}
+		return nil, ConnectRoutePlanIssue{}
+	}
+	fields := normalizedStringList(instance.By)
+	mappings, ok := connectInstanceKeyMappings(adapter, fields, carries, outputKey)
+	if !ok {
+		if adapter.Declared {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceKeyAdapterInvalid, Detail: "connect.using.instance must completely map producer carries to receiver instance.by"}
+		}
+		return nil, ConnectRoutePlanIssue{}
 	}
 	return &ConnectRoutePlanInstanceKey{
-		Fields:     normalizedStringList(instance.By),
+		Fields:     fields,
+		Mappings:   mappings,
 		OnMissing:  strings.TrimSpace(instance.OnMissing),
 		OnConflict: strings.TrimSpace(instance.OnConflict),
+	}, ConnectRoutePlanIssue{}
+}
+
+func connectInstanceKeyMaterializationMappings(instanceKey *ConnectRoutePlanInstanceKey) []ConnectRoutePlanInstanceKeyMapping {
+	if instanceKey == nil {
+		return nil
 	}
+	if len(instanceKey.Mappings) > 0 {
+		out := make([]ConnectRoutePlanInstanceKeyMapping, 0, len(instanceKey.Mappings))
+		for _, mapping := range instanceKey.Mappings {
+			source := strings.TrimSpace(mapping.Source)
+			target := strings.TrimSpace(mapping.Target)
+			if source == "" || target == "" {
+				continue
+			}
+			out = append(out, ConnectRoutePlanInstanceKeyMapping{Source: source, Target: target})
+		}
+		return out
+	}
+	out := make([]ConnectRoutePlanInstanceKeyMapping, 0, len(instanceKey.Fields))
+	for _, field := range instanceKey.Fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out = append(out, ConnectRoutePlanInstanceKeyMapping{Source: field, Target: field})
+		}
+	}
+	return out
+}
+
+func connectInstanceKeyMappings(adapter runtimecontracts.FlowPackageConnectInstanceAdapter, receiverFields, carries []string, outputKey string) ([]ConnectRoutePlanInstanceKeyMapping, bool) {
+	if adapter.Declared {
+		sources := normalizedAdapterFields(adapter.Source)
+		targets := normalizedAdapterFields(adapter.Target)
+		if len(sources) == 0 || len(sources) != len(targets) || len(targets) != len(receiverFields) || duplicateString(sources) != "" || duplicateString(targets) != "" {
+			return nil, false
+		}
+		if !sameStringSet(targets, receiverFields) {
+			return nil, false
+		}
+		mappings := make([]ConnectRoutePlanInstanceKeyMapping, 0, len(targets))
+		for idx, source := range sources {
+			target := strings.TrimSpace(targets[idx])
+			if !stringListContains(carries, source) || !stringListContains(receiverFields, target) {
+				return nil, false
+			}
+			mappings = append(mappings, ConnectRoutePlanInstanceKeyMapping{Source: source, Target: target})
+		}
+		return mappings, true
+	}
+	if !stringListContains(receiverFields, outputKey) {
+		return nil, false
+	}
+	mappings := make([]ConnectRoutePlanInstanceKeyMapping, 0, len(receiverFields))
+	for _, field := range receiverFields {
+		if !stringListContains(carries, field) {
+			return nil, false
+		}
+		mappings = append(mappings, ConnectRoutePlanInstanceKeyMapping{Source: field, Target: field})
+	}
+	return mappings, true
+}
+
+func normalizedAdapterFields(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, value := range in {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func connectResolutionKind(scope semanticview.FlowScope, delivery ConnectRoutePlanDelivery, address *ConnectRoutePlanAddress, instanceKey *ConnectRoutePlanInstanceKey) ConnectRoutePlanResolutionKind {
@@ -808,6 +925,45 @@ func stringListContains(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func duplicateString(values []string) string {
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			return value
+		}
+		seen[value] = struct{}{}
+	}
+	return ""
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := map[string]struct{}{}
+	for _, value := range left {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return false
+		}
+		seen[value] = struct{}{}
+	}
+	for _, value := range right {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return false
+		}
+		if _, ok := seen[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneStringMap(in map[string]string) map[string]string {

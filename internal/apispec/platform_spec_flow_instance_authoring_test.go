@@ -132,6 +132,20 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "output_pin_key_carries"), "#1544")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_to_instance_route_planning"), "#1545")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_key_adapters"), "#1546")
+	keyAdapters := mustMappingValue(t, composition, "connect_key_adapters")
+	assertScalarValue(t, mustMappingValue(t, keyAdapters, "implementation_tracker"), "#1546")
+	assertScalarContains(t, mustMappingValue(t, keyAdapters, "canonical_code_owner"), "FlowPackageConnect.Using.Instance")
+	assertScalarContains(t, mustMappingValue(t, keyAdapters, "canonical_code_owner"), "validateCompositionConnectInstanceKeyAdapter")
+	assertScalarContains(t, mustMappingValue(t, keyAdapters, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey.Mappings")
+	assertScalarValue(t, mustMappingValue(t, keyAdapters, "syntax"), "connect.using.instance.source / connect.using.instance.target")
+	assertScalarContains(t, mustMappingValue(t, keyAdapters, "rule"), "Same-name")
+	assertScalarContains(t, mustMappingValue(t, keyAdapters, "rule"), "`connect.map` is not adapter authority")
+	if !sequenceContainsScalar(mustMappingValue(t, keyAdapters, "fail_closed"), "using.instance declared on addressed-input, broadcast, or non-template receiver routes") {
+		t.Fatal("connect_key_adapters must fail closed for unsupported declaration surfaces")
+	}
+	if !sequenceContainsScalar(mustMappingValue(t, keyAdapters, "non_authoritative_paths"), "connect.map for addressless template instance-key adapters") {
+		t.Fatal("connect_key_adapters must mark connect.map non-authoritative for addressless template instance-key adapters")
+	}
 	outputContract := mustMappingValue(t, composition, "output_pin_key_carries_contract")
 	assertScalarValue(t, mustMappingValue(t, outputContract, "implementation_tracker"), "#1544")
 	assertScalarContains(t, mustMappingValue(t, outputContract, "canonical_code_owner"), "FlowOutputEventPin")

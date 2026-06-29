@@ -359,6 +359,7 @@ seam_families:
     classification: canonical_owner
     paths:
       - platform-spec.yaml
+      - internal/apispec/platform_spec_flow_instance_authoring_test.go
       - internal/apispec/platform_spec_composition_routing_test.go
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
@@ -374,6 +375,9 @@ seam_families:
       ResolutionKind discriminant so addressed-input, instance-key, broadcast,
       and static route authority are not selected by nil-field ordering, and
       keyed instance evidence cannot shadow explicit parent broadcast fan-out.
+      #1546 adds ConnectRoutePlan.InstanceKey.Mappings as the only runtime
+      adapter authority for renamed addressless template instance-key routes;
+      connect.map remains non-authoritative for that class.
   - id: route_table_resolve_role_separation
     layer: route_topology
     classification: valid_consumer
