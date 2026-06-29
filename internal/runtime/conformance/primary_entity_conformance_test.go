@@ -18,36 +18,32 @@ func TestPrimaryEntityConformance(t *testing.T) {
 		flowSchema    string
 		flowEntities  string
 		wantEntity    string
-		wantExplicit  bool
-		wantInferred  bool
 		wantLoadError string
 		wantBootError string
 	}{
 		{
-			name:         "single entity infers primary",
+			name:         "single entity is primary",
 			flowSchema:   primaryEntityConformanceSchema(""),
 			flowEntities: "vertical:\n  name: text\n",
 			wantEntity:   "vertical",
-			wantInferred: true,
 		},
 		{
-			name:         "explicit entity selects primary",
-			flowSchema:   primaryEntityConformanceSchema("entity: vertical\n"),
-			flowEntities: "vertical:\n  name: text\ncampaign:\n  title: text\n",
-			wantEntity:   "vertical",
-			wantExplicit: true,
-		},
-		{
-			name:          "ambiguous multi entity fails closed",
-			flowSchema:    primaryEntityConformanceSchema(""),
-			flowEntities:  "vertical:\n  name: text\ncampaign:\n  title: text\n",
+			name:          "schema entity selector fails closed",
+			flowSchema:    primaryEntityConformanceSchema("entity: vertical\n"),
+			flowEntities:  "vertical:\n  name: text\n",
 			wantLoadError: "schema.yaml entity",
 		},
 		{
-			name:          "unknown explicit entity fails closed",
+			name:          "multi entity normal flow fails closed",
+			flowSchema:    primaryEntityConformanceSchema(""),
+			flowEntities:  "vertical:\n  name: text\ncampaign:\n  title: text\n",
+			wantLoadError: "exactly one entity type",
+		},
+		{
+			name:          "schema entity selector for missing entity fails closed",
 			flowSchema:    primaryEntityConformanceSchema("entity: missing\n"),
 			flowEntities:  "vertical:\n  name: text\n",
-			wantLoadError: "declares primary entity",
+			wantLoadError: "schema.yaml entity",
 		},
 		{
 			name:          "stateful normal flow without entity fails verify",
@@ -85,8 +81,8 @@ func TestPrimaryEntityConformance(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ResolveFlowPrimaryEntity: %v", err)
 			}
-			if resolved.EntityType != tc.wantEntity || resolved.Explicit != tc.wantExplicit || resolved.Inferred != tc.wantInferred {
-				t.Fatalf("primary entity = type:%q explicit:%v inferred:%v, want type:%q explicit:%v inferred:%v", resolved.EntityType, resolved.Explicit, resolved.Inferred, tc.wantEntity, tc.wantExplicit, tc.wantInferred)
+			if resolved.EntityType != tc.wantEntity {
+				t.Fatalf("primary entity = type:%q, want type:%q", resolved.EntityType, tc.wantEntity)
 			}
 		})
 	}
