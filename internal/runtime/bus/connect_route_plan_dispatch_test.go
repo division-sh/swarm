@@ -813,7 +813,7 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKe
 	defer eb.Unsubscribe("raw-source-listener")
 	eventID := uuid.NewString()
 	evt := eventtest.RootIngress(eventID,
-		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"nested":{"source_vertical_id":"v-1"}}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 
 	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
 	if err != nil {

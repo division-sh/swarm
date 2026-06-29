@@ -161,12 +161,12 @@ func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testi
 	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "vertical_id" {
 		t.Fatalf("InstanceKey.Fields = %#v, want receiver target field vertical_id", plan.InstanceKey.Fields)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "source_vertical_id" || plan.InstanceKey.Mappings[0].Target != "vertical_id" {
+	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "source_vertical_id" || plan.InstanceKey.Mappings[0].Target != "vertical_id" || !plan.InstanceKey.Mappings[0].Explicit {
 		t.Fatalf("InstanceKey.Mappings = %#v, want source_vertical_id -> vertical_id", plan.InstanceKey.Mappings)
 	}
 
 	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
-		MatchValues: map[string]string{"source_vertical_id": "v-1"},
+		MatchValues: map[string]string{"payload.source_vertical_id": "v-1", "source_vertical_id": "wrong-alias"},
 		Descriptors: []Descriptor{{
 			EntityID:      "ent-1",
 			FlowInstance:  "consumer/one",
@@ -180,7 +180,19 @@ func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testi
 		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
 	}
 
-	missing := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+	unqualifiedAlias := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"source_vertical_id": "v-1"},
+		Descriptors: []Descriptor{{
+			EntityID:      "ent-1",
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
+	})
+	if unqualifiedAlias.Failure != ConnectFailureAddressValueMissing {
+		t.Fatalf("unqualified alias Failure = %q, want %q", unqualifiedAlias.Failure, ConnectFailureAddressValueMissing)
+	}
+
+	wrongCanonicalField := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
 		MatchValues: map[string]string{"vertical_id": "v-1"},
 		Descriptors: []Descriptor{{
 			EntityID:      "ent-1",
@@ -188,8 +200,8 @@ func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testi
 			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
 		}},
 	})
-	if missing.Failure != ConnectFailureAddressValueMissing {
-		t.Fatalf("missing Failure = %q, want %q", missing.Failure, ConnectFailureAddressValueMissing)
+	if wrongCanonicalField.Failure != ConnectFailureAddressValueMissing {
+		t.Fatalf("wrong canonical field Failure = %q, want %q", wrongCanonicalField.Failure, ConnectFailureAddressValueMissing)
 	}
 }
 
