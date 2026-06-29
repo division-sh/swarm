@@ -14,6 +14,94 @@ type PrimaryEntityContract struct {
 	Types      TypeCatalogDocument
 }
 
+func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (TemplateInstanceContract, error) {
+	flowID = strings.TrimSpace(flowID)
+	label := defaultPrimaryEntityFlowLabel(flowID)
+	if b == nil {
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s template instance is unavailable: bundle is nil", label)
+	}
+	if flowID == "" {
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow <root> cannot declare a template instance key; template instances are child flow contracts")
+	}
+	schema, ok := b.FlowSchemas[flowID]
+	if !ok {
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s template instance is unavailable: schema not found", flowID)
+	}
+	mode := strings.TrimSpace(schema.Mode)
+	if mode != "template" {
+		if !schema.Instance.Empty() {
+			return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s declares instance but is not mode: template", flowID)
+		}
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s is not mode: template", flowID)
+	}
+	if schema.Instance.Empty() {
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s mode: template must declare instance.by, instance.on_missing, and instance.on_conflict", flowID)
+	}
+	primary, err := b.ResolveFlowPrimaryEntity(flowID)
+	if err != nil {
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s primary entity required for instance.by: %w", flowID, err)
+	}
+	by, err := validateTemplateInstanceBy(flowID, schema.Instance.By, primary)
+	if err != nil {
+		return TemplateInstanceContract{}, err
+	}
+	onMissing, err := validateTemplateInstancePolicy(flowID, "on_missing", schema.Instance.OnMissing, "create", "reject")
+	if err != nil {
+		return TemplateInstanceContract{}, err
+	}
+	onConflict, err := validateTemplateInstancePolicy(flowID, "on_conflict", schema.Instance.OnConflict, "reject", "reuse")
+	if err != nil {
+		return TemplateInstanceContract{}, err
+	}
+	return TemplateInstanceContract{
+		FlowID:        flowID,
+		By:            by,
+		OnMissing:     onMissing,
+		OnConflict:    onConflict,
+		PrimaryEntity: primary,
+	}, nil
+}
+
+func validateTemplateInstanceBy(flowID string, fields []string, primary PrimaryEntityContract) ([]string, error) {
+	flowID = strings.TrimSpace(flowID)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by is required", defaultPrimaryEntityFlowLabel(flowID))
+	}
+	out := make([]string, 0, len(fields))
+	seen := map[string]struct{}{}
+	for _, rawField := range fields {
+		field := strings.TrimSpace(rawField)
+		switch {
+		case field == "":
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by contains an empty field", flowID)
+		case strings.Contains(field, "."):
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q must be a top-level primary-entity field", flowID, field)
+		}
+		if _, ok := seen[field]; ok {
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q is duplicated; composite keys must be unambiguous", flowID, field)
+		}
+		if _, ok := primary.Contract.Fields[field]; !ok {
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by field %q is not declared on primary entity %s", flowID, field, primary.EntityType)
+		}
+		seen[field] = struct{}{}
+		out = append(out, field)
+	}
+	return out, nil
+}
+
+func validateTemplateInstancePolicy(flowID, field, value string, allowed ...string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.%s is required", defaultPrimaryEntityFlowLabel(flowID), field)
+	}
+	for _, option := range allowed {
+		if value == option {
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.%s value %q is unsupported; allowed values: %s", defaultPrimaryEntityFlowLabel(flowID), field, value, strings.Join(allowed, ", "))
+}
+
 func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return nil
@@ -23,19 +111,24 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 			errString("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml (legacy scope: " + legacyScope + ")"),
 		}}
 	}
+	flowScopedTypesFiles, flowScopedEntityFiles := flowScopedContractFiles(bundle)
 	for _, pkg := range bundle.PackageTree {
 		if strings.TrimSpace(pkg.Key) == "." {
 			continue
 		}
 		if path := existingFile(filepath.Join(pkg.Paths.Dir, "types.yaml")); path != "" {
-			return &LoadValidationError{Items: []error{
-				errString("RETIRED: package-scoped types.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
-			}}
+			if _, ok := flowScopedTypesFiles[filepath.Clean(path)]; !ok {
+				return &LoadValidationError{Items: []error{
+					errString("RETIRED: package-scoped types.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
+				}}
+			}
 		}
 		if path := existingFile(filepath.Join(pkg.Paths.Dir, "entities.yaml")); path != "" {
-			return &LoadValidationError{Items: []error{
-				errString("RETIRED: package-scoped entities.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
-			}}
+			if _, ok := flowScopedEntityFiles[filepath.Clean(path)]; !ok {
+				return &LoadValidationError{Items: []error{
+					errString("RETIRED: package-scoped entities.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
+				}}
+			}
 		}
 	}
 	for entityType, contract := range bundle.RootEntities {
@@ -63,6 +156,25 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 		}
 	}
 	return nil
+}
+
+func flowScopedContractFiles(bundle *WorkflowContractBundle) (map[string]struct{}, map[string]struct{}) {
+	typesFiles := map[string]struct{}{}
+	entityFiles := map[string]struct{}{}
+	if bundle == nil {
+		return typesFiles, entityFiles
+	}
+	for _, pkg := range bundle.PackageTree {
+		for _, flow := range pkg.Paths.Flows {
+			if path := strings.TrimSpace(flow.TypesFile); path != "" {
+				typesFiles[filepath.Clean(path)] = struct{}{}
+			}
+			if path := strings.TrimSpace(flow.EntitiesFile); path != "" {
+				entityFiles[filepath.Clean(path)] = struct{}{}
+			}
+		}
+	}
+	return typesFiles, entityFiles
 }
 
 func validateRootPrimaryEntityLoadBoundary(bundle *WorkflowContractBundle) error {

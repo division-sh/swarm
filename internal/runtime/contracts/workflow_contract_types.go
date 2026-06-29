@@ -2,11 +2,11 @@ package contracts
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"gopkg.in/yaml.v3"
-	"strings"
 )
 
 type ContractPaths struct {
@@ -703,23 +703,71 @@ type ContractItemSource struct {
 	File       string
 }
 type FlowSchemaDocument struct {
-	Name              string                   `yaml:"name"`
-	Mode              string                   `yaml:"mode"`
-	Entity            string                   `yaml:"entity"`
-	InitialState      string                   `yaml:"initial_state"`
-	NamespacePrefix   string                   `yaml:"namespace_prefix"`
-	NamespaceRule     string                   `yaml:"namespace_rule"`
-	TerminalStates    []string                 `yaml:"terminal_states"`
-	States            []string                 `yaml:"states"`
-	Pins              FlowPins                 `yaml:"pins"`
-	ToolSurface       FlowToolSurfaceContract  `yaml:"tool_surface"`
-	RequiredAgents    []FlowRequiredAgent      `yaml:"required_agents"`
-	InstanceVariables FlowInstanceVariables    `yaml:"instance_variables"`
-	AutoEmitOnCreate  AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
+	Name              string                          `yaml:"name"`
+	Mode              string                          `yaml:"mode"`
+	Entity            string                          `yaml:"entity"`
+	Instance          FlowTemplateInstanceDeclaration `yaml:"instance"`
+	InitialState      string                          `yaml:"initial_state"`
+	NamespacePrefix   string                          `yaml:"namespace_prefix"`
+	NamespaceRule     string                          `yaml:"namespace_rule"`
+	TerminalStates    []string                        `yaml:"terminal_states"`
+	States            []string                        `yaml:"states"`
+	Pins              FlowPins                        `yaml:"pins"`
+	ToolSurface       FlowToolSurfaceContract         `yaml:"tool_surface"`
+	RequiredAgents    []FlowRequiredAgent             `yaml:"required_agents"`
+	InstanceVariables FlowInstanceVariables           `yaml:"instance_variables"`
+	AutoEmitOnCreate  AutoEmitOnCreateContract        `yaml:"auto_emit_on_create"`
 }
 type FlowToolSurfaceContract struct {
 	RoleScopedEntityTools bool `yaml:"role_scoped_entity_tools"`
 }
+
+type FlowTemplateInstanceDeclaration struct {
+	By         []string `yaml:"by"`
+	OnMissing  string   `yaml:"on_missing"`
+	OnConflict string   `yaml:"on_conflict"`
+}
+
+func (i FlowTemplateInstanceDeclaration) Empty() bool {
+	return len(i.By) == 0 && strings.TrimSpace(i.OnMissing) == "" && strings.TrimSpace(i.OnConflict) == ""
+}
+
+type TemplateInstanceContract struct {
+	FlowID        string
+	By            []string
+	OnMissing     string
+	OnConflict    string
+	PrimaryEntity PrimaryEntityContract
+}
+
+type TemplateInstanceKeyValue struct {
+	Field string
+	Value string
+}
+
+func (c TemplateInstanceContract) CanonicalKeyMaterial(values map[string]any) ([]TemplateInstanceKeyValue, error) {
+	if len(c.By) == 0 {
+		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by is required", defaultPrimaryEntityFlowLabel(c.FlowID))
+	}
+	out := make([]TemplateInstanceKeyValue, 0, len(c.By))
+	for _, field := range c.By {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.by contains an empty field", defaultPrimaryEntityFlowLabel(c.FlowID))
+		}
+		value, ok := values[field]
+		if !ok || value == nil {
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is missing", defaultPrimaryEntityFlowLabel(c.FlowID), field)
+		}
+		valueText := strings.TrimSpace(fmt.Sprint(value))
+		if valueText == "" {
+			return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is empty", defaultPrimaryEntityFlowLabel(c.FlowID), field)
+		}
+		out = append(out, TemplateInstanceKeyValue{Field: field, Value: valueText})
+	}
+	return out, nil
+}
+
 type FlowInstanceVariables struct {
 	Description string                  `yaml:"description"`
 	Variables   map[string]FlowVariable `yaml:"variables"`

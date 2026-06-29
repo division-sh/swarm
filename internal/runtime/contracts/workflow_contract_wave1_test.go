@@ -106,6 +106,147 @@ vertical.shortlisted:
 	}
 }
 
+func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesOrderedCompositeKey(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"spec_repo": {
+				Name: "spec_repo",
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"scope", "scope_id", "artifact_type"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+		},
+		flowEntities: map[string]EntityContractsDocument{
+			"spec_repo": {
+				"artifact_repo": {
+					Fields: map[string]EntityFieldDecl{
+						"artifact_type": {Type: "text"},
+						"scope":         {Type: "text"},
+						"scope_id":      {Type: "uuid"},
+					},
+				},
+			},
+		},
+	}
+
+	resolved, err := bundle.ResolveFlowTemplateInstance("spec_repo")
+	if err != nil {
+		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
+	}
+	if got, want := strings.Join(resolved.By, ","), "scope,scope_id,artifact_type"; got != want {
+		t.Fatalf("resolved By = %q, want %q", got, want)
+	}
+	key, err := resolved.CanonicalKeyMaterial(map[string]any{
+		"artifact_type": "contract",
+		"scope_id":      "vertical-1",
+		"scope":         "project",
+	})
+	if err != nil {
+		t.Fatalf("CanonicalKeyMaterial: %v", err)
+	}
+	if got, want := keyMaterialString(key), "scope=project,scope_id=vertical-1,artifact_type=contract"; got != want {
+		t.Fatalf("CanonicalKeyMaterial = %q, want %q", got, want)
+	}
+}
+
+func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclarations(t *testing.T) {
+	tests := []struct {
+		name     string
+		schema   FlowSchemaDocument
+		entities EntityContractsDocument
+		wantErr  string
+	}{
+		{
+			name: "duplicate key",
+			schema: FlowSchemaDocument{
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"tenant_id", "tenant_id"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
+			wantErr:  "duplicated",
+		},
+		{
+			name: "missing field",
+			schema: FlowSchemaDocument{
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"account_id"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
+			wantErr:  "not declared",
+		},
+		{
+			name: "nested field",
+			schema: FlowSchemaDocument{
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"tenant.id"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant": {Type: "Tenant"}}}},
+			wantErr:  "top-level",
+		},
+		{
+			name: "missing policy",
+			schema: FlowSchemaDocument{
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"tenant_id"},
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
+			wantErr:  "on_missing",
+		},
+		{
+			name: "non template",
+			schema: FlowSchemaDocument{
+				Mode: "static",
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"tenant_id"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},
+			wantErr:  "not mode: template",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := &WorkflowContractBundle{
+				FlowSchemas:  map[string]FlowSchemaDocument{"worker": tc.schema},
+				flowEntities: map[string]EntityContractsDocument{"worker": tc.entities},
+			}
+			_, err := bundle.ResolveFlowTemplateInstance("worker")
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ResolveFlowTemplateInstance error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func keyMaterialString(values []TemplateInstanceKeyValue) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, value.Field+"="+value.Value)
+	}
+	return strings.Join(parts, ",")
+}
+
 func TestLoadWorkflowContractBundle_RejectsLegacyPackageEntitySchema(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()

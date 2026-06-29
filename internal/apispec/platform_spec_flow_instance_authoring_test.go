@@ -99,10 +99,20 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	}
 
 	templateModel := mustMappingValue(t, authoring, "template_instance_model")
-	assertScalarValue(t, mustMappingValue(t, templateModel, "status"), "spec_vocabulary_only")
+	assertScalarValue(t, mustMappingValue(t, templateModel, "status"), "merge_bearing_contract_behavior")
 	assertScalarValue(t, mustMappingValue(t, templateModel, "implementation_tracker"), "#1543")
+	assertScalarValue(t, mustMappingValue(t, templateModel, "canonical_code_owner"), "internal/runtime/contracts.WorkflowContractBundle.ResolveFlowTemplateInstance")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "process/case/job state")
 	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "independent lifecycle")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "rule"), "`mode: template` flows MUST declare `instance.by`")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "primary_entity_dependency"), "ResolveFlowPrimaryEntity")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "primary_entity_dependency"), "`schema.yaml entity`")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "key_rule"), "top-level scalar or enum field")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "key_rule"), "Composite key material is ordered exactly as declared")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "policy_rule"), "`on_missing` is required")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "policy_rule"), "`on_conflict` is required")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "non_authoritative_paths"), "Flow input-pin `address`")
+	assertScalarContains(t, mustMappingValue(t, templateModel, "non_authoritative_paths"), "`create_flow_instance.instance_id_from`")
 
 	primaryEntity := mustMappingValue(t, authoring, "primary_entity_model")
 	assertScalarValue(t, mustMappingValue(t, primaryEntity, "status"), "merge_bearing_contract_behavior")

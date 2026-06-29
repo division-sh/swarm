@@ -1,0 +1,7 @@
+worker:
+  worker_id:
+    type: text
+    _unused_reason: lifecycle fixture key supplied by create_flow_instance
+  task_label:
+    type: text
+    _unused_reason: lifecycle fixture payload proof field

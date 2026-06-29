@@ -1,0 +1,10 @@
+worker:
+  name:
+    type: text
+    _unused_reason: lifecycle config fixture proof field
+  priority:
+    type: integer
+    _unused_reason: lifecycle config fixture proof field
+  owner:
+    type: text
+    _unused_reason: lifecycle config fixture proof field
