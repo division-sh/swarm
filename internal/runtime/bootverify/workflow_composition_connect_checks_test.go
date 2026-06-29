@@ -230,6 +230,11 @@ func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
 			opts: compositionConnectFixtureOptions{producerAutoEmit: true},
 			want: "auto_emit_payload_unproven",
 		},
+		{
+			name: "workflow timer cannot prove carried field",
+			opts: compositionConnectFixtureOptions{producerTimer: true},
+			want: "timer_payload_unproven",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -242,6 +247,17 @@ func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
 				t.Fatalf("expected output_pin_key_carries_validation %q, got %#v", tc.want, report.Errors())
 			}
 		})
+	}
+}
+
+func TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence(t *testing.T) {
+	root := writeRootAutoEmitOutputPinKeyCarriesFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "output_pin_key_carries_validation", "auto_emit_payload_unproven") {
+		t.Fatalf("expected root auto_emit output_pin_key_carries_validation error, got %#v", report.Errors())
 	}
 }
 
@@ -353,6 +369,7 @@ type compositionConnectFixtureOptions struct {
 	producerVerticalIDType     string
 	producerAgentEmit          bool
 	producerAutoEmit           bool
+	producerTimer              bool
 	duplicateProducerOutputKey bool
 }
 
@@ -486,6 +503,77 @@ root.ready:
   entity_id: text
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	return root
+}
+
+func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: root-auto-emit-key-carries
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+  - from: .root_ready
+    to: consumer.ready
+    delivery: one
+    map:
+      entity_id:
+        source: payload.entity_id
+        target: entity.entity_id
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: root-auto-emit-key-carries
+auto_emit_on_create:
+  event: root.ready
+pins:
+  outputs:
+    events:
+      - name: root_ready
+        event: root.ready
+        key: entity_id
+        carries: [entity_id]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+root.ready:
+  entity_id: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: static
+pins:
+  inputs:
+    events:
+      - name: ready
+        event: root.ready
+        address:
+          by: entity_id
+          source: payload.entity_id
+          target: entity.entity_id
+          cardinality: one
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+root.ready:
+  entity_id: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+deployment:
+  entity_id:
+    type: string
+    indexed: true
+    _unused_reason: root output pin key/carries receiver address proof field
+`)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
 	return root
 }
@@ -722,6 +810,7 @@ producer-node:
   id: producer-node
   execution_type: system_node
   subscribes_to: [deploy.requested]
+`+producerWorkflowTimerBlock(opts)+`
   event_handlers:
     deploy.requested:
       emit:
@@ -729,6 +818,19 @@ producer-node:
         fields:
 `+emitField+`
 `)
+}
+
+func producerWorkflowTimerBlock(opts compositionConnectFixtureOptions) string {
+	if !opts.producerTimer {
+		return ""
+	}
+	return `  timers:
+    - id: deploy_done_timer
+      owner: producer-node
+      event: deploy.done
+      delay: 1m
+      start_on: event:deploy.requested
+`
 }
 
 func producerAutoEmitOnCreateBlock(opts compositionConnectFixtureOptions) string {
