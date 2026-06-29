@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546]
 parent_issues: [1340, 1353, 1481, 1493]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
