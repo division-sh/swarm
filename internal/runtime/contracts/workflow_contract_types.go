@@ -797,8 +797,10 @@ type FlowInputEventPin struct {
 	Address *FlowInputPinAddress `yaml:"address"`
 }
 type FlowOutputEventPin struct {
-	Name  string `yaml:"name"`
-	Event string `yaml:"event"`
+	Name    string   `yaml:"name"`
+	Event   string   `yaml:"event"`
+	Key     string   `yaml:"key"`
+	Carries []string `yaml:"carries"`
 }
 type FlowInputPinAddress struct {
 	By          string `yaml:"by"`

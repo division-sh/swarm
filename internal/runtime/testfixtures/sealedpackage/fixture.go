@@ -151,6 +151,8 @@ pins:
     events:
       - name: shared_done
         event: shared.done
+        key: flow_instance
+        carries: [flow_instance]
 `)
 	writeFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), `
 runtime:

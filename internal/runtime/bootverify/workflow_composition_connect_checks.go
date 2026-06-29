@@ -224,7 +224,7 @@ func validateCompositionConnectAddress(source semanticview.Source, connect runti
 	if targetExpr == "" {
 		targetExpr = "entity." + address.By
 	}
-	sourceType, err := compositionConnectSourceType(source, producerFlowID, outputPin.EventType(), sourceExpr)
+	sourceType, err := outputPinKeyCarriesSourceType(source, producerFlowID, outputPin, sourceExpr)
 	if err != nil {
 		return []Finding{compositionConnectFinding(connect, "output_carries_address_key", err.Error(), producerFlowID)}
 	}
@@ -239,39 +239,6 @@ func validateCompositionConnectAddress(source semanticview.Source, connect runti
 		return []Finding{compositionConnectFinding(connect, "key_types_incompatible", fmt.Sprintf("source %s type %s is incompatible with target %s type %s", sourceExpr, sourceType, targetExpr, targetType), receiverFlowID)}
 	}
 	return nil
-}
-
-func compositionConnectSourceType(source semanticview.Source, flowID, eventType, expr string) (string, error) {
-	expr = strings.TrimSpace(expr)
-	if expr == "" {
-		return "", fmt.Errorf("source expression is required")
-	}
-	if strings.HasPrefix(expr, "event.source.") {
-		return "string", nil
-	}
-	if !strings.HasPrefix(expr, "payload.") {
-		return "", fmt.Errorf("source expression %q must be payload.* or event.source.*", expr)
-	}
-	fieldPath := strings.TrimPrefix(expr, "payload.")
-	if fieldPath == "" || strings.Contains(fieldPath, ".") {
-		return "", fmt.Errorf("source expression %q must reference a single payload field", expr)
-	}
-	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
-	if !resolution.HasSchema {
-		return "", fmt.Errorf("producer output event %s has no payload schema", eventType)
-	}
-	props, _ := resolution.Schema.Schema["properties"].(map[string]any)
-	raw, ok := props[fieldPath]
-	if !ok {
-		return "", fmt.Errorf("producer output event %s does not carry payload field %s", eventType, fieldPath)
-	}
-	prop, _ := raw.(map[string]any)
-	typ, _ := prop["type"].(string)
-	typ = strings.TrimSpace(typ)
-	if typ == "" {
-		return "", fmt.Errorf("producer output event %s payload field %s has no scalar type", eventType, fieldPath)
-	}
-	return typ, nil
 }
 
 func compositionConnectTargetType(source semanticview.Source, flowID, expr string) (string, error) {

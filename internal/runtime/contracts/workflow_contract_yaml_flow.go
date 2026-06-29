@@ -290,6 +290,16 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 			if err := value.Decode(&out.Event); err != nil {
 				return FlowOutputEventPin{}, fmt.Errorf("output event pin event: %w", err)
 			}
+		case "key":
+			if err := value.Decode(&out.Key); err != nil {
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin key: %w", err)
+			}
+		case "carries":
+			carries, err := decodeFlowOutputPinCarriesNode(value)
+			if err != nil {
+				return FlowOutputEventPin{}, fmt.Errorf("output event pin carries: %w", err)
+			}
+			out.Carries = carries
 		default:
 			return FlowOutputEventPin{}, fmt.Errorf("UNDEFINED-FIELD: output event pin field %q not in platform spec", key)
 		}
@@ -299,6 +309,30 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 		return FlowOutputEventPin{}, fmt.Errorf("output event pin name is required")
 	}
 	return out, nil
+}
+
+func decodeFlowOutputPinCarriesNode(node *yaml.Node) ([]string, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
+			return nil, nil
+		}
+		return []string{strings.TrimSpace(node.Value)}, nil
+	case yaml.SequenceNode:
+		out := make([]string, 0, len(node.Content))
+		for _, item := range node.Content {
+			if item == nil || item.Kind != yaml.ScalarNode {
+				return nil, fmt.Errorf("carries entries must be strings")
+			}
+			out = append(out, strings.TrimSpace(item.Value))
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("carries must be a string or sequence")
+	}
 }
 
 func (a *FlowInputPinAddress) UnmarshalYAML(node *yaml.Node) error {

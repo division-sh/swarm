@@ -45,8 +45,10 @@ func (p FlowOutputEventPin) EventType() string {
 
 func (p FlowOutputEventPin) normalized() FlowOutputEventPin {
 	out := FlowOutputEventPin{
-		Name:  strings.TrimSpace(p.Name),
-		Event: strings.TrimSpace(p.Event),
+		Name:    strings.TrimSpace(p.Name),
+		Event:   strings.TrimSpace(p.Event),
+		Key:     strings.TrimSpace(p.Key),
+		Carries: normalizeOutputPinCarries(p.Carries),
 	}
 	if out.Event == "" {
 		out.Event = out.Name
@@ -163,6 +165,17 @@ func cloneFlowOutputEventPins(in []FlowOutputEventPin) []FlowOutputEventPin {
 			continue
 		}
 		out = append(out, normalized)
+	}
+	return out
+}
+
+func normalizeOutputPinCarries(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		out = append(out, strings.TrimSpace(item))
 	}
 	return out
 }

@@ -21,6 +21,10 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Producer emit sites MUST NOT own consumer routing")
 
 	authored := mustMappingValue(t, composition, "authored_shapes")
+	outputPin := mustMappingValue(t, authored, "output_event_pin")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{name, event, key, carries}")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "MUST include `key`")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "fails closed")
 	addressed := mustMappingValue(t, authored, "addressed_input_pin")
 	assertScalarContains(t, mustMappingValue(t, addressed, "canonical_form"), "{name, event, address}")
 	assertScalarContains(t, mustYAMLPath(t, addressed, "address_fields", "cardinality"), "one and many")
@@ -33,6 +37,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns inter-flow delivery topology")
+	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "key/carries evidence")
 	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "receiver address resolution")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit_target"), "exceptional dynamic routing")
 
@@ -60,6 +65,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, lowering, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering")
 	for _, want := range []string{
 		"parent package.yaml connect entries",
+		"producer output pin event identity and verified key/carries evidence, including explicit package-root `.pin_name` output endpoints",
 		"receiver addressed input pin rules",
 		"import-boundary pin alias bindings",
 	} {
@@ -189,6 +195,10 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "explicit target escape hatch")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "eligible static child delivery-entity route")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "producer target/broadcast")
+
+	outputPinKeyCarries := mustSequenceMappingByScalarField(t, checks, "id", "output_pin_key_carries_validation")
+	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "missing key/carries evidence")
+	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "Agent emit_events")
 
 	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
 	validatePins := mustSequenceMappingByScalarField(t, bootSteps, "name", "validate_pins")
