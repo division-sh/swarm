@@ -1173,13 +1173,16 @@ entity_contracts:
     static/template mode), a stateful normal flow declares exactly one entity
     type in its flow-owned entities.yaml. That single entity type is the
     flow's primary entity; there is no normal-flow primary/secondary split and
-    no schema.yaml `entity: <Type>` selector. A missing entity type, multiple
-    entity types, or a schema-level entity selector is fail-closed. Static
-    package/service flows, template instance-key behavior, and any future
-    advanced/static multi-entity escape hatch remain separate explicit
-    classifications; they are not silent fallback semantics for normal flows.
-    The old Wave 1 rule is preserved as a product decision for normal flow
-    authoring, not as a temporary limitation.
+    no schema.yaml `entity: <Type>` selector. Bundle-root entity declarations,
+    when present, use the same single-entity/no-schema-selector resolver so
+    root read/tool surfaces cannot silently disappear behind a local
+    interpretation. A missing normal child-flow entity type, multiple root or
+    flow entity types, or a schema-level entity selector is fail-closed.
+    Static package/service flows, template
+    instance-key behavior, and any future advanced/static multi-entity escape
+    hatch remain separate explicit classifications; they are not silent
+    fallback semantics for normal flows. The old Wave 1 rule is preserved as a
+    product decision for normal flow authoring, not as a temporary limitation.
   state_machine_link:
     description: |
       State is flow-scoped and declared in schema.yaml. The entity
@@ -5069,20 +5072,25 @@ flow_model:
     primary_entity_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1539'
-      declaration_surface: 'exactly one flow-owned entities.yaml entry'
-      canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowPrimaryEntity
+      declaration_surface: 'exactly one flow-owned entities.yaml entry; root entities.yaml uses the same resolver when present'
+      canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveRootPrimaryEntity / ResolveFlowPrimaryEntity
       single_entity_rule: >
-        If exactly one entity type exists for a normal flow, that entity type
-        is the primary entity. More than one entity type is invalid for normal
-        flow authoring; authors must split flows, use contained state, or use a
-        separately approved advanced/static multi-entity classification.
+        If exactly one entity type exists for a normal child flow, that entity
+        type is the primary entity. More than one entity type is invalid for
+        normal flow authoring; authors must split flows, use contained state,
+        or use a separately approved advanced/static multi-entity
+        classification. If the bundle root declares entity contracts, multiple
+        root entity types are invalid under the same resolver.
         `schema.yaml entity` is not a supported selector because it would
         restate entity ownership in a second file. Missing, duplicate, or
         restated entity ownership fails closed. Verification and direct runtime
         consumers consume the same canonical resolver.
       stateful_presence_rule: >
-        A stateful normal flow (stateful schema with no static/template mode)
-        must resolve exactly one entity type. Stateless flows, static
+        A stateful normal child flow (stateful schema with no static/template
+        mode) must resolve exactly one entity type. Root schema entity
+        selectors and multi-root-entity declarations fail closed, but existing
+        package-level root workflow state without root entities remains outside
+        this required-child-flow entity presence rule. Stateless flows, static
         package/service flows, and template-flow instance-key behavior remain
         separate explicit classifications and are not silently rescued by
         handler acquisition, route planning, entity-tool fallback, or a

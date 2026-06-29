@@ -281,6 +281,35 @@ campaign:
 	}
 }
 
+func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: invalid-root-entities
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeFixtureFile(t, root+"/schema.yaml", `
+name: invalid-root-entities
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+`)
+	writeFixtureFile(t, root+"/entities.yaml", `
+vertical:
+  name: text
+campaign:
+  title: text
+`)
+
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "INVALID-PRIMARY-ENTITY") || !strings.Contains(err.Error(), "exactly one entity type") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want INVALID-PRIMARY-ENTITY requiring exactly one entity type", err)
+	}
+}
+
 func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
@@ -315,6 +344,34 @@ vertical:
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err == nil || !strings.Contains(err.Error(), "schema.yaml entity") || !strings.Contains(err.Error(), "single entity authority") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want schema.yaml entity selector rejection", err)
+	}
+}
+
+func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: root-schema-entity-selector
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeFixtureFile(t, root+"/schema.yaml", `
+name: root-schema-entity-selector
+entity: vertical
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+`)
+	writeFixtureFile(t, root+"/entities.yaml", `
+vertical:
+  name: text
+`)
+
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "schema.yaml entity") || !strings.Contains(err.Error(), "single entity authority") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want root schema.yaml entity selector rejection", err)
 	}
 }
 
