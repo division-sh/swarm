@@ -121,7 +121,7 @@ func (i *FlowTemplateInstanceDeclaration) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("template instance must be a mapping")
 	}
-	var out FlowTemplateInstanceDeclaration
+	out := FlowTemplateInstanceDeclaration{Declared: true}
 	for idx := 0; idx+1 < len(node.Content); idx += 2 {
 		key := strings.TrimSpace(node.Content[idx].Value)
 		value := node.Content[idx+1]

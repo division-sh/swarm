@@ -220,6 +220,21 @@ account:
 `,
 			want: "not mode: template",
 		},
+		{
+			name: "non template declares empty instance",
+			flowSchema: `
+name: scoring
+mode: static
+instance: {}
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`,
+			flowEntities: "",
+			want:         "not mode: template",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
