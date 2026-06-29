@@ -169,10 +169,6 @@ func (b *WorkflowContractBundle) FlowEntityContractsByID(flowID string) (EntityC
 	return cloneEntityContractsDocument(doc), ok
 }
 
-func (b *WorkflowContractBundle) FlowOwnedEntityContract(flowID string) (string, EntityContract, bool) {
-	return b.FlowPrimaryEntityContract(flowID)
-}
-
 func (b *WorkflowContractBundle) FlowPrimaryEntityContract(flowID string) (string, EntityContract, bool) {
 	resolved, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
