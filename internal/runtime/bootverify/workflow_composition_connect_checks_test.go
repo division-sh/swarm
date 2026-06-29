@@ -225,6 +225,11 @@ func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
 			opts: compositionConnectFixtureOptions{producerAgentEmit: true},
 			want: "agent_emit_payload_unproven",
 		},
+		{
+			name: "auto_emit_on_create cannot prove carried field",
+			opts: compositionConnectFixtureOptions{producerAutoEmit: true},
+			want: "auto_emit_payload_unproven",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -347,6 +352,7 @@ type compositionConnectFixtureOptions struct {
 	omitProducerEmitField      bool
 	producerVerticalIDType     string
 	producerAgentEmit          bool
+	producerAutoEmit           bool
 	duplicateProducerOutputKey bool
 }
 
@@ -679,6 +685,7 @@ requires:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
 mode: static
+`+producerAutoEmitOnCreateBlock(opts)+`
 pins:
   outputs:
     events:
@@ -722,6 +729,15 @@ producer-node:
         fields:
 `+emitField+`
 `)
+}
+
+func producerAutoEmitOnCreateBlock(opts compositionConnectFixtureOptions) string {
+	if !opts.producerAutoEmit {
+		return ""
+	}
+	return `auto_emit_on_create:
+  event: deploy.done
+`
 }
 
 func writeCompositionConnectConsumerFlow(t *testing.T, root string, opts compositionConnectFixtureOptions) {
