@@ -40,6 +40,9 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 	if plan.Address == nil || plan.Address.By != "vertical_id" {
 		t.Fatalf("Address = %#v, want loaded vertical_id address", plan.Address)
 	}
+	if got, want := plan.ResolutionKind, ConnectResolutionStatic; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
+	}
 	if plan.Target.FlowInstance != "consumer" {
 		t.Fatalf("Target = %#v, want concrete static consumer route", plan.Target)
 	}
@@ -70,6 +73,9 @@ func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) 
 	}
 	if plan.InstanceKey == nil {
 		t.Fatal("InstanceKey = nil, want canonical receiver instance key evidence")
+	}
+	if got, want := plan.ResolutionKind, ConnectResolutionInstanceKey; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
 	}
 	if got, want := plan.Source.Key, "vertical_id"; got != want {
 		t.Fatalf("Source.Key = %q, want %q", got, want)
@@ -118,6 +124,69 @@ func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) 
 	})
 	if ambiguous.Failure != ConnectFailureTargetAmbiguous {
 		t.Fatalf("ambiguous Failure = %q, want %q", ambiguous.Failure, ConnectFailureTargetAmbiguous)
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeAddressedTemplateConnectRoutePlanPackageFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if plan.Address == nil {
+		t.Fatal("Address = nil, want addressed-input route evidence")
+	}
+	if plan.InstanceKey != nil {
+		t.Fatalf("InstanceKey = %#v, want nil when receiver input declares address", plan.InstanceKey)
+	}
+	if got, want := plan.ResolutionKind, ConnectResolutionAddress; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
+	}
+
+	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{
+			"customer_id": "cust-1",
+			"vertical_id": "v-wrong",
+		},
+		Descriptors: []Descriptor{
+			{
+				EntityID:     "ent-address",
+				FlowInstance: "consumer/addressed",
+				AddressFields: map[string]string{
+					"entity.customer_id": "cust-1",
+					"entity.vertical_id": "v-other",
+				},
+			},
+			{
+				EntityID:     "ent-instance",
+				FlowInstance: "consumer/instance-key",
+				AddressFields: map[string]string{
+					"entity.customer_id": "cust-other",
+					"entity.vertical_id": "v-wrong",
+				},
+			},
+		},
+		SupportedAddressTargets: []string{"entity.customer_id"},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	}
+	if got, want := materialized.Target.FlowInstance, "consumer/addressed"; got != want {
+		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
 	}
 }
 
@@ -186,6 +255,9 @@ func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 	}
 	if got, want := plan.TargetKind, ConnectTargetKindTarget; got != want {
 		t.Fatalf("TargetKind = %q, want %q", got, want)
+	}
+	if got, want := plan.ResolutionKind, ConnectResolutionStatic; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
 	}
 	if plan.Address == nil || plan.Address.By != "vertical_id" || plan.Address.Source != "payload.vertical_id" || plan.Address.Target != "entity.vertical_id" {
 		t.Fatalf("Address = %#v, want vertical_id payload/entity mapping", plan.Address)
@@ -785,6 +857,73 @@ pins:
 deployment:
   vertical_id:
     type: string
+`)
+	return root
+}
+
+func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: addressed-template-connect-route-plan-package
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: template
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_completed
+    delivery: one
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: addressed-template-connect-route-plan-package\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFlowFixture(t, root, "producer", `
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id, customer_id]
+`, "deploy.done:\n  vertical_id: string\n  customer_id: string\n", "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: template
+instance:
+  by: vertical_id
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.done
+        address:
+          by: customer_id
+          source: payload.customer_id
+          target: entity.customer_id
+          cardinality: one
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n  customer_id: string\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+deployment:
+  vertical_id:
+    type: string
+  customer_id:
+    type: string
+    indexed: true
 `)
 	return root
 }

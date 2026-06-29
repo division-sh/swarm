@@ -370,7 +370,9 @@ seam_families:
     notes: >
       Lowered ConnectRoutePlan is the typed route-intent artifact consumed by
       EventBus planning. #1494 classifies it as route authority input and guard
-      surface; #1495 owns broader producer migration.
+      surface; #1495 owns broader producer migration. #1545 adds an explicit
+      ResolutionKind discriminant so addressed-input, instance-key, broadcast,
+      and static route authority are not selected by nil-field ordering.
   - id: route_table_resolve_role_separation
     layer: route_topology
     classification: valid_consumer

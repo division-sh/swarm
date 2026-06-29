@@ -323,6 +323,7 @@ rows:
       - {kind: issue, issue: 1494}
       - {kind: issue, issue: 1545}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
@@ -330,8 +331,10 @@ rows:
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
     notes: >
       ConnectRoutePlan is a typed route-intent input, not an untracked string
-      fallback. #1495 owns additional typed producer migration after this
-      guardrail is in place.
+      fallback. #1545 records the selected route authority in ResolutionKind so
+      explicit addressed-input routing cannot be shadowed by addressless
+      instance-key materialization. #1495 owns additional typed producer
+      migration after this guardrail is in place.
 
   - id: route_table_resolve_role_separation
     concept: RouteTable.Resolve usages must be classified by role instead of treated as generic route authority.
@@ -400,6 +403,7 @@ rows:
       - {kind: issue, issue: 1494}
       - {kind: issue, issue: 1545}
       - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget}

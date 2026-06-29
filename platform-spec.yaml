@@ -5693,7 +5693,9 @@ flow_model:
             adapter_and_map: Explicit adapter plus sorted address-key map entries used for alias/key adaptation.
             delivery: one, many, broadcast, or reply after analyzer/default inference.
             target_kind: target for singular delivery, target_set for fanout/broadcast, reply for reply-lineage delivery.
+            resolution_kind: static, address, instance_key, or broadcast; materialization MUST consume this discriminant and MUST NOT select route authority from nil-field ordering.
             address_rule: Receiver-owned address key, source expression, target expression, cardinality, and mode when runtime descriptor materialization is required.
+            instance_key_rule: Receiver-owned template instance fields, on_missing, and on_conflict when an addressless template receiver is selected by producer key/carries plus receiver instance.by.
             reply_lineage: 'The explicit reply lineage map for delivery: reply.'
             static_target_route: Static receiver flows may lower immediately to a concrete target or single target_set member using the receiver flow path and canonical flow-instance entity id.
             runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
@@ -5709,15 +5711,20 @@ flow_model:
             unsupported_descriptor_targets: Nested entity paths, undeclared or unindexed entity fields, config.<field>, instance.<field>, and other arbitrary business fields remain fail-closed unless a later approved spec+runtime child promotes a typed descriptor/index owner for those forms.
         implementation_slice_1545:
           status: merge_bearing_runtime_behavior
-          canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
+          canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.ResolutionKind + ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
           rule: |
             Same-name parent connect into a template receiver MUST lower to an
-            explicit ConnectRoutePlan instance-key decision when the producer
-            output pin declares `key/carries` and the receiver resolves
-            `instance.by` through WorkflowContractBundle.ResolveFlowTemplateInstance.
+            explicit ConnectRoutePlan `ResolutionKind: instance_key` decision
+            when the receiver input pin is addressless, the producer output pin
+            declares `key/carries`, and the receiver resolves `instance.by`
+            through WorkflowContractBundle.ResolveFlowTemplateInstance.
             The lowered plan MUST carry producer key/carries evidence and
-            receiver instance-key fields separately from the legacy/advanced
-            addressed-input `Address` descriptor model.
+            receiver instance-key fields separately from the explicit
+            addressed-input `Address` descriptor model. If the receiver input
+            pin declares `address`, lowering MUST keep `ResolutionKind: address`
+            and MUST NOT also select the addressless instance-key route; the
+            addressed-input descriptor model remains the canonical owner for
+            that explicit addressed surface.
 
             Runtime materialization MUST derive key material from the inbound
             event payload using TemplateInstanceContract.CanonicalKeyMaterial,
@@ -5729,7 +5736,7 @@ flow_model:
             descriptors, unsupported evidence shape, or missing receiver carrier
             MUST fail closed with zero executable routes.
           non_authoritative_for_this_slice:
-          - receiver input-pin address
+          - receiver input-pin address for the addressless normal instance-key path
           - receiver select_entity/select_or_create_entity
           - producer target.match
           - producer broadcast:true

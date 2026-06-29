@@ -95,11 +95,14 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	slice1545 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1545")
 	assertScalarValue(t, mustMappingValue(t, slice1545, "status"), "merge_bearing_runtime_behavior")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.ResolutionKind")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: instance_key")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: address")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "WorkflowContractBundle.ResolveFlowTemplateInstance")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "TemplateInstanceContract.CanonicalKeyMaterial")
-	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address") {
-		t.Fatal("implementation_slice_1545 must classify receiver input-pin address as non-authoritative for normal instance-key routing")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address for the addressless normal instance-key path") {
+		t.Fatal("implementation_slice_1545 must classify receiver input-pin address as non-authoritative only for normal instance-key routing")
 	}
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
