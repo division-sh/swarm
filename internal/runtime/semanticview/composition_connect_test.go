@@ -42,6 +42,12 @@ func TestCompositionConnectFactsExposeTypedPinsAndParentConnect(t *testing.T) {
 	if got, want := outputPins[0].PinName(), "deploy_done"; got != want {
 		t.Fatalf("output pin name = %q, want %q", got, want)
 	}
+	if got, want := outputPins[0].Key, "vertical_id"; got != want {
+		t.Fatalf("output pin key = %q, want %q", got, want)
+	}
+	if got, want := len(outputPins[0].Carries), 1; got != want || outputPins[0].Carries[0] != "vertical_id" {
+		t.Fatalf("output pin carries = %#v, want [vertical_id]", outputPins[0].Carries)
+	}
 
 	connects := source.CompositionConnects()
 	if len(connects) != 1 {
@@ -133,7 +139,9 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
-`, "deploy.done: {}\n", "{}\n")
+        key: vertical_id
+        carries: [vertical_id]
+`, "deploy.done:\n  vertical_id: string\n", "{}\n")
 	writeCompositionConnectFlow(t, root, "consumer", `
 pins:
   inputs:

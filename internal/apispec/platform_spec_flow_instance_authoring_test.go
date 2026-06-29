@@ -132,6 +132,12 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "output_pin_key_carries"), "#1544")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_to_instance_route_planning"), "#1545")
 	assertScalarValue(t, mustYAMLPath(t, composition, "split_children", "connect_key_adapters"), "#1546")
+	outputContract := mustMappingValue(t, composition, "output_pin_key_carries_contract")
+	assertScalarValue(t, mustMappingValue(t, outputContract, "implementation_tracker"), "#1544")
+	assertScalarContains(t, mustMappingValue(t, outputContract, "canonical_code_owner"), "FlowOutputEventPin")
+	assertScalarContains(t, mustMappingValue(t, outputContract, "canonical_code_owner"), "checkOutputPinKeyCarriesValidation")
+	assertScalarContains(t, mustMappingValue(t, outputContract, "rule"), "MUST declare `key` and `carries`")
+	assertScalarContains(t, mustMappingValue(t, outputContract, "non_authoritative_paths"), "connect.map")
 
 	contained := mustMappingValue(t, authoring, "contained_state_model")
 	assertScalarValue(t, mustMappingValue(t, contained, "implementation_tracker"), "#1548")

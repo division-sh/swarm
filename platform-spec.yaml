@@ -4282,6 +4282,14 @@ engine:
       scope: per-node
       trigger: A handler's sets_gate references a gate name not declared in the node's gate_state schema.
       when: boot-only
+    - id: output_pin_key_carries_validation
+      severity: error
+      scope: per-output-pin-and-emit-site
+      trigger: A connected producer output pin that participates in instance-key composition is missing key/carries evidence,
+        declares ambiguous, duplicate, undeclared, or non-scalar carried fields, or an authored producer emit site cannot
+        statically prove every declared key/carries payload field. Agent emit_events declarations for key/carries output
+        pins fail closed until a static payload construction surface exists.
+      when: boot-only
     - id: input_pin_wiring
       severity: warning
       scope: per-flow
@@ -5205,6 +5213,26 @@ flow_model:
         output_pin_key_carries: '#1544'
         connect_to_instance_route_planning: '#1545'
         connect_key_adapters: '#1546'
+      output_pin_key_carries_contract:
+        status: merge_bearing_contract_behavior
+        implementation_tracker: '#1544'
+        canonical_code_owner: internal/runtime/contracts.FlowOutputEventPin + internal/runtime/bootverify.checkOutputPinKeyCarriesValidation
+        rule: >
+          Producer output event pins used for downstream instance-key composition
+          MUST declare `key` and `carries`. `key` names the top-level payload
+          field that supplies the producer's route identity evidence. `carries`
+          names every top-level payload field the output pin promises as
+          producer interface evidence and MUST include the key. The verifier
+          type-checks those fields against the producer event schema and
+          requires supported node emit sites to statically construct them.
+          Agent `emit_events` declarations that name key/carries output pins
+          fail closed until an explicit static payload construction surface is
+          available.
+        non_authoritative_paths: >
+          Event payload schema fields, connect.map source expressions, receiver
+          address rules, producer target.match, broadcast:true, raw/direct
+          subscribers, and RouteTable/live subscription lookup are not the
+          canonical producer evidence owner for this class.
     contained_state_model:
       status: spec_vocabulary_only
       implementation_tracker: '#1548'
@@ -5479,6 +5507,29 @@ flow_model:
         fail-closed, and lowers each accepted connection into concrete route-plan facts consumed by runtime RoutePlan.
         Producer emit sites MUST NOT own consumer routing on the common composed path.
       authored_shapes:
+        output_event_pin:
+          location: schema.yaml pins.outputs.events
+          canonical_form: >
+            An output event pin MAY be authored as an object `{name, event, key, carries}`.
+            `name` is the local public output pin name. `event` is the local event identity
+            emitted by the producer. `key` names the top-level payload field that carries
+            instance-key producer evidence for normal parent-composed delivery. `carries`
+            is the top-level payload field inventory promised by the producer output pin
+            and MUST include `key` when `key` is present.
+          scalar_form: >
+            A scalar output event pin remains valid for outputs that do not participate in
+            instance-key composition. A scalar output pin consumed by an addressed parent
+            connect cannot prove producer key evidence and fails closed.
+          example: |
+            pins:
+              outputs:
+                events:
+                  - name: deploy_completed
+                    event: deploy.completed
+                    key: vertical_id
+                    carries:
+                      - vertical_id
+                      - component_id
         addressed_input_pin:
           location: schema.yaml pins.inputs.events
           canonical_form: >
@@ -5533,7 +5584,7 @@ flow_model:
                 to: operating.root_ready
                 delivery: one
       ownership_split:
-        output_pins: Output pins own producer event identity and public producer interface only.
+        output_pins: Output pins own producer event identity and public producer key/carries evidence for instance-key composition.
         input_pins: Input pins own receiver interface and receiver address resolution requirements.
         parent_connect: Parent connect owns inter-flow delivery topology, including point-to-point, broadcast/fan-out, and reply/sender routing.
         analyzer: Analyzer owns validation, safe inference, alias/adapter expansion, and lowering to concrete route-plan facts.
@@ -5548,7 +5599,9 @@ flow_model:
         receiver_root_unsupported: Root receiver endpoints are not supported by #1508; `to` must name a loaded receiver flow input pin.
         receiver_input_pin_exists: The `to` pin must exist in the receiver schema input event pins.
         event_alias_or_adapter_valid: Differing local event names or payload keys require an explicit alias/adapter or unambiguous bind-derived alias; raw same-name fallback is not valid for declared imported package pins.
-        output_carries_address_key: The producer output event payload or envelope must carry every receiver address key required by the target input pin, or the connect entry must map it explicitly.
+        output_carries_address_key: The producer output pin key/carries declaration must prove the top-level payload key used
+          by the receiver address or explicit connect.map source. Event payload schema and connect.map are validation inputs,
+          not the canonical producer evidence owner; renamed-key adapters are explicit sibling work.
         receiver_address_rule_present: Stateful or instance-addressed receivers must declare or inherit an input-pin address rule unless the connection lowers to a statically unique receiver.
         key_types_compatible: Source and target key types must be compatible before route-plan lowering.
         delivery_topology_valid: The declared delivery topology must match addressed input cardinality and available receiver instances.
@@ -5559,7 +5612,7 @@ flow_model:
         owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering
         consumes:
         - parent package.yaml connect entries
-        - producer output pin event identity, including explicit package-root `.pin_name` output endpoints
+        - producer output pin event identity and verified key/carries evidence, including explicit package-root `.pin_name` output endpoints
         - receiver addressed input pin rules
         - import-boundary pin alias bindings
         - explicit adapter/map entries
@@ -5910,7 +5963,9 @@ flow_model:
       description: Events the flow emits across its public interface. Optional, but when an emit site emits one of these
         events, pin routing is active and routing must be supplied by parent connect lowering, explicit dynamic target escape
         hatch, structural ParentRoute fallback when no lowered connect route applies, an eligible static child delivery-entity
-        route, or explicit broadcast escape hatch.
+        route, or explicit broadcast escape hatch. Structured output pins may declare `key` and `carries`; for connected
+        instance-key composition these fields are the canonical producer-side evidence that the output event carries the
+        payload key material consumed by parent `connect`.
       required: false
     input_data_pins:
       description: Entity fields the flow reads. Required pins must be written by a prior flow or initial data.
@@ -9526,6 +9581,53 @@ static_analyzer:
       - broad #1466 composition-first parent closure
       - #1474 runtime generated-agent EventBus RoutePlan admission, already closed separately
       - marketplace/address-key or other final turnkey composition behavior outside static verify coverage
+  slice_3a0_output_pin_key_carries_validation:
+    id: output_pin_key_carries_validation
+    domain: semantic_validity
+    authority: hard_invalidity
+    severity: error
+    canonical_owner: internal/runtime/bootverify.checkOutputPinKeyCarriesValidation
+    supported_surface: cmd/swarm verify
+    implementation_tracker: '#1544'
+    spec_basis:
+    - flow_model.flow_instance_authoring.composition_model.output_pin_key_carries_contract
+    - flow_model.flow_package.composition_routing
+    - contract_formats.event_schema
+    scope:
+      description: >
+        For producer output event pins used by addressed parent connect /
+        instance-key composition, verify that the output pin declares canonical
+        key/carries evidence and that supported producer emit sites statically
+        construct every declared key/carries payload field.
+      applies_to:
+      - schema.yaml pins.outputs.events structured output pin objects
+      - connected output pins consumed by addressed parent connect entries
+      - handler top-level single-emit
+      - rules entries
+      - on_complete branches
+      - accumulate.on_timeout and accumulate.on_complete branches
+      - fan_out per-item emit
+      - guard on_fail: escalate
+      - agent emit_events declarations
+      excludes:
+      - RoutePlan runtime lowering and EventBus dispatch, tracked by #1545
+      - renamed-key adapters, tracked by #1546
+      - receiver select_entity demotion, tracked by #1547
+      - producer target/broadcast compatibility
+    validation_requirements:
+      connected_output_declares_key: Addressed parent connect outputs must declare key.
+      connected_output_declares_carries: Addressed parent connect outputs must declare carries.
+      key_is_carried: The declared key must also appear in carries.
+      carries_are_unique: Duplicate carried fields fail closed.
+      carries_are_top_level_payload_fields: Key/carries fields are top-level payload fields in this slice.
+      event_schema_declares_fields: The producer event schema must declare every key/carries field.
+      carried_fields_are_scalar: Key/carries fields must be scalar key material, not list/object payloads.
+      node_emit_payload_proves_fields: Supported node emit sites must include every key/carries field in emit.fields.
+      agent_emit_payload_fails_closed: Agent emit_events for key/carries output pins fail closed until static payload construction exists.
+    old_non_authoritative_paths: >
+      Event payload schema alone, connect.map source, receiver input-pin address
+      rules, target.match, broadcast:true, direct/raw subscribers, RouteTable, or
+      live subscription lookup cannot satisfy producer key/carries evidence.
   slice_3a1_composition_connect_validation:
     id: composition_connect_validation
     domain: semantic_validity
@@ -9560,8 +9662,9 @@ static_analyzer:
       event_alias_or_adapter_valid: Differing producer and receiver event identities require an explicit adapter or an
         import-boundary alias from requires/bind on either the producer output side or receiver input side; alias/bind
         adapts names only and does not own topology.
-      output_carries_address_key: The producer output event payload or explicit connect.map source must carry every receiver
-        address key needed by the input pin.
+      output_carries_address_key: The producer output pin key/carries declaration must prove the top-level payload key
+        consumed by the receiver address or explicit connect.map source; event payload schema and connect.map are
+        validation inputs, not the producer evidence owner.
       receiver_address_rule_present: Template or instance-addressed receivers must declare an addressed input pin unless
         delivery is an explicit broadcast.
       key_types_compatible: Payload/config/entity/instance source and target key types must be compatible before lowering.

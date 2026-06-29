@@ -243,6 +243,8 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
+        key: vertical_id
+        carries: [vertical_id, component_id]
 `), &doc); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -271,6 +273,12 @@ pins:
 	if got, want := doc.Pins.Outputs.EventPins[0].PinName(), "deploy_done"; got != want {
 		t.Fatalf("output PinName = %q, want %q", got, want)
 	}
+	if got, want := doc.Pins.Outputs.EventPins[0].Key, "vertical_id"; got != want {
+		t.Fatalf("output Key = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(doc.Pins.Outputs.EventPins[0].Carries, ","), "vertical_id,component_id"; got != want {
+		t.Fatalf("output Carries = %q, want %q", got, want)
+	}
 }
 
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedAddressedPinFields(t *testing.T) {
@@ -285,6 +293,22 @@ pins:
         address:
           by: vertical_id
           unsupported: nope
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: invalid-output-pins
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        unknown: nope
 `), &doc)
 	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
 		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)

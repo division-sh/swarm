@@ -170,6 +170,76 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	}
 }
 
+func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
+	tests := []struct {
+		name string
+		opts compositionConnectFixtureOptions
+		want string
+	}{
+		{
+			name: "connected output missing key",
+			opts: compositionConnectFixtureOptions{omitProducerOutputKey: true},
+			want: "missing_key",
+		},
+		{
+			name: "connected output missing carries",
+			opts: compositionConnectFixtureOptions{omitProducerOutputCarries: true},
+			want: "missing_carries",
+		},
+		{
+			name: "key not listed in carries",
+			opts: compositionConnectFixtureOptions{producerOutputCarries: "[component_id]"},
+			want: "key_not_carried",
+		},
+		{
+			name: "duplicate carried field",
+			opts: compositionConnectFixtureOptions{producerOutputCarries: "[vertical_id, vertical_id]"},
+			want: "duplicate_carry_field",
+		},
+		{
+			name: "ambiguous output key",
+			opts: compositionConnectFixtureOptions{duplicateProducerOutputKey: true},
+			want: "ambiguous_output_key",
+		},
+		{
+			name: "declared key missing from event payload schema",
+			opts: compositionConnectFixtureOptions{
+				producerOutputKey:     "component_id",
+				producerOutputCarries: "[component_id]",
+				mapSource:             "payload.component_id",
+			},
+			want: "does not declare payload field component_id",
+		},
+		{
+			name: "declared key is not scalar",
+			opts: compositionConnectFixtureOptions{producerVerticalIDType: "[string]"},
+			want: "not a scalar key type",
+		},
+		{
+			name: "node emit does not prove carried field",
+			opts: compositionConnectFixtureOptions{omitProducerEmitField: true},
+			want: "emit_payload_missing_key",
+		},
+		{
+			name: "agent emit_events cannot prove carried field",
+			opts: compositionConnectFixtureOptions{producerAgentEmit: true},
+			want: "agent_emit_payload_unproven",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeCompositionConnectBootverifyFixture(t, tc.opts)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Errors(), "output_pin_key_carries_validation", tc.want) {
+				t.Fatalf("expected output_pin_key_carries_validation %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_AllowsImportBoundaryAliasAsConnectEventAdapter(t *testing.T) {
 	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{
 		consumerRequiresInput: true,
@@ -242,21 +312,29 @@ func TestRun_TreatsParentCompositionConnectAsEventTopologyProof(t *testing.T) {
 }
 
 type compositionConnectFixtureOptions struct {
-	connectFrom             string
-	connectTo               string
-	delivery                string
-	noAdapter               bool
-	mapSource               string
-	mapTarget               string
-	omitMap                 bool
-	consumerMode            string
-	consumerScalarInput     bool
-	consumerEntityType      string
-	consumerEntityUnindexed bool
-	consumerRequiresInput   bool
-	consumerInputBind       string
-	producerRequiresOutput  bool
-	producerOutputBind      string
+	connectFrom                string
+	connectTo                  string
+	delivery                   string
+	noAdapter                  bool
+	mapSource                  string
+	mapTarget                  string
+	omitMap                    bool
+	consumerMode               string
+	consumerScalarInput        bool
+	consumerEntityType         string
+	consumerEntityUnindexed    bool
+	consumerRequiresInput      bool
+	consumerInputBind          string
+	producerRequiresOutput     bool
+	producerOutputBind         string
+	producerOutputKey          string
+	producerOutputCarries      string
+	omitProducerOutputKey      bool
+	omitProducerOutputCarries  bool
+	omitProducerEmitField      bool
+	producerVerticalIDType     string
+	producerAgentEmit          bool
+	duplicateProducerOutputKey bool
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
@@ -509,6 +587,8 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
@@ -563,6 +643,26 @@ requires:
   outputs: [deploy.done]
 `)
 	}
+	outputKeyBlock := ""
+	if !opts.omitProducerOutputKey {
+		outputKeyBlock += "\n        key: " + firstTestValue(opts.producerOutputKey, "vertical_id")
+	}
+	if !opts.omitProducerOutputCarries {
+		outputKeyBlock += "\n        carries: " + firstTestValue(opts.producerOutputCarries, "[vertical_id]")
+	}
+	duplicateOutputPinBlock := ""
+	if opts.duplicateProducerOutputKey {
+		duplicateOutputPinBlock = `
+      - name: deploy_done_alias
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
+`
+	}
+	emitField := "          vertical_id: payload.vertical_id\n"
+	if opts.omitProducerEmitField {
+		emitField = ""
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
 mode: static
@@ -571,18 +671,32 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
+`+outputKeyBlock+`
+`+duplicateOutputPinBlock+`
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
 	if !opts.producerRequiresOutput {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
 	}
+	verticalIDType := firstTestValue(opts.producerVerticalIDType, "string")
+	verticalIDSchema := "  vertical_id: " + verticalIDType + "\n"
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
 deploy.requested:
   vertical_id: string
 deploy.done:
-  vertical_id: string
+`+verticalIDSchema+`
 `)
+	producerAgents := "{}\n"
+	if opts.producerAgentEmit {
+		producerAgents = `
+producer-agent:
+  id: producer-agent
+  type: claude
+  role: producer
+  emit_events: [deploy.done]
+`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), producerAgents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
 producer-node:
   id: producer-node
@@ -593,7 +707,7 @@ producer-node:
       emit:
         event: deploy.done
         fields:
-          vertical_id: payload.vertical_id
+`+emitField+`
 `)
 }
 
