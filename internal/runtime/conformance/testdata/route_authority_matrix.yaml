@@ -321,8 +321,12 @@ rows:
       - {kind: issue, issue: 1472}
       - {kind: issue, issue: 1473}
       - {kind: issue, issue: 1494}
+      - {kind: issue, issue: 1545}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlanDoesNotDependOnRawPinNamesOrProducerTargets}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsSingularTargetWithoutLiveSubscriber}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
     notes: >
       ConnectRoutePlan is a typed route-intent input, not an untracked string
@@ -394,7 +398,10 @@ rows:
     proof_refs:
       - {kind: issue, issue: 1479}
       - {kind: issue, issue: 1494}
+      - {kind: issue, issue: 1545}
       - {kind: go_test, name: TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
+      - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForBusinessFieldDescriptorGaps}

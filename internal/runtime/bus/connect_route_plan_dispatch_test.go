@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -661,6 +663,169 @@ func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTarget(t *t
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *testing.T) {
+	source := connectRoutePlanInstanceKeySource(t)
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{{
+			InstanceID:    "one",
+			EntityID:      "ent-1",
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), want) || len(routePlan.DeliveryRoutes()) != 1 {
+		t.Fatalf("route plan delivery routes = %#v, want instance-key route %#v", routePlan.DeliveryRoutes(), want)
+	}
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, want) || len(plan.DeliveryRoutes) != 1 {
+		t.Fatalf("preflight delivery routes = %#v, want instance-key route %#v", plan.DeliveryRoutes, want)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want instance-key route %#v", store.routes[eventID], want)
+	}
+	live, internal, replayRoutes, err := eb.replayRecipientsForCommittedEvent(context.Background(), evt, nil, runtimereplayclaim.CommittedReplayScopeSubscribed)
+	if err != nil {
+		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
+	}
+	if !containsString(live, "consumer-node-one") || !containsString(internal, "consumer-node-one") {
+		t.Fatalf("replay live=%#v internal=%#v, want consumer-node-one from persisted connect route", live, internal)
+	}
+	if !deliveryRoutesContain(replayRoutes, want) {
+		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t *testing.T) {
+	tests := []struct {
+		name          string
+		payload       string
+		flowInstances []ActiveFlowInstanceDescriptor
+		addRoutes     []string
+		wantFailure   runtimepinrouting.TargetFailure
+	}{
+		{
+			name:        "missing source key value",
+			payload:     `{}`,
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureAddressValueMissing),
+		},
+		{
+			name:    "no receiver instance under rejecting policy",
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "two",
+				EntityID:      "ent-2",
+				FlowInstance:  "consumer/two",
+				AddressFields: map[string]string{"entity.vertical_id": "v-2"},
+			}},
+			addRoutes:   []string{"two"},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
+		},
+		{
+			name:    "ambiguous receiver instance key",
+			payload: `{"vertical_id":"v-1"}`,
+			flowInstances: []ActiveFlowInstanceDescriptor{
+				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			},
+			addRoutes:   []string{"one", "two"},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanInstanceKeySource(t)
+			store := &connectRoutePlanDescriptorStore{
+				targetRouteMemoryStore: newTargetRouteMemoryStore(),
+				flowInstances:          tc.flowInstances,
+			}
+			eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			for _, instanceID := range tc.addRoutes {
+				if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", instanceID)}); err != nil {
+					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+				}
+			}
+			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
+			defer eb.Unsubscribe("raw-source-listener")
+			eventID := uuid.NewString()
+			evt := eventtest.RootIngress(eventID,
+				events.EventType("producer/deploy.done"), "", "", json.RawMessage(tc.payload), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+			if err != nil {
+				t.Fatalf("planSubscribedRoutePlan: %v", err)
+			}
+			if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+				t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+			}
+			if routePlan.TargetFailure != tc.wantFailure {
+				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
+			}
+			if len(routePlan.LiveRecipients) != 0 || len(routePlan.DeliveryIntents) != 0 || len(routePlan.RoutedRecipients) != 0 ||
+				len(routePlan.SubscribedRecipients) != 0 || len(routePlan.RecipientIDs()) != 0 ||
+				len(routePlan.PersistedRecipientIDs()) != 0 || len(routePlan.DeliveryRoutes()) != 0 {
+				t.Fatalf("fail-closed instance-key route exposed lower-precedence fallback: live=%#v intents=%#v routed=%#v subscriptions=%#v recipients=%#v persisted=%#v routes=%#v",
+					routePlan.LiveRecipients, routePlan.DeliveryIntents, routePlan.RoutedRecipients, routePlan.SubscribedRecipients,
+					routePlan.RecipientIDs(), routePlan.PersistedRecipientIDs(), routePlan.DeliveryRoutes())
+			}
+
+			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if got, want := plan.TargetFailure, string(tc.wantFailure); got != want {
+				t.Fatalf("preflight target failure = %q, want %q", got, want)
+			}
+			if len(plan.Recipients) != 0 || len(plan.PersistedRecipients) != 0 || len(plan.RoutedRecipients) != 0 ||
+				len(plan.SubscriptionRecipients) != 0 || len(plan.DeliveryRoutes) != 0 {
+				t.Fatalf("preflight exposed lower-precedence fallback: recipients=%#v persisted=%#v routed=%#v subscriptions=%#v routes=%#v",
+					plan.Recipients, plan.PersistedRecipients, plan.RoutedRecipients, plan.SubscriptionRecipients, plan.DeliveryRoutes)
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if routes := store.routes[eventID]; len(routes) != 0 {
+				t.Fatalf("persisted delivery routes = %#v, want none for fail-closed instance-key route", routes)
+			}
+			requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
+		})
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanPersistsIndexedBusinessFieldTargetSet(t *testing.T) {
 	source := connectRoutePlanBusinessFieldSource("many", true)
 	store := &connectRoutePlanDescriptorStore{
@@ -1137,6 +1302,103 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 	}
 	if !deliveryRoutesContain(got.DeliveryRoutes(), connectRoutePlanStaticDeliveryRoute()) {
 		t.Fatalf("normalized route plan delivery routes = %#v, want static connect route", got.DeliveryRoutes())
+	}
+}
+
+func connectRoutePlanInstanceKeySource(t testing.TB) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeConnectRoutePlanInstanceKeyFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: instance-key-connect-route-plan-bus
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: template
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_completed
+    delivery: one
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-bus\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: template
+instance:
+  by: vertical_id
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.done
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+deployment:
+  vertical_id:
+    type: string
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
+consumer-node:
+  id: consumer-node-{instance_id}
+  execution_type: system_node
+  event_handlers:
+    deploy.done: {}
+`)
+	return root
+}
+
+func writeConnectRoutePlanBusFixtureFile(t testing.TB, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
 	}
 }
 

@@ -38,7 +38,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	ownership := mustMappingValue(t, composition, "ownership_split")
 	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns inter-flow delivery topology")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "key/carries evidence")
-	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "receiver address resolution")
+	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "receiver interface")
 	assertScalarContains(t, mustMappingValue(t, ownership, "producer_emit_target"), "exceptional dynamic routing")
 
 	verify := mustMappingValue(t, composition, "analyzer_verify_requirements")
@@ -49,7 +49,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"receiver_input_pin_exists",
 		"event_alias_or_adapter_valid",
 		"output_carries_address_key",
-		"receiver_address_rule_present",
+		"receiver_route_key_present",
 		"key_types_compatible",
 		"delivery_topology_valid",
 		"reply_lineage_usable",
@@ -66,6 +66,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	for _, want := range []string{
 		"parent package.yaml connect entries",
 		"producer output pin event identity and verified key/carries evidence, including explicit package-root `.pin_name` output endpoints",
+		"receiver template instance.by / on_missing / on_conflict contracts from WorkflowContractBundle.ResolveFlowTemplateInstance",
 		"receiver addressed input pin rules",
 		"import-boundary pin alias bindings",
 	} {
@@ -91,6 +92,15 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, slice1473, "status"), "merge_bearing_runtime_behavior")
 	assertScalarContains(t, mustMappingValue(t, slice1473, "canonical_code_owner"), "internal/runtime/bus.RoutePlan")
 	assertScalarContains(t, mustMappingValue(t, slice1473, "rule"), "Supported EventBus publish/preflight/outbox dispatch consumes lowered ConnectRoutePlan")
+
+	slice1545 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1545")
+	assertScalarValue(t, mustMappingValue(t, slice1545, "status"), "merge_bearing_runtime_behavior")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "WorkflowContractBundle.ResolveFlowTemplateInstance")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "TemplateInstanceContract.CanonicalKeyMaterial")
+	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address") {
+		t.Fatal("implementation_slice_1545 must classify receiver input-pin address as non-authoritative for normal instance-key routing")
+	}
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
 	assertScalarValue(t, mustMappingValue(t, slice1475, "status"), "merge_bearing_runtime_behavior")

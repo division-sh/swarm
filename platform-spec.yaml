@@ -462,8 +462,9 @@ contract_formats:
         nodes.yaml subscribes_to, and event_handlers keys. The platform matches local event names
         against local subscriber declarations.'
       cross_flow: 'Between flows, authored topology derives from parent package connect entries
-        over output and input pins. Output pins declare event identity, input pins declare receiver
-        address resolution, and parent connect lowers into concrete route-plan facts. See
+        over output and input pins. Output pins declare event identity and producer key/carries
+        evidence, template receivers declare instance.by route keys, input pins declare receiver
+        interface and explicit addressed-input routing when needed, and parent connect lowers into concrete route-plan facts. See
         flow_model.flow_package.composition_routing and engine.cross_flow_routing for details.
         Explicit scoped subscriptions (e.g., scoring/vertical.shortlisted) remain an escape hatch for
         cases outside the pin/connect interface.'
@@ -588,14 +589,15 @@ contract_formats:
             routing from replay/readback evidence.
         lowered_connect_route_plan_consumption:
           status: merge_bearing_runtime_behavior
-          implementation_slice: '#1473'
+          implementation_slice: '#1473/#1545'
           canonical_code_owner: internal/runtime/bus.RoutePlan via deliveryPlanner.Plan and connectRoutePlanResolver
           consumes:
           - internal/runtime/core/pinrouting.ConnectRoutePlan
           - lowered connect-route failure issues from route_plan_lowering
           - EventBus semantic source selected for the publish operation
+          - producer output key/carries evidence and receiver instance-key evidence carried by ConnectRoutePlan.InstanceKey
           - RouteTable concrete receiver subscribers only after a lowered plan selects the receiver route identity
-          - active flow-instance descriptors for supported identity-style addressed template targets
+          - active flow-instance descriptors for supported receiver instance-key and addressed template targets
           produces:
           - typed RoutePlanDeliveryIntent rows with source=connect_route_plan and reason=lowered_connect_route_plan
           - concrete delivery_target_route values for supported singular event.target delivery
@@ -609,6 +611,10 @@ contract_formats:
             Publish, PublishInMutation, CheckPublishRecipientPlan, and engineOutbox MUST share this RoutePlan authority path.
             Static lowered ConnectRoutePlan matches MUST NOT require or be blocked by legacy active-agent descriptor lookup;
             descriptor loading is limited to lowered plans whose supported target form requires runtime resolution.
+            Same-name template receiver plans MUST materialize from producer output key/carries plus receiver instance.by
+            evidence carried on ConnectRoutePlan.InstanceKey; input-pin address, connect.map, select_entity, producer target,
+            broadcast:true, direct delivery, raw subscribers, handler lookup, delivery rows, replay rows, and readback rows
+            MUST NOT route or rescue that normal instance-key path.
             When a lowered plan matches but cannot materialize or resolve to supported concrete receiver routes, planning MUST
             fail closed and MUST NOT preserve previously inferred live-subscriber fallback recipients. RouteTable may be used
             only as a consumer that locates the concrete receiver handler/carrier for the already-selected target route identity.
@@ -2163,9 +2169,10 @@ engine:
         unless the parent connect, alias/adapter, scoped subscription escape hatch, or explicit target escape hatch
         disambiguates the route.'
       static_pairs: Static-to-static pairs may resolve to a single instance pair at boot.
-      template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from the addressed input
-        pin, or an explicit dynamic target escape hatch at emit/publish time. Structural ParentRoute binding is only a
-        child-to-parent fallback when no lowered connect target applies.
+      template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from producer output
+        key/carries plus receiver instance.by for normal same-name instance-key routing, explicit addressed input-pin
+        descriptor routing for approved addressed surfaces, or an explicit dynamic target escape hatch at emit/publish
+        time. Structural ParentRoute binding is only a child-to-parent fallback when no lowered connect target applies.
     target_resolution:
       precedence:
       - lowered parent connect route plan
@@ -5231,6 +5238,19 @@ flow_model:
         output_pin_key_carries: '#1544'
         connect_to_instance_route_planning: '#1545'
         connect_key_adapters: '#1546'
+      connect_to_instance_route_planning:
+        status: merge_bearing_runtime_behavior
+        implementation_tracker: '#1545'
+        canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
+        rule: >
+          For same-name normal composition into a template receiver, parent
+          `connect` MUST lower the producer output pin `key/carries` evidence
+          and the receiver `instance.by` contract into an explicit
+          instance-key ConnectRoutePlan. The normal path MUST NOT use receiver
+          input-pin `address`, receiver `select_entity`, producer
+          target/broadcast, direct delivery, raw subscribers, RouteTable lookup,
+          handler lookup, delivery rows, or replay/readback rows as the route
+          selector. Renamed key adapters remain #1546.
       output_pin_key_carries_contract:
         status: merge_bearing_contract_behavior
         implementation_tracker: '#1544'
@@ -5519,8 +5539,9 @@ flow_model:
       owner: platform-spec.yaml#flow_model.flow_package.composition_routing
       rule: >
         Parent-authored composition routing is the canonical source authority for common cross-flow pin delivery.
-        Output pins declare the event identity and producer interface; input pins declare the receiver interface and
-        any receiver address resolution; parent package.yaml `connect` entries declare inter-flow delivery topology.
+        Output pins declare the event identity and producer interface/key evidence; input pins declare the receiver interface;
+        template receiver `instance.by` declares the normal receiver instance key; explicit input-pin `address` declares
+        separately approved addressed-input descriptor routing. Parent package.yaml `connect` entries declare inter-flow delivery topology.
         The analyzer verifies those authored facts, infers only safe and unambiguous defaults, rejects ambiguity
         fail-closed, and lowers each accepted connection into concrete route-plan facts consumed by runtime RoutePlan.
         Producer emit sites MUST NOT own consumer routing on the common composed path.
@@ -5556,8 +5577,10 @@ flow_model:
             identity accepted by the receiver handler. `address` declares how the receiver entity or flow instance
             is selected for in-topology delivery.
           scalar_form: >
-            A scalar input event pin remains valid only for receivers that need no receiver address resolution or where
-            the parent connect/lowering rule supplies a complete receiver route without receiver-side key selection.
+            A scalar input event pin remains valid only for receivers that need no explicit addressed-input descriptor
+            routing or where the parent connect/lowering rule supplies a complete receiver route from static topology or
+            producer output key/carries plus receiver instance.by. A scalar input pin on a template receiver is not a
+            receiver-side selector by itself.
           address_fields:
             by: Required receiver address key name when address is present.
             source: Optional source expression such as payload.vertical_id or event.source.entity_id. If omitted, the analyzer may infer it only when the output payload exposes exactly one compatible field for `by`.
@@ -5618,9 +5641,11 @@ flow_model:
         receiver_input_pin_exists: The `to` pin must exist in the receiver schema input event pins.
         event_alias_or_adapter_valid: Differing local event names or payload keys require an explicit alias/adapter or unambiguous bind-derived alias; raw same-name fallback is not valid for declared imported package pins.
         output_carries_address_key: The producer output pin key/carries declaration must prove the top-level payload key used
-          by the receiver address or explicit connect.map source. Event payload schema and connect.map are validation inputs,
+          by the receiver instance.by route key, receiver address, or explicit connect.map source. Event payload schema and connect.map are validation inputs,
           not the canonical producer evidence owner; renamed-key adapters are explicit sibling work.
-        receiver_address_rule_present: Stateful or instance-addressed receivers must declare or inherit an input-pin address rule unless the connection lowers to a statically unique receiver.
+        receiver_route_key_present: Template receivers must resolve a valid instance.by contract for normal same-name
+          instance-key routing, or declare an explicit addressed input-pin route surface. Stateful/static receivers that
+          need no runtime selection may lower to a statically unique receiver.
         key_types_compatible: Source and target key types must be compatible before route-plan lowering.
         delivery_topology_valid: The declared delivery topology must match addressed input cardinality and available receiver instances.
         reply_lineage_usable: Reply delivery must prove usable request lineage; missing or ambiguous lineage fails closed.
@@ -5631,12 +5656,15 @@ flow_model:
         consumes:
         - parent package.yaml connect entries
         - producer output pin event identity and verified key/carries evidence, including explicit package-root `.pin_name` output endpoints
+        - receiver template instance.by / on_missing / on_conflict contracts from WorkflowContractBundle.ResolveFlowTemplateInstance
         - receiver addressed input pin rules
         - import-boundary pin alias bindings
         - explicit adapter/map entries
         produces:
         - semantic producer scope and local output pin identity
+        - producer output key/carries evidence on instance-key connect plans
         - semantic receiver scope and local input pin identity
+        - receiver instance-key evidence on same-name template receiver connect plans
         - external persisted event identity
         - receiver-local handler event identity
         - 'concrete target route for delivery: one'
@@ -5671,7 +5699,7 @@ flow_model:
             runtime_resolution_flag: Template or dynamic receivers keep an explicit runtime-resolution requirement instead of fabricating concrete delivery rows.
           materialization_boundary:
             static_receivers: Static receivers can materialize target route facts during lowering because the receiver flow path is concrete.
-            template_receivers: Template/dynamic receivers may materialize route facts only from explicit addressed-input keys and runtime descriptors, or for delivery:broadcast by enumerating receiver-scope descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
+            template_receivers: Template/dynamic receivers may materialize route facts from receiver instance keys plus runtime descriptors, from explicit addressed-input keys and runtime descriptors, or for delivery:broadcast by enumerating receiver-scope descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
             descriptor_scope: Descriptor materialization MUST reject descriptors whose flow_instance is not the receiver semantic flow path or a child instance under that path before stamping the receiver flow id onto the route.
             supported_descriptor_targets:
             - entity_id / entity.entity_id
@@ -5679,6 +5707,42 @@ flow_model:
             - instance_id / instance.instance_id
             - entity.<field> when the receiver entity contract declares that top-level field with indexed: true
             unsupported_descriptor_targets: Nested entity paths, undeclared or unindexed entity fields, config.<field>, instance.<field>, and other arbitrary business fields remain fail-closed unless a later approved spec+runtime child promotes a typed descriptor/index owner for those forms.
+        implementation_slice_1545:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.connectRoutePlanResolver
+          rule: |
+            Same-name parent connect into a template receiver MUST lower to an
+            explicit ConnectRoutePlan instance-key decision when the producer
+            output pin declares `key/carries` and the receiver resolves
+            `instance.by` through WorkflowContractBundle.ResolveFlowTemplateInstance.
+            The lowered plan MUST carry producer key/carries evidence and
+            receiver instance-key fields separately from the legacy/advanced
+            addressed-input `Address` descriptor model.
+
+            Runtime materialization MUST derive key material from the inbound
+            event payload using TemplateInstanceContract.CanonicalKeyMaterial,
+            match only receiver-scoped active flow-instance descriptors whose
+            entity.<field> address fields equal that key material, and then use
+            RouteTable only to locate the concrete receiver carrier for the
+            already-selected route identity. Missing key value, no matching
+            receiver instance under rejecting policy, ambiguous matching
+            descriptors, unsupported evidence shape, or missing receiver carrier
+            MUST fail closed with zero executable routes.
+          non_authoritative_for_this_slice:
+          - receiver input-pin address
+          - receiver select_entity/select_or_create_entity
+          - producer target.match
+          - producer broadcast:true
+          - direct delivery
+          - connect.map renamed-key adapter
+          - raw/live subscribers before selected target identity
+          - handler lookup before selected target identity
+          - delivery rows, replay rows, or readback rows as route producers
+          split_or_adjacent:
+            renamed_key_adapters: '#1546'
+            select_entity_demote_warn_error: '#1547'
+            replay_fork_idempotency_beyond_delivery_row_readback: '#1550'
+            explicit_addressed_input_descriptor_routing: '#1479'
           failure_reasons:
           - source_missing
           - connect_pin_ref_invalid

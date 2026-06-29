@@ -45,6 +45,82 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeInstanceKeyConnectRoutePlanPackageFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if plan.Address != nil {
+		t.Fatalf("Address = %#v, want nil for canonical instance-key plan", plan.Address)
+	}
+	if plan.InstanceKey == nil {
+		t.Fatal("InstanceKey = nil, want canonical receiver instance key evidence")
+	}
+	if got, want := plan.Source.Key, "vertical_id"; got != want {
+		t.Fatalf("Source.Key = %q, want %q", got, want)
+	}
+	if len(plan.Source.Carries) != 1 || plan.Source.Carries[0] != "vertical_id" {
+		t.Fatalf("Source.Carries = %#v, want [vertical_id]", plan.Source.Carries)
+	}
+	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "vertical_id" {
+		t.Fatalf("InstanceKey.Fields = %#v, want [vertical_id]", plan.InstanceKey.Fields)
+	}
+	if got, want := plan.InstanceKey.OnMissing, "reject"; got != want {
+		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
+	}
+	if !plan.RequiresRuntimeResolution {
+		t.Fatal("template instance-key receiver should require runtime resolution")
+	}
+
+	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"vertical_id": "v-1"},
+		Descriptors: []Descriptor{{
+			EntityID:      "ent-1",
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	}
+	if got, want := materialized.Target.FlowInstance, "consumer/one"; got != want {
+		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
+	}
+
+	missing := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{},
+	})
+	if missing.Failure != ConnectFailureAddressValueMissing {
+		t.Fatalf("missing Failure = %q, want %q", missing.Failure, ConnectFailureAddressValueMissing)
+	}
+
+	ambiguous := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"payload.vertical_id": "v-1"},
+		Descriptors: []Descriptor{
+			{EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+		},
+	})
+	if ambiguous.Failure != ConnectFailureTargetAmbiguous {
+		t.Fatalf("ambiguous Failure = %q, want %q", ambiguous.Failure, ConnectFailureTargetAmbiguous)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansOneToOneStatic(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{
@@ -647,6 +723,65 @@ pins:
           target: entity.vertical_id
           cardinality: one
 `, "deploy.completed: {}\n", `
+deployment:
+  vertical_id:
+    type: string
+`)
+	return root
+}
+
+func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: instance-key-connect-route-plan-package
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: template
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_completed
+    delivery: one
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-package\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFlowFixture(t, root, "producer", `
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
+`, "deploy.done:\n  vertical_id: string\n", "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: template
+instance:
+  by: vertical_id
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.done
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
 deployment:
   vertical_id:
     type: string

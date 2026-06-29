@@ -41,6 +41,26 @@ func TestRun_AllowsRootProducerCompositionConnectAsRouteProof(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testing.T) {
+	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{
+		consumerMode:             "template",
+		consumerScalarInput:      true,
+		consumerTemplateInstance: true,
+		connectTo:                "consumer.deploy.completed",
+		omitMap:                  true,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "composition_connect_validation", "") {
+		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "template_instance_validation", "") {
+		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
+	}
+}
+
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -149,8 +169,19 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 				consumerMode:        "template",
 				consumerScalarInput: true,
 				connectTo:           "consumer.deploy.completed",
+				omitMap:             true,
 			},
-			want: "receiver_address_rule_missing",
+			want: "receiver_instance_key_invalid",
+		},
+		{
+			name: "template instance key route rejects renamed connect map",
+			opts: compositionConnectFixtureOptions{
+				consumerMode:             "template",
+				consumerScalarInput:      true,
+				consumerTemplateInstance: true,
+				connectTo:                "consumer.deploy.completed",
+			},
+			want: "connect_key_adapter_unsupported",
 		},
 	}
 	for _, tc := range tests {
@@ -371,6 +402,7 @@ type compositionConnectFixtureOptions struct {
 	producerAutoEmit           bool
 	producerTimer              bool
 	duplicateProducerOutputKey bool
+	consumerTemplateInstance   bool
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
@@ -867,9 +899,18 @@ requires:
       - deploy.completed
 `
 	}
+	instanceBlock := ""
+	if opts.consumerTemplateInstance {
+		instanceBlock = `instance:
+  by: vertical_id
+  on_missing: reject
+  on_conflict: reject
+`
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
 name: consumer
 mode: `+firstTestValue(opts.consumerMode, "static")+`
+`+instanceBlock+`
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]
@@ -882,7 +923,7 @@ pins:
 deploy.completed:
   vertical_id: string
 `)
-	if !opts.consumerScalarInput {
+	if !opts.consumerScalarInput || opts.consumerTemplateInstance {
 		entityType := firstTestValue(opts.consumerEntityType, "string")
 		indexed := "\n    indexed: true"
 		if opts.consumerEntityUnindexed {
@@ -893,6 +934,7 @@ deployment:
   vertical_id:
     type: `+entityType+`
 `+indexed+`
+    _unused_reason: composition connect route-key proof field
 `)
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
