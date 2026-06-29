@@ -16,6 +16,23 @@ func checkPrimaryEntityValidation(c *checkerContext) []Finding {
 		return nil
 	}
 	findings := []Finding{}
+	rootEntities := bundle.RootEntityContracts()
+	if bundle.RootSchema != nil || len(rootEntities) > 1 {
+		hasEntityDeclaration := false
+		if bundle.RootSchema != nil {
+			hasEntityDeclaration = strings.TrimSpace(bundle.RootSchema.Entity) != ""
+		}
+		if hasEntityDeclaration || len(rootEntities) > 1 {
+			if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
+				findings = append(findings, Finding{
+					CheckID:  "primary_entity_validation",
+					Severity: "error",
+					Message:  fmt.Sprintf("flow <root> primary entity invalid: %v", err),
+					Location: "<root>",
+				})
+			}
+		}
+	}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
 		if flowID == "" {

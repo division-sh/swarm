@@ -70,6 +70,51 @@ pins:
 	}
 }
 
+func TestRun_RejectsInvalidRootPrimaryEntityForConstructedBundle(t *testing.T) {
+	tests := []struct {
+		name      string
+		bundle    *runtimecontracts.WorkflowContractBundle
+		wantError string
+	}{
+		{
+			name: "root schema entity selector",
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				RootSchema: &runtimecontracts.FlowSchemaDocument{
+					Name:   "root-primary-entity",
+					Entity: "vertical",
+				},
+				RootEntities: runtimecontracts.EntityContractsDocument{
+					"vertical": {Fields: map[string]runtimecontracts.EntityFieldDecl{"name": {Type: "text"}}},
+				},
+				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
+			},
+			wantError: "schema.yaml entity",
+		},
+		{
+			name: "multiple root entities",
+			bundle: &runtimecontracts.WorkflowContractBundle{
+				RootSchema: &runtimecontracts.FlowSchemaDocument{Name: "root-primary-entity"},
+				RootEntities: runtimecontracts.EntityContractsDocument{
+					"campaign": {Fields: map[string]runtimecontracts.EntityFieldDecl{"title": {Type: "text"}}},
+					"vertical": {Fields: map[string]runtimecontracts.EntityFieldDecl{"name": {Type: "text"}}},
+				},
+				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{},
+			},
+			wantError: "exactly one entity type",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := Run(context.Background(), semanticview.Wrap(tc.bundle), Options{})
+			if !reportContains(report.Errors(), "primary_entity_validation", "flow <root>") ||
+				!reportContains(report.Errors(), "primary_entity_validation", tc.wantError) {
+				t.Fatalf("expected root primary_entity_validation containing %q, got %#v", tc.wantError, report.Errors())
+			}
+		})
+	}
+}
+
 func loadPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := repoRootForBootverifyTest(t)

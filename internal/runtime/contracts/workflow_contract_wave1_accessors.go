@@ -45,6 +45,9 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 			}}
 		}
 	}
+	if err := validateRootPrimaryEntityLoadBoundary(bundle); err != nil {
+		return &LoadValidationError{Items: []error{err}}
+	}
 	for _, entities := range bundle.flowEntities {
 		for entityType, contract := range entities {
 			if strings.TrimSpace(contract.Owner) != "" {
@@ -58,6 +61,23 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 		if err := validatePrimaryEntityLoadBoundary(bundle, flowID); err != nil {
 			return &LoadValidationError{Items: []error{err}}
 		}
+	}
+	return nil
+}
+
+func validateRootPrimaryEntityLoadBoundary(bundle *WorkflowContractBundle) error {
+	if bundle == nil {
+		return nil
+	}
+	declared := ""
+	if bundle.RootSchema != nil {
+		declared = bundle.RootSchema.Entity
+	}
+	if strings.TrimSpace(declared) == "" && len(bundle.RootEntities) <= 1 {
+		return nil
+	}
+	if _, err := bundle.ResolveRootPrimaryEntity(); err != nil {
+		return err
 	}
 	return nil
 }
