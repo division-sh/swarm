@@ -238,7 +238,7 @@ func validateCompositionConnectInstanceKey(source semanticview.Source, connect r
 		if !stringSliceContains(carries, field) {
 			return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", fmt.Sprintf("producer output pin carries must include receiver instance.by field %s", field), producerFlowID)}
 		}
-		sourceType, err := outputPinKeyCarriesSourceType(source, producerFlowID, outputPin, "payload."+field)
+		sourceType, err := outputPinCarriedPayloadFieldType(source, producerFlowID, outputPin, field)
 		if err != nil {
 			return []Finding{compositionConnectFinding(connect, "output_carries_instance_key", err.Error(), producerFlowID)}
 		}

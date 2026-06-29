@@ -61,6 +61,32 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 	}
 }
 
+func TestRun_AllowsCompositeTemplateInstanceKeyCompositionConnectWithoutAddress(t *testing.T) {
+	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{
+		consumerMode:                   "template",
+		consumerScalarInput:            true,
+		consumerTemplateInstance:       true,
+		consumerTemplateInstanceBy:     "[vertical_id, region]",
+		consumerTemplateInstanceRegion: true,
+		producerOutputCarries:          "[vertical_id, region]",
+		connectTo:                      "consumer.deploy.completed",
+		omitMap:                        true,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "composition_connect_validation", "") {
+		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "output_pin_key_carries_validation", "") {
+		t.Fatalf("unexpected output_pin_key_carries_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "template_instance_validation", "") {
+		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
+	}
+}
+
 func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -377,32 +403,34 @@ func TestRun_TreatsParentCompositionConnectAsEventTopologyProof(t *testing.T) {
 }
 
 type compositionConnectFixtureOptions struct {
-	connectFrom                string
-	connectTo                  string
-	delivery                   string
-	noAdapter                  bool
-	mapSource                  string
-	mapTarget                  string
-	omitMap                    bool
-	consumerMode               string
-	consumerScalarInput        bool
-	consumerEntityType         string
-	consumerEntityUnindexed    bool
-	consumerRequiresInput      bool
-	consumerInputBind          string
-	producerRequiresOutput     bool
-	producerOutputBind         string
-	producerOutputKey          string
-	producerOutputCarries      string
-	omitProducerOutputKey      bool
-	omitProducerOutputCarries  bool
-	omitProducerEmitField      bool
-	producerVerticalIDType     string
-	producerAgentEmit          bool
-	producerAutoEmit           bool
-	producerTimer              bool
-	duplicateProducerOutputKey bool
-	consumerTemplateInstance   bool
+	connectFrom                    string
+	connectTo                      string
+	delivery                       string
+	noAdapter                      bool
+	mapSource                      string
+	mapTarget                      string
+	omitMap                        bool
+	consumerMode                   string
+	consumerScalarInput            bool
+	consumerEntityType             string
+	consumerEntityUnindexed        bool
+	consumerRequiresInput          bool
+	consumerInputBind              string
+	producerRequiresOutput         bool
+	producerOutputBind             string
+	producerOutputKey              string
+	producerOutputCarries          string
+	omitProducerOutputKey          bool
+	omitProducerOutputCarries      bool
+	omitProducerEmitField          bool
+	producerVerticalIDType         string
+	producerAgentEmit              bool
+	producerAutoEmit               bool
+	producerTimer                  bool
+	duplicateProducerOutputKey     bool
+	consumerTemplateInstance       bool
+	consumerTemplateInstanceBy     string
+	consumerTemplateInstanceRegion bool
 }
 
 func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConnectFixtureOptions) string {
@@ -801,6 +829,8 @@ requires:
 	emitField := "          vertical_id: payload.vertical_id\n"
 	if opts.omitProducerEmitField {
 		emitField = ""
+	} else if opts.consumerTemplateInstanceRegion {
+		emitField += "          region: payload.region\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
@@ -820,6 +850,9 @@ pins:
 	}
 	verticalIDType := firstTestValue(opts.producerVerticalIDType, "string")
 	verticalIDSchema := "  vertical_id: " + verticalIDType + "\n"
+	if opts.consumerTemplateInstanceRegion {
+		verticalIDSchema += "  region: string\n"
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
 deploy.requested:
   vertical_id: string
@@ -901,8 +934,9 @@ requires:
 	}
 	instanceBlock := ""
 	if opts.consumerTemplateInstance {
+		instanceBy := firstTestValue(opts.consumerTemplateInstanceBy, "vertical_id")
 		instanceBlock = `instance:
-  by: vertical_id
+  by: ` + instanceBy + `
   on_missing: reject
   on_conflict: reject
 `
@@ -922,7 +956,7 @@ pins:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
 deploy.completed:
   vertical_id: string
-`)
+`+compositionConnectConsumerRegionEventSchema(opts))
 	if !opts.consumerScalarInput || opts.consumerTemplateInstance {
 		entityType := firstTestValue(opts.consumerEntityType, "string")
 		indexed := "\n    indexed: true"
@@ -935,6 +969,7 @@ deployment:
     type: `+entityType+`
 `+indexed+`
     _unused_reason: composition connect route-key proof field
+`+compositionConnectConsumerRegionEntitySchema(opts)+`
 `)
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
@@ -947,6 +982,23 @@ consumer-node:
       create_entity: true
       advances_to: done
 `)
+}
+
+func compositionConnectConsumerRegionEventSchema(opts compositionConnectFixtureOptions) string {
+	if !opts.consumerTemplateInstanceRegion {
+		return ""
+	}
+	return "  region: string\n"
+}
+
+func compositionConnectConsumerRegionEntitySchema(opts compositionConnectFixtureOptions) string {
+	if !opts.consumerTemplateInstanceRegion {
+		return ""
+	}
+	return `  region:
+    type: string
+    _unused_reason: composite template instance key proof field
+`
 }
 
 func firstTestValue(values ...string) string {
