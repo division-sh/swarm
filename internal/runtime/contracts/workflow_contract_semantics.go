@@ -179,11 +179,16 @@ func legacyWorkflowEntitySchema(bundle *WorkflowContractBundle) EntitySchema {
 		return bundle.Package.EntitySchema
 	}
 	if len(bundle.RootEntities) > 0 {
-		return entityContractsToLegacyEntitySchema(bundle.RootEntities)
+		if entityType, entity, ok := bundle.RootPrimaryEntityContract(); ok {
+			return entityContractsToLegacyEntitySchema(EntityContractsDocument{entityType: entity})
+		}
+		return EntitySchema{}
 	}
 	if len(bundle.flowEntities) == 1 {
-		for _, entities := range bundle.flowEntities {
-			return entityContractsToLegacyEntitySchema(entities)
+		for flowID := range bundle.flowEntities {
+			if entityType, entity, ok := bundle.FlowPrimaryEntityContract(flowID); ok {
+				return entityContractsToLegacyEntitySchema(EntityContractsDocument{entityType: entity})
+			}
 		}
 	}
 	return EntitySchema{}

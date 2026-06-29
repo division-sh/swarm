@@ -107,13 +107,13 @@ func ReadTargetContracts(source semanticview.Source) []Contract {
 		}
 	}
 	sort.Strings(flowIDs)
-	out := make([]Contract, 0, len(flowIDs)+len(bundle.RootEntityContracts()))
+	out := make([]Contract, 0, len(flowIDs)+1)
 	for _, flowID := range flowIDs {
 		if contract, ok := ResolveForFlow(source, flowID); ok {
 			out = append(out, contract)
 		}
 	}
-	if len(bundle.RootEntityContracts()) == 1 {
+	if _, _, ok := bundle.RootPrimaryEntityContract(); ok {
 		if contract, ok := ResolveForFlow(source, ""); ok {
 			out = append(out, contract)
 		}
@@ -164,7 +164,7 @@ func ResolveForFlow(source semanticview.Source, flowID string) (Contract, bool) 
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID != "" {
-		entityType, entity, ok := bundle.FlowOwnedEntityContract(flowID)
+		entityType, entity, ok := bundle.FlowPrimaryEntityContract(flowID)
 		if ok {
 			return Contract{
 				FlowID:     flowID,
@@ -174,30 +174,23 @@ func ResolveForFlow(source semanticview.Source, flowID string) (Contract, bool) 
 			}, true
 		}
 		if rootFlowContractApplies(bundle, flowID) {
-			for entityType, entity := range bundle.RootEntityContracts() {
-				return Contract{
-					FlowID:     flowID,
-					EntityType: strings.TrimSpace(entityType),
-					Entity:     entity,
-					Types:      bundle.RootTypeCatalog(),
-				}, true
-			}
+			entityType, entity, ok := bundle.RootPrimaryEntityContract()
+			return Contract{
+				FlowID:     flowID,
+				EntityType: strings.TrimSpace(entityType),
+				Entity:     entity,
+				Types:      bundle.RootTypeCatalog(),
+			}, ok
 		}
 		return Contract{}, false
 	}
-	root := bundle.RootEntityContracts()
-	if len(root) != 1 {
-		return Contract{}, false
-	}
-	for entityType, entity := range root {
-		return Contract{
-			FlowID:     "",
-			EntityType: strings.TrimSpace(entityType),
-			Entity:     entity,
-			Types:      bundle.RootTypeCatalog(),
-		}, true
-	}
-	return Contract{}, false
+	entityType, entity, ok := bundle.RootPrimaryEntityContract()
+	return Contract{
+		FlowID:     "",
+		EntityType: strings.TrimSpace(entityType),
+		Entity:     entity,
+		Types:      bundle.RootTypeCatalog(),
+	}, ok
 }
 
 func ResolveFlowIDForInstance(source semanticview.Source, flowInstance string) string {
@@ -259,7 +252,8 @@ func rootFlowContractApplies(bundle *runtimecontracts.WorkflowContractBundle, fl
 	if bundle == nil || flowID == "" {
 		return false
 	}
-	if len(bundle.RootEntityContracts()) != 1 {
+	_, _, ok := bundle.RootPrimaryEntityContract()
+	if !ok {
 		return false
 	}
 	rootName := strings.TrimSpace(bundle.WorkflowName())

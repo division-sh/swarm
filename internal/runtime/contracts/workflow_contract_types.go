@@ -705,6 +705,7 @@ type ContractItemSource struct {
 type FlowSchemaDocument struct {
 	Name              string                   `yaml:"name"`
 	Mode              string                   `yaml:"mode"`
+	Entity            string                   `yaml:"entity"`
 	InitialState      string                   `yaml:"initial_state"`
 	NamespacePrefix   string                   `yaml:"namespace_prefix"`
 	NamespaceRule     string                   `yaml:"namespace_rule"`

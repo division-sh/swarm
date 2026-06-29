@@ -276,8 +276,99 @@ campaign:
 `)
 
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), "INVALID-ENTITY-OWNERSHIP") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want INVALID-ENTITY-OWNERSHIP", err)
+	if err == nil || !strings.Contains(err.Error(), "INVALID-PRIMARY-ENTITY") || !strings.Contains(err.Error(), "schema.yaml entity") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want INVALID-PRIMARY-ENTITY requiring schema.yaml entity", err)
+	}
+}
+
+func TestLoadWorkflowContractBundle_AcceptsExplicitPrimaryEntityForMultipleFlowEntityTypes(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: explicit-primary-flow-entities
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`)
+	writeFixtureFile(t, root+"/schema.yaml", "name: explicit-primary-flow-entities\n")
+	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
+name: scoring
+entity: vertical
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`)
+	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
+vertical:
+  name: text
+campaign:
+  title: text
+`)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	resolved, err := bundle.ResolveFlowPrimaryEntity("scoring")
+	if err != nil {
+		t.Fatalf("ResolveFlowPrimaryEntity: %v", err)
+	}
+	if !resolved.Explicit || resolved.EntityType != "vertical" {
+		t.Fatalf("primary entity = explicit:%v type:%q, want explicit vertical", resolved.Explicit, resolved.EntityType)
+	}
+	if got, _, ok := bundle.FlowPrimaryEntityContract("scoring"); !ok || got != "vertical" {
+		t.Fatalf("FlowPrimaryEntityContract = (%q, %v), want vertical/true", got, ok)
+	}
+	if got, _, ok := bundle.FlowOwnedEntityContract("scoring"); !ok || got != "vertical" {
+		t.Fatalf("FlowOwnedEntityContract compatibility wrapper = (%q, %v), want vertical/true", got, ok)
+	}
+}
+
+func TestLoadWorkflowContractBundle_RejectsUnknownExplicitPrimaryEntity(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, root+"/package.yaml", `
+name: unknown-primary-flow-entities
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+`)
+	writeFixtureFile(t, root+"/schema.yaml", "name: unknown-primary-flow-entities\n")
+	writeFixtureFile(t, root+"/flows/scoring/schema.yaml", `
+name: scoring
+entity: missing
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`)
+	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
+vertical:
+  name: text
+campaign:
+  title: text
+`)
+
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "declares primary entity") || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want unknown primary entity rejection", err)
 	}
 }
 

@@ -1,9 +1,20 @@
 package contracts
 
 import (
+	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 )
+
+type PrimaryEntityContract struct {
+	FlowID     string
+	EntityType string
+	Contract   EntityContract
+	Types      TypeCatalogDocument
+	Explicit   bool
+	Inferred   bool
+}
 
 func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
@@ -36,12 +47,7 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 			}}
 		}
 	}
-	for flowID, entities := range bundle.flowEntities {
-		if len(entities) > 1 {
-			return &LoadValidationError{Items: []error{
-				errString("INVALID-ENTITY-OWNERSHIP: flow " + strings.TrimSpace(flowID) + " declares multiple entity types; Wave 1 permits at most one entity type per flow"),
-			}}
-		}
+	for _, entities := range bundle.flowEntities {
 		for entityType, contract := range entities {
 			if strings.TrimSpace(contract.Owner) != "" {
 				return &LoadValidationError{Items: []error{
@@ -50,7 +56,43 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 			}
 		}
 	}
+	for _, flowID := range sortedFlowSchemaIDs(bundle.FlowSchemas) {
+		if err := validatePrimaryEntityLoadBoundary(bundle, flowID); err != nil {
+			return &LoadValidationError{Items: []error{err}}
+		}
+	}
 	return nil
+}
+
+func validatePrimaryEntityLoadBoundary(bundle *WorkflowContractBundle, flowID string) error {
+	flowID = strings.TrimSpace(flowID)
+	if bundle == nil || flowID == "" {
+		return nil
+	}
+	schema, ok := bundle.FlowSchemas[flowID]
+	if !ok {
+		return nil
+	}
+	entities := bundle.flowEntities[flowID]
+	if strings.TrimSpace(schema.Entity) == "" && len(entities) <= 1 {
+		return nil
+	}
+	if _, err := bundle.ResolveFlowPrimaryEntity(flowID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func sortedFlowSchemaIDs(schemas map[string]FlowSchemaDocument) []string {
+	ids := make([]string, 0, len(schemas))
+	for id := range schemas {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func bundleLegacyEntitySchemaScope(bundle *WorkflowContractBundle) (string, bool) {
@@ -110,14 +152,111 @@ func (b *WorkflowContractBundle) FlowEntityContractsByID(flowID string) (EntityC
 }
 
 func (b *WorkflowContractBundle) FlowOwnedEntityContract(flowID string) (string, EntityContract, bool) {
-	entities, ok := b.FlowEntityContractsByID(flowID)
-	if !ok || len(entities) == 0 {
+	return b.FlowPrimaryEntityContract(flowID)
+}
+
+func (b *WorkflowContractBundle) FlowPrimaryEntityContract(flowID string) (string, EntityContract, bool) {
+	resolved, err := b.ResolveFlowPrimaryEntity(flowID)
+	if err != nil {
 		return "", EntityContract{}, false
 	}
-	for entityType, contract := range entities {
-		return strings.TrimSpace(entityType), cloneEntityContract(contract), true
+	return resolved.EntityType, cloneEntityContract(resolved.Contract), true
+}
+
+func (b *WorkflowContractBundle) RootPrimaryEntityContract() (string, EntityContract, bool) {
+	resolved, err := b.ResolveRootPrimaryEntity()
+	if err != nil {
+		return "", EntityContract{}, false
 	}
-	return "", EntityContract{}, false
+	return resolved.EntityType, cloneEntityContract(resolved.Contract), true
+}
+
+func (b *WorkflowContractBundle) ResolveFlowPrimaryEntity(flowID string) (PrimaryEntityContract, error) {
+	flowID = strings.TrimSpace(flowID)
+	if b == nil {
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s primary entity is unavailable: bundle is nil", defaultPrimaryEntityFlowLabel(flowID))
+	}
+	if flowID == "" {
+		return b.ResolveRootPrimaryEntity()
+	}
+	schema, ok := b.FlowSchemas[flowID]
+	if !ok {
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s primary entity is unavailable: schema not found", flowID)
+	}
+	return resolvePrimaryEntityContract(flowID, schema.Entity, b.flowEntities[flowID], b.ResolvedTypeCatalogForFlow(flowID))
+}
+
+func (b *WorkflowContractBundle) ResolveRootPrimaryEntity() (PrimaryEntityContract, error) {
+	if b == nil {
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: root primary entity is unavailable: bundle is nil")
+	}
+	entity := ""
+	if b.RootSchema != nil {
+		entity = b.RootSchema.Entity
+	}
+	return resolvePrimaryEntityContract("", entity, b.RootEntities, b.RootTypeCatalog())
+}
+
+func resolvePrimaryEntityContract(flowID, declared string, entities EntityContractsDocument, types TypeCatalogDocument) (PrimaryEntityContract, error) {
+	flowID = strings.TrimSpace(flowID)
+	declared = strings.TrimSpace(declared)
+	label := defaultPrimaryEntityFlowLabel(flowID)
+	keys := sortedEntityContractKeys(entities)
+	if declared != "" {
+		contract, ok := entities[declared]
+		if !ok {
+			return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s declares primary entity %q but available entity types are %s", label, declared, primaryEntityTypeList(keys))
+		}
+		return PrimaryEntityContract{
+			FlowID:     flowID,
+			EntityType: declared,
+			Contract:   cloneEntityContract(contract),
+			Types:      cloneTypeCatalogDocument(types),
+			Explicit:   true,
+		}, nil
+	}
+	switch len(keys) {
+	case 0:
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s has no declared entity types; stateful normal flows must declare exactly one primary entity or be explicitly stateless/template", label)
+	case 1:
+		entityType := keys[0]
+		return PrimaryEntityContract{
+			FlowID:     flowID,
+			EntityType: entityType,
+			Contract:   cloneEntityContract(entities[entityType]),
+			Types:      cloneTypeCatalogDocument(types),
+			Inferred:   true,
+		}, nil
+	default:
+		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s declares multiple entity types %s; schema.yaml entity: <Type> is required unless an approved advanced/static multi-entity escape hatch is explicitly implemented", label, strings.Join(keys, ", "))
+	}
+}
+
+func sortedEntityContractKeys(entities EntityContractsDocument) []string {
+	keys := make([]string, 0, len(entities))
+	for key := range entities {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func primaryEntityTypeList(keys []string) string {
+	if len(keys) == 0 {
+		return "<none>"
+	}
+	return strings.Join(keys, ", ")
+}
+
+func defaultPrimaryEntityFlowLabel(flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return "<root>"
+	}
+	return flowID
 }
 
 func (b *WorkflowContractBundle) ResolvedTypeCatalogForFlow(flowID string) TypeCatalogDocument {
