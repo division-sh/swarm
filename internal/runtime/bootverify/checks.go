@@ -55,6 +55,9 @@ type checkerContext struct {
 	toolLoaded   bool
 	toolFindings []Finding
 
+	requiredMCPLoaded   bool
+	requiredMCPFindings []Finding
+
 	toolUsageLoaded   bool
 	toolUsageFindings []Finding
 
@@ -215,6 +218,7 @@ var bootCheckRegistry = []Check{
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
+	{ID: "required_mcp_tool_availability", Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
 	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},
 	{ID: "generated_tool_schema_closure", Severity: SeverityHardInvalidity, Run: checkGeneratedToolSchemaClosure},
 	{ID: "prompt_exists", Severity: "warning", Run: checkPromptExists},

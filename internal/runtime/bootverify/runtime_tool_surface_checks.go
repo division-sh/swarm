@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 func checkToolResolution(c *checkerContext) []Finding { return c.toolResolution() }
+func checkRequiredMCPToolAvailability(c *checkerContext) []Finding {
+	return c.requiredMCPToolAvailability()
+}
 func checkPlatformToolUsageHints(c *checkerContext) []Finding {
 	return c.platformToolUsageHints()
 }
@@ -23,7 +23,6 @@ func (c *checkerContext) toolResolution() []Finding {
 		return c.toolFindings
 	}
 	c.toolLoaded = true
-	mcpPrefixes := declaredMCPPrefixes(c.source)
 	discoveredTools := c.mcpDiscovered()
 	// Boot tool warnings must consume the same runtime inventory truth that the
 	// generic runtime ships, then layer MCP discovery on top of it.
@@ -35,18 +34,13 @@ func (c *checkerContext) toolResolution() []Finding {
 			if toolID == "" {
 				continue
 			}
-			if entry, ok := c.source.ToolEntryForAgent(agentID, toolID); ok {
-				if mcpToolEntryRequiresDiscovery(entry) && !toolReferenceAllowedByMCPCatalog(toolID, discoveredTools, mcpPrefixes) {
-					c.toolFindings = append(c.toolFindings, Finding{
-						CheckID:  "tool_resolution",
-						Severity: "warning",
-						Message:  fmt.Sprintf("agent %s references missing tool %s", agentID, toolID),
-						Location: agentID,
-					})
-				}
+			if runtimetools.IsAgentRequiredMCPToolReference(c.source, agentID, toolID) {
 				continue
 			}
-			if toolReferenceAllowedByMCPCatalog(toolID, discoveredTools, mcpPrefixes) {
+			if _, ok := c.source.ToolEntryForAgent(agentID, toolID); ok {
+				continue
+			}
+			if runtimetools.MCPToolDiscovered(toolID, discoveredTools) {
 				continue
 			}
 			if _, ok := runtimeToolNames[toolID]; ok {
@@ -61,6 +55,22 @@ func (c *checkerContext) toolResolution() []Finding {
 		}
 	}
 	return c.toolFindings
+}
+
+func (c *checkerContext) requiredMCPToolAvailability() []Finding {
+	if c.requiredMCPLoaded {
+		return c.requiredMCPFindings
+	}
+	c.requiredMCPLoaded = true
+	for _, item := range runtimetools.RequiredMCPToolAvailabilityFindings(c.source, c.mcpDiscovered()) {
+		c.requiredMCPFindings = append(c.requiredMCPFindings, Finding{
+			CheckID:  "required_mcp_tool_availability",
+			Severity: SeverityHardInvalidity,
+			Message:  fmt.Sprintf("agent %s requires MCP tool %s but %s", item.AgentID, item.ToolName, item.Reason),
+			Location: item.AgentID,
+		})
+	}
+	return c.requiredMCPFindings
 }
 
 func (c *checkerContext) platformToolUsageHints() []Finding {
@@ -113,58 +123,4 @@ func (c *checkerContext) runtimeAvailableToolNames() map[string]struct{} {
 		c.runtimeToolNames[strings.TrimSpace(name)] = struct{}{}
 	}
 	return c.runtimeToolNames
-}
-
-func declaredMCPPrefixes(source semanticview.Source) map[string]struct{} {
-	if source == nil {
-		return nil
-	}
-	value, ok := semanticview.PolicyValueForFlow(source, "", "mcp_servers")
-	if !ok {
-		return nil
-	}
-	root, ok := anyMap(value.Value)
-	if !ok || len(root) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(root))
-	for _, raw := range root {
-		server, ok := anyMap(raw)
-		if !ok {
-			continue
-		}
-		prefix := strings.TrimSpace(anyString(server["prefix"]))
-		if prefix != "" {
-			out[prefix] = struct{}{}
-		}
-	}
-	return out
-}
-
-func toolReferenceAllowedByMCPPrefix(toolID string, prefixes map[string]struct{}) bool {
-	if len(prefixes) == 0 {
-		return false
-	}
-	prefix, _, ok := strings.Cut(strings.TrimSpace(toolID), ".")
-	if !ok || strings.TrimSpace(prefix) == "" {
-		return false
-	}
-	_, exists := prefixes[strings.TrimSpace(prefix)]
-	return exists
-}
-
-func toolReferenceAllowedByMCPCatalog(toolID string, discovered map[string]runtimemcp.DiscoveredTool, prefixes map[string]struct{}) bool {
-	toolID = strings.TrimSpace(toolID)
-	if toolID == "" {
-		return false
-	}
-	if len(discovered) > 0 {
-		_, ok := discovered[toolID]
-		return ok
-	}
-	return toolReferenceAllowedByMCPPrefix(toolID, prefixes)
-}
-
-func mcpToolEntryRequiresDiscovery(entry runtimecontracts.ToolSchemaEntry) bool {
-	return strings.EqualFold(strings.TrimSpace(entry.HandlerType), "mcp")
 }

@@ -216,6 +216,9 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 	if enabled && handlerType != implementationHTTP {
 		return RegisteredTool{}, false, fmt.Errorf("tool %s rate_limit is only supported for handler_type http", strings.TrimSpace(name))
 	}
+	if handlerType == implementationMCP {
+		return RegisteredTool{}, false, nil
+	}
 	inputSchema, err := schemaToMap(entry.InputSchema)
 	if err != nil {
 		return RegisteredTool{}, false, err

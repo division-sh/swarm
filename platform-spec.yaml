@@ -4122,8 +4122,18 @@ engine:
     - id: tool_resolution
       severity: warning
       scope: per-agent
-      trigger: An agent's tools list references a tool name that does not exist in the merged runtime tool registry
-        (platform builtin tools, authored tools.yaml/http tools, and MCP server catalogs).
+      trigger: An agent's tools list references a non-MCP tool name that does not exist in the merged runtime tool
+        registry (platform builtin tools, authored tools.yaml/http tools, and MCP server catalogs). Required MCP-backed
+        tools are governed by required_mcp_tool_availability instead of this warning path.
+      when: boot-only
+    - id: required_mcp_tool_availability
+      severity: hard_invalidity
+      scope: per-agent
+      trigger: An MCP-backed tool that can become visible or callable for an agent turn lacks exact concrete
+        tools/list catalog proof from the runtime MCP discovery owner. This includes explicit agent tools entries,
+        authored tools.yaml handler_type:mcp entries selected for an actor, and runtime actor tool definitions or
+        gateway catalog entries. Declared MCP prefixes, authored handler_type:mcp schemas, and later mcp tools/call
+        unavailable errors are not sufficient proof.
       when: boot-only
     - id: platform_tool_usage_hints
       severity: hard_invalidity
@@ -4510,9 +4520,12 @@ tool_model:
       description: Tools provided by external MCP servers. The platform connects as an MCP client, discovers tools via tools/list,
         and forwards agent calls via tools/call. The platform ships one generic MCP client executor — no per-tool handler code.
       handler_type_value: mcp
-      boot_rule: If an MCP server is unreachable at boot, log warning. Tools from that server are marked unavailable. Agents
-        with those tools in tools get a boot warning (not error — the agent may not be invoked in this run). If the agent
-        IS invoked and calls the tool, the platform returns a tool error to the agent.
+      boot_rule: If an MCP server is unreachable at boot, log warning only for optional or unreferenced external inventory.
+        Any MCP-backed tool that can become visible or callable for an agent turn MUST have an exact discovered tools/list
+        catalog entry before the agent turn. Missing reachability, missing catalog, missing concrete tool, prefix-only
+        evidence, and authored tools.yaml handler_type:mcp entries without discovered catalog proof are hard invalidity
+        under required_mcp_tool_availability. Later mcp tools/call unavailable errors are defense-in-depth only and MUST
+        NOT be the first failure point for a required MCP tool.
       portability: Works anywhere the MCP server is reachable. Pre-built MCP servers exist for common services (databases,
         APIs, cloud providers). Products can ship custom MCP servers as sidecars for infrastructure-specific tools.
     http:
@@ -4663,8 +4676,10 @@ tool_model:
     description: Agents only see tools listed in their tools contract field. The platform never injects the full tool
       catalog from any source into an agent session. This controls LLM context cost.
     rule: When constructing an agent session, the platform resolves tools entries against the merged tool registry
-      (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable entries
-      log a warning per the tool_resolution boot check.
+      (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable non-MCP
+      entries log a warning per the tool_resolution boot check. Unresolvable MCP-backed entries that can become visible
+      or callable for an agent turn fail closed per required_mcp_tool_availability and MUST NOT be delivered from a
+      declared prefix or authored handler_type:mcp schema without exact discovered catalog proof.
     usage_hints: Provider-facing tool definitions for platform-owned delivered tools and generated emit tools MUST include
       the shared platform usage guidance. Generated emit tool usage guidance MUST describe concrete JSON payload arguments,
       not CEL or workflow expression arguments. Boot verification reports this through platform_tool_usage_hints.
@@ -4720,7 +4735,9 @@ tool_model:
     - 2. Call tools/list. Cache the response as the server's tool catalog.
     - 3. For each tool in the catalog, register in the platform tool registry with the prefixed name.
     - 4. Log server name, tool count, and tool names at info level.
-    - 5. If connection fails, log warning with server name and error. Skip this server. Do not abort boot.
+    - 5. If connection fails, log warning with server name and error for optional or unreferenced inventory. Skip this
+      server for optional inventory, but abort boot/startup through required_mcp_tool_availability when any agent-required
+      MCP tool depends on exact catalog proof from that server.
     lifecycle:
       http: Connection maintained for platform lifetime. Reconnect on failure with exponential backoff (1s, 2s, 4s, max 30s).
       stdio: Process spawned at boot, killed on platform shutdown. If process exits unexpectedly, respawn with backoff.
