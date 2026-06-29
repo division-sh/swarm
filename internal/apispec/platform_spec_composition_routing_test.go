@@ -99,10 +99,14 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, slice1545, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: instance_key")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: address")
+	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "ResolutionKind: broadcast")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "WorkflowContractBundle.ResolveFlowTemplateInstance")
 	assertScalarContains(t, mustMappingValue(t, slice1545, "rule"), "TemplateInstanceContract.CanonicalKeyMaterial")
 	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver input-pin address for the addressless normal instance-key path") {
 		t.Fatal("implementation_slice_1545 must classify receiver input-pin address as non-authoritative only for normal instance-key routing")
+	}
+	if !sequenceContainsScalar(mustMappingValue(t, slice1545, "non_authoritative_for_this_slice"), "receiver instance-key materialization for explicit parent-authored broadcast fan-out") {
+		t.Fatal("implementation_slice_1545 must classify instance-key materialization as non-authoritative for explicit parent broadcast")
 	}
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")

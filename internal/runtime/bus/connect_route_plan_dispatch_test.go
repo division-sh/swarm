@@ -727,6 +727,62 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanBroadcastIgnoresInstanceKeyFiltering(t *testing.T) {
+	source := connectRoutePlanInstanceKeyBroadcastSource(t)
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{
+			{InstanceID: "one", EntityID: "ent-1", FlowInstance: "consumer/one", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+			{InstanceID: "two", EntityID: "ent-2", FlowInstance: "consumer/two", AddressFields: map[string]string{"entity.vertical_id": "v-2"}},
+			{InstanceID: "other", EntityID: "ent-3", FlowInstance: "other/three", AddressFields: map[string]string{"entity.vertical_id": "v-1"}},
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	for _, instanceID := range []string{"one", "two"} {
+		if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", instanceID)}); err != nil {
+			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+		}
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+	wantTwo := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-two", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/two", EntityID: "ent-2"}}
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+	}
+	if !deliveryRoutesContain(routePlan.DeliveryRoutes(), wantOne) || !deliveryRoutesContain(routePlan.DeliveryRoutes(), wantTwo) || len(routePlan.DeliveryRoutes()) != 2 {
+		t.Fatalf("route plan delivery routes = %#v, want broadcast routes %#v and %#v", routePlan.DeliveryRoutes(), wantOne, wantTwo)
+	}
+
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if plan.TargetFailure != "" {
+		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, wantOne) || !deliveryRoutesContain(plan.DeliveryRoutes, wantTwo) || len(plan.DeliveryRoutes) != 2 {
+		t.Fatalf("preflight delivery routes = %#v, want broadcast routes %#v and %#v", plan.DeliveryRoutes, wantOne, wantTwo)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if !deliveryRoutesContain(store.routes[eventID], wantOne) || !deliveryRoutesContain(store.routes[eventID], wantTwo) || len(store.routes[eventID]) != 2 {
+		t.Fatalf("persisted delivery routes = %#v, want broadcast routes %#v and %#v", store.routes[eventID], wantOne, wantTwo)
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -1320,7 +1376,26 @@ func connectRoutePlanInstanceKeySource(t testing.TB) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
+func connectRoutePlanInstanceKeyBroadcastSource(t testing.TB) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t, "broadcast")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
+	return writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t, "one")
+}
+
+func writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t testing.TB, delivery string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1337,7 +1412,7 @@ flows:
 connect:
   - from: producer.deploy_done
     to: consumer.deploy_completed
-    delivery: one
+    delivery: `+delivery+`
 `)
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-bus\n")
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
