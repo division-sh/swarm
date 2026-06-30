@@ -11,24 +11,26 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, logger *RuntimeLogger, source semanticview.Source, bundleFingerprint string, bundleSourceFact runtimecorrelation.BundleSourceFact, interceptorProvider func() []runtimebus.EventInterceptor, payloadValidator runtimebus.PayloadValidator, templateInstanceActivator runtimepipeline.FlowInstanceActivator, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
 	}
 	return runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
-		Logger:              hook,
-		InterceptorProvider: interceptorProvider,
-		ContractBundle:      source,
-		PayloadValidator:    payloadValidator,
-		BundleFingerprint:   bundleFingerprint,
-		BundleSourceFact:    bundleSourceFact,
-		TestLifecycleProbe:  testLifecycleProbe,
+		Logger:                    hook,
+		InterceptorProvider:       interceptorProvider,
+		ContractBundle:            source,
+		TemplateInstanceActivator: templateInstanceActivator,
+		PayloadValidator:          payloadValidator,
+		BundleFingerprint:         bundleFingerprint,
+		BundleSourceFact:          bundleSourceFact,
+		TestLifecycleProbe:        testLifecycleProbe,
 	})
 }
 

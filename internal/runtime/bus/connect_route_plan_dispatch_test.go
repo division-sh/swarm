@@ -46,6 +46,12 @@ type connectRoutePlanMutationStore struct {
 	*targetRouteMemoryStore
 }
 
+type connectRoutePlanLifecycleStore struct {
+	*connectRoutePlanDescriptorStore
+	bus         *EventBus
+	activations []runtimepipeline.FlowInstanceActivationRequest
+}
+
 type targetRouteMemoryEventMutation struct {
 	ctx   context.Context
 	store *connectRoutePlanMutationStore
@@ -100,6 +106,24 @@ func (*targetRouteMemoryEventMutation) RecordDeadLetter(context.Context, runtime
 func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
 	s.flowInstanceDescriptorCalls++
 	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+}
+
+func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+	s.activations = append(s.activations, req)
+	verticalID, _ := req.Metadata["vertical_id"].(string)
+	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
+		InstanceID:    req.Instance.InstanceID,
+		EntityID:      req.Instance.EntityID,
+		FlowInstance:  req.Instance.InstancePath,
+		FlowTemplate:  req.Instance.TemplateID,
+		AddressFields: map[string]string{"entity.vertical_id": verticalID},
+	})
+	if s.bus == nil {
+		return nil
+	}
+	return s.bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
+		Identity: req.Instance.Route(),
+	})
 }
 
 func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
@@ -725,6 +749,236 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	if !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay delivery routes = %#v, want %#v", replayRoutes, want)
 	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(t *testing.T) {
+	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reuse")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(store.activations) != 0 {
+		t.Fatalf("preflight activations = %d, want 0", len(store.activations))
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
+		t.Fatalf("preflight failure/routes = %q/%#v, want one preview route", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	previewTarget := preflight.DeliveryRoutes[0].Target
+	if previewTarget.FlowID != "consumer" || previewTarget.FlowInstance == "" || previewTarget.EntityID == "" {
+		t.Fatalf("preview target = %#v, want deterministic consumer flow instance", previewTarget)
+	}
+	previewIdentity := runtimeflowidentity.StoredRoute("consumer", runtimeflowidentity.LogicalInstanceID(previewTarget.FlowInstance), previewTarget.FlowInstance)
+	if routes := eb.RouteTable().MaterializedRoutes(previewIdentity); len(routes) != 0 {
+		t.Fatalf("preview route table state leaked after preflight: %#v", routes)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %d, want 1", len(store.activations))
+	}
+	activation := store.activations[0]
+	if activation.Config["vertical_id"] != "v-1" || activation.Metadata["vertical_id"] != "v-1" {
+		t.Fatalf("activation config/metadata = %#v/%#v, want vertical_id v-1", activation.Config, activation.Metadata)
+	}
+	if activation.Metadata["entity_type"] != "deployment" || activation.Metadata["instance_kind"] != "template" || activation.Metadata["last_source_event"] != evt.ID() {
+		t.Fatalf("activation metadata = %#v, want entity_type/instance_kind/last_source_event proof", activation.Metadata)
+	}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node-" + activation.Instance.InstanceID,
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want created instance route %#v", store.routes[evt.ID()], want)
+	}
+
+	retry := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := eb.Publish(context.Background(), retry); err != nil {
+		t.Fatalf("Publish retry: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("retry activations = %d, want idempotent reuse without a second activation", len(store.activations))
+	}
+	if !deliveryRoutesContain(store.routes[retry.ID()], want) || len(store.routes[retry.ID()]) != 1 {
+		t.Fatalf("retry delivery routes = %#v, want reused instance route %#v", store.routes[retry.ID()], want)
+	}
+
+	replayTarget := eb.SubscribeInternal(want.SubscriberID)
+	store.flowInstances = []ActiveFlowInstanceDescriptor{{
+		InstanceID:    "drift",
+		EntityID:      "ent-drift",
+		FlowInstance:  "consumer/drift",
+		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+	}}
+	store.flowInstanceDescriptorCalls = 0
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "drift")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
+	}
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
+	}
+	replayed := requireBusEvent(t, replayTarget, "persisted replay after lifecycle-created descriptor drift")
+	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
+		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted lifecycle-created %q/%q",
+			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("replay descriptor calls = %d, want 0 because lifecycle-created persisted route/scope is authoritative", got)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget(t *testing.T) {
+	source := connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "create", "reuse")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"source_vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %d, want 1", len(store.activations))
+	}
+	activation := store.activations[0]
+	if activation.Config["vertical_id"] != "v-1" || activation.Metadata["vertical_id"] != "v-1" {
+		t.Fatalf("renamed activation config/metadata = %#v/%#v, want receiver vertical_id from adapter source_vertical_id", activation.Config, activation.Metadata)
+	}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node-" + activation.Instance.InstanceID,
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want renamed-key created route %#v", store.routes[evt.ID()], want)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanRejectsCreateConflict(t *testing.T) {
+	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "consumer/one",
+				AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+			}},
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureInstanceConflict); got != want {
+		t.Fatalf("target failure = %q, want %q", got, want)
+	}
+	if len(routePlan.DeliveryRoutes()) != 0 {
+		t.Fatalf("delivery routes = %#v, want none on create conflict", routePlan.DeliveryRoutes())
+	}
+	if len(store.activations) != 0 {
+		t.Fatalf("activations = %d, want 0 on conflict", len(store.activations))
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanLifecycleUnavailableBlocksLowerPrecedenceRescue(t *testing.T) {
+	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reuse")
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+	}
+	materializerCalled := false
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle: source,
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			materializerCalled = true
+			return []events.DeliveryRoute{{
+				SubscriberType: "node",
+				SubscriberID:   "bogus-node",
+				Target:         events.RouteIdentity{FlowID: "bogus", FlowInstance: "bogus/one", EntityID: "bogus"},
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	raw := eb.Subscribe("raw-source-listener", events.EventType("producer/deploy.done"), events.EventType("deploy.done"))
+	defer eb.Unsubscribe("raw-source-listener")
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if materializerCalled {
+		t.Fatalf("recipient plan materializer was called for lifecycle-unavailable canonical failure")
+	}
+	if got, want := routePlan.TargetFailure, runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureLifecycleUnavailable); got != want {
+		t.Fatalf("target failure = %q, want %q", got, want)
+	}
+	if len(routePlan.DeliveryRoutes()) != 0 {
+		t.Fatalf("delivery routes = %#v, want none on lifecycle-unavailable failure", routePlan.DeliveryRoutes())
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if materializerCalled {
+		t.Fatalf("recipient plan materializer was called during publish for lifecycle-unavailable canonical failure")
+	}
+	requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
 }
 
 func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescriptorDrift(t *testing.T) {
@@ -1555,12 +1809,17 @@ func TestRoutePlanNormalizationPreservesAuthorityState(t *testing.T) {
 
 func connectRoutePlanInstanceKeySource(t testing.TB) semanticview.Source {
 	t.Helper()
+	return connectRoutePlanInstanceKeySourceWithPolicy(t, "reject", "reject")
+}
+
+func connectRoutePlanInstanceKeySourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanInstanceKeyFixture(t)
+	root := writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t, "one", onMissing, onConflict)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -1570,12 +1829,17 @@ func connectRoutePlanInstanceKeySource(t testing.TB) semanticview.Source {
 
 func connectRoutePlanRenamedInstanceKeySource(t testing.TB) semanticview.Source {
 	t.Helper()
+	return connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "reject", "reject")
+}
+
+func connectRoutePlanRenamedInstanceKeySourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanRenamedInstanceKeyFixture(t)
+	root := writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t, onMissing, onConflict)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -1603,6 +1867,10 @@ func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
 }
 
 func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {
+	return writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t, "reject", "reject")
+}
+
+func writeConnectRoutePlanRenamedInstanceKeyFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1652,8 +1920,8 @@ name: consumer
 mode: template
 instance:
   by: vertical_id
-  on_missing: reject
-  on_conflict: reject
+  on_missing: `+onMissing+`
+  on_conflict: `+onConflict+`
 pins:
   inputs:
     events:
@@ -1679,6 +1947,10 @@ consumer-node:
 }
 
 func writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t testing.TB, delivery string) string {
+	return writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t, delivery, "reject", "reject")
+}
+
+func writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t testing.TB, delivery, onMissing, onConflict string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1724,8 +1996,8 @@ name: consumer
 mode: template
 instance:
   by: vertical_id
-  on_missing: reject
-  on_conflict: reject
+  on_missing: `+onMissing+`
+  on_conflict: `+onConflict+`
 pins:
   inputs:
     events:

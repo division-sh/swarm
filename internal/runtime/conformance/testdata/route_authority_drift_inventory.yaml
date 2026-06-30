@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1577]
 parent_issues: [1340, 1353, 1481, 1493]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -364,6 +364,7 @@ seam_families:
       - internal/runtime/core/pinrouting/connect_route_plan.go
       - internal/runtime/core/pinrouting/connect_route_plan_test.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/route_plan.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
@@ -377,7 +378,9 @@ seam_families:
       keyed instance evidence cannot shadow explicit parent broadcast fan-out.
       #1546 adds ConnectRoutePlan.InstanceKey.Mappings as the only runtime
       adapter authority for renamed addressless template instance-key routes;
-      connect.map remains non-authoritative for that class.
+      connect.map remains non-authoritative for that class. #1577 adds the
+      connect-time template lifecycle owner that consumes the lowered instance
+      key plan and creates, reuses, or fails closed before delivery rows commit.
   - id: route_table_resolve_role_separation
     layer: route_topology
     classification: valid_consumer

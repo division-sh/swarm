@@ -12,6 +12,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -42,6 +43,7 @@ type EventBus struct {
 	store                       EventStore
 	logger                      LoggerHook
 	semanticSource              semanticview.Source
+	templateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	payloadValidator            PayloadValidator
 	recipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	recipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -90,6 +92,7 @@ type EventBusOptions struct {
 	InterceptorProvider         func() []EventInterceptor
 	ContractBundle              semanticview.Source
 	RouteTable                  *RouteTable
+	TemplateInstanceActivator   runtimepipeline.FlowInstanceActivator
 	PayloadValidator            PayloadValidator
 	RecipientPlanAdmissionGuard PublishRecipientPlanAdmissionGuard
 	RecipientPlanMaterializer   PublishRecipientPlanMaterializer
@@ -148,6 +151,7 @@ func NewEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		interceptors:                filtered,
 		interceptorProvider:         opts.InterceptorProvider,
 		semanticSource:              semanticSource,
+		templateInstanceActivator:   opts.TemplateInstanceActivator,
 		payloadValidator:            opts.PayloadValidator,
 		recipientPlanAdmissionGuard: opts.RecipientPlanAdmissionGuard,
 		recipientPlanMaterializer:   opts.RecipientPlanMaterializer,
@@ -166,7 +170,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator)
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }
 
@@ -226,8 +230,15 @@ func (eb *EventBus) RouteTable() *RouteTable {
 }
 
 func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationRequest) error {
+	return eb.AddFlowInstanceRouteContext(context.Background(), req)
+}
+
+func (eb *EventBus) AddFlowInstanceRouteContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
 	if eb == nil {
 		return errors.New("event bus is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	eb.mu.RLock()
 	table := eb.routeTable
@@ -248,9 +259,9 @@ func (eb *EventBus) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationReq
 		return nil
 	}
 	for _, route := range routes {
-		if err := persister.UpsertFlowInstanceRoute(context.Background(), route); err != nil {
+		if err := persister.UpsertFlowInstanceRoute(ctx, route); err != nil {
 			if rollback, ok := eb.store.(FlowInstanceRouteRollbackPersistence); ok && rollback != nil {
-				_ = rollback.RollbackFlowInstanceRoute(context.Background(), route.Identity)
+				_ = rollback.RollbackFlowInstanceRoute(ctx, route.Identity)
 			}
 			table.RemoveFlowInstanceRoute(route.Identity)
 			return err

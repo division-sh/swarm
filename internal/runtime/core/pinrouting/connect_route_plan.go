@@ -56,6 +56,8 @@ const (
 	ConnectFailureTargetUnresolved           ConnectRoutePlanFailure = "route_plan_target_unresolved"
 	ConnectFailureTargetAmbiguous            ConnectRoutePlanFailure = "route_plan_target_ambiguous"
 	ConnectFailureInstanceKeyAdapterInvalid  ConnectRoutePlanFailure = "route_plan_instance_key_adapter_invalid"
+	ConnectFailureInstanceConflict           ConnectRoutePlanFailure = "route_plan_instance_conflict"
+	ConnectFailureLifecycleUnavailable       ConnectRoutePlanFailure = "route_plan_lifecycle_unavailable"
 )
 
 type ConnectRoutePlanEndpoint struct {
@@ -130,6 +132,11 @@ type ConnectRoutePlanMaterialization struct {
 	Target    events.RouteIdentity
 	TargetSet []events.RouteIdentity
 	Failure   ConnectRoutePlanFailure
+}
+
+type ConnectRoutePlanInstanceKeyMaterial struct {
+	Values map[string]any
+	Keys   []runtimecontracts.TemplateInstanceKeyValue
 }
 
 func LowerCompositionConnectRoutePlans(source semanticview.Source) ([]ConnectRoutePlan, []ConnectRoutePlanIssue) {
@@ -347,35 +354,9 @@ func materializeBroadcastConnectRoutePlan(plan ConnectRoutePlan, descriptors []D
 }
 
 func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMaterializationInput) ConnectRoutePlanMaterialization {
-	instanceKey := plan.InstanceKey
-	if instanceKey == nil || len(instanceKey.Fields) == 0 {
-		return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverAddressRuleMissing}
-	}
-	values := make(map[string]any, len(instanceKey.Fields))
-	mappings := connectInstanceKeyMaterializationMappings(instanceKey)
-	for _, mapping := range mappings {
-		source := strings.TrimSpace(mapping.Source)
-		target := strings.TrimSpace(mapping.Target)
-		if source == "" || target == "" {
-			return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverAddressRuleMissing}
-		}
-		value := ""
-		if mapping.Explicit {
-			value = firstMatchValue(input.MatchValues, "payload."+source)
-		} else {
-			value = firstMatchValue(input.MatchValues, source, "payload."+source)
-		}
-		if value == "" {
-			return ConnectRoutePlanMaterialization{Failure: ConnectFailureAddressValueMissing}
-		}
-		values[target] = value
-	}
-	keyMaterial, err := (runtimecontracts.TemplateInstanceContract{
-		FlowID: plan.Receiver.FlowID,
-		By:     append([]string{}, instanceKey.Fields...),
-	}).CanonicalKeyMaterial(values)
-	if err != nil {
-		return ConnectRoutePlanMaterialization{Failure: ConnectFailureAddressValueMissing}
+	keyMaterial, failure := InstanceKeyMaterialForConnectRoutePlan(plan, input.MatchValues)
+	if failure != "" {
+		return ConnectRoutePlanMaterialization{Failure: failure}
 	}
 	routes := make([]events.RouteIdentity, 0, len(input.Descriptors))
 	for _, descriptor := range input.Descriptors {
@@ -383,7 +364,7 @@ func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input Connect
 		if route.Empty() {
 			continue
 		}
-		if connectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
+		if ConnectInstanceKeyDescriptorMatches(keyMaterial.Keys, descriptor) {
 			routes = append(routes, route)
 		}
 	}
@@ -402,6 +383,60 @@ func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input Connect
 	default:
 		return ConnectRoutePlanMaterialization{Failure: ConnectFailureDeliveryTopologyInvalid}
 	}
+}
+
+func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues map[string]string) (ConnectRoutePlanInstanceKeyMaterial, ConnectRoutePlanFailure) {
+	instanceKey := plan.InstanceKey
+	if instanceKey == nil || len(instanceKey.Fields) == 0 {
+		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
+	}
+	values := make(map[string]any, len(instanceKey.Fields))
+	mappings := connectInstanceKeyMaterializationMappings(instanceKey)
+	for _, mapping := range mappings {
+		source := strings.TrimSpace(mapping.Source)
+		target := strings.TrimSpace(mapping.Target)
+		if source == "" || target == "" {
+			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureReceiverAddressRuleMissing
+		}
+		value := ""
+		if mapping.Explicit {
+			value = firstMatchValue(matchValues, "payload."+source)
+		} else {
+			value = firstMatchValue(matchValues, source, "payload."+source)
+		}
+		if value == "" {
+			return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
+		}
+		values[target] = value
+	}
+	keys, err := (runtimecontracts.TemplateInstanceContract{
+		FlowID: plan.Receiver.FlowID,
+		By:     append([]string{}, instanceKey.Fields...),
+	}).CanonicalKeyMaterial(values)
+	if err != nil {
+		return ConnectRoutePlanInstanceKeyMaterial{}, ConnectFailureAddressValueMissing
+	}
+	return ConnectRoutePlanInstanceKeyMaterial{
+		Values: values,
+		Keys:   append([]runtimecontracts.TemplateInstanceKeyValue{}, keys...),
+	}, ""
+}
+
+func InstanceKeyDescriptorRoutesForConnectRoutePlan(plan ConnectRoutePlan, keyMaterial []runtimecontracts.TemplateInstanceKeyValue, descriptors []Descriptor) []events.RouteIdentity {
+	if len(keyMaterial) == 0 {
+		return nil
+	}
+	routes := make([]events.RouteIdentity, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		route := descriptorRouteForReceiver(plan, descriptor)
+		if route.Empty() {
+			continue
+		}
+		if ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
+			routes = append(routes, route)
+		}
+	}
+	return uniqueRoutes(routes)
 }
 
 func connectDelivery(connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin) (ConnectRoutePlanDelivery, ConnectRoutePlanFailure) {
@@ -750,7 +785,7 @@ func connectDescriptorMatches(targetExpr, value string, descriptor Descriptor, r
 	}
 }
 
-func connectInstanceKeyDescriptorMatches(keyMaterial []runtimecontracts.TemplateInstanceKeyValue, descriptor Descriptor) bool {
+func ConnectInstanceKeyDescriptorMatches(keyMaterial []runtimecontracts.TemplateInstanceKeyValue, descriptor Descriptor) bool {
 	if len(keyMaterial) == 0 {
 		return false
 	}
