@@ -1347,7 +1347,8 @@ handler_specification:
   on_complete_vs_rules:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
     on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after accumulation/computation.
-    rules: Map of {condition, emit/advances_to/data_accumulation} — payload-based routing. Used for type dispatching.
+    rules: Map of {condition, emit/advances_to/data_accumulation} — condition-based routing over the rule
+      condition context. Used for type dispatching without changing branch precedence.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
     accumulate_incomplete: If accumulation is not yet complete, handler stops after recording the arrival. No further steps
@@ -1755,9 +1756,13 @@ handler_specification:
     rules:
       field: rules
       type: map of rule_name → rule
-      purpose: Type-based routing. Match payload field against conditions.
+      purpose: Type-based routing. Match rule conditions over the rule-condition handler context; common dispatch
+        reads payload fields, but rule conditions are not payload-only.
       rule_fields:
-        condition: string — expression evaluated against payload
+        condition: string — CEL expression evaluated against the rule-condition handler context. Allowed roots
+          are payload.*, entity.*, policy.*, event.*, and query_entities(...). accumulated.*, fan_out.*, and
+          item.* are unavailable in rules.condition. entity.* reads use the pre-rule entity state and the same
+          declared-field validation as other rule-phase handler conditions.
         emit: string or object — rule-local event to emit
         advances_to: string — optional state change
         data_accumulation: object — optional data write (same format as handler-level)
@@ -2010,6 +2015,12 @@ handler_specification:
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
+      event:
+        resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads event context fields
+          such as event.id, event.type, event.entity_id, event.flow_instance, and platform-owned routing
+          envelope values supplied by the runtime.'
+        available_in: 'rules.condition and other handler expression surfaces when the runtime supplies current
+          event context. event.* is read-only handler context, not payload.'
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level).'
@@ -4039,6 +4050,7 @@ engine:
     context_variables:
       entity: Current entity state (all declared entity fields at type-valid values + envelope + gates)
       payload: Current event payload fields
+      event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
       fan_out: Available after fan_out step (e.g., fan_out.count)
       accumulated: Available inside on_complete after accumulation (list of received items)

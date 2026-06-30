@@ -46,6 +46,53 @@ func TestValidateConditionCEL_AllowsItemOnlyInFilterLikeContexts(t *testing.T) {
 	}
 }
 
+func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		wantErr    bool
+	}{
+		{
+			name:       "payload entity policy event",
+			expression: `entity.entity_id != "" && payload.score >= policy.threshold && event.entity_id != ""`,
+		},
+		{
+			name:       "query entities",
+			expression: `query_entities(name == payload.name).count == 0`,
+		},
+		{
+			name:       "accumulated unavailable",
+			expression: `accumulated.size() > 0`,
+			wantErr:    true,
+		},
+		{
+			name:       "fan out unavailable",
+			expression: `fan_out.count > 0`,
+			wantErr:    true,
+		},
+		{
+			name:       "item unavailable",
+			expression: `item.score > 50`,
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateConditionCEL(tt.expression, WorkflowConditionContextRule)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected rule condition %q to fail validation", tt.expression)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected rule condition %q to validate, got %v", tt.expression, err)
+			}
+		})
+	}
+}
+
 func TestNormalizeWorkflowExpression_RewritesQueryEntitiesCount(t *testing.T) {
 	got, _, err := normalizeWorkflowExpression(
 		`query_entities(name == payload.name).count == 0`,
