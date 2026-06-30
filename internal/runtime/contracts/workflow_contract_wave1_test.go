@@ -271,6 +271,24 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntity
 				},
 			},
 		},
+		flowTypes: map[string]TypeCatalogDocument{
+			"coordinator": {
+				Types: map[string]NamedTypeDecl{
+					"VerticalState": {
+						Fields: map[string]TypeFieldSpec{
+							"status":      {Type: "text"},
+							"active_jobs": {Type: "[Job]"},
+						},
+					},
+					"Job": {
+						Fields: map[string]TypeFieldSpec{
+							"id":    {Type: "text"},
+							"title": {Type: "text"},
+						},
+					},
+				},
+			},
+		},
 	}
 
 	resolved, err := bundle.ResolveFlowSingletonCoordinator("coordinator")
@@ -326,6 +344,22 @@ func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDec
 			},
 			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}}},
 			wantErr:  "agent conversation memory is not coordinator state authority",
+		},
+		{
+			name: "unresolved map value type",
+			schema: FlowSchemaDocument{
+				Mode: FlowModeSingleton,
+			},
+			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]MissingType"}}}},
+			wantErr:  "MissingType",
+		},
+		{
+			name: "unresolved list item type",
+			schema: FlowSchemaDocument{
+				Mode: FlowModeSingleton,
+			},
+			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"jobs": {Type: "[MissingType]"}}}},
+			wantErr:  "MissingType",
 		},
 		{
 			name: "schema entity restatement",

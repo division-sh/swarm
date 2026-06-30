@@ -85,7 +85,10 @@ func (b *WorkflowContractBundle) ResolveFlowSingletonCoordinator(flowID string) 
 	if err != nil {
 		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s primary entity required for singleton coordinator state: %w", flowID, err)
 	}
-	contained := singletonCoordinatorContainedFields(primary)
+	contained, err := singletonCoordinatorContainedFields(primary)
+	if err != nil {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s invalid contained coordinator state: %w", flowID, err)
+	}
 	if len(contained) == 0 {
 		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s mode: singleton must declare at least one typed contained map/list field on primary entity %s; agent conversation memory is not coordinator state authority", flowID, primary.EntityType)
 	}
@@ -96,12 +99,15 @@ func (b *WorkflowContractBundle) ResolveFlowSingletonCoordinator(flowID string) 
 	}, nil
 }
 
-func singletonCoordinatorContainedFields(primary PrimaryEntityContract) []SingletonCoordinatorContainedField {
+func singletonCoordinatorContainedFields(primary PrimaryEntityContract) ([]SingletonCoordinatorContainedField, error) {
 	fields := sortedEntityFieldKeys(primary.Contract.Fields)
 	out := make([]SingletonCoordinatorContainedField, 0, len(fields))
 	for _, field := range fields {
 		decl := primary.Contract.Fields[field]
-		kind := singletonCoordinatorContainedKind(decl.Type)
+		kind, err := singletonCoordinatorContainedKind(primary, decl.Type)
+		if err != nil {
+			return nil, fmt.Errorf("field %s: %w", field, err)
+		}
 		if kind == "" {
 			continue
 		}
@@ -111,18 +117,127 @@ func singletonCoordinatorContainedFields(primary PrimaryEntityContract) []Single
 			Kind: kind,
 		})
 	}
-	return out
+	return out, nil
 }
 
-func singletonCoordinatorContainedKind(typeRef string) string {
+func singletonCoordinatorContainedKind(primary PrimaryEntityContract, typeRef string) (string, error) {
+	typeRef = strings.TrimSpace(typeRef)
+	if keyType, valueType, ok := singletonCoordinatorMapTypeParts(typeRef); ok {
+		if err := singletonCoordinatorValidateMapKeyType(primary.Types, keyType); err != nil {
+			return "", err
+		}
+		if err := singletonCoordinatorValidateTypeRef(primary.Types, valueType); err != nil {
+			return "", fmt.Errorf("map value type %q does not resolve: %w", valueType, err)
+		}
+		return "map", nil
+	}
+	if templateInstanceIsListType(typeRef) {
+		itemType := singletonCoordinatorListItemType(typeRef)
+		if strings.TrimSpace(itemType) == "" {
+			return "", fmt.Errorf("list item type is required")
+		}
+		if err := singletonCoordinatorValidateTypeRef(primary.Types, itemType); err != nil {
+			return "", fmt.Errorf("list item type %q does not resolve: %w", itemType, err)
+		}
+		return "list", nil
+	}
+	return "", nil
+}
+
+func singletonCoordinatorValidateTypeRef(types TypeCatalogDocument, typeRef string) error {
+	return singletonCoordinatorValidateTypeRefSeen(types, typeRef, map[string]struct{}{})
+}
+
+func singletonCoordinatorValidateTypeRefSeen(types TypeCatalogDocument, typeRef string, seen map[string]struct{}) error {
+	typeRef = strings.TrimSpace(typeRef)
+	if typeRef == "" {
+		return fmt.Errorf("type is required")
+	}
+	if keyType, valueType, ok := singletonCoordinatorMapTypeParts(typeRef); ok {
+		if err := singletonCoordinatorValidateMapKeyType(types, keyType); err != nil {
+			return err
+		}
+		if err := singletonCoordinatorValidateTypeRefSeen(types, valueType, seen); err != nil {
+			return fmt.Errorf("map value type %q does not resolve: %w", valueType, err)
+		}
+		return nil
+	}
+	if templateInstanceIsListType(typeRef) {
+		itemType := singletonCoordinatorListItemType(typeRef)
+		if strings.TrimSpace(itemType) == "" {
+			return fmt.Errorf("list item type is required")
+		}
+		if err := singletonCoordinatorValidateTypeRefSeen(types, itemType, seen); err != nil {
+			return fmt.Errorf("list item type %q does not resolve: %w", itemType, err)
+		}
+		return nil
+	}
+	if templateInstanceIsTextType(typeRef) ||
+		templateInstanceIsIntegerType(types, typeRef) ||
+		templateInstanceIsNumericType(types, typeRef) ||
+		templateInstanceIsBooleanType(types, typeRef) ||
+		templateInstanceIsJSONObjectType(types, typeRef) ||
+		templateInstanceIsJSONArrayType(types, typeRef) ||
+		templateInstanceIsTimestampType(types, typeRef) ||
+		templateInstanceIsUUIDType(types, typeRef) ||
+		templateInstanceIsEnumType(types, typeRef) {
+		return nil
+	}
+	typeName := templateInstanceTypeName(types, typeRef)
+	named, ok := types.Types[typeName]
+	if !ok {
+		return fmt.Errorf("unsupported contract type %s", typeRef)
+	}
+	if _, ok := seen[typeName]; ok {
+		return nil
+	}
+	seen[typeName] = struct{}{}
+	for field, spec := range named.Fields {
+		if err := singletonCoordinatorValidateTypeRefSeen(types, spec.Type, seen); err != nil {
+			return fmt.Errorf("field %s: %w", strings.TrimSpace(field), err)
+		}
+	}
+	delete(seen, typeName)
+	return nil
+}
+
+func singletonCoordinatorValidateMapKeyType(types TypeCatalogDocument, keyType string) error {
+	if templateInstanceIsTextType(keyType) || templateInstanceIsUUIDType(types, keyType) || templateInstanceIsEnumType(types, keyType) {
+		return nil
+	}
+	return fmt.Errorf("map key type %q is unsupported; use text, uuid, or enum", strings.TrimSpace(keyType))
+}
+
+func singletonCoordinatorMapTypeParts(typeRef string) (string, string, bool) {
+	typeRef = strings.TrimSpace(typeRef)
+	if !strings.HasPrefix(strings.ToLower(typeRef), "map[") {
+		return "", "", false
+	}
+	closeIdx := strings.Index(typeRef, "]")
+	if closeIdx <= len("map[") {
+		return "", "", false
+	}
+	keyType := strings.TrimSpace(typeRef[len("map["):closeIdx])
+	valueType := strings.TrimSpace(typeRef[closeIdx+1:])
+	if keyType == "" || valueType == "" {
+		return "", "", false
+	}
+	return keyType, valueType, true
+}
+
+func singletonCoordinatorListItemType(typeRef string) string {
 	typeRef = strings.TrimSpace(typeRef)
 	switch {
-	case strings.HasPrefix(typeRef, "map["):
-		return "map"
-	case templateInstanceIsListType(typeRef):
-		return "list"
+	case strings.HasPrefix(typeRef, "list<") && strings.HasSuffix(typeRef, ">"):
+		return strings.TrimSpace(typeRef[len("list<") : len(typeRef)-1])
+	case strings.HasSuffix(typeRef, "[]"):
+		return strings.TrimSpace(typeRef[:len(typeRef)-2])
+	case strings.HasPrefix(typeRef, "[]"):
+		return strings.TrimSpace(typeRef[2:])
+	case strings.HasPrefix(typeRef, "[") && strings.HasSuffix(typeRef, "]"):
+		return strings.TrimSpace(typeRef[1 : len(typeRef)-1])
 	default:
-		return ""
+		return typeRef
 	}
 }
 

@@ -79,6 +79,27 @@ pins:
 	}
 }
 
+func TestRun_RejectsSingletonCoordinatorUnresolvedContainedType(t *testing.T) {
+	bundle := loadSingletonCoordinatorFixtureBundle(t, `
+name: coordinator
+mode: singleton
+pins:
+  inputs:
+    events: [job.received]
+  outputs:
+    events: []
+`, `
+coordinator_state:
+  verticals: map[text]MissingType
+`, "", "{}\n")
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "singleton_coordinator_validation", "MissingType") {
+		t.Fatalf("expected singleton_coordinator_validation unresolved contained type error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_DoesNotTreatBareStaticFlowAsSingletonCoordinator(t *testing.T) {
 	bundle := loadSingletonCoordinatorFixtureBundle(t, `
 name: coordinator

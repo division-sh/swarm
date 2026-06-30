@@ -5444,6 +5444,7 @@ flow_model:
       - 'mode: singleton declares template instance fields'
       - singleton flow lacks exactly one primary entity
       - singleton flow primary entity lacks typed contained map/list state
+      - singleton flow contained map/list value or item types do not resolve
       - singleton flow uses schema.yaml entity restatement
       - singleton flow declares multiple entity contracts
       - agent conversation/session memory is used as coordinator state authority
