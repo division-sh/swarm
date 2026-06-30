@@ -945,6 +945,21 @@ func validateWave1TypeRef(raw, context string) error {
 	if strings.HasPrefix(raw, "Optional<") {
 		return fmt.Errorf("RETIRED: %s type %q is not part of the Wave 1 type system", context, raw)
 	}
+	if keyType, valueType, ok := parseWave1MapTypeRef(raw); ok {
+		if keyType == "" || valueType == "" {
+			return fmt.Errorf("%s map type requires key and value types", context)
+		}
+		if strings.HasPrefix(keyType, "[") || strings.HasPrefix(strings.ToLower(keyType), "map[") {
+			return fmt.Errorf("%s map key type %q must be scalar or enum", context, keyType)
+		}
+		if strings.EqualFold(keyType, "object") || strings.EqualFold(keyType, "jsonb") {
+			return fmt.Errorf("RETIRED: %s map key type %q is retired", context, keyType)
+		}
+		if strings.EqualFold(valueType, "object") || strings.EqualFold(valueType, "jsonb") {
+			return fmt.Errorf("RETIRED: %s map value type %q is retired; declare a named type in types.yaml", context, valueType)
+		}
+		return nil
+	}
 	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
 		inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(raw, "["), "]"))
 		if inner == "" {
@@ -956,6 +971,20 @@ func validateWave1TypeRef(raw, context string) error {
 		return nil
 	}
 	return nil
+}
+
+func parseWave1MapTypeRef(raw string) (string, string, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(strings.ToLower(raw), "map[") {
+		return "", "", false
+	}
+	closeIdx := strings.Index(raw, "]")
+	if closeIdx < len("map[]")-1 {
+		return "", "", true
+	}
+	keyType := strings.TrimSpace(raw[len("map["):closeIdx])
+	valueType := strings.TrimSpace(raw[closeIdx+1:])
+	return keyType, valueType, true
 }
 
 func isBuiltinWave1Scalar(raw string) bool {

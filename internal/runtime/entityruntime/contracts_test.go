@@ -111,3 +111,83 @@ func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 		t.Fatalf("NormalizeFieldValue(spec.features undeclared field) = nil, want named-type field error")
 	}
 }
+
+func TestContainedOperationTarget_ResolvesTypedMapAndListOperations(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"verticals": {Type: "map[text]VerticalState"},
+				"queue":     {Type: "[Job]"},
+			},
+		},
+		Types: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"VerticalState": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"status":      {Type: "text"},
+						"active_jobs": {Type: "[Job]"},
+					},
+				},
+				"Job": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"id":    {Type: "text"},
+						"title": {Type: "text"},
+					},
+				},
+			},
+		},
+	}
+
+	target, err := ResolveContainedOperationTarget(contract, "entity.verticals.active_jobs", string(ContainedOperationAppend), true, false)
+	if err != nil {
+		t.Fatalf("ResolveContainedOperationTarget(map append): %v", err)
+	}
+	if !target.MapScoped || target.RootField != "verticals" || target.ListItemType != "Job" {
+		t.Fatalf("target = %+v, want map-scoped verticals active_jobs list", target)
+	}
+	value, err := NormalizeContainedOperationValue(contract, target, string(ContainedOperationAppend), map[string]any{"id": "job-1", "title": "Build"})
+	if err != nil {
+		t.Fatalf("NormalizeContainedOperationValue(append): %v", err)
+	}
+	if !reflect.DeepEqual(value, map[string]any{"id": "job-1", "title": "Build"}) {
+		t.Fatalf("value = %#v", value)
+	}
+
+	listTarget, err := ResolveContainedOperationTarget(contract, "entity.queue", string(ContainedOperationUpdate), false, true)
+	if err != nil {
+		t.Fatalf("ResolveContainedOperationTarget(list update): %v", err)
+	}
+	if listTarget.MapScoped || listTarget.ListItemType != "Job" {
+		t.Fatalf("list target = %+v, want direct Job list", listTarget)
+	}
+}
+
+func TestContainedOperationTarget_FailsClosedForDynamicPathAndWrongShape(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"verticals": {Type: "map[text]VerticalState"},
+			},
+		},
+		Types: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"VerticalState": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"status": {Type: "text"},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := ResolveContainedOperationTarget(contract, "entity.verticals[payload.vertical_id]", string(ContainedOperationSet), true, false); err == nil {
+		t.Fatal("dynamic bracket target resolved; want fail-closed rejection")
+	}
+	target, err := ResolveContainedOperationTarget(contract, "entity.verticals", string(ContainedOperationSet), true, false)
+	if err != nil {
+		t.Fatalf("ResolveContainedOperationTarget(map set): %v", err)
+	}
+	if _, err := NormalizeContainedOperationValue(contract, target, string(ContainedOperationSet), map[string]any{"missing": "field"}); err == nil {
+		t.Fatal("undeclared map value field normalized; want fail-closed rejection")
+	}
+}

@@ -208,6 +208,13 @@ type dataAccumulationPayloadSourceRef struct {
 }
 
 func dataAccumulationPayloadSourceRefs(write runtimecontracts.WorkflowDataWrite) []dataAccumulationPayloadSourceRef {
+	if write.IsContainedOperation() {
+		out := make([]dataAccumulationPayloadSourceRef, 0)
+		out = append(out, expressionPayloadSourceRefs(write.Key, "key")...)
+		out = append(out, expressionPayloadSourceRefs(write.Index, "index")...)
+		out = append(out, expressionPayloadSourceRefs(write.Value, "value")...)
+		return out
+	}
 	if write.Value.HasLiteralValue() {
 		return nil
 	}
@@ -240,6 +247,31 @@ func dataAccumulationPayloadSourceRefs(write runtimecontracts.WorkflowDataWrite)
 		return []dataAccumulationPayloadSourceRef{{
 			Field:       source,
 			Description: description,
+		}}
+	}
+	return nil
+}
+
+func expressionPayloadSourceRefs(expr runtimecontracts.ExpressionValue, label string) []dataAccumulationPayloadSourceRef {
+	if expr.IsZero() || expr.HasLiteralValue() {
+		return nil
+	}
+	if cel := strings.TrimSpace(expr.CEL); cel != "" {
+		refs := payloadReferences(cel)
+		out := make([]dataAccumulationPayloadSourceRef, 0, len(refs))
+		for _, ref := range refs {
+			out = append(out, dataAccumulationPayloadSourceRef{
+				Field:       ref,
+				Description: strings.TrimSpace(label) + " payload." + ref,
+			})
+		}
+		return out
+	}
+	if ref := strings.TrimSpace(expr.Ref); strings.HasPrefix(ref, "payload.") {
+		field := strings.TrimPrefix(ref, "payload.")
+		return []dataAccumulationPayloadSourceRef{{
+			Field:       field,
+			Description: strings.TrimSpace(label) + " " + ref,
 		}}
 	}
 	return nil

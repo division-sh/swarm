@@ -496,6 +496,8 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 	}
 	typeRef = strings.TrimSpace(typeRef)
 	switch {
+	case isMapType(typeRef):
+		return map[string]any{}, nil
 	case isListType(typeRef):
 		return []any{}, nil
 	case isTextType(typeRef):
@@ -548,6 +550,28 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 		}
 	}
 	switch {
+	case isMapType(typeRef):
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "must be map")
+		}
+		_, valueType, ok := MapTypeParts(typeRef)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "has unsupported map type "+typeRef)
+		}
+		out := make(map[string]any, len(object))
+		for key, raw := range object {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				return nil, fieldTypeError(fieldName, "map key cannot be empty")
+			}
+			normalized, err := normalizeValueForType(contract, joinFieldName(fieldName, key), valueType, raw)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = normalized
+		}
+		return out, nil
 	case isListType(typeRef):
 		items, ok := listValues(value)
 		if !ok {
@@ -701,6 +725,8 @@ func pathKind(contract Contract, typeRef string) string {
 		return "enum"
 	case isNamedType(contract, typeRef):
 		return "object"
+	case isMapType(typeRef):
+		return "map"
 	case isListType(typeRef):
 		return "list"
 	default:
@@ -771,6 +797,28 @@ func isJSONObjectType(contract Contract, typeRef string) bool {
 
 func isJSONArrayType(contract Contract, typeRef string) bool {
 	return strings.EqualFold(typeName(contract, typeRef), "array")
+}
+
+func isMapType(typeRef string) bool {
+	_, _, ok := MapTypeParts(typeRef)
+	return ok
+}
+
+func MapTypeParts(typeRef string) (string, string, bool) {
+	typeRef = strings.TrimSpace(typeRef)
+	if !strings.HasPrefix(strings.ToLower(typeRef), "map[") {
+		return "", "", false
+	}
+	closeIdx := strings.Index(typeRef, "]")
+	if closeIdx <= len("map[") {
+		return "", "", false
+	}
+	keyType := strings.TrimSpace(typeRef[len("map["):closeIdx])
+	valueType := strings.TrimSpace(typeRef[closeIdx+1:])
+	if keyType == "" || valueType == "" {
+		return "", "", false
+	}
+	return keyType, valueType, true
 }
 
 func isTimestampType(contract Contract, typeRef string) bool {

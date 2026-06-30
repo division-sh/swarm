@@ -765,6 +765,69 @@ writes:
 	}
 }
 
+func TestWorkflowDataWriteDecode_PreservesContainedOperationForms(t *testing.T) {
+	var spec WorkflowDataAccumulation
+	if err := yaml.Unmarshal([]byte(`
+writes:
+  - op: append
+    target: entity.verticals.active_jobs
+    key:
+      ref: payload.vertical_id
+    value:
+      ref: payload.job
+  - op: update
+    target: entity.queue
+    index: 0
+    value: reviewed
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := len(spec.Writes); got != 2 {
+		t.Fatalf("len(Writes) = %d, want 2", got)
+	}
+	appendWrite := spec.Writes[0]
+	if !appendWrite.IsContainedOperation() {
+		t.Fatal("append write did not decode as contained operation")
+	}
+	if got := appendWrite.Operation; got != WorkflowDataOperationAppend {
+		t.Fatalf("Operation = %q, want append", got)
+	}
+	if got := appendWrite.Target(); got != "entity.verticals.active_jobs" {
+		t.Fatalf("Target() = %q", got)
+	}
+	if got := appendWrite.Key.Ref; got != "payload.vertical_id" {
+		t.Fatalf("Key.Ref = %q", got)
+	}
+	if got := appendWrite.Value.Ref; got != "payload.job" {
+		t.Fatalf("Value.Ref = %q", got)
+	}
+	updateWrite := spec.Writes[1]
+	if got := updateWrite.Index.Literal; got != 0 {
+		t.Fatalf("Index.Literal = %#v, want 0", got)
+	}
+	if got := updateWrite.Value.Literal; got != "reviewed" {
+		t.Fatalf("Value.Literal = %#v, want reviewed", got)
+	}
+}
+
+func TestWorkflowDataWriteDecode_RejectsAmbiguousContainedOperationShape(t *testing.T) {
+	var spec WorkflowDataAccumulation
+	err := yaml.Unmarshal([]byte(`
+writes:
+  - op: append
+    target_path: entity.verticals.active_jobs
+    target: entity.verticals.active_jobs
+    key: north
+    value: job-1
+`), &spec)
+	if err == nil {
+		t.Fatal("expected contained operation target_path ambiguity error")
+	}
+	if !strings.Contains(err.Error(), "must use target") {
+		t.Fatalf("error = %v, want target-only rejection", err)
+	}
+}
+
 func TestWorkflowDataWriteDecode_PreservesTargetPathAuthoring(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := yaml.Unmarshal([]byte(`

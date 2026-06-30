@@ -208,6 +208,7 @@ var bootCheckRegistry = []Check{
 	{ID: "entity_writer_coverage", Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
 	{ID: "entity_write_target_compliance", Severity: SeverityHardInvalidity, Run: checkEntityWriteTargetCompliance},
+	{ID: "contained_state_operation_compliance", Severity: SeverityHardInvalidity, Run: checkContainedStateOperationCompliance},
 	{ID: "semantic_drift_payload_completeness", Severity: "error", Run: checkSemanticDriftPayloadCompleteness},
 	{ID: "condition_payload_alignment", Severity: "error", Run: checkConditionPayloadAlignment},
 	{ID: "condition_policy_alignment", Severity: "warning", Run: checkConditionPolicyAlignment},

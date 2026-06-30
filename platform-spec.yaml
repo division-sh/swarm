@@ -1595,7 +1595,7 @@ handler_specification:
         source_event: 'string — which event the payload comes from (default: current trigger event).
           CANONICAL field name — use source_event, not "source".'
       write_item_forms:
-        description: 'Each item in writes is one of four forms. No other forms are accepted.'
+        description: 'Each item in writes is one of five forms. No other forms are accepted.'
         direct:
           shape: 'field_name (bare string)'
           meaning: 'payload.field_name → entity.field_name. Direct name match.'
@@ -1619,14 +1619,76 @@ handler_specification:
           example: "- target_field: revision_count\n  expression: entity.revision_count + 1"
           note: 'value and expression are mutually exclusive. Use value for constants, expression
             for dynamic computation. Do not use expression for simple constants — use value instead.'
+        contained_operation:
+          promoted_by: '#1548'
+          canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.ResolveContainedOperationTarget
+          shape: '{op: set|merge|delete|append|update, target: entity.<map_or_list_field>[.<declared_nested_field>], key?: expression, index?: expression, value?: expression}'
+          meaning: >
+            Apply a deterministic typed update to a list/map contained inside the
+            current primary entity. `target` is a declared entity field path and
+            MUST use `entity.` scope. For map-scoped operations, `key` is the
+            explicit map key expression; dynamic bracket targets such as
+            `entity.map[payload.key]` are not valid operation syntax. `value`,
+            `key`, and `index` use the expression-value grammar: scalars/maps/lists
+            are literals, `{ref: payload.field}` reads a scoped value, and
+            `{cel: expression}` evaluates a CEL expression.
+          map_operations:
+            set: >
+              Requires `target`, `key`, and `value`. The target root must be
+              `map[...]T`. The value is type-checked as `T` or as the declared
+              nested target type when `target` names a declared field under the
+              map value type.
+            merge: >
+              Requires `target`, `key`, and `value`. The map entry or declared
+              nested target must already exist and resolve to an object/named
+              type. The value is a typed partial object merged deterministically
+              into that object. Unknown fields fail closed.
+            delete: >
+              Requires `target` and `key`; forbids `value` and `index`. The
+              target must be the map root. Missing keys fail closed.
+            append: >
+              With `key`, appends `value` to a list stored as the map value or
+              under a declared nested list field of the map value type. The list
+              item is type-checked against the declared list element type.
+          list_operations:
+            append: >
+              Without `key`, `target` must resolve to a declared list field on
+              the primary entity. Appends a value type-checked against the list
+              item type.
+            update: >
+              Requires `target`, `index`, and `value`. `target` must resolve to
+              a declared list field, either directly on the primary entity or
+              under an explicit map `key`. The index must be non-negative and
+              existing at runtime; out-of-range update fails closed.
+          fail_closed:
+          - missing target
+          - target outside entity scope
+          - target_path/field/source_field/target_field mixed with op syntax
+          - unsupported operation name
+          - missing required key/index/value for the operation
+          - index declared on append or delete
+          - value declared on delete
+          - dynamic bracket/index path syntax in target
+          - target root not declared on the primary entity schema
+          - map operation on a non-map field
+          - list operation on a non-list field
+          - nested target path that does not resolve through declared named types
+          - wrong key type, wrong value shape, missing map key, or out-of-range list update
+          non_authoritative_paths:
+          - target_path bracket syntax
+          - paths.Parse dynamic segments
+          - whole-map/list CEL rebuilds used as keyed operation proof
+          - connect/direct delivery/RouteTable/descriptor lookup for contained items
+          example: "data_accumulation:\n  writes:\n  - op: append\n    target: entity.verticals.active_jobs\n    key:\n      ref: payload.vertical_id\n    value:\n      ref: payload.job\n  - op: update\n    target: entity.review_queue\n    index: 0\n    value: reviewed"
       rules:
       - writes is always a list
-      - each item is exactly one of the four forms above
+      - each item is exactly one of the five forms above
       - value and expression are mutually exclusive on the same write item (boot error if both present)
       - source_event is optional — if omitted, the trigger event is the source
       - source_event payload must contain all fields referenced by direct and mapped writes (verified at boot)
       - literal writes do not reference source_event or handler context — the value is used as-is
       - computed writes do not reference source_event — they use the handler context directly
+      - contained operations are validated against the current flow primary entity contract and remain local state updates, not routing declarations
       example: "data_accumulation:\n  writes:\n  - geography                              # direct\n\
         \  - source_field: vertical_name             # mapped\n    target_field: name\n  - target_field:\
         \ revision_count                # literal\n    value: 0\n  - target_field: expected_count\
@@ -5319,8 +5381,9 @@ flow_model:
           subscribers, and RouteTable/live subscription lookup are not the
           canonical producer evidence owner for this class.
     contained_state_model:
-      status: spec_vocabulary_only
+      status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#1548'
+      canonical_code_owner: internal/runtime/contracts.WorkflowDataWrite.Operation + internal/runtime/entityruntime.ResolveContainedOperationTarget + internal/runtime/engine.Executor.applyContainedDataOperation
       rule: >
         Typed lists and maps are contained state inside the primary entity.
         They are not cross-flow route targets and MUST NOT be addressed through
@@ -5328,6 +5391,28 @@ flow_model:
         routing, timers, retries, agents, audit, callbacks, terminality, or
         durable idempotency identity, it must be promoted to a child/template
         flow instance instead of remaining only a list/map item.
+      operation_surface:
+        host: platform-spec.yaml#handler.data_accumulation.write_item_forms.contained_operation
+        supported_operations:
+        - map set
+        - map merge
+        - map delete
+        - map append-to-contained-list
+        - list append
+        - list update
+        variable_key_rule: >
+          Variable map keys are expressed only through the operation `key`
+          expression. Dynamic/bracket target paths are not a compatibility
+          surface and must fail verification/runtime validation.
+        persistence_rule: >
+          Contained operations mutate the owning primary entity field. Store
+          persistence, mutation-log rows, replay reconstruction, and readback
+          remain keyed by the primary entity field; contained map/list items do
+          not gain independent runtime identity or route rows.
+        non_routing_rule: >
+          A contained operation does not create a receiver, route descriptor,
+          RouteTable row, direct delivery target, or live subscription. Parent
+          `connect` remains cross-flow-instance topology only.
     singleton_coordinator_model:
       status: spec_vocabulary_only
       implementation_tracker: '#1549'

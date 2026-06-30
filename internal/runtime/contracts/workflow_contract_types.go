@@ -447,6 +447,16 @@ const (
 	ExpressionKindCEL     ExpressionKind = "cel"
 )
 
+type WorkflowDataOperation string
+
+const (
+	WorkflowDataOperationSet    WorkflowDataOperation = "set"
+	WorkflowDataOperationMerge  WorkflowDataOperation = "merge"
+	WorkflowDataOperationDelete WorkflowDataOperation = "delete"
+	WorkflowDataOperationAppend WorkflowDataOperation = "append"
+	WorkflowDataOperationUpdate WorkflowDataOperation = "update"
+)
+
 type ExpressionValue struct {
 	Kind    ExpressionKind `yaml:"kind,omitempty"`
 	Literal any            `yaml:"literal,omitempty"`
@@ -863,13 +873,17 @@ type WorkflowDataAccumulation struct {
 	SourceEvent string              `yaml:"source_event"`
 }
 type WorkflowDataWrite struct {
-	Field         string          `yaml:"-" json:"field,omitempty"`
-	SourceField   string          `yaml:"source_field,omitempty" json:"source_field,omitempty"`
-	SourcePath    paths.Path      `yaml:"-" json:"-"`
-	TargetField   string          `yaml:"target_field,omitempty" json:"target_field,omitempty"`
-	TargetPathRef string          `yaml:"target_path,omitempty" json:"target_path,omitempty"`
-	TargetPath    paths.Path      `yaml:"-" json:"-"`
-	Value         ExpressionValue `yaml:"value,omitempty" json:"value,omitempty"`
+	Field         string                `yaml:"-" json:"field,omitempty"`
+	SourceField   string                `yaml:"source_field,omitempty" json:"source_field,omitempty"`
+	SourcePath    paths.Path            `yaml:"-" json:"-"`
+	Operation     WorkflowDataOperation `yaml:"op,omitempty" json:"op,omitempty"`
+	TargetRef     string                `yaml:"target,omitempty" json:"target,omitempty"`
+	TargetField   string                `yaml:"target_field,omitempty" json:"target_field,omitempty"`
+	TargetPathRef string                `yaml:"target_path,omitempty" json:"target_path,omitempty"`
+	TargetPath    paths.Path            `yaml:"-" json:"-"`
+	Value         ExpressionValue       `yaml:"value,omitempty" json:"value,omitempty"`
+	Key           ExpressionValue       `yaml:"key,omitempty" json:"key,omitempty"`
+	Index         ExpressionValue       `yaml:"index,omitempty" json:"index,omitempty"`
 }
 
 func (w WorkflowDataWrite) Source() string {
@@ -884,6 +898,8 @@ func (w WorkflowDataWrite) Source() string {
 }
 func (w WorkflowDataWrite) Target() string {
 	switch {
+	case strings.TrimSpace(w.TargetRef) != "":
+		return strings.TrimSpace(w.TargetRef)
 	case strings.TrimSpace(w.TargetPathRef) != "":
 		return strings.TrimSpace(w.TargetPathRef)
 	case strings.TrimSpace(w.TargetField) != "":
@@ -896,6 +912,10 @@ func (w WorkflowDataWrite) Target() string {
 }
 func (w WorkflowDataWrite) HasLiteralValue() bool {
 	return w.Value.HasLiteralValue()
+}
+
+func (w WorkflowDataWrite) IsContainedOperation() bool {
+	return strings.TrimSpace(string(w.Operation)) != ""
 }
 
 func (w WorkflowDataWrite) SourceExpression() ExpressionValue {

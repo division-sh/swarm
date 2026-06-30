@@ -90,12 +90,26 @@ func stubSourceWithRootEntityContract() semanticview.Source {
 						"report_count": {Type: "integer"},
 					},
 				},
+				"VerticalState": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"status":      {Type: "text"},
+						"active_jobs": {Type: "[Job]"},
+					},
+				},
+				"Job": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"id":    {Type: "text"},
+						"title": {Type: "text"},
+					},
+				},
 			},
 		},
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"subject": {
 				Fields: map[string]runtimecontracts.EntityFieldDecl{
-					"analysis": {Type: "Analysis"},
+					"analysis":  {Type: "Analysis"},
+					"verticals": {Type: "map[text]VerticalState"},
+					"tags":      {Type: "[text]"},
 				},
 			},
 		},
@@ -2347,6 +2361,153 @@ func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T)
 	}
 	if got := analysis["report_count"]; got != 2 {
 		t.Fatalf("analysis.report_count = %#v, want 2", got)
+	}
+}
+
+func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		Event: eventtest.RootIngress(
+			"evt-1",
+			"job.received",
+			"",
+			"",
+			json.RawMessage(`{"vertical_id":"north","job":{"id":"job-1","title":"Build"}}`),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{
+					{
+						Operation: runtimecontracts.WorkflowDataOperationSet,
+						TargetRef: "entity.verticals",
+						Key:       runtimecontracts.LiteralExpression("north"),
+						Value: runtimecontracts.LiteralExpression(map[string]any{
+							"status":      "active",
+							"active_jobs": []any{},
+						}),
+					},
+					{
+						Operation: runtimecontracts.WorkflowDataOperationMerge,
+						TargetRef: "entity.verticals",
+						Key:       runtimecontracts.LiteralExpression("north"),
+						Value: runtimecontracts.LiteralExpression(map[string]any{
+							"status": "busy",
+						}),
+					},
+					{
+						Operation: runtimecontracts.WorkflowDataOperationAppend,
+						TargetRef: "entity.verticals.active_jobs",
+						Key:       runtimecontracts.RefExpression("payload.vertical_id"),
+						Value:     runtimecontracts.RefExpression("payload.job"),
+					},
+					{
+						Operation: runtimecontracts.WorkflowDataOperationUpdate,
+						TargetRef: "entity.tags",
+						Index:     runtimecontracts.LiteralExpression(1),
+						Value:     runtimecontracts.LiteralExpression("gold"),
+					},
+					{
+						Operation: runtimecontracts.WorkflowDataOperationAppend,
+						TargetRef: "entity.tags",
+						Value:     runtimecontracts.LiteralExpression("vip"),
+					},
+					{
+						Operation: runtimecontracts.WorkflowDataOperationDelete,
+						TargetRef: "entity.verticals",
+						Key:       runtimecontracts.LiteralExpression("obsolete"),
+					},
+				},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{
+			"verticals": map[string]any{
+				"obsolete": map[string]any{"status": "old", "active_jobs": []any{}},
+			},
+			"tags": []any{"new", "silver"},
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	verticals, ok := result.StateMutation.Metadata["verticals"].(map[string]any)
+	if !ok {
+		t.Fatalf("verticals = %#v", result.StateMutation.Metadata["verticals"])
+	}
+	if _, exists := verticals["obsolete"]; exists {
+		t.Fatalf("obsolete key survived delete: %#v", verticals)
+	}
+	north, ok := verticals["north"].(map[string]any)
+	if !ok {
+		t.Fatalf("verticals.north = %#v", verticals["north"])
+	}
+	if got := north["status"]; got != "busy" {
+		t.Fatalf("verticals.north.status = %#v, want busy", got)
+	}
+	jobs, ok := north["active_jobs"].([]any)
+	if !ok || len(jobs) != 1 {
+		t.Fatalf("verticals.north.active_jobs = %#v", north["active_jobs"])
+	}
+	job, ok := jobs[0].(map[string]any)
+	if !ok || job["id"] != "job-1" || job["title"] != "Build" {
+		t.Fatalf("active job = %#v", jobs[0])
+	}
+	if !reflect.DeepEqual(result.StateMutation.Metadata["tags"], []any{"new", "gold", "vip"}) {
+		t.Fatalf("tags = %#v", result.StateMutation.Metadata["tags"])
+	}
+}
+
+func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		Event:    eventtest.RootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					Operation: runtimecontracts.WorkflowDataOperationDelete,
+					TargetRef: "entity.verticals",
+					Key:       runtimecontracts.LiteralExpression("missing"),
+				}},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{
+			"verticals": map[string]any{},
+		}, nil, map[string]map[string]any{}),
+	})
+	if err == nil {
+		t.Fatal("expected missing map key failure")
+	}
+	if !strings.Contains(err.Error(), `map key "missing" does not exist`) {
+		t.Fatalf("error = %v, want missing-key context", err)
 	}
 }
 

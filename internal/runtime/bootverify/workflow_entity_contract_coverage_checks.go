@@ -279,6 +279,21 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 			}
 		}
 	}
+	for _, ref := range wave1ContainedStateOperations(source) {
+		contract, ok := entityruntime.ResolveForFlow(source, ref.FlowID)
+		if !ok {
+			continue
+		}
+		target, err := entityruntime.ResolveContainedOperationTarget(contract, ref.Write.Target(), string(ref.Write.Operation), !ref.Write.Key.IsZero(), !ref.Write.Index.IsZero())
+		if err != nil {
+			continue
+		}
+		ownerFlowID := strings.TrimSpace(ref.FlowID)
+		if out[ownerFlowID] == nil {
+			out[ownerFlowID] = map[string]struct{}{}
+		}
+		out[ownerFlowID][target.RootField] = struct{}{}
+	}
 	return out
 }
 
@@ -499,6 +514,9 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 	}
 	addRuleTargets := func(scope string, rule runtimecontracts.HandlerRuleEntry) {
 		for _, write := range rule.DataAccumulation.Writes {
+			if write.IsContainedOperation() {
+				continue
+			}
 			add(scope+".data_accumulation", write.Target())
 		}
 		if rule.Compute != nil {
@@ -518,6 +536,9 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 
 	addQueryTargets("handler", handler.Query)
 	for _, write := range handler.DataAccumulation.Writes {
+		if write.IsContainedOperation() {
+			continue
+		}
 		add("handler.data_accumulation", write.Target())
 	}
 	if handler.Compute != nil {

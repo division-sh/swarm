@@ -188,6 +188,9 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 		snapshot.StateCarrier.Metadata = map[string]any{}
 	}
 	for _, write := range spec.Writes {
+		if write.IsContainedOperation() {
+			return fmt.Errorf("data_accumulation target %s: contained operations require semantic source validation", strings.TrimSpace(write.Target()))
+		}
 		target := strings.TrimSpace(write.Target())
 		if target == "" {
 			continue
