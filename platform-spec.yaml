@@ -9352,6 +9352,44 @@ workspace_model:
     split_scope: >
       Docker Compose setup and workspace image contents/default agent CLI availability remain tracked separately by #996 and
       #997 unless a future gate explicitly widens them.
+  local_workspace_image_build_authority:
+    promoted_by: '#1566'
+    implementation_status: implemented_first_slice
+    canonical_owner: platform-spec.yaml#workspace_model.local_workspace_image_build_authority
+    implementation_owner: cmd/swarm workspace build command plus embedded workspace Dockerfile materializer
+    scope: >
+      Merge-bearing local setup authority for building and validating the Docker workspace image needed by local
+      `claude_cli` proof flows. This owner is an explicit operator setup surface. It is separate from runtime startup:
+      runtime startup consumes `workspace_model.runtime_image_packaging` and MUST remain fail-closed inspect-only when the
+      configured image is missing or unusable.
+    command_surface: swarm workspace build --backend claude_cli [--image <tag>]
+    build_plan_rule: >
+      The command MUST use an embedded/materialized workspace Dockerfile or equivalent embedded build plan. It MUST NOT
+      locate build material by walking for a source checkout, reading repo-root `Dockerfile.workspace`, using
+      `runtime.Caller`, or requiring a `go.mod` path. The materialized plan is internal implementation detail, not a
+      user-facing configuration source.
+    claude_cli_build_profile:
+      backend: claude_cli
+      docker_build_args:
+        INSTALL_CLAUDE_CLI: 'true'
+        INSTALL_CODEX_CLI: 'false'
+      version_policy: >
+        Claude CLI package/version selection is owned by the embedded workspace Dockerfile defaults unless a later gated
+        source-authority change promotes explicit version flags.
+    image_target_rule: >
+      Without `--image`, the command MUST target the same configured workspace image consumed by `swarm serve` Docker
+      startup: `SWARM_WORKSPACE_IMAGE` when set, otherwise `swarm-workspace:latest`. `--image <tag>` is an explicit
+      setup-only override and MUST fail closed when empty or syntactically invalid. The override does not change runtime
+      configuration by itself; operators must still run serve with the matching configured image when overriding.
+    validation_rule: >
+      After build, the command MUST validate the resulting image by running a harmless executable Claude CLI proof inside
+      the image, equivalent to `command -v -- "$1" >/dev/null && "$1" --version >/dev/null` with `$1=claude`. Image
+      inspection alone and command lookup alone are insufficient.
+    consumer_boundaries:
+      - '`swarm workspace build` is the setup producer for this first slice.'
+      - '`swarm doctor --backend claude_cli` may report or recommend the build command, but MUST NOT build images.'
+      - '`swarm serve --dev --backend claude_cli` and local foreground `swarm run --backend claude_cli` MUST NOT auto-build images.'
+      - 'Host workspace backend execution, local API connection discovery, stale MCP gateway env policy, Compose setup, and docs rollout remain split.'
   data_source_authority:
     promoted_by: '#1139/#1223'
     implementation_status: implemented
@@ -11563,6 +11601,22 @@ cli_specification:
       - local API connection discovery files
       - stale gateway env precedence or auto-fix policy
       - deployment-mode profile management
+    workspace_build:
+      command: swarm workspace build --backend claude_cli [--image <tag>]
+      tier: should_have
+      implementation_status: implemented_first_slice
+      owner: workspace_model.local_workspace_image_build_authority
+      behavior: >
+        Builds and validates the local Docker workspace image for `claude_cli` proof flows using the embedded/materialized
+        workspace build plan. The command uses `SWARM_DOCKER_BIN` when set, targets `SWARM_WORKSPACE_IMAGE` or
+        `swarm-workspace:latest` by default, accepts explicit `--image <tag>` for setup-only override, passes the approved
+        `claude_cli` build args, and validates that the resulting image can execute `claude --version`.
+      boundaries:
+      - no runtime startup auto-build
+      - no source-checkout Dockerfile lookup or go.mod walk
+      - no host workspace execution changes
+      - no local API connection discovery
+      - no stale MCP gateway env policy change
     secrets:
       command: swarm secrets set|list|check|rm
       tier: must_have
