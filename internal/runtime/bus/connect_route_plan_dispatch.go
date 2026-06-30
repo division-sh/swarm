@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -21,6 +22,7 @@ type connectRoutePlanResolver struct {
 	plans           []runtimepinrouting.ConnectRoutePlan
 	issues          []runtimepinrouting.ConnectRoutePlanIssue
 	loadDescriptors connectRoutePlanDescriptorLoader
+	lifecycle       templateInstanceLifecycleOwner
 }
 
 type connectRoutePlanDispatch struct {
@@ -32,7 +34,7 @@ type connectRoutePlanDispatch struct {
 	ExtraDetail      map[string]any
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader) connectRoutePlanResolver {
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator) connectRoutePlanResolver {
 	if source == nil {
 		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors}
 	}
@@ -43,6 +45,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		plans:           append([]runtimepinrouting.ConnectRoutePlan(nil), plans...),
 		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		loadDescriptors: loadDescriptors,
+		lifecycle:       newTemplateInstanceLifecycleOwner(source, loadDescriptors, activator),
 	}
 }
 
@@ -80,11 +83,10 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		},
 	}
 	for _, plan := range matched {
-		materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
-			MatchValues:             values,
-			Descriptors:             descriptors,
-			SupportedAddressTargets: runtimepinrouting.SupportedConnectAddressTargets(r.source, plan),
-		})
+		materialized, decision, err := r.materializeConnectRoutePlan(ctx, evt, plan, values, descriptors)
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
 		if materialized.Failure != "" {
 			out.Failure = connectRoutePlanTargetFailure(materialized.Failure)
 			out.ExtraDetail["connect_route_plan_failure"] = string(materialized.Failure)
@@ -92,7 +94,17 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEvent
 			return out, nil
 		}
+		if !decision.Empty() {
+			out.ExtraDetail["connect_route_plan_template_instance_lifecycle"] = decision.Detail()
+		}
+		cleanupPreview, err := r.installTemplateInstanceLifecyclePreview(decision)
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
 		routes, subscribers := r.deliveryRoutesForMaterialization(plan, materialized)
+		if cleanupPreview != nil {
+			cleanupPreview()
+		}
 		if len(routes) == 0 {
 			out.Failure = runtimepinrouting.FailureTargetNotSubscribed
 			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.FailureTargetNotSubscribed)
@@ -111,6 +123,42 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	out.DeliveryIntents = normalizeRoutePlanDeliveryIntents(out.DeliveryIntents)
 	out.RoutedRecipients = dedupeSubscribers(out.RoutedRecipients)
 	return out, nil
+}
+
+func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
+	if materialized, decision, handled, err := r.lifecycle.Materialize(ctx, evt, plan, values, descriptors); handled || err != nil {
+		return materialized, decision, err
+	}
+	return runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
+		MatchValues:             values,
+		Descriptors:             descriptors,
+		SupportedAddressTargets: runtimepinrouting.SupportedConnectAddressTargets(r.source, plan),
+	}), TemplateInstanceLifecycleDecision{}, nil
+}
+
+func (r connectRoutePlanResolver) installTemplateInstanceLifecyclePreview(decision TemplateInstanceLifecycleDecision) (func(), error) {
+	if strings.TrimSpace(decision.Action) != templateInstanceLifecycleActionPreviewCreate {
+		return nil, nil
+	}
+	if r.routeTable == nil {
+		return nil, nil
+	}
+	identity := decision.Route()
+	if !identity.Valid() {
+		return nil, nil
+	}
+	if len(r.routeTable.MaterializedRoutes(identity)) > 0 {
+		return nil, nil
+	}
+	if err := r.routeTable.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{
+		Identity:            identity,
+		ActivationVariables: decision.ActivationVariables(),
+	}); err != nil {
+		return nil, err
+	}
+	return func() {
+		r.routeTable.RemoveFlowInstanceRoute(identity)
+	}, nil
 }
 
 func (r connectRoutePlanResolver) matchedPlans(evt events.Event) []runtimepinrouting.ConnectRoutePlan {

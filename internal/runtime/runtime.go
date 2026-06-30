@@ -394,12 +394,18 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	payloadValidator := boot.payloadValidator(rt.Logger)
 	boot.bindPayloadValidator(payloadValidator)
+	var managerRef *runtimemanager.AgentManager
 	bus, err := newRuntimeEventBus(stores.EventStore, rt.Logger, source, boot.TrimmedBundleFingerprint, boot.BundleSourceFact, func() []runtimebus.EventInterceptor {
 		if rt.Pipeline == nil {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadValidator, opts.TestLifecycleProbe)
+	}, payloadValidator, func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+		if managerRef == nil {
+			return fmt.Errorf("flow instance activator is required")
+		}
+		return managerRef.ActivateFlowInstance(ctx, req)
+	}, opts.TestLifecycleProbe)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -413,8 +419,6 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.RunControl = runtimeruncontrol.NewController(runControlStore, rt.Bus, runtimeruncontrol.Options{})
 		rt.Bus.SetRunDispatchGate(rt.RunControl)
 	}
-
-	var managerRef *runtimemanager.AgentManager
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()

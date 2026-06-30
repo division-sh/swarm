@@ -34,6 +34,10 @@ type flowInstanceRouteInstaller interface {
 	AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest) error
 }
 
+type flowInstanceRouteContextInstaller interface {
+	AddFlowInstanceRouteContext(context.Context, runtimebus.FlowInstanceRouteMaterializationRequest) error
+}
+
 type flowInstanceRouteRemover interface {
 	RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) error
 }
@@ -92,6 +96,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if err != nil {
 		return err
 	}
+	metadata := cloneFlowConfig(req.Metadata)
+	for key, value := range flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, parentEntityID) {
+		metadata[key] = value
+	}
 	if err := am.workflowInstances.Create(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID:      instanceID,
 		StorageRef:      flowPath,
@@ -99,7 +107,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		WorkflowVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 		CurrentState:    initialState,
 		Config:          cloneFlowConfig(req.Config),
-		Metadata:        flowInstanceActivationMetadata(instance, flowEntityID, instanceID, flowPath, parentEntityID),
+		Metadata:        metadata,
 	}); err != nil {
 		return fmt.Errorf("persist flow instance %s: %w", flowPath, err)
 	}
@@ -131,7 +139,14 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			return err
 		}
 	}
-	if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
+	if installer, ok := am.bus.(flowInstanceRouteContextInstaller); ok && installer != nil {
+		if err := installer.AddFlowInstanceRouteContext(ctx, runtimebus.FlowInstanceRouteMaterializationRequest{
+			Identity:            instance.Route(),
+			ActivationVariables: vars,
+		}); err != nil {
+			return err
+		}
+	} else if installer, ok := am.bus.(flowInstanceRouteInstaller); ok && installer != nil {
 		if err := installer.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
 			Identity:            instance.Route(),
 			ActivationVariables: vars,

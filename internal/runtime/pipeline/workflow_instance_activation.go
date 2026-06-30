@@ -18,6 +18,7 @@ type FlowInstanceActivationRequest struct {
 	Instance       runtimeflowidentity.Instance
 	InitialState   string
 	Config         map[string]any
+	Metadata       map[string]any
 	TriggerEvent   events.Event
 }
 

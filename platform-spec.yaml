@@ -5265,6 +5265,27 @@ flow_model:
         `on_missing` is required and MUST be `create` or `reject`. `on_conflict`
         is required and MUST be `reject` or `reuse`. Missing or unsupported
         policy values fail closed during verification.
+      connect_time_lifecycle_rule: >
+        For normal parent `connect` into an addressless template receiver, the
+        runtime owner is the EventBus connect-time template instance lifecycle
+        decision. That owner consumes
+        WorkflowContractBundle.ResolveFlowTemplateInstance, ordered
+        TemplateInstanceContract.CanonicalKeyMaterial, the lowered
+        ConnectRoutePlan.InstanceKey including #1546 adapter mappings, and the
+        producer output key/carries evidence. If the receiver policy is
+        `on_missing: create`, the owner derives a deterministic instance id from
+        receiver flow id plus ordered key material, seeds the receiver primary
+        entity/config with those key fields, and invokes the configured flow
+        instance activator before delivery routes are committed. If
+        `on_missing: reject`, missing instances fail closed. If create is
+        enabled and an exact matching active descriptor already exists,
+        `on_conflict: reuse` routes to that exact instance and `on_conflict:
+        reject` fails closed as `route_plan_instance_conflict`; ambiguous
+        matches always fail closed. Preflight may only preview the deterministic
+        route when the real lifecycle activator is configured and MUST NOT
+        persist lifecycle state. Publish-time creation, route installation,
+        event row, delivery rows, and committed replay scope share the active
+        publish mutation boundary when the store provides one.
       non_authoritative_paths: >
         Flow input-pin `address`, receiver `select_entity` /
         `select_or_create_entity`, producer `target`, producer `broadcast:true`,
@@ -5319,6 +5340,7 @@ flow_model:
         output_pin_key_carries: '#1544'
         connect_to_instance_route_planning: '#1545'
         connect_key_adapters: '#1546'
+        connect_time_template_lifecycle: '#1577'
       connect_to_instance_route_planning:
         status: merge_bearing_runtime_behavior
         implementation_tracker: '#1545'
@@ -5976,6 +5998,42 @@ flow_model:
             - recovery or retry work
             - agent/node delivery parity
             - producer target/broadcast retirement
+        implementation_slice_1577:
+          status: merge_bearing_runtime_behavior
+          canonical_code_owner: internal/runtime/bus.TemplateInstanceLifecycleDecision + internal/runtime/bus.templateInstanceLifecycleOwner
+          rule: |
+            `on_missing` and `on_conflict` on addressless template receivers are
+            consumed by the connect-time template lifecycle owner, not by
+            descriptor lookup alone. The owner first derives ordered key
+            material with TemplateInstanceContract.CanonicalKeyMaterial from
+            ConnectRoutePlan.InstanceKey and producer key/carries evidence. It
+            then selects exactly one receiver-scoped active descriptor, creates
+            one deterministic receiver flow instance, or fails closed.
+
+            Created instance identity is deterministic: receiver semantic flow
+            id plus ordered field/value key material is hashed into the stored
+            template instance id. The created flow instance persists the key
+            fields as receiver primary-entity fields and config variables, with
+            entity_type, instance_kind, last_source_event, and parent-route
+            control metadata carried by activation. Route installation must use
+            the same activation context so stores that expose a publish mutation
+            persist the instance row, entity_state row, route row, event row,
+            delivery rows, and committed replay scope in one semantic mutation.
+
+            `on_missing: reject` means no create attempt and no lower-precedence
+            rescue. `on_missing: create` with `on_conflict: reuse` reuses the
+            exact existing matching receiver instance and treats duplicate
+            retry of the same key decision as reuse after the descriptor exists.
+            `on_missing: create` with `on_conflict: reject` rejects an exact
+            pre-existing match as `route_plan_instance_conflict`; event-id and
+            store idempotency remain responsible for retrying the same already
+            committed publish. Ambiguous matches, non-matching descriptors,
+            missing activator, missing key values, missing receiver carrier,
+            unsupported adapter evidence, delivery rows, replay/readback rows,
+            RouteTable lookup before selected identity, live subscribers,
+            handler lookup, direct delivery, producer target, producer
+            broadcast:true, receiver select_entity/select_or_create_entity, and
+            explicit create_flow_instance are not lifecycle authority.
         implementation_slice_1546:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings + internal/runtime/bus.connectRoutePlanResolver
