@@ -630,6 +630,9 @@ func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
 		if w.Key.IsZero() {
 			return fmt.Errorf("workflow data write op %q requires key", w.Operation)
 		}
+		if !w.Index.IsZero() {
+			return fmt.Errorf("workflow data write op %q must not declare index", w.Operation)
+		}
 	case WorkflowDataOperationAppend:
 		if !w.Index.IsZero() {
 			return fmt.Errorf("workflow data write op append must not declare index")

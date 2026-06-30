@@ -828,6 +828,36 @@ writes:
 	}
 }
 
+func TestWorkflowDataWriteDecode_RejectsContainedSetOrMergeIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		op   string
+	}{
+		{name: "set", op: "set"},
+		{name: "merge", op: "merge"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var spec WorkflowDataAccumulation
+			err := yaml.Unmarshal([]byte(fmt.Sprintf(`
+writes:
+  - op: %s
+    target: entity.verticals
+    key: north
+    index: 0
+    value:
+      status: active
+`, tc.op)), &spec)
+			if err == nil {
+				t.Fatalf("expected op %s index rejection", tc.op)
+			}
+			if !strings.Contains(err.Error(), "must not declare index") {
+				t.Fatalf("error = %v, want index rejection", err)
+			}
+		})
+	}
+}
+
 func TestWorkflowDataWriteDecode_PreservesTargetPathAuthoring(t *testing.T) {
 	var write WorkflowDataWrite
 	if err := yaml.Unmarshal([]byte(`

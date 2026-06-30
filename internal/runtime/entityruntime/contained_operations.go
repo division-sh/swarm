@@ -180,9 +180,15 @@ func validateOperationTargetKind(contract Contract, target ContainedOperationTar
 		if !target.MapScoped {
 			return "", fmt.Errorf("op set requires a map key")
 		}
+		if hasIndex {
+			return "", fmt.Errorf("op set must not declare index")
+		}
 	case ContainedOperationMerge:
 		if !target.MapScoped {
 			return "", fmt.Errorf("op merge requires a map key")
+		}
+		if hasIndex {
+			return "", fmt.Errorf("op merge must not declare index")
 		}
 		if !isNamedType(contract, target.TargetType) && !isJSONObjectType(contract, target.TargetType) {
 			return "", fmt.Errorf("op merge target %s must resolve to an object type", target.Path)
