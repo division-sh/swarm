@@ -1518,7 +1518,12 @@ handler_specification:
         platform_builtin: string — optional reference to a platform-provided guard (e.g., authorization checks)
       list_form:
         checks: list of {id, check} objects — ALL must pass
-        on_fail: 'reject | kill | discard | escalate:{event_name} — what to do when any check fails. Default: reject.'
+        on_fail: 'reject | kill | discard | escalate:{event_name} | {escalate: {event, fields}} — what to do when
+          any check fails. Default: reject. The scalar escalate:{event_name} shorthand emits an escalation event with
+          no explicit business payload. The object form authors explicit escalation business payload fields using the
+          same expression-value forms as emit.fields, evaluated at guard-failure time before later handler transforms
+          or data writes. Guard escalation never implicitly passes through trigger payload/entity metadata and cannot
+          author runtime-owned envelope fields as business payload.'
     accumulate:
       field: accumulate
       type: object
@@ -9290,10 +9295,11 @@ observation_model:
       reject: 'Guard failed with on_fail: reject. No side effects. Entity unchanged.'
       discard: 'Guard failed with on_fail: discard. No side effects. No record.'
       kill: 'Guard failed with on_fail: kill. Entity advanced to terminal state.'
-      escalate: 'Guard failed with on_fail: escalate:{event}. Escalation event emitted instead, using the same emit payload
-        construction rules as a declarative system-node emit with no business fields: no implicit trigger/entity passthrough,
-        payload stays empty unless authored fields exist, runtime-owned envelope remains on the event carrier, and fail-closed
-        contract validation still applies.'
+      escalate: 'Guard failed with on_fail: escalate:{event} or on_fail: {escalate: {event, fields}}. Escalation event
+        emitted instead. Scalar shorthand emits no explicit business payload. Object form fields use the same explicit
+        expression-value forms as declarative emit.fields, but they are evaluated at guard-failure time before later handler
+        transforms/data writes. No implicit trigger/entity passthrough occurs, runtime-owned envelope remains on the event
+        carrier, envelope-owned fields cannot be authored into business payload, and fail-closed contract validation applies.'
       dead_letter: Handler failed after retry exhaustion OR chain depth exceeded. Event moved to dead_letters.
       terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
       waiting: Accumulation incomplete. Handler recorded the arrival but completion condition not yet met. No further steps

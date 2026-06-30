@@ -752,7 +752,7 @@ func (e *Executor) stepGuard(frame *executionFrame) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := e.applyGuardFailure(frame, spec.OnFail); err != nil {
+	if err := e.applyGuardFailure(frame, spec); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -2285,8 +2285,12 @@ func (e *Executor) resolveClearGates(frame *executionFrame) []string {
 	return normalizeStrings(stringSliceFromAny(mapsKeys(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))))
 }
 
-func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error {
-	parsed, err := ParseGuardFailure(action)
+func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontracts.GuardSpec) error {
+	failureSpec, err := spec.FailureSpec()
+	if err != nil {
+		return err
+	}
+	parsed, err := GuardFailureFromSpec(failureSpec)
 	if err != nil {
 		return err
 	}
@@ -2317,11 +2321,17 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 		eventType := parsed.EventType
 		frame.result.Status = OutcomeEscalated
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "escalate:"+eventType)
-		// Guard escalation is a supported declarative emit outcome, but it has no
-		// business-payload authoring surface. It therefore uses the same runtime
-		// envelope-only path as an empty emit.fields payload, not the inbound
-		// trigger payload.
-		shaped, err := e.shapeEmitPayload(frame, eventType, map[string]any{})
+		emitSpec := failureSpec.EscalationEmitSpec()
+		emitSpec.Event = eventType
+		payload := map[string]any{}
+		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
+		if err != nil {
+			return err
+		}
+		if len(transformed) > 0 {
+			payload = transformed
+		}
+		shaped, err := e.shapeEmitPayload(frame, eventType, payload)
 		if err != nil {
 			return err
 		}
@@ -2330,7 +2340,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, action string) error
 		}
 		return nil
 	default:
-		return fmt.Errorf("unsupported guard on_fail action %q", action)
+		return fmt.Errorf("unsupported guard on_fail action %q", failureSpec.Action)
 	}
 }
 

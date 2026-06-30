@@ -2604,6 +2604,73 @@ func TestExecuteNodeContractHandler_GuardEscalateUsesOnlyRuntimeOwnedEnvelope(t 
 	}
 }
 
+func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadOnly(t *testing.T) {
+	pc, bus := newDeclarativeEmitContractCoordinatorWithBundle(declarativeEmitContractTestBundleWithEntry("guard.failed", runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"score":  {Type: "number"},
+				"reason": {Type: "string"},
+			},
+			Required: []string{"score", "reason"},
+		},
+	}))
+
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{
+			Check: "payload.score >= 70",
+			OnFailSpec: runtimecontracts.GuardFailureSpec{
+				Action: runtimecontracts.GuardFailureActionEscalate,
+				Escalation: runtimecontracts.EmitSpec{
+					Event: "guard.failed",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"score":  runtimecontracts.CELExpression("payload.score"),
+						"reason": runtimecontracts.CELExpression(`"score_below_threshold"`),
+					},
+				},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: eventtest.RootIngress(
+			"",
+			events.EventType("custom.trigger"),
+			"",
+			"",
+			mustJSON(map[string]any{"entity_id": "ent-1", "score": 50, "legacy": "should-not-pass"}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+			time.Time{},
+		),
+		State: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{"legacy_entity": "should-not-pass"}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishedEvent(0).Payload(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if got := payload["score"]; got != float64(50) {
+		t.Fatalf("guard escalation score payload = %#v, want 50", got)
+	}
+	if got := payload["reason"]; got != "score_below_threshold" {
+		t.Fatalf("guard escalation reason payload = %#v, want score_below_threshold", got)
+	}
+	if _, ok := payload["entity_id"]; ok {
+		t.Fatalf("payload must not carry envelope entity_id: %#v", payload["entity_id"])
+	}
+	if _, ok := payload["legacy"]; ok {
+		t.Fatalf("guard escalation leaked unmapped trigger payload: %#v", payload["legacy"])
+	}
+	if _, ok := payload["legacy_entity"]; ok {
+		t.Fatalf("guard escalation leaked entity metadata: %#v", payload["legacy_entity"])
+	}
+}
+
 func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSupportedEmitSites(t *testing.T) {
 	tests := []struct {
 		name    string

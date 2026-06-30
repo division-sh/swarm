@@ -161,10 +161,9 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 		}
 	}
 	if handler.Guard != nil {
-		onFail := strings.TrimSpace(handler.Guard.OnFail)
-		if onFail != "" {
-			if parsed, err := runtimeengine.ParseGuardFailure(onFail); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-				add("guard.on_fail.escalate", runtimecontracts.EmitSpec{Event: strings.TrimSpace(parsed.EventType)})
+		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
+			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
+				add("guard.on_fail.escalate", failureSpec.EscalationEmitSpec())
 			}
 		}
 	}

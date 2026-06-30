@@ -31,8 +31,8 @@ func (c *checkerContext) conditionExpressions() []Finding {
 		nodeID = strings.TrimSpace(nodeID)
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			if onFail := handlerGuardOnFailLocal(handler.Guard); onFail != "" {
-				if err := validateGuardOnFailLocal(onFail); err != nil {
+			if handler.Guard != nil {
+				if err := validateGuardOnFailLocal(handler.Guard); err != nil {
 					c.conditionExprFindings = append(c.conditionExprFindings, Finding{
 						CheckID:  "condition_expression_validation",
 						Severity: "error",
@@ -102,7 +102,8 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
 			for _, expr := range handlerEntityExpressions(handler) {
-				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields {
+				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields &&
+					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
 					continue
 				}
 				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem}); err != nil {
@@ -423,6 +424,18 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 		}
 	}
 	appendEmitExpressions("handler", handler.Emit, false)
+	if handler.Guard != nil {
+		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
+			appendEmitExpressions("guard escalation", failureSpec.EscalationEmitSpec(), false)
+			if len(out) > 0 {
+				for i := range out {
+					if strings.HasPrefix(out[i].Kind, "guard escalation emit field ") {
+						out[i].Phase = runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation
+					}
+				}
+			}
+		}
+	}
 	if handler.FanOut != nil {
 		appendEmitExpressions("fan_out", handler.FanOut.Emit, true)
 	}
@@ -489,7 +502,8 @@ func availableEntityFieldsForExpression(handler runtimecontracts.SystemNodeEvent
 	switch expr.Phase {
 	case runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation:
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler)
-	case runtimepipeline.WorkflowEntityFieldLifecycleGuard:
+	case runtimepipeline.WorkflowEntityFieldLifecycleGuard,
+		runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation:
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextGuard)
 	case runtimepipeline.WorkflowEntityFieldLifecycleFilter:
 		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextFilter)
@@ -599,8 +613,12 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 	return out
 }
 
-func validateGuardOnFailLocal(onFail string) error {
-	parsed, err := runtimeengine.ParseGuardFailure(onFail)
+func validateGuardOnFailLocal(spec *runtimecontracts.GuardSpec) error {
+	failureSpec, err := spec.FailureSpec()
+	if err != nil {
+		return err
+	}
+	parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec)
 	if err != nil {
 		return err
 	}
@@ -615,15 +633,8 @@ func validateGuardOnFailLocal(onFail string) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("on_fail %q is not supported", onFail)
+		return fmt.Errorf("on_fail %q is not supported", failureSpec.Action)
 	}
-}
-
-func handlerGuardOnFailLocal(spec *runtimecontracts.GuardSpec) string {
-	if spec == nil {
-		return ""
-	}
-	return strings.TrimSpace(spec.OnFail)
 }
 
 func conditionMissingRecognizedPrefixLocal(expression string, context runtimepipeline.WorkflowConditionContext) bool {
