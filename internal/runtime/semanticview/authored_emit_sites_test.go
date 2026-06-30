@@ -36,6 +36,30 @@ func TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes(t *testing.T) {
 	}
 }
 
+func TestAuthoredEmitSites_GuardEscalationObjectCarriesFields(t *testing.T) {
+	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
+		rootNodeID:      "root-node",
+		rootEmit:        "root.ready",
+		rootGuardEmit:   "root.escalated",
+		rootGuardObject: true,
+	})
+
+	sites := AuthoredEmitSites(source)
+	matches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.escalated")
+	if len(matches) != 1 {
+		t.Fatalf("expected one guard escalation authored emit site, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
+	}
+	if matches[0].Site != "handler.guard.on_fail.escalate" {
+		t.Fatalf("site = %q, want handler.guard.on_fail.escalate", matches[0].Site)
+	}
+	if expr := matches[0].Spec.Fields["score"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "payload.score" {
+		t.Fatalf("score field = %#v, want CEL payload.score", expr)
+	}
+	if expr := matches[0].Spec.Fields["reason"]; expr.Kind != runtimecontracts.ExpressionKindLiteral || expr.Literal != "score_below_threshold" {
+		t.Fatalf("reason field = %#v, want literal score_below_threshold", expr)
+	}
+}
+
 func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
 		rootNodeID:      "root-node",
@@ -109,6 +133,7 @@ type authoredEmitSiteFixture struct {
 	omitFlowPackage     bool
 	nestedPackageNodeID string
 	nestedPackageEmit   string
+	rootGuardObject     bool
 }
 
 func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Source {
@@ -150,7 +175,11 @@ root.escalated: {}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast))
+	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
+	if opts.rootGuardObject {
+		rootNodeYAML = authoredEmitSiteNodeYAMLWithGuardObject(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
+	}
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNodeYAML)
 	if !opts.omitFlowPackage {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
@@ -221,6 +250,36 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string,
   event_handlers:
     ` + trigger + `:
 ` + guardYAML + `
+      emit:
+        event: ` + eventType + `
+` + broadcastLine
+}
+
+func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEventType string, broadcast bool) string {
+	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
+		return "{}\n"
+	}
+	broadcastLine := ""
+	if broadcast {
+		broadcastLine = "        broadcast: true\n"
+	}
+	return `
+` + nodeID + `:
+  id: ` + nodeID + `
+  execution_type: system_node
+  event_handlers:
+    ` + trigger + `:
+      guard:
+        id: guard-escalate
+        check: "false"
+        on_fail:
+          escalate:
+            event: ` + guardEventType + `
+            fields:
+              score: payload.score
+              reason:
+                literal: score_below_threshold
+
       emit:
         event: ` + eventType + `
 ` + broadcastLine

@@ -122,8 +122,8 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 	}
 	add("handler.emit", "handler.emit", "", handler.Emit)
 	if handler.Guard != nil {
-		if eventType := authoredGuardEscalationEvent(handler.Guard.OnFail); eventType != "" {
-			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimecontracts.EmitSpec{Event: eventType})
+		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
+			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, emitSpec)
 		}
 	}
 	for idx, rule := range handler.Rules {
@@ -313,10 +313,13 @@ func indexedAuthoredEmitSiteKey(prefix string, index int, suffix string) string 
 	return prefix + "[" + strconv.Itoa(index) + "]." + suffix
 }
 
-func authoredGuardEscalationEvent(onFail string) string {
-	normalized := strings.TrimSpace(strings.ToLower(onFail))
-	if !strings.HasPrefix(normalized, "escalate:") {
-		return ""
+func authoredGuardEscalationEmitSpec(guard *runtimecontracts.GuardSpec) runtimecontracts.EmitSpec {
+	if guard == nil {
+		return runtimecontracts.EmitSpec{}
 	}
-	return strings.TrimSpace(strings.TrimPrefix(normalized, "escalate:"))
+	failureSpec, err := guard.FailureSpec()
+	if err != nil || failureSpec.Action != runtimecontracts.GuardFailureActionEscalate {
+		return runtimecontracts.EmitSpec{}
+	}
+	return failureSpec.EscalationEmitSpec()
 }

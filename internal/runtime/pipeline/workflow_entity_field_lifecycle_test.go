@@ -87,6 +87,35 @@ func TestWorkflowEntityFieldsAvailableBeforeEmitFields_IncludesCreateEntityTopLe
 	}
 }
 
+func TestWorkflowEntityFieldsAvailableBeforeGuardEscalation_UsesGuardTimeVisibility(t *testing.T) {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Query: &runtimecontracts.QuerySpec{
+			StoreAs: "entity.query_score",
+		},
+		Compute: &runtimecontracts.ComputeSpec{
+			Operation: runtimecontracts.ComputeOpCount,
+			StoreAs:   "entity.computed_score",
+		},
+		CreateEntity: true,
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},
+			},
+		},
+	}
+
+	available := workflowEntityFieldsAvailableBeforePhase(handler, WorkflowEntityFieldLifecycleGuardEscalation)
+	if _, ok := available["query_score"]; !ok {
+		t.Fatalf("query_score missing from guard escalation availability: %#v", available)
+	}
+	if _, ok := available["computed_score"]; ok {
+		t.Fatalf("computed_score unexpectedly available before guard escalation: %#v", available)
+	}
+	if _, ok := available["revision_count"]; ok {
+		t.Fatalf("revision_count unexpectedly available before guard escalation: %#v", available)
+	}
+}
+
 func TestWorkflowEntityFieldsAvailableBeforeEmitFields_ExcludesRuleOnlyWrites(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
@@ -168,6 +197,7 @@ func TestWorkflowEntityReadsPersistedStateBeforeHandlerWrites(t *testing.T) {
 		want  bool
 	}{
 		{name: "guard", phase: WorkflowEntityFieldLifecycleGuard, want: true},
+		{name: "guard escalation", phase: WorkflowEntityFieldLifecycleGuardEscalation, want: true},
 		{name: "filter", phase: WorkflowEntityFieldLifecycleFilter, want: true},
 		{name: "count", phase: WorkflowEntityFieldLifecycleCount, want: true},
 		{name: "rule", phase: WorkflowEntityFieldLifecycleRule, want: true},

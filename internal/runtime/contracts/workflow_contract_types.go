@@ -147,16 +147,77 @@ type HandlerRuleEntry struct {
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
 }
 type GuardSpec struct {
-	ID        string       `yaml:"id"`
-	Check     string       `yaml:"check"`
-	OnFail    string       `yaml:"on_fail"`
-	Checks    []GuardCheck `yaml:"checks"`
-	PolicyRef string       `yaml:"policy_ref"`
+	ID         string           `yaml:"id"`
+	Check      string           `yaml:"check"`
+	OnFail     string           `yaml:"on_fail"`
+	OnFailSpec GuardFailureSpec `yaml:"-"`
+	Checks     []GuardCheck     `yaml:"checks"`
+	PolicyRef  string           `yaml:"policy_ref"`
 }
 type GuardCheck struct {
 	ID    string `yaml:"id"`
 	Check string `yaml:"check"`
 }
+
+type GuardFailureAction string
+
+const (
+	GuardFailureActionReject   GuardFailureAction = "reject"
+	GuardFailureActionDiscard  GuardFailureAction = "discard"
+	GuardFailureActionKill     GuardFailureAction = "kill"
+	GuardFailureActionEscalate GuardFailureAction = "escalate"
+)
+
+type GuardFailureSpec struct {
+	Action          GuardFailureAction `yaml:"action"`
+	Escalation      EmitSpec           `yaml:"escalate"`
+	AuthoredMapping bool               `yaml:"-"`
+}
+
+func (s GuardFailureSpec) Empty() bool {
+	return strings.TrimSpace(string(s.Action)) == "" && s.Escalation.Empty() && len(s.Escalation.Fields) == 0
+}
+
+func (s GuardFailureSpec) EscalationEmitSpec() EmitSpec {
+	if s.Action != GuardFailureActionEscalate {
+		return EmitSpec{}
+	}
+	return cloneEmitSpec(s.Escalation)
+}
+
+func (g *GuardSpec) FailureSpec() (GuardFailureSpec, error) {
+	if g == nil {
+		return ParseGuardFailureSpec("")
+	}
+	if !g.OnFailSpec.Empty() || g.OnFailSpec.AuthoredMapping {
+		return g.OnFailSpec, nil
+	}
+	return ParseGuardFailureSpec(g.OnFail)
+}
+
+func ParseGuardFailureSpec(action string) (GuardFailureSpec, error) {
+	normalized := strings.TrimSpace(strings.ToLower(action))
+	switch normalized {
+	case "", "reject":
+		return GuardFailureSpec{Action: GuardFailureActionReject}, nil
+	case "discard":
+		return GuardFailureSpec{Action: GuardFailureActionDiscard}, nil
+	case "kill":
+		return GuardFailureSpec{Action: GuardFailureActionKill}, nil
+	}
+	if strings.HasPrefix(normalized, "escalate:") {
+		eventType := strings.TrimSpace(strings.TrimPrefix(normalized, "escalate:"))
+		if eventType == "" {
+			return GuardFailureSpec{}, fmt.Errorf("guard on_fail escalate requires event type")
+		}
+		return GuardFailureSpec{
+			Action:     GuardFailureActionEscalate,
+			Escalation: EmitSpec{Event: eventType},
+		}, nil
+	}
+	return GuardFailureSpec{}, fmt.Errorf("unsupported guard on_fail action %q", action)
+}
+
 type AccumulateSpec struct {
 	Into         string               `yaml:"into"`
 	ExpectedFrom string               `yaml:"expected_from"`

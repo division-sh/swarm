@@ -21,15 +21,107 @@ func (g *GuardSpec) UnmarshalYAML(node *yaml.Node) error {
 		*g = GuardSpec{ID: strings.TrimSpace(node.Value)}
 		return nil
 	case yaml.MappingNode:
-		type alias GuardSpec
-		var aux alias
+		var aux struct {
+			ID        string       `yaml:"id"`
+			Check     string       `yaml:"check"`
+			OnFail    yaml.Node    `yaml:"on_fail"`
+			Checks    []GuardCheck `yaml:"checks"`
+			PolicyRef string       `yaml:"policy_ref"`
+		}
 		if err := node.Decode(&aux); err != nil {
 			return err
 		}
-		*g = GuardSpec(aux)
+		*g = GuardSpec{
+			ID:        strings.TrimSpace(aux.ID),
+			Check:     strings.TrimSpace(aux.Check),
+			Checks:    aux.Checks,
+			PolicyRef: strings.TrimSpace(aux.PolicyRef),
+		}
+		onFail, spec, err := decodeGuardOnFailNode(&aux.OnFail)
+		if err != nil {
+			return err
+		}
+		g.OnFail = onFail
+		g.OnFailSpec = spec
 		return nil
 	default:
 		return fmt.Errorf("unsupported guard yaml node kind %d", node.Kind)
+	}
+}
+
+func decodeGuardOnFailNode(node *yaml.Node) (string, GuardFailureSpec, error) {
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return "", GuardFailureSpec{}, nil
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		value := strings.TrimSpace(node.Value)
+		if value == "" {
+			return "", GuardFailureSpec{}, nil
+		}
+		return value, GuardFailureSpec{}, nil
+	case yaml.MappingNode:
+		if len(node.Content) == 0 {
+			return "", GuardFailureSpec{}, nil
+		}
+		var escalation *EmitSpec
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			switch key {
+			case "escalate":
+				decoded, err := decodeGuardEscalationNode(node.Content[i+1])
+				if err != nil {
+					return "", GuardFailureSpec{}, err
+				}
+				escalation = &decoded
+			default:
+				return "", GuardFailureSpec{}, fmt.Errorf("UNDEFINED-FIELD: guard.on_fail field %q not in platform spec", key)
+			}
+		}
+		if escalation == nil {
+			return "", GuardFailureSpec{}, nil
+		}
+		spec := GuardFailureSpec{
+			Action:          GuardFailureActionEscalate,
+			Escalation:      cloneEmitSpec(*escalation),
+			AuthoredMapping: true,
+		}
+		onFail := "escalate:" + strings.TrimSpace(escalation.Event)
+		return onFail, spec, nil
+	default:
+		return "", GuardFailureSpec{}, fmt.Errorf("unsupported guard.on_fail yaml node kind %d", node.Kind)
+	}
+}
+
+func decodeGuardEscalationNode(node *yaml.Node) (EmitSpec, error) {
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return EmitSpec{}, nil
+	}
+	switch node.Kind {
+	case yaml.MappingNode:
+		var event string
+		var fields map[string]ExpressionValue
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			value := node.Content[i+1]
+			switch key {
+			case "event":
+				if err := value.Decode(&event); err != nil {
+					return EmitSpec{}, err
+				}
+			case "fields":
+				decoded, err := decodeEmitFieldsNode(value)
+				if err != nil {
+					return EmitSpec{}, err
+				}
+				fields = decoded
+			default:
+				return EmitSpec{}, fmt.Errorf("UNDEFINED-FIELD: guard.on_fail.escalate field %q not in platform spec", key)
+			}
+		}
+		return EmitSpec{Event: strings.TrimSpace(event), Fields: fields}, nil
+	default:
+		return EmitSpec{}, fmt.Errorf("guard.on_fail.escalate must be a mapping with event and optional fields")
 	}
 }
 

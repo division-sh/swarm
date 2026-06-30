@@ -1161,6 +1161,63 @@ fields:
 	}
 }
 
+func TestGuardSpecDecode_OnFailEscalateObjectFields(t *testing.T) {
+	var spec GuardSpec
+	if err := yaml.Unmarshal([]byte(`
+id: score_check
+check: payload.score >= policy.threshold
+on_fail:
+  escalate:
+    event: check.escalated
+    fields:
+      score: payload.score
+      threshold: policy.threshold
+      reason:
+        literal: score_below_threshold
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := strings.TrimSpace(spec.OnFail); got != "escalate:check.escalated" {
+		t.Fatalf("OnFail = %q, want scalar shorthand mirror", got)
+	}
+	failure, err := spec.FailureSpec()
+	if err != nil {
+		t.Fatalf("FailureSpec error: %v", err)
+	}
+	if failure.Action != GuardFailureActionEscalate {
+		t.Fatalf("failure action = %q, want %q", failure.Action, GuardFailureActionEscalate)
+	}
+	emit := failure.EscalationEmitSpec()
+	if got := emit.Event; got != "check.escalated" {
+		t.Fatalf("escalation event = %q, want check.escalated", got)
+	}
+	if expr := emit.Fields["score"]; expr.Kind != ExpressionKindCEL || expr.CEL != "payload.score" {
+		t.Fatalf("score field = %#v, want CEL payload.score", expr)
+	}
+	if expr := emit.Fields["threshold"]; expr.Kind != ExpressionKindCEL || expr.CEL != "policy.threshold" {
+		t.Fatalf("threshold field = %#v, want CEL policy.threshold", expr)
+	}
+	if expr := emit.Fields["reason"]; expr.Kind != ExpressionKindLiteral || expr.Literal != "score_below_threshold" {
+		t.Fatalf("reason field = %#v, want literal score_below_threshold", expr)
+	}
+}
+
+func TestGuardSpecDecode_RejectsNestedScalarEscalateShortcut(t *testing.T) {
+	var spec GuardSpec
+	err := yaml.Unmarshal([]byte(`
+id: score_check
+check: payload.score >= policy.threshold
+on_fail:
+  escalate: check.escalated
+`), &spec)
+	if err == nil {
+		t.Fatal("expected nested scalar guard escalation shortcut to be rejected")
+	}
+	if !strings.Contains(err.Error(), "guard.on_fail.escalate must be a mapping") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEmitSpecDecode_RejectsUnstructuredObjectFieldMappings(t *testing.T) {
 	var spec EmitSpec
 	err := yaml.Unmarshal([]byte(`

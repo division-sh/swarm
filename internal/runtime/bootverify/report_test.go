@@ -2770,6 +2770,33 @@ func TestRun_RejectsUnsupportedGuardOnFail(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsGuardEscalateObjectMissingEvent(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Guard: &runtimecontracts.GuardSpec{
+							Check: "entity.entity_id != null",
+							OnFailSpec: runtimecontracts.GuardFailureSpec{
+								Action:          runtimecontracts.GuardFailureActionEscalate,
+								AuthoredMapping: true,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "condition_expression_validation", "guard on_fail escalate requires event type") {
+		t.Fatalf("expected missing guard escalation event error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -3485,6 +3512,74 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 	}
 }
 
+func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
+	entry := bundle.Events["check.escalated"]
+	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
+	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
+	entry.Required = []string{"score", "reason"}
+	bundle.Events["check.escalated"] = entry
+	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
+		Event: "check.escalated",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"score":  runtimecontracts.RefExpression("payload.score"),
+			"reason": runtimecontracts.LiteralExpression("score_below_threshold"),
+		},
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+		t.Fatalf("unexpected guard escalation payload completeness error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
+	entry := bundle.Events["check.escalated"]
+	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
+	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
+	entry.Required = []string{"score", "reason"}
+	bundle.Events["check.escalated"] = entry
+	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
+		Event: "check.escalated",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"score": runtimecontracts.RefExpression("payload.score"),
+		},
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+		t.Fatalf("expected guard escalation payload completeness error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "reason is not statically provable") {
+		t.Fatalf("expected missing reason error for guard escalation object fields, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
+	entry := bundle.Events["check.escalated"]
+	entry.Required = nil
+	bundle.Events["check.escalated"] = entry
+	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
+		Event: "check.escalated",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"entity_id": runtimecontracts.RefExpression("event.entity_id"),
+		},
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "guard.on_fail.escalate") {
+		t.Fatalf("expected guard escalation envelope-owned field error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors envelope-owned field entity_id in emit.fields") {
+		t.Fatalf("expected authored envelope field error for guard escalation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
@@ -3499,6 +3594,19 @@ func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedField
 	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "entity_id is not statically provable") {
 		t.Fatalf("expected envelope-owned entity_id drift for guard escalation, got %#v", report.Errors())
 	}
+}
+
+func setGuardEscalationForBootverifyTest(bundle *runtimecontracts.WorkflowContractBundle, emit runtimecontracts.EmitSpec) {
+	node := bundle.Nodes["test-node"]
+	handler := node.EventHandlers["check.requested"]
+	handler.Guard.OnFail = "escalate:" + emit.Event
+	handler.Guard.OnFailSpec = runtimecontracts.GuardFailureSpec{
+		Action:     runtimecontracts.GuardFailureActionEscalate,
+		Escalation: emit,
+	}
+	node.EventHandlers["check.requested"] = handler
+	bundle.Nodes["test-node"] = node
+	bundle.Semantics.NodeHandlers["test-node"]["check.requested"] = handler
 }
 
 func TestRun_ReportsInputPinWiringWarning(t *testing.T) {

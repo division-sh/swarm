@@ -3542,6 +3542,66 @@ func TestExecutor_GuardOnFailEscalateCreatesEmitIntent(t *testing.T) {
 	}
 }
 
+func TestExecutor_GuardOnFailEscalateObjectFieldsShapeExplicitPayload(t *testing.T) {
+	shaper := &recordingPayloadShaper{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: shaper,
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{
+		"payload.ok == true": false,
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"ok":false,"score":42,"legacy":"should-not-pass"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Guard: &runtimecontracts.GuardSpec{
+				Check: "payload.ok == true",
+				OnFailSpec: runtimecontracts.GuardFailureSpec{
+					Action: runtimecontracts.GuardFailureActionEscalate,
+					Escalation: runtimecontracts.EmitSpec{
+						Event: "guard.failed",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"score":  runtimecontracts.CELExpression("payload.score"),
+							"reason": runtimecontracts.CELExpression(`"score_below_threshold"`),
+						},
+					},
+				},
+			},
+		},
+		State: testStateSnapshot("", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Status != OutcomeEscalated {
+		t.Fatalf("Status = %q", result.Status)
+	}
+	if len(result.EmitIntents) != 1 || string(result.EmitIntents[0].Event.Type()) != "guard.failed" {
+		t.Fatalf("unexpected escalation intents: %#v", result.EmitIntents)
+	}
+	if got := asInt(shaper.lastPayload["score"]); got != 42 {
+		t.Fatalf("guard escalation score payload = %#v, want 42", shaper.lastPayload["score"])
+	}
+	if got := shaper.lastPayload["reason"]; got != "score_below_threshold" {
+		t.Fatalf("guard escalation reason payload = %#v, want score_below_threshold", got)
+	}
+	if _, ok := shaper.lastPayload["legacy"]; ok {
+		t.Fatalf("guard escalation leaked unmapped trigger payload: %#v", shaper.lastPayload)
+	}
+}
+
 func loadEngineProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()

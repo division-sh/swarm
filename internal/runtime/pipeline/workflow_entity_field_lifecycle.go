@@ -12,6 +12,7 @@ type WorkflowEntityFieldLifecyclePhase string
 
 const (
 	WorkflowEntityFieldLifecycleGuard            WorkflowEntityFieldLifecyclePhase = "guard"
+	WorkflowEntityFieldLifecycleGuardEscalation  WorkflowEntityFieldLifecyclePhase = "guard_escalation_fields"
 	WorkflowEntityFieldLifecycleAccumulate       WorkflowEntityFieldLifecyclePhase = "accumulate"
 	WorkflowEntityFieldLifecycleFilter           WorkflowEntityFieldLifecyclePhase = "filter"
 	WorkflowEntityFieldLifecycleGroupBy          WorkflowEntityFieldLifecyclePhase = "group_by"
@@ -118,6 +119,7 @@ func WorkflowEntityFieldsAvailableBeforeEmitFields(handler runtimecontracts.Syst
 func WorkflowEntityReadsPersistedStateBeforeHandlerWrites(phase WorkflowEntityFieldLifecyclePhase) bool {
 	switch phase {
 	case WorkflowEntityFieldLifecycleGuard,
+		WorkflowEntityFieldLifecycleGuardEscalation,
 		WorkflowEntityFieldLifecycleFilter,
 		WorkflowEntityFieldLifecycleCount,
 		WorkflowEntityFieldLifecycleOnComplete,
@@ -250,6 +252,8 @@ func phaseAfter(current, threshold WorkflowEntityFieldLifecyclePhase) bool {
 func workflowEntityFieldLifecycleOrder(phase WorkflowEntityFieldLifecyclePhase) int {
 	switch phase {
 	case WorkflowEntityFieldLifecycleGuard:
+		return 1
+	case WorkflowEntityFieldLifecycleGuardEscalation:
 		return 1
 	case WorkflowEntityFieldLifecycleAccumulate:
 		return 2
