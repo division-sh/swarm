@@ -727,6 +727,71 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 	}
 }
 
+func TestEventBusReplay_ConnectRoutePlanUsesPersistedInstanceKeyRouteAfterDescriptorDrift(t *testing.T) {
+	source := connectRoutePlanInstanceKeySource(t)
+	store := &connectRoutePlanDescriptorStore{
+		targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		flowInstances: []ActiveFlowInstanceDescriptor{{
+			InstanceID:    "one",
+			EntityID:      "ent-1",
+			FlowInstance:  "consumer/one",
+			AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+		}},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
+	}
+	consumerOne := eb.SubscribeInternal("consumer-node-one")
+	consumerTwo := eb.SubscribeInternal("consumer-node-two")
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	wantOne := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "consumer-node-one", Target: events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/one", EntityID: "ent-1"}}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	got := requireBusEvent(t, consumerOne, "initial instance-key publish")
+	if got.FlowInstance() != "consumer/one" || got.EntityID() != "ent-1" {
+		t.Fatalf("initial delivery target = flow_instance:%q entity:%q, want consumer/one ent-1", got.FlowInstance(), got.EntityID())
+	}
+	if !deliveryRoutesContain(store.routes[eventID], wantOne) || len(store.routes[eventID]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want instance-key route %#v", store.routes[eventID], wantOne)
+	}
+
+	store.flowInstances = []ActiveFlowInstanceDescriptor{{
+		InstanceID:    "two",
+		EntityID:      "ent-2",
+		FlowInstance:  "consumer/two",
+		AddressFields: map[string]string{"entity.vertical_id": "v-1"},
+	}}
+	store.flowInstanceDescriptorCalls = 0
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("consumer", "two")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(two): %v", err)
+	}
+
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
+	}
+	got = requireBusEvent(t, consumerOne, "persisted replay after descriptor drift")
+	if got.FlowInstance() != "consumer/one" || got.EntityID() != "ent-1" {
+		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted consumer/one ent-1", got.FlowInstance(), got.EntityID())
+	}
+	select {
+	case evt := <-consumerTwo:
+		t.Fatalf("descriptor drift recipient received replay: flow_instance:%q entity:%q", evt.FlowInstance(), evt.EntityID())
+	default:
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget(t *testing.T) {
 	source := connectRoutePlanRenamedInstanceKeySource(t)
 	store := &connectRoutePlanDescriptorStore{
