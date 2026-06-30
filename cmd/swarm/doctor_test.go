@@ -156,6 +156,31 @@ func TestDoctorClaudeCLIPreflightReportsMissingWorkspaceCLI(t *testing.T) {
 	}
 }
 
+func TestDoctorClaudeCLIPreflightReportsBrokenWorkspaceCLI(t *testing.T) {
+	configureDoctorDockerStub(t)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("SWARM_TEST_DOCKER_CLI_BROKEN", "1")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false), &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"workspace_prerequisite/workspace_claude_cli_unavailable",
+		"cannot execute in workspace image",
+		"claude launcher failed after command lookup",
+		"runnable Claude CLI",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestDoctorClaudeCLIPreflightUsesCredentialStoreForContractSecrets(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
@@ -416,6 +441,14 @@ case "$1:$2" in
     if [ "${SWARM_TEST_DOCKER_CLI_MISSING:-}" = "1" ]; then
       echo "claude: not found" >&2
       exit 127
+    fi
+    if [ "${SWARM_TEST_DOCKER_CLI_BROKEN:-}" = "1" ]; then
+      case "$*" in
+        *"command -v"*"--version"*)
+          echo "claude launcher failed after command lookup" >&2
+          exit 126
+          ;;
+      esac
     fi
     exit 0
     ;;
