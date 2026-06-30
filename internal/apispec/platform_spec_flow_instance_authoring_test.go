@@ -174,6 +174,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		"bare mode: static used as singleton/coordinator proof",
 		"mode: singleton declares template instance fields",
 		"singleton flow primary entity lacks typed contained map/list state",
+		"singleton flow contained map/list value or item types do not resolve",
 		"agent conversation/session memory is used as coordinator state authority",
 		"contained map/list items are targeted as route recipients",
 	} {
