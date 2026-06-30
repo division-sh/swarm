@@ -4080,6 +4080,65 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 	}
 }
 
+func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *testing.T) {
+	bundle := loadWave1ExpressionFixtureBundle(t)
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
+	handler.CreateEntity = true
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		ID:        "ready",
+		Condition: `entity.revision_count == 0 && payload.score >= 0 && event.entity_id != ""`,
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("unexpected rule-condition errors, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
+		t.Fatalf("unexpected rule-condition entity reference error, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "condition_expression_validation", "event.entity_id") {
+		t.Fatalf("unexpected rule-condition event context validation error, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "condition_payload_alignment", "payload.score") {
+		t.Fatalf("unexpected rule-condition payload alignment error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsRuleConditionReferenceToUndeclaredEntityField(t *testing.T) {
+	bundle := loadWave1ExpressionFixtureBundle(t)
+	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		ID:        "missing",
+		Condition: "entity.missing_rule_score > 0",
+	}}
+	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "expression_field_reference_validation", "entity.missing_rule_score") {
+		t.Fatalf("expected undeclared rule-condition entity reference error, got %#v", report.Errors())
+	}
+}
+
+func clearWave1ExpressionFeedbackEmit(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID string) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	node := flowView.Nodes[nodeID]
+	feedbackHandler, ok := node.EventHandlers["task.feedback"]
+	if !ok {
+		t.Fatalf("expected wave1 fixture feedback handler on node %s", nodeID)
+	}
+	feedbackHandler.Emit = runtimecontracts.EmitSpec{}
+	writeFlowHandler(t, bundle, flowID, nodeID, "task.feedback", feedbackHandler)
+}
+
 func TestRun_AllowsCreateEntityGuardReferenceToSchemaInitializedField(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
