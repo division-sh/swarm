@@ -9382,9 +9382,10 @@ workspace_model:
       setup-only override and MUST fail closed when empty or syntactically invalid. The override does not change runtime
       configuration by itself; operators must still run serve with the matching configured image when overriding.
     validation_rule: >
-      After build, the command MUST validate the resulting image by running a harmless executable Claude CLI proof inside
-      the image, equivalent to `command -v -- "$1" >/dev/null && "$1" --version >/dev/null` with `$1=claude`. Image
-      inspection alone and command lookup alone are insufficient.
+      The command MUST build into a temporary image tag first and MUST NOT publish/replace the configured runtime image
+      tag until validation passes. After build, the command MUST validate the temporary image by running a harmless
+      executable Claude CLI proof inside the image, equivalent to `command -v -- "$1" >/dev/null && "$1" --version
+      >/dev/null` with `$1=claude`. Image inspection alone and command lookup alone are insufficient.
     consumer_boundaries:
       - '`swarm workspace build` is the setup producer for this first slice.'
       - '`swarm doctor --backend claude_cli` may report or recommend the build command, but MUST NOT build images.'
@@ -11608,9 +11609,10 @@ cli_specification:
       owner: workspace_model.local_workspace_image_build_authority
       behavior: >
         Builds and validates the local Docker workspace image for `claude_cli` proof flows using the embedded/materialized
-        workspace build plan. The command uses `SWARM_DOCKER_BIN` when set, targets `SWARM_WORKSPACE_IMAGE` or
-        `swarm-workspace:latest` by default, accepts explicit `--image <tag>` for setup-only override, passes the approved
-        `claude_cli` build args, and validates that the resulting image can execute `claude --version`.
+        workspace build plan. The command uses `SWARM_DOCKER_BIN` when set, builds into a temporary image tag, targets
+        `SWARM_WORKSPACE_IMAGE` or `swarm-workspace:latest` by default, accepts explicit `--image <tag>` for setup-only
+        override, passes the approved `claude_cli` build args, validates that the temporary image can execute
+        `claude --version`, and only then tags the validated image as the configured target.
       boundaries:
       - no runtime startup auto-build
       - no source-checkout Dockerfile lookup or go.mod walk
