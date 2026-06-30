@@ -104,12 +104,6 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		return report.finalize()
 	}
 
-	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
-		report.add(localPreflightBackendPrerequisite, "missing_backend_credential", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), fmt.Sprintf("set %s for claude_cli backend authentication", strings.TrimSpace(profile.Credential.EnvVar)))
-	} else {
-		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is present", strings.TrimSpace(profile.Credential.EnvVar)), "")
-	}
-
 	if req.CheckListeners {
 		report.checkListener("api_listener", "api", req.APIListenAddr)
 		report.checkListener("mcp_listener", "mcp", req.MCPListenAddr)
@@ -127,8 +121,14 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.checkContractSecrets(ctx, source, req.ContractSecretSeverity)
 	}
 	if !sourceDeclaresAgents(source) {
+		report.add(localPreflightBackendPrerequisite, "backend_credential_skipped_agent_free", localPreflightSeverityInfo, localPreflightStatusSkipped, "selected contract source declares no agents; claude_cli backend credential is not required", "")
 		report.add(localPreflightWorkspacePrerequisite, "agent_free_source", localPreflightSeverityInfo, localPreflightStatusSkipped, "selected contract source declares no agents; claude_cli workspace proof is not required", "")
 		return report.finalize()
+	}
+	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
+		report.add(localPreflightBackendPrerequisite, "missing_backend_credential", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), fmt.Sprintf("set %s for claude_cli backend authentication", strings.TrimSpace(profile.Credential.EnvVar)))
+	} else {
+		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is present", strings.TrimSpace(profile.Credential.EnvVar)), "")
 	}
 	report.checkWorkspace(ctx, req.RepoRoot, req.Config, source, contractsRoot, req.DataSource, req.WorkspaceBackend)
 	return report.finalize()

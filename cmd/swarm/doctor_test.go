@@ -95,6 +95,42 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 	}
 }
 
+func TestDoctorClaudeCLIPreflightSkipsCredentialForAgentFreeContracts(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--contracts" {
+			args[i+1] = writeDoctorAgentFreeContractsFixture(t)
+			break
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"backend_prerequisite/backend_credential_skipped_agent_free",
+		"workspace_prerequisite/agent_free_source",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, forbidden := range []string{
+		"missing_backend_credential",
+		"workspace_claude_cli_unavailable",
+	} {
+		if strings.Contains(stdout.String(), forbidden) {
+			t.Fatalf("doctor output contains %q for agent-free source:\n%s", forbidden, stdout.String())
+		}
+	}
+}
+
 func TestDoctorClaudeCLIPreflightReportsMissingWorkspaceCLI(t *testing.T) {
 	configureDoctorDockerStub(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
@@ -331,6 +367,30 @@ func writeDoctorClaudeConfig(t *testing.T) string {
 		"    no_session_persistence: false",
 	}, "\n")+"\n")
 	return path
+}
+
+func writeDoctorAgentFreeContractsFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: agent-free-doctor
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: agent-free-doctor
+initial_state: idle
+states:
+  - idle
+terminal_states:
+  - idle
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	return root
 }
 
 func configureDoctorDockerStub(t *testing.T) {
