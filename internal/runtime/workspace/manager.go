@@ -304,8 +304,8 @@ func (m *DockerManager) CheckWorkspaceCLICommandAvailable(ctx context.Context, c
 	if command == "" {
 		command = "claude"
 	}
-	if _, err := m.RunDocker(ctx, "run", "--rm", "--entrypoint", "sh", image, "-lc", `command -v -- "$1" >/dev/null`, "swarm-cli-proof", command); err != nil {
-		return fmt.Errorf("workspace prerequisite failed: configured Claude CLI command %q is not available in workspace image %q; build or pull a workspace image that includes the Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE to a compatible image: %w", command, image, err)
+	if _, err := m.RunDocker(ctx, "run", "--rm", "--entrypoint", "sh", image, "-lc", `command -v -- "$1" >/dev/null && "$1" --version >/dev/null`, "swarm-cli-proof", command); err != nil {
+		return fmt.Errorf("workspace prerequisite failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE to a compatible image: %w", command, image, err)
 	}
 	return nil
 }
