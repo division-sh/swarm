@@ -10790,10 +10790,11 @@ cli_specification:
         prerequisites; dev-only conveniences must not leak into deployment-mode serve.
       owner_consumption_rule: >
         The preflight owner MUST delegate subordinate facts to existing owners: backend profile/credential and retired
-        selector checks consume `llm_provider_selection_config_authority`; contract-required secrets consume
-        `tool_model.credential_store` / `swarm secrets check`; Docker/image/workspace CLI capability consumes the workspace
-        lifecycle owner; listener and gateway validation consume the serve startup/listener owners. Doctor-only or run-only
-        duplicate interpreters are non-authoritative.
+        selector checks consume `llm_provider_selection_config_authority`; the selected backend credential is required only
+        when the selected contract source declares agents, matching runtime's declared-agent credential gate;
+        contract-required secrets consume `tool_model.credential_store` / `swarm secrets check`; Docker/image/workspace CLI
+        capability consumes the workspace lifecycle owner; listener and gateway validation consume the serve startup/listener
+        owners. Doctor-only or run-only duplicate interpreters are non-authoritative.
       split_tail:
       - '#1566 workspace image build/validation path remains split; this owner may report a missing/unusable image but must not build one.'
       - '#1567 API connection discovery and .swarm/connection.* remain split.'
@@ -11540,10 +11541,11 @@ cli_specification:
       owner: cli_specification.foundations.local_claude_cli_preflight_admission
       behavior: >
         Reports typed local prerequisite findings for the selected backend without starting runtime or reading/writing runtime
-        DB state. For `claude_cli`, the command checks backend credential/env selector authority, selected contract source
-        when provided, contract-required secrets through the credential store, Docker/workspace image/Claude CLI availability
-        through the workspace lifecycle owner, API/MCP listener availability, and stale MCP gateway env values through the
-        serve startup owner. JSON output is supported for scripts.
+        DB state. For `claude_cli`, the command checks backend selector authority, applies backend credential authority only
+        when the selected source declares agents, checks selected contract source when provided, contract-required secrets
+        through the credential store, Docker/workspace image/Claude CLI availability through the workspace lifecycle owner,
+        API/MCP listener availability, and stale MCP gateway env values through the serve startup owner. JSON output is
+        supported for scripts.
       split_scope:
       - workspace image build
       - local API connection discovery files
