@@ -308,16 +308,17 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	producers := 0
 	targeted := 0
 	for _, site := range pinRoutingEmitSites(source) {
-		if !pinRoutingEmitSiteProducesReceiverEvent(source, site, flowID, eventType, canonical) {
+		sameCanonical := pinRoutingEmitSiteMatchesReceiverCanonical(source, site, canonical)
+		connectedToReceiver := pinRoutingEmitSiteConnectsToReceiverEvent(source, site, flowID, eventType)
+		if !sameCanonical && !connectedToReceiver {
 			continue
 		}
 		if !runtimepinrouting.PinDeclaredOutput(source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
 		producers++
-		connectedOutput := compositionConnectsFromOutputEvent(source, site.FlowID, site.Spec.EventType())
 		structuralParent := pinRoutingStructuralParentRouteEligible(source, site.FlowID)
-		if connectedOutput {
+		if connectedToReceiver {
 			structuralParent = true
 		}
 		if (site.Spec.HasTarget() && runtimepinrouting.ProducerRouteCommonPathFailure(source, site.FlowID, site.Spec.EventType(), site.Spec) == "") ||
@@ -328,14 +329,11 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	return producers > 0 && targeted == producers
 }
 
-func pinRoutingEmitSiteProducesReceiverEvent(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverFlowID, receiverEventType, receiverCanonical string) bool {
+func pinRoutingEmitSiteMatchesReceiverCanonical(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverCanonical string) bool {
 	if source == nil {
 		return false
 	}
-	if receiverCanonical != "" && strings.TrimSpace(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType())) == receiverCanonical {
-		return true
-	}
-	return pinRoutingEmitSiteConnectsToReceiverEvent(source, site, receiverFlowID, receiverEventType)
+	return receiverCanonical != "" && strings.TrimSpace(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType())) == receiverCanonical
 }
 
 func pinRoutingEmitSiteConnectsToReceiverEvent(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverFlowID, receiverEventType string) bool {
