@@ -141,6 +141,22 @@ func TestRedundantInTopologySelectEntityAllowsExternalAndMixedProvenanceAcquisit
 	}
 }
 
+func TestRedundantInTopologySelectEntityIgnoresProducerConnectedOnlyToOtherReceiver(t *testing.T) {
+	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+		consumerMode:           "static",
+		acquisition:            "select_entity",
+		withProducer:           true,
+		connectProducerToOther: true,
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "redundant_in_topology_select_entity", "") ||
+		reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
+		t.Fatalf("producer connected only to another receiver must not prove in-topology authority for this receiver, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+}
+
 func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
@@ -743,10 +759,11 @@ connect:
 }
 
 type selectEntityDemotionFixtureOptions struct {
-	consumerMode string
-	acquisition  string
-	external     bool
-	withProducer bool
+	consumerMode           string
+	acquisition            string
+	external               bool
+	withProducer           bool
+	connectProducerToOther bool
 }
 
 func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtureOptions) *runtimecontracts.WorkflowContractBundle {
@@ -765,13 +782,23 @@ func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtu
   - id: producer
     flow: producer
     mode: static` + flows
+		if opts.connectProducerToOther {
+			flows += `
+  - id: other_consumer
+    flow: other_consumer
+    mode: static`
+		}
 	}
 	connectBlock := ""
 	if opts.withProducer {
+		targetFlow := "consumer"
+		if opts.connectProducerToOther {
+			targetFlow = "other_consumer"
+		}
 		connectBlock = `
 connect:
   - from: producer.deploy_done
-    to: consumer.deploy_done
+    to: ` + targetFlow + `.deploy_done
     delivery: one`
 		if consumerMode == "static" {
 			connectBlock += `
@@ -795,6 +822,9 @@ flows:`+flows+connectBlock+`
 	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
 	if opts.withProducer {
 		writeSelectEntityDemotionProducerFlow(t, root)
+		if opts.connectProducerToOther {
+			writeSelectEntityDemotionOtherConsumerFlow(t, root)
+		}
 	}
 	writeSelectEntityDemotionConsumerFlow(t, root, opts)
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
@@ -848,6 +878,51 @@ producer-node:
         event: deploy.done
         fields:
           vertical_id: payload.vertical_id
+      advances_to: done
+`)
+}
+
+func writeSelectEntityDemotionOtherConsumerFlow(t *testing.T, root string) {
+	t.Helper()
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "schema.yaml"), `
+name: other-consumer
+mode: static
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        address:
+          by: vertical_id
+          source: payload.vertical_id
+          target: entity.vertical_id
+          cardinality: one
+  outputs:
+    events: []
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "events.yaml"), `
+deploy.done:
+  vertical_id: string
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "entities.yaml"), `
+deployment:
+  vertical_id:
+    type: string
+    indexed: true
+    _unused_reason: select_entity demotion other receiver route-key proof field
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "other_consumer", "nodes.yaml"), `
+other-consumer-node:
+  id: other-consumer-node
+  execution_type: system_node
+  subscribes_to: [deploy.done]
+  event_handlers:
+    deploy.done:
       advances_to: done
 `)
 }
