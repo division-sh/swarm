@@ -58,6 +58,46 @@ func TestRun_FailsClosedOnDynamicContainedStateOperationTargetPath(t *testing.T)
 	}
 }
 
+func TestRun_FailsClosedOnContainedStateOperationRefOperandsToUnknownEntityField(t *testing.T) {
+	tests := []struct {
+		name  string
+		write runtimecontracts.WorkflowDataWrite
+		want  string
+	}{
+		{
+			name: "key ref",
+			write: runtimecontracts.WorkflowDataWrite{
+				Operation: runtimecontracts.WorkflowDataOperationSet,
+				TargetRef: "entity.verticals",
+				Key:       runtimecontracts.RefExpression("entity.bad_key"),
+				Value: runtimecontracts.LiteralExpression(map[string]any{
+					"status":      "active",
+					"active_jobs": []any{},
+				}),
+			},
+			want: "entity.bad_key",
+		},
+		{
+			name: "value ref",
+			write: runtimecontracts.WorkflowDataWrite{
+				Operation: runtimecontracts.WorkflowDataOperationAppend,
+				TargetRef: "entity.verticals.active_jobs",
+				Key:       runtimecontracts.LiteralExpression("north"),
+				Value:     runtimecontracts.RefExpression("entity.missing"),
+			},
+			want: "entity.missing",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report := Run(context.Background(), semanticview.Wrap(containedStateOperationBundle(tc.write)), Options{})
+			if !reportContains(report.Errors(), "expression_field_reference_validation", tc.want) {
+				t.Fatalf("expected expression_field_reference_validation containing %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
 func containedStateOperationBundle(write runtimecontracts.WorkflowDataWrite) *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
