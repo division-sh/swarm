@@ -252,6 +252,117 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 	}
 }
 
+func TestWorkflowContractBundleResolveFlowSingletonCoordinator_UsesPrimaryEntityContainedState(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"coordinator": {
+				Name: "coordinator",
+				Mode: FlowModeSingleton,
+			},
+		},
+		flowEntities: map[string]EntityContractsDocument{
+			"coordinator": {
+				"coordinator_state": {
+					Fields: map[string]EntityFieldDecl{
+						"status":    {Type: "text"},
+						"verticals": {Type: "map[text]VerticalState"},
+						"jobs":      {Type: "[Job]"},
+					},
+				},
+			},
+		},
+	}
+
+	resolved, err := bundle.ResolveFlowSingletonCoordinator("coordinator")
+	if err != nil {
+		t.Fatalf("ResolveFlowSingletonCoordinator: %v", err)
+	}
+	if got := resolved.PrimaryEntity.EntityType; got != "coordinator_state" {
+		t.Fatalf("PrimaryEntity.EntityType = %q, want coordinator_state", got)
+	}
+	if len(resolved.ContainedState) != 2 {
+		t.Fatalf("ContainedState = %#v, want verticals/jobs", resolved.ContainedState)
+	}
+	if got := resolved.ContainedState[0].Name + ":" + resolved.ContainedState[0].Kind; got != "jobs:list" {
+		t.Fatalf("ContainedState[0] = %q, want jobs:list", got)
+	}
+	if got := resolved.ContainedState[1].Name + ":" + resolved.ContainedState[1].Kind; got != "verticals:map" {
+		t.Fatalf("ContainedState[1] = %q, want verticals:map", got)
+	}
+}
+
+func TestWorkflowContractBundleResolveFlowSingletonCoordinator_RejectsInvalidDeclarations(t *testing.T) {
+	tests := []struct {
+		name     string
+		schema   FlowSchemaDocument
+		entities EntityContractsDocument
+		wantErr  string
+	}{
+		{
+			name: "bare static is not singleton",
+			schema: FlowSchemaDocument{
+				Mode: FlowModeStatic,
+			},
+			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
+			wantErr:  "not mode: singleton",
+		},
+		{
+			name: "template instance mix",
+			schema: FlowSchemaDocument{
+				Mode: FlowModeSingleton,
+				Instance: FlowTemplateInstanceDeclaration{
+					By:         []string{"vertical_id"},
+					OnMissing:  "create",
+					OnConflict: "reject",
+				},
+			},
+			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
+			wantErr:  "must not declare template instance",
+		},
+		{
+			name: "agent memory only no contained state",
+			schema: FlowSchemaDocument{
+				Mode: FlowModeSingleton,
+			},
+			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}}},
+			wantErr:  "agent conversation memory is not coordinator state authority",
+		},
+		{
+			name: "schema entity restatement",
+			schema: FlowSchemaDocument{
+				Mode:   FlowModeSingleton,
+				Entity: "coordinator_state",
+			},
+			entities: EntityContractsDocument{"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}}},
+			wantErr:  "schema.yaml entity",
+		},
+		{
+			name: "multiple entity contracts",
+			schema: FlowSchemaDocument{
+				Mode: FlowModeSingleton,
+			},
+			entities: EntityContractsDocument{
+				"coordinator_state": {Fields: map[string]EntityFieldDecl{"verticals": {Type: "map[text]VerticalState"}}},
+				"legacy_state":      {Fields: map[string]EntityFieldDecl{"status": {Type: "text"}}},
+			},
+			wantErr: "multiple entity types",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := &WorkflowContractBundle{
+				FlowSchemas:  map[string]FlowSchemaDocument{"coordinator": tc.schema},
+				flowEntities: map[string]EntityContractsDocument{"coordinator": tc.entities},
+			}
+			_, err := bundle.ResolveFlowSingletonCoordinator("coordinator")
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ResolveFlowSingletonCoordinator error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func keyMaterialString(values []TemplateInstanceKeyValue) string {
 	parts := make([]string, 0, len(values))
 	for _, value := range values {

@@ -728,6 +728,13 @@ type FlowSchemaDocument struct {
 	InstanceVariables FlowInstanceVariables           `yaml:"instance_variables"`
 	AutoEmitOnCreate  AutoEmitOnCreateContract        `yaml:"auto_emit_on_create"`
 }
+
+const (
+	FlowModeStatic    = "static"
+	FlowModeTemplate  = "template"
+	FlowModeSingleton = "singleton"
+)
+
 type FlowToolSurfaceContract struct {
 	RoleScopedEntityTools bool `yaml:"role_scoped_entity_tools"`
 }
@@ -749,6 +756,18 @@ type TemplateInstanceContract struct {
 	OnMissing     string
 	OnConflict    string
 	PrimaryEntity PrimaryEntityContract
+}
+
+type SingletonCoordinatorContract struct {
+	FlowID         string
+	PrimaryEntity  PrimaryEntityContract
+	ContainedState []SingletonCoordinatorContainedField
+}
+
+type SingletonCoordinatorContainedField struct {
+	Name string
+	Type string
+	Kind string
 }
 
 type TemplateInstanceKeyValue struct {

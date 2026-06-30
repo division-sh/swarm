@@ -160,8 +160,35 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, contained, "rule"), "promoted to a child/template")
 
 	coordinator := mustMappingValue(t, authoring, "singleton_coordinator_model")
+	assertScalarValue(t, mustMappingValue(t, coordinator, "status"), "merge_bearing_contract_runtime_behavior")
 	assertScalarValue(t, mustMappingValue(t, coordinator, "implementation_tracker"), "#1549")
+	assertScalarValue(t, mustMappingValue(t, coordinator, "declaration_surface"), "mode: singleton")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "ResolveFlowSingletonCoordinator")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "checkSingletonCoordinatorValidation")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "canonical_code_owner"), "applyContainedDataOperation")
 	assertScalarContains(t, mustMappingValue(t, coordinator, "rule"), "shared policy, aggregate state, or cross-instance learning")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "rule"), "Bare `mode: static` is")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "lifecycle_policy"), "archive, roll up, clean up, or promote")
+	assertScalarContains(t, mustMappingValue(t, coordinator, "promotion_rule"), "#1553")
+	for _, want := range []string{
+		"bare mode: static used as singleton/coordinator proof",
+		"mode: singleton declares template instance fields",
+		"singleton flow primary entity lacks typed contained map/list state",
+		"agent conversation/session memory is used as coordinator state authority",
+		"contained map/list items are targeted as route recipients",
+	} {
+		if !sequenceContainsScalar(mustMappingValue(t, coordinator, "fail_closed"), want) {
+			t.Fatalf("singleton_coordinator_model.fail_closed missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"mode: static as implicit coordinator declaration",
+		"agent conversation_mode or session_scope memory",
+	} {
+		if !sequenceContainsScalar(mustMappingValue(t, coordinator, "non_authoritative_paths"), want) {
+			t.Fatalf("singleton_coordinator_model.non_authoritative_paths missing %q", want)
+		}
+	}
 
 	escapeHatches := mustMappingValue(t, authoring, "escape_hatches")
 	staticMulti := mustMappingValue(t, escapeHatches, "static_multi_entity_flows")
@@ -210,6 +237,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		{"ambiguous_key_rejection", "#1545"},
 		{"select_entity_demotion", "#1547"},
 		{"typed_map_list_update_verification", "#1548"},
+		{"singleton_coordinator_contract", "#1549"},
 		{"expand_minimize_tooling", "#1551"},
 	} {
 		assertScalarValue(t, mustYAMLPath(t, analyzer, "children", tc.key), tc.want)

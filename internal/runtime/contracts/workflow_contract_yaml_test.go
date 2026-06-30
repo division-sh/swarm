@@ -341,6 +341,19 @@ instance:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_PreservesSingletonMode(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: coordinator-flow
+mode: singleton
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := doc.Mode, "singleton"; got != want {
+		t.Fatalf("Mode = %q, want %q", got, want)
+	}
+}
+
 func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDuplicateKeysForResolver(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`

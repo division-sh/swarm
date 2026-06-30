@@ -2474,6 +2474,89 @@ func TestExecutor_DataAccumulationAppliesTypedContainedOperations(t *testing.T) 
 	}
 }
 
+func TestExecutor_SingletonCoordinatorAppliesContainedStateThroughLoadedContract(t *testing.T) {
+	bundle := loadEngineSingletonCoordinatorFlowBundle(t)
+	if _, err := bundle.ResolveFlowSingletonCoordinator("coordinator"); err != nil {
+		t.Fatalf("ResolveFlowSingletonCoordinator: %v", err)
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     semanticview.Wrap(bundle),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "coordinator-1",
+		NodeID:   "coordinator-node",
+		FlowID:   "coordinator",
+		Event: eventtest.RootIngress(
+			"evt-1",
+			"job.received",
+			"",
+			"",
+			json.RawMessage(`{"vertical_id":"north","job":{"id":"job-1","title":"Build"}}`),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{
+					{
+						Operation: runtimecontracts.WorkflowDataOperationSet,
+						TargetRef: "entity.verticals",
+						Key:       runtimecontracts.RefExpression("payload.vertical_id"),
+						Value: runtimecontracts.LiteralExpression(map[string]any{
+							"status":      "active",
+							"active_jobs": []any{},
+						}),
+					},
+					{
+						Operation: runtimecontracts.WorkflowDataOperationAppend,
+						TargetRef: "entity.verticals.active_jobs",
+						Key:       runtimecontracts.RefExpression("payload.vertical_id"),
+						Value:     runtimecontracts.RefExpression("payload.job"),
+					},
+				},
+			},
+		},
+		State: testStateSnapshot("active", map[string]any{
+			"verticals": map[string]any{},
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	verticals, ok := result.StateMutation.Metadata["verticals"].(map[string]any)
+	if !ok {
+		t.Fatalf("verticals = %#v", result.StateMutation.Metadata["verticals"])
+	}
+	north, ok := verticals["north"].(map[string]any)
+	if !ok {
+		t.Fatalf("verticals.north = %#v", verticals["north"])
+	}
+	if got := north["status"]; got != "active" {
+		t.Fatalf("verticals.north.status = %#v, want active", got)
+	}
+	jobs, ok := north["active_jobs"].([]any)
+	if !ok || len(jobs) != 1 {
+		t.Fatalf("verticals.north.active_jobs = %#v", north["active_jobs"])
+	}
+	job, ok := jobs[0].(map[string]any)
+	if !ok || job["id"] != "job-1" || job["title"] != "Build" {
+		t.Fatalf("active job = %#v", jobs[0])
+	}
+}
+
 func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSourceWithRootEntityContract(),
@@ -3530,6 +3613,69 @@ scoring-node:
   state_schema:
     fields:
       dimensions_received: "[DimensionScore]"
+`)
+
+	repoRoot := repoRootForEngineProjectionTest(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func loadEngineSingletonCoordinatorFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: singleton-coordinator-runtime
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: coordinator
+    flow: coordinator
+    mode: singleton
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), `
+name: coordinator
+mode: singleton
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events:
+      - job.received
+  outputs:
+    events: []
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "types.yaml"), `
+types:
+  VerticalState:
+    status: text
+    active_jobs: "[Job]"
+  Job:
+    id: text
+    title: text
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "entities.yaml"), `
+coordinator_state:
+  verticals: map[text]VerticalState
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "events.yaml"), `
+job.received:
+  vertical_id: text
+  job: Job
+`)
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "nodes.yaml"), `
+coordinator-node:
+  id: coordinator-node
+  execution_type: system_node
+  event_handlers: {}
 `)
 
 	repoRoot := repoRootForEngineProjectionTest(t)

@@ -28,7 +28,7 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s template instance is unavailable: schema not found", flowID)
 	}
 	mode := strings.TrimSpace(schema.Mode)
-	if mode != "template" {
+	if mode != FlowModeTemplate {
 		if !schema.Instance.Empty() {
 			return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s declares instance but is not mode: template", flowID)
 		}
@@ -60,6 +60,70 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 		OnConflict:    onConflict,
 		PrimaryEntity: primary,
 	}, nil
+}
+
+func (b *WorkflowContractBundle) ResolveFlowSingletonCoordinator(flowID string) (SingletonCoordinatorContract, error) {
+	flowID = strings.TrimSpace(flowID)
+	label := defaultPrimaryEntityFlowLabel(flowID)
+	if b == nil {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s singleton coordinator is unavailable: bundle is nil", label)
+	}
+	if flowID == "" {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow <root> cannot declare singleton coordinator ownership; singleton coordinators are child flow contracts")
+	}
+	schema, ok := b.FlowSchemas[flowID]
+	if !ok {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s singleton coordinator is unavailable: schema not found", flowID)
+	}
+	if mode := strings.TrimSpace(schema.Mode); mode != FlowModeSingleton {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s is not mode: singleton", flowID)
+	}
+	if !schema.Instance.Empty() {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s mode: singleton must not declare template instance", flowID)
+	}
+	primary, err := b.ResolveFlowPrimaryEntity(flowID)
+	if err != nil {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s primary entity required for singleton coordinator state: %w", flowID, err)
+	}
+	contained := singletonCoordinatorContainedFields(primary)
+	if len(contained) == 0 {
+		return SingletonCoordinatorContract{}, fmt.Errorf("INVALID-SINGLETON-COORDINATOR: flow %s mode: singleton must declare at least one typed contained map/list field on primary entity %s; agent conversation memory is not coordinator state authority", flowID, primary.EntityType)
+	}
+	return SingletonCoordinatorContract{
+		FlowID:         flowID,
+		PrimaryEntity:  primary,
+		ContainedState: contained,
+	}, nil
+}
+
+func singletonCoordinatorContainedFields(primary PrimaryEntityContract) []SingletonCoordinatorContainedField {
+	fields := sortedEntityFieldKeys(primary.Contract.Fields)
+	out := make([]SingletonCoordinatorContainedField, 0, len(fields))
+	for _, field := range fields {
+		decl := primary.Contract.Fields[field]
+		kind := singletonCoordinatorContainedKind(decl.Type)
+		if kind == "" {
+			continue
+		}
+		out = append(out, SingletonCoordinatorContainedField{
+			Name: field,
+			Type: strings.TrimSpace(decl.Type),
+			Kind: kind,
+		})
+	}
+	return out
+}
+
+func singletonCoordinatorContainedKind(typeRef string) string {
+	typeRef = strings.TrimSpace(typeRef)
+	switch {
+	case strings.HasPrefix(typeRef, "map["):
+		return "map"
+	case templateInstanceIsListType(typeRef):
+		return "list"
+	default:
+		return ""
+	}
 }
 
 func validateTemplateInstanceBy(flowID string, fields []string, primary PrimaryEntityContract) ([]string, error) {
@@ -445,6 +509,18 @@ func resolvePrimaryEntityContract(flowID, declared string, entities EntityContra
 func sortedEntityContractKeys(entities EntityContractsDocument) []string {
 	keys := make([]string, 0, len(entities))
 	for key := range entities {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func sortedEntityFieldKeys(fields map[string]EntityFieldDecl) []string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
 		key = strings.TrimSpace(key)
 		if key != "" {
 			keys = append(keys, key)

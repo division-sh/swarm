@@ -5148,6 +5148,7 @@ flow_model:
         - '#1545'
         - '#1546'
         - '#1548'
+        - '#1549'
       - id: empire_migration_framing
         locked_design_section: Empire migration framing
         coverage: split_to_child
@@ -5168,6 +5169,7 @@ flow_model:
         - '#1546'
         - '#1547'
         - '#1548'
+        - '#1549'
         - '#1551'
       - id: first_pilots
         locked_design_section: First pilots
@@ -5414,13 +5416,53 @@ flow_model:
           RouteTable row, direct delivery target, or live subscription. Parent
           `connect` remains cross-flow-instance topology only.
     singleton_coordinator_model:
-      status: spec_vocabulary_only
+      status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#1549'
+      declaration_surface: 'mode: singleton'
+      canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowSingletonCoordinator + internal/runtime/bootverify.checkSingletonCoordinatorValidation + internal/runtime/engine.Executor.applyContainedDataOperation
       rule: >
-        Singleton/coordinator flows are valid when the flow owns real shared
-        policy, aggregate state, or cross-instance learning. They are not a
-        backdoor for accidental shared agent memory or arbitrary multi-entity
-        routing inside a static flow.
+        Singleton/coordinator flows are explicit `mode: singleton` child flows
+        that own real shared policy, aggregate state, or cross-instance
+        learning for many normal/template instances. Bare `mode: static` is
+        not coordinator authority. A singleton coordinator still has exactly
+        one primary entity and must express coordinator state as typed
+        contained map/list fields on that entity. Agent conversation/session
+        memory, static multi-entity ownership, route-to-contained-item
+        semantics, producer target/broadcast, direct delivery, and route-plan
+        fallbacks are not singleton coordinator authority.
+      lifecycle_policy: >
+        Singleton coordinator state is persisted on the coordinator primary
+        entity until handlers explicitly archive, roll up, clean up, or promote
+        the state. Contained map/list items do not gain independent lifecycle,
+        retry, timer, audit, callback, terminality, idempotency, or route
+        identity. If a contained item needs those behaviors it must be promoted
+        to a child/template flow instance instead of remaining singleton
+        contained state.
+      fail_closed:
+      - 'root schema declares mode: singleton'
+      - 'bare mode: static used as singleton/coordinator proof'
+      - 'mode: singleton declares template instance fields'
+      - singleton flow lacks exactly one primary entity
+      - singleton flow primary entity lacks typed contained map/list state
+      - singleton flow uses schema.yaml entity restatement
+      - singleton flow declares multiple entity contracts
+      - agent conversation/session memory is used as coordinator state authority
+      - contained map/list items are targeted as route recipients
+      - 'producer target, broadcast:true, direct delivery, RouteTable, live subscriptions, handler lookup, delivery rows, or replay rows are used as coordinator authority'
+      promotion_rule: >
+        Promote a singleton contained map/list item when it becomes an
+        independently routable recipient or needs lifecycle, timers, retries,
+        agents, audit, callbacks, terminality, durable idempotency, or separate
+        route identity. Promotion behavior and pilots remain tracked by #1553
+        and do not widen #1549.
+      non_authoritative_paths:
+      - 'mode: static as implicit coordinator declaration'
+      - schema.yaml entity as a singleton entity selector
+      - template instance.by / on_missing / on_conflict for singleton ownership
+      - static multi-entity flow ownership
+      - agent conversation_mode or session_scope memory
+      - parent connect to contained map/list items
+      - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     escape_hatches:
       static_multi_entity_flows:
         status: advanced_legacy_escape_hatch
@@ -5497,6 +5539,7 @@ flow_model:
         ambiguous_key_rejection: '#1545'
         select_entity_demotion: '#1547'
         typed_map_list_update_verification: '#1548'
+        singleton_coordinator_contract: '#1549'
         expand_minimize_tooling: '#1551'
     non_goals:
     - '#1538 does not implement verifier/runtime behavior.'
