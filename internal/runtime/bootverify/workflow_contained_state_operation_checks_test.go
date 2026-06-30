@@ -58,6 +58,35 @@ func TestRun_FailsClosedOnDynamicContainedStateOperationTargetPath(t *testing.T)
 	}
 }
 
+func TestRun_FailsClosedOnContainedSetOrMergeIndex(t *testing.T) {
+	tests := []struct {
+		name string
+		op   runtimecontracts.WorkflowDataOperation
+	}{
+		{name: "set", op: runtimecontracts.WorkflowDataOperationSet},
+		{name: "merge", op: runtimecontracts.WorkflowDataOperationMerge},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(containedStateOperationBundle(runtimecontracts.WorkflowDataWrite{
+				Operation: tc.op,
+				TargetRef: "entity.verticals",
+				Key:       runtimecontracts.LiteralExpression("north"),
+				Index:     runtimecontracts.LiteralExpression(0),
+				Value: runtimecontracts.LiteralExpression(map[string]any{
+					"status": "active",
+				}),
+			}))
+
+			report := Run(context.Background(), source, Options{})
+
+			if !reportContains(report.Errors(), "contained_state_operation_compliance", "must not declare index") {
+				t.Fatalf("expected contained_state_operation_compliance index rejection, got %#v", report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_FailsClosedOnContainedStateOperationRefOperandsToUnknownEntityField(t *testing.T) {
 	tests := []struct {
 		name  string

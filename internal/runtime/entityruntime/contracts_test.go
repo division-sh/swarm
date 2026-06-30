@@ -2,6 +2,7 @@ package entityruntime
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -189,5 +190,36 @@ func TestContainedOperationTarget_FailsClosedForDynamicPathAndWrongShape(t *test
 	}
 	if _, err := NormalizeContainedOperationValue(contract, target, string(ContainedOperationSet), map[string]any{"missing": "field"}); err == nil {
 		t.Fatal("undeclared map value field normalized; want fail-closed rejection")
+	}
+}
+
+func TestContainedOperationTarget_RejectsSetOrMergeIndex(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"verticals": {Type: "map[text]VerticalState"},
+			},
+		},
+		Types: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"VerticalState": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"status": {Type: "text"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, op := range []string{ContainedOperationSet, ContainedOperationMerge} {
+		t.Run(op, func(t *testing.T) {
+			_, err := ResolveContainedOperationTarget(contract, "entity.verticals", op, true, true)
+			if err == nil {
+				t.Fatalf("ResolveContainedOperationTarget(%s with index) = nil, want fail-closed rejection", op)
+			}
+			if !strings.Contains(err.Error(), "must not declare index") {
+				t.Fatalf("error = %v, want index rejection", err)
+			}
+		})
 	}
 }

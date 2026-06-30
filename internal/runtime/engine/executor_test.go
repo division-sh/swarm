@@ -2511,6 +2511,58 @@ func TestExecutor_DataAccumulationContainedOperationRejectsMissingMapKey(t *test
 	}
 }
 
+func TestExecutor_DataAccumulationRejectsContainedSetOrMergeIndex(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSourceWithRootEntityContract(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	tests := []struct {
+		name string
+		op   runtimecontracts.WorkflowDataOperation
+	}{
+		{name: "set", op: runtimecontracts.WorkflowDataOperationSet},
+		{name: "merge", op: runtimecontracts.WorkflowDataOperationMerge},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID: "entity-1",
+				NodeID:   "node-1",
+				Event:    eventtest.RootIngress("evt-1", "job.received", "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Handler: runtimecontracts.SystemNodeEventHandler{
+					DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+						Writes: []runtimecontracts.WorkflowDataWrite{{
+							Operation: tc.op,
+							TargetRef: "entity.verticals",
+							Key:       runtimecontracts.LiteralExpression("north"),
+							Index:     runtimecontracts.LiteralExpression(0),
+							Value: runtimecontracts.LiteralExpression(map[string]any{
+								"status": "active",
+							}),
+						}},
+					},
+				},
+				State: testStateSnapshot("pending", map[string]any{
+					"verticals": map[string]any{},
+				}, nil, map[string]map[string]any{}),
+			})
+			if err == nil {
+				t.Fatal("expected contained operation index rejection")
+			}
+			if !strings.Contains(err.Error(), "must not declare index") {
+				t.Fatalf("error = %v, want index rejection", err)
+			}
+		})
+	}
+}
+
 func TestExecutor_RejectsUndeclaredNestedEntityWriteBeforeExecution(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     stubSourceWithRootEntityContract(),
