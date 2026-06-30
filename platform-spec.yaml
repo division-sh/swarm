@@ -1428,9 +1428,10 @@ handler_specification:
         canonical_uses: External webhook ingress, events declared with swarm.source beginning with external, and rare mixed-provenance
           event types where in-topology producers set event.target but external producers arrive without target.
         non_canonical_use: In-topology receivers for pin-declared events whose producers are also in the pin topology. Pin routing
-          already supplies event.target; select_entity is redundant and should be removed by the contract migration.
-        boot_verify: Redundant in-topology select_entity is a warning. Missing select_entity on external/no-target stateful
-          handlers is an error because the handler would otherwise run against the wrong entity context.
+          already supplies event.target; select_entity is a hard invalidity under the normal composition model and should
+          be replaced with receiver instance.by plus parent connect routing.
+        boot_verify: Redundant normal in-topology select_entity is a hard invalidity. Missing select_entity on external/no-target
+          stateful handlers is an error because the handler would otherwise run against the wrong entity context.
       restrictions:
         lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
           acquisition. Template flows acquire entities through create_flow_instance.
@@ -1483,6 +1484,8 @@ handler_specification:
           to mint the entity on zero-match.
         non_canonical_use: In-topology pin routing where lowered parent connect, the explicit target escape hatch, structural
           fallback, or target_set delivery already supplies the receiver route context.
+        boot_verify: Redundant normal in-topology select_or_create_entity is a hard invalidity. External or mixed-provenance
+          acquisition remains valid when event.target may be absent.
       restrictions:
         lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
           acquisition. Template flows acquire entities through create_flow_instance.
@@ -2307,12 +2310,13 @@ engine:
     select_entity_coexistence:
       canonical: External webhook ingress, events declared with swarm.source beginning with external, and mixed-provenance no-target events.
       non_canonical: In-topology parent-connect pin routing. Receivers should declare addressed input pin resolution rather
-        than depend on select_entity to repair broadcast to the right entity.
+        than depend on select_entity to repair broadcast or connected delivery to the right entity.
       receiver_context_order:
       - event.target
       - select_entity_or_select_or_create_entity
       - event.source
-      boot_verify: Redundant in-topology select_entity is a warning. Missing select_entity on external/no-target stateful handlers is an error.
+      boot_verify: Redundant normal in-topology select_entity/select_or_create_entity is hard invalidity. Missing select_entity
+        on external/no-target stateful handlers is an error.
     auth_boundary:
       v1_rule: Existing emit authorization plus pin topology are the v1 authorization boundary.
       no_separate_acl: No separate per-target ACL layer exists in v1.
@@ -4328,11 +4332,12 @@ engine:
         receiver input where parent connect is required.
       when: boot-only
     - id: redundant_in_topology_select_entity
-      severity: warning
+      severity: hard_invalidity
       scope: per-handler
       trigger: A handler declares select_entity or select_or_create_entity for an event whose only producers are in-topology
-        pin-routed producers that set event.target. The receiver-side acquisition is redundant and should be removed unless
-        the event is external or mixed-provenance.
+        connected/pin-routed producers that set event.target through parent connect, structural routing, or a valid explicit
+        target. The receiver-side acquisition is invalid normal composition authority and must be replaced with receiver
+        instance.by plus parent connect routing unless the event is external or mixed-provenance.
       when: boot-only
     - id: missing_external_select_entity
       severity: error
@@ -5349,7 +5354,8 @@ flow_model:
           primitives for external ingress, legacy migration, and explicit
           advanced database-like flows. Normal in-topology composition should
           route to the receiving flow instance through parent `connect` and
-          instance keys instead.
+          instance keys instead; normal in-topology receiver acquisition fails
+          boot verification rather than remaining a warning.
       producer_emit_target:
         status: exotic_dynamic_routing_escape_hatch
         implementation_tracker: '#1545'
@@ -9885,8 +9891,8 @@ static_analyzer:
   slice_3b_select_entity_pin_coexistence:
     id: select_entity_pin_coexistence
     domain: semantic_drift
-    authority: semantic_drift_warning
-    severity: warning
+    authority: hard_invalidity
+    severity: error
     canonical_owner: internal/runtime/bootverify
     supported_surface: cmd/swarm verify
     spec_basis:
@@ -9904,8 +9910,9 @@ static_analyzer:
       - runtime target resolution
     verdicts:
       redundant_in_topology:
-        severity: warning
-        rule: select_entity/select_or_create_entity on an event whose only producers are in-topology pin-routed producers is redundant.
+        severity: error
+        rule: select_entity/select_or_create_entity on an event whose only producers are normal in-topology connected/pin-routed
+          producers is hard invalidity; use receiver instance.by plus parent connect routing instead.
       external_or_mixed_provenance:
         severity: ok
         rule: External or mixed-provenance events may use receiver-side acquisition as late binding when event.target is absent.
