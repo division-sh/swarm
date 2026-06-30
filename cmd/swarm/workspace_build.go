@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/platform"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -95,9 +96,10 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 	if out != nil {
 		fmt.Fprintf(out, "Building workspace image %s for backend claude_cli\n", image)
 	}
+	tempImage := temporaryWorkspaceBuildImageTag()
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin,
 		"build",
-		"-t", image,
+		"-t", tempImage,
 		"-f", dockerfile,
 		"--build-arg", "INSTALL_CLAUDE_CLI=true",
 		"--build-arg", "INSTALL_CODEX_CLI=false",
@@ -105,21 +107,31 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 	); err != nil {
 		return fmt.Errorf("workspace image build failed for image %q: %w", image, err)
 	}
+	defer func() {
+		_, _ = runWorkspaceBuildDocker(ctx, dockerBin, "image", "rm", tempImage)
+	}()
 
 	if out != nil {
 		fmt.Fprintf(out, "Validating workspace image %s can execute %s\n", image, workspaceBuildClaudeCommand)
 	}
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin,
-		"run", "--rm", "--entrypoint", "sh", image,
+		"run", "--rm", "--entrypoint", "sh", tempImage,
 		"-lc", `command -v -- "$1" >/dev/null && "$1" --version >/dev/null`,
 		"swarm-cli-proof", workspaceBuildClaudeCommand,
 	); err != nil {
 		return fmt.Errorf("workspace image validation failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, or set SWARM_WORKSPACE_IMAGE/--image to a compatible image: %w", workspaceBuildClaudeCommand, image, err)
 	}
+	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, "tag", tempImage, image); err != nil {
+		return fmt.Errorf("workspace image build failed to publish validated image %q: %w", image, err)
+	}
 	if out != nil {
 		fmt.Fprintf(out, "Workspace image %s is ready for claude_cli\n", image)
 	}
 	return nil
+}
+
+func temporaryWorkspaceBuildImageTag() string {
+	return fmt.Sprintf("swarm-workspace-build-%d:%d", os.Getpid(), time.Now().UnixNano())
 }
 
 func normalizeWorkspaceBuildImage(raw, source string) (string, error) {

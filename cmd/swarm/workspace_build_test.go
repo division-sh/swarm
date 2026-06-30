@@ -37,15 +37,15 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 	}
 
 	calls := readWorkspaceBuildDockerCalls(t, callsPath)
-	if len(calls) != 3 {
-		t.Fatalf("docker call count = %d, want 3:\n%s", len(calls), strings.Join(calls, "\n"))
+	if len(calls) != 5 {
+		t.Fatalf("docker call count = %d, want 5:\n%s", len(calls), strings.Join(calls, "\n"))
 	}
 	if calls[0] != "version --format {{.Server.Version}}" {
 		t.Fatalf("docker version call = %q", calls[0])
 	}
 	build := calls[1]
 	for _, want := range []string{
-		"build -t swarm-workspace:latest",
+		"build -t swarm-workspace-build-",
 		"--build-arg INSTALL_CLAUDE_CLI=true",
 		"--build-arg INSTALL_CODEX_CLI=false",
 		"swarm-workspace-build-context-",
@@ -54,6 +54,10 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 			t.Fatalf("docker build call missing %q:\n%s", want, build)
 		}
 	}
+	if strings.Contains(build, "build -t swarm-workspace:latest") {
+		t.Fatalf("docker build call published directly to runtime image tag:\n%s", build)
+	}
+	tempImage := workspaceBuildTaggedImageFromCall(t, build)
 	if strings.Contains(build, sourceRoot) || strings.Contains(build, tempCWD) {
 		t.Fatalf("docker build call used source checkout or current directory:\n%s", build)
 	}
@@ -62,13 +66,19 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 	}
 	validate := calls[2]
 	for _, want := range []string{
-		"run --rm --entrypoint sh swarm-workspace:latest",
+		"run --rm --entrypoint sh " + tempImage,
 		"command -v -- \"$1\" >/dev/null && \"$1\" --version >/dev/null",
 		"swarm-cli-proof claude",
 	} {
 		if !strings.Contains(validate, want) {
 			t.Fatalf("docker validation call missing %q:\n%s", want, validate)
 		}
+	}
+	if calls[3] != "tag "+tempImage+" swarm-workspace:latest" {
+		t.Fatalf("docker publish call = %q, want tag from temp image to runtime image", calls[3])
+	}
+	if calls[4] != "image rm "+tempImage {
+		t.Fatalf("docker temp cleanup call = %q, want image rm %s", calls[4], tempImage)
 	}
 }
 
@@ -82,8 +92,11 @@ func TestWorkspaceBuildClaudeCLIImageOverride(t *testing.T) {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	calls := strings.Join(readWorkspaceBuildDockerCalls(t, callsPath), "\n")
-	if !strings.Contains(calls, "build -t custom/image:test") || !strings.Contains(calls, "run --rm --entrypoint sh custom/image:test") {
+	if !strings.Contains(calls, "tag swarm-workspace-build-") || !strings.Contains(calls, " custom/image:test") {
 		t.Fatalf("docker calls did not use --image override:\n%s", calls)
+	}
+	if strings.Contains(calls, "build -t custom/image:test") || strings.Contains(calls, "run --rm --entrypoint sh custom/image:test") {
+		t.Fatalf("docker calls published or validated final image before validation completed:\n%s", calls)
 	}
 	if strings.Contains(calls, "env-image:latest") {
 		t.Fatalf("docker calls used env image despite --image override:\n%s", calls)
@@ -107,7 +120,7 @@ func TestWorkspaceBuildClaudeCLIFailsOnDockerBuildError(t *testing.T) {
 }
 
 func TestWorkspaceBuildClaudeCLIFailsOnValidationError(t *testing.T) {
-	configureWorkspaceBuildDockerStub(t)
+	callsPath := configureWorkspaceBuildDockerStub(t)
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", "1")
 
 	var stdout, stderr bytes.Buffer
@@ -119,6 +132,13 @@ func TestWorkspaceBuildClaudeCLIFailsOnValidationError(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
+	}
+	calls := strings.Join(readWorkspaceBuildDockerCalls(t, callsPath), "\n")
+	if strings.Contains(calls, "\ntag ") || strings.HasPrefix(calls, "tag ") {
+		t.Fatalf("docker calls published final image after validation failure:\n%s", calls)
+	}
+	if !strings.Contains(calls, "\nimage rm swarm-workspace-build-") {
+		t.Fatalf("docker calls did not clean up temp validation image:\n%s", calls)
 	}
 }
 
@@ -209,7 +229,7 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 			t.Fatalf("image target rule missing %q:\n%s", want, owner.ImageTargetRule)
 		}
 	}
-	for _, want := range []string{"command -v", "--version", "lookup alone are insufficient"} {
+	for _, want := range []string{"temporary image tag", "command -v", "--version", "lookup alone are insufficient"} {
 		if !strings.Contains(owner.ValidationRule, want) {
 			t.Fatalf("validation rule missing %q:\n%s", want, owner.ValidationRule)
 		}
@@ -227,7 +247,7 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 	if row.Command != "swarm workspace build --backend claude_cli [--image <tag>]" || row.ImplementationStatus != "implemented_first_slice" || row.Owner != "workspace_model.local_workspace_image_build_authority" {
 		t.Fatalf("workspace_build command catalog row = %#v", row)
 	}
-	for _, want := range []string{"embedded/materialized", "SWARM_DOCKER_BIN", "SWARM_WORKSPACE_IMAGE", "claude --version"} {
+	for _, want := range []string{"embedded/materialized", "temporary image tag", "SWARM_DOCKER_BIN", "SWARM_WORKSPACE_IMAGE", "claude --version"} {
 		if !strings.Contains(row.Behavior, want) {
 			t.Fatalf("workspace_build behavior missing %q:\n%s", want, row.Behavior)
 		}
@@ -262,6 +282,16 @@ case "$1" in
     fi
     exit 0
     ;;
+  tag)
+    exit 0
+    ;;
+  image)
+    if [ "$2" = "rm" ]; then
+      exit 0
+    fi
+    echo "unexpected docker image command: $*" >&2
+    exit 45
+    ;;
   *)
     echo "unexpected docker command: $*" >&2
     exit 44
@@ -276,6 +306,18 @@ esac
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_BUILD", "")
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", "")
 	return callsPath
+}
+
+func workspaceBuildTaggedImageFromCall(t *testing.T, call string) string {
+	t.Helper()
+	fields := strings.Fields(call)
+	for i := 0; i < len(fields)-1; i++ {
+		if fields[i] == "-t" {
+			return fields[i+1]
+		}
+	}
+	t.Fatalf("docker call missing -t image: %s", call)
+	return ""
 }
 
 func readWorkspaceBuildDockerCalls(t *testing.T, callsPath string) []string {
