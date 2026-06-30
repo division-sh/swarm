@@ -60,6 +60,87 @@ func TestPinTargetResolution_FailsClosedForProducerBroadcastCommonCompositionPat
 	}
 }
 
+func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T) {
+	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+		consumerMode: "static",
+		acquisition:  "select_entity",
+		withProducer: true,
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+		t.Fatalf("expected redundant_in_topology_select_entity hard invalidity, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+	if reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
+		t.Fatalf("redundant_in_topology_select_entity must not remain warning-only, got %#v", report.Warnings())
+	}
+}
+
+func TestRedundantInTopologySelectOrCreateEntityFailsClosedForParentConnect(t *testing.T) {
+	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+		consumerMode: "static",
+		acquisition:  "select_or_create_entity",
+		withProducer: true,
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "select_or_create_entity") ||
+		!reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+		t.Fatalf("expected redundant_in_topology_select_entity hard invalidity for select_or_create_entity, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+}
+
+func TestRedundantInTopologySelectEntityAllowsTemplateInstanceConnectReplacement(t *testing.T) {
+	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+		consumerMode: "template",
+		withProducer: true,
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("template instance.by plus parent connect should verify without receiver acquisition, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
+		t.Fatalf("connect-routed replacement should not report select_entity warning, got %#v", report.Warnings())
+	}
+}
+
+func TestRedundantInTopologySelectEntityAllowsExternalAndMixedProvenanceAcquisition(t *testing.T) {
+	tests := []struct {
+		name         string
+		acquisition  string
+		withProducer bool
+	}{
+		{name: "external select_entity", acquisition: "select_entity"},
+		{name: "external select_or_create_entity", acquisition: "select_or_create_entity"},
+		{name: "mixed select_entity", acquisition: "select_entity", withProducer: true},
+		{name: "mixed select_or_create_entity", acquisition: "select_or_create_entity", withProducer: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+				consumerMode: "static",
+				acquisition:  tc.acquisition,
+				external:     true,
+				withProducer: tc.withProducer,
+			})
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if reportContains(report.Errors(), "redundant_in_topology_select_entity", "") ||
+				reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
+				t.Fatalf("external/mixed provenance acquisition must remain allowed, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+			}
+			if reportContains(report.Errors(), "select_entity_validation", "") {
+				t.Fatalf("external/mixed provenance acquisition should keep valid binding semantics, got %#v", report.Errors())
+			}
+		})
+	}
+}
+
 func TestPinTargetResolution_FailsClosedForProducerTargetAdaptedConnectCommonPath(t *testing.T) {
 	bundle := loadPinRoutingProducerRouteBundleForEvents(t, "shared.ready", "consumer.ready", `
       emit:
@@ -658,6 +739,202 @@ connect:
   - from: producer.shared.ready
     to: consumer.consumer.ready
     adapter: producer-shared-to-consumer-ready
+`
+}
+
+type selectEntityDemotionFixtureOptions struct {
+	consumerMode string
+	acquisition  string
+	external     bool
+	withProducer bool
+}
+
+func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtureOptions) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	consumerMode := opts.consumerMode
+	if strings.TrimSpace(consumerMode) == "" {
+		consumerMode = "static"
+	}
+	flows := `
+  - id: consumer
+    flow: consumer
+    mode: ` + consumerMode
+	if opts.withProducer {
+		flows = `
+  - id: producer
+    flow: producer
+    mode: static` + flows
+	}
+	connectBlock := ""
+	if opts.withProducer {
+		connectBlock = `
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_done
+    delivery: one`
+		if consumerMode == "static" {
+			connectBlock += `
+    map:
+      vertical_id:
+        source: payload.vertical_id
+        target: entity.vertical_id`
+		}
+	}
+	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
+name: select-entity-demotion
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:`+flows+connectBlock+`
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-demotion\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
+	if opts.withProducer {
+		writeSelectEntityDemotionProducerFlow(t, root)
+	}
+	writeSelectEntityDemotionConsumerFlow(t, root, opts)
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
+}
+
+func writeSelectEntityDemotionProducerFlow(t *testing.T, root string) {
+	t.Helper()
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [deploy.requested]
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), `
+producer_request:
+  vertical_id:
+    type: string
+    _unused_reason: select_entity demotion producer proof field
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
+deploy.requested:
+  vertical_id: string
+deploy.done:
+  vertical_id: string
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  event_handlers:
+    deploy.requested:
+      create_entity: true
+      emit:
+        event: deploy.done
+        fields:
+          vertical_id: payload.vertical_id
+      advances_to: done
+`)
+}
+
+func writeSelectEntityDemotionConsumerFlow(t *testing.T, root string, opts selectEntityDemotionFixtureOptions) {
+	t.Helper()
+	consumerMode := opts.consumerMode
+	if strings.TrimSpace(consumerMode) == "" {
+		consumerMode = "static"
+	}
+	instanceBlock := ""
+	inputPin := `
+      - name: deploy_done
+        event: deploy.done
+        address:
+          by: vertical_id
+          source: payload.vertical_id
+          target: entity.vertical_id
+          cardinality: one
+`
+	if consumerMode == "template" {
+		instanceBlock = `instance:
+  by: vertical_id
+  on_missing: reject
+  on_conflict: reject
+`
+		inputPin = `
+      - name: deploy_done
+        event: deploy.done
+`
+	}
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: `+consumerMode+`
+`+instanceBlock+`initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events:`+inputPin+`  outputs:
+    events: []
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	externalSource := ""
+	if opts.external {
+		externalSource = `  swarm:
+    source: external (operator webhook)
+`
+	}
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
+deploy.done:
+`+externalSource+`  vertical_id: string
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+deployment:
+  vertical_id:
+    type: string
+    indexed: true
+    _unused_reason: select_entity demotion route-key proof field
+`)
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), selectEntityDemotionConsumerNodes(opts.acquisition))
+}
+
+func selectEntityDemotionConsumerNodes(acquisition string) string {
+	acquisition = strings.TrimSpace(acquisition)
+	acquisitionBlock := ""
+	switch acquisition {
+	case "select_entity":
+		acquisitionBlock = `      select_entity:
+        by:
+          vertical_id: payload.vertical_id
+`
+	case "select_or_create_entity":
+		acquisitionBlock = `      select_or_create_entity:
+        by:
+          vertical_id: payload.vertical_id
+`
+	}
+	return `
+consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to: [deploy.done]
+  event_handlers:
+    deploy.done:
+` + acquisitionBlock + `      advances_to: done
 `
 }
 

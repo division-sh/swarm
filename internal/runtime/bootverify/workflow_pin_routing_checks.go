@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -71,13 +72,20 @@ func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
 				if !hasSelect && !hasSelectOrCreate {
 					continue
 				}
+				if pinRoutingEventExternalSource(c.source, flowID, eventType) {
+					continue
+				}
 				if !pinRoutingAllKnownProducersTargeted(c.source, flowID, eventType) {
 					continue
 				}
+				label := "select_entity"
+				if hasSelectOrCreate && !hasSelect {
+					label = "select_or_create_entity"
+				}
 				findings = append(findings, Finding{
 					CheckID:  "redundant_in_topology_select_entity",
-					Severity: "warning",
-					Message:  fmt.Sprintf("flow %s handler %s on node %s declares receiver-side entity acquisition for in-topology pin-routed event", flowID, eventType, nodeID),
+					Severity: SeverityHardInvalidity,
+					Message:  fmt.Sprintf("flow %s handler %s on node %s declares %s for normal in-topology composition; use receiver instance.by plus parent connect routing instead", flowID, eventType, nodeID, label),
 					Location: flowID,
 				})
 			}
@@ -261,12 +269,35 @@ func pinRoutingStructuralParentRouteEligible(source semanticview.Source, flowID 
 }
 
 func pinRoutingEventExternalSource(source semanticview.Source, flowID, eventType string) bool {
+	if source == nil {
+		return false
+	}
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return false
+	}
+	if scope, ok := source.FlowScopeByID(flowID); ok {
+		if entry, ok := scope.Events[eventType]; ok && pinRoutingEventEntryExternalSource(entry) {
+			return true
+		}
+		if canonical := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType)); canonical != "" {
+			for local, entry := range scope.Events {
+				if eventidentity.Normalize(source.ResolveFlowEventReference(flowID, local)) == canonical && pinRoutingEventEntryExternalSource(entry) {
+					return true
+				}
+			}
+		}
+	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(proof.Entry.SwarmSource())), "external") {
+	if pinRoutingEventEntryExternalSource(proof.Entry) {
 		return true
 	}
 	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	return ok && strings.HasPrefix(strings.ToLower(strings.TrimSpace(entry.SwarmSource())), "external")
+	return ok && pinRoutingEventEntryExternalSource(entry)
+}
+
+func pinRoutingEventEntryExternalSource(entry runtimecontracts.EventCatalogEntry) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(entry.SwarmSource())), "external")
 }
 
 func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eventType string) bool {
@@ -277,18 +308,87 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	producers := 0
 	targeted := 0
 	for _, site := range pinRoutingEmitSites(source) {
-		if strings.TrimSpace(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType())) != canonical {
+		if !pinRoutingEmitSiteProducesReceiverEvent(source, site, flowID, eventType, canonical) {
 			continue
 		}
 		if !runtimepinrouting.PinDeclaredOutput(source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
 		producers++
+		connectedOutput := compositionConnectsFromOutputEvent(source, site.FlowID, site.Spec.EventType())
 		structuralParent := pinRoutingStructuralParentRouteEligible(source, site.FlowID)
+		if connectedOutput {
+			structuralParent = true
+		}
 		if (site.Spec.HasTarget() && runtimepinrouting.ProducerRouteCommonPathFailure(source, site.FlowID, site.Spec.EventType(), site.Spec) == "") ||
 			(structuralParent && !site.Spec.Broadcast) {
 			targeted++
 		}
 	}
 	return producers > 0 && targeted == producers
+}
+
+func pinRoutingEmitSiteProducesReceiverEvent(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverFlowID, receiverEventType, receiverCanonical string) bool {
+	if source == nil {
+		return false
+	}
+	if receiverCanonical != "" && strings.TrimSpace(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType())) == receiverCanonical {
+		return true
+	}
+	return pinRoutingEmitSiteConnectsToReceiverEvent(source, site, receiverFlowID, receiverEventType)
+}
+
+func pinRoutingEmitSiteConnectsToReceiverEvent(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverFlowID, receiverEventType string) bool {
+	if source == nil {
+		return false
+	}
+	for _, inputPin := range source.FlowInputEventPins(receiverFlowID) {
+		if !pinRoutingInputPinMatchesReceiverEvent(source, receiverFlowID, inputPin, receiverEventType) {
+			continue
+		}
+		for _, connect := range source.CompositionConnectsTo(receiverFlowID, inputPin.PinName()) {
+			from, err := connect.FromRef()
+			if err != nil {
+				continue
+			}
+			if pinRoutingConnectSourceMatchesEmitSite(source, from, site) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func pinRoutingInputPinMatchesReceiverEvent(source semanticview.Source, flowID string, inputPin runtimecontracts.FlowInputEventPin, eventType string) bool {
+	eventType = eventidentity.Normalize(eventType)
+	if eventType == "" {
+		return false
+	}
+	if eventidentity.Normalize(inputPin.PinName()) == eventType || eventidentity.Normalize(inputPin.EventType()) == eventType {
+		return true
+	}
+	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
+	pinResolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
+	return resolved != "" && resolved == pinResolved
+}
+
+func pinRoutingConnectSourceMatchesEmitSite(source semanticview.Source, from runtimecontracts.FlowPackagePinRef, site semanticview.AuthoredEmitSite) bool {
+	siteFlowID := strings.TrimSpace(site.FlowID)
+	if from.Root {
+		if siteFlowID != "" {
+			return false
+		}
+	} else if strings.TrimSpace(from.FlowID) != siteFlowID {
+		return false
+	}
+	for _, outputPin := range source.FlowOutputEventPins(siteFlowID) {
+		if strings.TrimSpace(outputPin.PinName()) != strings.TrimSpace(from.Pin) {
+			continue
+		}
+		if eventidentity.Normalize(outputPin.PinName()) == eventidentity.Normalize(site.Spec.EventType()) ||
+			eventidentity.Normalize(outputPin.EventType()) == eventidentity.Normalize(site.Spec.EventType()) {
+			return true
+		}
+	}
+	return false
 }
