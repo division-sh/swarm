@@ -348,6 +348,7 @@ type serveOptions struct {
 	AbandonActiveRuns                bool
 	Verbose                          bool
 	Output                           io.Writer
+	LocalRun                         bool
 	TestEntityStateHook              func(entityID, state string)
 	TestWorkflowNodeHandlerStartHook runtimepipeline.WorkflowNodeHandlerStartHook
 	TestLifecycleProbe               runtimelifecycleprobe.Observer
@@ -789,6 +790,18 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("resolve workspace backend: %v", err)
 		return 1
+	}
+	if shouldRunServeLocalClaudeCLIPreflight(opts) {
+		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackend)
+		if preflight.HasBlockers() {
+			detail := preflight.BlockerSummary()
+			reporter.emit(2, "local_preflight", "FAILED", detail)
+			if opts.Output != nil {
+				writeLocalPreflightText(opts.Output, preflight)
+			}
+			log.Printf("local claude_cli preflight failed: %s", detail)
+			return 3
+		}
 	}
 	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
 	if err != nil {

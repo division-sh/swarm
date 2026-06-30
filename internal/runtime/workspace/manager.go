@@ -266,14 +266,46 @@ func (m *DockerManager) EnsurePrereqs(ctx context.Context) error {
 	if m == nil {
 		return fmt.Errorf("workspace manager is required")
 	}
-	if err := m.ensureDockerAvailable(ctx); err != nil {
+	if err := m.CheckDockerAvailable(ctx); err != nil {
 		return err
 	}
 	if err := m.ensureWorkspaceNetwork(ctx); err != nil {
 		return err
 	}
-	if err := m.ensureWorkspaceImage(ctx); err != nil {
+	if err := m.CheckWorkspaceImageAvailable(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (m *DockerManager) CheckDockerAvailable(ctx context.Context) error {
+	if m == nil {
+		return fmt.Errorf("workspace manager is required")
+	}
+	return m.ensureDockerAvailable(ctx)
+}
+
+func (m *DockerManager) CheckWorkspaceImageAvailable(ctx context.Context) error {
+	if m == nil {
+		return fmt.Errorf("workspace manager is required")
+	}
+	return m.ensureWorkspaceImage(ctx)
+}
+
+func (m *DockerManager) CheckWorkspaceCLICommandAvailable(ctx context.Context, command string) error {
+	if m == nil {
+		return fmt.Errorf("workspace manager is required")
+	}
+	image := strings.TrimSpace(m.cfg.WorkspaceImage)
+	if image == "" {
+		return fmt.Errorf("workspace prerequisite failed: workspace image is required")
+	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		command = "claude"
+	}
+	if _, err := m.RunDocker(ctx, "run", "--rm", "--entrypoint", "sh", image, "-lc", `command -v -- "$1" >/dev/null`, "swarm-cli-proof", command); err != nil {
+		return fmt.Errorf("workspace prerequisite failed: configured Claude CLI command %q is not available in workspace image %q; build or pull a workspace image that includes the Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE to a compatible image: %w", command, image, err)
 	}
 	return nil
 }

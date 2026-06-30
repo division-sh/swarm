@@ -10764,6 +10764,42 @@ cli_specification:
       - '#995 schema migration startup diagnostics remain split.'
       - '#979/#1012 selected-contract and multi-bundle gateway materialization remains split.'
       - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not reopened.'
+    local_claude_cli_preflight_admission:
+      promoted_by: '#1565'
+      implementation_status: implemented
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_claude_cli_preflight_admission
+      implementation_owner: cmd/swarm local claude_cli preflight/admission owner
+      scope: >
+        Merge-bearing authority for local `claude_cli` prerequisite diagnostics and admission. The owner materializes typed
+        prerequisite findings for the selected backend and local runtime path, reports them through `swarm doctor`, and feeds
+        the relevant fail-closed subset into `swarm serve --dev --backend claude_cli` and local foreground
+        `swarm run --backend claude_cli` through the serve startup owner. It is not a deployment profile system and does not
+        build workspace images, write local connection files, or change stale gateway env precedence.
+      finding_categories:
+      - backend_prerequisite
+      - workspace_prerequisite
+      - serve_listener_prerequisite
+      - gateway_prerequisite
+      - contract_secret_prerequisite
+      - dev_convenience_prerequisite
+      command_mode_rule: >
+        `swarm doctor --backend claude_cli` renders the shared findings without starting runtime. `swarm serve --dev
+        --backend claude_cli` and local foreground `swarm run --backend claude_cli` consume the same owner as admission
+        evidence and fail closed before readiness when a blocking prerequisite is missing. Non-dev `swarm serve
+        --backend claude_cli` consumes the runtime-safety subset where the selected disk-contract startup path needs the same
+        prerequisites; dev-only conveniences must not leak into deployment-mode serve.
+      owner_consumption_rule: >
+        The preflight owner MUST delegate subordinate facts to existing owners: backend profile/credential and retired
+        selector checks consume `llm_provider_selection_config_authority`; contract-required secrets consume
+        `tool_model.credential_store` / `swarm secrets check`; Docker/image/workspace CLI capability consumes the workspace
+        lifecycle owner; listener and gateway validation consume the serve startup/listener owners. Doctor-only or run-only
+        duplicate interpreters are non-authoritative.
+      split_tail:
+      - '#1566 workspace image build/validation path remains split; this owner may report a missing/unusable image but must not build one.'
+      - '#1567 API connection discovery and .swarm/connection.* remain split.'
+      - '#1568 stale MCP gateway env precedence/auto-fix policy remains split; this owner may detect/report/fail closed on stale values.'
+      - '#1138/#1213 host workspace claude_cli execution support remains split.'
+      - '#1441 parent local proof setup remains open after this child unless all sibling tails are closed separately.'
     no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
     daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
     cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical API at /v1/rpc or /v1/ws. The only local file-contract carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
@@ -11497,6 +11533,22 @@ cli_specification:
           - remote server commit
           - remote server build date
           - server-local bundle path
+    doctor:
+      command: swarm doctor --backend claude_cli [--contracts <path>] [--json]
+      tier: should_have
+      implementation_status: implemented
+      owner: cli_specification.foundations.local_claude_cli_preflight_admission
+      behavior: >
+        Reports typed local prerequisite findings for the selected backend without starting runtime or reading/writing runtime
+        DB state. For `claude_cli`, the command checks backend credential/env selector authority, selected contract source
+        when provided, contract-required secrets through the credential store, Docker/workspace image/Claude CLI availability
+        through the workspace lifecycle owner, API/MCP listener availability, and stale MCP gateway env values through the
+        serve startup owner. JSON output is supported for scripts.
+      split_scope:
+      - workspace image build
+      - local API connection discovery files
+      - stale gateway env precedence or auto-fix policy
+      - deployment-mode profile management
     secrets:
       command: swarm secrets set|list|check|rm
       tier: must_have

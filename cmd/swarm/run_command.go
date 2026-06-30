@@ -368,6 +368,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveOpts.ContractsPath = resolvedPaths.ContractsPath
 	serveOpts.DataSource = opts.dataSource
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
+	serveOpts.LocalRun = true
 	if opts.apiPort > 0 {
 		serveOpts.APIListenAddr = net.JoinHostPort("127.0.0.1", strconv.Itoa(opts.apiPort))
 	}

@@ -66,6 +66,9 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 		if serveOpts.Verbose {
 			t.Errorf("local run serve opts Verbose = true, want default non-verbose schema summary owner")
 		}
+		if !serveOpts.LocalRun {
+			t.Errorf("local run serve opts LocalRun = false, want shared local preflight consumer marker")
+		}
 		<-ctx.Done()
 		close(serveCanceled)
 		return 0
