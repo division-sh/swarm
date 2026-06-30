@@ -50,6 +50,11 @@ func (eb *EventBus) replayRecipientsForCommittedEvent(
 		}
 	}
 	if scope == runtimereplayclaim.CommittedReplayScopeSubscribed && hasDeliveryRouteSubscriberType(persistedRoutes, "node") {
+		if hasFlowInstanceNodeDeliveryRoute(persistedRoutes) {
+			internal := deliveryRouteRecipientIDsByType(persistedRoutes, "node")
+			live := uniqueStrings(append(deliveryRouteRecipientIDsByType(persistedRoutes, "agent"), internal...))
+			return live, internal, persistedRoutes, nil
+		}
 		internal, err := eb.currentInternalRecipientsForCommittedEvent(ctx, evt)
 		if err != nil {
 			return nil, nil, nil, err
@@ -93,6 +98,19 @@ func hasDeliveryRouteSubscriberType(routes []events.DeliveryRoute, subscriberTyp
 	subscriberType = strings.TrimSpace(subscriberType)
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.SubscriberType == subscriberType {
+			return true
+		}
+	}
+	return false
+}
+
+func hasFlowInstanceNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.SubscriberType != "node" {
+			continue
+		}
+		target := route.Target.Normalized()
+		if target.FlowID != "" && target.FlowInstance != "" {
 			return true
 		}
 	}
