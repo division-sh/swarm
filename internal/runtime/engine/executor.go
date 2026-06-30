@@ -241,6 +241,16 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 	}
 	validateWrites := func(kind string, writes []runtimecontracts.WorkflowDataWrite) error {
 		for _, write := range writes {
+			if write.IsContainedOperation() {
+				contract, ok := entityruntime.ResolveForFlow(source, flowID)
+				if !ok {
+					return fmt.Errorf("%s target %q: flow %s has no declared entity contract", kind, write.Target(), strings.TrimSpace(flowID))
+				}
+				if _, err := entityruntime.ResolveContainedOperationTarget(contract, write.Target(), string(write.Operation), !write.Key.IsZero(), !write.Index.IsZero()); err != nil {
+					return fmt.Errorf("%s target %q: %w", kind, write.Target(), err)
+				}
+				continue
+			}
 			if err := validateTarget(kind, write.Target()); err != nil {
 				return err
 			}
@@ -1598,14 +1608,29 @@ func (e *Executor) emitPersistencePrerequisites(frame executionFrame) EmitPersis
 		seen[field] = len(fields)
 		fields = append(fields, prerequisite)
 	}
+	appendWrite := func(write runtimecontracts.WorkflowDataWrite) {
+		if write.IsContainedOperation() {
+			contract, ok := entityruntime.ResolveForFlow(e.deps.Source, frame.req.FlowID.String())
+			if !ok {
+				return
+			}
+			target, err := entityruntime.ResolveContainedOperationTarget(contract, write.Target(), string(write.Operation), !write.Key.IsZero(), !write.Index.IsZero())
+			if err != nil {
+				return
+			}
+			appendField("entity." + target.RootField)
+			return
+		}
+		appendField(write.Target())
+	}
 	if frame.topLevelDataWritesApplied {
 		for _, write := range frame.topLevelDataAccumulation.Writes {
-			appendField(write.Target())
+			appendWrite(write)
 		}
 	}
 	if frame.rule != nil {
 		for _, write := range frame.rule.DataAccumulation.Writes {
-			appendField(write.Target())
+			appendWrite(write)
 		}
 	}
 	if spec := e.selectedCompute(&frame); spec != nil {
@@ -1923,6 +1948,12 @@ func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.Handl
 func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecontracts.WorkflowDataAccumulation) error {
 	current := e.currentContext(frame)
 	for _, write := range spec.Writes {
+		if write.IsContainedOperation() {
+			if err := e.applyContainedDataOperation(frame, current, write); err != nil {
+				return fmt.Errorf("data_accumulation target %s: %w", strings.TrimSpace(write.Target()), err)
+			}
+			continue
+		}
 		target := strings.TrimSpace(write.Target())
 		if target == "" {
 			continue

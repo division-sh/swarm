@@ -222,18 +222,22 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		switch strings.TrimSpace(node.Content[i].Value) {
-		case "", "field", "source_field", "target_field", "target_path", "expression", "value":
+		case "", "field", "source_field", "target_field", "target_path", "target", "op", "key", "index", "expression", "value":
 		default:
 			return fmt.Errorf("unsupported workflow data write field %q", strings.TrimSpace(node.Content[i].Value))
 		}
 	}
 	var aux struct {
-		Field       string    `yaml:"field"`
-		SourceField string    `yaml:"source_field"`
-		TargetField string    `yaml:"target_field"`
-		TargetPath  string    `yaml:"target_path"`
-		Expression  string    `yaml:"expression"`
-		Value       yaml.Node `yaml:"value"`
+		Field       string                `yaml:"field"`
+		SourceField string                `yaml:"source_field"`
+		Operation   WorkflowDataOperation `yaml:"op"`
+		Target      string                `yaml:"target"`
+		TargetField string                `yaml:"target_field"`
+		TargetPath  string                `yaml:"target_path"`
+		Key         ExpressionValue       `yaml:"key"`
+		Index       ExpressionValue       `yaml:"index"`
+		Expression  string                `yaml:"expression"`
+		Value       yaml.Node             `yaml:"value"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -241,8 +245,12 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 	*w = WorkflowDataWrite{
 		Field:         strings.TrimSpace(aux.Field),
 		SourceField:   strings.TrimSpace(aux.SourceField),
+		Operation:     WorkflowDataOperation(strings.TrimSpace(string(aux.Operation))),
+		TargetRef:     strings.TrimSpace(aux.Target),
 		TargetField:   strings.TrimSpace(aux.TargetField),
 		TargetPathRef: strings.TrimSpace(aux.TargetPath),
+		Key:           aux.Key,
+		Index:         aux.Index,
 	}
 	switch aux.Value.Kind {
 	case 0:
@@ -254,11 +262,19 @@ func (w *WorkflowDataWrite) UnmarshalYAML(node *yaml.Node) error {
 		if strings.TrimSpace(aux.Expression) != "" {
 			return fmt.Errorf("workflow data write cannot declare both value and expression")
 		}
-		expr, err := decodeWorkflowDataWriteValueNode(&aux.Value)
-		if err != nil {
-			return err
+		if strings.TrimSpace(string(w.Operation)) != "" {
+			var expr ExpressionValue
+			if err := aux.Value.Decode(&expr); err != nil {
+				return err
+			}
+			w.Value = expr
+		} else {
+			expr, err := decodeWorkflowDataWriteValueNode(&aux.Value)
+			if err != nil {
+				return err
+			}
+			w.Value = expr
 		}
-		w.Value = expr
 	}
 	return hydrateWorkflowDataWrite(w)
 }
@@ -520,11 +536,32 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 	}
 	w.Field = strings.TrimSpace(w.Field)
 	w.SourceField = strings.TrimSpace(w.SourceField)
+	w.Operation = WorkflowDataOperation(strings.TrimSpace(string(w.Operation)))
+	w.TargetRef = strings.TrimSpace(w.TargetRef)
 	w.TargetField = strings.TrimSpace(w.TargetField)
 	w.TargetPathRef = strings.TrimSpace(w.TargetPathRef)
 	w.Value.hydrate()
+	w.Key.hydrate()
+	w.Index.hydrate()
 	if err := validateExpressionValue(w.Value); err != nil {
 		return err
+	}
+	if err := validateExpressionValue(w.Key); err != nil {
+		return err
+	}
+	if err := validateExpressionValue(w.Index); err != nil {
+		return err
+	}
+	if w.Operation != "" {
+		if err := hydrateWorkflowDataOperation(w); err != nil {
+			return err
+		}
+		w.SourcePath = paths.Parse(w.Source())
+		w.TargetPath = paths.Parse(w.Target())
+		return nil
+	}
+	if w.TargetRef != "" || !w.Key.IsZero() || !w.Index.IsZero() {
+		return fmt.Errorf("workflow data write target/key/index forms require op")
 	}
 	if w.TargetField != "" && w.TargetPathRef != "" {
 		return fmt.Errorf("workflow data write must not declare both target_field and target_path")
@@ -553,6 +590,51 @@ func hydrateWorkflowDataWrite(w *WorkflowDataWrite) error {
 	}
 	w.SourcePath = paths.Parse(w.Source())
 	w.TargetPath = paths.Parse(w.Target())
+	return nil
+}
+
+func hydrateWorkflowDataOperation(w *WorkflowDataWrite) error {
+	switch w.Operation {
+	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationDelete, WorkflowDataOperationAppend, WorkflowDataOperationUpdate:
+	default:
+		return fmt.Errorf("unsupported workflow data write op %q", strings.TrimSpace(string(w.Operation)))
+	}
+	if w.TargetRef == "" {
+		return fmt.Errorf("workflow data write op %q requires target", w.Operation)
+	}
+	if w.Field != "" || w.SourceField != "" || w.TargetField != "" || w.TargetPathRef != "" {
+		return fmt.Errorf("workflow data write op %q must use target, not field/source_field/target_field/target_path", w.Operation)
+	}
+	if strings.TrimSpace(w.TargetRef) != "" && paths.Parse(w.TargetRef).Root != paths.RootEntity {
+		return fmt.Errorf("workflow data write op %q target %q must use entity scope", w.Operation, w.TargetRef)
+	}
+	switch w.Operation {
+	case WorkflowDataOperationSet, WorkflowDataOperationMerge, WorkflowDataOperationAppend:
+		if w.Value.IsZero() {
+			return fmt.Errorf("workflow data write op %q requires value", w.Operation)
+		}
+	case WorkflowDataOperationDelete:
+		if w.Key.IsZero() {
+			return fmt.Errorf("workflow data write op delete requires key")
+		}
+		if !w.Value.IsZero() || !w.Index.IsZero() {
+			return fmt.Errorf("workflow data write op delete must not declare value or index")
+		}
+	case WorkflowDataOperationUpdate:
+		if w.Value.IsZero() || w.Index.IsZero() {
+			return fmt.Errorf("workflow data write op update requires value and index")
+		}
+	}
+	switch w.Operation {
+	case WorkflowDataOperationSet, WorkflowDataOperationMerge:
+		if w.Key.IsZero() {
+			return fmt.Errorf("workflow data write op %q requires key", w.Operation)
+		}
+	case WorkflowDataOperationAppend:
+		if !w.Index.IsZero() {
+			return fmt.Errorf("workflow data write op append must not declare index")
+		}
+	}
 	return nil
 }
 

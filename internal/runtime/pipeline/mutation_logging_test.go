@@ -147,6 +147,77 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 	}
 }
 
+func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	store := NewWorkflowInstanceStore(db)
+	entityID := uuid.NewString()
+
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "contained-state-flow",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"verticals": map[string]any{
+				"north": map[string]any{
+					"status":      "active",
+					"active_jobs": []any{},
+				},
+			},
+			"tags": []any{"new"},
+		},
+	}); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+
+	contained := map[string]any{
+		"north": map[string]any{
+			"status": "busy",
+			"active_jobs": []any{
+				map[string]any{"id": "job-1", "title": "Build"},
+			},
+		},
+	}
+	if err := store.Upsert(testWorkflowStoreRunContext(t, store), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "contained-state-flow",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"verticals": contained,
+			"tags":      []any{"new", "vip"},
+		},
+	}); err != nil {
+		t.Fatalf("update workflow instance: %v", err)
+	}
+
+	loaded, ok, err := store.Load(testWorkflowStoreRunContext(t, store), entityID)
+	if err != nil {
+		t.Fatalf("load workflow instance: %v", err)
+	}
+	if !ok {
+		t.Fatal("workflow instance missing after contained state update")
+	}
+	if got := mustCanonicalJSON(t, loaded.Metadata["verticals"]); got != mustCanonicalJSON(t, contained) {
+		t.Fatalf("loaded verticals = %s, want %s", got, mustCanonicalJSON(t, contained))
+	}
+	if got := mustCanonicalJSON(t, loaded.Metadata["tags"]); got != `["new","vip"]` {
+		t.Fatalf("loaded tags = %s, want [new,vip]", got)
+	}
+
+	fields := mutationFieldsForEntity(t, db, entityID)
+	for _, want := range []string{"verticals", "tags"} {
+		if !containsMutationField(fields, want) {
+			t.Fatalf("mutation fields missing %q: %v", want, fields)
+		}
+	}
+	if err := trackedMutationStateMatchesEntityState(t, db, entityID); err != nil {
+		t.Fatalf("trackedMutationStateMatchesEntityState(contained state): %v", err)
+	}
+}
+
 func TestApplyWorkflowGateMutation_LogsMutationRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	entityID := uuid.NewString()

@@ -346,6 +346,14 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 					SelfTargetField: selfTarget,
 				})
 			}
+			if write.IsContainedOperation() {
+				if expr := strings.TrimSpace(write.Key.CEL); expr != "" {
+					out = append(out, expressionReference{Kind: kind + " key", Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation})
+				}
+				if expr := strings.TrimSpace(write.Index.CEL); expr != "" {
+					out = append(out, expressionReference{Kind: kind + " index", Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation})
+				}
+			}
 		}
 	}
 	appendRuleExpressions := func(kindPrefix string, rule runtimecontracts.HandlerRuleEntry) {
