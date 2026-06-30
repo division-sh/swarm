@@ -336,6 +336,15 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 		out = append(out, expressionReference{Kind: "condition", Expression: condition, Phase: runtimepipeline.WorkflowEntityFieldLifecycleRule})
 	}
 	appendWriteExpressions := func(kind string, writes []runtimecontracts.WorkflowDataWrite) {
+		appendOperandExpression := func(operandKind string, exprValue runtimecontracts.ExpressionValue) {
+			expr := strings.TrimSpace(exprValue.CEL)
+			if expr == "" && exprValue.Kind == runtimecontracts.ExpressionKindRef {
+				expr = strings.TrimSpace(exprValue.Ref)
+			}
+			if expr != "" {
+				out = append(out, expressionReference{Kind: kind + " " + operandKind, Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation})
+			}
+		}
 		for _, write := range writes {
 			if expr := strings.TrimSpace(write.Value.CEL); expr != "" {
 				selfTarget, _ := runtimepipeline.WorkflowEntityFieldNameFromTarget(write.Target())
@@ -347,11 +356,10 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 				})
 			}
 			if write.IsContainedOperation() {
-				if expr := strings.TrimSpace(write.Key.CEL); expr != "" {
-					out = append(out, expressionReference{Kind: kind + " key", Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation})
-				}
-				if expr := strings.TrimSpace(write.Index.CEL); expr != "" {
-					out = append(out, expressionReference{Kind: kind + " index", Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation})
+				appendOperandExpression("key", write.Key)
+				appendOperandExpression("index", write.Index)
+				if strings.TrimSpace(write.Value.CEL) == "" {
+					appendOperandExpression("value", write.Value)
 				}
 			}
 		}
