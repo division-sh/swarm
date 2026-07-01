@@ -72,6 +72,7 @@ func (c *checkerContext) timerValidation() []Finding {
 		} else {
 			c.validateTimerTrigger(timer, "cancel_on", cancelTrigger)
 		}
+		c.validateTimerCancelStateReachability(timer, startTrigger, cancelTrigger)
 	}
 	return c.timerFindings
 }
@@ -122,6 +123,201 @@ func (c *checkerContext) validateTimerFireEventConsumer(timer runtimecontracts.W
 		Message:  fmt.Sprintf("timer %s event %s has no executable consumer or explicit external/exported role", timer.ID, ref.DisplayName()),
 		Location: strings.TrimSpace(timer.ID),
 	})
+}
+
+func (c *checkerContext) validateTimerCancelStateReachability(timer runtimecontracts.WorkflowTimerContract, startTrigger, cancelTrigger timeridentity.Trigger) {
+	if c.source == nil || !startTrigger.Valid() || !cancelTrigger.Valid() || cancelTrigger.Kind != timeridentity.TriggerKindState {
+		return
+	}
+	if startTrigger.Kind == timeridentity.TriggerKindBoot {
+		return
+	}
+	flowID := strings.TrimSpace(timer.FlowID)
+	declaredStates := declaredStatesForFlow(c.source, flowID)
+	cancelState := strings.TrimSpace(cancelTrigger.Name)
+	if cancelState == "" {
+		return
+	}
+	if _, ok := declaredStates[cancelState]; !ok {
+		return
+	}
+	initial := timerFlowInitialState(c.source, flowID)
+	if strings.TrimSpace(initial) == "" {
+		return
+	}
+	activationStates := timerActivationStates(c.source, timer, startTrigger, initial, declaredStates)
+	if len(activationStates) == 0 {
+		c.timerFindings = append(c.timerFindings, Finding{
+			CheckID:  "timer_validation",
+			Severity: "error",
+			Message:  fmt.Sprintf("timer %s cancel_on state %s has no derived activation state from start_on %s", timer.ID, cancelState, startTrigger.String()),
+			Location: strings.TrimSpace(timer.ID),
+		})
+		return
+	}
+	edges := timerCancelStateGraphEdges(c.source, timer, initial, declaredStates)
+	unreachableActivationStates := timerActivationStatesWithoutPostActivationReachability(edges, activationStates, cancelState)
+	if len(unreachableActivationStates) == 0 {
+		return
+	}
+	c.timerFindings = append(c.timerFindings, Finding{
+		CheckID:  "timer_validation",
+		Severity: "error",
+		Message: fmt.Sprintf(
+			"timer %s cancel_on state %s is not reachable after start_on %s in flow %s; activation states: %s; unreachable activation states: %s",
+			timer.ID,
+			cancelState,
+			startTrigger.String(),
+			timerValidationFlowLabel(flowID),
+			strings.Join(sortedSetKeys(activationStates), ", "),
+			strings.Join(unreachableActivationStates, ", "),
+		),
+		Location: strings.TrimSpace(timer.ID),
+	})
+}
+
+func timerActivationStates(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, startTrigger timeridentity.Trigger, initial string, declaredStates map[string]struct{}) map[string]struct{} {
+	out := map[string]struct{}{}
+	if source == nil || !startTrigger.Valid() {
+		return out
+	}
+	switch startTrigger.Kind {
+	case timeridentity.TriggerKindState:
+		state := strings.TrimSpace(startTrigger.Name)
+		if _, ok := declaredStates[state]; ok {
+			out[state] = struct{}{}
+		}
+	case timeridentity.TriggerKindEvent:
+		flowID := strings.TrimSpace(timer.FlowID)
+		ref := semanticview.ResolveFlowEventProof(source, flowID, startTrigger.Name)
+		nonTerminalStates := authoredNonTerminalStates(source, flowID, declaredStates)
+		for nodeID, node := range source.NodeEntries() {
+			nodeID = strings.TrimSpace(nodeID)
+			if nodeID == "" || strings.TrimSpace(nodeFlowID(source, nodeID)) != flowID {
+				continue
+			}
+			for eventType, handler := range node.EventHandlers {
+				if !timerHandlerMatchesEvent(source, flowID, eventType, ref) {
+					continue
+				}
+				targets := authoredReachabilityTargets(handler)
+				if len(targets) == 0 {
+					addTimerActivationStates(out, declaredStates, authoredHandlerSourceStates(initial, nonTerminalStates, handler))
+					continue
+				}
+				addTimerActivationStates(out, declaredStates, targets)
+			}
+		}
+	}
+	return out
+}
+
+func addTimerActivationStates(out map[string]struct{}, declaredStates map[string]struct{}, states []string) {
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		if _, ok := declaredStates[state]; !ok {
+			continue
+		}
+		out[state] = struct{}{}
+	}
+}
+
+func timerCancelStateGraphEdges(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, initial string, declaredStates map[string]struct{}) map[string]map[string]struct{} {
+	flowID := strings.TrimSpace(timer.FlowID)
+	fireRef := semanticview.ResolveFlowEventProof(source, flowID, timer.Event)
+	return authoredStateGraphEdgesFiltered(source, flowID, initial, declaredStates, func(_ string, eventType string, _ runtimecontracts.SystemNodeEventHandler) bool {
+		return !timerHandlerMatchesEvent(source, flowID, eventType, fireRef)
+	})
+}
+
+func timerActivationStatesWithoutPostActivationReachability(edges map[string]map[string]struct{}, activationStates map[string]struct{}, target string) []string {
+	missing := []string{}
+	for _, state := range sortedSetKeys(activationStates) {
+		if timerStateReachableAfterActivation(edges, state, target) {
+			continue
+		}
+		missing = append(missing, state)
+	}
+	return missing
+}
+
+func timerStateReachableAfterActivation(edges map[string]map[string]struct{}, activationState string, target string) bool {
+	activationState = strings.TrimSpace(activationState)
+	target = strings.TrimSpace(target)
+	if activationState == "" || target == "" {
+		return false
+	}
+	seen := map[string]struct{}{}
+	queue := make([]string, 0)
+	for next := range edges[activationState] {
+		next = strings.TrimSpace(next)
+		if next == "" {
+			continue
+		}
+		queue = append(queue, next)
+	}
+	for len(queue) > 0 {
+		state := strings.TrimSpace(queue[0])
+		queue = queue[1:]
+		if state == "" {
+			continue
+		}
+		if state == target {
+			return true
+		}
+		if _, ok := seen[state]; ok {
+			continue
+		}
+		seen[state] = struct{}{}
+		for next := range edges[state] {
+			if _, ok := seen[next]; ok {
+				continue
+			}
+			queue = append(queue, next)
+		}
+	}
+	return false
+}
+
+func timerHandlerMatchesEvent(source semanticview.Source, flowID, eventType string, ref semanticview.FlowEventProof) bool {
+	if source == nil {
+		return false
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return false
+	}
+	for _, candidate := range []string{ref.Canonical, ref.Authored, ref.Local, ref.CatalogKey} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if source.FlowEventMatches(flowID, eventType, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func timerFlowInitialState(source semanticview.Source, flowID string) string {
+	if source == nil {
+		return ""
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return strings.TrimSpace(source.WorkflowInitialStage())
+	}
+	return strings.TrimSpace(source.FlowInitialStage(flowID))
+}
+
+func timerValidationFlowLabel(flowID string) string {
+	if flowID = strings.TrimSpace(flowID); flowID != "" {
+		return flowID
+	}
+	return "root"
 }
 
 func timerFireEventHasConsumer(source semanticview.Source, ref semanticview.FlowEventProof) bool {

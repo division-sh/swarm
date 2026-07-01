@@ -4049,6 +4049,16 @@ engine:
         path, platform producer, or explicit external source. Unknown or inert event triggers are boot errors.
       fire_event_consumer: The timer fire event must have an executable handler/agent consumer, a declared output boundary, or
         explicit external consumer metadata. Catalog membership alone is not sufficient proof that a timer can do useful work.
+      cancel_state_reachability: >
+        For timers started by state:<name> or event:<name>, cancel_on state:<name> must be reachable after every possible
+        timer activation context in the authored transition graph. start_on state:<name> uses that state as the activation
+        context. start_on event:<name> derives activation states from same-flow handlers for that event: explicit advances_to,
+        on_complete advances_to, and rules advances_to targets are post-handler activation states; a handler with no authored
+        state target uses its authored source states. The timer's own fire event is not valid proof of a pre-fire cancellation
+        path. The activation state itself is not sufficient proof unless an authored post-activation transition reaches the
+        cancel state from that activation state. Missing activation proof or any derived activation state with no
+        post-activation path is a boot error. start_on boot state-cancel reachability is left to explicit boot-start
+        scheduling semantics and is not closed by this rule.
     example: "timers:\n  - id: sla_timeout\n    event: timer.sla_breach\n    delay: \"{{sla_timeout_hours}}h\"\
       \n    start_on: state:assigned\n    cancel_on: state:resolved\n    recurring: false\n  - id: daily_report\n\
       \    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
@@ -10211,6 +10221,7 @@ static_analyzer:
       - structural invalid target validation
       - missing terminal-path reasoning
       - runtime liveness or temporal behavior claims
+      - timer cancel_on state:<name> reachability from timer activation context
     transition_carriers:
       handler_advances_to:
         rule: Handler-level advances_to contributes a possible edge.

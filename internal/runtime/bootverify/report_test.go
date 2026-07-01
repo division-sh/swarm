@@ -5069,6 +5069,16 @@ func TestRun_ReportsErrorForUnknownTimerTriggerState(t *testing.T) {
 	}
 }
 
+func TestRun_ReportsErrorForUnknownTimerCancelState(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "state:missing_state")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on references unknown state missing_state") {
+		t.Fatalf("expected timer_validation unknown cancel state error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsErrorForUnknownTimerTriggerEvent(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.unknown", "")
 	repoRoot := repoRootForBootverifyTest(t)
@@ -5331,6 +5341,118 @@ func TestRun_ReportsErrorForUnknownTimerCancelEvent(t *testing.T) {
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "cancel_on references unknown event ticket.unknown") {
 		t.Fatalf("expected timer_validation unknown cancel event error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsTimerCancelStateReachableFromStartStateContext(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:          "state:active",
+		cancelOn:         "state:done",
+		includeClosePath: true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "cancel_on state done is not reachable") {
+		t.Fatalf("unexpected timer_validation cancel-state reachability error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelStateUnreachableFromStartStateContext(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:                 "state:active",
+		cancelOn:                "state:done",
+		includeGlobalDonePath:   true,
+		includeGlobalReviewPath: true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on state done is not reachable after start_on state:active") {
+		t.Fatalf("expected timer_validation cancel-state reachability error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "done") {
+		t.Fatalf("done should be globally reachable so the timer-specific owner proves the failure, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelStateGloballyUnreachableFromStartContext(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:               "state:active",
+		cancelOn:              "state:review",
+		includeGlobalDonePath: true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on state review is not reachable after start_on state:active") {
+		t.Fatalf("expected timer_validation globally-unreachable cancel-state error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "declares state review") {
+		t.Fatalf("expected generic unreachable-state warning to survive as diagnostic, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_AllowsTimerCancelStateReachableFromEventStartContext(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:          "event:ticket.opened",
+		cancelOn:         "state:done",
+		includeClosePath: true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "cancel_on state done is not reachable") {
+		t.Fatalf("unexpected timer_validation event-start cancel-state reachability error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelStateUnreachableFromOneEventActivationState(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:                         "event:ticket.opened",
+		cancelOn:                        "state:done",
+		includeClosePath:                true,
+		includeEventStartReviewBranch:   true,
+		treatReviewAsTerminalActivation: true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "unreachable activation states: review") {
+		t.Fatalf("expected timer_validation to reject one unreachable event activation state, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelStateUnreachableFromEventStartContext(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:                 "event:ticket.opened",
+		cancelOn:                "state:review",
+		includeGlobalDonePath:   true,
+		includeGlobalReviewPath: true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on state review is not reachable after start_on event:ticket.opened") {
+		t.Fatalf("expected timer_validation event-start cancel-state reachability error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("review should be globally reachable so the timer-specific owner proves the failure, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelStateReachedOnlyByTimerFireEvent(t *testing.T) {
+	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
+		startOn:                 "state:active",
+		cancelOn:                "state:done",
+		includeTimerFireHandler: true,
+		includeGlobalDonePath:   true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on state done is not reachable after start_on state:active") {
+		t.Fatalf("expected timer fire handler not to prove pre-fire cancellation, got %#v", report.Errors())
 	}
 }
 
@@ -5613,6 +5735,136 @@ support-node:
     ticket.closed:
       advances_to: done
 `+timerHandlerBlock)
+	return root
+}
+
+type timerStateCancelReachabilityFixtureOptions struct {
+	startOn                         string
+	cancelOn                        string
+	includeClosePath                bool
+	includeGlobalDonePath           bool
+	includeGlobalReviewPath         bool
+	includeTimerFireHandler         bool
+	includeEventStartReviewBranch   bool
+	treatReviewAsTerminalActivation bool
+}
+
+func writeTimerStateCancelReachabilityFixture(t *testing.T, opts timerStateCancelReachabilityFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: timer-state-cancel-reachability
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+ticket:
+  ticket_id: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timer-state-cancel-reachability\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	terminalStates := "[done]"
+	if opts.treatReviewAsTerminalActivation {
+		terminalStates = "[review, done]"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+initial_state: waiting
+terminal_states: `+terminalStates+`
+states: [waiting, active, review, done]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+ticket.opened:
+  swarm:
+    source: external (test)
+ticket.closed:
+  entity_id: string
+admin.done:
+  swarm:
+    source: external (test)
+admin.review:
+  swarm:
+    source: external (test)
+timer.reminder:
+  swarm:
+    consumer: mailbox_system
+`)
+	timerBlock := `
+    - id: reminder
+      owner: support-node
+      event: timer.reminder
+      delay: 1m
+      start_on: ` + opts.startOn + "\n"
+	if strings.TrimSpace(opts.cancelOn) != "" {
+		timerBlock += "      cancel_on: " + opts.cancelOn + "\n"
+	}
+	handlerBlock := ""
+	if opts.includeEventStartReviewBranch {
+		handlerBlock += `
+    ticket.opened:
+      rules:
+        - id: active_path
+          condition: "true"
+          advances_to: active
+        - id: review_path
+          condition: "true"
+          advances_to: review
+`
+	} else {
+		handlerBlock += `
+    ticket.opened:
+      create_entity: true
+      advances_to: active
+`
+	}
+	if opts.includeClosePath {
+		handlerBlock += `
+    ticket.closed:
+      advances_to: done
+`
+	}
+	if opts.includeGlobalDonePath {
+		handlerBlock += `
+    admin.done:
+      create_entity: true
+      advances_to: done
+`
+	}
+	if opts.includeGlobalReviewPath {
+		handlerBlock += `
+    admin.review:
+      create_entity: true
+      advances_to: review
+`
+	}
+	if opts.includeTimerFireHandler {
+		handlerBlock += `
+    timer.reminder:
+      advances_to: done
+`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.opened
+    - ticket.closed
+    - admin.done
+    - admin.review
+    - timer.reminder
+  timers:
+`+timerBlock+`  event_handlers:
+`+handlerBlock)
 	return root
 }
 
