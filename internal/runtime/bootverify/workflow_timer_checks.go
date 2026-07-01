@@ -69,6 +69,13 @@ func (c *checkerContext) timerValidation() []Finding {
 				Message:  fmt.Sprintf("timer %s cancel_on %q is invalid: %v", timer.ID, timer.CancelOn, err),
 				Location: strings.TrimSpace(timer.ID),
 			})
+		} else if startTrigger.IsBoot() && cancelTrigger.Valid() {
+			c.timerFindings = append(c.timerFindings, Finding{
+				CheckID:  "timer_validation",
+				Severity: "error",
+				Message:  fmt.Sprintf("timer %s start_on boot does not support cancel_on %s", timer.ID, cancelTrigger.String()),
+				Location: strings.TrimSpace(timer.ID),
+			})
 		} else {
 			c.validateTimerTrigger(timer, "cancel_on", cancelTrigger)
 		}

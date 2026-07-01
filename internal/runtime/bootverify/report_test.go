@@ -5340,6 +5340,36 @@ func TestRun_ReportsErrorForUnknownTimerCancelEvent(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsBootTimerWithoutCancelOn(t *testing.T) {
+	root := writeTimerValidationFixture(t, "boot", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "timer reminder") {
+		t.Fatalf("unexpected timer_validation error for boot timer without cancel_on, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForBootTimerCancelOnState(t *testing.T) {
+	root := writeTimerValidationFixture(t, "boot", "state:done")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "start_on boot does not support cancel_on state:done") {
+		t.Fatalf("expected timer_validation boot cancel_on state error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForBootTimerCancelOnEvent(t *testing.T) {
+	root := writeTimerValidationFixture(t, "boot", "event:ticket.closed")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "start_on boot does not support cancel_on event:ticket.closed") {
+		t.Fatalf("expected timer_validation boot cancel_on event error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsTimerCancelStateReachableFromStartStateContext(t *testing.T) {
 	root := writeTimerStateCancelReachabilityFixture(t, timerStateCancelReachabilityFixtureOptions{
 		startOn:          "state:active",

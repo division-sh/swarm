@@ -4035,26 +4035,34 @@ engine:
         recurring: Boolean — if true, timer re-fires at the interval until cancelled
         start_on: Trigger that starts the timer. Canonical forms are state:<name>, event:<name>, or boot.
         cancel_on: Trigger that cancels the timer. Canonical forms are state:<name> or event:<name>. boot is invalid.
+          cancel_on is invalid when start_on is boot until the platform defines an explicit global boot-timer cancellation
+          primitive.
       trigger_forms:
         state: "state:<name> starts or cancels when the entity enters the named state"
         event: "event:<name> starts or cancels when the named event fires for the entity"
-        boot: "start_on: boot starts a timer at platform boot. This form is only valid on start_on."
+        boot: "start_on: boot starts a global schedule at platform boot. This form is only valid on start_on."
       invalid_forms:
       - "Unprefixed trigger values are boot errors. The platform does not infer state-vs-event intent from bare strings."
       - "Prefixes other than state: and event: are boot errors."
     lifecycle:
     - 1. Timer starts when the entity enters the start_on state, the start_on event fires, or start_on is boot and platform startup schedules it.
-    - 2. Platform renders the timer delay at start time and persists the timer (entity_id, timer_id, fire_at timestamp).
-      Active timers keep the persisted fire_at value; later policy/config changes do not rewrite already scheduled timers unless
-      a separate explicit reschedule primitive is defined.
+    - 2. Platform renders the timer delay at start time and persists the timer. State/event timers persist run/entity or
+      flow scope plus fire_at. Boot-start timers persist as global schedules with entity_id, flow_instance, and run_id NULL.
+      Non-recurring boot timers persist a one-shot fire_at. Recurring boot timers persist the recurring schedule interval.
+      Active timers keep the persisted fire_at or recurrence value; later policy/config changes do not rewrite already scheduled
+      timers unless a separate explicit reschedule primitive is defined.
     - 3. When fire_at is reached, platform emits the timer event into the event loop.
     - 4. Timer event is a regular event — routed to subscribers, processed by handlers.
-    - 5. If cancel_on state is reached or cancel_on event fires before fire_at, timer is cancelled.
+    - 5. If cancel_on state is reached or cancel_on event fires before fire_at, timer is cancelled. cancel_on is invalid
+      for start_on boot timers until an explicit global cancellation primitive is specified.
     - 6. Recurring timers restart after firing unless cancelled.
     crash_recovery: Timers are persisted. On restart, platform checks for expired timers and fires them.
     boot_validation:
       start_on: start_on must match state:<name>, event:<name>, or boot. Any other form is a boot error.
       cancel_on: cancel_on must match state:<name> or event:<name>. boot is not valid.
+      boot_start: start_on boot creates a global startup schedule. Recurring and non-recurring boot timers are valid only
+        when cancel_on is absent. A boot-start timer with cancel_on is a boot error because no entity/run-scoped cancellation
+        context exists for that global schedule.
       state_reference: state:<name> must reference a declared flow state. Unknown state is a boot error.
       event_reference: event:<name> must reference an event in the flow or platform catalog and must have an authored producer
         path, platform producer, or explicit external source. Unknown or inert event triggers are boot errors.
@@ -7027,13 +7035,15 @@ platform_tables:
       description: 'Durable timer and scheduled task store. Persisted across restarts. Run-scoped timers carry run_id and
         are claimed, fired, cancelled, and recovered under that run identity. Entity-scoped timers: entity_id and
         flow_instance set, tied to a specific entity lifecycle inside run_id. Global timers: entity_id, flow_instance,
-        and run_id NULL, used for recurring platform-level work (periodic scans, health checks, digest compilation).
+        and run_id NULL, used for boot-start workflow timers and platform-level work (periodic scans, health checks,
+        digest compilation).
         fire_payload carries context when the timer fires. owner_node OR owner_agent identifies who declared the timer
         (mutually exclusive). source_timer_id, forked_from_run_id, forked_from_event_id, and reconstruction_owner are
         lineage-only fields for fork-local reconstructed timers and must not make the source timer executable fork truth.
         recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration
-        strings (e.g., "24h") for entity-scoped recurring timers. task_type: timer (one-shot entity), scheduled_task
-        (recurring entity), deadline (hard cutoff), global_recurring (platform-level periodic work).'
+        strings (e.g., "24h") for entity-scoped recurring timers. task_type: timer (one-shot schedule, including global
+        non-recurring boot timers), scheduled_task (recurring entity), deadline (hard cutoff), global_recurring
+        (global recurring work).'
       ddl: "CREATE TABLE timers (\n    timer_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    timer_name     \
         \   TEXT NOT NULL,\n    run_id            UUID REFERENCES runs(run_id),\n    source_timer_id   UUID REFERENCES timers(timer_id),\n\
         \    forked_from_run_id UUID REFERENCES runs(run_id),\n    forked_from_event_id UUID REFERENCES events(event_id),\n\

@@ -9057,6 +9057,42 @@ reader:
 	}
 }
 
+func TestRunVerifyCommand_AllowsBootTimerWithoutCancelOn(t *testing.T) {
+	root := writeVerifyBootTimerCommandFixture(t, "")
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify stdout missing success marker:\n%s", out)
+	}
+}
+
+func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
+	root := writeVerifyBootTimerCommandFixture(t, "state:done")
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	}
+	errText := stderr.String()
+	for _, want := range []string{
+		"verify failed: boot verification failed:",
+		"ERROR: timer_validation",
+		"start_on boot does not support cancel_on state:done",
+	} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
+		}
+	}
+}
+
 func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
@@ -9087,6 +9123,57 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	if strings.Contains(errText, "boot verification warnings:") {
 		t.Fatalf("verify stderr used legacy fatal warning banner:\n%s", errText)
 	}
+}
+
+func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-boot-timer
+version: "1.0.0"
+platform: ">=1.6.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: verify-boot-timer
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, done]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+ticket:
+  ticket_id:
+    type: string
+    initial: ""
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+timer.reminder:
+  entity_id: string
+`)
+	timerBlock := `
+    - id: reminder
+      owner: support-node
+      event: timer.reminder
+      delay: 1m
+      start_on: boot
+`
+	if strings.TrimSpace(cancelOn) != "" {
+		timerBlock += "      cancel_on: " + cancelOn + "\n"
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to: [timer.reminder]
+  timers:
+`+timerBlock+`  event_handlers:
+    timer.reminder:
+      advances_to: done
+`)
+	return root
 }
 
 func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *testing.T) {
