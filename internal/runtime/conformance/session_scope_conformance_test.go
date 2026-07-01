@@ -57,7 +57,6 @@ func TestSessionScopeConformance(t *testing.T) {
 		{
 			name:               "task_rejects_session_scope",
 			actor:              runtimeactors.AgentConfig{ID: "task-invalid", Role: "task_invalid", ConversationMode: runtimesessions.RuntimeModeTask.String(), SessionScope: runtimesessions.SessionScopeGlobal.String()},
-			bootErrContains:    "task mode does not use sessions; session_scope must be absent",
 			buildErrContains:   "task mode does not use sessions; session_scope must be absent",
 			acquireErrContains: "task mode does not use sessions; session_scope must be absent",
 			persistErrContains: "task mode does not use sessions; session_scope must be absent",
@@ -66,7 +65,7 @@ func TestSessionScopeConformance(t *testing.T) {
 		{
 			name:               "session_global_root_rejected_for_authored_agent",
 			actor:              runtimeactors.AgentConfig{ID: "global-agent", Role: "global_agent", ConversationMode: runtimesessions.RuntimeModeSession.String(), SessionScope: runtimesessions.SessionScopeGlobal.String()},
-			bootErrContains:    "authored normal agents cannot declare session_scope global",
+			bootErrContains:    "session_scope flow requires flow-scoped declaration",
 			buildErrContains:   "authored normal agents cannot declare session_scope global",
 			acquireErrContains: "authored normal agents cannot declare session_scope global",
 			persistErrContains: "authored normal agents cannot declare session_scope global",
@@ -75,7 +74,7 @@ func TestSessionScopeConformance(t *testing.T) {
 		{
 			name:               "session_requires_explicit_scope",
 			actor:              runtimeactors.AgentConfig{ID: "session-invalid", Role: "session_invalid", ConversationMode: runtimesessions.RuntimeModeSession.String()},
-			bootErrContains:    "session mode requires explicit session_scope flow",
+			bootErrContains:    "session_scope flow requires flow-scoped declaration",
 			buildErrContains:   "session mode requires explicit session_scope flow",
 			acquireErrContains: "session mode requires explicit session_scope flow",
 			persistErrContains: "session mode requires explicit session_scope flow",
@@ -111,7 +110,6 @@ func TestSessionScopeConformance(t *testing.T) {
 			name:               "session_per_entity_rejects_global_scope",
 			actor:              runtimeactors.AgentConfig{ID: "entity-global-invalid", Role: "entity_global_invalid", ConversationMode: runtimesessions.RuntimeModeSessionPerEntity.String(), SessionScope: runtimesessions.SessionScopeGlobal.String(), FlowPath: "support/inst-1"},
 			bootInFlow:         true,
-			bootErrContains:    "session_per_entity does not support global scope",
 			buildErrContains:   "session_per_entity does not support global scope",
 			acquireErrContains: "session_per_entity does not support global scope",
 			persistErrContains: "session_per_entity does not support global scope",
@@ -385,10 +383,7 @@ func conformanceAgentYAML(tc sessionScopeConformanceCase, subscription string) s
 		fmt.Sprintf("%s:", tc.actor.ID),
 		fmt.Sprintf("  id: %s", tc.actor.ID),
 		"  model: regular",
-		fmt.Sprintf("  conversation_mode: %s", conversationModeOrTask(tc.actor)),
-	}
-	if sessionScope := strings.TrimSpace(tc.actor.SessionScope); sessionScope != "" {
-		lines = append(lines, fmt.Sprintf("  session_scope: %s", sessionScope))
+		fmt.Sprintf("  mode: %s", conversationModeOrTask(tc.actor)),
 	}
 	lines = append(lines, "  subscriptions:", fmt.Sprintf("    - %s", subscription))
 	return strings.Join(lines, "\n") + "\n"

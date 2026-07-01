@@ -45,8 +45,7 @@ memory-agent:
   id: memory-agent
   role: analyst
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions: [job.received]
 `, "{}\n")
 

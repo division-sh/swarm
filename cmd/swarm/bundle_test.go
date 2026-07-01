@@ -986,17 +986,17 @@ func validBundleDetail(bundleHash string) map[string]any {
 
 func validBundleAgent(agentID string) map[string]any {
 	return map[string]any{
-		"agent_id":          agentID,
-		"flow_instance":     "default",
-		"role":              "researcher",
-		"type":              "business",
-		"model":             "regular",
-		"llm_backend":       "openai_compatible",
-		"conversation_mode": "task",
-		"session_scope":     "run",
-		"prompt_path":       "agents/researcher.md",
-		"subscriptions":     []string{"scan.requested"},
-		"tools":             []string{"read_file"},
+		"agent_id":      agentID,
+		"flow_instance": "default",
+		"role":          "researcher",
+		"type":          "business",
+		"model":         "regular",
+		"llm_backend":   "openai_compatible",
+		"mode":          "task",
+		"session_scope": "",
+		"prompt_path":   "agents/researcher.md",
+		"subscriptions": []string{"scan.requested"},
+		"tools":         []string{"read_file"},
 	}
 }
 

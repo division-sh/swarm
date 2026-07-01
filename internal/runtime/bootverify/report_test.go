@@ -2506,8 +2506,7 @@ func TestRun_RejectsRootAgentFlowSessionScope(t *testing.T) {
 root-flow:
   id: root-flow
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - item.created
 `, "", "")
@@ -2526,8 +2525,7 @@ name: support
 entity-agent:
   id: entity-agent
   model: regular
-  conversation_mode: session_per_entity
-  session_scope: entity
+  mode: session_per_entity
   subscriptions:
     - item.created
 `)
@@ -2550,15 +2548,13 @@ states:
 flow-agent:
   id: flow-agent
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
   model: regular
-  conversation_mode: session_per_entity
-  session_scope: entity
+  mode: session_per_entity
   subscriptions:
     - support/item.created
 `)
@@ -2577,16 +2573,16 @@ func TestRun_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 root-global:
   id: root-global
   model: regular
-  conversation_mode: session
+  mode: session
   session_scope: global
   subscriptions:
     - item.created
 `, "", "")
 
-	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
-
-	if !reportContains(report.Errors(), "invalid_field_detection", "authored normal agents cannot declare session_scope global") {
-		t.Fatalf("expected authored global session_scope error, got %#v", report.Errors())
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "agent field session_scope is runtime-derived from mode") {
+		t.Fatalf("expected retired session_scope load error, got %v", err)
 	}
 }
 
@@ -2601,15 +2597,13 @@ states:
 flow-agent:
   id: flow-agent
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
 entity-agent:
   id: entity-agent
   model: regular
-  conversation_mode: session_per_entity
-  session_scope: entity
+  mode: session_per_entity
   subscriptions:
     - support/item.created
 `)
@@ -2631,8 +2625,7 @@ name: support
 entity-agent:
   id: entity-agent
   model: regular
-  conversation_mode: session_per_entity
-  session_scope: entity
+  mode: session_per_entity
   subscriptions:
     - support/item.created
 `)
@@ -3938,6 +3931,7 @@ func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesList(t *testing.
 writer:
   id: writer
   role: writer
+  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -3967,6 +3961,7 @@ func TestRun_ReportsPromptCreateEntityWithoutEntityWritesAuthorization(t *testin
 writer:
   id: writer
   role: writer
+  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -3990,6 +3985,7 @@ func TestRun_ReportsPromptSaveEntityFieldWithoutMatchingEntityWritesAuthorizatio
 writer:
   id: writer
   role: writer
+  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops
@@ -4023,7 +4019,7 @@ writer:
   role: writer
   prompt_ref: writer
   model: regular
-  conversation_mode: task
+  mode: task
   subscriptions: []
   entity_writes:
     case:
@@ -4088,7 +4084,7 @@ writer:
   role: writer
   prompt_ref: writer
   model: regular
-  conversation_mode: task
+  mode: task
   subscriptions: []
   entity_writes:
     case:
@@ -5164,7 +5160,7 @@ func TestRun_AllowsTimerFireEventWithAgentConsumer(t *testing.T) {
 		flowAgents: `
 reminder-agent:
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions: [timer.reminder]
   emit_events: []
 `,

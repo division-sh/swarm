@@ -229,6 +229,7 @@ web_search_provider:
 worker-agent:
   id: worker-agent
   model: regular
+  mode: task
   native_tools:
     web_search: true
 `)

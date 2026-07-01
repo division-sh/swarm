@@ -813,6 +813,7 @@ auto_emit_on_create:
   id: ceo-{product_id}
   type: generic
   role: ceo
+  mode: task
   subscriptions: [opco.product_initialization_requested]
 `,
 	}

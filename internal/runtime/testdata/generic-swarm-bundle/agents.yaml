@@ -1,6 +1,7 @@
 control-plane:
   id: control-plane
   role: control-plane
+  mode: task
   manager_fallback: control-plane
   subscriptions:
     - item.review_requested
@@ -11,6 +12,7 @@ control-plane:
 worker-a:
   id: worker-a
   role: worker
+  mode: task
   manager_fallback: control-plane
   subscriptions:
     - item.review_requested
@@ -23,6 +25,7 @@ worker-a:
 worker-b:
   id: worker-b
   role: worker
+  mode: task
   manager_fallback: control-plane
   subscriptions:
     - item.review_requested

@@ -508,6 +508,7 @@ local.done:
 flow-agent:
   id: flow-agent
   role: flow_agent
+  mode: task
   emit_events:
     - local.done
 `)

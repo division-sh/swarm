@@ -34,6 +34,7 @@ func TestDerivePromptSchemaGuards_UsesCanonicalPromptResolution(t *testing.T) {
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
 schema-ref-agent:
   role: schema_ref
+  mode: task
   prompt_ref: shared-schema-prompt
   emit_events:
     - schema.prompt.created
@@ -98,6 +99,7 @@ func writePromptTestBundle(t *testing.T, repoRoot string) string {
 ops-lead:
   id: ops-lead
   role: ops_lead
+  mode: task
   manager_fallback: control-plane
   emit_events:
     - item.created

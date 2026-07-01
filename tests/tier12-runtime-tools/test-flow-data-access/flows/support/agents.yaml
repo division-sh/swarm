@@ -2,7 +2,7 @@ reference-agent:
   id: reference-agent
   role: reference_reader
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions:
     - support.requested
   emit_events: []

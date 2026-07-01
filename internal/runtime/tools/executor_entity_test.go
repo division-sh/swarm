@@ -2838,6 +2838,7 @@ func roleScopedEntityToolAgentYAML(actor models.AgentConfig) string {
 		builder.WriteString(role)
 		builder.WriteString("\n")
 	}
+	builder.WriteString("  mode: task\n")
 	if len(actor.Tools) > 0 {
 		builder.WriteString("  tools:\n")
 		for _, tool := range actor.Tools {
@@ -2999,6 +3000,7 @@ func entityToolAgentYAML(actor models.AgentConfig) string {
 		builder.WriteString(role)
 		builder.WriteString("\n")
 	}
+	builder.WriteString("  mode: task\n")
 	if len(actor.Tools) > 0 {
 		builder.WriteString("  tools:\n")
 		for _, tool := range actor.Tools {

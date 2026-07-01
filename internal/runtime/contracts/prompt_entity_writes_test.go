@@ -51,6 +51,7 @@ func TestDerivePromptEntityWriteEvidence(t *testing.T) {
 writer:
   id: writer
   role: writer
+  mode: task
   workspace_class: factory
   manager_fallback: ops-lead
 `)...)
@@ -131,6 +132,7 @@ case:
 writer:
   id: writer
   role: writer
+  mode: task
   prompt_ref: writer
   workspace_class: factory
   manager_fallback: ops

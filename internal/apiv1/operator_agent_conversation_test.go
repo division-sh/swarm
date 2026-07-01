@@ -129,13 +129,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	reads := &fakeAgentConversationReadStore{
 		listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{{
-			AgentID:          "agent-1",
-			Role:             "researcher",
-			Type:             "managed",
-			Model:            "cheap",
-			ConversationMode: "session",
-			SessionScope:     "global",
-			Status:           "running",
+			AgentID:      "agent-1",
+			Role:         "researcher",
+			Type:         "managed",
+			Model:        "cheap",
+			Mode:         "session",
+			SessionScope: "global",
+			Status:       "running",
 		}}},
 		agentResult: store.OperatorAgentDetail{Agent: store.OperatorAgentSummary{AgentID: "agent-1", Role: "researcher"}},
 		agentDiagnosisResult: store.OperatorAgentDiagnosis{
@@ -573,13 +573,13 @@ func TestOperatorAgentConversationHandlersExposeReadOwner(t *testing.T) {
 
 func TestOperatorAgentHandlersSerializeLifecycleStatusFromReadOwner(t *testing.T) {
 	summary := store.OperatorAgentSummary{
-		AgentID:          "agent-1",
-		Role:             "researcher",
-		Type:             "managed",
-		Model:            "cheap",
-		ConversationMode: "session",
-		SessionScope:     "global",
-		Status:           "idle",
+		AgentID:      "agent-1",
+		Role:         "researcher",
+		Type:         "managed",
+		Model:        "cheap",
+		Mode:         "session",
+		SessionScope: "global",
+		Status:       "idle",
 	}
 	reads := &fakeAgentConversationReadStore{
 		listAgentsResult: store.OperatorAgentListResult{Agents: []store.OperatorAgentSummary{summary}},

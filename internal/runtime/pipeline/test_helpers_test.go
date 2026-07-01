@@ -57,7 +57,7 @@ control-plane:
   id: control-plane
   role: control-plane
   model: regular
-  conversation_mode: task
+  mode: task
   subscriptions:
     - item.reviewed
 `)

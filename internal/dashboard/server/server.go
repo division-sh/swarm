@@ -1022,7 +1022,7 @@ func toGenericAgent(row runtimemanager.PersistedAgent) genericAgent {
 		ID:              strings.TrimSpace(row.Config.ID),
 		Type:            strings.TrimSpace(row.Config.Type),
 		Role:            strings.TrimSpace(row.Config.Role),
-		Mode:            strings.TrimSpace(row.Config.Mode),
+		Mode:            strings.TrimSpace(row.Config.ConversationMode),
 		Status:          strings.TrimSpace(row.Status),
 		EntityID:        strings.TrimSpace(row.Config.EffectiveEntityID()),
 		ParentAgentID:   strings.TrimSpace(row.ParentAgentID),

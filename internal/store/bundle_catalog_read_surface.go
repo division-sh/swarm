@@ -55,17 +55,17 @@ type BundleCatalogAgentsResult struct {
 }
 
 type BundleCatalogAgentDefinition struct {
-	AgentID          string   `json:"agent_id"`
-	FlowInstance     string   `json:"flow_instance,omitempty"`
-	Role             string   `json:"role,omitempty"`
-	Type             string   `json:"type,omitempty"`
-	Model            string   `json:"model,omitempty"`
-	LLMBackend       string   `json:"llm_backend,omitempty"`
-	ConversationMode string   `json:"conversation_mode,omitempty"`
-	SessionScope     string   `json:"session_scope,omitempty"`
-	PromptPath       string   `json:"prompt_path,omitempty"`
-	Subscriptions    []string `json:"subscriptions,omitempty"`
-	Tools            []string `json:"tools,omitempty"`
+	AgentID       string   `json:"agent_id"`
+	FlowInstance  string   `json:"flow_instance,omitempty"`
+	Role          string   `json:"role,omitempty"`
+	Type          string   `json:"type,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	LLMBackend    string   `json:"llm_backend,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	SessionScope  string   `json:"session_scope,omitempty"`
+	PromptPath    string   `json:"prompt_path,omitempty"`
+	Subscriptions []string `json:"subscriptions,omitempty"`
+	Tools         []string `json:"tools,omitempty"`
 }
 
 type bundleCatalogCursor struct {
@@ -519,17 +519,17 @@ func projectBundleCatalogAgentDefinition(agentID, flowInstance string, def map[s
 		return BundleCatalogAgentDefinition{}, err
 	}
 	return BundleCatalogAgentDefinition{
-		AgentID:          agentID,
-		FlowInstance:     strings.TrimSpace(flowInstance),
-		Role:             stringFromMap(def, "role"),
-		Type:             stringFromMap(def, "type"),
-		Model:            stringFromMap(def, "model"),
-		LLMBackend:       stringFromMap(def, "llm_backend"),
-		ConversationMode: stringFromMap(def, "conversation_mode"),
-		SessionScope:     stringFromMap(def, "session_scope"),
-		PromptPath:       stringFromMap(def, "prompt_path"),
-		Subscriptions:    subscriptions,
-		Tools:            tools,
+		AgentID:       agentID,
+		FlowInstance:  strings.TrimSpace(flowInstance),
+		Role:          stringFromMap(def, "role"),
+		Type:          stringFromMap(def, "type"),
+		Model:         stringFromMap(def, "model"),
+		LLMBackend:    stringFromMap(def, "llm_backend"),
+		Mode:          stringFromMap(def, "mode"),
+		SessionScope:  stringFromMap(def, "session_scope"),
+		PromptPath:    stringFromMap(def, "prompt_path"),
+		Subscriptions: subscriptions,
+		Tools:         tools,
 	}, nil
 }
 

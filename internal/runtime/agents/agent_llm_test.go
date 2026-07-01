@@ -310,6 +310,7 @@ func writeAgentPromptTestBundle(t *testing.T, repoRoot string) string {
 ops-lead:
   id: ops-lead
   role: ops_lead
+  mode: task
   manager_fallback: control-plane
   emit_events:
     - item.created

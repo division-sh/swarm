@@ -113,11 +113,71 @@ role: researcher
 type: managed
 model: regular
 model_tier: sonnet
-conversation_mode: task
+mode: task
 subscriptions: [scan.requested]
 `), &entry)
 	if err == nil || !strings.Contains(err.Error(), "model_tier is retired") {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired model_tier rejection", err)
+	}
+}
+
+func TestAgentRegistryEntryDerivesRuntimeScopeFromAuthoredMode(t *testing.T) {
+	tests := []struct {
+		name      string
+		mode      string
+		wantScope string
+	}{
+		{name: "task", mode: "task"},
+		{name: "session", mode: "session", wantScope: "flow"},
+		{name: "session_per_entity", mode: "session_per_entity", wantScope: "entity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry AgentRegistryEntry
+			err := yaml.Unmarshal([]byte(`
+role: researcher
+type: managed
+model: regular
+mode: `+tt.mode+`
+subscriptions: [scan.requested]
+`), &entry)
+			if err != nil {
+				t.Fatalf("yaml.Unmarshal: %v", err)
+			}
+			if entry.Mode != tt.mode || entry.ConversationMode != tt.mode || entry.SessionScope != tt.wantScope {
+				t.Fatalf("entry mode/scope = (%q, %q, %q), want (%q, %q, %q)", entry.Mode, entry.ConversationMode, entry.SessionScope, tt.mode, tt.mode, tt.wantScope)
+			}
+		})
+	}
+}
+
+func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		contains string
+	}{
+		{name: "conversation_mode", body: "conversation_mode: task\n", contains: "conversation_mode is retired"},
+		{name: "session_scope", body: "mode: session\nsession_scope: flow\n", contains: "session_scope is runtime-derived from mode"},
+		{name: "session_scope_authority", body: "mode: session\nsession_scope_authority: platform_internal\n", contains: "session_scope_authority is platform-internal"},
+		{name: "mode_global", body: "mode: global\n", contains: "reserved"},
+		{name: "mode_unknown", body: "mode: forever\n", contains: "invalid mode"},
+		{name: "mode_stateless", body: "mode: stateless\n", contains: "retired"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry AgentRegistryEntry
+			err := yaml.Unmarshal([]byte(`
+role: researcher
+type: managed
+model: regular
+`+tt.body+`
+subscriptions: [scan.requested]
+`), &entry)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
+			}
+		})
 	}
 }
 

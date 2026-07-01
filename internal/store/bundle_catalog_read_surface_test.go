@@ -36,7 +36,7 @@ agents:
 					"type": "managed",
 					"model": "cheap",
 					"llm_backend": "claude",
-					"conversation_mode": "session",
+					"mode": "session",
 					"session_scope": "flow",
 					"prompt_path": "prompts/researcher.md",
 					"subscriptions": ["scan.requested"],

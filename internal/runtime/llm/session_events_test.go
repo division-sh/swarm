@@ -133,8 +133,8 @@ func TestAnthropicAPIRuntime_StartSessionPublishesAgentStarted(t *testing.T) {
 	if got := payload["agent_id"]; got != "agent-1" {
 		t.Fatalf("agent_id = %#v, want agent-1", got)
 	}
-	if got := payload["conversation_mode"]; got != sessions.RuntimeModeTask.String() {
-		t.Fatalf("conversation_mode = %#v, want task", got)
+	if got := payload["mode"]; got != sessions.RuntimeModeTask.String() {
+		t.Fatalf("mode = %#v, want task", got)
 	}
 	if got := payload["model"]; got != "regular" {
 		t.Fatalf("model = %#v, want regular", got)

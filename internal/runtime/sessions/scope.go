@@ -107,6 +107,52 @@ func ParseConversationRuntimeMode(raw string) (RuntimeMode, error) {
 	return mode, nil
 }
 
+func ParseAuthoredAgentMode(raw string) (RuntimeMode, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("mode is required")
+	}
+	switch strings.ToLower(raw) {
+	case RuntimeModeTask.String():
+		return RuntimeModeTask, nil
+	case RuntimeModeSession.String():
+		return RuntimeModeSession, nil
+	case RuntimeModeSessionPerEntity.String():
+		return RuntimeModeSessionPerEntity, nil
+	case "stateless":
+		return "", fmt.Errorf("mode %q is retired; use %q", raw, RuntimeModeTask)
+	case SessionScopeGlobal.String():
+		return "", fmt.Errorf("mode %q is reserved for platform-owned internal sessions", raw)
+	default:
+		return "", fmt.Errorf("invalid mode %q", raw)
+	}
+}
+
+func DeriveSessionScopeForAuthoredMode(runtimeMode RuntimeMode) (SessionScope, error) {
+	switch runtimeMode {
+	case RuntimeModeTask:
+		return "", nil
+	case RuntimeModeSession:
+		return SessionScopeFlow, nil
+	case RuntimeModeSessionPerEntity:
+		return SessionScopeEntity, nil
+	default:
+		return "", fmt.Errorf("unsupported mode %q", runtimeMode)
+	}
+}
+
+func ResolveAuthoredAgentMemoryMode(raw string) (RuntimeMode, SessionScope, error) {
+	mode, err := ParseAuthoredAgentMode(raw)
+	if err != nil {
+		return "", "", err
+	}
+	scope, err := DeriveSessionScopeForAuthoredMode(mode)
+	if err != nil {
+		return "", "", err
+	}
+	return mode, scope, nil
+}
+
 func IsStatelessRuntimeMode(raw string) bool {
 	mode, ok := canonicalConversationRuntimeMode(raw)
 	return ok && mode.IsStateless()
