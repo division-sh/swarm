@@ -317,6 +317,82 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	`, 0, autoEventID)
 }
 
+func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute(t *testing.T) {
+	bundle := loadRuntimeTempBundle(t, templateInstanceConnectLifecycleRollbackFixtureFiles())
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := seedRuntimeTestRun(t, db)
+	pg := &store.PostgresStore{DB: db}
+	proofStore := &failingDeliveryRouteStore{PostgresStore: pg}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	var manager *runtimemanager.AgentManager
+	bus, err := runtimebus.NewEventBusWithOptions(proofStore, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		TemplateInstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+			if manager == nil {
+				return errors.New("agent manager is required")
+			}
+			return manager.ActivateFlowInstance(ctx, req)
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	manager = runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
+		WorkflowInstances: workflowStore,
+	})
+	proofStore.failDeliveryRoutes = true
+	evt := eventtest.RootIngress(
+		"99999999-9999-4999-8999-999999999940",
+		events.EventType("producer/deploy.done"),
+		"",
+		"",
+		[]byte(`{"vertical_id":"v-1"}`),
+		0,
+		templateInstanceDeliveryRunID,
+		"",
+		events.EventEnvelope{},
+		time.Now().UTC(),
+	)
+
+	err = bus.Publish(ctx, evt)
+	if err == nil || !strings.Contains(err.Error(), "injected delivery route persistence failure") {
+		t.Fatalf("Publish error = %v, want injected delivery route persistence failure", err)
+	}
+	if len(proofStore.descriptorsSeenDuringDelivery) != 1 {
+		t.Fatalf("descriptors seen during delivery failure = %#v, want one lifecycle-created descriptor", proofStore.descriptorsSeenDuringDelivery)
+	}
+	descriptor := proofStore.descriptorsSeenDuringDelivery[0]
+	if descriptor.FlowTemplate != "consumer" || descriptor.FlowInstance == "" {
+		t.Fatalf("descriptor seen during delivery failure = %#v, want consumer flow instance", descriptor)
+	}
+	if descriptor.AddressFields["entity.vertical_id"] != "v-1" {
+		t.Fatalf("descriptor address fields = %#v, want entity.vertical_id v-1", descriptor.AddressFields)
+	}
+
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM events
+		WHERE event_id = $1::uuid
+	`, 0, evt.ID())
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid
+	`, 0, evt.ID())
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM flow_instances
+		WHERE instance_id = $1
+	`, 0, descriptor.FlowInstance)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM entity_state
+		WHERE flow_instance = $1
+	`, 0, descriptor.FlowInstance)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM routing_rules
+		WHERE flow_instance = $1
+	`, 0, descriptor.FlowInstance)
+}
+
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
 	bundle := loadRuntimeTempBundle(t, templateInstanceEmpireOutboxFixtureFiles())
 	source := semanticview.Wrap(bundle)
@@ -736,6 +812,142 @@ auto_emit_on_create:
   subscriptions: [opco.product_initialization_requested]
 `,
 	}
+}
+
+func templateInstanceConnectLifecycleRollbackFixtureFiles() map[string]string {
+	return map[string]string{
+		"package.yaml": `name: test
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: template
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_completed
+    delivery: one
+  - from: producer.deploy_done
+    to: consumer.deploy_audited
+    delivery: one
+`,
+		"schema.yaml": "name: test\n",
+		"policy.yaml": "{}\n",
+		"tools.yaml":  "{}\n",
+		"agents.yaml": "{}\n",
+		"events.yaml": "{}\n",
+		"nodes.yaml":  "{}\n",
+		"flows/producer/schema.yaml": `name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
+`,
+		"flows/producer/policy.yaml":   "{}\n",
+		"flows/producer/agents.yaml":   "{}\n",
+		"flows/producer/events.yaml":   "deploy.done:\n  vertical_id: string\n",
+		"flows/producer/entities.yaml": "{}\n",
+		"flows/producer/nodes.yaml":    "{}\n",
+		"flows/consumer/schema.yaml": `name: consumer
+mode: template
+instance:
+  by: vertical_id
+  on_missing: create
+  on_conflict: reuse
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.done
+      - name: deploy_audited
+        event: deploy.done
+`,
+		"flows/consumer/policy.yaml": "{}\n",
+		"flows/consumer/agents.yaml": "{}\n",
+		"flows/consumer/events.yaml": "deploy.done:\n  vertical_id: string\n",
+		"flows/consumer/entities.yaml": `deployment:
+  vertical_id:
+    type: string
+`,
+		"flows/consumer/nodes.yaml": `consumer-node:
+  id: consumer-node-{instance_id}
+  execution_type: system_node
+  event_handlers:
+    deploy.done: {}
+`,
+	}
+}
+
+type failingDeliveryRouteStore struct {
+	*store.PostgresStore
+	failDeliveryRoutes            bool
+	descriptorsSeenDuringDelivery []runtimebus.ActiveFlowInstanceDescriptor
+}
+
+func (s *failingDeliveryRouteStore) RunEventMutation(ctx context.Context, fn func(runtimebus.EventMutation) error) error {
+	if s == nil || s.PostgresStore == nil {
+		return errors.New("postgres store is required")
+	}
+	return s.PostgresStore.RunEventMutation(ctx, func(mutation runtimebus.EventMutation) error {
+		return fn(&failingDeliveryRouteMutation{
+			EventMutation: mutation,
+			store:         s,
+		})
+	})
+}
+
+type failingDeliveryRouteMutation struct {
+	runtimebus.EventMutation
+	store *failingDeliveryRouteStore
+}
+
+func (m *failingDeliveryRouteMutation) InsertEventDeliveries(ctx context.Context, eventID string, agentIDs []string) error {
+	if err := m.captureDescriptorReadback(ctx); err != nil {
+		return err
+	}
+	if m.store.failDeliveryRoutes {
+		return errors.New("injected delivery route persistence failure")
+	}
+	return m.EventMutation.InsertEventDeliveries(ctx, eventID, agentIDs)
+}
+
+func (m *failingDeliveryRouteMutation) InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error {
+	if err := m.captureDescriptorReadback(ctx); err != nil {
+		return err
+	}
+	if m.store.failDeliveryRoutes {
+		return errors.New("injected delivery route persistence failure")
+	}
+	return m.EventMutation.InsertEventDeliveriesWithTargets(ctx, eventID, agentIDs, deliveryTargets)
+}
+
+func (m *failingDeliveryRouteMutation) InsertEventDeliveryRoutes(ctx context.Context, eventID string, routes []events.DeliveryRoute) error {
+	if err := m.captureDescriptorReadback(ctx); err != nil {
+		return err
+	}
+	if m.store.failDeliveryRoutes {
+		return errors.New("injected delivery route persistence failure")
+	}
+	return m.EventMutation.InsertEventDeliveryRoutes(ctx, eventID, routes)
+}
+
+func (m *failingDeliveryRouteMutation) captureDescriptorReadback(ctx context.Context) error {
+	if m == nil || m.store == nil {
+		return errors.New("delivery route mutation store is required")
+	}
+	descriptors, err := m.store.ListActiveFlowInstanceDescriptors(ctx)
+	if err != nil {
+		return err
+	}
+	m.store.descriptorsSeenDuringDelivery = descriptors
+	return nil
 }
 
 type routeMaterializationDBProofStore struct {
