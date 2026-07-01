@@ -9318,6 +9318,8 @@ accumulator:
 }
 
 func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
+
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-accumulator-entity-projection
@@ -9400,6 +9402,119 @@ scorer:
 	if out := buf.String(); !strings.Contains(out, "verify ok: contracts=") {
 		t.Fatalf("verify output missing success marker:\n%s", out)
 	}
+}
+
+func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
+
+	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
+		eventSource: "external (verify accumulator safety proof)",
+		completion:  "all",
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify stdout missing success marker:\n%s", out)
+	}
+	errText := stderr.String()
+	if !strings.Contains(errText, "WARN: accumulate_all_bounded_escape") ||
+		!strings.Contains(errText, "without a bounded timeout escape") {
+		t.Fatalf("verify stderr missing accumulator bounded-escape warning:\n%s", errText)
+	}
+	if strings.Contains(errText, "accumulator_input_producer_path") {
+		t.Fatalf("verify stderr reported no-producer error despite external source:\n%s", errText)
+	}
+}
+
+func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing.T) {
+	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
+		completion: "timeout",
+		timeoutMS:  5000,
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	}
+	errText := stderr.String()
+	for _, want := range []string{
+		"verify failed: boot verification failed:",
+		"ERROR: accumulator_input_producer_path",
+		"no accepted producer/source path",
+	} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
+		}
+	}
+}
+
+type verifyAccumulatorSafetyCommandFixtureOptions struct {
+	eventSource string
+	completion  string
+	timeoutMS   int
+}
+
+func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumulatorSafetyCommandFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	completion := strings.TrimSpace(opts.completion)
+	if completion == "" {
+		completion = "all"
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-accumulator-safety
+version: "1.0.0"
+platform: ">=1.6.0"
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: verify-accumulator-safety
+initial_state: collecting
+terminal_states: [done]
+states: [collecting, done]
+pins:
+  inputs:
+    events: [item.arrived]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	sourceBlock := ""
+	if strings.TrimSpace(opts.eventSource) != "" {
+		sourceBlock = "\n  swarm:\n    source: " + opts.eventSource
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+item.arrived:`+sourceBlock+`
+  expected_count: integer
+`)
+	timeoutLine := ""
+	if opts.timeoutMS > 0 {
+		timeoutLine = fmt.Sprintf("        timeout_ms: %d\n", opts.timeoutMS)
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+accumulator:
+  id: accumulator
+  execution_type: system_node
+  subscribes_to: [item.arrived]
+  event_handlers:
+    item.arrived:
+      accumulate:
+        expected_from: entity.expected_count
+        completion: `+completion+`
+`+timeoutLine+`      advances_to: done
+  state_schema:
+    fields:
+      expected_count: integer
+`)
+	return root
 }
 
 func testWorkflowValidationBundle() *runtimecontracts.WorkflowContractBundle {

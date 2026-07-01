@@ -4400,6 +4400,21 @@ engine:
         swarm.source values starting with external, and same-flow timer declarations. It does not use produces or swarm.status:
         planned as input-pin proof.'
       when: boot-only
+    - id: accumulate_all_bounded_escape
+      severity: warning
+      scope: per-handler
+      trigger: A handler declares an accumulator in completion all/default mode without a schedulable bounded timeout escape.
+        This is a static safety-net lint only; it does not prove the accumulator will stall.
+      when: boot-only
+    - id: accumulator_input_producer_path
+      severity: hard_invalidity
+      scope: per-handler
+      trigger: A handler declares an accumulator over an input event but the authored bundle has no accepted static producer
+        or source path for that event. Accepted paths are parent connect, safe sibling output pin inference, root agent
+        emit_events, root node handler emits, exact platform event catalog matches, swarm.source external metadata, same-flow
+        timers, same-flow node handler emits, and same-flow agent emit_events. produces declarations and swarm.status planned
+        do not satisfy this proof.
+      when: boot-only
     - id: pin_target_resolution
       severity: error
       scope: per-emit-site
@@ -10323,6 +10338,45 @@ static_analyzer:
       execution fails closed as a runtime invariant violation rather than
       silently skipping the projection. Projection does not run for timeout,
       incomplete accumulation, or no-match completion.
+  slice_6c_accumulator_static_safety:
+    ids:
+    - accumulate_all_bounded_escape
+    - accumulator_input_producer_path
+    domain: semantic_validity
+    authority: mixed_warning_and_hard_invalidity
+    canonical_owner: internal/runtime/bootverify
+    supported_surface: cmd/swarm verify
+    spec_basis:
+    - handler_specification.handler_fields.accumulate
+    - engine.event_identity
+    - flow_model.flow_package.composition_routing
+    - static_analyzer.slice_3_input_pin_producer_path_satisfaction
+    scope:
+      description: Verify static accumulator safety properties that are decidable from the authored bundle without claiming
+        runtime liveness. The check is structural and source/producer-path based only.
+      applies_to:
+      - system-node handlers with accumulate declarations
+      excludes:
+      - runtime progress detection
+      - watchdog stalled-entity signaling
+      - implicit timeout insertion
+      - changing accumulator completion semantics
+      - treating produces declarations as producer proof
+      - treating swarm.status planned as producer proof
+    bounded_escape_warning:
+      id: accumulate_all_bounded_escape
+      severity: warning
+      rule: Emit a warning when an accumulator uses completion all/default and has no schedulable bounded timeout escape.
+        A schedulable timeout escape requires positive timeout_ms plus either completion timeout or an on_timeout branch.
+        A bare on_timeout without positive timeout_ms remains unbounded. This warning is not proof that runtime execution
+        will stall; it says the authored handler has no static escape if an expected arrival never appears.
+    input_producer_dead_end:
+      id: accumulator_input_producer_path
+      severity: hard_invalidity
+      rule: Emit hard invalidity when an accumulator input event has no accepted static producer/source path in the authored
+        bundle. Accepted paths are the same producer/source categories used by input_pin_wiring where applicable, plus same-flow
+        node handler emits and same-flow agent emit_events for accumulator-local consumption. produces declarations and
+        swarm.status planned do not count as proof.
   slice_7_entity_reader_compliance:
     id: expression_field_reference_validation
     domain: semantic_validity
