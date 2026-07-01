@@ -28,6 +28,23 @@ func TestRun_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T) {
 	}
 }
 
+func TestRun_WarnsForDefaultAccumulateWithoutBoundedEscape(t *testing.T) {
+	root := writeAccumulatorSafetyFixture(t, accumulatorSafetyFixtureOptions{
+		eventSource:    "external",
+		omitCompletion: true,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if report.HasErrors() {
+		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+	}
+	if !reportContains(report.Warnings(), checkIDAccumulateAllBoundedEscape, "default/all") {
+		t.Fatalf("expected %s warning for omitted completion, got %#v", checkIDAccumulateAllBoundedEscape, report.Warnings())
+	}
+}
+
 func TestRun_WarnsForAccumulateAllOnTimeoutWithoutSchedulableTimeout(t *testing.T) {
 	root := writeAccumulatorSafetyFixture(t, accumulatorSafetyFixtureOptions{
 		eventSource: "external",
@@ -59,6 +76,26 @@ func TestRun_DoesNotWarnForAccumulateAllWithSchedulableOnTimeout(t *testing.T) {
 
 	if reportContains(report.Warnings(), checkIDAccumulateAllBoundedEscape, "") {
 		t.Fatalf("unexpected %s warning with schedulable on_timeout: %#v", checkIDAccumulateAllBoundedEscape, report.Warnings())
+	}
+	if reportContains(report.Errors(), checkIDAccumulatorInputProducer, "") {
+		t.Fatalf("unexpected %s error with external source: %#v", checkIDAccumulatorInputProducer, report.Errors())
+	}
+}
+
+func TestRun_FailsClosedForAccumulateTimeoutWithoutTimeoutMS(t *testing.T) {
+	root := writeAccumulatorSafetyFixture(t, accumulatorSafetyFixtureOptions{
+		eventSource: "external",
+		completion:  "timeout",
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), checkIDAccumulatorTimeoutRequiresTimeout, "without positive timeout_ms") {
+		t.Fatalf("expected %s hard invalidity, got %#v", checkIDAccumulatorTimeoutRequiresTimeout, report.Errors())
+	}
+	if reportContains(report.Warnings(), checkIDAccumulateAllBoundedEscape, "") {
+		t.Fatalf("unexpected %s warning for timeout completion: %#v", checkIDAccumulateAllBoundedEscape, report.Warnings())
 	}
 	if reportContains(report.Errors(), checkIDAccumulatorInputProducer, "") {
 		t.Fatalf("unexpected %s error with external source: %#v", checkIDAccumulatorInputProducer, report.Errors())
@@ -227,6 +264,7 @@ type accumulatorSafetyFixtureOptions struct {
 	eventSource           string
 	eventStatusPlan       bool
 	completion            string
+	omitCompletion        bool
 	timeoutMS             int
 	onTimeout             bool
 	sameFlowNodeProducer  bool
@@ -245,6 +283,10 @@ func writeAccumulatorSafetyFixture(t *testing.T, opts accumulatorSafetyFixtureOp
 	completion := strings.TrimSpace(opts.completion)
 	if completion == "" {
 		completion = "all"
+	}
+	completionLine := ""
+	if !opts.omitCompletion {
+		completionLine = "        completion: " + completion + "\n"
 	}
 	producesLine := ""
 	if opts.nodeProduces {
@@ -315,8 +357,7 @@ accumulator-node:
     `+eventType+`:
       accumulate:
         expected_from: entity.expected_count
-        completion: `+completion+`
-`+timeoutLine+onTimeoutBlock+`      advances_to: done
+`+completionLine+timeoutLine+onTimeoutBlock+`      advances_to: done
   state_schema:
     fields:
       expected_count: integer

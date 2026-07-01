@@ -4406,6 +4406,12 @@ engine:
       trigger: A handler declares an accumulator in completion all/default mode without a schedulable bounded timeout escape.
         This is a static safety-net lint only; it does not prove the accumulator will stall.
       when: boot-only
+    - id: accumulator_timeout_requires_timeout_ms
+      severity: hard_invalidity
+      scope: per-handler
+      trigger: A handler declares accumulator completion timeout without positive timeout_ms, so runtime cannot schedule the
+        accumulate.timeout event required to complete that mode.
+      when: boot-only
     - id: accumulator_input_producer_path
       severity: hard_invalidity
       scope: per-handler
@@ -10341,6 +10347,7 @@ static_analyzer:
   slice_6c_accumulator_static_safety:
     ids:
     - accumulate_all_bounded_escape
+    - accumulator_timeout_requires_timeout_ms
     - accumulator_input_producer_path
     domain: semantic_validity
     authority: mixed_warning_and_hard_invalidity
@@ -10370,6 +10377,11 @@ static_analyzer:
         A schedulable timeout escape requires positive timeout_ms plus either completion timeout or an on_timeout branch.
         A bare on_timeout without positive timeout_ms remains unbounded. This warning is not proof that runtime execution
         will stall; it says the authored handler has no static escape if an expected arrival never appears.
+    timeout_completion_requires_timeout:
+      id: accumulator_timeout_requires_timeout_ms
+      severity: hard_invalidity
+      rule: Emit hard invalidity when an accumulator uses completion timeout without positive timeout_ms. Runtime schedules
+        accumulate.timeout only from a positive timeout_ms, and timeout completion depends on that event.
     input_producer_dead_end:
       id: accumulator_input_producer_path
       severity: hard_invalidity
