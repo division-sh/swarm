@@ -232,18 +232,14 @@ func TestDoctorClaudeCLIPreflightReportsRetiredBackendEnv(t *testing.T) {
 	}
 }
 
-func TestDoctorClaudeCLIPreflightWarnsOnStaleGatewayEnv(t *testing.T) {
+func TestDoctorClaudeCLIPreflightWarnsOnRetiredGatewayEnv(t *testing.T) {
 	configureDoctorDockerStub(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
 
 	mcpPort := freeDoctorTCPPort(t)
-	oldPort := freeDoctorTCPPort(t)
-	if oldPort == mcpPort {
-		oldPort = freeDoctorTCPPort(t)
-	}
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+oldPort)
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+oldPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+mcpPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+mcpPort)
 
 	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false)
 	args = append(args[:len(args)-4], "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:"+mcpPort)
@@ -252,11 +248,18 @@ func TestDoctorClaudeCLIPreflightWarnsOnStaleGatewayEnv(t *testing.T) {
 	if code != cliExitOK {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "[WARNING] gateway_prerequisite/swarm_tool_gateway_url_stale") || !strings.Contains(stdout.String(), "must target the MCP listener port "+mcpPort) {
-		t.Fatalf("stale gateway env not reported:\n%s", stdout.String())
+	for _, want := range []string{
+		"[WARNING] gateway_prerequisite/swarm_tool_gateway_url_retired",
+		"[WARNING] gateway_prerequisite/swarm_tool_gateway_container_url_retired",
+		"SWARM_TOOL_GATEWAY_URL is retired and not accepted as gateway endpoint configuration",
+		"unset SWARM_TOOL_GATEWAY_URL; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
+		}
 	}
-	if !strings.Contains(stdout.String(), "local serve/run derives the gateway binding from the bound MCP listener and ignores this URL") {
-		t.Fatalf("stale gateway env remediation missing binding authority:\n%s", stdout.String())
+	if strings.Contains(stdout.String(), "shadowed_or_empty") || strings.Contains(stdout.String(), "must target the MCP listener port") {
+		t.Fatalf("doctor output still renders retired URL env through old acceptance model:\n%s", stdout.String())
 	}
 }
 

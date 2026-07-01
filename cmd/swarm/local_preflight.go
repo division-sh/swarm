@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"sort"
 	"strings"
@@ -109,7 +108,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.checkListener("mcp_listener", "mcp", req.MCPListenAddr)
 	}
 	if req.CheckGatewayEnv {
-		report.checkGatewayEnv(req.MCPListenAddr)
+		report.checkGatewayEnv()
 	}
 
 	source, contractsRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths)
@@ -214,28 +213,20 @@ func (r *localPreflightReport) checkListener(code, name, addr string) {
 	r.add(localPreflightServeListenerPrerequisite, code, localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s listener address %s is available", name, strings.TrimSpace(addr)), "")
 }
 
-func (r *localPreflightReport) checkGatewayEnv(mcpListenAddr string) {
-	addr, ok, err := resolvedGatewayCheckAddr(mcpListenAddr)
-	if err != nil {
-		r.add(localPreflightGatewayPrerequisite, "mcp_listener_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "set a valid --mcp-listen-addr")
-		return
-	}
-	if !ok {
-		r.add(localPreflightGatewayPrerequisite, "gateway_env_port_deferred", localPreflightSeverityInfo, localPreflightStatusSkipped, "MCP listener uses port 0; gateway env validation is deferred until serve binds the actual listener", "")
-		return
-	}
-	for _, name := range []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL"} {
-		if err := validateExistingServeGatewayURL(name, lookupEnvValue(name), addr); err != nil {
-			severity := localPreflightSeverityWarning
-			remediation := fmt.Sprintf("unset %s; local serve/run derives the gateway binding from the bound MCP listener and ignores this URL", name)
-			if r.Mode == "serve" {
-				severity = localPreflightSeverityBlocker
-				remediation = fmt.Sprintf("unset %s or point it at the selected MCP listener port; public URL-env retirement remains split", name)
-			}
-			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_stale", severity, localPreflightStatusFailed, err.Error(), remediation)
-		} else {
-			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_shadowed_or_empty", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is empty or non-authoritative for local gateway binding", name), "")
+func (r *localPreflightReport) checkGatewayEnv() {
+	for _, name := range retiredToolGatewayURLEnvNames {
+		raw := strings.TrimSpace(lookupEnvValue(name))
+		if raw == "" {
+			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_empty", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is empty; gateway endpoints are derived from ToolGatewayBinding", name), "")
+			continue
 		}
+		severity := localPreflightSeverityWarning
+		remediation := fmt.Sprintf("unset %s; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL", name)
+		if r.Mode == "serve" {
+			severity = localPreflightSeverityBlocker
+			remediation = fmt.Sprintf("unset %s; non-dev serve rejects retired gateway URL env because ToolGatewayBinding owns endpoint configuration", name)
+		}
+		r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_retired", severity, localPreflightStatusFailed, validateRetiredToolGatewayURLEnv(name, raw).Error(), remediation)
 	}
 }
 
@@ -322,25 +313,6 @@ func loadLocalPreflightSource(repo string, paths cliContractPlatformSpecPaths) (
 
 func sourceDeclaresAgents(source semanticview.Source) bool {
 	return source != nil && len(source.AgentEntries()) > 0
-}
-
-func resolvedGatewayCheckAddr(mcpListenAddr string) (net.Addr, bool, error) {
-	addr := strings.TrimSpace(mcpListenAddr)
-	if err := validateServeListenAddr("--mcp-listen-addr", addr); err != nil {
-		return nil, false, err
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, false, err
-	}
-	if strings.TrimSpace(port) == "" || strings.TrimSpace(port) == "0" {
-		return nil, false, nil
-	}
-	resolved, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(host, port))
-	if err != nil {
-		return nil, false, err
-	}
-	return resolved, true, nil
 }
 
 func lookupEnvValue(name string) string {

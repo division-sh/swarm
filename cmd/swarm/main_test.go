@@ -2507,7 +2507,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 	if !strings.Contains(binding.CanonicalOwner, "cli_specification.foundations.local_tool_gateway_binding") {
 		t.Fatalf("canonical owner does not point at local_tool_gateway_binding: %s", binding.CanonicalOwner)
 	}
-	for _, want := range []string{"local `serve`", "foreground `run`", "actual bound MCP listener", "stale URL-env", "first slice", "production Claude runtime factory", "MUST NOT mutate process-global"} {
+	for _, want := range []string{"local `serve`", "foreground `run`", "actual bound MCP listener", "stale URL-env", "public/operator", "non-dev serve", "production Claude runtime factory", "MUST NOT mutate process-global"} {
 		if !strings.Contains(binding.Scope, want) {
 			t.Fatalf("local tool gateway binding scope missing %q:\n%s", want, binding.Scope)
 		}
@@ -2522,7 +2522,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("source rule missing %q:\n%s", want, binding.SourceRule)
 		}
 	}
-	for _, want := range []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL", "not public/operator source", "generated final-boundary compatibility", "derived from `ToolGatewayBinding`", "Selected-fork ephemeral gateway startup MUST NOT set"} {
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL", "not public/operator source", "generated final-boundary compatibility", "derived from `ToolGatewayBinding`", "Selected-fork ephemeral gateway startup MUST NOT set", "retired public input", "MUST fail closed", "unset it", "MUST NOT be rendered as accepted configuration"} {
 		if !strings.Contains(binding.EndpointEnvRule, want) {
 			t.Fatalf("endpoint env rule missing %q:\n%s", want, binding.EndpointEnvRule)
 		}
@@ -2532,12 +2532,12 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("auth rule missing %q:\n%s", want, binding.AuthRule)
 		}
 	}
-	for _, want := range []string{"serve listener binding", "RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "MCP HTTP config", "Docker exec", "fork-chat sandbox", "selected-fork ephemeral gateway"} {
+	for _, want := range []string{"serve listener binding", "RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "MCP HTTP config", "Docker exec", "fork-chat sandbox", "selected-fork ephemeral gateway", "non-dev serve retired URL-env admission"} {
 		if !stringSliceContains(binding.Consumers, want) {
 			t.Fatalf("binding consumers missing %q: %#v", want, binding.Consumers)
 		}
 	}
-	for _, want := range []string{"#1568 public/operator URL-env retirement", "#1568 broader selected-contract", "no longer uses process-global URL env", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
+	for _, want := range []string{"#1568 token-source migration", "#1568 broader selected-contract", "no longer uses process-global URL env", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
 		if !stringSliceContains(binding.SplitTail, want) {
 			t.Fatalf("binding split_tail missing %q: %#v", want, binding.SplitTail)
 		}
@@ -10598,6 +10598,47 @@ func TestCreateServeToolGatewayBindingIgnoresStaleLocalURLEnv(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	mcpPort := freeDoctorTCPPort(t)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+mcpPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+mcpPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	var out lockedBuffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:         writeDoctorClaudeConfig(t),
+		Backend:            "claude_cli",
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		DataSource:         t.TempDir(),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "not-a-store",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:" + mcpPort,
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Output:             &out,
+	})
+	if code != cliExitRuntime {
+		t.Fatalf("runServeRuntime code = %d, want %d\noutput:\n%s", code, cliExitRuntime, out.String())
+	}
+	for _, want := range []string{
+		"local_preflight",
+		"swarm_tool_gateway_url_retired",
+		"swarm_tool_gateway_container_url_retired",
+		"non-dev serve rejects retired gateway URL env",
+		"ToolGatewayBinding owns endpoint configuration",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "not-a-store") || strings.Contains(out.String(), "db_connection") || strings.Contains(out.String(), "ready") {
+		t.Fatalf("serve reached later startup after retired gateway URL env failure:\n%s", out.String())
+	}
+}
+
 func assertServePreflightStaleGatewayWarning(t *testing.T, opts serveOptions, wantMode string) {
 	t.Helper()
 	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
@@ -10623,7 +10664,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts serveOptions, wa
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
-	for _, code := range []string{"swarm_tool_gateway_url_stale", "swarm_tool_gateway_container_url_stale"} {
+	for _, code := range []string{"swarm_tool_gateway_url_retired", "swarm_tool_gateway_container_url_retired"} {
 		if !localPreflightReportHasFinding(report, code, localPreflightSeverityWarning, localPreflightStatusFailed) {
 			t.Fatalf("preflight report missing warning %q:\n%#v", code, report)
 		}
@@ -10690,29 +10731,31 @@ func staleGatewayTestPort(mcpPort string) string {
 	return "8081"
 }
 
-func TestValidateServeGatewayURLEnvForNonDevRejectsOldUnifiedPort(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen mcp: %v", err)
-	}
-	defer listener.Close()
-	_, mcpPort, err := net.SplitHostPort(listener.Addr().String())
-	if err != nil {
-		t.Fatalf("split listener addr: %v", err)
-	}
-	oldUnifiedPort := "8081"
-	if mcpPort == oldUnifiedPort {
-		oldUnifiedPort = "8080"
-	}
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+oldUnifiedPort)
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+oldUnifiedPort)
-
-	err = validateServeGatewayURLEnvForNonDev(listener.Addr())
-	if err == nil {
-		t.Fatal("non-dev gateway env validation unexpectedly accepted old unified API port")
-	}
-	if !strings.Contains(err.Error(), "must target the MCP listener port") {
-		t.Fatalf("error = %v, want MCP listener port mismatch", err)
+func TestValidateServeGatewayURLEnvForNonDevRejectsAnyRetiredURLEnv(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		value string
+	}{
+		{name: "SWARM_TOOL_GATEWAY_URL", value: "http://127.0.0.1:8082"},
+		{name: "SWARM_TOOL_GATEWAY_CONTAINER_URL", value: "http://host.docker.internal:8082"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+			t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+			t.Setenv(tt.name, tt.value)
+			err := validateServeGatewayURLEnvForNonDev()
+			if err == nil {
+				t.Fatal("non-dev gateway env validation unexpectedly accepted retired URL env")
+			}
+			for _, want := range []string{tt.name, "retired", "unset " + tt.name, "ToolGatewayBinding"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+			}
+			if strings.Contains(err.Error(), "MCP listener port") {
+				t.Fatalf("error still suggests port-matching URL env is valid: %v", err)
+			}
+		})
 	}
 }
 
