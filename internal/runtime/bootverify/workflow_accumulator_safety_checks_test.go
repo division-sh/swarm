@@ -127,6 +127,12 @@ func TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths(t *testing.T) {
 			},
 		},
 		{
+			name: "same-flow node handler wildcard emit",
+			root: func(t *testing.T) string {
+				return writeAccumulatorWildcardSameFlowNodeFixture(t)
+			},
+		},
+		{
 			name: "same-flow agent emit_events",
 			root: func(t *testing.T) string {
 				return writeAccumulatorSafetyFixture(t, accumulatorSafetyFixtureOptions{
@@ -134,6 +140,12 @@ func TestRun_DoesNotErrorForAccumulatorAcceptedProducerPaths(t *testing.T) {
 					completion:            "timeout",
 					timeoutMS:             5000,
 				})
+			},
+		},
+		{
+			name: "same-flow agent wildcard emit_events",
+			root: func(t *testing.T) string {
+				return writeAccumulatorWildcardSameFlowAgentFixture(t)
 			},
 		},
 		{
@@ -375,6 +387,94 @@ func writeAccumulatorRootNodeFixture(t *testing.T) string {
 		completion:           "timeout",
 		timeoutMS:            5000,
 	})
+}
+
+func writeAccumulatorWildcardSameFlowNodeFixture(t *testing.T) string {
+	t.Helper()
+	root := writeAccumulatorWildcardSameFlowFixture(t)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  subscribes_to: [producer.start]
+  event_handlers:
+    producer.start:
+      emit:
+        event: task.done
+accumulator-node:
+  id: accumulator-node
+  execution_type: system_node
+  subscribes_to: [task.*]
+  event_handlers:
+    task.*:
+      accumulate:
+        expected_from: entity.expected_count
+        completion: timeout
+        timeout_ms: 5000
+      advances_to: done
+  state_schema:
+    fields:
+      expected_count: integer
+`)
+	return root
+}
+
+func writeAccumulatorWildcardSameFlowAgentFixture(t *testing.T) string {
+	t.Helper()
+	root := writeAccumulatorWildcardSameFlowFixture(t)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+producer-agent:
+  id: producer-agent
+  role: producer
+  emit_events:
+    - task.done
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+accumulator-node:
+  id: accumulator-node
+  execution_type: system_node
+  subscribes_to: [task.*]
+  event_handlers:
+    task.*:
+      accumulate:
+        expected_from: entity.expected_count
+        completion: timeout
+        timeout_ms: 5000
+      advances_to: done
+  state_schema:
+    fields:
+      expected_count: integer
+`)
+	return root
+}
+
+func writeAccumulatorWildcardSameFlowFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: accumulator-wildcard-safety
+version: "1.0.0"
+platform: ">=1.6.0"
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: accumulator-wildcard-safety
+initial_state: collecting
+terminal_states: [done]
+states: [collecting, done]
+pins:
+  inputs:
+    events: [task.done]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+task.done:
+  expected_count: integer
+producer.start:
+  {}
+`)
+	return root
 }
 
 func writeAccumulatorCrossFlowFixture(t *testing.T, withConnect bool) string {
