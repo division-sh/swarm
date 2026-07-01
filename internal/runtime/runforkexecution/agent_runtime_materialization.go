@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -32,8 +31,6 @@ import (
 )
 
 const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
-
-var selectedContractAgentRuntimeGatewayEnvMu sync.Mutex
 
 type SelectedContractAgentRuntimeOptions struct {
 	Config            *config.Config
@@ -315,13 +312,6 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 	if exec == nil {
 		return toolgateway.Binding{}, nil, nil
 	}
-	selectedContractAgentRuntimeGatewayEnvMu.Lock()
-	unlock := true
-	defer func() {
-		if unlock {
-			selectedContractAgentRuntimeGatewayEnvMu.Unlock()
-		}
-	}()
 
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
@@ -350,17 +340,6 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 		_ = ln.Close()
 		return toolgateway.Binding{}, nil, err
 	}
-	prevHostURL, prevHostSet := os.LookupEnv("SWARM_TOOL_GATEWAY_URL")
-	prevContainerURL, prevContainerSet := os.LookupEnv("SWARM_TOOL_GATEWAY_CONTAINER_URL")
-	if err := os.Setenv("SWARM_TOOL_GATEWAY_URL", hostURL); err != nil {
-		_ = ln.Close()
-		return toolgateway.Binding{}, nil, err
-	}
-	if err := os.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", containerURL); err != nil {
-		restoreEnv("SWARM_TOOL_GATEWAY_URL", prevHostURL, prevHostSet)
-		_ = ln.Close()
-		return toolgateway.Binding{}, nil, err
-	}
 
 	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, emitRegistry, mcpTurns))
 	server := &http.Server{Handler: gateway.Handler()}
@@ -369,23 +348,11 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 			_ = server.Close()
 		}
 	}()
-	unlock = false
 	return binding, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = server.Shutdown(ctx)
 		cancel()
-		restoreEnv("SWARM_TOOL_GATEWAY_CONTAINER_URL", prevContainerURL, prevContainerSet)
-		restoreEnv("SWARM_TOOL_GATEWAY_URL", prevHostURL, prevHostSet)
-		selectedContractAgentRuntimeGatewayEnvMu.Unlock()
 	}, nil
-}
-
-func restoreEnv(key, value string, existed bool) {
-	if existed {
-		_ = os.Setenv(key, value)
-		return
-	}
-	_ = os.Unsetenv(key)
 }
 
 func selectedContractPromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
