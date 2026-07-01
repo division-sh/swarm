@@ -10846,7 +10846,7 @@ cli_specification:
       split_tail:
       - '#997 local cli_test workspace image contents/default-agent Claude CLI availability is closed by cli_specification.foundations.local_cli_test_workspace_cli_availability.'
       - '#996 Docker Compose setup remains split.'
-      - '#979/#1012 selected-contract and multi-bundle gateway materialization remains split.'
+      - '#1568 selected-contract and multi-bundle gateway materialization remains split; #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not an open tail.'
       - '#1568 broader public URL-env retirement, selected-fork/multi-bundle materialization, and remote transport policy remain split.'
     local_tool_gateway_binding:
@@ -10901,7 +10901,7 @@ cli_specification:
       split_tail:
       - '#1568 public/operator URL-env retirement outside local serve/run remains split.'
       - '#1568 token-source migration beyond token-only env remains split.'
-      - '#979/#1012 broader selected-contract and multi-bundle gateway materialization remains split; this first slice only requires a selected-fork ephemeral gateway to pass its own typed binding to its internal Claude runtime factory.'
+      - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; this first slice only requires a selected-fork ephemeral gateway to pass its own typed binding to its internal Claude runtime factory. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1138/#1213 host workspace `claude_cli` execution remains split.'
       - '#1567 API connection discovery and connection-file authority remain split.'
       - 'IPC/unix socket transports and remote/Kubernetes routing remain split.'
@@ -10938,7 +10938,7 @@ cli_specification:
       split_tail:
       - '#996 Docker Compose setup remains split.'
       - '#995 schema migration startup diagnostics remain split.'
-      - '#979/#1012 selected-contract and multi-bundle gateway materialization remains split.'
+      - '#1568 selected-contract and multi-bundle gateway materialization remains split; #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not reopened.'
     local_claude_cli_preflight_admission:
       promoted_by: '#1565'

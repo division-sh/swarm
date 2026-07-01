@@ -2464,7 +2464,7 @@ func TestPlatformSpecLocalCLITestGatewayStartupPromoted(t *testing.T) {
 			t.Fatalf("startup probe rule missing %q:\n%s", want, startup.StartupProbeRule)
 		}
 	}
-	for _, want := range []string{"#997 local cli_test workspace image contents", "#996 Docker Compose", "#979/#1012", "#1002 runtime workspace source-root image packaging is closed"} {
+	for _, want := range []string{"#997 local cli_test workspace image contents", "#996 Docker Compose", "#1568 selected-contract", "#979/#1012 are completed historical source-authority slices", "#1002 runtime workspace source-root image packaging is closed"} {
 		if !stringSliceContains(startup.SplitTail, want) {
 			t.Fatalf("local cli_test gateway startup split_tail missing %q: %#v", want, startup.SplitTail)
 		}
@@ -2537,7 +2537,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("binding consumers missing %q: %#v", want, binding.Consumers)
 		}
 	}
-	for _, want := range []string{"#1568 public/operator URL-env retirement", "#979/#1012 broader selected-contract", "ephemeral gateway to pass its own typed binding", "#1138/#1213", "#1567", "IPC/unix socket"} {
+	for _, want := range []string{"#1568 public/operator URL-env retirement", "#1568 broader selected-contract", "ephemeral gateway to pass its own typed binding", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
 		if !stringSliceContains(binding.SplitTail, want) {
 			t.Fatalf("binding split_tail missing %q: %#v", want, binding.SplitTail)
 		}
@@ -2592,7 +2592,7 @@ func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) 
 			t.Fatalf("local cli_test workspace cli availability consumers missing %q: %#v", want, availability.Consumers)
 		}
 	}
-	for _, want := range []string{"#996 Docker Compose", "#995 schema migration", "#979/#1012", "#1002 runtime workspace source-root image packaging is closed"} {
+	for _, want := range []string{"#996 Docker Compose", "#995 schema migration", "#1568 selected-contract", "#979/#1012 are completed historical source-authority slices", "#1002 runtime workspace source-root image packaging is closed"} {
 		if !stringSliceContains(availability.SplitTail, want) {
 			t.Fatalf("local cli_test workspace cli availability split_tail missing %q: %#v", want, availability.SplitTail)
 		}
@@ -10329,6 +10329,103 @@ func TestCreateServeToolGatewayBindingPreservesExplicitGatewayToken(t *testing.T
 	}
 }
 
+func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	mcpPort := freeDoctorTCPPort(t)
+	mcpAddr := "127.0.0.1:" + mcpPort
+	stalePort := staleGatewayTestPort(mcpPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+stalePort)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+stalePort)
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	bindingCh := make(chan toolgateway.Binding, 1)
+	opts := serveOptions{
+		ConfigPath:         writeDoctorClaudeConfig(t),
+		Backend:            "claude_cli",
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		DataSource:         t.TempDir(),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "sqlite",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      mcpAddr,
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Dev:                true,
+		TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) {
+			bindingCh <- rt.Options.ToolGatewayBinding
+		},
+	}
+	assertServePreflightStaleGatewayWarning(t, opts, "serve_dev")
+
+	process := startServeRuntimeTestProcess(t, opts)
+	process.waitForReadyLine()
+	binding := receiveToolGatewayBinding(t, bindingCh, process.outputString())
+	assertToolGatewayBindingUsesMCPPort(t, binding, mcpPort, stalePort)
+	if code := process.stop(); code != 0 {
+		t.Fatalf("serve exited with code %d, want 0\noutput:\n%s", code, process.outputString())
+	}
+}
+
+func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	apiPortText := freeDoctorTCPPort(t)
+	apiPort, err := strconv.Atoi(apiPortText)
+	if err != nil {
+		t.Fatalf("parse api port %q: %v", apiPortText, err)
+	}
+	mcpPort := freeDoctorTCPPort(t)
+	mcpAddr := "127.0.0.1:" + mcpPort
+	stalePort := staleGatewayTestPort(mcpPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+stalePort)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+stalePort)
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	bindingCh := make(chan toolgateway.Binding, 1)
+	serveStarted := make(chan serveOptions, 1)
+	apiOpts := defaultRootCommandOptions()
+	apiOpts.apiRPCEndpointOverride = "http://127.0.0.1:" + apiPortText + "/v1/rpc"
+	apiOpts.runReadyTimeout = serveRuntimeReadyTimeout
+	apiOpts.runReadyPoll = 10 * time.Millisecond
+	apiOpts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		if !serveOpts.LocalRun {
+			t.Errorf("startLocalRunServe produced LocalRun = false, want shared run_local preflight consumer")
+		}
+		if serveOpts.APIListenAddr != "127.0.0.1:"+apiPortText {
+			t.Errorf("startLocalRunServe APIListenAddr = %q, want 127.0.0.1:%s", serveOpts.APIListenAddr, apiPortText)
+		}
+		serveOpts.MCPListenAddr = mcpAddr
+		serveOpts.Verbose = true
+		serveOpts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+			bindingCh <- rt.Options.ToolGatewayBinding
+		}
+		assertServePreflightStaleGatewayWarning(t, serveOpts, "run_local")
+		serveStarted <- serveOpts
+		return runServeRuntime(ctx, repo, serveOpts)
+	}
+
+	stop, err := startLocalRunServe(context.Background(), repoRoot(), runCommandOptions{
+		apiOptions:       apiOpts,
+		configPath:       writeDoctorClaudeConfig(t),
+		backend:          "claude_cli",
+		contractsPath:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		dataSource:       t.TempDir(),
+		platformSpecPath: defaultPlatformSpecPath,
+		apiPort:          apiPort,
+	})
+	if err != nil {
+		t.Fatalf("startLocalRunServe: %v", err)
+	}
+	defer stop()
+	select {
+	case <-serveStarted:
+	case <-time.After(serveRuntimeReadyTimeout):
+		t.Fatal("startLocalRunServe did not invoke the serve owner")
+	}
+	binding := receiveToolGatewayBinding(t, bindingCh, "")
+	assertToolGatewayBindingUsesMCPPort(t, binding, mcpPort, stalePort)
+}
+
 func TestCreateServeToolGatewayBindingIgnoresStaleLocalURLEnv(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -10353,6 +10450,87 @@ func TestCreateServeToolGatewayBindingIgnoresStaleLocalURLEnv(t *testing.T) {
 	if strings.Contains(binding.HostEndpoint, oldUnifiedPort) || strings.Contains(binding.WorkspaceEndpoint, oldUnifiedPort) {
 		t.Fatalf("binding = %#v, stale URL env leaked into binding", binding)
 	}
+}
+
+func assertServePreflightStaleGatewayWarning(t *testing.T, opts serveOptions, wantMode string) {
+	t.Helper()
+	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
+		RepoRoot:        repoRoot(),
+		ExplicitPath:    opts.ConfigPath,
+		BackendOverride: opts.Backend,
+	})
+	if err != nil {
+		t.Fatalf("load config for preflight proof: %v", err)
+	}
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repoRoot(), cliContractPlatformSpecPathOptions{
+		ContractsPath:    opts.ContractsPath,
+		PlatformSpecPath: opts.PlatformSpecPath,
+	})
+	if err != nil {
+		t.Fatalf("resolve preflight paths: %v", err)
+	}
+	workspaceBackend, err := resolveWorkspaceBackend(opts.WorkspaceBackend, opts.WorkspaceBackendSet, cfgResult.Config)
+	if err != nil {
+		t.Fatalf("resolve workspace backend for preflight proof: %v", err)
+	}
+	report := runServeLocalClaudeCLIPreflight(context.Background(), repoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend)
+	if report.Mode != wantMode {
+		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
+	}
+	for _, code := range []string{"swarm_tool_gateway_url_stale", "swarm_tool_gateway_container_url_stale"} {
+		if !localPreflightReportHasFinding(report, code, localPreflightSeverityWarning, localPreflightStatusFailed) {
+			t.Fatalf("preflight report missing warning %q:\n%#v", code, report)
+		}
+	}
+	if report.HasBlockers() {
+		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
+	}
+}
+
+func localPreflightReportHasFinding(report localPreflightReport, code string, severity localPreflightSeverity, status localPreflightFindingStatus) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code && finding.Severity == severity && finding.Status == status {
+			return true
+		}
+	}
+	return false
+}
+
+func receiveToolGatewayBinding(t *testing.T, ch <-chan toolgateway.Binding, output string) toolgateway.Binding {
+	t.Helper()
+	select {
+	case binding := <-ch:
+		return binding
+	case <-time.After(serveRuntimeReadyTimeout):
+		t.Fatalf("timed out waiting for runtime tool gateway binding\noutput:\n%s", output)
+		return toolgateway.Binding{}
+	}
+}
+
+func assertToolGatewayBindingUsesMCPPort(t *testing.T, binding toolgateway.Binding, mcpPort, stalePort string) {
+	t.Helper()
+	if err := binding.Validate(); err != nil {
+		t.Fatalf("runtime tool gateway binding is invalid: %v\nbinding=%#v", err, binding)
+	}
+	if got, want := binding.HostEndpoint, "http://127.0.0.1:"+mcpPort; got != want {
+		t.Fatalf("binding HostEndpoint = %q, want %q", got, want)
+	}
+	if got, want := binding.WorkspaceEndpoint, "http://host.docker.internal:"+mcpPort; got != want {
+		t.Fatalf("binding WorkspaceEndpoint = %q, want %q", got, want)
+	}
+	if strings.Contains(binding.HostEndpoint, stalePort) || strings.Contains(binding.WorkspaceEndpoint, stalePort) {
+		t.Fatalf("runtime binding leaked stale URL env port %s: %#v", stalePort, binding)
+	}
+	if strings.TrimSpace(binding.Token) == "" {
+		t.Fatalf("runtime binding token is empty: %#v", binding)
+	}
+}
+
+func staleGatewayTestPort(mcpPort string) string {
+	if strings.TrimSpace(mcpPort) == "8081" {
+		return "8080"
+	}
+	return "8081"
 }
 
 func TestValidateServeGatewayURLEnvForNonDevRejectsOldUnifiedPort(t *testing.T) {
