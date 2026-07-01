@@ -13,6 +13,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -27,6 +28,7 @@ type ClaudeCLIRuntime struct {
 	monitor         MonitorSink
 	events          EventPublisher
 	mcpTurns        MCPTurnContextStore
+	toolGateway     toolgateway.Binding
 	execWorkspaceFn func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
 }
 
@@ -42,6 +44,7 @@ type promptTransportFallback struct {
 type ClaudeCLIRuntimeOptions struct {
 	MonitorSink         MonitorSink
 	MCPTurnContextStore MCPTurnContextStore
+	ToolGateway         toolgateway.Binding
 }
 
 func NewClaudeCLIRuntime(
@@ -83,6 +86,7 @@ func NewClaudeCLIRuntimeWithOptions(
 		monitor:       monitor,
 		events:        publisher,
 		mcpTurns:      opts.MCPTurnContextStore,
+		toolGateway:   opts.ToolGateway,
 	}
 }
 

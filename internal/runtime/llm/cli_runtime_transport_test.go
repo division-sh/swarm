@@ -300,11 +300,10 @@ func TestCLIExecutionToolSurface_FileIONativeSurfaceRemovesFallbackRuntimeTools(
 
 func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:18082")
-	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 
 	r := &ClaudeCLIRuntime{
-		cfg: &config.Config{},
+		cfg:         &config.Config{},
+		toolGateway: testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
 		mcpTurns: mcpTurnContextStoreStub{
 			register: func(_ context.Context, _ time.Duration, allowedTools []string) string {
 				if !slices.Equal(allowedTools, []string{"emit_category_assessed", "query_entities"}) {
@@ -409,11 +408,10 @@ func TestBuildMCPHTTPBinding_DisablesBridgeForNativeBuiltinOnlySurface(t *testin
 
 func TestBuildMCPConfigArg_PreservesNonLoopbackGatewayURLForContainerExecution(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://orchestrator:8090")
-	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 
 	r := &ClaudeCLIRuntime{
-		cfg: &config.Config{},
+		cfg:         &config.Config{},
+		toolGateway: testToolGatewayBinding("http://127.0.0.1:8090", "http://orchestrator:8090", "gateway-token"),
 		mcpTurns: mcpTurnContextStoreStub{
 			register:   func(_ context.Context, _ time.Duration, _ []string) string { return "ctx-token-456" },
 			unregister: func(string) {},
@@ -448,29 +446,13 @@ func TestBuildMCPConfigArg_PreservesNonLoopbackGatewayURLForContainerExecution(t
 	}
 }
 
-func TestRuntimeMCPGatewayURLForHostExecution_UsesExplicitHostGatewayURL(t *testing.T) {
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:18082")
-
-	got := RuntimeMCPGatewayURLForHostExecution()
-	if got != "http://127.0.0.1:18082/mcp" {
-		t.Fatalf("gateway url = %q, want explicit host MCP endpoint", got)
-	}
-}
-
-func TestRuntimeMCPGatewayURLForContainerExecution_UsesExplicitContainerGatewayURL(t *testing.T) {
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:18082")
-
-	got := runtimeMCPGatewayURLForContainerExecution()
-	if got != "http://host.docker.internal:18082/mcp" {
-		t.Fatalf("gateway url = %q, want explicit container MCP endpoint", got)
-	}
-}
-
 func TestBuildMCPConfigArg_FailsClosedWithoutTurnContextStore(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:18082")
 
-	r := &ClaudeCLIRuntime{cfg: &config.Config{}}
+	r := &ClaudeCLIRuntime{
+		cfg:         &config.Config{},
+		toolGateway: testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
+	}
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
 		ID:   "market-research-agent",
 		Role: "market_research",

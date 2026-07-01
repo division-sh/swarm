@@ -101,12 +101,13 @@ func TestClaudeCLIRuntimeWorkspaceCommandRejectsHostWorkspaceBackend(t *testing.
 }
 
 func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *testing.T) {
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
-	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://stale.example.invalid:8081")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "stale-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
 	runtime.cfg.LLM.ClaudeCLI.Command = "claude"
+	runtime.toolGateway = testToolGatewayBinding("http://127.0.0.1:8082", "http://host.docker.internal:8082", "gateway-token")
 
 	cmd, err := runtime.buildCommand(context.Background(), []string{"--print", "hello"}, &workspace.Target{
 		Backend:   workspace.BackendDocker,
@@ -117,11 +118,14 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 		t.Fatalf("buildCommand: %v", err)
 	}
 	got := strings.Join(cmd.Args, " ")
-	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_URL=http://host.docker.internal:8081/mcp") {
+	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_URL=http://host.docker.internal:8082/mcp") {
 		t.Fatalf("docker args = %q, want explicit container MCP gateway URL", got)
 	}
 	if !strings.Contains(got, "SWARM_TOOL_GATEWAY_TOKEN=gateway-token") {
 		t.Fatalf("docker args = %q, want MCP gateway token propagated into cli_test container exec", got)
+	}
+	if strings.Contains(got, "stale.example.invalid") || strings.Contains(got, "stale-token") {
+		t.Fatalf("docker args = %q, stale operator gateway env leaked into launch", got)
 	}
 }
 

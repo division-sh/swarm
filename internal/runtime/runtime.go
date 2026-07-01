@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
@@ -69,6 +70,7 @@ type RuntimeOptions struct {
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
 	ToolGatewayToken                 string
+	ToolGatewayBinding               toolgateway.Binding
 	BundleFingerprint                string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
 	WorkflowModule                   runtimepipeline.WorkflowModule
@@ -503,6 +505,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			Workspaces:    rt.Workspace,
 			Events:        rt.Bus,
 			MCPTurns:      rt.MCPTurns,
+			ToolGateway:   opts.ToolGatewayBinding,
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)
@@ -606,7 +609,11 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 	}
 	if opts.EnableToolGateway {
-		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, strings.TrimSpace(opts.ToolGatewayToken), RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(agentID string) (runtimeactors.AgentConfig, bool) {
+		toolGatewayToken := opts.ToolGatewayBinding.AuthToken()
+		if toolGatewayToken == "" {
+			toolGatewayToken = strings.TrimSpace(opts.ToolGatewayToken)
+		}
+		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, toolGatewayToken, RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(agentID string) (runtimeactors.AgentConfig, bool) {
 			if rt.Manager == nil {
 				return runtimeactors.AgentConfig{}, false
 			}
@@ -954,7 +961,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	rt.emitBootProgress(15, "workspace_validation_and_system_containers", "ok", fmt.Sprintf("%d system containers", len(rt.Options.SystemContainers)))
 	startupProbe, _ := llm.StartupVisibleToolSurfaceProberForRuntime(rt.LLM)
-	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, source, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
+	if err := validateClaudeMCPToolsForManagedAgents(ctx, rt.Config, source, rt.Options.ToolGatewayBinding, startupProbe, rt.MCPTurns, rt.ToolExecutor, rt.Manager); err != nil {
 		rt.emitBootProgress(16, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}

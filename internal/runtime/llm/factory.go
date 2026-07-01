@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -23,6 +24,7 @@ type RuntimeFactory struct {
 	Workspaces    workspace.Resolver
 	Events        EventPublisher
 	MCPTurns      MCPTurnContextStore
+	ToolGateway   toolgateway.Binding
 }
 
 func (f RuntimeFactory) Build() (Runtime, error) {
@@ -48,6 +50,7 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 	case llmselection.BackendClaudeCLI:
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
+			ToolGateway:         f.ToolGateway,
 		})
 	case llmselection.BackendOpenAICompatible:
 		runtime = NewOpenAICompatibleRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)

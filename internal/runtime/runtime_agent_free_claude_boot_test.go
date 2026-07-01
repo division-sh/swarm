@@ -103,13 +103,10 @@ func TestNewRuntime_AgentPresentCLITestStillRequiresClaudeStartupEnv(t *testing.
 	}
 }
 
-func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.T) {
+func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.LLM.Backend = "claude_cli"
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:8081")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
-	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
@@ -119,8 +116,9 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.
 		WorkspaceLifecycle: claudeStartupWorkspaceStub{
 			target: &workspace.Target{Container: "swarm-agent-recovered-agent", Workdir: "/workspace"},
 		},
-		EnableToolGateway: true,
-		ToolGatewayToken:  "gateway-token",
+		EnableToolGateway:  true,
+		ToolGatewayToken:   "gateway-token",
+		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:8081", "", "gateway-token"),
 	}})
 
 	if err != nil {
@@ -132,8 +130,8 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupEnv(t *testing.
 	}
 
 	err = rt.Start(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "claude runtime startup validation failed") || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_CONTAINER_URL") {
-		t.Fatalf("Start error = %v, want startup validation failure for missing container gateway URL", err)
+	if err == nil || !strings.Contains(err.Error(), "claude runtime startup validation failed") || !strings.Contains(err.Error(), "tool gateway binding workspace endpoint") {
+		t.Fatalf("Start error = %v, want startup validation failure for missing workspace gateway binding", err)
 	}
 }
 

@@ -296,11 +296,11 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 			dockerBin = "docker"
 		}
 		dockerArgs := []string{"exec", "-i"}
-		gatewayURL := runtimeMCPGatewayURLForContainerExecution()
+		gatewayURL := r.toolGateway.WorkspaceMCPURL()
 		if gatewayURL != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_URL="+gatewayURL)
 		}
-		if gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); gatewayToken != "" {
+		if gatewayToken := r.toolGateway.AuthToken(); gatewayToken != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_TOKEN="+gatewayToken)
 		}
 		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)

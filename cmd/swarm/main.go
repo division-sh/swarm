@@ -52,6 +52,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -117,11 +118,6 @@ func (s serveStartupRecoveryContainers) StopManagedContainer(ctx context.Context
 		return fmt.Errorf("workspace lifecycle is not configured")
 	}
 	return s.lifecycle.StopManagedContainer(ctx, name)
-}
-
-type previousEnv struct {
-	value string
-	set   bool
 }
 
 type storeBundle struct {
@@ -392,6 +388,7 @@ type serveRuntimeBundleContextRequest struct {
 	BootStartedAt          time.Time
 	BootProgress           func(runtime.BootProgressEvent)
 	EnableToolGateway      bool
+	ToolGatewayBinding     toolgateway.Binding
 	UseStartupOwnership    bool
 	UseStartupRecovery     bool
 	RequireBundleScopeName bool
@@ -698,7 +695,8 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			WorkflowModule:                   loaded.module,
 			WorkspaceLifecycle:               workspaces,
 			EnableToolGateway:                req.EnableToolGateway,
-			ToolGatewayToken:                 strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")),
+			ToolGatewayToken:                 req.ToolGatewayBinding.AuthToken(),
+			ToolGatewayBinding:               req.ToolGatewayBinding,
 			BundleFingerprint:                bootIdentity.Fingerprint,
 			BundleSourceFact:                 bundleSourceFact,
 			Credentials:                      req.Credentials,
@@ -919,8 +917,46 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("configure credentials", "error", err)
 		return 1
 	}
+
+	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
+	if err != nil {
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("bind api listener: %v", err)
+		return 3
+	}
+	defer apiListener.Close()
+	mcpListener, err := listenServeHTTPListener("mcp", opts.MCPListenAddr)
+	if err != nil {
+		_ = apiListener.Close()
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("bind mcp listener: %v", err)
+		return 3
+	}
+	defer mcpListener.Close()
+	toolGatewayBinding, err := createServeToolGatewayBinding(mcpListener.Addr())
+	if err != nil {
+		_ = mcpListener.Close()
+		_ = apiListener.Close()
+		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+		log.Printf("configure mcp gateway binding: %v", err)
+		return 3
+	}
+	if !opts.Dev && !opts.LocalRun {
+		if err := validateServeGatewayURLEnvForNonDev(mcpListener.Addr()); err != nil {
+			_ = mcpListener.Close()
+			_ = apiListener.Close()
+			reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
+			log.Printf("validate non-dev mcp gateway env: %v", err)
+			return 3
+		}
+	}
+
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
 	for i, loaded := range loadedBundles {
+		contextToolGatewayBinding := toolgateway.Binding{}
+		if i == 0 {
+			contextToolGatewayBinding = toolGatewayBinding
+		}
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			Ctx:                    ctx,
 			Stores:                 stores,
@@ -934,6 +970,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			BootStartedAt:          bootStartedAt,
 			BootProgress:           reporter.runtimeSink(),
 			EnableToolGateway:      i == 0,
+			ToolGatewayBinding:     contextToolGatewayBinding,
 			UseStartupOwnership:    len(loadedBundles) == 1 && i == 0,
 			UseStartupRecovery:     len(loadedBundles) == 1,
 			RequireBundleScopeName: len(loadedBundles) > 1,
@@ -954,31 +991,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	rt := primaryContext.runtime
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
-
-	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
-	if err != nil {
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("bind api listener: %v", err)
-		return 3
-	}
-	defer apiListener.Close()
-	mcpListener, err := listenServeHTTPListener("mcp", opts.MCPListenAddr)
-	if err != nil {
-		_ = apiListener.Close()
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("bind mcp listener: %v", err)
-		return 3
-	}
-	defer mcpListener.Close()
-	restoreGatewayEnv, err := configureServeMCPGatewayEnv(mcpListener.Addr())
-	if err != nil {
-		_ = mcpListener.Close()
-		_ = apiListener.Close()
-		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-		log.Printf("configure mcp gateway env: %v", err)
-		return 3
-	}
-	defer restoreGatewayEnv()
 
 	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces)
 	if err != nil {
@@ -3142,36 +3154,37 @@ func addrString(addr net.Addr) string {
 	return addr.String()
 }
 
-func configureServeMCPGatewayEnv(mcpAddr net.Addr) (func(), error) {
+func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error) {
 	if mcpAddr == nil {
-		return func() {}, errors.New("mcp listener address is unavailable")
+		return toolgateway.Binding{}, errors.New("mcp listener address is unavailable")
 	}
 	mcpHostURL, err := serveListenerHTTPURL(mcpAddr, "127.0.0.1")
 	if err != nil {
-		return func() {}, err
+		return toolgateway.Binding{}, err
 	}
 	mcpContainerURL, err := serveMCPContainerGatewayURL(mcpAddr)
 	if err != nil {
-		return func() {}, err
-	}
-	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_URL", os.Getenv("SWARM_TOOL_GATEWAY_URL"), mcpAddr); err != nil {
-		return func() {}, err
-	}
-	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_CONTAINER_URL", os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), mcpAddr); err != nil {
-		return func() {}, err
+		return toolgateway.Binding{}, err
 	}
 	gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
 	if gatewayToken == "" {
 		gatewayToken, err = generateServeMCPGatewayToken()
 		if err != nil {
-			return func() {}, err
+			return toolgateway.Binding{}, err
 		}
 	}
-	return setServeGatewayEnv(map[string]string{
-		"SWARM_TOOL_GATEWAY_URL":           mcpHostURL,
-		"SWARM_TOOL_GATEWAY_CONTAINER_URL": mcpContainerURL,
-		"SWARM_TOOL_GATEWAY_TOKEN":         gatewayToken,
-	})
+	binding := toolgateway.Binding{
+		Transport:         toolgateway.TransportHTTP,
+		HostEndpoint:      mcpHostURL,
+		WorkspaceEndpoint: mcpContainerURL,
+		Token:             gatewayToken,
+		LifecycleOwner:    toolgateway.LifecycleOwnerServeBoot,
+		Source:            toolgateway.SourceBoundMCPListener,
+	}
+	if err := binding.Validate(); err != nil {
+		return toolgateway.Binding{}, err
+	}
+	return binding, nil
 }
 
 func generateServeMCPGatewayToken() (string, error) {
@@ -3201,29 +3214,14 @@ func validateExistingServeGatewayURL(name, raw string, mcpAddr net.Addr) error {
 	return nil
 }
 
-func setServeGatewayEnv(values map[string]string) (func(), error) {
-	previous := make(map[string]previousEnv, len(values))
-	for name, value := range values {
-		prevValue, prevSet := os.LookupEnv(name)
-		previous[name] = previousEnv{value: prevValue, set: prevSet}
-		if err := os.Setenv(name, value); err != nil {
-			restoreServeGatewayEnv(previous)
-			return func() {}, err
-		}
+func validateServeGatewayURLEnvForNonDev(mcpAddr net.Addr) error {
+	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_URL", os.Getenv("SWARM_TOOL_GATEWAY_URL"), mcpAddr); err != nil {
+		return err
 	}
-	return func() {
-		restoreServeGatewayEnv(previous)
-	}, nil
-}
-
-func restoreServeGatewayEnv(previous map[string]previousEnv) {
-	for name, prev := range previous {
-		if prev.set {
-			_ = os.Setenv(name, prev.value)
-		} else {
-			_ = os.Unsetenv(name)
-		}
+	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_CONTAINER_URL", os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), mcpAddr); err != nil {
+		return err
 	}
+	return nil
 }
 
 type parsedHTTPHostPort struct {
