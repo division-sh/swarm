@@ -111,6 +111,180 @@ func TestPostgresStoreFlowInstanceRoutes(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreUpsertFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ensureFlowInstanceRouteTables(t, ctx, db)
+
+	route := runtimebus.FlowInstanceRouteRecord{
+		Identity:       runtimeflowidentity.DeriveRoute("review", "inst-1"),
+		EventPattern:   "review/inst-1/task.started",
+		SubscriberType: "node",
+		SubscriberID:   "reviewer-inst-1",
+		SourceFlow:     "review",
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', NOW())
+	`, route.Identity.InstancePath); err != nil {
+		t.Fatalf("seed flow_instances in tx: %v", err)
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := pg.UpsertFlowInstanceRoute(txctx, route); err != nil {
+		t.Fatalf("UpsertFlowInstanceRoute in tx: %v", err)
+	}
+	var inTx int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM routing_rules
+		WHERE flow_instance = $1
+		  AND is_materialized = true
+		  AND status = 'active'
+	`, route.Identity.InstancePath).Scan(&inTx); err != nil {
+		t.Fatalf("count routing_rules in tx: %v", err)
+	}
+	if inTx != 1 {
+		t.Fatalf("routing_rules in tx = %d, want 1", inTx)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	var leaked int
+	if err := db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM routing_rules
+		WHERE flow_instance = $1
+		  AND is_materialized = true
+	`, route.Identity.InstancePath).Scan(&leaked); err != nil {
+		t.Fatalf("count routing_rules after rollback: %v", err)
+	}
+	if leaked != 0 {
+		t.Fatalf("routing_rules leaked after rollback = %d, want 0", leaked)
+	}
+}
+
+func TestPostgresStoreDeleteFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ensureFlowInstanceRouteTables(t, ctx, db)
+
+	route := runtimebus.FlowInstanceRouteRecord{
+		Identity:       runtimeflowidentity.DeriveRoute("review", "inst-1"),
+		EventPattern:   "review/inst-1/task.started",
+		SubscriberType: "node",
+		SubscriberID:   "reviewer-inst-1",
+		SourceFlow:     "review",
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at)
+		VALUES ($1, 'review', 'template', '{}'::jsonb, 'terminated', NOW(), NOW())
+	`, route.Identity.InstancePath); err != nil {
+		t.Fatalf("seed flow_instances: %v", err)
+	}
+	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
+		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := pg.DeleteFlowInstanceRoute(txctx, route.Identity); err != nil {
+		t.Fatalf("DeleteFlowInstanceRoute in tx: %v", err)
+	}
+	var inTxStatus string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT status
+		FROM routing_rules
+		WHERE flow_instance = $1
+	`, route.Identity.InstancePath).Scan(&inTxStatus); err != nil {
+		t.Fatalf("query routing_rules in tx: %v", err)
+	}
+	if strings.TrimSpace(inTxStatus) != "inactive" {
+		t.Fatalf("routing_rules status in tx = %q, want inactive", inTxStatus)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status
+		FROM routing_rules
+		WHERE flow_instance = $1
+	`, route.Identity.InstancePath).Scan(&status); err != nil {
+		t.Fatalf("query routing_rules after rollback: %v", err)
+	}
+	if strings.TrimSpace(status) != "active" {
+		t.Fatalf("routing_rules status after rollback = %q, want active", status)
+	}
+}
+
+func TestPostgresStoreRollbackFlowInstanceRouteUsesPipelineTransaction(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ensureFlowInstanceRouteTables(t, ctx, db)
+
+	route := runtimebus.FlowInstanceRouteRecord{
+		Identity:       runtimeflowidentity.DeriveRoute("review", "inst-1"),
+		EventPattern:   "review/inst-1/task.started",
+		SubscriberType: "node",
+		SubscriberID:   "reviewer-inst-1",
+		SourceFlow:     "review",
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ($1, 'review', 'template', '{}'::jsonb, 'active', NOW())
+	`, route.Identity.InstancePath); err != nil {
+		t.Fatalf("seed flow_instances: %v", err)
+	}
+	if err := pg.UpsertFlowInstanceRoute(ctx, route); err != nil {
+		t.Fatalf("UpsertFlowInstanceRoute: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	if err := pg.RollbackFlowInstanceRoute(txctx, route.Identity); err != nil {
+		t.Fatalf("RollbackFlowInstanceRoute in tx: %v", err)
+	}
+	var inTxStatus string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT status
+		FROM routing_rules
+		WHERE flow_instance = $1
+	`, route.Identity.InstancePath).Scan(&inTxStatus); err != nil {
+		t.Fatalf("query routing_rules in tx: %v", err)
+	}
+	if strings.TrimSpace(inTxStatus) != "inactive" {
+		t.Fatalf("routing_rules status in tx = %q, want inactive", inTxStatus)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	var status string
+	if err := db.QueryRowContext(ctx, `
+		SELECT status
+		FROM routing_rules
+		WHERE flow_instance = $1
+	`, route.Identity.InstancePath).Scan(&status); err != nil {
+		t.Fatalf("query routing_rules after rollback: %v", err)
+	}
+	if strings.TrimSpace(status) != "active" {
+		t.Fatalf("routing_rules status after rollback = %q, want active", status)
+	}
+}
+
 func TestPostgresStoreFlowInstanceRoutes_NestedTemplateScope(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
