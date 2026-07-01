@@ -273,6 +273,7 @@ func asObject(v any) (map[string]any, bool) {
 
 type sqlTxContextKey struct{}
 type pipelinePostCommitActionsKey struct{}
+type pipelineRollbackActionsKey struct{}
 type pipelineAfterPublishActionsKey struct{}
 type pipelineReceiptOverrideKey struct{}
 
@@ -352,6 +353,45 @@ func flushPipelinePostCommitActions(actions []func()) {
 
 func FlushPipelinePostCommitActions(actions []func()) {
 	flushPipelinePostCommitActions(actions)
+}
+
+func withPipelineRollbackActions(ctx context.Context, actions *[]func()) context.Context {
+	if actions == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, pipelineRollbackActionsKey{}, actions)
+}
+
+func WithPipelineRollbackActions(ctx context.Context, actions *[]func()) context.Context {
+	return withPipelineRollbackActions(ctx, actions)
+}
+
+func queuePipelineRollbackAction(ctx context.Context, fn func()) bool {
+	if ctx == nil || fn == nil {
+		return false
+	}
+	actions, ok := ctx.Value(pipelineRollbackActionsKey{}).(*[]func())
+	if !ok || actions == nil {
+		return false
+	}
+	*actions = append(*actions, fn)
+	return true
+}
+
+func QueuePipelineRollbackAction(ctx context.Context, fn func()) bool {
+	return queuePipelineRollbackAction(ctx, fn)
+}
+
+func flushPipelineRollbackActions(actions []func()) {
+	for i := len(actions) - 1; i >= 0; i-- {
+		if actions[i] != nil {
+			actions[i]()
+		}
+	}
+}
+
+func FlushPipelineRollbackActions(actions []func()) {
+	flushPipelineRollbackActions(actions)
 }
 
 func withPipelineAfterPublishActions(ctx context.Context, actions *[]func()) context.Context {

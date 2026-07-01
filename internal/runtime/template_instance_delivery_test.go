@@ -391,6 +391,10 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 		SELECT COUNT(*) FROM routing_rules
 		WHERE flow_instance = $1
 	`, 0, descriptor.FlowInstance)
+	route := runtimeflowidentity.StoredRoute("", "", descriptor.FlowInstance)
+	if got := bus.RouteTable().MaterializedRoutes(route); len(got) != 0 {
+		t.Fatalf("route table materialized routes after rollback = %#v, want none", got)
+	}
 }
 
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {

@@ -52,13 +52,17 @@ func (s *PostgresStore) RunEventTransaction(ctx context.Context, fn func(context
 		return err
 	}
 	postCommit := make([]func(), 0, 4)
+	rollbackActions := make([]func(), 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
 		_ = tx.Rollback()
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return err
 	}
 	if err := tx.Commit(); err != nil {
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return err
 	}
 	runtimepipeline.FlushPipelinePostCommitActions(postCommit)
@@ -157,13 +161,17 @@ func (s *SQLiteRuntimeStore) runRuntimeMutationOnceLocked(ctx context.Context, f
 		return nil, err
 	}
 	postCommit := make([]func(), 0, 4)
+	rollbackActions := make([]func(), 0, 4)
 	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
 	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommit)
+	txctx = runtimepipeline.WithPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
 		_ = tx.Rollback()
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
+		runtimepipeline.FlushPipelineRollbackActions(rollbackActions)
 		return nil, err
 	}
 	return postCommit, nil
