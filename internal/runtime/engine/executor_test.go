@@ -1062,13 +1062,20 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 			DedupBy:   "payload.dimension",
 			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
 		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				TargetField: "metadata.handler_marker",
+				Value:       runtimecontracts.LiteralExpression("top-level"),
+			}},
+		},
 		FanOut: &runtimecontracts.FanOutSpec{
 			ItemsFrom: "payload.targets",
 			Emit: runtimecontracts.EmitSpec{
 				Event: "vertical.scored",
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"scores": runtimecontracts.RefExpression("entity.scores"),
-					"target": runtimecontracts.RefExpression("fan_out.item"),
+					"handler_marker": runtimecontracts.RefExpression("metadata.handler_marker"),
+					"scores":         runtimecontracts.RefExpression("entity.scores"),
+					"target":         runtimecontracts.RefExpression("fan_out.item"),
 				},
 			},
 		},
@@ -1088,6 +1095,9 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	if result.Status != OutcomeFannedOut {
 		t.Fatalf("Status = %q, want %q", result.Status, OutcomeFannedOut)
 	}
+	if got := result.StateMutation.Metadata["handler_marker"]; got != "top-level" {
+		t.Fatalf("handler_marker state mutation = %#v, want top-level", got)
+	}
 	if len(result.EmitIntents) != 1 {
 		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
 	}
@@ -1098,6 +1108,9 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	emittedScores, ok := emitted["scores"].([]any)
 	if !ok || len(emittedScores) != 1 {
 		t.Fatalf("fan_out emit payload scores = %#v", emitted["scores"])
+	}
+	if got := emitted["handler_marker"]; got != "top-level" {
+		t.Fatalf("fan_out emit handler_marker = %#v, want top-level", got)
 	}
 	if got := emitted["target"]; got != "agent-a" {
 		t.Fatalf("fan_out emit target = %#v, want agent-a", got)
