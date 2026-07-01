@@ -1054,6 +1054,56 @@ func TestExecutor_AccumulatorProjectionSkipsTimeoutBranch(t *testing.T) {
 	requireNoProjectedScores(t, result)
 }
 
+func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitFields(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, nil)
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+		},
+		FanOut: &runtimecontracts.FanOutSpec{
+			ItemsFrom: "payload.targets",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "vertical.scored",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"scores": runtimecontracts.RefExpression("entity.scores"),
+					"target": runtimecontracts.RefExpression("fan_out.item"),
+				},
+			},
+		},
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "scoring-node",
+		Event: eventtest.RootIngress("evt-1",
+			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high","targets":["agent-a"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: handler,
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	requireProjectedScore(t, result, "scores")
+	if result.Status != OutcomeFannedOut {
+		t.Fatalf("Status = %q, want %q", result.Status, OutcomeFannedOut)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
+	}
+	var emitted map[string]any
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
+		t.Fatalf("emit payload json: %v", err)
+	}
+	emittedScores, ok := emitted["scores"].([]any)
+	if !ok || len(emittedScores) != 1 {
+		t.Fatalf("fan_out emit payload scores = %#v", emitted["scores"])
+	}
+	if got := emitted["target"]; got != "agent-a" {
+		t.Fatalf("fan_out emit target = %#v, want agent-a", got)
+	}
+}
+
 func newAccumulatorProjectionTestExecutor(t *testing.T, evaluator Evaluator) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{

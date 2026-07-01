@@ -1002,6 +1002,9 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if len(items) == 0 {
 		return false, nil
 	}
+	if err := e.stepProjection(frame); err != nil {
+		return false, err
+	}
 	for _, item := range items {
 		eventType := fanOutEventType(spec)
 		if eventType == "" {
