@@ -232,7 +232,7 @@ func TestDoctorClaudeCLIPreflightReportsRetiredBackendEnv(t *testing.T) {
 	}
 }
 
-func TestDoctorClaudeCLIPreflightReportsStaleGatewayEnv(t *testing.T) {
+func TestDoctorClaudeCLIPreflightWarnsOnStaleGatewayEnv(t *testing.T) {
 	configureDoctorDockerStub(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
@@ -249,11 +249,14 @@ func TestDoctorClaudeCLIPreflightReportsStaleGatewayEnv(t *testing.T) {
 	args = append(args[:len(args)-4], "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:"+mcpPort)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
-	if code != cliExitRuntime {
-		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "gateway_prerequisite/swarm_tool_gateway_url_stale") || !strings.Contains(stdout.String(), "must target the MCP listener port "+mcpPort) {
+	if !strings.Contains(stdout.String(), "[WARNING] gateway_prerequisite/swarm_tool_gateway_url_stale") || !strings.Contains(stdout.String(), "must target the MCP listener port "+mcpPort) {
 		t.Fatalf("stale gateway env not reported:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "local serve/run derives the gateway binding from the bound MCP listener and ignores this URL") {
+		t.Fatalf("stale gateway env remediation missing binding authority:\n%s", stdout.String())
 	}
 }
 

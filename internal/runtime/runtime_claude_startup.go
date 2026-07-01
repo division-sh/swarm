@@ -19,6 +19,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -114,7 +115,7 @@ func validateSelectedBackendCredential(cfg *config.Config) error {
 }
 
 func validateClaudeStartupRequirements(cfg *config.Config, opts RuntimeOptions) error {
-	if err := llm.ValidateClaudeCLIRuntimeConfig(cfg); err != nil {
+	if err := llm.ValidateClaudeCLIRuntimeConfig(cfg, opts.ToolGatewayBinding); err != nil {
 		return err
 	}
 	if opts.WorkspaceLifecycle == nil {
@@ -122,9 +123,6 @@ func validateClaudeStartupRequirements(cfg *config.Config, opts RuntimeOptions) 
 	}
 	if !opts.EnableToolGateway {
 		return fmt.Errorf("tool gateway must be enabled for claude cli runtime")
-	}
-	if strings.TrimSpace(opts.ToolGatewayToken) == "" {
-		return fmt.Errorf("tool gateway token must be configured for claude cli runtime")
 	}
 	return nil
 }
@@ -194,7 +192,7 @@ type claudeStartupContextAwareToolSource interface {
 	ToolCapabilitiesForActorInContext(context.Context, runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
-func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
+func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Config, source semanticview.Source, binding toolgateway.Binding, startupProbe llm.StartupVisibleToolSurfaceProber, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager) error {
 	enabled, err := isClaudeCLIBackend(cfg)
 	if err != nil {
 		return err
@@ -218,13 +216,13 @@ func validateClaudeMCPToolsForManagedAgents(ctx context.Context, cfg *config.Con
 	if manager == nil {
 		return fmt.Errorf("agent manager is required for claude cli runtime")
 	}
-	gatewayURL := strings.TrimSpace(runtimeConfiguredMCPGatewayURL())
+	gatewayURL := strings.TrimSpace(binding.HostMCPURL())
 	if gatewayURL == "" {
-		return fmt.Errorf("SWARM_TOOL_GATEWAY_URL is required for claude cli runtime")
+		return fmt.Errorf("tool gateway binding host endpoint is required for claude cli runtime")
 	}
-	gatewayToken := strings.TrimSpace(runtimeConfiguredMCPGatewayToken())
+	gatewayToken := strings.TrimSpace(binding.AuthToken())
 	if gatewayToken == "" {
-		return fmt.Errorf("SWARM_TOOL_GATEWAY_TOKEN is required for claude cli runtime")
+		return fmt.Errorf("tool gateway binding token is required for claude cli runtime")
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
 	for _, agentCfg := range manager.ListAgentConfigs() {
@@ -316,14 +314,6 @@ func isClaudeCLIBackend(cfg *config.Config) (bool, error) {
 		return false, err
 	}
 	return profile.ID == llmselection.BackendClaudeCLI, nil
-}
-
-func runtimeConfiguredMCPGatewayURL() string {
-	return strings.TrimSpace(llm.RuntimeMCPGatewayURLForHostExecution())
-}
-
-func runtimeConfiguredMCPGatewayToken() string {
-	return strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
 }
 
 func expectedStartupMCPTools(ctx context.Context, agentCfg runtimeactors.AgentConfig, tools claudeStartupToolSource, sessionTools []llm.ToolDefinition) ([]string, toolcapabilities.Set, error) {

@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/url"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -51,7 +51,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	if len(allowedTools) == 0 {
 		return MCPHTTPBinding{}, false, nil
 	}
-	serverURL := normalizeMCPServerURL(gatewayURL)
+	serverURL := toolgateway.NormalizeMCPServerURL(gatewayURL)
 	if serverURL == "" {
 		return MCPHTTPBinding{}, false, nil
 	}
@@ -71,8 +71,7 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 }
 
 func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
-	gatewayURL := runtimeMCPGatewayURLForContainerExecution()
-	binding, enabled, err := BuildMCPHTTPBinding(ctx, r.cfg, r.mcpTurns, s, gatewayURL, strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")))
+	binding, enabled, err := BuildMCPHTTPBinding(ctx, r.cfg, r.mcpTurns, s, r.toolGateway.WorkspaceMCPURL(), r.toolGateway.AuthToken())
 	if err != nil || !enabled {
 		return "", "", enabled, err
 	}
@@ -129,36 +128,6 @@ func shouldUseMCPBridge() bool {
 		return false
 	}
 	return v == "1" || v == "true" || v == "yes"
-}
-
-func normalizeMCPServerURL(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	u, err := url.Parse(raw)
-	if err != nil || strings.TrimSpace(u.Scheme) == "" || strings.TrimSpace(u.Host) == "" {
-		return ""
-	}
-	path := strings.TrimSpace(u.Path)
-	switch path {
-	case "", "/":
-		u.Path = "/mcp"
-	case "/mcp":
-	default:
-		// Respect explicit path when operator already targets a specific endpoint.
-	}
-	return strings.TrimSpace(u.String())
-}
-
-func runtimeMCPGatewayURLForContainerExecution() string {
-	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"))
-	return normalizeMCPServerURL(raw)
-}
-
-func RuntimeMCPGatewayURLForHostExecution() string {
-	raw := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL"))
-	return normalizeMCPServerURL(raw)
 }
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {

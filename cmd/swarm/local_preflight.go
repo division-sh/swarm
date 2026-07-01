@@ -226,9 +226,15 @@ func (r *localPreflightReport) checkGatewayEnv(mcpListenAddr string) {
 	}
 	for _, name := range []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL"} {
 		if err := validateExistingServeGatewayURL(name, lookupEnvValue(name), addr); err != nil {
-			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_stale", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), fmt.Sprintf("unset %s or point it at the selected MCP listener port", name))
+			severity := localPreflightSeverityWarning
+			remediation := fmt.Sprintf("unset %s; local serve/run derives the gateway binding from the bound MCP listener and ignores this URL", name)
+			if r.Mode == "serve" {
+				severity = localPreflightSeverityBlocker
+				remediation = fmt.Sprintf("unset %s or point it at the selected MCP listener port; public URL-env retirement remains split", name)
+			}
+			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_stale", severity, localPreflightStatusFailed, err.Error(), remediation)
 		} else {
-			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_valid", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is empty or targets the selected MCP listener", name), "")
+			r.add(localPreflightGatewayPrerequisite, strings.ToLower(name)+"_shadowed_or_empty", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is empty or non-authoritative for local gateway binding", name), "")
 		}
 	}
 }

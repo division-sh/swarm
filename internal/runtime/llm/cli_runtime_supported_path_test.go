@@ -97,6 +97,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
+			ToolGateway: testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
 				register: func(_ context.Context, _ time.Duration, got []string) string {
 					allowedTools = append([]string(nil), got...)
