@@ -10331,6 +10331,7 @@ func TestCreateServeToolGatewayBindingPreservesExplicitGatewayToken(t *testing.T
 
 func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	stubServeWorkspaceLifecycleForTest(t)
 	mcpPort := freeDoctorTCPPort(t)
 	mcpAddr := "127.0.0.1:" + mcpPort
 	stalePort := staleGatewayTestPort(mcpPort)
@@ -10369,6 +10370,7 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	stubServeWorkspaceLifecycleForTest(t)
 	apiPortText := freeDoctorTCPPort(t)
 	apiPort, err := strconv.Atoi(apiPortText)
 	if err != nil {
@@ -10494,6 +10496,17 @@ func localPreflightReportHasFinding(report localPreflightReport, code string, se
 		}
 	}
 	return false
+}
+
+func stubServeWorkspaceLifecycleForTest(t *testing.T) {
+	t.Helper()
+	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+		return serveRuntimeWorkspaceStub{}, nil
+	}
+	t.Cleanup(func() {
+		configuredWorkspaceLifecycleForServe = oldWorkspaceLifecycle
+	})
 }
 
 func receiveToolGatewayBinding(t *testing.T, ch <-chan toolgateway.Binding, output string) toolgateway.Binding {
