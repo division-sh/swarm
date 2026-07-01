@@ -19,10 +19,23 @@ type flowInstanceDescriptorQueryer interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
+type flowInstanceRouteExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func flowInstanceRouteExecutorFromContext(ctx context.Context, db *sql.DB) flowInstanceRouteExecutor {
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		return tx
+	}
+	return db
+}
+
 func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runtimebus.FlowInstanceRouteRecord) error {
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
 	}
+	exec := flowInstanceRouteExecutorFromContext(ctx, s.DB)
 	route.Identity = runtimeflowidentity.StoredRoute(route.Identity.ScopeKey, route.Identity.InstanceID, route.Identity.InstancePath)
 	if !route.Identity.Valid() {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
@@ -33,7 +46,7 @@ func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runti
 	}
 	var materializedFrom any
 	if strings.TrimSpace(route.EventPattern) != "" && strings.TrimSpace(route.SubscriberType) != "" && strings.TrimSpace(route.SubscriberID) != "" {
-		_ = s.DB.QueryRowContext(ctx, `
+		_ = exec.QueryRowContext(ctx, `
 			SELECT rule_id
 			FROM routing_rules
 			WHERE event_pattern = $1
@@ -47,7 +60,7 @@ func (s *PostgresStore) UpsertFlowInstanceRoute(ctx context.Context, route runti
 				LIMIT 1
 			`, route.EventPattern, route.SubscriberType, route.SubscriberID, sourceFlow).Scan(&materializedFrom)
 	}
-	_, err := s.DB.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, `
 		WITH updated AS (
 			UPDATE routing_rules
 			SET source_flow = NULLIF($5,''),
@@ -95,12 +108,13 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity ru
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
 	}
+	exec := flowInstanceRouteExecutorFromContext(ctx, s.DB)
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
 	if !identity.Valid() {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
 	var status string
-	err := s.DB.QueryRowContext(ctx, `
+	err := exec.QueryRowContext(ctx, `
 		SELECT status
 		FROM flow_instances
 		WHERE instance_id = $1
@@ -114,7 +128,7 @@ func (s *PostgresStore) DeleteFlowInstanceRoute(ctx context.Context, identity ru
 	if strings.TrimSpace(status) != "terminated" {
 		return fmt.Errorf("flow instance route removal requires terminal flow_instances status for %s", identity.InstancePath)
 	}
-	if _, err := s.DB.ExecContext(ctx, `
+	if _, err := exec.ExecContext(ctx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
 			WHERE flow_instance = $1
@@ -130,11 +144,12 @@ func (s *PostgresStore) RollbackFlowInstanceRoute(ctx context.Context, identity 
 	if s == nil || s.DB == nil {
 		return fmt.Errorf("postgres store is required for flow instance routes")
 	}
+	exec := flowInstanceRouteExecutorFromContext(ctx, s.DB)
 	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
 	if !identity.Valid() {
 		return fmt.Errorf("scope_key, instance_id, and instance_path are required")
 	}
-	if _, err := s.DB.ExecContext(ctx, `
+	if _, err := exec.ExecContext(ctx, `
 			UPDATE routing_rules
 			SET status = 'inactive'
 			WHERE flow_instance = $1
@@ -150,7 +165,11 @@ func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]runtimefl
 	if s == nil || s.DB == nil {
 		return nil, fmt.Errorf("postgres store is required for flow instance routes")
 	}
-	rows, err := s.DB.QueryContext(ctx, `
+	q := flowInstanceDescriptorQueryer(s.DB)
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != nil {
+		q = tx
+	}
+	rows, err := q.QueryContext(ctx, `
 			SELECT
 				COALESCE(NULLIF(source_flow, ''), ''),
 				flow_instance
