@@ -663,8 +663,8 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	}
 }
 
-func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t *testing.T) {
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+func accumulatorProjectionTestSource() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"DimensionScore": {
@@ -748,6 +748,10 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 			},
 		},
 	})
+}
+
+func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t *testing.T) {
+	source := accumulatorProjectionTestSource()
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:     source,
 		StateRepo:  stubStateRepo{},
@@ -828,6 +832,283 @@ func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t 
 	emittedScores, ok := emitted["scores"].([]any)
 	if !ok || len(emittedScores) != 1 {
 		t.Fatalf("emit payload scores = %#v", emitted["scores"])
+	}
+}
+
+func TestExecutor_AccumulatorProjectionMaterializesWithoutOnComplete(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, nil)
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+		},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "vertical.scored",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"scores": runtimecontracts.RefExpression("entity.scores"),
+			},
+		},
+	}
+	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
+	score := requireProjectedScore(t, result, "scores")
+	if got := score["dimension"]; got != "market" {
+		t.Fatalf("projected dimension = %#v", got)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
+	}
+	var emitted map[string]any
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
+		t.Fatalf("emit payload json: %v", err)
+	}
+	emittedScores, ok := emitted["scores"].([]any)
+	if !ok || len(emittedScores) != 1 {
+		t.Fatalf("emit payload scores = %#v", emitted["scores"])
+	}
+}
+
+func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, nil)
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+		},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+			Writes: []runtimecontracts.WorkflowDataWrite{{
+				TargetField: "metadata.handler_marker",
+				Value:       runtimecontracts.LiteralExpression("top-level"),
+			}},
+		},
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			ID:        "matched",
+			Condition: "else",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					TargetField: "metadata.rule_marker",
+					Value:       runtimecontracts.LiteralExpression("rule"),
+				}},
+			},
+			Emit: runtimecontracts.EmitSpec{
+				Event: "vertical.scored",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"scores":         runtimecontracts.RefExpression("entity.scores"),
+					"handler_marker": runtimecontracts.RefExpression("metadata.handler_marker"),
+					"rule_marker":    runtimecontracts.RefExpression("metadata.rule_marker"),
+				},
+			},
+		}},
+	}
+	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
+	requireProjectedScore(t, result, "scores")
+	if got := result.RuleID; got != "matched" {
+		t.Fatalf("RuleID = %q, want matched", got)
+	}
+	if got := result.StateMutation.Metadata["handler_marker"]; got != "top-level" {
+		t.Fatalf("handler_marker = %#v, want top-level", got)
+	}
+	if got := result.StateMutation.Metadata["rule_marker"]; got != "rule" {
+		t.Fatalf("rule_marker = %#v, want rule", got)
+	}
+	if len(result.EmitIntents) != 1 {
+		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
+	}
+	var emitted map[string]any
+	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
+		t.Fatalf("emit payload json: %v", err)
+	}
+	if emittedScores, ok := emitted["scores"].([]any); !ok || len(emittedScores) != 1 {
+		t.Fatalf("emit payload scores = %#v", emitted["scores"])
+	}
+	if got := emitted["handler_marker"]; got != "top-level" {
+		t.Fatalf("emit handler_marker = %#v, want top-level", got)
+	}
+	if got := emitted["rule_marker"]; got != "rule" {
+		t.Fatalf("emit rule_marker = %#v, want rule", got)
+	}
+}
+
+func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{bools: map[string]bool{
+		"payload.score > 100": false,
+	}})
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+		},
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			ID:        "too-high",
+			Condition: "payload.score > 100",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					TargetField: "metadata.rule_marker",
+					Value:       runtimecontracts.LiteralExpression("unexpected"),
+				}},
+			},
+		}},
+	}
+	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
+	requireProjectedScore(t, result, "scores")
+	if got := strings.TrimSpace(result.RuleID); got != "" {
+		t.Fatalf("RuleID = %q, want empty when rules do not match", got)
+	}
+	if _, ok := result.StateMutation.Metadata["rule_marker"]; ok {
+		t.Fatalf("rule_marker unexpectedly written: %#v", result.StateMutation.Metadata)
+	}
+}
+
+func TestExecutor_AccumulatorProjectionSkipsDeclaredOnCompleteNoMatch(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{bools: map[string]bool{
+		"payload.score > 100": false,
+	}})
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "too-high",
+				Condition: "payload.score > 100",
+				Emit:      runtimecontracts.EmitSpec{Event: "vertical.scored"},
+			}},
+		},
+	}
+	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
+	requireNoProjectedScores(t, result)
+	if got := strings.TrimSpace(result.RuleID); got != "" {
+		t.Fatalf("RuleID = %q, want empty when on_complete does not match", got)
+	}
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("EmitIntents count = %d, want 0", len(result.EmitIntents))
+	}
+}
+
+func TestExecutor_AccumulatorProjectionSkipsIncompleteAccumulation(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, nil)
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:         "dimensions_received",
+			ExpectedFrom: "entity.expected_dimensions",
+			ExpectedPath: runtimecontracts.RefExpression("entity.expected_dimensions").RefPath,
+			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+			DedupBy:      "payload.dimension",
+			DedupPath:    runtimecontracts.RefExpression("payload.dimension").RefPath,
+		},
+	}
+	state := testStateSnapshot("pending", map[string]any{"expected_dimensions": []any{"market", "risk"}}, nil, map[string]map[string]any{})
+	result := executeAccumulatorProjectionTestEvent(t, exec, handler, state)
+	if result.Status != OutcomeWaiting {
+		t.Fatalf("Status = %q, want %q", result.Status, OutcomeWaiting)
+	}
+	requireNoProjectedScores(t, result)
+}
+
+func TestExecutor_AccumulatorProjectionSkipsTimeoutBranch(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, nil)
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:       "dimensions_received",
+			Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+			OnTimeout: &runtimecontracts.HandlerRuleEntry{
+				ID: "timeout",
+				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+					Writes: []runtimecontracts.WorkflowDataWrite{{
+						TargetField: "metadata.timeout_seen",
+						Value:       runtimecontracts.LiteralExpression(true),
+					}},
+				},
+			},
+		},
+	}
+	state := testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{})
+	storeAccumulatorForBucket(&state, accumulatorBucketRef("scoring-node", "score.dimension_complete"), &Accumulator{
+		ExpectedCount: 2,
+		Received:      map[string]bool{"market": true},
+		Items: []map[string]any{{
+			"dimension":  "market",
+			"tier":       2,
+			"score":      87,
+			"evidence":   "strong",
+			"confidence": "high",
+		}},
+	})
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "scoring-node",
+		Event: eventtest.RootIngress("timeout-1",
+			"accumulate.timeout", "", "", json.RawMessage(`{"timer_handle":{"kind":"accumulation_timeout","bucket":{"node_id":"scoring-node","event_type":"score.dimension_complete"}}}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		HandlerEventKey: "score.dimension_complete",
+		Handler:         handler,
+		State:           state,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.StateMutation.Metadata["timeout_seen"]; got != true {
+		t.Fatalf("timeout_seen = %#v, want true", got)
+	}
+	requireNoProjectedScores(t, result)
+}
+
+func newAccumulatorProjectionTestExecutor(t *testing.T, evaluator Evaluator) *Executor {
+	t.Helper()
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     accumulatorProjectionTestSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, evaluator)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	return exec
+}
+
+func executeAccumulatorProjectionTestEvent(t *testing.T, exec *Executor, handler runtimecontracts.SystemNodeEventHandler, state StateSnapshot) ExecutionResult {
+	t.Helper()
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "scoring-node",
+		Event: eventtest.RootIngress("evt-1",
+			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: handler,
+		State:   state,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	return result
+}
+
+func requireProjectedScore(t *testing.T, result ExecutionResult, field string) map[string]any {
+	t.Helper()
+	scores, ok := result.StateMutation.Metadata[field].([]any)
+	if !ok || len(scores) != 1 {
+		t.Fatalf("projected %s = %#v", field, result.StateMutation.Metadata[field])
+	}
+	score, ok := scores[0].(map[string]any)
+	if !ok {
+		t.Fatalf("projected %s item = %#v", field, scores[0])
+	}
+	if _, exists := score["event_id"]; exists {
+		t.Fatalf("projected score leaked accumulator metadata: %#v", score)
+	}
+	if _, exists := score["vertical_id"]; exists {
+		t.Fatalf("projected score leaked payload extra field: %#v", score)
+	}
+	return score
+}
+
+func requireNoProjectedScores(t *testing.T, result ExecutionResult) {
+	t.Helper()
+	if _, exists := result.StateMutation.Metadata["scores"]; exists {
+		t.Fatalf("projected scores unexpectedly present: %#v", result.StateMutation.Metadata["scores"])
 	}
 }
 
