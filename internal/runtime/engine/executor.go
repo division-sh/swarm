@@ -78,17 +78,16 @@ type Executor struct {
 }
 
 type executionFrame struct {
-	tx                            Tx
-	req                           ExecutionRequest
-	base                          BaseContext
-	state                         ExecutionState
-	result                        ExecutionResult
-	rule                          *runtimecontracts.HandlerRuleEntry
-	ruleSource                    handlerRuleSource
-	payload                       map[string]any
-	topLevelDataAccumulation      runtimecontracts.WorkflowDataAccumulation
-	topLevelDataWritesApplied     bool
-	accumulatorProjectionEligible bool
+	tx                        Tx
+	req                       ExecutionRequest
+	base                      BaseContext
+	state                     ExecutionState
+	result                    ExecutionResult
+	rule                      *runtimecontracts.HandlerRuleEntry
+	ruleSource                handlerRuleSource
+	payload                   map[string]any
+	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
+	topLevelDataWritesApplied bool
 }
 
 type handlerRuleSource string
@@ -1095,11 +1094,6 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	if rule != nil {
 		frame.rule = rule
 		frame.ruleSource = ruleSource
-		if frame.result.AccumulatorCompletionDiagnostics.Relevant &&
-			frame.result.AccumulatorCompletionDiagnostics.CompletionReached &&
-			frame.req.Handler.Accumulate != nil {
-			frame.accumulatorProjectionEligible = true
-		}
 		e.applyRule(frame, rule)
 		if rule.FanOut != nil {
 			if _, err := e.stepFanOut(frame); err != nil {
@@ -1207,7 +1201,7 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 }
 
 func (e *Executor) stepProjection(frame *executionFrame) error {
-	if !frame.accumulatorProjectionEligible {
+	if !accumulatorProjectionEligible(frame) {
 		return nil
 	}
 	handlerEventType := handlerAccumulatorEventType(frame.req)
@@ -1242,6 +1236,25 @@ func activeAccumulatorName(handler runtimecontracts.SystemNodeEventHandler) stri
 		return ""
 	}
 	return strings.TrimSpace(handler.Accumulate.Into)
+}
+
+func accumulatorProjectionEligible(frame *executionFrame) bool {
+	if frame == nil || frame.req.Handler.Accumulate == nil {
+		return false
+	}
+	diagnostics := frame.result.AccumulatorCompletionDiagnostics
+	if !diagnostics.Relevant || !diagnostics.CompletionReached {
+		return false
+	}
+	if isAccumulationTimeoutEvent(frame.req.Event.Type()) || frame.ruleSource == handlerRuleSourceAccumulateOnTimeout {
+		return false
+	}
+	onCompleteDeclared := len(frame.req.Handler.OnComplete) > 0 || len(frame.req.Handler.Accumulate.OnComplete) > 0
+	if !onCompleteDeclared {
+		return true
+	}
+	return frame.rule != nil &&
+		(frame.ruleSource == handlerRuleSourceOnComplete || frame.ruleSource == handlerRuleSourceAccumulateOnComplete)
 }
 
 func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {

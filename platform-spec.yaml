@@ -1331,7 +1331,7 @@ handler_specification:
       \           └→ emit-site selection (handler emit OR active branch/rule/timeout/fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
-      \                         └→ projection (materialize_from, if accumulator on_complete matched)\n                  \
+      \                         └→ projection (materialize_from, if accumulator projection eligible)\n                  \
       \                                └→ emit.fields\n                                                       └→ emit.event\n  \
       \                                                          └→ action\n                                            \
       \                     └→ clear (optional — reset accumulator/state buckets)\n    "
@@ -1544,12 +1544,15 @@ handler_specification:
       concept: Track multiple events arriving for the same entity. Fire on_complete when completion condition is met. Expected
         count read from entity state (written by initiating handler).
       projection_hook: |
-        When a handler accumulator completes and an on_complete branch matches
-        successfully, any same-flow entity field declaring `materialize_from`
-        for this handler's `accumulate.into` buffer is written as a full
-        replacement list after data_accumulation and before emit.fields. No
-        projection occurs for incomplete accumulation, timeout branches, or
-        completion with no matching on_complete rule.
+        When a handler accumulator reaches successful completion, any same-flow
+        entity field declaring `materialize_from` for this handler's
+        `accumulate.into` buffer is written as a full replacement list after
+        data_accumulation and before emit.fields if either no `on_complete`
+        block is declared or an `on_complete` branch matches successfully.
+        `rules` remain branch-selection/data-write/emit/action semantics and do
+        not guard accumulator projection eligibility. No projection occurs for
+        incomplete accumulation, timeout branches, or declared `on_complete`
+        completion with no matching branch.
     compute:
       field: compute
       type: object
@@ -10352,14 +10355,17 @@ static_analyzer:
       also declares `_unused_reason`, or any other authored writer targets the
       same field.
     runtime_rule: |
-      On a successful matching accumulator on_complete branch, runtime writes
-      the projection as a full replacement before emit.fields and validates the
-      result through entity named-type normalization. Failure rolls back the
-      whole handler transaction. If a verify-clean declaration exists for the
-      active handler accumulator but runtime resolves zero projection bindings,
-      execution fails closed as a runtime invariant violation rather than
-      silently skipping the projection. Projection does not run for timeout,
-      incomplete accumulation, or no-match completion.
+      On successful accumulator completion, runtime writes the projection as a
+      full replacement before emit.fields when no `on_complete` block is
+      declared or when a declared `on_complete` branch matches successfully.
+      Handler `rules` do not guard projection eligibility. The projected result
+      is validated through entity named-type normalization. Failure rolls back
+      the whole handler transaction. If a verify-clean declaration exists for
+      the active handler accumulator but runtime resolves zero projection
+      bindings, execution fails closed as a runtime invariant violation rather
+      than silently skipping the projection. Projection does not run for
+      timeout, incomplete accumulation, or declared `on_complete` no-match
+      completion.
   slice_6c_accumulator_static_safety:
     ids:
     - accumulate_all_bounded_escape
