@@ -202,7 +202,7 @@ func (noopLLMRuntime) ContinueSession(context.Context, *llm.Session, llm.Message
 	return &llm.Response{}, nil
 }
 
-func TestEnsureRecurringWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *testing.T) {
+func TestEnsureBootWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-timer-recurring")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
@@ -211,18 +211,18 @@ func TestEnsureRecurringWorkflowSchedulesSkipsLifecycleScopedRecurringTimers(t *
 		t.Fatalf("load bundle: %v", err)
 	}
 	store := &recordingRuntimeScheduleStore{}
-	err = ensureRecurringWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	err = ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
-		t.Fatalf("ensureRecurringWorkflowSchedules: %v", err)
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
 	}
 	if len(store.schedules) != 0 {
 		t.Fatalf("startup recurring schedules = %#v, want none for start_on recurring timers", store.schedules)
 	}
 }
 
-func TestEnsureRecurringWorkflowSchedulesRegistersBootRecurringTimers(t *testing.T) {
+func TestEnsureBootWorkflowSchedulesRegistersGlobalBootRecurringTimers(t *testing.T) {
 	store := &recordingRuntimeScheduleStore{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -236,17 +236,135 @@ func TestEnsureRecurringWorkflowSchedulesRegistersBootRecurringTimers(t *testing
 			}},
 		},
 	}
-	err := ensureRecurringWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+	err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
 		source: semanticview.Wrap(bundle),
 	})
 	if err != nil {
-		t.Fatalf("ensureRecurringWorkflowSchedules: %v", err)
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
 	}
 	if len(store.schedules) != 1 {
 		t.Fatalf("startup recurring schedules = %#v, want 1 boot schedule", store.schedules)
 	}
-	if got := store.schedules[0].EventType; got != "timer.daily_report" {
+	sc := store.schedules[0]
+	if got := sc.EventType; got != "timer.daily_report" {
 		t.Fatalf("scheduled event = %q, want timer.daily_report", got)
+	}
+	if got := sc.Mode; got != "cron" {
+		t.Fatalf("schedule mode = %q, want cron", got)
+	}
+	if got := sc.Cron; got != "@every 24h0m0s" {
+		t.Fatalf("schedule cron = %q, want @every 24h0m0s", got)
+	}
+	if !sc.At.IsZero() {
+		t.Fatalf("recurring boot schedule At = %v, want zero", sc.At)
+	}
+	if sc.RunID != "" || sc.EntityID != "" || sc.FlowInstance != "" {
+		t.Fatalf("boot recurring schedule scope = run:%q entity:%q flow:%q, want global", sc.RunID, sc.EntityID, sc.FlowInstance)
+	}
+	if got := sc.TaskID; got != "daily_report" {
+		t.Fatalf("schedule task_id = %q, want daily_report", got)
+	}
+}
+
+func TestEnsureBootWorkflowSchedulesRegistersGlobalBootOneShotTimers(t *testing.T) {
+	store := &recordingRuntimeScheduleStore{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:      "boot_once",
+				Owner:   "runtime",
+				Event:   "timer.boot_once",
+				Delay:   "5s",
+				StartOn: "boot",
+			}},
+		},
+	}
+	before := time.Now().UTC()
+	err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("startup boot schedules = %#v, want 1 one-shot boot schedule", store.schedules)
+	}
+	sc := store.schedules[0]
+	if got := sc.Mode; got != "once" {
+		t.Fatalf("schedule mode = %q, want once", got)
+	}
+	if sc.At.Before(before.Add(5*time.Second)) || sc.At.After(time.Now().UTC().Add(6*time.Second)) {
+		t.Fatalf("schedule At = %v, want roughly 5s after startup", sc.At)
+	}
+	if sc.RunID != "" || sc.EntityID != "" || sc.FlowInstance != "" {
+		t.Fatalf("boot one-shot schedule scope = run:%q entity:%q flow:%q, want global", sc.RunID, sc.EntityID, sc.FlowInstance)
+	}
+	if got := sc.TaskID; got != "boot_once" {
+		t.Fatalf("schedule task_id = %q, want boot_once", got)
+	}
+}
+
+func TestEnsureBootWorkflowSchedulesRendersPolicyDelayAtStartup(t *testing.T) {
+	store := &recordingRuntimeScheduleStore{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"boot_delay": {Value: "7s"},
+		}},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:      "policy_boot",
+				Owner:   "runtime",
+				Event:   "timer.policy_boot",
+				Delay:   "{{boot_delay}}",
+				StartOn: "boot",
+			}},
+		},
+	}
+	before := time.Now().UTC()
+	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	}); err != nil {
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("startup boot schedules = %#v, want 1 policy-backed boot schedule", store.schedules)
+	}
+	if got := store.schedules[0].At; got.Before(before.Add(7*time.Second)) || got.After(time.Now().UTC().Add(8*time.Second)) {
+		t.Fatalf("policy-backed boot schedule At = %v, want roughly 7s after startup", got)
+	}
+}
+
+func TestEnsureBootWorkflowSchedulesSkipsUnsupportedBootCancelTimers(t *testing.T) {
+	store := &recordingRuntimeScheduleStore{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{
+				{
+					ID:       "boot_cancel_state",
+					Owner:    "runtime",
+					Event:    "timer.boot_cancel_state",
+					Delay:    "5s",
+					StartOn:  "boot",
+					CancelOn: "state:done",
+				},
+				{
+					ID:       "boot_cancel_event",
+					Owner:    "runtime",
+					Event:    "timer.boot_cancel_event",
+					Delay:    "5s",
+					StartOn:  "boot",
+					CancelOn: "event:cancel.boot",
+				},
+			},
+		},
+	}
+	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	}); err != nil {
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 0 {
+		t.Fatalf("unsupported boot-cancel schedules = %#v, want none", store.schedules)
 	}
 }
 

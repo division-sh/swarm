@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -807,9 +808,9 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
 			}
 		}
-		if err := ensureRecurringWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
+		if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
 			if rt.Logger != nil {
-				handleRuntimeLogPersistenceError("scheduler", "ensure_recurring_failed", rt.Logger.Error(ctx, "scheduler", "ensure_recurring_failed", nil, err))
+				handleRuntimeLogPersistenceError("scheduler", "ensure_boot_timers_failed", rt.Logger.Error(ctx, "scheduler", "ensure_boot_timers_failed", nil, err))
 			}
 		}
 		if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ScheduleDropCount > 0 {
@@ -1258,7 +1259,9 @@ func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
 	return nil
 }
 
-func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
+var bootWorkflowTimerPolicyPlaceholder = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}`)
+
+func ensureBootWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
 	if store == nil || workflow == nil {
 		return nil
 	}
@@ -1266,34 +1269,11 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 	if source == nil {
 		return nil
 	}
+	now := time.Now().UTC()
 	for _, timer := range source.WorkflowTimers() {
-		if !timer.Recurring {
-			continue
-		}
-		startTrigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
-		if err != nil || !startTrigger.IsBoot() {
-			continue
-		}
-		cancelTrigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn)
-		if err != nil || cancelTrigger.Valid() {
-			continue
-		}
-		owner := strings.TrimSpace(timer.Owner)
-		eventType := strings.TrimSpace(timer.Event)
-		if owner == "" || eventType == "" {
-			continue
-		}
-		cron, ok := recurringWorkflowTimerSpec(timer)
+		sc, ok := bootWorkflowTimerSchedule(source, timer, now)
 		if !ok {
 			continue
-		}
-		sc := runtimepipeline.Schedule{
-			RunID:     runtimecorrelation.RunIDFromContext(ctx),
-			AgentID:   owner,
-			EventType: eventType,
-			Mode:      "cron",
-			Cron:      cron,
-			Payload:   recurringWorkflowTimerPayload(timer),
 		}
 		if err := store.UpsertSchedule(ctx, sc); err != nil {
 			return err
@@ -1303,6 +1283,41 @@ func ensureRecurringWorkflowSchedules(ctx context.Context, store runtimepipeline
 		}
 	}
 	return nil
+}
+
+func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, now time.Time) (runtimepipeline.Schedule, bool) {
+	startTrigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
+	if err != nil || !startTrigger.IsBoot() {
+		return runtimepipeline.Schedule{}, false
+	}
+	cancelTrigger, err := timeridentity.ParseCancelTrigger(timer.CancelOn)
+	if err != nil || cancelTrigger.Valid() {
+		return runtimepipeline.Schedule{}, false
+	}
+	owner := strings.TrimSpace(timer.Owner)
+	eventType := strings.TrimSpace(timer.Event)
+	if owner == "" || eventType == "" {
+		return runtimepipeline.Schedule{}, false
+	}
+	interval := bootWorkflowTimerDuration(source, timer)
+	if interval <= 0 {
+		return runtimepipeline.Schedule{}, false
+	}
+	handle := timeridentity.WorkflowTimerHandle(timer.ID)
+	sc := runtimepipeline.Schedule{
+		AgentID:   owner,
+		EventType: eventType,
+		Mode:      "once",
+		At:        now.Add(interval),
+		TaskID:    handle.TaskID(),
+		Payload:   workflowTimerPayload(timer),
+	}
+	if timer.Recurring {
+		sc.Mode = "cron"
+		sc.Cron = "@every " + interval.String()
+		sc.At = time.Time{}
+	}
+	return sc, true
 }
 
 func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
@@ -1356,7 +1371,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 				EntityID:     entityID,
 				FlowInstance: strings.TrimSpace(instance.StorageRef),
 				TaskID:       timeridentity.WorkflowTimerHandle(timerID).TaskID(),
-				Payload:      recurringWorkflowTimerPayload(timer),
+				Payload:      workflowTimerPayload(timer),
 			}
 			if err := store.UpsertSchedule(ctx, sc); err != nil {
 				return err
@@ -1371,9 +1386,9 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 	return nil
 }
 
-func recurringWorkflowTimerSpec(timer runtimecontracts.WorkflowTimerContract) (string, bool) {
+func bootWorkflowTimerDuration(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) time.Duration {
 	var interval time.Duration
-	if delay := strings.TrimSpace(timer.Delay); delay != "" && !strings.Contains(delay, "{") {
+	if delay := bootWorkflowTimerRenderedDelay(source, timer, timer.Delay); delay != "" && !strings.Contains(delay, "{") {
 		if parsed, err := time.ParseDuration(delay); err == nil && parsed > 0 {
 			interval += parsed
 		}
@@ -1382,13 +1397,29 @@ func recurringWorkflowTimerSpec(timer runtimecontracts.WorkflowTimerContract) (s
 	interval += time.Duration(timer.DelayMinutes) * time.Minute
 	interval += time.Duration(timer.DelayHours) * time.Hour
 	interval += time.Duration(timer.DelayDays) * 24 * time.Hour
-	if interval <= 0 {
-		return "", false
-	}
-	return "@every " + interval.String(), true
+	return interval
 }
 
-func recurringWorkflowTimerPayload(timer runtimecontracts.WorkflowTimerContract) []byte {
+func bootWorkflowTimerRenderedDelay(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, delay string) string {
+	delay = strings.TrimSpace(delay)
+	if delay == "" || !strings.Contains(delay, "{{") {
+		return delay
+	}
+	flowID := strings.TrimSpace(timer.FlowID)
+	return bootWorkflowTimerPolicyPlaceholder.ReplaceAllStringFunc(delay, func(token string) string {
+		match := bootWorkflowTimerPolicyPlaceholder.FindStringSubmatch(token)
+		if len(match) != 2 {
+			return token
+		}
+		value, ok := semanticview.PolicyValueForFlow(source, flowID, match[1])
+		if !ok || value.Value == nil {
+			return token
+		}
+		return fmt.Sprint(value.Value)
+	})
+}
+
+func workflowTimerPayload(timer runtimecontracts.WorkflowTimerContract) []byte {
 	handle := timeridentity.WorkflowTimerHandle(timer.ID)
 	if !handle.Valid() {
 		return mustJSON(map[string]any{})
