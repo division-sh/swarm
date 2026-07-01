@@ -10599,14 +10599,44 @@ func TestCreateServeToolGatewayBindingIgnoresStaleLocalURLEnv(t *testing.T) {
 }
 
 func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		env   string
+		value string
+	}{
+		{name: "host-url", env: "SWARM_TOOL_GATEWAY_URL", value: "http://127.0.0.1:" + freeDoctorTCPPort(t)},
+		{name: "container-url", env: "SWARM_TOOL_GATEWAY_CONTAINER_URL", value: "http://host.docker.internal:" + freeDoctorTCPPort(t)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+			t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+			t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+			t.Setenv(tt.env, tt.value)
+
+			assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, tt.env, serveOptions{
+				ConfigPath:         writeDoctorClaudeConfig(t),
+				Backend:            "claude_cli",
+				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				DataSource:         t.TempDir(),
+				PlatformSpecPath:   defaultPlatformSpecPath,
+				StoreMode:          "not-a-store",
+				APIListenAddr:      "127.0.0.1:0",
+				MCPListenAddr:      "127.0.0.1:0",
+				SelfCheck:          true,
+				RequireBundleMatch: false,
+			})
+		})
+	}
+}
+
+func TestRunServeRuntimeBundleHashRetiredGatewayURLEnvFailsBeforeStartupSideEffects(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	mcpPort := freeDoctorTCPPort(t)
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+mcpPort)
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+mcpPort)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+freeDoctorTCPPort(t))
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	var out lockedBuffer
-	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", serveOptions{
 		ConfigPath:         writeDoctorClaudeConfig(t),
 		Backend:            "claude_cli",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
@@ -10614,28 +10644,59 @@ func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testin
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "not-a-store",
 		APIListenAddr:      "127.0.0.1:0",
-		MCPListenAddr:      "127.0.0.1:" + mcpPort,
+		MCPListenAddr:      "127.0.0.1:0",
 		SelfCheck:          true,
 		RequireBundleMatch: false,
-		Verbose:            true,
-		Output:             &out,
+		BundleHash:         "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	})
+}
+
+func TestRunServeRuntimeNonClaudeRetiredGatewayURLEnvFailsBeforeStartupSideEffects(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+freeDoctorTCPPort(t))
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_CONTAINER_URL", serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		Backend:            "anthropic",
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		DataSource:         t.TempDir(),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "not-a-store",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+	})
+}
+
+func assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t *testing.T, envName string, opts serveOptions) {
+	t.Helper()
+	var out lockedBuffer
+	opts.Verbose = true
+	opts.Output = &out
+	code := runServeRuntime(context.Background(), repoRoot(), opts)
 	if code != cliExitRuntime {
 		t.Fatalf("runServeRuntime code = %d, want %d\noutput:\n%s", code, cliExitRuntime, out.String())
 	}
 	for _, want := range []string{
-		"local_preflight",
-		"swarm_tool_gateway_url_retired",
-		"swarm_tool_gateway_container_url_retired",
+		"config_load",
+		"serve_admission",
+		envName,
+		"retired",
+		"unset " + envName,
+		"ToolGatewayBinding",
 		"non-dev serve rejects retired gateway URL env",
-		"ToolGatewayBinding owns endpoint configuration",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve output missing %q:\n%s", want, out.String())
 		}
 	}
-	if strings.Contains(out.String(), "not-a-store") || strings.Contains(out.String(), "db_connection") || strings.Contains(out.String(), "ready") {
-		t.Fatalf("serve reached later startup after retired gateway URL env failure:\n%s", out.String())
+	for _, notWant := range []string{"local_preflight", "not-a-store", "db_connection", "bundle_load", "http_listener_bind", "ready"} {
+		if strings.Contains(out.String(), notWant) {
+			t.Fatalf("serve reached %q after retired gateway URL env failure:\n%s", notWant, out.String())
+		}
 	}
 }
 

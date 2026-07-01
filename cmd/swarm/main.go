@@ -774,6 +774,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	cfg := cfgResult.Config
 	reporter.emit(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
+	if !opts.Dev && !opts.LocalRun {
+		if err := validateServeGatewayURLEnvForNonDev(); err != nil {
+			reporter.emit(2, "serve_admission", "FAILED", err.Error())
+			log.Printf("validate non-dev mcp gateway env: %v", err)
+			return 3
+		}
+	}
 	mountSources, err := resolveWorkspaceMountSources(repo, opts.DataSource, cfg)
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
@@ -937,15 +944,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
 		log.Printf("configure mcp gateway binding: %v", err)
 		return 3
-	}
-	if !opts.Dev && !opts.LocalRun {
-		if err := validateServeGatewayURLEnvForNonDev(); err != nil {
-			_ = mcpListener.Close()
-			_ = apiListener.Close()
-			reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
-			log.Printf("validate non-dev mcp gateway env: %v", err)
-			return 3
-		}
 	}
 
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
@@ -3196,7 +3194,7 @@ func validateRetiredToolGatewayURLEnv(name, raw string) error {
 func validateServeGatewayURLEnvForNonDev() error {
 	for _, name := range retiredToolGatewayURLEnvNames {
 		if err := validateRetiredToolGatewayURLEnv(name, os.Getenv(name)); err != nil {
-			return err
+			return fmt.Errorf("non-dev serve rejects retired gateway URL env: %w", err)
 		}
 	}
 	return nil
