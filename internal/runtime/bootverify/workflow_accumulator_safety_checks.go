@@ -253,5 +253,11 @@ func accumulatorEventMatches(source interface {
 	if canonicalEvent != "" && canonicalCandidate == canonicalEvent {
 		return true
 	}
-	return source.FlowEventMatches(flowID, candidate, canonicalEvent)
+	if source.FlowEventMatches(flowID, eventType, candidate) {
+		return true
+	}
+	if canonicalCandidate != "" && canonicalCandidate != candidate {
+		return source.FlowEventMatches(flowID, eventType, canonicalCandidate)
+	}
+	return false
 }
