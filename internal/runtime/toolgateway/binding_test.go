@@ -1,6 +1,9 @@
 package toolgateway
 
-import "testing"
+import (
+	"encoding/base64"
+	"testing"
+)
 
 func TestBindingNormalizesHostAndWorkspaceMCPURLs(t *testing.T) {
 	binding := Binding{
@@ -29,5 +32,18 @@ func TestBindingValidateRequiresWorkspaceEndpoint(t *testing.T) {
 
 	if err := binding.Validate(); err == nil {
 		t.Fatal("expected missing workspace endpoint to fail validation")
+	}
+}
+
+func TestGenerateAuthTokenReturnsURLSafeToken(t *testing.T) {
+	token, err := GenerateAuthToken()
+	if err != nil {
+		t.Fatalf("GenerateAuthToken: %v", err)
+	}
+	if got, want := len(token), base64.RawURLEncoding.EncodedLen(AuthTokenBytes); got != want {
+		t.Fatalf("token length = %d, want %d", got, want)
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(token); err != nil {
+		t.Fatalf("token is not raw URL-safe base64: %v", err)
 	}
 }

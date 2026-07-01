@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,8 +22,10 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -527,6 +530,49 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	}
 	if typedRuntimeDiagnostics == 0 {
 		t.Fatalf("typed runtime diagnostics parented to fork event = %d, want > 0", typedRuntimeDiagnostics)
+	}
+}
+
+func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *testing.T) {
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:9998")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:9998")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
+	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, nil)
+	if err != nil {
+		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	defer cleanup()
+	if binding.HostMCPURL() == "" || binding.WorkspaceMCPURL() == "" {
+		t.Fatalf("binding endpoints were not populated: %#v", binding)
+	}
+	if binding.AuthToken() == "" {
+		t.Fatalf("binding token was not generated: %#v", binding)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != strings.TrimSuffix(binding.HostEndpoint, "/") {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want selected-fork host endpoint %q", got, binding.HostEndpoint)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); got != "" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN = %q, want generated binding token to remain typed-only", got)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, binding.HostMCPURL(), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+binding.AuthToken())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post selected-fork gateway initialize: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("selected-fork gateway status = %d, want 200", resp.StatusCode)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -251,21 +252,6 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if credentials == nil {
 		credentials = runtimecredentials.NewEnvStore()
 	}
-	modelRuntime := options.LLMRuntime
-	if modelRuntime == nil {
-		modelRuntime, err = runtimellm.RuntimeFactory{
-			Cfg:           options.Config,
-			Sessions:      options.SessionRegistry,
-			Turns:         options.TurnStore,
-			Conversations: options.ConversationStore,
-			Workspaces:    options.Workspace,
-			Events:        bus,
-			MCPTurns:      mcpTurns,
-		}.Build()
-		if err != nil {
-			return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime: %w", err)
-		}
-	}
 	var managerRef runtimetools.Manager
 	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
 		Config:            options.Config,
@@ -282,7 +268,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			return managerRef
 		},
 	}, options.ScheduleStore)
-	cleanup, err := startSelectedContractAgentRuntimeGateway(exec, emitRegistry, mcpTurns, func(agentID string) (runtimeactors.AgentConfig, bool) {
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, emitRegistry, mcpTurns, func(agentID string) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false
 		}
@@ -290,6 +276,25 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	})
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("start selected-fork tool gateway: %w", err)
+	}
+	modelRuntime := options.LLMRuntime
+	if modelRuntime == nil {
+		modelRuntime, err = runtimellm.RuntimeFactory{
+			Cfg:           options.Config,
+			Sessions:      options.SessionRegistry,
+			Turns:         options.TurnStore,
+			Conversations: options.ConversationStore,
+			Workspaces:    options.Workspace,
+			Events:        bus,
+			MCPTurns:      mcpTurns,
+			ToolGateway:   binding,
+		}.Build()
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime: %w", err)
+		}
 	}
 	factory := runtimeagents.NewLLMAgentFactory(modelRuntime, exec, exec.ToolDefinitions(), runtimeagents.LLMAgentOptions{
 		PromptResolver:    promptResolver,
@@ -306,9 +311,9 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	}, nil
 }
 
-func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitRegistry *runtimetools.EmitRegistry, mcpTurns *runtimemcp.TurnContextRegistry, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) (func(), error) {
+func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitRegistry *runtimetools.EmitRegistry, mcpTurns *runtimemcp.TurnContextRegistry, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool)) (toolgateway.Binding, func(), error) {
 	if exec == nil {
-		return nil, nil
+		return toolgateway.Binding{}, nil, nil
 	}
 	selectedContractAgentRuntimeGatewayEnvMu.Lock()
 	unlock := true
@@ -320,24 +325,44 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 
 	ln, err := net.Listen("tcp", "0.0.0.0:0")
 	if err != nil {
-		return nil, err
+		return toolgateway.Binding{}, nil, err
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	hostURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	containerURL := fmt.Sprintf("http://host.docker.internal:%d", port)
+	gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
+	if gatewayToken == "" {
+		gatewayToken, err = toolgateway.GenerateAuthToken()
+		if err != nil {
+			_ = ln.Close()
+			return toolgateway.Binding{}, nil, fmt.Errorf("generate selected-fork tool gateway token: %w", err)
+		}
+	}
+	binding := toolgateway.Binding{
+		Transport:         toolgateway.TransportHTTP,
+		HostEndpoint:      hostURL,
+		WorkspaceEndpoint: containerURL,
+		Token:             gatewayToken,
+		LifecycleOwner:    toolgateway.LifecycleOwnerSelectedForkRuntime,
+		Source:            toolgateway.SourceSelectedForkEphemeralGateway,
+	}
+	if err := binding.Validate(); err != nil {
+		_ = ln.Close()
+		return toolgateway.Binding{}, nil, err
+	}
 	prevHostURL, prevHostSet := os.LookupEnv("SWARM_TOOL_GATEWAY_URL")
 	prevContainerURL, prevContainerSet := os.LookupEnv("SWARM_TOOL_GATEWAY_CONTAINER_URL")
 	if err := os.Setenv("SWARM_TOOL_GATEWAY_URL", hostURL); err != nil {
 		_ = ln.Close()
-		return nil, err
+		return toolgateway.Binding{}, nil, err
 	}
 	if err := os.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", containerURL); err != nil {
 		restoreEnv("SWARM_TOOL_GATEWAY_URL", prevHostURL, prevHostSet)
 		_ = ln.Close()
-		return nil, err
+		return toolgateway.Binding{}, nil, err
 	}
 
-	gateway := runtimemcp.NewGateway(exec, strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, emitRegistry, mcpTurns))
+	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, emitRegistry, mcpTurns))
 	server := &http.Server{Handler: gateway.Handler()}
 	go func() {
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
@@ -345,7 +370,7 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 		}
 	}()
 	unlock = false
-	return func() {
+	return binding, func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = server.Shutdown(ctx)
 		cancel()

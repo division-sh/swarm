@@ -10858,8 +10858,11 @@ cli_specification:
         tool gateway reachability in the approved #1568 first slice. The binding is a typed runtime value
         produced from the actual bound MCP listener before local runtime construction. It closes the local
         stale URL-env endpoint authority class only for local serve/run. It does not close public URL-env
-        retirement outside local serve/run, selected-contract/multi-bundle materialization, host workspace
-        execution, API connection discovery, IPC/unix socket transports, or remote/Kubernetes routing.
+        retirement outside local serve/run, broader selected-contract/multi-bundle materialization,
+        host workspace execution, API connection discovery, IPC/unix socket transports, or remote/Kubernetes
+        routing. It also records the regression-guard requirement that any production Claude runtime factory
+        constructed for a live ephemeral gateway must receive that gateway's typed binding instead of depending
+        on ambient URL env.
       binding_fields:
       - transport
       - host_endpoint
@@ -10892,11 +10895,13 @@ cli_specification:
       - Claude CLI startup MCP probes
       - Claude CLI MCP HTTP config generation
       - Claude CLI Docker exec final-boundary env injection
+      - fork-chat sandbox Claude runtime factory as a local serve consumer
+      - selected-fork ephemeral gateway Claude runtime factory as regression-guard consumer
       - local `claude_cli` preflight diagnostics as consumer-only stale-env reporter
       split_tail:
       - '#1568 public/operator URL-env retirement outside local serve/run remains split.'
       - '#1568 token-source migration beyond token-only env remains split.'
-      - '#979/#1012 selected-contract and multi-bundle gateway materialization remains split.'
+      - '#979/#1012 broader selected-contract and multi-bundle gateway materialization remains split; this first slice only requires a selected-fork ephemeral gateway to pass its own typed binding to its internal Claude runtime factory.'
       - '#1138/#1213 host workspace `claude_cli` execution remains split.'
       - '#1567 API connection discovery and connection-file authority remain split.'
       - 'IPC/unix socket transports and remote/Kubernetes routing remain split.'

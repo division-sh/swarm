@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -70,7 +68,6 @@ const (
 	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws"
 	serveMCPRoutes          = "/mcp /tools/"
 	serveReadinessRoutes    = "/healthz /readyz"
-	serveGatewayTokenBytes  = 32
 	serveExitDataIntegrity  = 78
 	runtimeStoreBackendHelp = "Runtime store backend: sqlite (local/dev default) or postgres (explicit opt-in production/external backend)"
 )
@@ -725,15 +722,16 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}, nil
 }
 
-func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver) (runtimellm.Runtime, error) {
+func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding) (runtimellm.Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
 	return runtimellm.RuntimeFactory{
-		Cfg:        cfg,
-		Sessions:   sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
-		LockOwner:  "forkchat-sandbox",
-		Workspaces: workspaces,
+		Cfg:         cfg,
+		Sessions:    sessions.NewInMemoryRegistry(cfg.LLM.Session.LockTTL),
+		LockOwner:   "forkchat-sandbox",
+		Workspaces:  workspaces,
+		ToolGateway: binding,
 	}.Build()
 }
 
@@ -992,7 +990,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
 
-	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding)
 	if err != nil {
 		log.Printf("init forkchat sandbox runtime: %v", err)
 		return 1
@@ -3168,9 +3166,9 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 	}
 	gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
 	if gatewayToken == "" {
-		gatewayToken, err = generateServeMCPGatewayToken()
+		gatewayToken, err = toolgateway.GenerateAuthToken()
 		if err != nil {
-			return toolgateway.Binding{}, err
+			return toolgateway.Binding{}, fmt.Errorf("generate mcp gateway token: %w", err)
 		}
 	}
 	binding := toolgateway.Binding{
@@ -3185,14 +3183,6 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 		return toolgateway.Binding{}, err
 	}
 	return binding, nil
-}
-
-func generateServeMCPGatewayToken() (string, error) {
-	raw := make([]byte, serveGatewayTokenBytes)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("generate mcp gateway token: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func validateExistingServeGatewayURL(name, raw string, mcpAddr net.Addr) error {
