@@ -132,6 +132,8 @@ type checkerContext struct {
 
 	accumulatorProjectionLoaded   bool
 	accumulatorProjectionFindings []Finding
+	accumulatorSafetyLoaded       bool
+	accumulatorSafetyFindings     []Finding
 
 	producesDriftLoaded   bool
 	producesDriftFindings []Finding
@@ -216,6 +218,8 @@ var bootCheckRegistry = []Check{
 	{ID: "semantic_drift_unreachable_state", Severity: "warning", Run: checkSemanticDriftUnreachableState},
 	{ID: "node_state_schema_typed_counterpart", Severity: SeverityHardInvalidity, Run: checkNodeStateSchemaTypedCounterpart},
 	{ID: "accumulator_entity_projection", Severity: SeverityHardInvalidity, Run: checkAccumulatorEntityProjection},
+	{ID: "accumulate_all_bounded_escape", Severity: "warning", Run: checkAccumulateAllBoundedEscape},
+	{ID: "accumulator_input_producer_path", Severity: SeverityHardInvalidity, Run: checkAccumulatorInputProducerPath},
 	{ID: "required_agents_match", Severity: "error", Run: checkRequiredAgentsMatch},
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
