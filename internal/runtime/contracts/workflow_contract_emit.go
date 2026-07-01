@@ -7,6 +7,7 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 	if eventType := handler.Emit.EventType(); eventType != "" {
 		out = append(out, eventType)
 	}
+	out = append(out, actionResultEvents(handler.Action)...)
 	for _, rule := range handler.Rules {
 		out = append(out, ruleEmitEvents(rule)...)
 	}
@@ -38,12 +39,23 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 	if eventType := rule.Emit.EventType(); eventType != "" {
 		out = append(out, eventType)
 	}
+	out = append(out, actionResultEvents(rule.Action)...)
 	if rule.FanOut != nil {
 		if eventType := rule.FanOut.Emit.EventType(); eventType != "" {
 			out = append(out, eventType)
 		}
 	}
 	return uniqueOrderedStrings(out)
+}
+
+func actionResultEvents(action ActionSpec) []string {
+	if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
+		return nil
+	}
+	return []string{
+		action.ArtifactRepo.SuccessEvent,
+		action.ArtifactRepo.FailureEvent,
+	}
 }
 
 func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {

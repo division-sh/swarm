@@ -5233,6 +5233,80 @@ func TestRun_ReportsErrorForTimerStartEventWithoutProducerPath(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult(t *testing.T) {
+	artifactHandler := runtimecontracts.SystemNodeEventHandler{
+		Action: runtimecontracts.ActionSpec{
+			ID: "artifact_repo_commit",
+			ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
+				Provider:     "local_git",
+				RepoID:       runtimecontracts.RefExpression("entity.repo_id"),
+				Namespace:    runtimecontracts.RefExpression("event.run_id"),
+				RequestID:    runtimecontracts.RefExpression("payload.request_id"),
+				AllowedPaths: []string{"readme.md"},
+				Files: []runtimecontracts.ArtifactRepoFileSpec{{
+					Path:        runtimecontracts.LiteralExpression("readme.md"),
+					Content:     runtimecontracts.RefExpression("payload.readme"),
+					ContentType: "markdown",
+				}},
+				Output: runtimecontracts.ArtifactRepoOutputSpec{
+					RepoURL:           "repo_url",
+					CurrentRef:        "current_ref",
+					FileManifest:      "file_manifest",
+					Status:            "status",
+					FailureReason:     "failure_reason",
+					LastRequestID:     "last_request_id",
+					LastSourceEventID: "last_source_event_id",
+				},
+				SuccessEvent: "artifact_repo.commit_completed",
+				FailureEvent: "artifact_repo.commit_failed",
+			},
+		},
+	}
+	timerHandler := runtimecontracts.SystemNodeEventHandler{AdvancesTo: "done"}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"artifact.commit_requested":      {},
+			"artifact_repo.commit_completed": artifactRepoTimerResultEventEntry(true),
+			"artifact_repo.commit_failed":    artifactRepoTimerResultEventEntry(false),
+			"timer.reminder":                 {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"artifact-node": {
+				ID: "artifact-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"artifact.commit_requested": artifactHandler,
+					"timer.reminder":            timerHandler,
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:      "reminder",
+				Owner:   "artifact-node",
+				Event:   "timer.reminder",
+				Delay:   "1m",
+				StartOn: "event:artifact_repo.commit_completed",
+			}},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"artifact-node": {
+					"artifact.commit_requested": artifactHandler,
+					"timer.reminder":            timerHandler,
+				},
+			},
+			EventOwners: map[string][]string{
+				"artifact.commit_requested": {"artifact-node"},
+				"timer.reminder":            {"artifact-node"},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Errors(), "timer_validation", "start_on event artifact_repo.commit_completed has no producer path") {
+		t.Fatalf("unexpected timer_validation producer error for artifact result event, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsErrorForTimerCancelEventWithoutProducerPath(t *testing.T) {
 	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
 		startOn:              "event:ticket.opened",
@@ -5573,6 +5647,30 @@ func timerValidationHasExternalSource(events []string, eventType string) bool {
 		}
 	}
 	return false
+}
+
+func artifactRepoTimerResultEventEntry(success bool) runtimecontracts.EventCatalogEntry {
+	properties := map[string]runtimecontracts.EventFieldSpec{
+		"repo_id":         {Type: "string"},
+		"namespace":       {Type: "string"},
+		"request_id":      {Type: "string"},
+		"source_event_id": {Type: "string"},
+		"provenance":      {Type: "object"},
+	}
+	required := []string{"repo_id", "namespace", "request_id", "source_event_id", "provenance"}
+	if success {
+		properties["repo_url"] = runtimecontracts.EventFieldSpec{Type: "string"}
+		properties["current_ref"] = runtimecontracts.EventFieldSpec{Type: "string"}
+		properties["file_manifest"] = runtimecontracts.EventFieldSpec{Type: "object"}
+		required = append(required, "repo_url", "current_ref", "file_manifest")
+	} else {
+		properties["failure_reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
+		required = append(required, "failure_reason")
+	}
+	return runtimecontracts.EventCatalogEntry{
+		Payload:  runtimecontracts.EventPayloadSpec{Properties: properties},
+		Required: required,
+	}
 }
 
 func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
