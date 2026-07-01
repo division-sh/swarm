@@ -100,11 +100,7 @@ func TestSingletonCoordinatorPilotPipelineDispatchPersistsContainedStateReadback
 	}
 	assertSingletonCoordinatorPilotDeliveryStatus(t, db, evt.ID(), singletoncoordinatorpilot.NodeID, "delivered")
 	assertNoSingletonCoordinatorPilotContainedRouteRows(t, db, "coordinator/lead-42")
-	if _, ok, err := workflowStore.Load(ctx, "lead-42"); err != nil {
-		t.Fatalf("workflowStore.Load(lead-42): %v", err)
-	} else if ok {
-		t.Fatal("contained map key lead-42 materialized as a workflow instance")
-	}
+	assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t, db, workflowStore, ctx, "coordinator/lead-42")
 }
 
 func TestSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
@@ -237,5 +233,49 @@ func assertNoSingletonCoordinatorPilotContainedRouteRows(t *testing.T, db *sql.D
 	}
 	if count != 0 {
 		t.Fatalf("contained flow_instance %q has %d delivery row(s), want none", flowInstance, count)
+	}
+}
+
+func assertNoSingletonCoordinatorPilotContainedWorkflowInstance(t *testing.T, db *sql.DB, store *WorkflowInstanceStore, ctx context.Context, flowInstance string) {
+	t.Helper()
+	entityID := FlowInstanceEntityID(flowInstance)
+	if _, ok, err := store.Load(ctx, entityID); err != nil {
+		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
+	} else if ok {
+		t.Fatalf("contained flow_instance %q materialized with canonical entity id %s", flowInstance, entityID)
+	}
+	if _, ok, err := store.Load(ctx, flowInstance); err != nil {
+		t.Fatalf("workflowStore.Load(%s): %v", flowInstance, err)
+	} else if ok {
+		t.Fatalf("contained flow_instance %q materialized through storage-ref lookup", flowInstance)
+	}
+
+	assertNoSingletonCoordinatorPilotRow(t, db, `
+		SELECT COUNT(*)
+		FROM entity_state
+		WHERE run_id = $1::uuid
+		  AND entity_id = $2::uuid
+	`, testPipelineRunID, entityID)
+	assertNoSingletonCoordinatorPilotRow(t, db, `
+		SELECT COUNT(*)
+		FROM entity_state
+		WHERE run_id = $1::uuid
+		  AND flow_instance = $2
+	`, testPipelineRunID, flowInstance)
+	assertNoSingletonCoordinatorPilotRow(t, db, `
+		SELECT COUNT(*)
+		FROM flow_instances
+		WHERE instance_id = $1
+	`, flowInstance)
+}
+
+func assertNoSingletonCoordinatorPilotRow(t *testing.T, db *sql.DB, query string, args ...any) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("count singleton coordinator pilot rows: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("singleton coordinator pilot absence query returned %d row(s), want none", count)
 	}
 }
