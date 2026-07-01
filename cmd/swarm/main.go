@@ -13,7 +13,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -940,7 +939,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 3
 	}
 	if !opts.Dev && !opts.LocalRun {
-		if err := validateServeGatewayURLEnvForNonDev(mcpListener.Addr()); err != nil {
+		if err := validateServeGatewayURLEnvForNonDev(); err != nil {
 			_ = mcpListener.Close()
 			_ = apiListener.Close()
 			reporter.emit(20, "http_listener_bind", "FAILED", err.Error())
@@ -3185,54 +3184,22 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 	return binding, nil
 }
 
-func validateExistingServeGatewayURL(name, raw string, mcpAddr net.Addr) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+var retiredToolGatewayURLEnvNames = []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL"}
+
+func validateRetiredToolGatewayURLEnv(name, raw string) error {
+	if strings.TrimSpace(raw) == "" {
 		return nil
 	}
-	_, mcpPort, err := splitListenerHostPort(mcpAddr)
-	if err != nil {
-		return err
-	}
-	parsed, err := httpURLHostPort(raw)
-	if err != nil {
-		return fmt.Errorf("%s must be a valid http(s) URL for the MCP listener: %w", name, err)
-	}
-	if parsed.port != mcpPort {
-		return fmt.Errorf("%s must target the MCP listener port %s, got %s", name, mcpPort, parsed.port)
+	return fmt.Errorf("%s is retired and not accepted as gateway endpoint configuration; unset %s because swarm derives the tool gateway endpoint from ToolGatewayBinding", name, name)
+}
+
+func validateServeGatewayURLEnvForNonDev() error {
+	for _, name := range retiredToolGatewayURLEnvNames {
+		if err := validateRetiredToolGatewayURLEnv(name, os.Getenv(name)); err != nil {
+			return err
+		}
 	}
 	return nil
-}
-
-func validateServeGatewayURLEnvForNonDev(mcpAddr net.Addr) error {
-	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_URL", os.Getenv("SWARM_TOOL_GATEWAY_URL"), mcpAddr); err != nil {
-		return err
-	}
-	if err := validateExistingServeGatewayURL("SWARM_TOOL_GATEWAY_CONTAINER_URL", os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL"), mcpAddr); err != nil {
-		return err
-	}
-	return nil
-}
-
-type parsedHTTPHostPort struct {
-	host string
-	port string
-}
-
-func httpURLHostPort(raw string) (parsedHTTPHostPort, error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return parsedHTTPHostPort{}, err
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return parsedHTTPHostPort{}, fmt.Errorf("scheme must be http or https")
-	}
-	host := strings.TrimSpace(parsed.Hostname())
-	port := strings.TrimSpace(parsed.Port())
-	if host == "" || port == "" {
-		return parsedHTTPHostPort{}, fmt.Errorf("host and port are required")
-	}
-	return parsedHTTPHostPort{host: host, port: port}, nil
 }
 
 func serveMCPContainerGatewayURL(addr net.Addr) (string, error) {

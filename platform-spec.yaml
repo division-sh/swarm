@@ -10930,7 +10930,7 @@ cli_specification:
       - '#996 Docker Compose setup remains split.'
       - '#1568 selected-contract and multi-bundle gateway materialization remains split; #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1002 runtime workspace source-root image packaging is closed by PR #1034 and is not an open tail.'
-      - '#1568 broader public URL-env retirement, selected-fork/multi-bundle materialization, and remote transport policy remain split.'
+      - '#1568 selected-fork URL-env side-channel and current public URL-env retirement/admission are closed by local_tool_gateway_binding; broader multi-bundle materialization and remote transport policy remain split.'
     local_tool_gateway_binding:
       promoted_by: '#1568'
       implementation_status: implemented_first_slice
@@ -10939,10 +10939,11 @@ cli_specification:
         Merge-bearing source authority for local `serve` / foreground `run` `claude_cli`
         tool gateway reachability in the approved #1568 first slice. The binding is a typed runtime value
         produced from the actual bound MCP listener before local runtime construction. It closes the local
-        stale URL-env endpoint authority class only for local serve/run. It does not close public URL-env
-        retirement outside local serve/run, broader selected-contract/multi-bundle materialization,
-        host workspace execution, API connection discovery, IPC/unix socket transports, or remote/Kubernetes
-        routing. It also closes the selected-fork ephemeral gateway URL-env side-channel child: any production
+        stale URL-env endpoint authority class for local serve/run. It also closes current public/operator
+        URL-env retirement/admission for non-dev serve and doctor/preflight diagnostics. It does not close
+        broader selected-contract/multi-bundle materialization, host workspace execution, API connection
+        discovery, IPC/unix socket transports, or remote/Kubernetes routing. It also closes the selected-fork
+        ephemeral gateway URL-env side-channel child: any production
         Claude runtime factory constructed for a live ephemeral gateway MUST receive that gateway's typed binding
         instead of depending on ambient URL env, and selected-fork gateway startup MUST NOT mutate process-global
         `SWARM_TOOL_GATEWAY_URL` or `SWARM_TOOL_GATEWAY_CONTAINER_URL`.
@@ -10967,7 +10968,11 @@ cli_specification:
         These variables may survive only as generated final-boundary compatibility for launched host/container
         processes, and only when their values are derived from `ToolGatewayBinding`. Selected-fork ephemeral
         gateway startup MUST NOT set, restore, or otherwise use process-global URL env as a propagation channel;
-        stale shell URL env must remain unchanged and non-authoritative.
+        stale shell URL env must remain unchanged and non-authoritative. For current non-dev `swarm serve`,
+        any non-empty `SWARM_TOOL_GATEWAY_URL` or `SWARM_TOOL_GATEWAY_CONTAINER_URL` is a retired public input
+        and MUST fail closed with remediation to unset it, not repoint it at the MCP listener. `swarm doctor`
+        and local preflight may read these variables only to report retired/shadowed diagnostic evidence; matching
+        non-empty URL env MUST NOT be rendered as accepted configuration.
       auth_rule: >
         `SWARM_TOOL_GATEWAY_TOKEN` remains token-only source authority for this first slice. If it is empty,
         serve boot MUST generate a per-boot token and place it on `ToolGatewayBinding`. Runtime gateway auth,
@@ -10986,8 +10991,8 @@ cli_specification:
       - fork-chat sandbox Claude runtime factory as a local serve consumer
       - selected-fork ephemeral gateway Claude runtime factory as regression-guard consumer
       - local `claude_cli` preflight diagnostics as consumer-only stale-env reporter
+      - non-dev serve retired URL-env admission
       split_tail:
-      - '#1568 public/operator URL-env retirement outside local serve/run remains split.'
       - '#1568 token-source migration beyond token-only env remains split.'
       - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; selected-fork ephemeral gateway startup no longer uses process-global URL env as a propagation side channel, but broader multi-bundle materialization remains open. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1138/#1213 host workspace `claude_cli` execution remains split.'
