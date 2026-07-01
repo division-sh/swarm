@@ -534,8 +534,10 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 }
 
 func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *testing.T) {
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:9998")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:9998")
+	const staleHostURL = "http://127.0.0.1:9998"
+	const staleContainerURL = "http://host.docker.internal:9998"
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
@@ -554,8 +556,14 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	if binding.AuthToken() == "" {
 		t.Fatalf("binding token was not generated: %#v", binding)
 	}
-	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != strings.TrimSuffix(binding.HostEndpoint, "/") {
-		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want selected-fork host endpoint %q", got, binding.HostEndpoint)
+	if strings.Contains(binding.HostEndpoint, ":9998") || strings.Contains(binding.WorkspaceEndpoint, ":9998") {
+		t.Fatalf("binding endpoints used stale env: %#v", binding)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want stale operator value unchanged %q", got, staleHostURL)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL")); got != staleContainerURL {
+		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want stale operator value unchanged %q", got, staleContainerURL)
 	}
 	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); got != "" {
 		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN = %q, want generated binding token to remain typed-only", got)
@@ -576,9 +584,42 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	}
 }
 
+func TestStartSelectedContractAgentRuntimeGatewayUsesExplicitTokenWithoutURLMutation(t *testing.T) {
+	const staleHostURL = "http://127.0.0.1:9998"
+	const staleContainerURL = "http://host.docker.internal:9998"
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
+
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
+	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, nil)
+	if err != nil {
+		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
+	}
+	if cleanup == nil {
+		t.Fatal("cleanup is nil")
+	}
+	defer cleanup()
+	if got := binding.AuthToken(); got != "operator-token" {
+		t.Fatalf("binding token = %q, want explicit token", got)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want unchanged %q", got, staleHostURL)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL")); got != staleContainerURL {
+		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want unchanged %q", got, staleContainerURL)
+	}
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN")); got != "operator-token" {
+		t.Fatalf("SWARM_TOOL_GATEWAY_TOKEN = %q, want explicit token env preserved", got)
+	}
+}
+
 func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *testing.T) {
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:9998")
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:9998")
+	const staleHostURL = "http://127.0.0.1:9998"
+	const staleContainerURL = "http://host.docker.internal:9998"
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	eventBus, err := bus.NewEventBus(nil)
 	if err != nil {
@@ -608,23 +649,11 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	if err == nil || !strings.Contains(err.Error(), "missing required system_prompt") {
 		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
 	}
-	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != "http://127.0.0.1:9998" {
-		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want restored original", got)
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
+		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want unchanged %q", got, staleHostURL)
 	}
-	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL")); got != "http://host.docker.internal:9998" {
-		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want restored original", got)
-	}
-
-	unlocked := make(chan struct{})
-	go func() {
-		selectedContractAgentRuntimeGatewayEnvMu.Lock()
-		defer selectedContractAgentRuntimeGatewayEnvMu.Unlock()
-		close(unlocked)
-	}()
-	select {
-	case <-unlocked:
-	case <-time.After(time.Second):
-		t.Fatal("selected-fork runtime gateway mutex remained locked after registration failure")
+	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL")); got != staleContainerURL {
+		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want unchanged %q", got, staleContainerURL)
 	}
 }
 

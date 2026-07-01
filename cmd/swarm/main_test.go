@@ -2507,7 +2507,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 	if !strings.Contains(binding.CanonicalOwner, "cli_specification.foundations.local_tool_gateway_binding") {
 		t.Fatalf("canonical owner does not point at local_tool_gateway_binding: %s", binding.CanonicalOwner)
 	}
-	for _, want := range []string{"local `serve`", "foreground `run`", "actual bound MCP listener", "stale URL-env", "first slice", "production Claude runtime factory"} {
+	for _, want := range []string{"local `serve`", "foreground `run`", "actual bound MCP listener", "stale URL-env", "first slice", "production Claude runtime factory", "MUST NOT mutate process-global"} {
 		if !strings.Contains(binding.Scope, want) {
 			t.Fatalf("local tool gateway binding scope missing %q:\n%s", want, binding.Scope)
 		}
@@ -2517,17 +2517,17 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("binding fields missing %q: %#v", want, binding.BindingFields)
 		}
 	}
-	for _, want := range []string{"bind the MCP/tool listener first", "ToolGatewayBinding", "workspace-backend projection", "serve boot"} {
+	for _, want := range []string{"bind the MCP/tool listener first", "ToolGatewayBinding", "workspace-backend projection", "serve boot", "Selected-fork ephemeral gateways", "actual ephemeral gateway listener"} {
 		if !strings.Contains(binding.SourceRule, want) {
 			t.Fatalf("source rule missing %q:\n%s", want, binding.SourceRule)
 		}
 	}
-	for _, want := range []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL", "not public/operator source", "generated final-boundary compatibility", "derived from `ToolGatewayBinding`"} {
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL", "not public/operator source", "generated final-boundary compatibility", "derived from `ToolGatewayBinding`", "Selected-fork ephemeral gateway startup MUST NOT set"} {
 		if !strings.Contains(binding.EndpointEnvRule, want) {
 			t.Fatalf("endpoint env rule missing %q:\n%s", want, binding.EndpointEnvRule)
 		}
 	}
-	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "token-only source authority", "per-boot token", "binding token"} {
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "token-only source authority", "per-boot token", "binding token", "Selected-fork ephemeral gateways follow the same token-only rule"} {
 		if !strings.Contains(binding.AuthRule, want) {
 			t.Fatalf("auth rule missing %q:\n%s", want, binding.AuthRule)
 		}
@@ -2537,7 +2537,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("binding consumers missing %q: %#v", want, binding.Consumers)
 		}
 	}
-	for _, want := range []string{"#1568 public/operator URL-env retirement", "#1568 broader selected-contract", "ephemeral gateway to pass its own typed binding", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
+	for _, want := range []string{"#1568 public/operator URL-env retirement", "#1568 broader selected-contract", "no longer uses process-global URL env", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
 		if !stringSliceContains(binding.SplitTail, want) {
 			t.Fatalf("binding split_tail missing %q: %#v", want, binding.SplitTail)
 		}

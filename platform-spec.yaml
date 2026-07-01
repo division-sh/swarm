@@ -10865,9 +10865,10 @@ cli_specification:
         stale URL-env endpoint authority class only for local serve/run. It does not close public URL-env
         retirement outside local serve/run, broader selected-contract/multi-bundle materialization,
         host workspace execution, API connection discovery, IPC/unix socket transports, or remote/Kubernetes
-        routing. It also records the regression-guard requirement that any production Claude runtime factory
-        constructed for a live ephemeral gateway must receive that gateway's typed binding instead of depending
-        on ambient URL env.
+        routing. It also closes the selected-fork ephemeral gateway URL-env side-channel child: any production
+        Claude runtime factory constructed for a live ephemeral gateway MUST receive that gateway's typed binding
+        instead of depending on ambient URL env, and selected-fork gateway startup MUST NOT mutate process-global
+        `SWARM_TOOL_GATEWAY_URL` or `SWARM_TOOL_GATEWAY_CONTAINER_URL`.
       binding_fields:
       - transport
       - host_endpoint
@@ -10880,17 +10881,22 @@ cli_specification:
         address. The host endpoint is the listener URL reachable by the serve process. The workspace endpoint
         is the workspace-backend projection for containers or workspace processes. The binding source records
         the bound MCP listener, and the lifecycle owner is serve boot. Local foreground `swarm run` consumes
-        the same binding path through the serve startup owner.
+        the same binding path through the serve startup owner. Selected-fork ephemeral gateways MUST create their
+        own typed binding from the actual ephemeral gateway listener, with selected-fork lifecycle/source metadata,
+        and pass that binding directly to selected-fork runtime consumers.
       endpoint_env_rule: >
         `SWARM_TOOL_GATEWAY_URL` and `SWARM_TOOL_GATEWAY_CONTAINER_URL` are not public/operator source
         authority for local serve/run endpoint binding. Stale values MUST NOT override the typed binding.
         These variables may survive only as generated final-boundary compatibility for launched host/container
-        processes, and only when their values are derived from `ToolGatewayBinding`.
+        processes, and only when their values are derived from `ToolGatewayBinding`. Selected-fork ephemeral
+        gateway startup MUST NOT set, restore, or otherwise use process-global URL env as a propagation channel;
+        stale shell URL env must remain unchanged and non-authoritative.
       auth_rule: >
         `SWARM_TOOL_GATEWAY_TOKEN` remains token-only source authority for this first slice. If it is empty,
         serve boot MUST generate a per-boot token and place it on `ToolGatewayBinding`. Runtime gateway auth,
         startup probes, MCP HTTP config generation, and Docker exec env injection MUST consume the binding token,
-        not a later ambient env read.
+        not a later ambient env read. Selected-fork ephemeral gateways follow the same token-only rule: explicit
+        `SWARM_TOOL_GATEWAY_TOKEN` may supply the binding token, and absent token generates a typed binding token.
       consumers:
       - '`cmd/swarm` serve listener binding'
       - 'local foreground `swarm run` through the serve startup owner'
@@ -10906,7 +10912,7 @@ cli_specification:
       split_tail:
       - '#1568 public/operator URL-env retirement outside local serve/run remains split.'
       - '#1568 token-source migration beyond token-only env remains split.'
-      - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; this first slice only requires a selected-fork ephemeral gateway to pass its own typed binding to its internal Claude runtime factory. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
+      - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; selected-fork ephemeral gateway startup no longer uses process-global URL env as a propagation side channel, but broader multi-bundle materialization remains open. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1138/#1213 host workspace `claude_cli` execution remains split.'
       - '#1567 API connection discovery and connection-file authority remain split.'
       - 'IPC/unix socket transports and remote/Kubernetes routing remain split.'
