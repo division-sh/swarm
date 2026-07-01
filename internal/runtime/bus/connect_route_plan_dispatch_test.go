@@ -109,6 +109,12 @@ func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(cont
 }
 
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+	for _, descriptor := range s.flowInstances {
+		descriptor = descriptor.Normalized()
+		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
+			return errors.New("flow instance already exists")
+		}
+	}
 	s.activations = append(s.activations, req)
 	verticalID, _ := req.Metadata["vertical_id"].(string)
 	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
@@ -847,6 +853,89 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 	}
 	if got := store.flowInstanceDescriptorCalls; got != 0 {
 		t.Fatalf("replay descriptor calls = %d, want 0 because lifecycle-created persisted route/scope is authoritative", got)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans(t *testing.T) {
+	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %d, want exactly one lifecycle create for both connect plans", len(store.activations))
+	}
+	activation := store.activations[0]
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node-" + activation.Instance.InstanceID,
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want one deduplicated route %#v", store.routes[evt.ID()], want)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryUsesCommittedReplay(t *testing.T) {
+	source := connectRoutePlanInstanceKeySourceWithPolicy(t, "create", "reject")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish initial: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("initial activations = %d, want 1", len(store.activations))
+	}
+	activation := store.activations[0]
+	replayTarget := eb.SubscribeInternal("consumer-node-" + activation.Instance.InstanceID)
+	store.flowInstanceDescriptorCalls = 0
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish retry: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("retry activations = %d, want committed replay without a second activation", len(store.activations))
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("retry descriptor calls = %d, want 0 because committed replay is authoritative", got)
+	}
+	replayed := requireBusEvent(t, replayTarget, "same-event retry committed replay")
+	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
+		t.Fatalf("retry delivery target = flow_instance:%q entity:%q, want persisted %q/%q",
+			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
 	}
 }
 
@@ -1827,6 +1916,21 @@ func connectRoutePlanInstanceKeySourceWithPolicy(t testing.TB, onMissing, onConf
 	return semanticview.Wrap(bundle)
 }
 
+func connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t, onMissing, onConflict)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func connectRoutePlanRenamedInstanceKeySource(t testing.TB) semanticview.Source {
 	t.Helper()
 	return connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "reject", "reject")
@@ -2002,6 +2106,83 @@ pins:
   inputs:
     events:
       - name: deploy_completed
+        event: deploy.done
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
+deployment:
+  vertical_id:
+    type: string
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), `
+consumer-node:
+  id: consumer-node-{instance_id}
+  execution_type: system_node
+  event_handlers:
+    deploy.done: {}
+`)
+	return root
+}
+
+func writeConnectRoutePlanInstanceKeyMultiInputFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: instance-key-connect-route-plan-bus
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: template
+connect:
+  - from: producer.deploy_done
+    to: consumer.deploy_completed
+    delivery: one
+  - from: producer.deploy_done
+    to: consumer.deploy_audited
+    delivery: one
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: instance-key-connect-route-plan-bus\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: deploy_done
+        event: deploy.done
+        key: vertical_id
+        carries: [vertical_id]
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "deploy.done:\n  vertical_id: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
+name: consumer
+mode: template
+instance:
+  by: vertical_id
+  on_missing: `+onMissing+`
+  on_conflict: `+onConflict+`
+pins:
+  inputs:
+    events:
+      - name: deploy_completed
+        event: deploy.done
+      - name: deploy_audited
         event: deploy.done
 `)
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")

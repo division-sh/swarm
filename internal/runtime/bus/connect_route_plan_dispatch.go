@@ -105,6 +105,13 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		if cleanupPreview != nil {
 			cleanupPreview()
 		}
+		if strings.TrimSpace(decision.Action) == templateInstanceLifecycleActionCreated {
+			refreshed, err := r.descriptorsForPlans(ctx, matched)
+			if err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
+			descriptors = refreshed
+		}
 		if len(routes) == 0 {
 			out.Failure = runtimepinrouting.FailureTargetNotSubscribed
 			out.ExtraDetail["connect_route_plan_failure"] = string(runtimepinrouting.FailureTargetNotSubscribed)

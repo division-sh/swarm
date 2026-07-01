@@ -171,6 +171,9 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 	if err != nil {
 		return err
 	}
+	if replayed, err := eb.publishCommittedReplayIfPresent(ictx, evt); replayed || err != nil {
+		return err
+	}
 
 	deferredTransitions := make([]runtimepipeline.DeferredPipelineTransition, 0, 8)
 	postCommitActions := make([]func(), 0, 8)
@@ -256,6 +259,19 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		}
 	}
 	return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
+}
+
+func (eb *EventBus) publishCommittedReplayIfPresent(ctx context.Context, evt events.Event) (bool, error) {
+	if eb == nil || strings.TrimSpace(evt.ID()) == "" {
+		return false, nil
+	}
+	if _, err := eb.authoritativeReplayScopeForEvent(ctx, evt.ID()); err != nil {
+		if errors.Is(err, runtimereplayclaim.ErrMissingCommittedReplayScope) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, eb.publishPersistedRecipients(ctx, evt, nil, false)
 }
 
 // PublishAcknowledged persists the event, recipient manifest, and replay scope
