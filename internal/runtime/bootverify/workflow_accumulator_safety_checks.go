@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	checkIDAccumulateAllBoundedEscape = "accumulate_all_bounded_escape"
-	checkIDAccumulatorInputProducer   = "accumulator_input_producer_path"
+	checkIDAccumulateAllBoundedEscape        = "accumulate_all_bounded_escape"
+	checkIDAccumulatorTimeoutRequiresTimeout = "accumulator_timeout_requires_timeout_ms"
+	checkIDAccumulatorInputProducer          = "accumulator_input_producer_path"
 )
 
 func checkAccumulateAllBoundedEscape(c *checkerContext) []Finding {
@@ -19,6 +20,10 @@ func checkAccumulateAllBoundedEscape(c *checkerContext) []Finding {
 
 func checkAccumulatorInputProducerPath(c *checkerContext) []Finding {
 	return c.accumulatorSafetyByCheck(checkIDAccumulatorInputProducer)
+}
+
+func checkAccumulatorTimeoutRequiresTimeout(c *checkerContext) []Finding {
+	return c.accumulatorSafetyByCheck(checkIDAccumulatorTimeoutRequiresTimeout)
 }
 
 func (c *checkerContext) accumulatorSafetyByCheck(checkID string) []Finding {
@@ -74,6 +79,20 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 					),
 				})
 			}
+			if accumulatorTimeoutCompletionWithoutSchedulableTimeout(spec) {
+				c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
+					CheckID:  checkIDAccumulatorTimeoutRequiresTimeout,
+					Severity: SeverityHardInvalidity,
+					Location: location,
+					Message: fmt.Sprintf(
+						"flow %s node %s handler %s uses accumulate completion %q without positive timeout_ms; runtime cannot schedule the accumulate.timeout event, so the handler can wait indefinitely. Add timeout_ms > 0 or choose a completion mode with a schedulable bounded escape.",
+						accumulatorFlowLabel(flowID),
+						nodeID,
+						eventType,
+						accumulatorCompletionLabel(spec),
+					),
+				})
+			}
 			producerPaths := c.accumulatorProducerPaths(flowID, eventType, flowScopedNodes, flowScopedAgents)
 			if producerPaths.hasAny() {
 				continue
@@ -105,6 +124,12 @@ func accumulatorHasBoundedEscape(spec *runtimecontracts.AccumulateSpec) bool {
 		return true
 	}
 	return spec.OnTimeout != nil
+}
+
+func accumulatorTimeoutCompletionWithoutSchedulableTimeout(spec *runtimecontracts.AccumulateSpec) bool {
+	return spec != nil &&
+		spec.Completion.Mode == runtimecontracts.AccumulateModeTimeout &&
+		spec.TimeoutMS <= 0
 }
 
 func accumulatorCompletionLabel(spec *runtimecontracts.AccumulateSpec) string {

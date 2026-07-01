@@ -9504,6 +9504,35 @@ func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T
 	}
 }
 
+func TestRunVerifyCommand_FailsForAccumulateTimeoutWithoutTimeoutMS(t *testing.T) {
+	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
+		eventSource: "external (verify accumulator safety proof)",
+		completion:  "timeout",
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("expected non-zero exit code, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify stdout = %q, want empty for hard invalidity", stdout.String())
+	}
+	errText := stderr.String()
+	for _, want := range []string{
+		"verify failed: boot verification failed:",
+		"ERROR: accumulator_timeout_requires_timeout_ms",
+		"without positive timeout_ms",
+	} {
+		if !strings.Contains(errText, want) {
+			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
+		}
+	}
+	if strings.Contains(errText, "accumulator_input_producer_path") {
+		t.Fatalf("verify stderr reported no-producer error despite external source:\n%s", errText)
+	}
+}
+
 func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing.T) {
 	root := writeVerifyAccumulatorSafetyCommandFixture(t, verifyAccumulatorSafetyCommandFixtureOptions{
 		completion: "timeout",
