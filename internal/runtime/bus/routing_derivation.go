@@ -267,6 +267,20 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 	return nil
 }
 
+func (rt *RouteTable) HasFlowInstanceRoute(identity runtimeflowidentity.Route) bool {
+	if rt == nil {
+		return false
+	}
+	identity = runtimeflowidentity.StoredRoute(identity.ScopeKey, identity.InstanceID, identity.InstancePath)
+	if !identity.Valid() {
+		return false
+	}
+	rt.mu.RLock()
+	defer rt.mu.RUnlock()
+	_, exists := rt.instances[identity.InstancePath]
+	return exists
+}
+
 func (rt *RouteTable) RemoveFlowInstanceRoute(identity runtimeflowidentity.Route) {
 	if rt == nil {
 		return

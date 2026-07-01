@@ -437,12 +437,17 @@ func (s *WorkflowInstanceStore) runInPipelineTransactionOnce(ctx context.Context
 		return err
 	}
 	postCommit := make([]func(), 0, 4)
-	txctx := withPipelinePostCommitActions(withSQLTxContext(ctx, tx), &postCommit)
+	rollbackActions := make([]func(), 0, 4)
+	txctx := withSQLTxContext(ctx, tx)
+	txctx = withPipelinePostCommitActions(txctx, &postCommit)
+	txctx = withPipelineRollbackActions(txctx, &rollbackActions)
 	if err := fn(txctx, tx); err != nil {
 		_ = tx.Rollback()
+		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
 	if err := tx.Commit(); err != nil {
+		flushPipelineRollbackActions(rollbackActions)
 		return err
 	}
 	flushPipelinePostCommitActions(postCommit)
