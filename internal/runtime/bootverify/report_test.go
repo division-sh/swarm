@@ -5069,13 +5069,13 @@ func TestRun_ReportsErrorForUnknownTimerTriggerState(t *testing.T) {
 	}
 }
 
-func TestRun_ReportsWarningForUnknownTimerTriggerEvent(t *testing.T) {
+func TestRun_ReportsErrorForUnknownTimerTriggerEvent(t *testing.T) {
 	root := writeTimerValidationFixture(t, "event:ticket.unknown", "")
 	repoRoot := repoRootForBootverifyTest(t)
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
-	if !reportContains(report.Warnings(), "timer_validation", "unknown event") {
-		t.Fatalf("expected timer_validation unknown event warning, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "timer_validation", "unknown event") {
+		t.Fatalf("expected timer_validation unknown event error, got %#v", report.Errors())
 	}
 }
 
@@ -5112,6 +5112,151 @@ func TestRun_ReportsErrorForTimerEventMissingFromCatalog(t *testing.T) {
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if !reportContains(report.Errors(), "timer_validation", "event timer.missing missing from event catalog") {
 		t.Fatalf("expected timer_validation missing timer event error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerFireEventWithoutExecutableConsumer(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:           "event:ticket.opened",
+		owner:             "support-node",
+		event:             "timer.reminder",
+		includeTimerEvent: true,
+		omitTimerHandler:  true,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
+		t.Fatalf("expected timer_validation no-consumer error, got %#v", report.Errors())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_dead_event_schema", "support/timer.reminder") {
+		t.Fatalf("timer reference should still satisfy dead-event accounting; timer_validation owns consumer proof, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_AllowsTimerFireEventWithHandlerConsumer(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "timer reminder") {
+		t.Fatalf("unexpected timer_validation error for handler consumer, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsTimerFireEventWithAgentConsumer(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:           "event:ticket.opened",
+		owner:             "support-node",
+		event:             "timer.reminder",
+		includeTimerEvent: true,
+		omitTimerHandler:  true,
+		flowAgents: `
+reminder-agent:
+  model: regular
+  conversation_mode: stateless
+  subscriptions: [timer.reminder]
+  emit_events: []
+`,
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
+		t.Fatalf("unexpected timer_validation no-consumer error for agent subscriber, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsTimerFireEventWithWildcardConsumer(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:           "event:ticket.opened",
+		owner:             "support-node",
+		event:             "timer.reminder",
+		includeTimerEvent: true,
+		timerHandlerKey:   "timer.*",
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
+		t.Fatalf("unexpected timer_validation no-consumer error for wildcard handler, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsTimerFireEventWithExternalConsumer(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:           "event:ticket.opened",
+		owner:             "support-node",
+		event:             "timer.reminder",
+		includeTimerEvent: true,
+		omitTimerHandler:  true,
+		timerEventSwarm:   "consumer: mailbox_system",
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
+		t.Fatalf("unexpected timer_validation no-consumer error for external consumer, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsTimerFireEventWithOutputBoundary(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:           "event:ticket.opened",
+		owner:             "support-node",
+		event:             "timer.reminder",
+		includeTimerEvent: true,
+		omitTimerHandler:  true,
+		flowOutputs:       []string{"timer.reminder"},
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if reportContains(report.Errors(), "timer_validation", "has no executable consumer") {
+		t.Fatalf("unexpected timer_validation no-consumer error for output boundary, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerStartEventWithoutProducerPath(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:              "event:ticket.closed",
+		owner:                "support-node",
+		event:                "timer.reminder",
+		includeTimerEvent:    true,
+		externalSourceEvents: []string{"ticket.opened"},
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "start_on event support/ticket.closed has no producer path") {
+		t.Fatalf("expected timer_validation start_on producer error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForTimerCancelEventWithoutProducerPath(t *testing.T) {
+	root := writeTimerValidationFixtureWithOptions(t, timerValidationFixtureOptions{
+		startOn:              "event:ticket.opened",
+		cancelOn:             "event:ticket.closed",
+		owner:                "support-node",
+		event:                "timer.reminder",
+		includeTimerEvent:    true,
+		externalSourceEvents: []string{"ticket.opened"},
+	})
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on event support/ticket.closed has no producer path") {
+		t.Fatalf("expected timer_validation cancel_on producer error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsErrorForUnknownTimerCancelEvent(t *testing.T) {
+	root := writeTimerValidationFixture(t, "event:ticket.opened", "event:ticket.unknown")
+	repoRoot := repoRootForBootverifyTest(t)
+	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
+	if !reportContains(report.Errors(), "timer_validation", "cancel_on references unknown event ticket.unknown") {
+		t.Fatalf("expected timer_validation unknown cancel event error, got %#v", report.Errors())
 	}
 }
 
@@ -5278,11 +5423,17 @@ support/item.created:
 }
 
 type timerValidationFixtureOptions struct {
-	startOn           string
-	cancelOn          string
-	owner             string
-	event             string
-	includeTimerEvent bool
+	startOn              string
+	cancelOn             string
+	owner                string
+	event                string
+	includeTimerEvent    bool
+	omitTimerHandler     bool
+	timerHandlerKey      string
+	timerEventSwarm      string
+	flowOutputs          []string
+	flowAgents           string
+	externalSourceEvents []string
 }
 
 func writeTimerValidationFixture(t *testing.T, startOn, cancelOn string) string {
@@ -5300,6 +5451,18 @@ func writeTimerValidationFixtureWithOptions(t *testing.T, opts timerValidationFi
 	root := t.TempDir()
 	if strings.TrimSpace(opts.event) == "" {
 		opts.event = "timer.reminder"
+	}
+	externalSourceEvents := opts.externalSourceEvents
+	if externalSourceEvents == nil {
+		externalSourceEvents = []string{"ticket.opened", "ticket.closed"}
+	}
+	flowAgents := opts.flowAgents
+	if strings.TrimSpace(flowAgents) == "" {
+		flowAgents = "{}\n"
+	}
+	timerHandlerKey := strings.TrimSpace(opts.timerHandlerKey)
+	if timerHandlerKey == "" {
+		timerHandlerKey = opts.event
 	}
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -5320,27 +5483,33 @@ ticket:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	timerEventBlock := ""
-	if opts.includeTimerEvent {
-		timerEventBlock = strings.TrimSpace(`
-` + opts.event + `:
-  entity_id: string
-`)
+	flowPinsBlock := ""
+	if len(opts.flowOutputs) > 0 {
+		flowPinsBlock = `
+pins:
+  inputs:
+    events: []
+  outputs:
+    events:
+`
+		for _, output := range opts.flowOutputs {
+			flowPinsBlock += "      - " + output + "\n"
+		}
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
 initial_state: waiting
 terminal_states: [done]
 states: [waiting, active, done]
-`)
+`+flowPinsBlock)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
-ticket.opened:
-  entity_id: string
-ticket.closed:
-  entity_id: string
-`+timerEventBlock+`
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
+	eventsYAML := timerValidationEventEntry("ticket.opened", timerValidationHasExternalSource(externalSourceEvents, "ticket.opened"), "")
+	eventsYAML += timerValidationEventEntry("ticket.closed", timerValidationHasExternalSource(externalSourceEvents, "ticket.closed"), "")
+	if opts.includeTimerEvent {
+		eventsYAML += timerValidationEventEntry(opts.event, false, opts.timerEventSwarm)
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), eventsYAML)
 	timerBlock := `
     - id: reminder
       owner: ` + opts.owner + `
@@ -5349,6 +5518,10 @@ ticket.closed:
       start_on: ` + opts.startOn + "\n"
 	if strings.TrimSpace(opts.cancelOn) != "" {
 		timerBlock += "      cancel_on: " + opts.cancelOn + "\n"
+	}
+	timerHandlerBlock := ""
+	if !opts.omitTimerHandler {
+		timerHandlerBlock = "    " + timerHandlerKey + ":\n      advances_to: done\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
 support-node:
@@ -5365,10 +5538,41 @@ support-node:
       advances_to: active
     ticket.closed:
       advances_to: done
-    timer.reminder:
-      advances_to: done
-`)
+`+timerHandlerBlock)
 	return root
+}
+
+func timerValidationEventEntry(eventType string, externalSource bool, swarmLines string) string {
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return ""
+	}
+	out := eventType + ":\n  entity_id: string\n"
+	swarmLines = strings.TrimSpace(swarmLines)
+	if externalSource || swarmLines != "" {
+		out += "  swarm:\n"
+		if externalSource {
+			out += "    source: external\n"
+		}
+		for _, line := range strings.Split(swarmLines, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			out += "    " + line + "\n"
+		}
+	}
+	return out
+}
+
+func timerValidationHasExternalSource(events []string, eventType string) bool {
+	eventType = strings.TrimSpace(eventType)
+	for _, candidate := range events {
+		if strings.TrimSpace(candidate) == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {

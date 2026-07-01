@@ -1,4 +1,6 @@
 monitor.started:
   entity_id: string
+  swarm:
+    source: external
 timer.tick:
   entity_id: string

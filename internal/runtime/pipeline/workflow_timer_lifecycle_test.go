@@ -101,6 +101,33 @@ func testActivePipelineSQLTxContext(t *testing.T, db *sql.DB, ctx context.Contex
 	return WithPipelineSQLTxContext(ctx, tx)
 }
 
+func TestWorkflowTimerFireAtSnapshotsPolicyDelayAtStart(t *testing.T) {
+	now := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	timer := runtimecontracts.WorkflowTimerContract{
+		ID:    "sla_timeout",
+		Owner: "support-node",
+		Event: "timer.sla_timeout",
+		Delay: "{{sla_timeout_hours}}h",
+	}
+
+	fireAt, ok := workflowTimerFireAt(timer, now, map[string]any{
+		"sla_timeout_hours": 2,
+	})
+	if !ok {
+		t.Fatal("expected policy-backed timer delay to render")
+	}
+	if want := now.Add(2 * time.Hour); !fireAt.Equal(want) {
+		t.Fatalf("fireAt = %s, want %s", fireAt, want)
+	}
+
+	schedule := workflowTimerSchedule(timer, "ent-001", "support", fireAt, map[string]any{
+		"sla_timeout_hours": 8,
+	})
+	if !schedule.At.Equal(fireAt) {
+		t.Fatalf("schedule At = %s, want persisted fireAt %s", schedule.At, fireAt)
+	}
+}
+
 func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-timer-fire")
