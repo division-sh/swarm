@@ -42,6 +42,7 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
@@ -2506,7 +2507,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 	if !strings.Contains(binding.CanonicalOwner, "cli_specification.foundations.local_tool_gateway_binding") {
 		t.Fatalf("canonical owner does not point at local_tool_gateway_binding: %s", binding.CanonicalOwner)
 	}
-	for _, want := range []string{"local `serve`", "foreground `run`", "actual bound MCP listener", "stale URL-env", "first slice"} {
+	for _, want := range []string{"local `serve`", "foreground `run`", "actual bound MCP listener", "stale URL-env", "first slice", "production Claude runtime factory"} {
 		if !strings.Contains(binding.Scope, want) {
 			t.Fatalf("local tool gateway binding scope missing %q:\n%s", want, binding.Scope)
 		}
@@ -2531,12 +2532,12 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("auth rule missing %q:\n%s", want, binding.AuthRule)
 		}
 	}
-	for _, want := range []string{"serve listener binding", "RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "MCP HTTP config", "Docker exec"} {
+	for _, want := range []string{"serve listener binding", "RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "MCP HTTP config", "Docker exec", "fork-chat sandbox", "selected-fork ephemeral gateway"} {
 		if !stringSliceContains(binding.Consumers, want) {
 			t.Fatalf("binding consumers missing %q: %#v", want, binding.Consumers)
 		}
 	}
-	for _, want := range []string{"#1568 public/operator URL-env retirement", "#979/#1012", "#1138/#1213", "#1567", "IPC/unix socket"} {
+	for _, want := range []string{"#1568 public/operator URL-env retirement", "#979/#1012 broader selected-contract", "ephemeral gateway to pass its own typed binding", "#1138/#1213", "#1567", "IPC/unix socket"} {
 		if !stringSliceContains(binding.SplitTail, want) {
 			t.Fatalf("binding split_tail missing %q: %#v", want, binding.SplitTail)
 		}
@@ -10295,7 +10296,7 @@ func TestCreateServeToolGatewayBindingAlignsToMCPListenerWithoutMutatingURLEnv(t
 	if strings.TrimSpace(binding.Token) == "" {
 		t.Fatal("binding token was not generated")
 	}
-	if got, want := len(binding.Token), base64.RawURLEncoding.EncodedLen(serveGatewayTokenBytes); got != want {
+	if got, want := len(binding.Token), base64.RawURLEncoding.EncodedLen(toolgateway.AuthTokenBytes); got != want {
 		t.Fatalf("binding token length = %d, want %d", got, want)
 	}
 	if got := os.Getenv("SWARM_TOOL_GATEWAY_URL"); got != "" {

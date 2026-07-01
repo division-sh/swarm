@@ -1,6 +1,8 @@
 package toolgateway
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"strings"
@@ -11,8 +13,12 @@ type Transport string
 const (
 	TransportHTTP Transport = "http"
 
-	LifecycleOwnerServeBoot = "serve_boot"
-	SourceBoundMCPListener  = "bound_mcp_listener"
+	AuthTokenBytes = 32
+
+	LifecycleOwnerServeBoot            = "serve_boot"
+	LifecycleOwnerSelectedForkRuntime  = "selected_fork_agent_runtime"
+	SourceBoundMCPListener             = "bound_mcp_listener"
+	SourceSelectedForkEphemeralGateway = "selected_fork_ephemeral_gateway"
 )
 
 type Binding struct {
@@ -60,6 +66,14 @@ func (b Binding) WorkspaceMCPURL() string {
 
 func (b Binding) AuthToken() string {
 	return strings.TrimSpace(b.Token)
+}
+
+func GenerateAuthToken() (string, error) {
+	raw := make([]byte, AuthTokenBytes)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func NormalizeMCPServerURL(raw string) string {
