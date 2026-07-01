@@ -363,9 +363,9 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Se
 	mode, err := sessions.ParseConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode))
 	if err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_openai_compatible_conversation_invalid_mode", "Persisting the OpenAI-compatible conversation was skipped because the session mode was invalid", s.AgentID, s.ID, "", map[string]any{
-			"conversation_mode": strings.TrimSpace(s.ConversationMode),
-			"runtime_mode":      strings.TrimSpace(s.RuntimeMode),
-			"scope_key":         strings.TrimSpace(s.ScopeKey),
+			"mode":         strings.TrimSpace(s.ConversationMode),
+			"runtime_mode": strings.TrimSpace(s.RuntimeMode),
+			"scope_key":    strings.TrimSpace(s.ScopeKey),
 		}, err)
 		return
 	}
@@ -385,8 +385,8 @@ func (r *OpenAICompatibleRuntime) persistConversation(ctx context.Context, s *Se
 		Status:       "active",
 	}); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_openai_compatible_conversation_failed", "Persisting the OpenAI-compatible conversation failed", s.AgentID, s.ID, "", map[string]any{
-			"conversation_mode": mode.String(),
-			"scope_key":         strings.TrimSpace(s.ScopeKey),
+			"mode":      mode.String(),
+			"scope_key": strings.TrimSpace(s.ScopeKey),
 		}, err)
 	}
 }

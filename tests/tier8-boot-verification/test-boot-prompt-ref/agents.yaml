@@ -2,7 +2,7 @@ prompt-ref-agent:
   role: prompt_ref_agent
   prompt_ref: shared-prompt
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions:
     - task.requested
   emit_events:

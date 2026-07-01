@@ -125,17 +125,17 @@ type bundleDeletePartialError struct {
 }
 
 type bundleAgentDefinition struct {
-	AgentID          string   `json:"agent_id"`
-	FlowInstance     string   `json:"flow_instance,omitempty"`
-	Role             string   `json:"role,omitempty"`
-	Type             string   `json:"type,omitempty"`
-	Model            string   `json:"model,omitempty"`
-	LLMBackend       string   `json:"llm_backend,omitempty"`
-	ConversationMode string   `json:"conversation_mode,omitempty"`
-	SessionScope     string   `json:"session_scope,omitempty"`
-	PromptPath       string   `json:"prompt_path,omitempty"`
-	Subscriptions    []string `json:"subscriptions,omitempty"`
-	Tools            []string `json:"tools,omitempty"`
+	AgentID       string   `json:"agent_id"`
+	FlowInstance  string   `json:"flow_instance,omitempty"`
+	Role          string   `json:"role,omitempty"`
+	Type          string   `json:"type,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	LLMBackend    string   `json:"llm_backend,omitempty"`
+	Mode          string   `json:"mode,omitempty"`
+	SessionScope  string   `json:"session_scope,omitempty"`
+	PromptPath    string   `json:"prompt_path,omitempty"`
+	Subscriptions []string `json:"subscriptions,omitempty"`
+	Tools         []string `json:"tools,omitempty"`
 }
 
 func newBundleCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
@@ -799,7 +799,7 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 		appendKV("type", agent.Type)
 		appendKV("model", agent.Model)
 		appendKV("llm_backend", agent.LLMBackend)
-		appendKV("conversation_mode", agent.ConversationMode)
+		appendKV("mode", agent.Mode)
 		appendKV("session_scope", agent.SessionScope)
 		appendKV("prompt_path", agent.PromptPath)
 		if len(agent.Subscriptions) > 0 {

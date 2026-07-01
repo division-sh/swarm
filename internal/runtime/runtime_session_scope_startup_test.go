@@ -107,8 +107,7 @@ backend:
   type: generic
   role: backend
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
   emit_events:
@@ -177,8 +176,7 @@ backend:
   type: generic
   role: backend
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
   emit_events:

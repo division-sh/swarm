@@ -3660,14 +3660,17 @@ engine:
         provider remains a separate provider implementation/parity gate.
       - Native multi-backend-per-run remains deferred until a separate real user need is gated.
     conversation_modes:
-      description: How the platform manages agent session context across invocations.
+      description: How the platform manages agent session context across invocations. Public authored agent contracts
+        use the field `mode`; the runtime persists the derived value in the internal `conversation_mode` column.
       modes:
-        task: New session per event. No memory between invocations. Stateless.
-        session: Session persists across events for the agent. Authored normal agents require explicit session_scope flow;
-          session_scope global is reserved for platform-owned/internal system services and historical/read-only runtime rows.
-        session_per_entity: One session per entity the agent works on. Requires explicit session_scope entity. Agent retains
+        task: 'New session per event. No memory between invocations. Stateless.'
+        session: 'Session persists across events for the agent. Authored normal agents declare `mode: session`; the runtime
+          derives session_scope flow. session_scope global is reserved for platform-owned/internal system services and
+          historical/read-only runtime rows.'
+        session_per_entity: 'One session per entity the agent works on. Authored normal agents declare `mode: session_per_entity`;
+          the runtime derives session_scope entity. Agent retains
           context across multiple events for the same entity but has separate sessions for different entities. Useful for
-          agents that need continuity (e.g., research agent building a brief over multiple turns).
+          agents that need continuity (e.g., research agent building a brief over multiple turns).'
       default: task
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
@@ -3692,7 +3695,7 @@ engine:
       universal_tools: 'The following tools are auto-granted to all agents without explicit tools listing: agent_message
         and mailbox_send. Generated emit tools are derived from emit_events. Entity tools are governed by
         contract_formats.persistence_model.role_scoped_entity_tools and tool_model.agent_tool_filtering, not by prompt prose.'
-    task_mode_audit: 'Agents in task conversation_mode do NOT create agent_sessions rows. Task mode is
+    task_mode_audit: 'Agents in task mode do NOT create agent_sessions rows. Task mode is
       stateless — no live session, no session lookup, no session persistence. The conversation transcript
       (reasoning, tool calls, results) is persisted after each invocation to agent_conversation_audits
       (write-only audit table) and agent_turns (per-turn append-only log). The transcript is NEVER loaded
@@ -3748,70 +3751,75 @@ engine:
       - 'Replace old UNIQUE (agent_id, scope_key) with the partial non-terminated unique index.'
       - 'Backfill legacy terminated rows to termination_reason = legacy and terminated_at = COALESCE(updated_at, created_at).'
       - 'Enable invariant enforcement only after the legacy backfill.'
-    conversation_mode_values:
+    agent_memory_mode_values:
       task: 'Stateless between invocations. No agent_sessions row. Audit snapshot persisted to
         agent_conversation_audits (write-only). Per-turn history in agent_turns. Never reloaded.
         Each invocation starts fresh.'
       session: 'Persistent session across events. Live session row in agent_sessions. Requires explicit
-        session_scope flow for authored normal agents. session_scope global is reserved for platform-owned/internal
-        system services and historical/read-only runtime rows. Conversation history maintained and reused. Agent
+        authored `mode: session`; the runtime derives session_scope flow for authored normal agents. session_scope global
+        is reserved for platform-owned/internal system services and historical/read-only runtime rows. Conversation history maintained and reused. Agent
         accumulates context.'
       session_per_entity: 'One session per agent × entity. Live session row in agent_sessions per entity.
-        Requires explicit session_scope entity. Context preserved and reused per entity.'
-      stateless: Alias for task. Accepted by the loader, normalized to task internally.
+        Requires explicit authored `mode: session_per_entity`; the runtime derives session_scope entity. Context preserved and reused per entity.'
+      stateless: Retired alias for task. Authored YAML, tool/API mutation payloads, and generated public inputs MUST reject
+        stateless rather than normalize it.
     session_scope_intent:
-      description: 'Explicit session scope declaration for agent contracts. Removes scope inference from
-        agent placement or actor form.'
+      description: 'Runtime-derived session scope for authored normal agent contracts. Authored contracts and tool/API
+        mutation payloads do not declare session_scope directly.'
       contract_field:
-        field: session_scope
-        location: Agent declaration in agents.yaml, alongside conversation_mode.
+        field: mode
+        location: Agent declaration in agents.yaml and dynamic agent_hire/agent_reconfigure memory-mode mutation payloads.
         type: string
         authored_normal_agent_values:
-        - flow
-        - entity
+        - task
+        - session
+        - session_per_entity
+        derived_runtime_scope:
+          task: absent
+          session: flow
+          session_per_entity: entity
+        retired_authored_fields:
+        - conversation_mode
+        - session_scope
+        - session_scope_authority
         values:
-        - global
-        - flow
-        - entity
+        - task
+        - session
+        - session_per_entity
         value_notes:
           global: Reserved for platform-owned/internal system services and historical/read-only persisted runtime rows.
-            Product-authored normal agents in agents.yaml MUST NOT declare session_scope global.
+            Product-authored normal agents in agents.yaml and runtime mutation payloads MUST NOT declare or derive global.
         internal_authority_marker: 'Platform-owned/internal services that require session_scope global must carry the
           runtime-only persisted descriptor field session_scope_authority: platform_internal. This marker is not an
           agents.yaml/API/tool-input field and MUST NOT be inferable from authored type, role, mode, tools, or opaque config.'
       canonical_rules:
-        task: 'conversation_mode task: session_scope must be absent.'
-        session_global: 'conversation_mode session + session_scope global: one session per agent across
+        task: 'mode task: session_scope is absent and no session lookup/row is performed.'
+        session_global: 'Internal runtime state only: conversation_mode session + session_scope global means one session per agent across
           the system. scope_key = "global". This is valid only for platform-owned/internal system-service runtime
           state and historical/read-only rows; authored normal agents MUST NOT declare it.'
-        session_flow: 'conversation_mode session + session_scope flow: one session per agent per flow
-          instance. scope_key = flow_instance path.'
-        session_per_entity: 'conversation_mode session_per_entity + session_scope entity: one reusable
+        session_flow: 'mode session derives conversation_mode session + session_scope flow: one session per agent per
+          flow instance. scope_key = flow_instance path.'
+        session_per_entity: 'mode session_per_entity derives conversation_mode session_per_entity + session_scope entity: one reusable
           session per agent per entity within the same flow instance. scope_key = entity_id.'
       invalid_combinations:
-        task_present: 'task + session_scope present is a boot error.'
-        session_missing: 'session + session_scope absent is a boot error. Authored normal agents must use session_scope
-          flow.'
-        authored_session_global: 'Authored normal agents with session + session_scope global are a boot/runtime error.
-          Global reusable sessions are reserved for platform-owned/internal system-service runtime state.'
+        retired_conversation_mode: 'Authored conversation_mode is a load/tool/API error; use mode.'
+        retired_session_scope: 'Authored session_scope is a load/tool/API error; scope is runtime-derived from mode.'
         forged_session_scope_authority: 'Authored agents and runtime tool payloads cannot set session_scope_authority.
-          Any appearance in opaque config is invalid runtime-owned metadata.'
-        session_entity: 'session + session_scope entity is a boot error. Use session_per_entity.'
-        entity_missing: 'session_per_entity + session_scope absent is a boot error.'
-        entity_global: 'session_per_entity + session_scope global is a boot error.'
-        entity_flow: 'session_per_entity + session_scope flow is a boot error. Use session with
-          session_scope flow.'
+          Any appearance in top-level payloads, config, constraints, opaque config, or runtime descriptor paths is invalid runtime-owned metadata.'
+        mode_global: 'Authored mode global is invalid. Global reusable sessions are reserved for platform-owned/internal system-service runtime state.'
+        unknown_mode: 'Any authored mode outside task/session/session_per_entity is invalid.'
+        stateless_alias: 'Authored stateless is invalid; use mode task.'
       boot_validation:
         description: Enforced at boot, not at first runtime session acquisition.
         rules:
-        - Validate conversation_mode + session_scope against the canonical combinations.
-        - Authored normal agents MUST NOT declare session_scope global. Runtime mutators such as agent_hire and
-          agent_reconfigure must enforce the same rejection as boot validation and must not accept
-          session_scope_authority from tool/API/authored payloads.
-        - No inference. No fallback. Missing required session_scope is a boot error.
-        - session_scope flow requires a flow-scoped declaration with resolvable flow-instance context.
+        - Validate authored mode against task/session/session_per_entity and derive runtime conversation_mode/session_scope from that single owner.
+        - Authored normal agents MUST NOT declare conversation_mode, session_scope, or session_scope_authority. Runtime
+          mutators such as agent_hire and agent_reconfigure must enforce the same rejection and must not accept old fields
+          or runtime authority through top-level payloads, config, constraints, opaque config, or runtime descriptor paths.
+        - No compatibility aliases. stateless, global, and unknown mode values fail closed.
+        - Derived session_scope flow requires a flow-scoped declaration with resolvable flow-instance context.
           Root-level agents cannot declare session_scope flow.
-        - session_scope entity requires a flow that manages entities (has initial_state). Stateless
+        - Derived session_scope entity requires a flow that manages entities (has initial_state). Stateless
           flows cannot declare session_scope entity.
       lookup_rules:
         global: scope_key = "global"
@@ -5536,7 +5544,7 @@ flow_model:
       - schema.yaml entity as a singleton entity selector
       - template instance.by / on_missing / on_conflict for singleton ownership
       - static multi-entity flow ownership
-      - agent conversation_mode or session_scope memory
+      - agent mode or derived session_scope memory
       - parent connect to contained map/list items
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     escape_hatches:
@@ -6776,7 +6784,7 @@ platform_tables:
         conversation modes. Task mode does NOT create rows here — task-mode audit goes to
         agent_conversation_audits instead. Supports three scopes: entity (one session per agent × entity),
         flow (one session per agent × flow instance), global (one session per agent, shared across all
-        entities). For authored normal agents, scope directly reflects the declared session_scope and MUST NOT be
+        entities). For authored normal agents, scope is derived from declared mode and MUST NOT be
         global. The global value is retained for platform-owned/internal system-service runtime state and historical/read-only
         persisted rows. scope_key is the lookup key.
         lease_holder/lease_expires_at for distributed session locking. Termination metadata captures WHY
@@ -8402,7 +8410,7 @@ multi_bundle_persistence:
       parsed_json: >
         Definition-only JSON projection with projection_version, workflow name/version, canonical input labels/policies,
         and agent definitions. Agent definitions may include agent_id, flow_instance, role, type, model,
-        conversation_mode, session_scope, prompt_path, subscriptions, and tools. Runtime-owned fields such as status,
+        mode, session_scope, prompt_path, subscriptions, and tools. Runtime-owned fields such as status,
         runtime_state, queues, active task, watchdog, last_tool_outcome, pending deliveries, and delivery lifecycle are
         forbidden.
       metadata: >
@@ -9162,7 +9170,7 @@ platform_events:
       payload:
         agent_id: string
         flow_instance: string (nullable)
-        conversation_mode: string
+        mode: string
         session_scope: string (nullable)
         model: string
         llm_backend: string
@@ -12862,7 +12870,7 @@ cli_specification:
       behavior: Read-only single-agent detail CLI consumer. The CLI renders only AgentDetail and refs returned by /v1/rpc agent.get; it MUST NOT expand transcripts, call conversation.current_for_agent, call conversation.get, or reconstruct agent/session/turn state locally.
       output:
         header: Agent <agent-id>
-        summary_line: role=<role> type=<type> status=<status> model=<model> conversation_mode=<mode> session_scope=<scope>
+        summary_line: role=<role> type=<type> status=<status> model=<model> mode=<mode> session_scope=<scope>
         refs_only: optional current_session_ref and last_turn_ref lines when present
       exit_codes:
         success: 0
@@ -14528,7 +14536,7 @@ api_specification:
             type: string
           llm_backend:
             type: string
-          conversation_mode:
+          mode:
             type: string
           session_scope:
             type: string
@@ -15617,8 +15625,7 @@ api_specification:
         - role
         - type
         - model
-        - conversation_mode
-        - session_scope
+        - mode
         - status
         properties:
           agent_id:
@@ -15629,10 +15636,11 @@ api_specification:
             type: string
           model:
             type: string
-          conversation_mode:
+          mode:
             $ref: '#/components/schemas/ConversationMode'
           session_scope:
             $ref: '#/components/schemas/SessionScope'
+            description: Present only for scoped agent modes. Omitted for mode=task because task agents have no live runtime session scope.
           status:
             $ref: '#/components/schemas/AgentStatus'
       SessionRef:

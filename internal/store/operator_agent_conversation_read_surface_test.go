@@ -74,6 +74,66 @@ func (s fakeAgentConversationReadSource) ListAgentLifecycleFacts(_ context.Conte
 	return out, s.err
 }
 
+func TestOperatorAgentSummaryPublishesModeWithoutLegacyConversationMode(t *testing.T) {
+	sessionSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "session-agent",
+			Role:             "worker",
+			Type:             "managed",
+			Model:            "cheap",
+			ConversationMode: runtimesessions.RuntimeModeSession.String(),
+			SessionScope:     runtimesessions.SessionScopeFlow.String(),
+		},
+	}, operatorAgentProjection{LifecycleState: "active"}, 0)
+	if sessionSummary.Mode != runtimesessions.RuntimeModeSession.String() {
+		t.Fatalf("Mode = %q, want session", sessionSummary.Mode)
+	}
+	if sessionSummary.SessionScope != runtimesessions.SessionScopeFlow.String() {
+		t.Fatalf("SessionScope = %q, want flow", sessionSummary.SessionScope)
+	}
+	raw, err := json.Marshal(sessionSummary)
+	if err != nil {
+		t.Fatalf("marshal summary: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"mode":"session"`) {
+		t.Fatalf("summary json = %s, want mode", text)
+	}
+	if strings.Contains(text, "conversation_mode") {
+		t.Fatalf("summary json = %s, must not expose legacy conversation_mode", text)
+	}
+
+	taskSummary := operatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:               "task-agent",
+			Role:             "worker",
+			Type:             "managed",
+			Model:            "cheap",
+			ConversationMode: runtimesessions.RuntimeModeTask.String(),
+		},
+	}, operatorAgentProjection{}, 0)
+	if taskSummary.Mode != runtimesessions.RuntimeModeTask.String() {
+		t.Fatalf("task Mode = %q, want task", taskSummary.Mode)
+	}
+	if taskSummary.SessionScope != "" {
+		t.Fatalf("task SessionScope = %q, want empty runtime scope", taskSummary.SessionScope)
+	}
+	raw, err = json.Marshal(taskSummary)
+	if err != nil {
+		t.Fatalf("marshal task summary: %v", err)
+	}
+	text = string(raw)
+	if !strings.Contains(text, `"mode":"task"`) {
+		t.Fatalf("task summary json = %s, want mode", text)
+	}
+	if strings.Contains(text, "session_scope") {
+		t.Fatalf("task summary json = %s, must omit absent session_scope", text)
+	}
+	if strings.Contains(text, "conversation_mode") {
+		t.Fatalf("task summary json = %s, must not expose legacy conversation_mode", text)
+	}
+}
+
 func canonicalAgentConversationReadCaps() StoreSchemaCapabilities {
 	return StoreSchemaCapabilities{
 		Events: EventSchemaCapabilities{

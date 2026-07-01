@@ -1,7 +1,7 @@
 audit-agent:
   id: audit-agent
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions:
     - task.completed
   emit_events:

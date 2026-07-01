@@ -1,6 +1,6 @@
 worker:
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions:
     - task.requested
   emit_events:

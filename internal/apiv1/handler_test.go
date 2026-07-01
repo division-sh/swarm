@@ -570,16 +570,16 @@ func TestOperatorBundleCatalogHandlersExposeStoreOwner(t *testing.T) {
 		agents: map[string]store.BundleCatalogAgentsResult{
 			bundleHash: {
 				Agents: []store.BundleCatalogAgentDefinition{{
-					AgentID:          "researcher",
-					Role:             "research",
-					Type:             "managed",
-					Model:            "cheap",
-					LLMBackend:       "claude",
-					ConversationMode: "session",
-					SessionScope:     "flow",
-					PromptPath:       "prompts/researcher.md",
-					Subscriptions:    []string{"scan.requested"},
-					Tools:            []string{"web_search"},
+					AgentID:       "researcher",
+					Role:          "research",
+					Type:          "managed",
+					Model:         "cheap",
+					LLMBackend:    "claude",
+					Mode:          "session",
+					SessionScope:  "flow",
+					PromptPath:    "prompts/researcher.md",
+					Subscriptions: []string{"scan.requested"},
+					Tools:         []string{"web_search"},
 				}},
 			},
 		},
@@ -716,7 +716,7 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	}
 	agents := asMap(t, upsert.ParsedJSON["agents"])
 	researcher := asMap(t, agents["researcher"])
-	if researcher["model"] != "regular" || researcher["conversation_mode"] != "stateless" {
+	if researcher["model"] != "regular" || researcher["mode"] != "task" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
 
@@ -877,7 +877,7 @@ files:
         id: researcher
         role: research
         model: regular
-        conversation_mode: stateless
+        mode: task
         subscriptions:
           - scan.requested
 `

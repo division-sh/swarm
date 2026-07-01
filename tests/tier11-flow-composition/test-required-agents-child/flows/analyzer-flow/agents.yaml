@@ -1,5 +1,5 @@
 analyzer:
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions: [analysis.requested]
   emit_events: [analysis.done]

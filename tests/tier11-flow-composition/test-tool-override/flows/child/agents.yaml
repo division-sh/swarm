@@ -1,6 +1,6 @@
 child-agent:
   model: regular
-  conversation_mode: stateless
+  mode: task
   tools_tier2:
     - lookup_data
   subscriptions:

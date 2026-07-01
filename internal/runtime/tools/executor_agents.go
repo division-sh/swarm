@@ -234,11 +234,8 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
 	}
-	var in struct {
-		EntityID string             `json:"entity_id"`
-		Config   models.AgentConfig `json:"config"`
-	}
-	if err := decodeToolInput(input, &in); err != nil {
+	in, err := decodeAgentMutationInput("agent_hire", input, true)
+	if err != nil {
 		return nil, err
 	}
 	if in.Config.ID == "" {
@@ -305,11 +302,8 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
 	}
-	var in struct {
-		AgentID string             `json:"agent_id"`
-		Config  models.AgentConfig `json:"config"`
-	}
-	if err := decodeToolInput(input, &in); err != nil {
+	in, err := decodeAgentMutationInput("agent_reconfigure", input, false)
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(in.AgentID) == "" {
@@ -340,6 +334,119 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 		runtimeauthority.UpsertManagedAgent(e.authority, in.Config)
 	}
 	return map[string]any{"status": "reconfigured", "agent_id": in.AgentID}, nil
+}
+
+type agentMutationInput struct {
+	AgentID  string
+	EntityID string
+	Config   models.AgentConfig
+}
+
+func decodeAgentMutationInput(toolName string, input any, requireMode bool) (agentMutationInput, error) {
+	normalized := canonicalRuntimeToolInput(toolName, input)
+	var payload map[string]any
+	if err := decodeToolInput(normalized, &payload); err != nil {
+		return agentMutationInput{}, err
+	}
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	if err := rejectAgentMemoryModeForgery(payload, "input", true); err != nil {
+		return agentMutationInput{}, err
+	}
+
+	configMap, err := agentMutationConfigMap(payload["config"])
+	if err != nil {
+		return agentMutationInput{}, err
+	}
+	topMode := strings.TrimSpace(asString(payload["mode"]))
+	configMode := strings.TrimSpace(asString(configMap["mode"]))
+	switch {
+	case topMode != "" && configMode != "" && topMode != configMode:
+		return agentMutationInput{}, fmt.Errorf("mode mismatch between input.mode and input.config.mode")
+	case configMode != "":
+		topMode = configMode
+	}
+	if requireMode && topMode == "" {
+		return agentMutationInput{}, fmt.Errorf("config.mode is required")
+	}
+	delete(configMap, "mode")
+	payload["config"] = configMap
+
+	var decoded struct {
+		AgentID  string             `json:"agent_id"`
+		EntityID string             `json:"entity_id"`
+		Config   models.AgentConfig `json:"config"`
+	}
+	if err := decodeToolInput(payload, &decoded); err != nil {
+		return agentMutationInput{}, err
+	}
+	if topMode != "" {
+		mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(topMode)
+		if err != nil {
+			return agentMutationInput{}, fmt.Errorf("invalid mode: %w", err)
+		}
+		decoded.Config.ConversationMode = mode.String()
+		decoded.Config.SessionScope = scope.String()
+	}
+	return agentMutationInput{
+		AgentID:  decoded.AgentID,
+		EntityID: decoded.EntityID,
+		Config:   decoded.Config,
+	}, nil
+}
+
+func agentMutationConfigMap(raw any) (map[string]any, error) {
+	if raw == nil {
+		return map[string]any{}, nil
+	}
+	var config map[string]any
+	if err := decodeToolInput(raw, &config); err != nil {
+		return nil, fmt.Errorf("decode config: %w", err)
+	}
+	if config == nil {
+		return map[string]any{}, nil
+	}
+	return config, nil
+}
+
+func rejectAgentMemoryModeForgery(value any, path string, allowMode bool) error {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, item := range typed {
+			field := strings.TrimSpace(key)
+			if field == "" {
+				continue
+			}
+			fieldPath := path + "." + field
+			switch field {
+			case "conversation_mode":
+				return fmt.Errorf("%s is retired; use mode", fieldPath)
+			case "session_scope":
+				return fmt.Errorf("%s is runtime-derived from mode", fieldPath)
+			case "session_scope_authority":
+				return fmt.Errorf("%s is platform-internal runtime state", fieldPath)
+			case "mode":
+				if !allowMode {
+					return fmt.Errorf("%s is only supported as the agent memory mode field", fieldPath)
+				}
+			}
+			childAllowMode := false
+			if path == "input" && field == "config" {
+				childAllowMode = true
+			}
+			if err := rejectAgentMemoryModeForgery(item, fieldPath, childAllowMode); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for i, item := range typed {
+			if err := rejectAgentMemoryModeForgery(item, fmt.Sprintf("%s[%d]", path, i), false); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func mergeAgentSessionScopeConfig(base, patch models.AgentConfig) models.AgentConfig {

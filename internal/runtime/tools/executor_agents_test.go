@@ -208,6 +208,7 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
+			"mode":             "task",
 			"manager_fallback": "manager",
 			"flow_path":        "review/inst-1",
 			"permissions":      []any{"agent_fire"},
@@ -250,6 +251,7 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
+			"mode":             "task",
 			"manager_fallback": "manager",
 			"flow_path":        "review/inst-1",
 			"tools":            []any{"deploy_prod"},
@@ -292,6 +294,7 @@ func TestExecAgentHire_DeniesRoleBasedEmitEscalation(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "escalated",
+			"mode":             "task",
 			"manager_fallback": "manager",
 			"flow_path":        "review/inst-1",
 		},
@@ -335,6 +338,7 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 		"config": map[string]any{
 			"id":               "worker-1",
 			"role":             "worker",
+			"mode":             "task",
 			"manager_fallback": "manager",
 			"flow_path":        "review/inst-1",
 			"permissions":      []any{"schedule"},
@@ -368,6 +372,61 @@ func TestExecAgentHire_AllowsDelegablePrivileges(t *testing.T) {
 	}
 }
 
+func TestExecAgentHire_DerivesSessionScopeFromAuthoredMode(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		entityID  string
+		wantScope string
+	}{
+		{name: "task", mode: "task"},
+		{name: "session", mode: "session", wantScope: runtimesessions.SessionScopeFlow.String()},
+		{name: "session_per_entity", mode: "session_per_entity", entityID: "entity-1", wantScope: runtimesessions.SessionScopeEntity.String()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{
+					"manager": {ID: "manager", Role: "manager"},
+					"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+				},
+			})
+			manager := &captureManagerStub{}
+			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+				Manager:           manager,
+				AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+				WorkflowSource:    source,
+			})
+
+			input := map[string]any{
+				"config": map[string]any{
+					"id":               "worker-1",
+					"role":             "worker",
+					"mode":             tc.mode,
+					"manager_fallback": "manager",
+					"flow_path":        "review/inst-1",
+				},
+			}
+			if tc.entityID != "" {
+				input["entity_id"] = tc.entityID
+			}
+			_, err := exec.ExecAgentHireDirect(models.AgentConfig{
+				ID:          "manager-1",
+				Role:        "manager",
+				Permissions: []string{"agent_hire"},
+				FlowPath:    "review/inst-1",
+			}, input)
+			if err != nil {
+				t.Fatalf("ExecAgentHireDirect: %v", err)
+			}
+			if manager.spawnedConfig.ConversationMode != tc.mode || manager.spawnedConfig.SessionScope != tc.wantScope {
+				t.Fatalf("spawned mode/scope = (%q, %q), want (%q, %q)", manager.spawnedConfig.ConversationMode, manager.spawnedConfig.SessionScope, tc.mode, tc.wantScope)
+			}
+		})
+	}
+}
+
 func TestExecAgentHire_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 	t.Parallel()
 
@@ -391,22 +450,65 @@ func TestExecAgentHire_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 		FlowPath:    "review/inst-1",
 	}, map[string]any{
 		"config": map[string]any{
-			"id":                      "worker-1",
-			"role":                    "worker",
-			"manager_fallback":        "manager",
-			"conversation_mode":       runtimesessions.RuntimeModeSession.String(),
-			"session_scope":           runtimesessions.SessionScopeGlobal.String(),
-			"session_scope_authority": "platform_internal",
+			"id":               "worker-1",
+			"role":             "worker",
+			"manager_fallback": "manager",
+			"mode":             runtimesessions.RuntimeModeSession.String(),
+			"session_scope":    runtimesessions.SessionScopeGlobal.String(),
 		},
 	})
 	if err == nil {
 		t.Fatal("expected authored global session scope hire to be denied")
 	}
-	if !strings.Contains(err.Error(), "authored normal agents cannot declare session_scope global") {
-		t.Fatalf("error = %q, want authored global session scope denial", err.Error())
+	if !strings.Contains(err.Error(), "input.config.session_scope is runtime-derived from mode") {
+		t.Fatalf("error = %q, want retired session_scope denial", err.Error())
 	}
 	if manager.spawnCalled {
 		t.Fatal("expected denied hire to fail closed before spawning")
+	}
+}
+
+func TestExecAgentHireRejectsRetiredAndInvalidMemoryModeInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		input    map[string]any
+		contains string
+	}{
+		{name: "top_level_conversation_mode", input: map[string]any{"conversation_mode": "task", "config": map[string]any{"id": "worker-1", "role": "worker", "mode": "task"}}, contains: "input.conversation_mode is retired"},
+		{name: "top_level_session_scope", input: map[string]any{"session_scope": "flow", "config": map[string]any{"id": "worker-1", "role": "worker", "mode": "session"}}, contains: "input.session_scope is runtime-derived"},
+		{name: "config_conversation_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "conversation_mode": "task"}}, contains: "input.config.conversation_mode is retired"},
+		{name: "config_session_scope_authority", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "session", "session_scope_authority": "platform_internal"}}, contains: "input.config.session_scope_authority is platform-internal"},
+		{name: "opaque_config_session_scope", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "task", "config": map[string]any{"session_scope": "global"}}}, contains: "input.config.config.session_scope is runtime-derived"},
+		{name: "opaque_config_mode", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "task", "config": map[string]any{"mode": "entity"}}}, contains: "input.config.config.mode is only supported"},
+		{name: "mode_global", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "global"}}, contains: "reserved"},
+		{name: "mode_unknown", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "forever"}}, contains: "invalid mode"},
+		{name: "mode_stateless", input: map[string]any{"config": map[string]any{"id": "worker-1", "role": "worker", "mode": "stateless"}}, contains: "retired"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+				Agents: map[string]runtimecontracts.AgentRegistryEntry{
+					"manager": {ID: "manager", Role: "manager"},
+					"worker":  {ID: "worker", Role: "worker", ManagerFallback: "manager"},
+				},
+			})
+			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+				Manager:           &captureManagerStub{},
+				AuthorityProvider: runtimeauthority.NewSourceProvider(source),
+				WorkflowSource:    source,
+			})
+			_, err := exec.ExecAgentHireDirect(models.AgentConfig{
+				ID:          "manager-1",
+				Role:        "manager",
+				Permissions: []string{"agent_hire"},
+				FlowPath:    "review/inst-1",
+			}, tt.input)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("ExecAgentHireDirect error = %v, want %q", err, tt.contains)
+			}
+		})
 	}
 }
 
@@ -494,15 +596,14 @@ func TestExecAgentReconfigure_RejectsAuthoredGlobalSessionScope(t *testing.T) {
 	}, map[string]any{
 		"agent_id": "worker-1",
 		"config": map[string]any{
-			"session_scope":           runtimesessions.SessionScopeGlobal.String(),
-			"session_scope_authority": "platform_internal",
+			"session_scope": runtimesessions.SessionScopeGlobal.String(),
 		},
 	})
 	if err == nil {
 		t.Fatal("expected authored global session scope reconfigure to be denied")
 	}
-	if !strings.Contains(err.Error(), "authored normal agents cannot declare session_scope global") {
-		t.Fatalf("error = %q, want authored global session scope denial", err.Error())
+	if !strings.Contains(err.Error(), "input.config.session_scope is runtime-derived from mode") {
+		t.Fatalf("error = %q, want retired session_scope denial", err.Error())
 	}
 	if manager.reconfigureCalled {
 		t.Fatal("expected denied reconfigure to fail closed before persistence")

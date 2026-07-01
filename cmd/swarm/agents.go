@@ -131,13 +131,13 @@ type agentDiagnosisLastToolOutcome struct {
 }
 
 type agentSummary struct {
-	AgentID          string `json:"agent_id"`
-	Role             string `json:"role"`
-	Type             string `json:"type"`
-	Model            string `json:"model"`
-	ConversationMode string `json:"conversation_mode"`
-	SessionScope     string `json:"session_scope"`
-	Status           string `json:"status"`
+	AgentID      string `json:"agent_id"`
+	Role         string `json:"role"`
+	Type         string `json:"type"`
+	Model        string `json:"model"`
+	Mode         string `json:"mode"`
+	SessionScope string `json:"session_scope,omitempty"`
+	Status       string `json:"status"`
 }
 
 type agentSessionRef struct {
@@ -765,8 +765,7 @@ func validateAgentSummary(agent agentSummary) error {
 		{name: "role", value: agent.Role},
 		{name: "type", value: agent.Type},
 		{name: "model", value: agent.Model},
-		{name: "conversation_mode", value: agent.ConversationMode},
-		{name: "session_scope", value: agent.SessionScope},
+		{name: "mode", value: agent.Mode},
 		{name: "status", value: agent.Status},
 	} {
 		if strings.TrimSpace(field.value) == "" {
@@ -776,11 +775,13 @@ func validateAgentSummary(agent agentSummary) error {
 	if _, ok := agentValidStatuses[strings.TrimSpace(agent.Status)]; !ok {
 		return fmt.Errorf("status=%q is not a valid AgentStatus", agent.Status)
 	}
-	if _, ok := agentValidConversationModes[strings.TrimSpace(agent.ConversationMode)]; !ok {
-		return fmt.Errorf("conversation_mode=%q is not a valid ConversationMode", agent.ConversationMode)
+	if _, ok := agentValidConversationModes[strings.TrimSpace(agent.Mode)]; !ok {
+		return fmt.Errorf("mode=%q is not a valid AgentMode", agent.Mode)
 	}
-	if _, ok := agentValidSessionScopes[strings.TrimSpace(agent.SessionScope)]; !ok {
-		return fmt.Errorf("session_scope=%q is not a valid SessionScope", agent.SessionScope)
+	if strings.TrimSpace(agent.Mode) != "task" {
+		if _, ok := agentValidSessionScopes[strings.TrimSpace(agent.SessionScope)]; !ok {
+			return fmt.Errorf("session_scope=%q is not a valid SessionScope", agent.SessionScope)
+		}
 	}
 	return nil
 }
@@ -834,7 +835,7 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			agent.Type,
 			agent.Status,
 			agent.Model,
-			agent.ConversationMode,
+			agent.Mode,
 			agent.SessionScope,
 		)
 	}
@@ -939,12 +940,12 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 	}
 	agent := result.Agent
 	fmt.Fprintf(out, "Agent %s\n", agent.AgentID)
-	fmt.Fprintf(out, "role=%s type=%s status=%s model=%s conversation_mode=%s session_scope=%s\n",
+	fmt.Fprintf(out, "role=%s type=%s status=%s model=%s mode=%s session_scope=%s\n",
 		agent.Role,
 		agent.Type,
 		agent.Status,
 		agent.Model,
-		agent.ConversationMode,
+		agent.Mode,
 		agent.SessionScope,
 	)
 	if ref := result.CurrentSessionRef; ref != nil {

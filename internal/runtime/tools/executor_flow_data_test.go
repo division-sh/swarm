@@ -238,6 +238,7 @@ flows:
 factory-cto:
   id: factory-cto
   role: factory_cto
+  mode: task
 `+toolFlowDataAccessYAML(access))
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")

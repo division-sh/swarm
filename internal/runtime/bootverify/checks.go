@@ -717,14 +717,14 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field conversation_mode", agentLabel),
+					Message:  fmt.Sprintf("agent %s missing required field mode", agentLabel),
 					Location: agentLabel,
 				})
-			} else if _, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode); err != nil {
+			} else if _, err := sessions.ParseAuthoredAgentMode(agent.ConversationMode); err != nil {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("agent %s has invalid conversation_mode: %v", agentLabel, err),
+					Message:  fmt.Sprintf("agent %s has invalid mode: %v", agentLabel, err),
 					Location: agentLabel,
 				})
 			}
@@ -824,14 +824,14 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("agent %s missing required field conversation_mode", agentLabel),
+					Message:  fmt.Sprintf("agent %s missing required field mode", agentLabel),
 					Location: agentLabel,
 				})
-			} else if _, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode); err != nil {
+			} else if _, err := sessions.ParseAuthoredAgentMode(agent.ConversationMode); err != nil {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("agent %s has invalid conversation_mode: %v", agentLabel, err),
+					Message:  fmt.Sprintf("agent %s has invalid mode: %v", agentLabel, err),
 					Location: agentLabel,
 				})
 			}
@@ -854,7 +854,7 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 
 func appendAgentSessionScopeFindings(findings []Finding, source semanticview.Source, scopeLabel string, proof semanticview.AgentSessionScopeProof, agentID string, agent runtimecontracts.AgentRegistryEntry) []Finding {
 	agentLabel := scopedObjectLabel(scopeLabel, agentID)
-	mode, err := sessions.ParseConversationRuntimeMode(agent.ConversationMode)
+	mode, err := sessions.ParseAuthoredAgentMode(agent.ConversationMode)
 	if err != nil {
 		return findings
 	}

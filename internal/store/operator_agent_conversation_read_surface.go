@@ -61,15 +61,15 @@ type OperatorAgentListResult struct {
 }
 
 type OperatorAgentSummary struct {
-	AgentID          string `json:"agent_id"`
-	Role             string `json:"role"`
-	Type             string `json:"type"`
-	Model            string `json:"model"`
-	ConversationMode string `json:"conversation_mode"`
-	SessionScope     string `json:"session_scope"`
-	Status           string `json:"status"`
+	AgentID      string `json:"agent_id"`
+	Role         string `json:"role"`
+	Type         string `json:"type"`
+	Model        string `json:"model"`
+	Mode         string `json:"mode"`
+	SessionScope string `json:"session_scope,omitempty"`
+	Status       string `json:"status"`
 
-	Mode                  string                              `json:"-"`
+	RuntimeDescriptorMode string                              `json:"-"`
 	FlowInstance          string                              `json:"-"`
 	EntityID              string                              `json:"-"`
 	ParentAgentID         string                              `json:"-"`
@@ -1225,18 +1225,15 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 		mode = runtimesessions.RuntimeModeTask.String()
 	}
 	scope := strings.TrimSpace(row.Config.SessionScope)
-	if scope == "" {
-		scope = runtimesessions.SessionScopeGlobal.String()
-	}
 	out := OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
 		Role:                  strings.TrimSpace(row.Config.Role),
 		Type:                  agentPersistedType(row.Config, strings.TrimSpace(row.Config.Model)),
 		Model:                 strings.TrimSpace(row.Config.Model),
-		ConversationMode:      mode,
+		Mode:                  mode,
 		SessionScope:          scope,
 		Status:                projection.v1Status(),
-		Mode:                  strings.TrimSpace(row.Config.Mode),
+		RuntimeDescriptorMode: strings.TrimSpace(row.Config.Mode),
 		FlowInstance:          strings.TrimSpace(row.Config.CanonicalFlowPath()),
 		EntityID:              strings.TrimSpace(row.Config.EffectiveEntityID()),
 		ParentAgentID:         strings.TrimSpace(row.ParentAgentID),

@@ -370,9 +370,9 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 	mode, err := sessions.ParseConversationRuntimeMode(coalesce(s.ConversationMode, s.RuntimeMode))
 	if err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_api_conversation_invalid_mode", "Persisting the API conversation was skipped because the session mode was invalid", s.AgentID, s.ID, "", map[string]any{
-			"conversation_mode": strings.TrimSpace(s.ConversationMode),
-			"runtime_mode":      strings.TrimSpace(s.RuntimeMode),
-			"scope_key":         strings.TrimSpace(s.ScopeKey),
+			"mode":         strings.TrimSpace(s.ConversationMode),
+			"runtime_mode": strings.TrimSpace(s.RuntimeMode),
+			"scope_key":    strings.TrimSpace(s.ScopeKey),
 		}, err)
 		return
 	}
@@ -392,8 +392,8 @@ func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Sessio
 		Status:       "active",
 	}); err != nil {
 		logPublisherRuntime(ctx, r.events, "error", "persist_api_conversation_failed", "Persisting the API conversation failed", s.AgentID, s.ID, "", map[string]any{
-			"conversation_mode": mode.String(),
-			"scope_key":         strings.TrimSpace(s.ScopeKey),
+			"mode":      mode.String(),
+			"scope_key": strings.TrimSpace(s.ScopeKey),
 		}, err)
 	}
 }

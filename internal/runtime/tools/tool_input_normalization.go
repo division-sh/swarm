@@ -111,12 +111,6 @@ func canonicalRuntimeToolInput(name string, input any) any {
 			if modelTier := strings.TrimSpace(asString(payload["model"])); modelTier != "" {
 				config["model"] = modelTier
 			}
-			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
-				config["conversation_mode"] = conversationMode
-			}
-			if sessionScope := strings.TrimSpace(asString(payload["session_scope"])); sessionScope != "" {
-				config["session_scope"] = sessionScope
-			}
 			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
 				config["max_turns_per_task"] = maxTurns
 			}
@@ -151,14 +145,11 @@ func canonicalRuntimeToolInput(name string, input any) any {
 	case "agent_reconfigure":
 		if payload["config"] == nil {
 			config := map[string]any{}
+			if mode := strings.TrimSpace(asString(payload["mode"])); mode != "" {
+				config["mode"] = mode
+			}
 			if modelTier := strings.TrimSpace(asString(payload["model"])); modelTier != "" {
 				config["model"] = modelTier
-			}
-			if conversationMode := strings.TrimSpace(asString(payload["conversation_mode"])); conversationMode != "" {
-				config["conversation_mode"] = conversationMode
-			}
-			if sessionScope := strings.TrimSpace(asString(payload["session_scope"])); sessionScope != "" {
-				config["session_scope"] = sessionScope
 			}
 			if maxTurns := asInt(payload["max_turns_per_task"]); maxTurns > 0 {
 				config["max_turns_per_task"] = maxTurns

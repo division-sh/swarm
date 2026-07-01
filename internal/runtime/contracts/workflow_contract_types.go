@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -1287,6 +1288,7 @@ type AgentRegistryEntry struct {
 	ManagerFallback        string                          `yaml:"manager_fallback"`
 	NodeType               string                          `yaml:"node_type"`
 	Model                  string                          `yaml:"model"`
+	Mode                   string                          `yaml:"mode"`
 	ConversationMode       string                          `yaml:"conversation_mode"`
 	SessionScope           string                          `yaml:"session_scope"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
@@ -1306,8 +1308,15 @@ type agentRegistryEntryYAML AgentRegistryEntry
 func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
 	if value != nil && value.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(value.Content); i += 2 {
-			if strings.TrimSpace(value.Content[i].Value) == "model_tier" {
+			switch strings.TrimSpace(value.Content[i].Value) {
+			case "model_tier":
 				return fmt.Errorf("RETIRED: agent field model_tier is retired; use model")
+			case "conversation_mode":
+				return fmt.Errorf("RETIRED: agent field conversation_mode is retired; use mode")
+			case "session_scope":
+				return fmt.Errorf("RETIRED: agent field session_scope is runtime-derived from mode")
+			case "session_scope_authority":
+				return fmt.Errorf("RETIRED: agent field session_scope_authority is platform-internal runtime state")
 			}
 		}
 	}
@@ -1315,6 +1324,13 @@ func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode(&decoded); err != nil {
 		return err
 	}
+	mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(decoded.Mode)
+	if err != nil {
+		return fmt.Errorf("agent field mode: %w", err)
+	}
+	decoded.Mode = mode.String()
+	decoded.ConversationMode = mode.String()
+	decoded.SessionScope = scope.String()
 	*e = AgentRegistryEntry(decoded)
 	return nil
 }

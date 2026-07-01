@@ -46,7 +46,7 @@ func TestAgentsListUsesV1RPCWithFilters(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"AGENT_ID", "agent-1", "researcher", "worker", "running", "default", "task", "global", "agent-2", "idle"} {
+	for _, want := range []string{"AGENT_ID", "agent-1", "researcher", "worker", "running", "default", "task", "agent-2", "idle"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -118,7 +118,7 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Agent agent-1",
-		"role=reviewer type=worker status=running model=default conversation_mode=task session_scope=global",
+		"role=reviewer type=worker status=running model=default mode=task session_scope=",
 		"current_session_ref: session_id=session-1 started_at=2026-05-18T03:00:00Z",
 		"last_turn_ref: turn_id=turn-1 completed_at=2026-05-18T03:05:00Z parse_ok=true error=-",
 	} {
@@ -293,13 +293,12 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 
 func agentSummaryResult(agentID, role, status string) map[string]any {
 	return map[string]any{
-		"agent_id":          agentID,
-		"role":              role,
-		"type":              "worker",
-		"model":             "default",
-		"conversation_mode": "task",
-		"session_scope":     "global",
-		"status":            status,
+		"agent_id": agentID,
+		"role":     role,
+		"type":     "worker",
+		"model":    "default",
+		"mode":     "task",
+		"status":   status,
 	}
 }
 

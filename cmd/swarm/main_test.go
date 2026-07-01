@@ -4307,7 +4307,7 @@ load-agent:
   role: load_agent
   prompt_ref: load-agent
   model: regular
-  conversation_mode: task
+  mode: task
   subscriptions:
     - thing.agent_hold
 `)
@@ -9264,7 +9264,7 @@ writer:
   role: writer
   prompt_ref: writer
   model: regular
-  conversation_mode: task
+  mode: task
   subscriptions: []
   entity_writes:
     case:
@@ -9779,7 +9779,7 @@ worker:
   role: worker
   prompt_ref: worker
   model: %s
-  conversation_mode: task
+  mode: task
   subscriptions: [task.assigned]
 `, model))
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `

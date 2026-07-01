@@ -34,10 +34,10 @@ func TestCatalogPromptIssues_UsesSemanticPromptScope(t *testing.T) {
 	bundle := catalogLoadBootBundle(t, dir)
 	scope := catalogBootScope{Name: "support"}
 	agent := map[string]any{
-		"id":                "support-agent",
-		"prompt_ref":        "shared",
-		"model":             "regular",
-		"conversation_mode": "session",
+		"id":         "support-agent",
+		"prompt_ref": "shared",
+		"model":      "regular",
+		"mode":       "session",
 	}
 
 	if issues := catalogPromptIssues(bundle, scope, "support-agent", agent); len(issues) != 0 {
@@ -70,10 +70,10 @@ terminal_states: [done]
 	}
 
 	agent := map[string]any{
-		"id":                "support-agent",
-		"prompt_ref":        "shared",
-		"model":             "regular",
-		"conversation_mode": "session",
+		"id":         "support-agent",
+		"prompt_ref": "shared",
+		"model":      "regular",
+		"mode":       "session",
 	}
 	if issues := catalogPromptIssues(bundle, catalogBootScope{Name: "support"}, "support-agent", agent); len(issues) != 0 {
 		t.Fatalf("catalogPromptIssues returned %#v, want no issues", issues)
@@ -126,7 +126,7 @@ support-agent:
   id: support-agent
   prompt_ref: shared
   model: regular
-  conversation_mode: session
+  mode: session
 `)
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "events.yaml"), "{}\n")
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "flows", "support", "nodes.yaml"), "{}\n")

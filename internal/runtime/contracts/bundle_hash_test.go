@@ -346,7 +346,7 @@ researcher:
   id: researcher
   role: research
   model: regular
-  conversation_mode: stateless
+  mode: task
   subscriptions:
     - scan.requested
 `)
@@ -373,7 +373,7 @@ researcher:
 	}
 	agents := projection.ParsedJSON["agents"].(map[string]any)
 	researcher := agents["researcher"].(map[string]any)
-	if researcher["model"] != "regular" || researcher["conversation_mode"] != "stateless" {
+	if researcher["model"] != "regular" || researcher["mode"] != "task" {
 		t.Fatalf("projected researcher = %#v", researcher)
 	}
 	if _, ok := researcher["status"]; ok {

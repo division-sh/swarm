@@ -696,6 +696,8 @@ requires:
 	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
 worker-agent:
   id: worker-agent
+  role: worker
+  mode: task
   model: regular
   tools: [send_provider]
 `)

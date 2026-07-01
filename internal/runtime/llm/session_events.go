@@ -35,7 +35,7 @@ func publishAgentStarted(ctx context.Context, publisher EventPublisher, session 
 	payload := map[string]any{
 		"agent_id":               strings.TrimSpace(session.AgentID),
 		"flow_instance":          nil,
-		"conversation_mode":      strings.TrimSpace(session.ConversationMode),
+		"mode":                   strings.TrimSpace(session.ConversationMode),
 		"session_scope":          strings.TrimSpace(session.SessionScope),
 		"model":                  strings.TrimSpace(actor.Model),
 		"llm_backend":            strings.TrimSpace(actor.LLMBackend),

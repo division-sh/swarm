@@ -95,12 +95,12 @@ flows:
 
 	accessYAML := flowDataAccessYAML(access)
 	if rootAgent {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  id: root-agent\n  role: root_agent\n"+accessYAML)
+		writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  id: root-agent\n  role: root_agent\n  mode: task\n"+accessYAML)
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
 		return root
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "factory-cto:\n  id: factory-cto\n  role: factory_cto\n"+accessYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "factory-cto:\n  id: factory-cto\n  role: factory_cto\n  mode: task\n"+accessYAML)
 	return root
 }
 

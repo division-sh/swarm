@@ -53,8 +53,7 @@ states:
 flow-agent:
   id: flow-agent
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
 `)
@@ -129,8 +128,7 @@ flows: []
 flow-agent:
   id: flow-agent
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
 `)
@@ -202,8 +200,7 @@ states:
 backend:
   id: backend-{vertical_id}
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - support/item.created
 `)
@@ -265,8 +262,7 @@ states:
 backend:
   id: backend-{flow_id}
   model: regular
-  conversation_mode: session
-  session_scope: flow
+  mode: session
   subscriptions:
     - item.created
 `)

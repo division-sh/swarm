@@ -81,17 +81,22 @@ func TestResolvePromptFileForContractAgent_UsesCanonicalCandidateSet(t *testing.
 	agentsRaw = append(agentsRaw, []byte(strings.TrimLeft(`
 prompt-ref-agent:
   role: prompt_ref_role
+  mode: task
   prompt_ref: shared-prompt
 entry-id-agent:
   id: concrete-template
   role: entry_id_role
+  mode: task
 mode-agent:
   role: mode_role
+  mode: task
 workspace-role-agent:
   role: ops_lead
+  mode: task
   workspace_class: factory
 parent-agent:
   role: parent_role
+  mode: task
 `, "\n"))...)
 	if err := os.WriteFile(agentsPath, agentsRaw, 0o644); err != nil {
 		t.Fatalf("write %s: %v", agentsPath, err)

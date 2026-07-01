@@ -400,6 +400,7 @@ func writeAccumulatorAgentsFile(t *testing.T, path, eventType string, includePro
 producer-agent:
   id: producer-agent
   role: producer
+  mode: task
   emit_events:
     - `+eventType+`
 `)
@@ -415,6 +416,7 @@ func writeAccumulatorRootAgentFixture(t *testing.T) string {
 producer-agent:
   id: producer-agent
   role: producer
+  mode: task
   emit_events:
     - item.arrived
 `)
@@ -467,6 +469,7 @@ func writeAccumulatorWildcardSameFlowAgentFixture(t *testing.T) string {
 producer-agent:
   id: producer-agent
   role: producer
+  mode: task
   emit_events:
     - task.done
 `)
