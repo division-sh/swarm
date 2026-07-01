@@ -1157,14 +1157,42 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 		return false
 	}
 	if target.FlowID != "" {
-		return target.FlowID == flowID
+		return target.FlowID == flowID && workflowNodeDeliveryTargetFlowInstanceMatches(source, flowID, target.FlowInstance)
 	}
 	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
 	if flowPath == "" {
 		flowPath = flowID
 	}
 	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
+	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
+		return targetPath == flowPath || targetPath == flowID
+	}
 	return targetPath == flowPath || strings.HasPrefix(targetPath, flowPath+"/")
+}
+
+func workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, flowID, flowInstance string) bool {
+	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
+	if flowInstance == "" {
+		return true
+	}
+	flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/")
+	if flowPath == "" {
+		flowPath = strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
+		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/")
+	}
+	return true
+}
+
+func workflowFlowMode(source semanticview.Source, flowID string) string {
+	if source == nil {
+		return ""
+	}
+	if schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID)); ok {
+		return strings.TrimSpace(schema.Mode)
+	}
+	return ""
 }
 
 func deriveWorkflowEventDelivery(entry runtimecontracts.EventCatalogEntry) (consume bool, visible bool) {
