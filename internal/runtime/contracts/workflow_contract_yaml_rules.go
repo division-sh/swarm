@@ -62,7 +62,7 @@ func decodeGuardOnFailNode(node *yaml.Node) (string, GuardFailureSpec, error) {
 		return value, GuardFailureSpec{}, nil
 	case yaml.MappingNode:
 		if len(node.Content) == 0 {
-			return "", GuardFailureSpec{}, nil
+			return "", GuardFailureSpec{}, fmt.Errorf("guard.on_fail object form requires escalate")
 		}
 		var escalation *EmitSpec
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -79,7 +79,7 @@ func decodeGuardOnFailNode(node *yaml.Node) (string, GuardFailureSpec, error) {
 			}
 		}
 		if escalation == nil {
-			return "", GuardFailureSpec{}, nil
+			return "", GuardFailureSpec{}, fmt.Errorf("guard.on_fail object form requires escalate")
 		}
 		spec := GuardFailureSpec{
 			Action:          GuardFailureActionEscalate,

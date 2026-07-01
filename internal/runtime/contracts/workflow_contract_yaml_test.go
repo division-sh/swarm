@@ -1218,6 +1218,43 @@ on_fail:
 	}
 }
 
+func TestGuardSpecDecode_RejectsMalformedOnFailObjectForms(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "empty object",
+			body: `
+id: score_check
+check: payload.score >= policy.threshold
+on_fail: {}
+`,
+			wantErr: "guard.on_fail object form requires escalate",
+		},
+		{
+			name: "missing escalate key",
+			body: `
+id: score_check
+check: payload.score >= policy.threshold
+on_fail:
+  reject: true
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var spec GuardSpec
+			err := yaml.Unmarshal([]byte(tc.body), &spec)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestEmitSpecDecode_RejectsUnstructuredObjectFieldMappings(t *testing.T) {
 	var spec EmitSpec
 	err := yaml.Unmarshal([]byte(`
