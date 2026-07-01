@@ -88,6 +88,8 @@ type executionFrame struct {
 	payload                   map[string]any
 	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
 	topLevelDataWritesApplied bool
+	ruleDataWritesApplied     bool
+	projectionApplied         bool
 }
 
 type handlerRuleSource string
@@ -1002,6 +1004,9 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if len(items) == 0 {
 		return false, nil
 	}
+	if err := e.stepDataWrites(frame); err != nil {
+		return false, err
+	}
 	if err := e.stepProjection(frame); err != nil {
 		return false, err
 	}
@@ -1189,12 +1194,13 @@ func (e *Executor) stepSetsGate(frame *executionFrame) error {
 
 func (e *Executor) stepDataWrites(frame *executionFrame) error {
 	ruleHasWrites := frame.rule != nil && (frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "")
-	if ruleHasWrites {
+	if ruleHasWrites && !frame.ruleDataWritesApplied {
 		if err := e.applyDataAccumulation(frame, frame.rule.DataAccumulation); err != nil {
 			return err
 		}
+		frame.ruleDataWritesApplied = true
 	}
-	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && (!frame.topLevelDataWritesApplied || ruleHasWrites) {
+	if (frame.topLevelDataAccumulation.HasWrites() || strings.TrimSpace(frame.topLevelDataAccumulation.SourceEvent) != "") && !frame.topLevelDataWritesApplied {
 		if err := e.applyDataAccumulation(frame, frame.topLevelDataAccumulation); err != nil {
 			return err
 		}
@@ -1204,6 +1210,9 @@ func (e *Executor) stepDataWrites(frame *executionFrame) error {
 }
 
 func (e *Executor) stepProjection(frame *executionFrame) error {
+	if frame.projectionApplied {
+		return nil
+	}
 	if !accumulatorProjectionEligible(frame) {
 		return nil
 	}
@@ -1231,6 +1240,7 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 			return fmt.Errorf("materialize_from %s.%s: %w", binding.SourceNodeID, binding.AccumulatorName, err)
 		}
 	}
+	frame.projectionApplied = true
 	return nil
 }
 
