@@ -4033,7 +4033,9 @@ engine:
       - "Prefixes other than state: and event: are boot errors."
     lifecycle:
     - 1. Timer starts when the entity enters the start_on state, the start_on event fires, or start_on is boot and platform startup schedules it.
-    - 2. Platform persists the timer (entity_id, timer_id, fire_at timestamp).
+    - 2. Platform renders the timer delay at start time and persists the timer (entity_id, timer_id, fire_at timestamp).
+      Active timers keep the persisted fire_at value; later policy/config changes do not rewrite already scheduled timers unless
+      a separate explicit reschedule primitive is defined.
     - 3. When fire_at is reached, platform emits the timer event into the event loop.
     - 4. Timer event is a regular event — routed to subscribers, processed by handlers.
     - 5. If cancel_on state is reached or cancel_on event fires before fire_at, timer is cancelled.
@@ -4043,7 +4045,10 @@ engine:
       start_on: start_on must match state:<name>, event:<name>, or boot. Any other form is a boot error.
       cancel_on: cancel_on must match state:<name> or event:<name>. boot is not valid.
       state_reference: state:<name> must reference a declared flow state. Unknown state is a boot error.
-      event_reference: event:<name> should reference an event in the flow or platform catalog. Unknown event is a boot warning.
+      event_reference: event:<name> must reference an event in the flow or platform catalog and must have an authored producer
+        path, platform producer, or explicit external source. Unknown or inert event triggers are boot errors.
+      fire_event_consumer: The timer fire event must have an executable handler/agent consumer, a declared output boundary, or
+        explicit external consumer metadata. Catalog membership alone is not sufficient proof that a timer can do useful work.
     example: "timers:\n  - id: sla_timeout\n    event: timer.sla_breach\n    delay: \"{{sla_timeout_hours}}h\"\
       \n    start_on: state:assigned\n    cancel_on: state:resolved\n    recurring: false\n  - id: daily_report\n\
       \    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\n    start_on: boot\n    recurring: true"

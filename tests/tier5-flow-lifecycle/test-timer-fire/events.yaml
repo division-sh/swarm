@@ -1,4 +1,6 @@
 timer.scheduled:
   entity_id: string
+  swarm:
+    source: external
 timer.check:
   entity_id: string

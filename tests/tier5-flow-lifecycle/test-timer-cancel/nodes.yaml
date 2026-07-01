@@ -2,7 +2,6 @@ timer-node:
   id: timer-node
   execution_type: system_node
   subscribes_to: [timer.scheduled, timer.check]
-  produces: [timer.check]
   timers:
     - id: check_timer
       event: timer.check

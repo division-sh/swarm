@@ -2,7 +2,6 @@ test-node:
   id: test-node
   execution_type: system_node
   subscribes_to: [monitor.started, timer.tick]
-  produces: [timer.tick]
   timers:
     - id: tick_timer
       event: timer.tick

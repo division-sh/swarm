@@ -1,5 +1,7 @@
 task.started:
   entity_id: string
+  swarm:
+    source: external
 timer.task_timeout:
   entity_id: string
 task.timed_out:
