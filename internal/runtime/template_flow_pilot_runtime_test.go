@@ -94,6 +94,17 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	`, 0, evt.ID())
 
 	flowInstance, entityID := loadTemplateFlowPilotInstanceIdentity(t, ctx, db)
+	assertRuntimeDBCount(t, ctx, db, `
+		SELECT COUNT(*) FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'scoring-handler'
+		  AND delivery_target_route @> $2::jsonb
+	`, 1, evt.ID(), templateFlowPilotDeliveryTargetRouteJSON(t, events.RouteIdentity{
+		FlowID:       "scoring",
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}))
 	loaded, ok, err := workflowStore.Load(ctx, entityID)
 	if err != nil {
 		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
@@ -218,4 +229,13 @@ func loadTemplateFlowPilotInstanceIdentity(t *testing.T, ctx context.Context, db
 		t.Fatalf("load scoring instance identity: %v", err)
 	}
 	return flowInstance, entityID
+}
+
+func templateFlowPilotDeliveryTargetRouteJSON(t *testing.T, target events.RouteIdentity) string {
+	t.Helper()
+	encoded, err := json.Marshal(target.Normalized())
+	if err != nil {
+		t.Fatalf("marshal template-flow pilot delivery target: %v", err)
+	}
+	return string(encoded)
 }
