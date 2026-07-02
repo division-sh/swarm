@@ -1206,7 +1206,7 @@ entity_contracts:
   state_machine_link:
     description: |
       State is flow-scoped and declared in schema.yaml. The entity
-      envelope field entity.current_state is populated from that flow
+      envelope field exposed to expressions as _entity.current_state is populated from that flow
       state machine. Authors do not declare a state field or state model
       inside entities.yaml.
 event_payload_migration:
@@ -1259,9 +1259,11 @@ runtime_enforcement:
     rule: |
       query_entities validates filter paths against the inferred entity
       contract. Filter paths, metric selectors, and grouped/projected
-      entity selectors must resolve either to an envelope field or to a
-      declared scalar or enum leaf. Composite whole-value comparison is
-      not part of Wave 1.
+      entity selectors are projection-specific row selectors: bare top-level
+      row fields such as current_state remain valid on that tool surface, and
+      declared field paths must resolve to declared scalar or enum leaves.
+      `entity.*` is not accepted as a filter selector root on this projection
+      surface. Composite whole-value comparison is not part of Wave 1.
     handler_expression_rule: |
       `query_entities(...).count` used inside handler boolean expressions
       (guards, rules/on_complete conditions, and accumulator completion
@@ -1282,12 +1284,14 @@ state_machine_authority:
     and Wave 1 assumes one entity type per flow.
   rules:
     state_field_is_implicit: |
-      Authors do not declare a state_field anywhere. entity.current_state
-      is the implicit envelope carrier. Any state_field declaration is a
-      contract error.
+      Authors do not declare a state_field anywhere. _entity.current_state is
+      the platform entity metadata read for the current lifecycle state. Any
+      state_field declaration is a contract error. A declared business field
+      named current_state remains ordinary business data and is read as
+      entity.current_state; it is not the lifecycle state carrier.
     stateless_flows: |
       Stateless flows declare initial_state: null, states: [], and
-      terminal_states: []. For them, entity.current_state is null.
+      terminal_states: []. For them, _entity.current_state is null.
     not_field_presence_authority: |
       The state machine answers lifecycle questions, not field-write
       status questions.
@@ -1455,7 +1459,8 @@ handler_specification:
           create_entity or select an existing target-flow-owned entity with select_entity, never both.
         source_authority: PROHIBITED. select_entity keys must not target platform envelope/control fields such as entity_id,
           entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
-          payload.entity_id, payload.entity_type, or payload.flow_instance.
+          payload.entity_id, payload.entity_type, or payload.flow_instance. `_entity.*` and `event.*` refs are readable
+          elsewhere only where explicitly supported; they are not selector source authority.
         compatibility: PROHIBITED. select_entity does not restore generic existing-entity cross-flow continuation and does
           not allow a source flow to directly name or mutate another flow's entity row.
       interactions:
@@ -1510,7 +1515,8 @@ handler_specification:
         with_select_entity: PROHIBITED. select_entity and select_or_create_entity cannot appear on the same handler.
         source_authority: PROHIBITED. select_or_create_entity keys must not target platform envelope/control fields such as
           entity_id, entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
-          payload.entity_id, payload.entity_type, or payload.flow_instance.
+          payload.entity_id, payload.entity_type, or payload.flow_instance. `_entity.*` and `event.*` refs are readable
+          elsewhere only where explicitly supported; they are not selector source authority.
         compatibility: PROHIBITED. select_or_create_entity does not restore generic existing-entity cross-flow continuation
           and does not allow a source flow to directly name or mutate another flow's entity row.
       interactions:
@@ -1520,7 +1526,7 @@ handler_specification:
           subject to same-flow ownership enforcement.
         with_advances_to: ALLOWED. State transitions advance only the acquired receiving-flow entity.
         with_action: ALLOWED. Actions execute with the acquired entity context. Built-ins such as artifact_repo_commit may
-          use entity.entity_id as a service-owned opaque repo_id without exposing product-specific target identity to Swarm.
+          use _entity.id as a service-owned opaque repo_id without exposing product-specific target identity to Swarm.
         with_query: ALLOWED. Query runs after acquisition and cannot replace select_or_create_entity ownership checks.
     guard:
       field: guard
@@ -1605,11 +1611,11 @@ handler_specification:
     advances_to:
       field: advances_to
       type: string
-      purpose: Set entity.current_state to the target state. Skipped if on_complete already advanced.
+      purpose: Set the platform lifecycle state exposed as _entity.current_state to the target state. Skipped if on_complete already advanced.
     sets_gate:
       field: sets_gate
       type: string
-      purpose: Set entity.gates.{name} = true.
+      purpose: Set the platform gate exposed as _entity.gates.{name} = true.
     data_accumulation:
       field: data_accumulation
       type: object
@@ -2068,19 +2074,29 @@ handler_specification:
       are contract errors.'
     namespaces:
       entity:
-        resolves_to: 'entity_state row for the current entity. entity.X reads entity_state.fields->>X.
-          entity.current_state reads entity_state.current_state. entity.gates.X reads entity_state.gates->>X.'
+        resolves_to: 'Declared business fields for the current entity. entity.X reads entity_state.fields->>X
+          only when X is declared by the active entity contract.'
         populated_by: 'data_accumulation writes, compute.store_as, sets_gate, advances_to, save_entity_field
           (agent tool), and create_entity (initial field population).'
         read_model:
           declared_fields: Every declared entity field is readable with either an explicit initial value or the field's type default.
-          undeclared_fields: Referencing an undeclared entity field is a contract error.
+          undeclared_fields: Referencing an undeclared entity field is a contract error. Legacy platform metadata reads such as entity.current_state, entity.gates, entity.entity_id, entity.flow_instance, entity.revision, entity.created_at, entity.updated_at, entity.entity_type, entity.workflow_name, and entity.workflow_version are invalid unless the field name is declared as business data; use _entity for supported platform metadata.
           presence_checks: has(entity.X) and == null / != null comparisons are valid, but they are not required for declared fields.
         does_NOT_include: 'Accumulated items. Dimension scores, fan-out results, and other per-item data
           collected by the accumulate handler step are NOT promoted to entity fields automatically. They exist
           only in the accumulator. To reference them in post-accumulation conditions, use the accumulated namespace.
           To persist a strict typed downstream copy, declare an entity field materialize_from; the runtime projection
           step owns that write.'
+      _entity:
+        resolves_to: 'Read-only platform metadata/control for the current entity. Supported fields are _entity.id,
+          _entity.current_state, _entity.flow_instance, _entity.gates, and _entity.gates.<name>.'
+        read_model:
+          id: Canonical current entity id. This replaces legacy platform reads through entity.entity_id.
+          current_state: Current lifecycle state owned by the flow state machine.
+          flow_instance: Current flow-instance path for the entity context.
+          gates: Read-only map of platform gate booleans; dot access is supported for simple gate names and bracket access is used for gate names containing separators.
+          unsupported_fields: '_entity.entity_id, _entity.entity_type, _entity.workflow_name, _entity.workflow_version, _entity.run_id, _entity.fields, _entity.accumulator, _entity.entered_state_at, _entity.revision, _entity.created_at, _entity.updated_at, and _entity.name are not exposed. revision, created_at, and updated_at must not remain readable through undeclared entity.* platform fallback.'
+        write_model: Read-only. Handler writes and entity tools may not target _entity. Emit payload construction may read _entity; select_entity/select_or_create_entity keys may not use _entity as a source-authority bypass.
       accumulated:
         resolves_to: 'The items array from the current handler''s accumulate step. Each item is a JSONB object
           representing one accumulated event payload. Available only in on_complete conditions and filter
@@ -2845,8 +2861,8 @@ engine:
         and similar patterns are valid.
     entity_field_resolution:
       description: 'In CEL expressions, entity.X resolves against a unified namespace that includes: entity_state.fields (from
-        declared entity fields, entity_state.current_state (as entity.current_state), entity_state.gates (as entity.gates.X), and
-        node-local state_schema fields (from accumulate/compute writes). Entity contract fields come from entities.yaml, not
+        declared entity fields) and node-local state_schema fields (from accumulate/compute writes). Platform current-entity
+        metadata/control is read only through _entity.*. Entity contract fields come from entities.yaml, not
         package.yaml.entity_schema. Declared entity fields are universally readable at type-valid values; node state remains
         a separate local concept merged into the CEL namespace by the runtime.'
     state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
@@ -6125,7 +6141,7 @@ flow_model:
             template_receivers: Template/dynamic receivers may materialize route facts from receiver instance keys plus runtime descriptors, from explicit addressed-input keys and runtime descriptors, or for delivery:broadcast by enumerating receiver-scope descriptors; descriptor materialization remains pre-dispatch route evidence, not delivery execution.
             descriptor_scope: Descriptor materialization MUST reject descriptors whose flow_instance is not the receiver semantic flow path or a child instance under that path before stamping the receiver flow id onto the route.
             supported_descriptor_targets:
-            - entity_id / entity.entity_id
+            - entity_id / _entity.id
             - flow_instance / instance.flow_instance
             - instance_id / instance.instance_id
             - 'entity.<field> when the receiver entity contract declares that top-level field with indexed: true'

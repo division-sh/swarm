@@ -20,25 +20,27 @@ var (
 	dataExpressionWithBareItemEnv     *cel.Env
 	dataExpressionWithBareItemEnvErr  error
 
-	workflowExpressionEntityReferencePattern        = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityPresencePattern         = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
-	workflowExpressionEntityHasPattern              = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
-	workflowExpressionEntityHasTernaryTruePattern   = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityHasTernaryFalsePattern  = regexp.MustCompile(`!\s*has\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*[^:]+:\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEntityNullCompareLeftPattern  = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*null\b`)
-	workflowExpressionEntityNullCompareRightPattern = regexp.MustCompile(`\bnull\s*(==|!=)\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
-	workflowExpressionEntityNullNotEqualPattern     = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*!=\s*null\b`)
-	workflowExpressionEntityNullEqualPattern        = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
-	workflowExpressionNullEntityNotEqualPattern     = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
-	workflowExpressionNullEntityEqualPattern        = regexp.MustCompile(`\bnull\s*==\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
+	workflowExpressionEntityReferencePattern         = regexp.MustCompile(`(^|[^a-zA-Z0-9_])entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	workflowExpressionEntityPresencePattern          = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
+	workflowExpressionEntityHasPattern               = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
+	workflowExpressionEntityHasTernaryTruePattern    = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	workflowExpressionEntityHasTernaryFalsePattern   = regexp.MustCompile(`!\s*has\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*[^:]+:\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	workflowExpressionEntityNullCompareLeftPattern   = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=)\s*null\b`)
+	workflowExpressionEntityNullCompareRightPattern  = regexp.MustCompile(`\bnull\s*(==|!=)\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
+	workflowExpressionEntityNullNotEqualPattern      = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*!=\s*null\b`)
+	workflowExpressionEntityNullEqualPattern         = regexp.MustCompile(`\bentity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*==\s*null\b`)
+	workflowExpressionNullEntityNotEqualPattern      = regexp.MustCompile(`\bnull\s*!=\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
+	workflowExpressionNullEntityEqualPattern         = regexp.MustCompile(`\bnull\s*==\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\b`)
 )
 
 type ValueContext struct {
-	Entity  map[string]any
-	Event   map[string]any
-	Payload map[string]any
-	Policy  map[string]any
-	FanOut  map[string]any
+	Entity         map[string]any
+	PlatformEntity map[string]any
+	Event          map[string]any
+	Payload        map[string]any
+	Policy         map[string]any
+	FanOut         map[string]any
 }
 
 type ValueExpressionOptions struct {
@@ -97,6 +99,7 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	}
 	activation := map[string]any{
 		"entity":  NormalizeCELInputMap(ctx.Entity),
+		"_entity": NormalizeCELInputMap(ctx.PlatformEntity),
 		"event":   NormalizeCELInputMap(ctx.Event),
 		"payload": NormalizeCELInputMap(ctx.Payload),
 		"policy":  NormalizeCELInputMap(ctx.Policy),
@@ -288,10 +291,35 @@ func EntityReferences(expression string) []string {
 	out := make([]string, 0, len(matches))
 	seen := map[string]struct{}{}
 	for _, match := range matches {
-		if len(match) < 2 {
+		if len(match) < 3 {
 			continue
 		}
-		ref := strings.TrimSpace(match[1])
+		ref := strings.TrimSpace(match[2])
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func PlatformEntityReferences(expression string) []string {
+	expression = strings.TrimSpace(StripStringLiterals(expression))
+	if expression == "" {
+		return nil
+	}
+	matches := workflowExpressionPlatformEntityReferencePattern.FindAllStringSubmatch(expression, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		ref := strings.TrimSpace(match[2])
 		if ref == "" {
 			continue
 		}
@@ -459,6 +487,7 @@ func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) 
 func newDataExpressionEnv(allowBareItem bool) (*cel.Env, error) {
 	variables := []cel.EnvOption{
 		cel.Variable("entity", cel.DynType),
+		cel.Variable("_entity", cel.DynType),
 		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),

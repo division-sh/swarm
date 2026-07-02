@@ -842,6 +842,16 @@ func addressTargetSupported(expr string, supportedTargets []string) bool {
 
 func normalizeAddressTarget(expr string) string {
 	expr = strings.TrimSpace(expr)
+	if strings.HasPrefix(expr, "_entity.") {
+		switch value := strings.TrimSpace(strings.TrimPrefix(expr, "_entity.")); value {
+		case "id":
+			return "entity_id"
+		case "flow_instance":
+			return "flow_instance"
+		default:
+			return value
+		}
+	}
 	for _, prefix := range []string{"entity.", "instance.", "event.target.", "target."} {
 		if strings.HasPrefix(expr, prefix) {
 			return strings.TrimSpace(strings.TrimPrefix(expr, prefix))
@@ -858,6 +868,9 @@ func normalizeAddressTargetKey(expr string) string {
 	if strings.HasPrefix(expr, "entity.") {
 		return "entity." + strings.TrimSpace(strings.TrimPrefix(expr, "entity."))
 	}
+	if strings.HasPrefix(expr, "_entity.") {
+		return "_entity." + strings.TrimSpace(strings.TrimPrefix(expr, "_entity."))
+	}
 	if strings.HasPrefix(expr, "config.") {
 		return "config." + strings.TrimSpace(strings.TrimPrefix(expr, "config."))
 	}
@@ -866,7 +879,7 @@ func normalizeAddressTargetKey(expr string) string {
 	}
 	switch normalizeAddressTarget(expr) {
 	case "entity_id":
-		return "entity.entity_id"
+		return "_entity.id"
 	case "flow_instance":
 		return "instance.flow_instance"
 	case "instance_id":

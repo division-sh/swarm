@@ -2037,7 +2037,7 @@ func TestExecuteNodeContractHandlerAppliesEmitFieldsToEmittedEvent(t *testing.T)
 			Event: "custom.emitted",
 			Fields: map[string]runtimecontracts.ExpressionValue{
 				"summary.entity_id": runtimecontracts.CELExpression("event.entity_id"),
-				"summary.stage":     runtimecontracts.CELExpression("entity.current_state"),
+				"summary.stage":     runtimecontracts.CELExpression("_entity.current_state"),
 				"flags.ready":       runtimecontracts.CELExpression("true"),
 				"label":             runtimecontracts.CELExpression(`"done"`),
 			},

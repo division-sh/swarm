@@ -2779,7 +2779,7 @@ func TestRun_RejectsUnsupportedGuardOnFail(t *testing.T) {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Guard: &runtimecontracts.GuardSpec{
-							Check:  "entity.entity_id != null",
+							Check:  "_entity.id != null",
 							OnFail: "explode",
 						},
 					},
@@ -2803,7 +2803,7 @@ func TestRun_RejectsGuardEscalateObjectMissingEvent(t *testing.T) {
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
 						Guard: &runtimecontracts.GuardSpec{
-							Check: "entity.entity_id != null",
+							Check: "_entity.id != null",
 							OnFailSpec: runtimecontracts.GuardFailureSpec{
 								Action:          runtimecontracts.GuardFailureActionEscalate,
 								AuthoredMapping: true,
@@ -2829,7 +2829,7 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 				ID: "test-node",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"item.received": {
-						Guard: &runtimecontracts.GuardSpec{Check: "entity.entity_id =="},
+						Guard: &runtimecontracts.GuardSpec{Check: "_entity.id =="},
 					},
 				},
 			},
@@ -2838,7 +2838,7 @@ func TestRun_RejectsMalformedConditionCELAfterRecognizedPrefix(t *testing.T) {
 
 	report := Run(context.Background(), source, Options{})
 
-	if !reportContains(report.Errors(), "condition_expression_validation", `CEL parse failed for "entity.entity_id =="`) {
+	if !reportContains(report.Errors(), "condition_expression_validation", `CEL parse failed for "_entity.id =="`) {
 		t.Fatalf("expected CEL parse failure, got %#v", report.Errors())
 	}
 }
@@ -4604,7 +4604,7 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleWrite
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.entity_id != null",
+		Condition: "_entity.id != null",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
 				TargetField: "revision_count",
@@ -4632,7 +4632,7 @@ func TestRun_AllowsCreateEntityEmitFieldReadOfDeclaredFieldEvenWhenOnlyRuleCompu
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.entity_id != null",
+		Condition: "_entity.id != null",
 		Compute: &runtimecontracts.ComputeSpec{
 			Operation: runtimecontracts.ComputeOpCount,
 			StoreAs:   "entity.revision_count",
@@ -4662,7 +4662,7 @@ func TestRun_AllowsCreateEntityEmitFieldReadWhenRuleAlsoWritesUnconditionallyAva
 		StoreAs:   "entity.revision_count",
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "entity.entity_id != null",
+		Condition: "_entity.id != null",
 		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 			Writes: []runtimecontracts.WorkflowDataWrite{{
 				TargetField: "revision_count",

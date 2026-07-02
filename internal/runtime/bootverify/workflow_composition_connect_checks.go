@@ -366,6 +366,9 @@ func compositionConnectTargetType(source semanticview.Source, flowID, expr strin
 	if expr == "" {
 		return "", fmt.Errorf("target expression is required")
 	}
+	if expr == "_entity.id" {
+		return "uuid", nil
+	}
 	if strings.HasPrefix(expr, "entity.") {
 		fieldPath := strings.TrimPrefix(expr, "entity.")
 		contract, ok := entityruntime.ResolveForFlow(source, flowID)
@@ -396,12 +399,14 @@ func compositionConnectTargetType(source semanticview.Source, flowID, expr strin
 	if strings.HasPrefix(expr, "instance.") {
 		return "string", nil
 	}
-	return "", fmt.Errorf("target expression %q must be entity.*, config.*, or instance.*", expr)
+	return "", fmt.Errorf("target expression %q must be _entity.id, entity.*, config.*, or instance.*", expr)
 }
 
 func compositionConnectTargetIndexed(source semanticview.Source, flowID, expr string) error {
 	expr = strings.TrimSpace(expr)
 	switch {
+	case expr == "_entity.id":
+		return nil
 	case strings.HasPrefix(expr, "entity."):
 		fieldPath := strings.TrimSpace(strings.TrimPrefix(expr, "entity."))
 		switch fieldPath {

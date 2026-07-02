@@ -253,9 +253,6 @@ func crossSurfaceEventPayloadFields(entry runtimecontracts.EventCatalogEntry) ma
 func crossSurfaceEntityFields(contract runtimecontracts.EntityContract) map[string]string {
 	fields := make(map[string]string, len(contract.Fields))
 	for name, spec := range contract.Fields {
-		if wave1EntityEnvelopeField(name) {
-			continue
-		}
 		fields[name] = spec.Type
 	}
 	return fields

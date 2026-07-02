@@ -8,6 +8,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -38,7 +39,7 @@ func wave1SpecialClearTarget(target string) bool {
 }
 
 func wave1WriteTargetContract(source semanticview.Source, target wave1WriteTarget) (wave1EntityContractView, bool) {
-	if !target.Entity || wave1EntityEnvelopeField(target.Field) {
+	if !target.Entity {
 		return wave1EntityContractView{}, false
 	}
 	if _, ownerFlowID, _, err := wave1ResolveWriteTargetPath(source, target); err == nil {
@@ -77,7 +78,7 @@ func (c *checkerContext) entityWriterCoverage() []Finding {
 	for _, contract := range wave1DeclaredEntityContracts(c.source) {
 		for fieldName, fieldDecl := range contract.Contract.Fields {
 			fieldName = strings.TrimSpace(fieldName)
-			if fieldName == "" || wave1EntityEnvelopeField(fieldName) {
+			if fieldName == "" {
 				continue
 			}
 			if fieldDecl.Initial != nil {
@@ -134,15 +135,6 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 			continue
 		}
 		_ = resolved
-		if wave1EntityEnvelopeField(rootField) {
-			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
-				CheckID:  "entity_write_target_compliance",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s targets envelope field %q; envelope fields are platform-owned", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, rootField),
-				Location: target.NodeID,
-			})
-			continue
-		}
 		contract, ok := wave1WriteTargetContract(c.source, target)
 		if !ok {
 			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
@@ -178,7 +170,7 @@ func (c *checkerContext) entityReaderCoverage() []Finding {
 	for _, contract := range wave1DeclaredEntityContracts(c.source) {
 		for fieldName, fieldDecl := range contract.Contract.Fields {
 			fieldName = strings.TrimSpace(fieldName)
-			if fieldName == "" || wave1EntityEnvelopeField(fieldName) {
+			if fieldName == "" {
 				continue
 			}
 			if strings.TrimSpace(fieldDecl.UnusedReaderReason) != "" {
@@ -226,7 +218,7 @@ func wave1DeclaredEntityContracts(source semanticview.Source) []wave1EntityContr
 func wave1EntityWriterCoverageByFlow(source semanticview.Source) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{}
 	for _, target := range wave1AllEntityWriteTargets(source) {
-		if !target.Entity || wave1EntityEnvelopeField(target.Field) || wave1SpecialClearTarget(target.Field) {
+		if !target.Entity || wave1SpecialClearTarget(target.Field) {
 			continue
 		}
 		_, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(source, target)
@@ -268,12 +260,12 @@ func wave1AgentExplicitEntityWriteCoverageByFlow(source semanticview.Source) map
 				out[contract.FlowID] = map[string]struct{}{}
 			}
 			for _, field := range decl.Create.Fields {
-				if _, declared := contract.Contract.Fields[field]; declared && !wave1EntityEnvelopeField(field) {
+				if _, declared := contract.Contract.Fields[field]; declared {
 					out[contract.FlowID][field] = struct{}{}
 				}
 			}
 			for _, field := range decl.Save.Fields {
-				if _, declared := contract.Contract.Fields[field]; declared && !wave1EntityEnvelopeField(field) {
+				if _, declared := contract.Contract.Fields[field]; declared {
 					out[contract.FlowID][field] = struct{}{}
 				}
 			}
@@ -466,9 +458,6 @@ func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[
 			eventType = strings.TrimSpace(eventType)
 			for _, expr := range handlerEntityExpressions(handler) {
 				for _, ref := range wave1ResolvedExpressionRefs(source, flowID, nodeID, eventType, expr) {
-					if wave1EntityEnvelopeField(ref.Field) {
-						continue
-					}
 					ownerFlowID := strings.TrimSpace(ref.OwnerFlowID)
 					if out[ownerFlowID] == nil {
 						out[ownerFlowID] = map[string]struct{}{}
@@ -659,6 +648,9 @@ func wave1ResolveWriteTargetPath(source semanticview.Source, target wave1WriteTa
 			if root, ok := wave1RootFieldContract(source, rootField); ok {
 				return wave1ResolvedType{}, strings.TrimSpace(root.FlowID), strings.TrimSpace(rootField), nil
 			}
+		}
+		if platformcontext.LegacyEntityMetadataField(rootField) {
+			return wave1ResolvedType{}, "", "", fmt.Errorf("%s", legacyEntityMetadataDiagnostic(rootField))
 		}
 		return wave1ResolvedType{}, strings.TrimSpace(target.FlowID), strings.TrimSpace(rootField), nil
 	}

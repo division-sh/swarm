@@ -23,11 +23,13 @@ var workflowExpressionQueryPredicatePattern = regexp.MustCompile(`^\s*([a-zA-Z_]
 
 type workflowExpressionContext struct {
 	Entity                       map[string]any
+	PlatformEntity               map[string]any
 	Event                        map[string]any
 	Payload                      map[string]any
 	Policy                       map[string]any
 	Accumulated                  any
 	FanOut                       map[string]any
+	WorkflowName                 string
 	QueryEntityCount             func(string) (int, error)
 	AllowUnresolvedQueryOperands bool
 }
@@ -41,6 +43,7 @@ type workflowExpressionEvaluator struct {
 func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 	env, err := cel.NewEnv(
 		cel.Variable("entity", cel.DynType),
+		cel.Variable("_entity", cel.DynType),
 		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
@@ -84,6 +87,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 	}
 	out, _, err := program.Eval(map[string]any{
 		"entity":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Entity)),
+		"_entity":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.PlatformEntity)),
 		"event":       workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Event)),
 		"payload":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Payload)),
 		"policy":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Policy)),
@@ -151,11 +155,13 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	if expression == "" {
 		return "", workflowExpressionContext{
 			Entity:                       cloneStringAnyMap(ctx.Entity),
+			PlatformEntity:               cloneStringAnyMap(ctx.PlatformEntity),
 			Event:                        cloneStringAnyMap(ctx.Event),
 			Payload:                      cloneStringAnyMap(ctx.Payload),
 			Policy:                       cloneStringAnyMap(ctx.Policy),
 			Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 			FanOut:                       cloneStringAnyMap(ctx.FanOut),
+			WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
 			QueryEntityCount:             ctx.QueryEntityCount,
 			AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 		}, nil
@@ -183,11 +189,13 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	normalized = rewriteWorkflowExpressionEntityNullPresenceChecks(normalized)
 	normalizedCtx := workflowExpressionContext{
 		Entity:                       cloneStringAnyMap(ctx.Entity),
+		PlatformEntity:               cloneStringAnyMap(ctx.PlatformEntity),
 		Event:                        cloneStringAnyMap(ctx.Event),
 		Payload:                      cloneStringAnyMap(ctx.Payload),
 		Policy:                       cloneStringAnyMap(ctx.Policy),
 		Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 		FanOut:                       cloneStringAnyMap(ctx.FanOut),
+		WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 	}
@@ -296,7 +304,7 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 	}
 	if root, scoped := workflowExpressionQueryOperandScope(raw); scoped {
 		switch root {
-		case "entity", "event", "payload", "policy", "fan_out":
+		case "entity", "_entity", "event", "payload", "policy", "fan_out":
 			if ctx.AllowUnresolvedQueryOperands {
 				return raw, nil
 			}
@@ -331,6 +339,8 @@ func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionCont
 	switch {
 	case strings.HasPrefix(ref, "entity."):
 		return workflowExpressionLookupPath(ctx.Entity, strings.TrimPrefix(ref, "entity."))
+	case strings.HasPrefix(ref, "_entity."):
+		return workflowExpressionLookupPath(ctx.PlatformEntity, strings.TrimPrefix(ref, "_entity."))
 	case strings.HasPrefix(ref, "event."):
 		return workflowExpressionLookupPath(ctx.Event, strings.TrimPrefix(ref, "event."))
 	case strings.HasPrefix(ref, "payload."):

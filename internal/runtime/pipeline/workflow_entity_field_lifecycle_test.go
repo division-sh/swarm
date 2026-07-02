@@ -119,7 +119,7 @@ func TestWorkflowEntityFieldsAvailableBeforeGuardEscalation_UsesGuardTimeVisibil
 func TestWorkflowEntityFieldsAvailableBeforeEmitFields_ExcludesRuleOnlyWrites(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "entity.entity_id != null",
+			Condition: "_entity.id != null",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{
 					{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},
@@ -137,7 +137,7 @@ func TestWorkflowEntityFieldsAvailableBeforeEmitFields_ExcludesRuleOnlyWrites(t 
 func TestWorkflowEntityFieldsAvailableBeforeEmitFields_ExcludesRuleOnlyComputeOutputs(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "entity.entity_id != null",
+			Condition: "_entity.id != null",
 			Compute: &runtimecontracts.ComputeSpec{
 				Operation: runtimecontracts.ComputeOpCount,
 				StoreAs:   "entity.revision_count",
@@ -159,7 +159,7 @@ func TestWorkflowEntityFieldsAvailableBeforeEmitFields_PreservesUnconditionalWri
 			StoreAs:   "entity.revision_count",
 		},
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "entity.entity_id != null",
+			Condition: "_entity.id != null",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{
 					{TargetField: "revision_count", Value: runtimecontracts.LiteralExpression(0)},

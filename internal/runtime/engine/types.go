@@ -9,6 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 )
 
 const DefaultMaxChainDepth = 50
@@ -63,11 +64,6 @@ func (c StateCarrier) EntityContext(entityID identity.EntityID, currentState, wo
 		out = map[string]any{}
 	}
 	delete(out, "subject_id")
-	out["entity_id"] = entityID.String()
-	out["current_state"] = strings.TrimSpace(currentState)
-	out["workflow_name"] = strings.TrimSpace(workflowName)
-	out["workflow_version"] = strings.TrimSpace(workflowVersion)
-	out["gates"] = boolMapToAnyMap(c.Gates)
 	return out
 }
 
@@ -171,6 +167,10 @@ func (s StateSnapshot) StateBucketsBucket() values.Bucket {
 
 func (s StateSnapshot) EntityContext() map[string]any {
 	return s.StateCarrier.EntityContext(s.EntityID, s.CurrentState, s.WorkflowName, s.WorkflowVersion)
+}
+
+func (s StateSnapshot) PlatformEntityContext(flowInstance string) map[string]any {
+	return platformcontext.EntityMetadata(s.EntityID.String(), s.CurrentState, flowInstance, s.StateCarrier.Gates)
 }
 
 func (s *StateSnapshot) SetGate(name string, value bool) {

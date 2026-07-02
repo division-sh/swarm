@@ -14,13 +14,13 @@ pipeline:
     step.b_done:
       guard:
         id: requires_a
-        check: "entity.gates.g_a == true"
+        check: "_entity.gates.g_a == true"
       sets_gate: g_b
       advances_to: stage_b
     step.c_done:
       guard:
         id: requires_b
-        check: "entity.gates.g_b == true"
+        check: "_entity.gates.g_b == true"
       sets_gate: g_c
       advances_to: released
       emit:

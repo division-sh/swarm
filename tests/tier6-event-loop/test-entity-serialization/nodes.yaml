@@ -12,7 +12,7 @@ test-node:
     step.second:
       guard:
         id: state_check
-        check: "entity.current_state == 'processing'"
+        check: "_entity.current_state == 'processing'"
       advances_to: complete
       emit:
         event: step.second_done

@@ -12,7 +12,7 @@ test-node:
         fields:
           id: event.entity_id
           name: entity.name
-          status: entity.current_state
+          status: _entity.current_state
   state_schema:
     fields:
       name: string

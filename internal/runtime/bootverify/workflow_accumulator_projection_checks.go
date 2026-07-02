@@ -35,7 +35,7 @@ func (c *checkerContext) accumulatorEntityProjection() []Finding {
 func accumulatorProjectionWriterConflictFindings(c *checkerContext, binding accprojection.Binding) []Finding {
 	out := make([]Finding, 0)
 	for _, target := range wave1AllEntityWriteTargets(c.source) {
-		if !target.Entity || wave1EntityEnvelopeField(target.Field) || wave1SpecialClearTarget(target.Field) {
+		if !target.Entity || wave1SpecialClearTarget(target.Field) {
 			continue
 		}
 		_, ownerFlowID, rootField, err := wave1ResolveWriteTargetPath(c.source, target)

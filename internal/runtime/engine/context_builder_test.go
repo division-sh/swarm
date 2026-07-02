@@ -22,14 +22,17 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 
 	base := BuildBaseContext(input)
 
-	if got := base.Entity.Raw()["entity_id"]; got != "entity-1" {
-		t.Fatalf("entity_id = %#v", got)
+	if got := base.PlatformEntity.Raw()["id"]; got != "entity-1" {
+		t.Fatalf("_entity.id = %#v", got)
 	}
 	if got := base.Entity.Raw()["k"]; got != "v" {
 		t.Fatalf("entity metadata not reflected into entity context: %#v", got)
 	}
-	if got := base.Entity.Raw()["current_state"]; got != "researching" {
-		t.Fatalf("current_state = %#v", got)
+	if got := base.PlatformEntity.Raw()["current_state"]; got != "researching" {
+		t.Fatalf("_entity.current_state = %#v", got)
+	}
+	if _, ok := base.Entity.Raw()["current_state"]; ok {
+		t.Fatalf("platform current_state leaked into entity context: %#v", base.Entity.Raw())
 	}
 	if got := base.Gates.Bool("review"); !got {
 		t.Fatalf("gates bucket missing review: %#v", base.Gates.Raw())

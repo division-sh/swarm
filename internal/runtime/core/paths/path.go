@@ -9,6 +9,7 @@ const (
 	RootPayload
 	RootEvent
 	RootEntity
+	RootPlatformEntity
 	RootPolicy
 	RootMetadata
 	RootGates
@@ -25,6 +26,8 @@ func (r PathRoot) String() string {
 		return "event"
 	case RootEntity:
 		return "entity"
+	case RootPlatformEntity:
+		return "_entity"
 	case RootPolicy:
 		return "policy"
 	case RootMetadata:
@@ -80,6 +83,8 @@ func parseRoot(text string) PathRoot {
 		return RootEvent
 	case "entity":
 		return RootEntity
+	case "_entity":
+		return RootPlatformEntity
 	case "policy":
 		return RootPolicy
 	case "metadata":
