@@ -481,6 +481,19 @@ rules:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsRuleLevelSetsGate(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+rules:
+  gated:
+    condition: "else"
+    sets_gate: approved
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), `UNDEFINED-FIELD: rule field "sets_gate"`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want rule-level sets_gate rejection", err)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsRetiredPayloadTransform(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`

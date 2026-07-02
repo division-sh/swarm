@@ -1905,6 +1905,38 @@ func TestRun_AllowsDeclaredSetsGateFromScalarAndStructuredForms(t *testing.T) {
 	}
 }
 
+func TestRun_ValidatesHandlerSetsGateWhenRulesExist(t *testing.T) {
+	cases := []struct {
+		name      string
+		setsGate  string
+		wantError bool
+	}{
+		{name: "declared", setsGate: "approved"},
+		{name: "undeclared", setsGate: "rejected", wantError: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := gateSchemaValidationBundle(runtimecontracts.NodeGateStateSchema{
+				Gates: []runtimecontracts.NodeGateField{{Name: "approved"}},
+			}, runtimecontracts.SystemNodeEventHandler{
+				SetsGate: &runtimecontracts.GateSpec{Name: tc.setsGate, Value: true},
+				Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID:        "matched",
+					Condition: "else",
+				}},
+			})
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			hasError := reportContains(report.Errors(), "gate_schema_validation", "sets_gate "+tc.setsGate)
+			if hasError != tc.wantError {
+				t.Fatalf("gate_schema_validation error = %v, want %v; errors: %#v", hasError, tc.wantError, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) {
 	cases := []struct {
 		name    string

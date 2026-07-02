@@ -1841,6 +1841,90 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	}
 }
 
+func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{
+		"payload.score > 5": true,
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			AdvancesTo: "default",
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.RuleID != "rule-1" {
+		t.Fatalf("RuleID = %q", result.RuleID)
+	}
+	if result.NextState != "default" {
+		t.Fatalf("NextState = %q, want handler-level default", result.NextState)
+	}
+}
+
+func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{
+		"payload.score > 5": true,
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.RuleID != "rule-1" {
+		t.Fatalf("RuleID = %q", result.RuleID)
+	}
+	if result.SetsGate != "approved" {
+		t.Fatalf("SetsGate = %q, want handler-level gate with matched rule", result.SetsGate)
+	}
+	if result.StateMutation.SetGate != "approved" {
+		t.Fatalf("StateMutation.SetGate = %q, want approved", result.StateMutation.SetGate)
+	}
+	if got := result.StateMutation.Gates["approved"]; !got {
+		t.Fatalf("StateMutation.Gates[approved] = %v, want true", got)
+	}
+}
+
 func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRules(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        stubSource(),
