@@ -856,6 +856,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
+	if err := validateServeMultiContextToolGatewayAdmission(cfg, loadedBundles); err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		log.Printf("validate multi-context tool gateway admission: %v", err)
+		return 3
+	}
 	stateStoreSummaries := make([]string, len(loadedBundles))
 	if stores.SchemaBootstrapper != nil {
 		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles, opts.Verbose)
@@ -3180,6 +3185,23 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 		return toolgateway.Binding{}, err
 	}
 	return binding, nil
+}
+
+func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBundles []serveRuntimeBundle) error {
+	if len(loadedBundles) <= 1 {
+		return nil
+	}
+	if cfg == nil {
+		return fmt.Errorf("runtime config is required for multi-context tool gateway admission")
+	}
+	profile, err := cfg.LLMBackendProfile()
+	if err != nil {
+		return fmt.Errorf("resolve llm backend for multi-context tool gateway admission: %w", err)
+	}
+	if profile.ID != llmselection.BackendClaudeCLI {
+		return nil
+	}
+	return fmt.Errorf("multi-context swarm serve --bundle-hash with llm.backend=claude_cli is unsupported by #1568 first-slice source authority: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context until a separately gated context-aware gateway router exists; use one --bundle-hash or a non-claude_cli backend")
 }
 
 var retiredToolGatewayURLEnvNames = []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL"}
