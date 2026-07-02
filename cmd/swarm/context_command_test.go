@@ -24,6 +24,20 @@ func TestContextListCommandUsesSwarmDirRegistry(t *testing.T) {
 	}
 }
 
+func TestContextListCommandSwarmDirFlagBypassesBrokenConfig(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	swarmDir := t.TempDir()
+	t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing-config.yaml"))
+	var out, errOut bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "no contexts found") {
+		t.Fatalf("output = %q, want empty registry", out.String())
+	}
+}
+
 func TestContextCurrentCommandReportsEmptyRegistry(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", filepath.Join(t.TempDir(), "state"), "context", "current"}, &out, &errOut, rootCommandOptions{})

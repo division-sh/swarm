@@ -108,12 +108,16 @@ func inspectLocalContextRegistryForCommand(ctx context.Context, cmd *cobra.Comma
 }
 
 func resolveSwarmDirForCommand(cmd *cobra.Command) (cliSwarmDirResolution, error) {
+	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
+	if swarmDirFlagSet {
+		path, err := normalizeCLISwarmDir(swarmDirFlag, "--swarm-dir")
+		return cliSwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
+	}
 	cfg, err := loadCLIAPIConfigFile()
 	if err != nil {
 		return cliSwarmDirResolution{}, err
 	}
-	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
-	return resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfg)
+	return resolveCLISwarmDirFromConfig(cliSwarmDirOptions{}, cfg)
 }
 
 func writeContextCurrentText(out io.Writer, report localContextRegistryReport) {

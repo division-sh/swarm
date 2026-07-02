@@ -196,6 +196,26 @@ func TestLocalContextPruneRemovesOnlyPruneableStatuses(t *testing.T) {
 	}
 }
 
+func TestLocalContextPruneClearsDanglingCurrentSelector(t *testing.T) {
+	registry := newLocalContextRegistry(t.TempDir())
+	if err := registry.SetCurrent("missing"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := registry.Prune(context.Background(), &fakeRuntimeIdentityCaller{})
+	if err != nil {
+		t.Fatalf("Prune() error = %v", err)
+	}
+	if len(result.Removed) != 1 || result.Removed[0].Descriptor.Name != "missing" {
+		t.Fatalf("removed = %#v, want dangling current", result.Removed)
+	}
+	if result.Removed[0].Status != localContextStatusCorruptDescriptor {
+		t.Fatalf("removed status = %q, want corrupt_descriptor", result.Removed[0].Status)
+	}
+	if current, err := registry.CurrentName(); err != nil || current != "" {
+		t.Fatalf("current = %q err=%v, want cleared", current, err)
+	}
+}
+
 func TestLocalContextPermissionClassifier(t *testing.T) {
 	if got := classifyLocalContextTokenError(os.ErrPermission); got != localContextStatusPermissionDenied {
 		t.Fatalf("permission token error classified as %q", got)
