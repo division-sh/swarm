@@ -808,7 +808,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_lifecycle_failed", rt.Logger.Error(ctx, "scheduler", "ensure_lifecycle_failed", nil, err))
 			}
 		}
-		if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline); err != nil {
+		if err := ensureBootWorkflowSchedules(ctx, rt.Stores.ScheduleStore, rt.Scheduler, rt.Pipeline, schedules); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "ensure_boot_timers_failed", rt.Logger.Error(ctx, "scheduler", "ensure_boot_timers_failed", nil, err))
 			}
@@ -1261,7 +1261,7 @@ func (rt *Runtime) verifyBootPublished(ch <-chan events.Event) error {
 
 var bootWorkflowTimerPolicyPlaceholder = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}`)
 
-func ensureBootWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime) error {
+func ensureBootWorkflowSchedules(ctx context.Context, store runtimepipeline.SchedulePersistence, scheduler *runtimepipeline.Scheduler, workflow runtimepipeline.WorkflowRuntime, activeSnapshots ...[]runtimepipeline.Schedule) error {
 	if store == nil || workflow == nil {
 		return nil
 	}
@@ -1269,10 +1269,20 @@ func ensureBootWorkflowSchedules(ctx context.Context, store runtimepipeline.Sche
 	if source == nil {
 		return nil
 	}
+	activeSchedules, err := activeScheduleSnapshot(ctx, store, activeSnapshots...)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	for _, timer := range source.WorkflowTimers() {
 		sc, ok := bootWorkflowTimerSchedule(source, timer, now)
 		if !ok {
+			continue
+		}
+		if active, ok := activeScheduleExactMatch(activeSchedules, sc); ok {
+			if _, err := runtimepipeline.ClaimAndRegisterSchedule(ctx, store, scheduler, active); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := store.UpsertSchedule(ctx, sc); err != nil {
@@ -1283,6 +1293,52 @@ func ensureBootWorkflowSchedules(ctx context.Context, store runtimepipeline.Sche
 		}
 	}
 	return nil
+}
+
+func activeScheduleSnapshot(ctx context.Context, store runtimepipeline.SchedulePersistence, snapshots ...[]runtimepipeline.Schedule) ([]runtimepipeline.Schedule, error) {
+	if len(snapshots) > 0 {
+		return append([]runtimepipeline.Schedule(nil), snapshots[0]...), nil
+	}
+	if store == nil {
+		return nil, nil
+	}
+	return store.LoadActiveSchedules(ctx)
+}
+
+func activeScheduleExactMatch(active []runtimepipeline.Schedule, target runtimepipeline.Schedule) (runtimepipeline.Schedule, bool) {
+	normalizeScheduleIdentity(&target)
+	for _, candidate := range active {
+		normalizeScheduleIdentity(&candidate)
+		if strings.TrimSpace(candidate.AgentID) != strings.TrimSpace(target.AgentID) {
+			continue
+		}
+		if strings.TrimSpace(candidate.EventType) != strings.TrimSpace(target.EventType) {
+			continue
+		}
+		if strings.TrimSpace(candidate.TaskID) != strings.TrimSpace(target.TaskID) {
+			continue
+		}
+		if candidate.RunID != target.RunID {
+			continue
+		}
+		if candidate.EntityID != target.EntityID {
+			continue
+		}
+		if candidate.FlowInstance != target.FlowInstance {
+			continue
+		}
+		return candidate, true
+	}
+	return runtimepipeline.Schedule{}, false
+}
+
+func normalizeScheduleIdentity(sc *runtimepipeline.Schedule) {
+	if sc == nil {
+		return
+	}
+	sc.NormalizeRunID()
+	sc.NormalizeEntityID()
+	sc.NormalizeFlowInstance()
 }
 
 func bootWorkflowTimerSchedule(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, now time.Time) (runtimepipeline.Schedule, bool) {

@@ -304,6 +304,70 @@ func TestEnsureBootWorkflowSchedulesRegistersGlobalBootOneShotTimers(t *testing.
 	}
 }
 
+func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.T) {
+	activeAt := time.Now().UTC().Add(-1 * time.Minute)
+	store := &recordingRuntimeScheduleStore{
+		active: []runtimepipeline.Schedule{{
+			AgentID:   "runtime",
+			EventType: "timer.boot_once",
+			Mode:      "once",
+			At:        activeAt,
+			TaskID:    "boot_once",
+			Payload:   []byte(`{"timer_id":"boot_once"}`),
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:      "boot_once",
+				Owner:   "runtime",
+				Event:   "timer.boot_once",
+				Delay:   "5s",
+				StartOn: "boot",
+			}},
+		},
+	}
+	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	}); err != nil {
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 0 {
+		t.Fatalf("startup boot schedule upserts = %#v, want none when active exact schedule already exists", store.schedules)
+	}
+}
+
+func TestEnsureBootWorkflowSchedulesUsesRestoredSnapshotToAvoidRecreatingBootSchedule(t *testing.T) {
+	restored := runtimepipeline.Schedule{
+		AgentID:   "runtime",
+		EventType: "timer.boot_once",
+		Mode:      "once",
+		At:        time.Now().UTC().Add(-1 * time.Minute),
+		TaskID:    "boot_once",
+		Payload:   []byte(`{"timer_id":"boot_once"}`),
+	}
+	store := &recordingRuntimeScheduleStore{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:      "boot_once",
+				Owner:   "runtime",
+				Event:   "timer.boot_once",
+				Delay:   "5s",
+				StartOn: "boot",
+			}},
+		},
+	}
+	if err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	}, []runtimepipeline.Schedule{restored}); err != nil {
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 0 {
+		t.Fatalf("startup boot schedule upserts = %#v, want none when restored startup snapshot had exact schedule", store.schedules)
+	}
+}
+
 func TestEnsureBootWorkflowSchedulesRendersPolicyDelayAtStartup(t *testing.T) {
 	store := &recordingRuntimeScheduleStore{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
