@@ -106,6 +106,34 @@ vertical.shortlisted:
 	}
 }
 
+func TestMergeAgentContractsRejectsDuplicateScopedAgentID(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		Agents:                map[string]AgentRegistryEntry{},
+		agentSources:          map[string]ContractItemSource{},
+		scopedAgents:          map[string]AgentRegistryEntry{},
+		scopedAgentSources:    map[string]ContractItemSource{},
+		ambiguousAgentAliases: map[string]struct{}{},
+	}
+	sourceA := ContractItemSource{FlowID: "review", Layer: "flow", File: "flows/review/agents.yaml"}
+	sourceB := ContractItemSource{FlowID: "review", Layer: "flow", File: "flows/review/agents-extra.yaml"}
+	if err := mergeAgentContracts(bundle, map[string]AgentRegistryEntry{
+		"worker": {ID: "worker", Role: "reviewer"},
+	}, sourceA); err != nil {
+		t.Fatalf("mergeAgentContracts initial: %v", err)
+	}
+	err := mergeAgentContracts(bundle, map[string]AgentRegistryEntry{
+		"worker": {ID: "worker", Role: "alternate"},
+	}, sourceB)
+	if err == nil {
+		t.Fatal("mergeAgentContracts duplicate scoped agent error = nil")
+	}
+	for _, want := range []string{`duplicate scoped agent id "review::worker"`, sourceA.File, sourceB.File} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("duplicate scoped agent error missing %q:\n%s", want, err.Error())
+		}
+	}
+}
+
 func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesOrderedCompositeKey(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		FlowSchemas: map[string]FlowSchemaDocument{

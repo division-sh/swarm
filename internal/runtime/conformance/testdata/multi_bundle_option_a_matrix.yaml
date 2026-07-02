@@ -311,13 +311,16 @@ rows:
 
   - id: duplicate_agent_slug_posture
     category: identity
-    concept: duplicate authored agent slugs across live bundles are unsupported under current global slug posture.
+    concept: duplicate authored agent slugs across live bundles are unsupported under current global slug posture, and boot-pinned RuntimeContextManager admission fails closed for that unsupported shape.
     classification: not_current_option_a
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: agent_identity_model}
     proof_refs:
       - {kind: issue, issue: 977}
+      - {kind: issue, issue: 1531}
       - {kind: pr, pr: 1243}
+      - {kind: go_test, name: TestRuntimeContextManagerRejectsDuplicateAgentSlugs}
+      - {kind: go_test, name: TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness}
       - {kind: spec_ref, path: platform-spec.yaml, ref: current_global_slug_constraint}
 
   - id: provider_native_llm_exclusion

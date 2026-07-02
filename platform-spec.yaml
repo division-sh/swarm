@@ -8169,9 +8169,11 @@ agent_identity_model:
       use globally unique authored agent_id values. Duplicate authored agent slugs across live loaded BundleContexts are
       unsupported and must not be advertised as bundle-scoped or UUID-disambiguated behavior.
     enforcement_status: >
-      This source-authority slice documents the supported contract only. It does not add runtime/store enforcement.
-      A future loader/admission/serve child that can detect duplicate live agent slugs before API readiness must fail
-      closed or receive its own gate; absent such proof, operators must avoid duplicate live slugs.
+      RuntimeContextManager admission enforces this current-model live constraint for registered loaded BundleContexts:
+      duplicate authored agent slugs fail closed before API readiness and report the duplicate slug plus conflicting
+      bundle hashes/source labels when available. This enforcement does not add duplicate-slug support, UUID identity,
+      bundle-scoped public lookup, store schema migration, API/CLI disambiguation, slug prefixing, or compatibility
+      remapping; #977 remains the parent for those behaviors.
     final_matrix_dependency: >
       #1025 must treat duplicate agent slugs across live bundles as unsupported unless a later #977 implementation child
       promotes UUID-internal identity and proves bundle-scoped lookup across all affected surfaces.
@@ -8470,6 +8472,7 @@ multi_bundle_persistence:
         - The runtime loader consumes stored bundles.content_yaml and raw bundles.data_blob bytes only; parsed_json is inspection output and is never a runtime source.
         - The loader reconstructs platform spec, contract definition files, prompts, and flow data/ raw bytes into a process-owned temporary source, then recomputes BundleHash and requires it to equal the requested bundle_hash before runtime construction.
         - Each pinned bundle is registered as a BundleContext under RuntimeContextManager. The BundleContext owns its source, BundleSourceFact, EventBus, route table, pipeline/coordinator, agent manager, subscriptions, source-bound runtime components, and manager-owned lifecycle state.
+        - Under agent_identity_model.current_supported_posture, RuntimeContextManager admission rejects duplicate authored agent_id slugs across registered loaded BundleContexts before API readiness; the unsupported shape must name the duplicate slug and conflicting bundle hashes/source labels rather than prefix, alias, remap, or otherwise disambiguate the slug.
         - event.publish and run.start select a loaded BundleContext by explicit canonical bundle_hash for create-new work or by runs.bundle_hash/runs.bundle_source for existing-run work. Missing, deleted, legacy, or unloaded contexts fail closed rather than falling back to ambient boot state.
         - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
         - Successful bundle.delete, force bundle.delete partial failure after force-controlled cleanup begins, and successful or partial runtime.nuke with include_bundles=true consume RuntimeContextManager deactivation for loaded matching contexts. runtime.nuke include_bundles=false must not deactivate bundle contexts.
