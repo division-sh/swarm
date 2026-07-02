@@ -371,8 +371,7 @@ func deadEventSameScope(a, b string) bool {
 }
 
 func deadEventExternalSource(entry runtimecontracts.EventCatalogEntry) bool {
-	source := strings.ToLower(strings.TrimSpace(entry.SwarmSource()))
-	return strings.HasPrefix(source, "external")
+	return eventMetadataExternalOrPlatformSource(entry.SwarmSource())
 }
 
 func deadEventExternalConsumer(entry runtimecontracts.EventCatalogEntry) bool {

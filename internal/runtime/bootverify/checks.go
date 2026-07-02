@@ -94,6 +94,9 @@ type checkerContext struct {
 	deadEventSchemaLoaded   bool
 	deadEventSchemaFindings []Finding
 
+	eventMetadataAuthorityLoaded   bool
+	eventMetadataAuthorityFindings []Finding
+
 	dialectLoaded   bool
 	dialectFindings []Finding
 
@@ -203,6 +206,7 @@ type checkerContext struct {
 }
 
 var bootCheckRegistry = []Check{
+	{ID: "event_metadata_authority", Severity: SeverityHardInvalidity, Run: checkEventMetadataAuthority},
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},

@@ -1,21 +1,13 @@
 item.created:
   emitter:
     - control-plane
-  consumer:
-    - intake-router
 item.processed:
   emitter:
     - worker-a
     - worker-b
-  consumer:
-    - intake-router
 item.review_requested:
   emitter:
     - intake-router
-  consumer:
-    - processing-node
 item.rejected:
   emitter:
     - processing-node
-  consumer:
-    - control-plane

@@ -257,6 +257,13 @@ contract_formats:
       Wave 1 type catalog. Runtime validators MUST NOT pass unresolved
       contract type names such as named types, scalar aliases, or enums
       to the primitive JSON schema validator as literal schema types.
+      Authored `swarm.source`, `swarm.producer`, and `swarm.consumer`
+      are external/platform/non-derivable proof only. Internal producer,
+      consumer, and source facts MUST be derived from topology owners such
+      as handlers, agents, timers, fan_out, auto_emit_on_create, pins,
+      connect routes, runtime owners, and effective system-node helpers.
+      Authored metadata that deterministically restates those internal
+      roles is a hard invalidity, not an alternate semantic owner.
       Validation ownership is layered, not competing: supported emit
       surfaces validate producer-authored payloads before publish, while
       canonical event-store admission validates every event payload that
@@ -971,10 +978,10 @@ contract_formats:
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
-      _source: 'Legacy migration input for event swarm.source. Do not author in new contracts.'
-      _consumer: 'Legacy migration input for event swarm.consumer. Do not author in new contracts.'
-      _status: 'Legacy migration input for event swarm.status. Do not author in new contracts.'
-      _producer: 'Legacy migration input for event swarm.producer for non-derivable producer proof only. Do not author for ordinary internal topology.'
+      _source: 'Retired legacy migration input for event swarm.source. Contracts MUST fail closed instead of accepting this as event metadata.'
+      _consumer: 'Retired legacy migration input for event swarm.consumer. Contracts MUST fail closed instead of accepting this as event metadata.'
+      _status: 'Retired legacy migration input for event swarm.status. Contracts MUST fail closed instead of accepting this as event metadata.'
+      _producer: 'Retired legacy migration input for event swarm.producer. Contracts MUST fail closed instead of accepting this as event metadata.'
     documentation_fields: Any other _-prefixed field (_note, _routing_note, _internal_events_note, etc.) is a human comment.
       The platform ignores them. The verifier ignores them. They are not part of the contract.
 rule:
@@ -4306,13 +4313,27 @@ engine:
       severity: warning
       scope: per-flow
       trigger: An event is emitted (by a node handler or agent emit_events) but no node or agent subscribes to it. Suppressed
-        if the event has swarm.consumer or swarm.status metadata.
+        only by accepted external/non-derivable swarm.consumer proof or swarm.status metadata. Internal consumers are derived
+        from topology owners; authored swarm.consumer values that restate internal handlers, agents, timers, pins, connect
+        routes, runtime owners, or effective system-node helpers fail closed under event_metadata_authority.
       when: boot-only
     - id: event_producer_exists
       severity: warning
       scope: per-flow
       trigger: An agent subscribes to an event that no node handler emits and no agent lists in emit_events. Suppressed if the
-        event has swarm.source, swarm.producer, swarm.status metadata, or an exact authoritative platform_events.catalog match.
+        event has accepted external/platform swarm.source proof, accepted external/non-derivable swarm.producer proof,
+        swarm.status metadata, or an exact authoritative platform_events.catalog match. Internal producers are derived from
+        topology owners; authored swarm.source or swarm.producer values that restate internal handlers, agents, timers, pins,
+        connect routes, runtime owners, or effective system-node helpers fail closed under event_metadata_authority.
+      when: boot-only
+    - id: event_metadata_authority
+      severity: hard_invalidity
+      scope: per-event
+      trigger: An events.yaml entry authors legacy event metadata fields (`producer`, `consumer`, `_source`, `_producer`,
+        `_consumer`, `_status`) or authors `swarm.source`, `swarm.producer`, or `swarm.consumer` values that deterministically
+        restate internal topology roles. `swarm.*` event metadata is external/platform/non-derivable proof only; internal roles
+        are derived from handlers, agents, timers, fan_out, auto_emit_on_create, pins, connect routes, runtime owners, and
+        effective system-node helpers.
       when: boot-only
     - id: payload_field_coverage
       severity: error
@@ -4516,7 +4537,9 @@ engine:
       severity: error
       scope: per-node
       trigger: A timer declaration is missing its owner (owner_node or owner_agent). Or the timer's owner is not a registered
-        participant in the flow. Or the timer's fire_event is not in events.yaml.
+        participant in the flow. Or the timer's fire_event is not in events.yaml. Timer fire/start/cancel references are
+        derived internal event producer/consumer roles; authors MUST NOT restate them through swarm.source, swarm.producer,
+        or swarm.consumer. External/non-derivable metadata remains only explicit proof for external producers or consumers.
       when: boot-only
     - id: write_pin_ownership_validation
       severity: error
@@ -4596,8 +4619,8 @@ engine:
       scope: per-event
       trigger: A product-declared event schema entry in `events.yaml` has no active authored role on the static verify surface.
         Active roles are limited to intra-flow local usage, explicit cross-flow qualified usage, root-local usage for root-declared
-        events only, external `swarm.source` / `swarm.consumer` metadata, same-flow timer fire/start/cancel references, same-flow
-        `fan_out.emit`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
+        events only, accepted external/platform `swarm.source` proof, accepted external `swarm.consumer` proof, same-flow timer
+        fire/start/cancel references, same-flow `fan_out.emit`, and same-flow `auto_emit_on_create`. It does not treat platform catalog membership, root-local
         references into child-flow declarations, or coincidental same local names in other flows as proof.
       when: boot-only
     severity_behavior:
@@ -10423,7 +10446,7 @@ static_analyzer:
         rule: Another flow or root participant references the declaration via an explicitly qualified event name that resolves
           to the declaring flow.
       external_annotations:
-        rule: "`swarm.source` beginning with external or `swarm.consumer` metadata on the declared event entry counts as an active external role."
+        rule: "Accepted `swarm.source` beginning with external or platform, or accepted external `swarm.consumer` metadata on the declared event entry, counts as an active external role. Internal topology roles must be derived from topology owners and fail closed if restated through `swarm.*`."
       same_flow_timer_references:
         rule: "Timers in the same scope keep the declaration alive through `event`, `start_on: event:...`, or `cancel_on: event:...`."
       same_flow_fan_out_emit:

@@ -787,6 +787,9 @@ func (e *EventCatalogEntry) UnmarshalYAML(node *yaml.Node) error {
 	if hasYAMLMappingKey(node, "payload") {
 		return fmt.Errorf("RETIRED: nested events.yaml payload blocks are no longer supported; move payload fields to the event top level")
 	}
+	if err := rejectRetiredEventMetadataFields(node); err != nil {
+		return err
+	}
 	flatPayload, err := buildFlatEventPayloadSpec(node)
 	if err != nil {
 		return err
@@ -921,6 +924,26 @@ type eventSwarmMetadataYAML struct {
 	Producer yaml.Node `yaml:"producer"`
 	Consumer yaml.Node `yaml:"consumer"`
 	Status   string    `yaml:"status"`
+}
+
+func rejectRetiredEventMetadataFields(node *yaml.Node) error {
+	retired := map[string]string{
+		"producer":  "swarm.producer",
+		"_producer": "swarm.producer",
+		"consumer":  "swarm.consumer",
+		"_consumer": "swarm.consumer",
+		"_source":   "swarm.source",
+		"_status":   "swarm.status",
+	}
+	for i := 0; node != nil && i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		canonical, ok := retired[key]
+		if !ok {
+			continue
+		}
+		return fmt.Errorf("RETIRED: events.yaml metadata field %s is no longer supported; use %s for external/non-derivable proof and derive internal roles from topology", key, canonical)
+	}
+	return nil
 }
 
 func mergeCanonicalLegacyString(canonical, legacy, canonicalKey, legacyKey string) (string, error) {
