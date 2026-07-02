@@ -4861,6 +4861,81 @@ treasury-node:
 	}
 }
 
+func TestRun_RejectsImplicitMaterializationForRootDefaultStaticInputPinHandlers(t *testing.T) {
+	root := writeRootDefaultStaticInputPinFixture(t, `
+root-writer:
+  id: root-writer
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  event_handlers:
+    subject.created:
+      data_accumulation:
+        writes:
+          - source_field: display_name
+            target_field: display_name
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired root/default-static implicit materialization error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsNonMaterializingRootDefaultStaticInputPinHandlers(t *testing.T) {
+	root := writeRootDefaultStaticInputPinFixture(t, `
+root-observer:
+  id: root-observer
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  produces: [subject.observed]
+  event_handlers:
+    subject.created:
+      emit:
+        event: subject.observed
+        fields:
+          display_name: payload.display_name
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+		reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
+		reportContains(report.Errors(), "missing_external_select_entity", "") {
+		t.Fatalf("root/default-static non-materializing handler must not be forced into retired acquisition, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsRootDefaultStaticInputPinMaterializationWithDeclaredEntityID(t *testing.T) {
+	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
+		DeclareEntityID: true,
+		Nodes: `
+root-writer:
+  id: root-writer
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  event_handlers:
+    subject.created:
+      data_accumulation:
+        writes:
+          - source_field: display_name
+            target_field: display_name
+`,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+		reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
+		reportContains(report.Errors(), "missing_external_select_entity", "") {
+		t.Fatalf("root/default-static handler with declared entity_id owner must not be forced into retired acquisition, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
@@ -5799,6 +5874,57 @@ opco_budget:
     initial: 0
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "nodes.yaml"), treasuryNodes)
+	return root
+}
+
+func writeRootDefaultStaticInputPinFixture(t *testing.T, rootNodes string) string {
+	t.Helper()
+	return writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{Nodes: rootNodes})
+}
+
+type rootDefaultStaticInputPinFixtureOptions struct {
+	DeclareEntityID bool
+	Nodes           string
+}
+
+func writeRootDefaultStaticInputPinFixtureWithOptions(t *testing.T, opts rootDefaultStaticInputPinFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: root-default-static-fixture
+version: 1.0.0
+platform_version: ">=1.1.0"
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: root-default-static-fixture
+initial_state: active
+states: [active]
+pins:
+  inputs:
+    events: [subject.created]
+  outputs:
+    events: [subject.observed]
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	entityIDField := ""
+	if opts.DeclareEntityID {
+		entityIDField = "  entity_id: string\n"
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
+subject.created:
+  swarm:
+    source: external
+`+entityIDField+`  display_name: string
+subject.observed:
+`+entityIDField+`  display_name: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+subject:
+  display_name: text
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), opts.Nodes)
 	return root
 }
 

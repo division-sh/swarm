@@ -4169,6 +4169,7 @@ portfolio:
 opco.bootstrap_requested:
   swarm:
     source: external
+  entity_id: string
   owner: text
 
 opco.spinup_requested:
