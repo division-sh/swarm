@@ -1,15 +1,9 @@
 item.review_requested:
   emitter:
     - intake-router
-  consumer:
-    - processing-node
 item.completed:
   emitter:
     - processing-node
-  consumer:
-    - delivery-node
 item.rejected:
   emitter:
     - processing-node
-  consumer:
-    - control-plane

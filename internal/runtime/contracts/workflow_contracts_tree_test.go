@@ -783,7 +783,7 @@ entity_id: string
 	}
 }
 
-func TestEventCatalogEntry_LegacyMetadataNormalizesIntoSwarmOwner(t *testing.T) {
+func TestEventCatalogEntry_LegacyMetadataFieldsFailClosed(t *testing.T) {
 	var entry EventCatalogEntry
 	if err := loadYAMLBytes([]byte(`
 _source: external (human board interface)
@@ -793,29 +793,41 @@ _consumer_type: external_ui
 _status: planned
 _note: Human board handoff
 source: text
-`), &entry); err != nil {
-		t.Fatalf("load event catalog entry: %v", err)
+`), &entry); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "_source") || !strings.Contains(err.Error(), "swarm.source") {
+		t.Fatalf("load event catalog entry error = %v, want retired _source failure", err)
 	}
-	if got := entry.SwarmSource(); got != "external (human board interface)" {
-		t.Fatalf("expected legacy _source to normalize into swarm.source, got %q", got)
-	}
-	if got := entry.SwarmProducer(); len(got) != 1 || got[0] != "mailbox_human" {
-		t.Fatalf("expected legacy _producer to normalize into swarm.producer, got %#v", got)
-	}
-	if got := entry.SwarmConsumer(); len(got) != 1 || got[0] == "" {
-		t.Fatalf("expected legacy _consumer to normalize into swarm.consumer, got %#v", got)
-	}
-	if got := entry.ConsumerType; len(got) != 1 || got[0] != "external_ui" {
-		t.Fatalf("expected legacy _consumer_type to normalize into sibling consumer_type, got %#v", got)
-	}
-	if got := entry.SwarmStatus(); got != "planned" {
-		t.Fatalf("expected legacy _status to normalize into swarm.status, got %q", got)
-	}
-	if got := entry.SwarmNote(); got != "Human board handoff" {
-		t.Fatalf("expected legacy _note to normalize into swarm.note, got %q", got)
-	}
-	if _, ok := entry.Payload.Properties["source"]; !ok {
-		t.Fatalf("expected bare source to remain payload field, not metadata")
+}
+
+func TestEventCatalogEntry_TopLevelProducerConsumerMetadataFailsClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		yaml      string
+		wantField string
+	}{
+		{
+			name: "producer",
+			yaml: `
+producer: mailbox_human
+entity_id: string
+`,
+			wantField: "producer",
+		},
+		{
+			name: "consumer",
+			yaml: `
+consumer: dashboard
+entity_id: string
+`,
+			wantField: "consumer",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var entry EventCatalogEntry
+			err := loadYAMLBytes([]byte(tc.yaml), &entry)
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), tc.wantField) || !strings.Contains(err.Error(), "swarm.") {
+				t.Fatalf("load event catalog entry error = %v, want retired %s failure", err, tc.wantField)
+			}
+		})
 	}
 }
 

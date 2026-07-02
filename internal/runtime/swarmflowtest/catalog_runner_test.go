@@ -1956,16 +1956,7 @@ func catalogIsSuppressedEvent(events map[string]any, ev string) bool {
 	if strings.EqualFold(strings.TrimSpace(asStringForCatalog(swarm["status"])), "planned") {
 		return true
 	}
-	if source := strings.TrimSpace(asStringForCatalog(eventDef["_source"])); strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform") {
-		return true
-	}
-	if catalogMetadataPresent(eventDef["consumer"]) || catalogMetadataPresent(eventDef["_consumer"]) {
-		return true
-	}
-	if catalogMetadataPresent(eventDef["producer"]) || catalogMetadataPresent(eventDef["_producer"]) {
-		return true
-	}
-	return strings.EqualFold(strings.TrimSpace(asStringForCatalog(eventDef["_status"])), "planned")
+	return false
 }
 
 func catalogMetadataPresent(value any) bool {

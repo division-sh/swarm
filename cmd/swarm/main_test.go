@@ -9287,9 +9287,7 @@ ticket:
     initial: ""
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
-timer.reminder:
-  swarm:
-    source: internal
+timer.reminder: {}
 `)
 	timerBlock := `
     - id: reminder
@@ -12024,9 +12022,7 @@ pins:
 task.requested:
   swarm:
     source: external
-task.completed:
-  swarm:
-    source: internal
+task.completed: {}
 child/task.assigned: {}
 child/task.result: {}
 `)
@@ -12063,9 +12059,7 @@ pins:
 work_item: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
-task.assigned:
-  swarm:
-    source: internal
+task.assigned: {}
 task.feedback:
   comment: string
 task.result: {}
