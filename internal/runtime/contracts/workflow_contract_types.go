@@ -1099,7 +1099,7 @@ func (e EmitSpec) EventType() string {
 }
 
 func (e EmitSpec) Empty() bool {
-	return strings.TrimSpace(e.Event) == ""
+	return strings.TrimSpace(e.Event) == "" && len(e.Fields) == 0 && e.Target.Empty() && !e.Broadcast
 }
 
 func (e EmitSpec) HasFields() bool {

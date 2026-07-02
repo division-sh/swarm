@@ -120,17 +120,26 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			Handler:        handler,
 		})
 	}
-	add("handler.emit", "handler.emit", "", handler.Emit)
+	templateSites := runtimecontracts.HandlerRuleEmitTemplateSites(handler)
+	if len(templateSites) == 0 {
+		add("handler.emit", "handler.emit", "", handler.Emit)
+	} else {
+		for _, site := range templateSites {
+			add(site.Source, site.SiteKey, site.RuleID, site.Spec)
+		}
+	}
 	add("handler.on_success.emit", "handler.on_success.emit", "", handler.OnSuccess.Emit)
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
 			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, emitSpec)
 		}
 	}
-	for idx, rule := range handler.Rules {
-		add("handler.rules.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "emit"), rule.ID, rule.Emit)
-		if rule.FanOut != nil {
-			add("handler.rules.fan_out.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
+	if len(templateSites) == 0 {
+		for idx, rule := range handler.Rules {
+			add("handler.rules.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "emit"), rule.ID, rule.Emit)
+			if rule.FanOut != nil {
+				add("handler.rules.fan_out.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
+			}
 		}
 	}
 	for idx, rule := range handler.OnComplete {

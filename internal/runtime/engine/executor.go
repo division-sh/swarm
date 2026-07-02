@@ -2065,11 +2065,18 @@ type activeDeclarativeEmitSpec struct {
 
 func selectedDeclarativeEmitSpecs(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) []activeDeclarativeEmitSpec {
 	out := make([]activeDeclarativeEmitSpec, 0, 2)
-	if rule != nil && !rule.Emit.Empty() {
-		out = append(out, activeDeclarativeEmitSpec{
-			Source: "handler.rules.emit",
-			Spec:   rule.Emit,
-		})
+	if rule != nil {
+		if spec, ok := runtimecontracts.EffectiveRuleEmitTemplateSpec(handler, *rule); ok {
+			out = append(out, activeDeclarativeEmitSpec{
+				Source: "handler.rules.emit_template",
+				Spec:   spec,
+			})
+		} else if !rule.Emit.Empty() {
+			out = append(out, activeDeclarativeEmitSpec{
+				Source: "handler.rules.emit",
+				Spec:   rule.Emit,
+			})
+		}
 	}
 	if !handler.OnSuccess.Empty() {
 		out = append(out, activeDeclarativeEmitSpec{

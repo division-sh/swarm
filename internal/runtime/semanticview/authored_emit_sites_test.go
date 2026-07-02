@@ -84,6 +84,35 @@ func TestAuthoredEmitSites_EnumeratesOnSuccessEmitWithRules(t *testing.T) {
 	}
 }
 
+func TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite(t *testing.T) {
+	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
+		rootNodeID:       "root-node",
+		rootTemplateEmit: true,
+	})
+
+	sites := AuthoredEmitSites(source)
+	matches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.ready")
+	if len(matches) != 2 {
+		t.Fatalf("expected one effective template site per rule, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
+	}
+	for _, match := range matches {
+		if got := match.Site; got != "handler.rules.emit_template" {
+			t.Fatalf("template site = %q, want handler.rules.emit_template", got)
+		}
+		for _, field := range []string{"shared", "bucket"} {
+			if _, ok := match.Spec.Fields[field]; !ok {
+				t.Fatalf("site %s missing merged field %s: %#v", match.RuleID, field, match.Spec.Fields)
+			}
+		}
+	}
+	if countAuthoredSitesWithSite(sites, "handler.emit") != 0 {
+		t.Fatalf("raw handler.emit survived for template specialization: %#v", authoredEmitSiteSummaries(sites))
+	}
+	if countAuthoredSitesWithSite(sites, "handler.rules.emit") != 0 {
+		t.Fatalf("raw handler.rules.emit survived for template specialization: %#v", authoredEmitSiteSummaries(sites))
+	}
+}
+
 func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
 		rootNodeID:      "root-node",
@@ -148,6 +177,7 @@ type authoredEmitSiteFixture struct {
 	rootEmit            string
 	rootRuleEmit        string
 	rootOnSuccess       string
+	rootTemplateEmit    bool
 	rootGuardEmit       string
 	rootBroadcast       bool
 	flowNodeID          string
@@ -206,6 +236,9 @@ root.audit: {}
 	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
 	if strings.TrimSpace(opts.rootRuleEmit) != "" || strings.TrimSpace(opts.rootOnSuccess) != "" {
 		rootNodeYAML = authoredEmitSiteRulesSuccessNodeYAML(opts.rootNodeID, "root.start", opts.rootRuleEmit, opts.rootOnSuccess)
+	}
+	if opts.rootTemplateEmit {
+		rootNodeYAML = authoredEmitSiteTemplateNodeYAML(opts.rootNodeID, "root.start", "root.ready")
 	}
 	if opts.rootGuardObject {
 		rootNodeYAML = authoredEmitSiteNodeYAMLWithGuardObject(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
@@ -274,8 +307,7 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string,
         on_fail: "escalate:` + guardEventType + `"
 `
 	}
-	return `
-` + nodeID + `:
+	return nodeID + `:
   id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
@@ -294,8 +326,7 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
 	if broadcast {
 		broadcastLine = "        broadcast: true\n"
 	}
-	return `
-` + nodeID + `:
+	return nodeID + `:
   id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
@@ -320,8 +351,7 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
 	if strings.TrimSpace(nodeID) == "" {
 		return "{}\n"
 	}
-	return `
-` + nodeID + `:
+	return nodeID + `:
   id: ` + nodeID + `
   execution_type: system_node
   event_handlers:
@@ -335,8 +365,45 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
 `
 }
 
+func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string {
+	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
+		return "{}\n"
+	}
+	return nodeID + `:
+  id: ` + nodeID + `
+  execution_type: system_node
+  event_handlers:
+    ` + trigger + `:
+      emit:
+        event: ` + eventType + `
+        fields:
+          shared: payload.shared
+      rules:
+        high:
+          condition: "payload.score >= 80"
+          emit:
+            fields:
+              bucket: '"high"'
+        low:
+          condition: "else"
+          emit:
+            fields:
+              bucket: '"low"'
+`
+}
+
 func countAuthoredEmitSites(sites []AuthoredEmitSite, flowID, nodeID, eventType string) int {
 	return len(authoredEmitSitesByFlowNodeEvent(sites, flowID, nodeID, eventType))
+}
+
+func countAuthoredSitesWithSite(sites []AuthoredEmitSite, site string) int {
+	count := 0
+	for _, candidate := range sites {
+		if strings.TrimSpace(candidate.Site) == site {
+			count++
+		}
+	}
+	return count
 }
 
 func authoredEmitSitesByFlowNodeEvent(sites []AuthoredEmitSite, flowID, nodeID, eventType string) []AuthoredEmitSite {
