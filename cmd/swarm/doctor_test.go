@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -263,6 +264,116 @@ func TestDoctorClaudeCLIPreflightWarnsOnRetiredGatewayEnv(t *testing.T) {
 	}
 }
 
+func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	flagSwarmDir := filepath.Join(t.TempDir(), "flag-state")
+	configSwarmDir := filepath.Join(t.TempDir(), "config-state")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"swarm_dir":  configSwarmDir,
+		"api_server": "http://127.0.0.1:19001",
+	}))
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"--swarm-dir", flagSwarmDir,
+		"doctor", "--target",
+		"--contracts", filepath.Join(repo, "contracts"),
+		"--config", filepath.Join(t.TempDir(), "missing-runtime-config.yaml"),
+		"--backend", "not-a-backend",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"swarm target diagnostics: ok",
+		"swarm_dir: " + flagSwarmDir + " (source: --swarm-dir)",
+		"project_root: " + repo,
+		"api_server: http://127.0.0.1:19001 (source: config api_server)",
+		"descriptor_registry: pending (#1613)",
+		"runtime_identity: pending (#1613)",
+		"store_path: " + filepath.Join(repo, ".swarm", "dev.db"),
+		"data_dir: " + filepath.Join(repo, ".swarm", "data"),
+		"command_classes:",
+		"#1614",
+		"#1615",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor target output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "claude_cli preflight") {
+		t.Fatalf("doctor target ran backend preflight:\n%s", stdout.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	tokenFile := writeCLIAPITokenFile(t, "target-token")
+	apiServer := "http://127.0.0.1:19002"
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"doctor", "--target", "--json",
+		"--api-server", apiServer,
+		"--api-token-file", tokenFile,
+		"--contracts", filepath.Join(repo, "contracts"),
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
+	}
+	if !report.OK || report.Owner != localTargetOwner || report.Mode != "target" {
+		t.Fatalf("report identity = %#v", report)
+	}
+	if report.API.Server != apiServer || report.API.Source != "--api-server" || report.API.Auth.Source != "--api-token-file" {
+		t.Fatalf("api resolution = %#v", report.API)
+	}
+	if report.Context.Registry.Status != "pending" || report.RuntimeIdentity.Status != "pending" {
+		t.Fatalf("registry/identity should be pending, report = %#v", report)
+	}
+	if len(report.CommandClasses) == 0 || len(report.SplitSiblings) == 0 {
+		t.Fatalf("report missing command classes or split siblings: %#v", report)
+	}
+}
+
+func TestDoctorTargetQuietRemainsUnsupported(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"doctor", "--target", "--quiet"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unknown flag: --quiet") {
+		t.Fatalf("stderr = %q, want unsupported quiet flag", stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestDoctorAPIFlagsRequireTargetMode(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"doctor", "--api-server", "http://127.0.0.1:19003"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--api-server and --api-token-file require --target") {
+		t.Fatalf("stderr = %q, want target-only API flag validation", stderr.String())
+	}
+}
+
 func TestRunServeRuntimeConsumesLocalClaudePreflightBeforeStoreSelection(t *testing.T) {
 	configureDoctorDockerStub(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
@@ -350,11 +461,85 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 		}
 	}
 	doctor := spec.CLISpecification.CommandCatalog.Doctor
-	if doctor.Command != "swarm doctor --backend claude_cli [--contracts <path>] [--json]" || doctor.ImplementationStatus != "implemented" || doctor.Owner != "cli_specification.foundations.local_claude_cli_preflight_admission" {
+	if doctor.Command != "swarm doctor [--backend claude_cli] [--target] [--contracts <path>] [--json]" || doctor.ImplementationStatus != "implemented" || !strings.Contains(doctor.Owner, "local_claude_cli_preflight_admission") {
 		t.Fatalf("doctor command catalog = %#v", doctor)
 	}
-	if !strings.Contains(doctor.Behavior, "without starting runtime") || !strings.Contains(doctor.Behavior, "DB state") {
+	if !strings.Contains(doctor.Owner, "local_target_resolution_authority") {
+		t.Fatalf("doctor command catalog missing target owner: %#v", doctor)
+	}
+	if !strings.Contains(doctor.Behavior, "without starting runtime") || !strings.Contains(doctor.Behavior, "DB state") || !strings.Contains(doctor.Behavior, "--target") {
 		t.Fatalf("doctor behavior missing runtime/DB boundary: %s", doctor.Behavior)
+	}
+}
+
+func TestPlatformSpecLocalTargetResolutionAuthorityPromoted(t *testing.T) {
+	var spec struct {
+		CLISpecification struct {
+			Foundations struct {
+				LocalTarget struct {
+					PromotedBy           string `yaml:"promoted_by"`
+					ImplementationStatus string `yaml:"implementation_status"`
+					CanonicalOwner       string `yaml:"canonical_owner"`
+					SwarmDir             struct {
+						SourceOrder     []string          `yaml:"source_order"`
+						RejectedSources map[string]string `yaml:"rejected_sources"`
+					} `yaml:"swarm_dir"`
+					TargetPrecedence struct {
+						SourceOrder []string `yaml:"source_order"`
+					} `yaml:"target_precedence"`
+					CommandClasses map[string]struct {
+						Status   string   `yaml:"status"`
+						Commands []string `yaml:"commands"`
+					} `yaml:"command_classes"`
+					DoctorTargetSurface struct {
+						Command  string `yaml:"command"`
+						Behavior string `yaml:"behavior"`
+					} `yaml:"doctor_target_surface"`
+					SplitSiblings []string `yaml:"split_siblings"`
+				} `yaml:"local_target_resolution_authority"`
+			} `yaml:"foundations"`
+		} `yaml:"cli_specification"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	target := spec.CLISpecification.Foundations.LocalTarget
+	if target.PromotedBy != "#1612" || target.ImplementationStatus != "implemented_first_slice" || target.CanonicalOwner != localTargetOwner {
+		t.Fatalf("local target owner = %#v", target)
+	}
+	wantSwarmDirOrder := []string{"--swarm-dir", "config swarm_dir", "default ~/.swarm"}
+	if !reflect.DeepEqual(target.SwarmDir.SourceOrder, wantSwarmDirOrder) {
+		t.Fatalf("swarm_dir source order = %#v, want %#v", target.SwarmDir.SourceOrder, wantSwarmDirOrder)
+	}
+	for _, rejected := range []string{"--datadir", "SWARM_DIR", "SWARM_HOME", "<swarm-dir>/config.yaml"} {
+		if _, ok := target.SwarmDir.RejectedSources[rejected]; !ok {
+			t.Fatalf("swarm_dir rejected sources missing %q: %#v", rejected, target.SwarmDir.RejectedSources)
+		}
+	}
+	for _, want := range []string{"explicit_api_flags", "live_project_scoped_context", "selected_or_default_global_context", "built_in_loopback_default"} {
+		if !stringSliceContains(target.TargetPrecedence.SourceOrder, want) {
+			t.Fatalf("target precedence missing %q: %#v", want, target.TargetPrecedence.SourceOrder)
+		}
+	}
+	for _, class := range []string{"target_diagnostic", "read_only_inspection", "mutating_runtime_state", "control_destructive", "startup_and_run"} {
+		if _, ok := target.CommandClasses[class]; !ok {
+			t.Fatalf("command classes missing %q: %#v", class, target.CommandClasses)
+		}
+	}
+	if target.CommandClasses["target_diagnostic"].Status != "implemented" || !stringSliceContains(target.CommandClasses["target_diagnostic"].Commands, "swarm doctor --target") {
+		t.Fatalf("target diagnostic class = %#v", target.CommandClasses["target_diagnostic"])
+	}
+	if !strings.Contains(target.DoctorTargetSurface.Command, "swarm doctor --target") || !strings.Contains(target.DoctorTargetSurface.Behavior, "MUST NOT require backend preflight") {
+		t.Fatalf("doctor target surface = %#v", target.DoctorTargetSurface)
+	}
+	for _, sibling := range []string{"#1613", "#1614", "#1615", "#1576"} {
+		if !stringSliceContainsPrefix(target.SplitSiblings, sibling) {
+			t.Fatalf("split siblings missing %q: %#v", sibling, target.SplitSiblings)
+		}
 	}
 }
 
@@ -398,6 +583,19 @@ func writeDoctorClaudeConfig(t *testing.T) string {
 		"    no_session_persistence: false",
 	}, "\n")+"\n")
 	return path
+}
+
+func writeDoctorTargetRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	contracts := filepath.Join(repo, "contracts")
+	if err := os.MkdirAll(contracts, 0o755); err != nil {
+		t.Fatalf("mkdir contracts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contracts, "package.yaml"), []byte("name: target-fixture\nversion: 0.0.1\n"), 0o644); err != nil {
+		t.Fatalf("write package: %v", err)
+	}
+	return repo
 }
 
 func writeDoctorAgentFreeContractsFixture(t *testing.T) string {
@@ -488,6 +686,15 @@ func freeDoctorTCPPort(t *testing.T) string {
 func localPreflightReportHasCode(report localPreflightReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContainsPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
 			return true
 		}
 	}

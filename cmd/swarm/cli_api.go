@@ -36,6 +36,7 @@ type rootCommandOptions struct {
 	// those paths have already resolved their own API endpoint semantics.
 	apiRPCEndpointOverride string
 	apiTokenFile           string
+	swarmDir               string
 	httpClient             *http.Client
 	input                  io.Reader
 	stdinIsTerminal        func() bool
@@ -90,6 +91,7 @@ type cliAPISettings struct {
 type cliAPIConfigFile struct {
 	APIServer          string `yaml:"api_server"`
 	APITokenFile       string `yaml:"api_token_file"`
+	SwarmDir           string `yaml:"swarm_dir"`
 	ContractsPath      string `yaml:"contracts_path"`
 	PlatformSpecPath   string `yaml:"platform_spec_path"`
 	ServeAPIListenAddr string `yaml:"serve_api_listen_addr"`
@@ -293,7 +295,7 @@ func parseCLIAPIConfigFile(configPath string, raw []byte) (cliAPIConfigFile, err
 	}
 	for key, value := range decoded {
 		switch key {
-		case "api_server", "api_token_file", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr":
+		case "api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr":
 			if value == nil {
 				continue
 			}
