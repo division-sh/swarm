@@ -39,7 +39,7 @@ func resolveCLISwarmDirFromConfig(opts cliSwarmDirOptions, cfg cliAPIConfigFile)
 		path, err := normalizeCLISwarmDir(opts.SwarmDir, "--swarm-dir")
 		return cliSwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
-	if strings.TrimSpace(cfg.SwarmDir) != "" {
+	if cfg.SwarmDirSet {
 		path, err := normalizeCLISwarmDir(cfg.SwarmDir, "config swarm_dir")
 		return cliSwarmDirResolution{Path: path, Source: "config swarm_dir"}, err
 	}

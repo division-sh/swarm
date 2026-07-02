@@ -38,6 +38,7 @@ func firstCLIAPIConnectionFlagIndex(args []string) (int, string) {
 }
 
 func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
+	prefix = stripRootPersistentFlagsForCLIAPIPlacement(prefix)
 	leafCommands := [][]string{
 		{"runs"},
 		{"status"},
@@ -82,6 +83,26 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		}
 	}
 	return false
+}
+
+func stripRootPersistentFlagsForCLIAPIPlacement(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	stripped := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--swarm-dir" && i+1 < len(args):
+			i++
+			continue
+		case strings.HasPrefix(arg, "--swarm-dir="):
+			continue
+		default:
+			stripped = append(stripped, arg)
+		}
+	}
+	return stripped
 }
 
 func argsHaveCommandPrefix(args, command []string) bool {

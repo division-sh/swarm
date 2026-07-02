@@ -347,6 +347,37 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 	}
 }
 
+func TestDoctorTargetAPIFlagsAfterRootSwarmDir(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	swarmDir := filepath.Join(t.TempDir(), "state")
+	apiServer := "http://127.0.0.1:19004"
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"--swarm-dir", swarmDir,
+		"doctor", "--target", "--json",
+		"--api-server", apiServer,
+		"--contracts", filepath.Join(repo, "contracts"),
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
+	}
+	if report.SwarmDir.Path != swarmDir || report.SwarmDir.Source != "--swarm-dir" {
+		t.Fatalf("swarm dir = %#v, want %q from --swarm-dir", report.SwarmDir, swarmDir)
+	}
+	if report.API.Server != apiServer || report.API.Source != "--api-server" {
+		t.Fatalf("api target = %#v, want %q from --api-server", report.API, apiServer)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestDoctorTargetQuietRemainsUnsupported(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	var stdout, stderr bytes.Buffer
