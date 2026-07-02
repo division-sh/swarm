@@ -2164,7 +2164,9 @@ handler_specification:
   - 'reduce → count: aggregated result available before counting'
   - 'count → compute: all list processing complete before computation'
   - 'compute → emit-site selection: computed values written before branch/rule/timeout selection evaluates'
-  - 'emit-site selection → {advances_to, sets_gate, data_accumulation}: active branch/rule/timeout may override these fields'
+  - 'emit-site selection → advances_to: the selected rule/branch/timeout advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
+  - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/branch/timeout entries do not declare or override sets_gate'
+  - 'emit-site selection → data_accumulation: selected rule/branch/timeout data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
   - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
   - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected branch writes'
   - 'projection → emit.fields: emit payload expressions observe projected entity fields'
@@ -2215,12 +2217,18 @@ handler_specification:
     example: 'order.received may have handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
       Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission, however,
       and action must be owned by the matching rule or by the explicit rules emit template specialization.'
-    precedence: Handler-level advances_to, sets_gate, and data_accumulation are defaults. If the matched rule specifies any
-      of these, the rule value OVERRIDES the handler-level value for that field only. Bare emit and action never fall through from
-      a handler into a rules-based multi-emit/action handler. The only handler-level emit exception is rules emit template
-      specialization, where handler-level `emit.event` and shared `emit.fields` are inherited by the matched rule's eventless
-      `emit.fields` and produce exactly one effective emit. Explicit on_success.emit is additive only as a second distinct
-      success event.
+    side_effect_resolution:
+      advances_to: Handler-level advances_to is the default transition target. A matched rule with a non-empty advances_to
+        overrides the handler-level target for that execution only.
+      sets_gate: sets_gate is handler-level only in the supported handler/rule vocabulary. Rules, on_complete entries,
+        accumulate.on_timeout entries, and branch entries do not declare or override sets_gate.
+      data_accumulation: Handler-level data_accumulation supplements the selected rule/branch/timeout data_accumulation in
+        the same atomic transaction. Selected entry writes run before handler-level writes. This is additive composition,
+        not default/override precedence.
+      emit_and_action: Bare emit and action never fall through from a handler into a rules-based multi-emit/action handler.
+        The only handler-level emit exception is rules emit template specialization, where handler-level `emit.event` and
+        shared `emit.fields` are inherited by the matched rule's eventless `emit.fields` and produce exactly one effective
+        emit. Explicit on_success.emit is additive only as a second distinct success event.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
   flow_tree_walker:
@@ -4672,7 +4680,7 @@ compliance:
     - 'If handler has accumulate: track arrival, check completion, proceed only on complete.'
     - 'If handler has on_complete: evaluate conditions, execute matching branch.'
     - 'If handler has rules: match payload field, select the matching rule-local emit and action if present.'
-    - 'Apply advances_to, sets_gate, and data_accumulation from the active handler/branch/rule outcome.'
+    - 'Resolve side effects per handler_specification.rules_handler_interaction.side_effect_resolution: advances_to uses handler default with selected-entry override, sets_gate is handler-level only, and data_accumulation composes selected-entry writes before handler-level writes.'
     - 'If the active emit site has emit: publish the selected follow-up event.'
     - 'If the active handler or selected rule has action that is a platform action: call registered platform action.'
     - 'If the resolved action runtime instruction emits an event: publish it using the action-originated payload rules and fail-closed schema validation before commit.'
