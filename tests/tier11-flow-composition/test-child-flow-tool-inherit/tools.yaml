@@ -1,9 +1,11 @@
 lookup_data:
   description: Looks up data from the knowledge base.
   input_schema:
-    query:
-      type: string
-      description: The search query.
+    type: object
+    properties:
+      query:
+        type: string
+        description: The search query.
   output_schema:
     type: string
     description: The search result.

@@ -3,6 +3,8 @@ lookup_data:
   type: custom
   permission: external_api_access
   input_schema:
-    query:
-      type: string
-      description: Search query
+    type: object
+    properties:
+      query:
+        type: string
+        description: Search query

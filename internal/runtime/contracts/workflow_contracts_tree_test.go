@@ -180,6 +180,38 @@ flow_lookup:
 	}
 }
 
+func TestMigratedToolFixturesPreserveQueryInputSchema(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	paths := []string{
+		filepath.Join("tests", "tier8-boot-verification", "test-boot-permission-tool-mismatch", "tools.yaml"),
+		filepath.Join("tests", "tier11-flow-composition", "test-child-flow-tool-inherit", "tools.yaml"),
+		filepath.Join("tests", "tier11-flow-composition", "test-tool-override", "tools.yaml"),
+		filepath.Join("tests", "tier11-flow-composition", "test-tool-override", "flows", "child", "tools.yaml"),
+	}
+	for _, rel := range paths {
+		t.Run(rel, func(t *testing.T) {
+			var tools map[string]ToolSchemaEntry
+			if err := loadYAMLFile(filepath.Join(repoRoot, rel), &tools); err != nil {
+				t.Fatalf("load %s: %v", rel, err)
+			}
+			entry, ok := tools["lookup_data"]
+			if !ok {
+				t.Fatalf("lookup_data missing from %s: %#v", rel, tools)
+			}
+			if got := strings.TrimSpace(entry.InputSchema.Type); got != "object" {
+				t.Fatalf("%s input_schema.type = %q, want object", rel, got)
+			}
+			query, ok := entry.InputSchema.Properties["query"]
+			if !ok {
+				t.Fatalf("%s input_schema properties = %#v, want query", rel, entry.InputSchema.Properties)
+			}
+			if got := strings.TrimSpace(query.Type); got != "string" {
+				t.Fatalf("%s query.type = %q, want string", rel, got)
+			}
+		})
+	}
+}
+
 func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
