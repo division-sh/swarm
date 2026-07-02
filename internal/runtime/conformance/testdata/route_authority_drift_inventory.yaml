@@ -367,7 +367,6 @@ seam_families:
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/route_plan.go
-      - internal/runtime/authoringview/view.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
     notes: >
@@ -382,6 +381,21 @@ seam_families:
       connect.map remains non-authoritative for that class. #1577 adds the
       connect-time template lifecycle owner that consumes the lowered instance
       key plan and creates, reuses, or fails closed before delivery rows commit.
+  - id: authoring_describe_connect_route_plan_projection
+    layer: public_projection_non_authority
+    classification: non_authoritative_observer_projection
+    paths:
+      - internal/runtime/authoringview/view.go
+    search_dimensions: [connect_route_plan]
+    invalid_authority:
+      - route authority decisions
+      - route-plan fallback repair
+      - verifier/runtime reimplementation
+    notes: >
+      The `swarm describe` authoring view consumes
+      LowerCompositionConnectRoutePlans for author-facing readback only. It is
+      projection-only and must not become canonical connect route-plan
+      authority.
   - id: route_table_resolve_role_separation
     layer: route_topology
     classification: valid_consumer
