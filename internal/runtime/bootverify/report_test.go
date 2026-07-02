@@ -4838,6 +4838,29 @@ func TestRun_RejectsCreateEntityForStatefulDefaultStaticInputPinHandlers(t *test
 	}
 }
 
+func TestRun_RejectsImplicitMaterializationForStatefulStaticInputPinHandlers(t *testing.T) {
+	root := writeSelectEntityInputPinFixture(t, `
+treasury-node:
+  id: treasury-node
+  execution_type: system_node
+  subscribes_to: [opco.spend_requested]
+  event_handlers:
+    opco.spend_requested:
+      data_accumulation:
+        writes:
+          - source_field: amount_usd
+            target_field: spent_usd
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired static implicit materialization error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:

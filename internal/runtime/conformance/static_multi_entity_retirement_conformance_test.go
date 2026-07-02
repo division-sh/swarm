@@ -57,12 +57,20 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 			wantMessage: "static multi-row entity ownership is retired",
 		},
 		{
-			name: "missing acquisition is not required",
-			handlerBody: `      data_accumulation:
-        writes:
-          - source_field: amount_usd
-            target_field: spent_usd
-`,
+			name: "missing acquisition materializing state fails closed",
+			handlerBody: "      data_accumulation:\n" +
+				"        writes:\n" +
+				"          - source_field: amount_usd\n" +
+				"            target_field: spent_usd\n",
+			checkID:     "flow_boundary_create_entity_validation",
+			wantMessage: "static multi-row entity ownership is retired",
+		},
+		{
+			name: "missing acquisition non materializing handler is allowed",
+			handlerBody: "      emit:\n" +
+				"        event: opco.spend_recorded\n" +
+				"        fields:\n" +
+				"          vertical_id: payload.vertical_id\n",
 		},
 	}
 
@@ -120,6 +128,8 @@ opco.spend_requested:
     source: external (operator webhook)
   vertical_id: string
   amount_usd: number
+opco.spend_recorded:
+  vertical_id: string
 `)
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "flows", "treasury", "entities.yaml"), `
 budget:

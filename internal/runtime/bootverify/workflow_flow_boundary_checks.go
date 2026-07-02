@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
 func checkWritePinOwnershipValidation(c *checkerContext) []Finding { return c.writePinOwnership() }
@@ -714,6 +715,18 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 							Location: validationScope.displayFlowID,
 						})
 					}
+					if !handler.CreateEntity &&
+						(handler.SelectEntity == nil || handler.SelectEntity.Empty()) &&
+						(handler.SelectOrCreateEntity == nil || handler.SelectOrCreateEntity.Empty()) &&
+						retiredStaticMultiEntityInputHasNoOwner(c.source, validationScope.semanticFlowID, eventType) &&
+						bootverifyHandlerMaterializesEntity(c.source, validationScope.semanticFlowID, handler) {
+						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
+							CheckID:  "flow_boundary_create_entity_validation",
+							Severity: "error",
+							Message:  retiredStaticMultiEntityAcquisitionMessage(validationScope.displayFlowID, eventType, nodeID, "implicit entity materialization"),
+							Location: validationScope.displayFlowID,
+						})
+					}
 					continue
 				}
 				if handler.CreateEntity {
@@ -794,6 +807,165 @@ func retiredStaticMultiEntityAcquisitionFlow(schema runtimecontracts.FlowSchemaD
 
 func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label string) string {
 	return fmt.Sprintf("flow %s handler %s on node %s uses %s, but stateful static multi-row entity ownership is retired; model this as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a child flow", flowID, eventType, nodeID, label)
+}
+
+func retiredStaticMultiEntityInputHasNoOwner(source semanticview.Source, flowID, eventType string) bool {
+	if strings.TrimSpace(flowID) == "" {
+		return false
+	}
+	if source == nil {
+		return true
+	}
+	if pinRoutingEventExternalSource(source, flowID, eventType) {
+		return true
+	}
+	return !pinRoutingAllKnownProducersTargeted(source, flowID, eventType)
+}
+
+func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
+	if handler.CreateEntity {
+		return true
+	}
+	allowedFields := bootverifyWorkflowEntitySchemaFields(source, flowID)
+	if len(allowedFields) == 0 {
+		return false
+	}
+	if bootverifyDataWritesEntityFields(handler.DataAccumulation, allowedFields) {
+		return true
+	}
+	if bootverifyComputeStoresEntityField(handler.Compute, allowedFields) {
+		return true
+	}
+	if bootverifyEmitSitesReferenceEntity(handler) {
+		return true
+	}
+	if bootverifyAccumulateReferencesEntity(handler.Accumulate) {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if bootverifyDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
+			return true
+		}
+		if bootverifyComputeStoresEntityField(rule.Compute, allowedFields) {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if bootverifyDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
+			return true
+		}
+		if bootverifyComputeStoresEntityField(rule.Compute, allowedFields) {
+			return true
+		}
+	}
+	return false
+}
+
+func bootverifyWorkflowEntitySchemaFields(source semanticview.Source, flowID string) map[string]struct{} {
+	contract, ok := entityruntime.ResolveForFlow(source, flowID)
+	if !ok {
+		return map[string]struct{}{}
+	}
+	out := make(map[string]struct{}, len(contract.Entity.Fields))
+	for _, field := range entityruntime.FieldNames(contract) {
+		out[field] = struct{}{}
+	}
+	return out
+}
+
+func bootverifyDataWritesEntityFields(spec runtimecontracts.WorkflowDataAccumulation, allowedFields map[string]struct{}) bool {
+	for _, write := range spec.Writes {
+		targetField := bootverifyNormalizeEntityWriteTarget(write.Target())
+		if targetField == "" {
+			continue
+		}
+		if _, ok := allowedFields[targetField]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func bootverifyComputeStoresEntityField(spec *runtimecontracts.ComputeSpec, allowedFields map[string]struct{}) bool {
+	if spec == nil {
+		return false
+	}
+	targetField := bootverifyNormalizeEntityWriteTarget(spec.StoreAs)
+	if targetField == "" {
+		return false
+	}
+	_, ok := allowedFields[targetField]
+	return ok
+}
+
+func bootverifyEmitSitesReferenceEntity(handler runtimecontracts.SystemNodeEventHandler) bool {
+	if bootverifyEmitReferencesEntity(handler.Emit) {
+		return true
+	}
+	if handler.FanOut != nil && bootverifyEmitReferencesEntity(handler.FanOut.Emit) {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if bootverifyEmitReferencesEntity(rule.Emit) {
+			return true
+		}
+		if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if bootverifyEmitReferencesEntity(rule.Emit) {
+			return true
+		}
+		if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
+			return true
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if bootverifyEmitReferencesEntity(rule.Emit) {
+				return true
+			}
+			if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			rule := handler.Accumulate.OnTimeout
+			if bootverifyEmitReferencesEntity(rule.Emit) {
+				return true
+			}
+			if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func bootverifyEmitReferencesEntity(spec runtimecontracts.EmitSpec) bool {
+	for _, value := range spec.Fields {
+		if value.Kind == runtimecontracts.ExpressionKindCEL && workflowexpr.ExpressionReferencesEntity(value.CEL) {
+			return true
+		}
+	}
+	return false
+}
+
+func bootverifyAccumulateReferencesEntity(spec *runtimecontracts.AccumulateSpec) bool {
+	if spec == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(spec.ExpectedFrom), "entity.")
+}
+
+func bootverifyNormalizeEntityWriteTarget(target string) string {
+	path, entityTarget, err := entityruntime.EntityWritePath(target)
+	if err != nil || !entityTarget {
+		return ""
+	}
+	field, _, _ := strings.Cut(path, ".")
+	return strings.TrimSpace(field)
 }
 
 func normalizeStringSet(values []string) map[string]struct{} {
