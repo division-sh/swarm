@@ -25,6 +25,7 @@ type HandlerPreview struct {
 	SetsGate        string
 	ClearGates      []string
 	FanOutCount     int
+	BatchAgentCount int
 	Computed        map[string]any
 }
 
@@ -148,6 +149,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 	setsGate := ""
 	clearGates := []string(nil)
 	fanOutCount := 0
+	batchAgentCount := 0
 	computed := map[string]any(nil)
 	status := HandlerOutcomeCompleted
 	if result.Outcome != nil {
@@ -158,6 +160,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		setsGate = strings.TrimSpace(result.Outcome.SetsGate)
 		clearGates = append(clearGates, result.Outcome.ClearGates...)
 		fanOutCount = result.Outcome.FanOutCount
+		batchAgentCount = result.Outcome.BatchAgentCount
 		computed = cloneStringAnyMap(result.Outcome.Computed)
 	}
 	return HandlerPreview{
@@ -173,6 +176,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		SetsGate:        setsGate,
 		ClearGates:      clearGates,
 		FanOutCount:     fanOutCount,
+		BatchAgentCount: batchAgentCount,
 		Computed:        computed,
 	}, nil
 }

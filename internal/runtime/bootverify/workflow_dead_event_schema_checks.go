@@ -298,9 +298,19 @@ func deadEventHandlerFanOutEmits(handler runtimecontracts.SystemNodeEventHandler
 			out = append(out, emitted)
 		}
 	}
+	if handler.BatchAgent != nil {
+		if emitted := handler.BatchAgent.Emit.EventType(); emitted != "" {
+			out = append(out, emitted)
+		}
+	}
 	for _, rule := range handler.Rules {
 		if rule.FanOut != nil {
 			if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
+				out = append(out, emitted)
+			}
+		}
+		if rule.BatchAgent != nil {
+			if emitted := rule.BatchAgent.Emit.EventType(); emitted != "" {
 				out = append(out, emitted)
 			}
 		}
@@ -308,6 +318,11 @@ func deadEventHandlerFanOutEmits(handler runtimecontracts.SystemNodeEventHandler
 	for _, rule := range handler.OnComplete {
 		if rule.FanOut != nil {
 			if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
+				out = append(out, emitted)
+			}
+		}
+		if rule.BatchAgent != nil {
+			if emitted := rule.BatchAgent.Emit.EventType(); emitted != "" {
 				out = append(out, emitted)
 			}
 		}
@@ -319,9 +334,19 @@ func deadEventHandlerFanOutEmits(handler runtimecontracts.SystemNodeEventHandler
 					out = append(out, emitted)
 				}
 			}
+			if rule.BatchAgent != nil {
+				if emitted := rule.BatchAgent.Emit.EventType(); emitted != "" {
+					out = append(out, emitted)
+				}
+			}
 		}
 		if handler.Accumulate.OnTimeout != nil && handler.Accumulate.OnTimeout.FanOut != nil {
 			if emitted := handler.Accumulate.OnTimeout.FanOut.Emit.EventType(); emitted != "" {
+				out = append(out, emitted)
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && handler.Accumulate.OnTimeout.BatchAgent != nil {
+			if emitted := handler.Accumulate.OnTimeout.BatchAgent.Emit.EventType(); emitted != "" {
 				out = append(out, emitted)
 			}
 		}

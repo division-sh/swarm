@@ -959,7 +959,7 @@ contract_formats:
   produces_derivation: >-
     The produces field on system nodes is OPTIONAL. If omitted, the platform derives it from every supported declarative
     emit site at boot: handler top-level emit, rule-local emit, on_complete branch emit, accumulate.on_timeout emit, and
-    fan_out emit. If present, the verifier checks it matches actual emits (PRODUCES-DRIFT warning). Authors should omit
+    fan_out emit, and batch_agent emit. If present, the verifier checks it matches actual emits (PRODUCES-DRIFT warning). Authors should omit
     produces and let the platform derive it.
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
@@ -1328,7 +1328,7 @@ handler_specification:
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
-      \           └→ emit-site selection (handler emit OR active branch/rule/timeout/fan_out emit)\n                    \
+      \           └→ emit-site selection (handler emit OR active branch/rule/timeout/fan_out/batch_agent emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
       \                         └→ projection (materialize_from, if accumulator projection eligible)\n                  \
@@ -1577,14 +1577,75 @@ handler_specification:
           example: "compute:\n  operation: weighted_average\n  keys:\n    dimension_key: dimension\n    score_keys: [score]\n\
             \  tiers:\n  - dimensions: [build_complexity, automation_completeness]\n    weight: 0.6\n  - dimensions: [pain_severity]\n\
             \    weight: 0.4\n  store_as: entity.composite_score"
+    batch_agent:
+      field: batch_agent
+      promoted_by: '#1447'
+      canonical_code_owner: internal/runtime/engine.BatchAgentRunner + internal/runtime/engine.stepBatchAgent
+      type: object
+      purpose: >
+        Invoke one configured agent turn over a typed list of items and scatter
+        one validated result row per input item through a normal declarative
+        emit site. `batch_agent` is a supported emit site, not a routing
+        primitive; routing authority remains the emitted event's output pin,
+        parent `connect` lowering, structural binding, or explicit escape hatch.
+      valid_locations:
+      - handler.batch_agent
+      - handler.rules[*].batch_agent
+      - handler.on_complete[*].batch_agent
+      - handler.accumulate.on_complete[*].batch_agent
+      - handler.accumulate.on_timeout.batch_agent
+      sub_fields:
+        agent: string — required agent id/role to invoke for the batch operation.
+        items_from: string — required expression/path resolving to the input item list in handler context.
+        input: map — optional expression-value map sent once with the batch request.
+        result: object — required result contract for validating the agent output rows.
+        emit: object — required declarative emit spec used once per accepted row.
+      result:
+        items_from: string — required path inside the agent output object resolving to the result row list.
+        correlation_key: string — required field/path present on every input item and every result row.
+        required_fields: list — required result-row fields. The correlation key is always required even if omitted here.
+      runtime_semantics: >
+        The runtime reads the input item list, evaluates `input`, invokes the
+        agent once, extracts `result.items_from` from the returned JSON object,
+        validates the complete row set atomically, reorders accepted rows to
+        input order by `correlation_key`, and evaluates `emit.fields` for each
+        row with `batch_agent.result`, `batch_agent.source_item`,
+        `batch_agent.key`, `batch_agent.count`, and `batch_agent.agent`
+        available in expression context.
+      fail_closed:
+      - missing batch_agent.agent
+      - missing batch_agent.items_from
+      - missing batch_agent.result.items_from
+      - missing batch_agent.result.correlation_key
+      - missing batch_agent.emit.event
+      - input item is not an object
+      - input item is missing the correlation key
+      - duplicate input correlation key
+      - agent runner unavailable or agent output is not a JSON object
+      - result.items_from missing or not a list
+      - result row is not an object
+      - result row missing, duplicate, unknown, or empty correlation key
+      - result row missing any required field
+      routing_rules:
+      - batch_agent.emit produces ordinary declarative emit intents.
+      - Pin-declared batch_agent emits MUST consume the same pin/connect route authority as handler, rule, on_complete, and fan_out emits.
+      - batch_agent MUST NOT use select_entity, producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, replay/readback, or relay nodes as scatter authority.
+      - Agent output is untrusted operation output. It never authorizes routing; only validated emit payload fields can feed the existing emitted event route plan.
+      non_authoritative_paths:
+      - producer target/broadcast as common-path scatter routing
+      - direct delivery or RouteTable lookup from the batch result rows
+      - raw subscriber fan-out from returned result rows
+      - dynamic bracket/path writes into batch_agent state
+      example: "accumulate:\n  into: pending_profiles\n  expected_from: payload.expected_count\n  completion: all\n  dedup_by: payload.account_id\n  on_complete:\n    - condition: else\n      batch_agent:\n        agent: profile-classifier\n        items_from: accumulated.items\n        input:\n          instruction: Classify each account profile by sales fit.\n        result:\n          items_from: results\n          correlation_key: account_id\n          required_fields: [account_id, bucket, score]\n        emit:\n          event: account.classified\n          fields:\n            account_id: batch_agent.result.account_id\n            bucket: batch_agent.result.bucket\n            score: batch_agent.result.score\n            handle: batch_agent.source_item.handle"
     on_complete:
       field: on_complete
-      type: list of {condition, advances_to, emit} objects — evaluated top-to-bottom, first match wins
+      type: list of {condition, advances_to, emit, fan_out, batch_agent} objects — evaluated top-to-bottom, first match wins
       purpose: Conditional branching after accumulation or computation.
       branch_fields:
         condition: string — expression evaluated against entity state and policy
         advances_to: string — target state
         emit: string or object — event to emit, optionally with local fields payload construction
+        batch_agent: object — batch agent operation and row-scatter emit site
       _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
         condition executes.
     advances_to:
@@ -1708,7 +1769,7 @@ handler_specification:
       type: 'scalar event name OR object: {event, fields, target, broadcast}'
       purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
         has no nested emit sites. Nested emit sites are branch-local on_complete emit, rules emit, accumulate.on_timeout emit,
-        and fan_out emit.
+        fan_out emit, and batch_agent emit.
       sub_fields:
         event: string — event to emit
         fields: map of output_field_name → CEL expression evaluated against handler context. Optional. If omitted, the emitted
@@ -1759,7 +1820,7 @@ handler_specification:
           delivery to receiver input pins for the same pin-declared output or connected output pin; parent connect
           broadcast/fan-out is the required route owner.
       single_emit_handler_rule: 'A handler top-level emit is valid only when the handler has exactly one possible emit site.
-        If the handler also declares rules, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity.
+        If the handler also declares rules, on_complete, accumulate.on_timeout, fan_out emit, or batch_agent emit, boot fails with ambiguity.
         Payload ownership must move to the active emit site.'
     rules:
       field: rules

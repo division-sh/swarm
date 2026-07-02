@@ -131,11 +131,17 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 		if rule.FanOut != nil {
 			add("handler.rules.fan_out.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
 		}
+		if rule.BatchAgent != nil {
+			add("handler.rules.batch_agent.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "batch_agent.emit"), rule.ID, rule.BatchAgent.Emit)
+		}
 	}
 	for idx, rule := range handler.OnComplete {
 		add("handler.on_complete.emit", indexedAuthoredEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, rule.Emit)
 		if rule.FanOut != nil {
 			add("handler.on_complete.fan_out.emit", indexedAuthoredEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
+		}
+		if rule.BatchAgent != nil {
+			add("handler.on_complete.batch_agent.emit", indexedAuthoredEmitSiteKey("handler.on_complete", idx, "batch_agent.emit"), rule.ID, rule.BatchAgent.Emit)
 		}
 	}
 	if handler.Accumulate != nil {
@@ -144,16 +150,25 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			if rule.FanOut != nil {
 				add("handler.accumulate.on_complete.fan_out.emit", indexedAuthoredEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
 			}
+			if rule.BatchAgent != nil {
+				add("handler.accumulate.on_complete.batch_agent.emit", indexedAuthoredEmitSiteKey("handler.accumulate.on_complete", idx, "batch_agent.emit"), rule.ID, rule.BatchAgent.Emit)
+			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			add("handler.accumulate.on_timeout.emit", "handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.ID, handler.Accumulate.OnTimeout.Emit)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
 				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, handler.Accumulate.OnTimeout.FanOut.Emit)
 			}
+			if handler.Accumulate.OnTimeout.BatchAgent != nil {
+				add("handler.accumulate.on_timeout.batch_agent.emit", "handler.accumulate.on_timeout.batch_agent.emit", handler.Accumulate.OnTimeout.ID, handler.Accumulate.OnTimeout.BatchAgent.Emit)
+			}
 		}
 	}
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", "handler.fan_out.emit", "", handler.FanOut.Emit)
+	}
+	if handler.BatchAgent != nil {
+		add("handler.batch_agent.emit", "handler.batch_agent.emit", "", handler.BatchAgent.Emit)
 	}
 }
 

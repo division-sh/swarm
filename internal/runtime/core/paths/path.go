@@ -14,6 +14,7 @@ const (
 	RootGates
 	RootAccumulated
 	RootFanOut
+	RootBatchAgent
 	RootComputed
 )
 
@@ -35,6 +36,8 @@ func (r PathRoot) String() string {
 		return "accumulated"
 	case RootFanOut:
 		return "fan_out"
+	case RootBatchAgent:
+		return "batch_agent"
 	case RootComputed:
 		return "computed"
 	default:
@@ -90,6 +93,8 @@ func parseRoot(text string) PathRoot {
 		return RootAccumulated
 	case "fan_out":
 		return RootFanOut
+	case "batch_agent":
+		return RootBatchAgent
 	case "computed":
 		return RootComputed
 	default:

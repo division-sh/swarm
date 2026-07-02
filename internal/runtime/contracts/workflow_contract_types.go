@@ -129,6 +129,7 @@ type HandlerTransitionSemantic struct {
 	Compute              *ComputeSpec
 	Query                *QuerySpec
 	FanOut               *FanOutSpec
+	BatchAgent           *BatchAgentSpec
 	GroupBy              *GroupBySpec
 	Filter               *FilterSpec
 	Reduce               *ReduceSpec
@@ -146,6 +147,7 @@ type HandlerRuleEntry struct {
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
+	BatchAgent       *BatchAgentSpec          `yaml:"batch_agent"`
 }
 type GuardSpec struct {
 	ID         string           `yaml:"id"`
@@ -257,6 +259,20 @@ type FanOutSpec struct {
 	ItemsPath paths.Path `yaml:"-"`
 	Target    string     `yaml:"target"`
 	Emit      EmitSpec   `yaml:"emit"`
+}
+type BatchAgentSpec struct {
+	Agent     string                     `yaml:"agent"`
+	ItemsFrom string                     `yaml:"items_from"`
+	ItemsPath paths.Path                 `yaml:"-"`
+	Input     map[string]ExpressionValue `yaml:"input"`
+	Result    BatchAgentResultSpec       `yaml:"result"`
+	Emit      EmitSpec                   `yaml:"emit"`
+}
+type BatchAgentResultSpec struct {
+	ItemsFrom      string     `yaml:"items_from"`
+	ItemsPath      paths.Path `yaml:"-"`
+	CorrelationKey string     `yaml:"correlation_key"`
+	RequiredFields []string   `yaml:"required_fields"`
 }
 type GroupBySpec struct {
 	ItemsFrom string     `yaml:"items_from"`
@@ -1222,6 +1238,7 @@ type SystemNodeEventHandler struct {
 	Compute              *ComputeSpec              `yaml:"compute"`
 	Query                *QuerySpec                `yaml:"query"`
 	FanOut               *FanOutSpec               `yaml:"fan_out"`
+	BatchAgent           *BatchAgentSpec           `yaml:"batch_agent"`
 	GroupBy              *GroupBySpec              `yaml:"group_by"`
 	Filter               *FilterSpec               `yaml:"filter"`
 	Reduce               *ReduceSpec               `yaml:"reduce"`

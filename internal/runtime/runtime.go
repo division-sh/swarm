@@ -513,6 +513,9 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}
 	}
 	rt.LLM = modelRuntime
+	if rt.Pipeline != nil {
+		rt.Pipeline.SetBatchAgentRunner(newLLMBatchAgentRunner(rt.LLM, source, rt.PromptResolver))
+	}
 	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, modelRuntime); err != nil {
 		return nil, fmt.Errorf("native tool validation failed: %w", err)
 	} else {

@@ -104,6 +104,25 @@ type PayloadShaper interface {
 	ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error)
 }
 
+type BatchAgentRunner interface {
+	InvokeBatchAgent(ctx context.Context, req BatchAgentRequest) (BatchAgentResponse, error)
+}
+
+type BatchAgentRequest struct {
+	FlowID          string
+	NodeID          string
+	Agent           string
+	Items           []any
+	Input           map[string]any
+	ResultItemsFrom string
+	CorrelationKey  string
+	RequiredFields  []string
+}
+
+type BatchAgentResponse struct {
+	Output any
+}
+
 type TargetDescriptorLoader func(context.Context) ([]runtimepinrouting.Descriptor, error)
 
 type TransitionValidator interface {
@@ -123,6 +142,7 @@ type RuntimeDependencies struct {
 	GuardRunner         GuardRunner
 	ActionRegistry      ActionRegistry
 	ActionRunner        ActionRunner
+	BatchAgentRunner    BatchAgentRunner
 	PayloadShaper       PayloadShaper
 	TargetDescriptors   TargetDescriptorLoader
 	TransitionValidator TransitionValidator

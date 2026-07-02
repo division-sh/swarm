@@ -34,11 +34,12 @@ var (
 )
 
 type ValueContext struct {
-	Entity  map[string]any
-	Event   map[string]any
-	Payload map[string]any
-	Policy  map[string]any
-	FanOut  map[string]any
+	Entity     map[string]any
+	Event      map[string]any
+	Payload    map[string]any
+	Policy     map[string]any
+	FanOut     map[string]any
+	BatchAgent map[string]any
 }
 
 type ValueExpressionOptions struct {
@@ -90,11 +91,12 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 		return nil, err
 	}
 	activation := map[string]any{
-		"entity":  NormalizeCELInputMap(ctx.Entity),
-		"event":   NormalizeCELInputMap(ctx.Event),
-		"payload": NormalizeCELInputMap(ctx.Payload),
-		"policy":  NormalizeCELInputMap(ctx.Policy),
-		"fan_out": NormalizeCELInputMap(ctx.FanOut),
+		"entity":      NormalizeCELInputMap(ctx.Entity),
+		"event":       NormalizeCELInputMap(ctx.Event),
+		"payload":     NormalizeCELInputMap(ctx.Payload),
+		"policy":      NormalizeCELInputMap(ctx.Policy),
+		"fan_out":     NormalizeCELInputMap(ctx.FanOut),
+		"batch_agent": NormalizeCELInputMap(ctx.BatchAgent),
 	}
 	if opts.AllowBareItem {
 		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
@@ -352,6 +354,7 @@ func newDataExpressionEnv(allowBareItem bool) (*cel.Env, error) {
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
+		cel.Variable("batch_agent", cel.DynType),
 	}
 	if allowBareItem {
 		variables = append(variables, cel.Variable("item", cel.DynType))

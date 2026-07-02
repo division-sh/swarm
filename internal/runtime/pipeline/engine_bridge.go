@@ -40,6 +40,7 @@ type handlerExecutionOutcome struct {
 	Emits            []string
 	RuleID           string
 	FanOutCount      int
+	BatchAgentCount  int
 	Computed         map[string]any
 	InterceptedEmits []runtimeengine.EmitIntent
 }
@@ -379,6 +380,7 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		DataAccumulation: result.StateMutation.DataAccumulation,
 		RuleID:           strings.TrimSpace(result.RuleID),
 		FanOutCount:      result.FanOutCount,
+		BatchAgentCount:  result.BatchAgentCount,
 		Computed:         cloneStringAnyMap(result.Computed),
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
 	}

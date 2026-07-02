@@ -132,6 +132,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Compute:              handler.Compute,
 				Query:                handler.Query,
 				FanOut:               handler.FanOut,
+				BatchAgent:           handler.BatchAgent,
 				GroupBy:              handler.GroupBy,
 				Filter:               handler.Filter,
 				Reduce:               handler.Reduce,

@@ -38,6 +38,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		"data_accumulation": {},
 		"compute":           {},
 		"fan_out":           {},
+		"batch_agent":       {},
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)

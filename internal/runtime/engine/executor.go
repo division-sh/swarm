@@ -37,6 +37,7 @@ const (
 	StepCount      Step = "count"
 	StepCompute    Step = "compute"
 	StepFanOut     Step = "fan_out"
+	StepBatchAgent Step = "batch_agent"
 	StepOnComplete Step = "on_complete"
 	StepRules      Step = "rules"
 	StepAdvancesTo Step = "advances_to"
@@ -60,6 +61,7 @@ var OrderedSteps = []Step{
 	StepCount,
 	StepCompute,
 	StepFanOut,
+	StepBatchAgent,
 	StepOnComplete,
 	StepRules,
 	StepAdvancesTo,
@@ -176,6 +178,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 		return fmt.Errorf("%w: handler declares both select_entity and select_or_create_entity", ErrInvalidConfig)
 	}
 	if err := validateHandlerComputeSpecs(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	if err := validateHandlerBatchAgentSpecs(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	if err := validateHandlerEntityWriteTargets(e.deps.Source, req.FlowID.String(), req.Handler); err != nil {
@@ -577,6 +582,7 @@ func (e *Executor) newExecutionFrame(tx Tx, req ExecutionRequest) executionFrame
 			Computed:    map[string]any{},
 			Accumulated: map[string]any{},
 			FanOut:      map[string]any{},
+			BatchAgent:  map[string]any{},
 			Transformed: map[string]any{},
 		},
 		result: ExecutionResult{
@@ -624,6 +630,8 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepCompute(frame)
 	case StepFanOut:
 		return e.stepFanOut(frame)
+	case StepBatchAgent:
+		return e.stepBatchAgent(frame)
 	case StepOnComplete:
 		return false, e.stepOnComplete(frame)
 	case StepRules:
@@ -1108,6 +1116,11 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 				return err
 			}
 		}
+		if rule.BatchAgent != nil {
+			if _, err := e.stepBatchAgent(frame); err != nil {
+				return err
+			}
+		}
 		if rule.Compute != nil {
 			return e.stepCompute(frame)
 		}
@@ -1129,6 +1142,11 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 		e.applyRule(frame, rule)
 		if rule.FanOut != nil {
 			if _, err := e.stepFanOut(frame); err != nil {
+				return err
+			}
+		}
+		if rule.BatchAgent != nil {
+			if _, err := e.stepBatchAgent(frame); err != nil {
 				return err
 			}
 		}
@@ -1768,6 +1786,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx = WithEvent(ctx, frame.req.Event.ContextMap(frame.state.State.CurrentState))
 	ctx = WithAccumulated(ctx, frame.state.Accumulated)
 	ctx = WithFanOutItem(ctx, frame.state.FanOut)
+	ctx = WithBatchAgent(ctx, frame.state.BatchAgent)
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
@@ -1792,6 +1811,8 @@ func (e *Executor) writeStepValue(frame *executionFrame, target string, value an
 	case paths.RootFanOut:
 		frame.state.SetFanOut(strings.Join(parsed.Segments, "."), value)
 		return nil
+	case paths.RootBatchAgent:
+		return fmt.Errorf("target %s: unsupported target scope", target)
 	}
 	if frame.state.State.StateCarrier.Metadata == nil {
 		frame.state.State.StateCarrier.Metadata = map[string]any{}
@@ -1844,6 +1865,8 @@ func (e *Executor) clearStepValue(frame *executionFrame, target string) error {
 		delete(frame.state.Accumulated, strings.Join(parsed.Segments, "."))
 	case paths.RootFanOut:
 		delete(frame.state.FanOut, strings.Join(parsed.Segments, "."))
+	case paths.RootBatchAgent:
+		return fmt.Errorf("clear target %s: unsupported target scope", target)
 	case paths.RootEntity, paths.RootMetadata:
 		if parsed.Root == paths.RootEntity {
 			if _, resolved, _, err := resolveHandlerEntityWriteTarget(e.deps.Source, frame.req.FlowID.String(), target); err != nil {
@@ -1985,7 +2008,7 @@ func (e *Executor) applyDataAccumulation(frame *executionFrame, spec runtimecont
 			continue
 		}
 		switch parsed := paths.Parse(target); parsed.Root {
-		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
+		case paths.RootComputed, paths.RootAccumulated, paths.RootFanOut, paths.RootBatchAgent, paths.RootGates, paths.RootEvent, paths.RootPayload, paths.RootPolicy:
 			return fmt.Errorf("data_accumulation target %s: unsupported target scope", target)
 		}
 		if write.Value.HasLiteralValue() {
@@ -2032,6 +2055,13 @@ func (e *Executor) selectedFanOut(frame *executionFrame) *runtimecontracts.FanOu
 		return frame.rule.FanOut
 	}
 	return frame.req.Handler.FanOut
+}
+
+func (e *Executor) selectedBatchAgent(frame *executionFrame) *runtimecontracts.BatchAgentSpec {
+	if frame.rule != nil && frame.rule.BatchAgent != nil {
+		return frame.rule.BatchAgent
+	}
+	return frame.req.Handler.BatchAgent
 }
 
 func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) runtimecontracts.EmitSpec {

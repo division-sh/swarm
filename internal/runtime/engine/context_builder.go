@@ -14,6 +14,7 @@ type ContextOverlay struct {
 	Payload     map[string]any
 	Accumulated map[string]any
 	FanOut      map[string]any
+	BatchAgent  map[string]any
 }
 
 type ContextBuilderInput struct {
@@ -57,6 +58,11 @@ func WithAccumulated(base BaseContext, accumulated map[string]any) BaseContext {
 
 func WithFanOutItem(base BaseContext, fanOut map[string]any) BaseContext {
 	base.FanOut = values.Wrap(cloneStringAnyMap(fanOut))
+	return base
+}
+
+func WithBatchAgent(base BaseContext, batchAgent map[string]any) BaseContext {
+	base.BatchAgent = values.Wrap(cloneStringAnyMap(batchAgent))
 	return base
 }
 

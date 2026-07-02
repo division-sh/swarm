@@ -29,6 +29,7 @@ type handlerExecutionPlan struct {
 	Accumulate       *runtimecontracts.AccumulateSpec
 	Compute          *runtimecontracts.ComputeSpec
 	FanOut           *runtimecontracts.FanOutSpec
+	BatchAgent       *runtimecontracts.BatchAgentSpec
 	AdvancesTo       string
 	SetsGate         string
 	ClearGates       bool
@@ -78,6 +79,7 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		Accumulate:       handler.Accumulate,
 		Compute:          handler.Compute,
 		FanOut:           handler.FanOut,
+		BatchAgent:       handler.BatchAgent,
 		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 		SetsGate:         gateSpecString(handler.SetsGate),
 		ClearGates:       len(handler.ClearGates) > 0,
@@ -107,6 +109,9 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	}
 	if plan.FanOut != nil {
 		steps = append(steps, "fan_out")
+	}
+	if plan.BatchAgent != nil {
+		steps = append(steps, "batch_agent")
 	}
 	if len(plan.OnComplete) > 0 {
 		steps = append(steps, "on_complete")
@@ -151,11 +156,17 @@ func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
 	if plan.FanOut != nil && plan.FanOut.Emit.HasFields() {
 		return true
 	}
+	if plan.BatchAgent != nil && plan.BatchAgent.Emit.HasFields() {
+		return true
+	}
 	for _, rule := range plan.Rules {
 		if rule.Emit.HasFields() {
 			return true
 		}
 		if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
+			return true
+		}
+		if rule.BatchAgent != nil && rule.BatchAgent.Emit.HasFields() {
 			return true
 		}
 	}
@@ -164,6 +175,9 @@ func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
 			return true
 		}
 		if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
+			return true
+		}
+		if rule.BatchAgent != nil && rule.BatchAgent.Emit.HasFields() {
 			return true
 		}
 	}
@@ -175,12 +189,18 @@ func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
 			if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
 				return true
 			}
+			if rule.BatchAgent != nil && rule.BatchAgent.Emit.HasFields() {
+				return true
+			}
 		}
 		if plan.Accumulate.OnTimeout != nil {
 			if plan.Accumulate.OnTimeout.Emit.HasFields() {
 				return true
 			}
 			if plan.Accumulate.OnTimeout.FanOut != nil && plan.Accumulate.OnTimeout.FanOut.Emit.HasFields() {
+				return true
+			}
+			if plan.Accumulate.OnTimeout.BatchAgent != nil && plan.Accumulate.OnTimeout.BatchAgent.Emit.HasFields() {
 				return true
 			}
 		}

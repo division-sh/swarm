@@ -28,6 +28,7 @@ type workflowExpressionContext struct {
 	Policy                       map[string]any
 	Accumulated                  any
 	FanOut                       map[string]any
+	BatchAgent                   map[string]any
 	QueryEntityCount             func(string) (int, error)
 	AllowUnresolvedQueryOperands bool
 }
@@ -46,6 +47,7 @@ func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 		cel.Variable("policy", cel.DynType),
 		cel.Variable("accumulated", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
+		cel.Variable("batch_agent", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -89,6 +91,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		"policy":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Policy)),
 		"accumulated": normalizedCtx.Accumulated,
 		"fan_out":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.FanOut)),
+		"batch_agent": workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.BatchAgent)),
 	})
 	if err != nil {
 		return false, err
@@ -156,6 +159,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			Policy:                       cloneStringAnyMap(ctx.Policy),
 			Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 			FanOut:                       cloneStringAnyMap(ctx.FanOut),
+			BatchAgent:                   cloneStringAnyMap(ctx.BatchAgent),
 			QueryEntityCount:             ctx.QueryEntityCount,
 			AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 		}, nil
@@ -188,6 +192,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		Policy:                       cloneStringAnyMap(ctx.Policy),
 		Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 		FanOut:                       cloneStringAnyMap(ctx.FanOut),
+		BatchAgent:                   cloneStringAnyMap(ctx.BatchAgent),
 		QueryEntityCount:             ctx.QueryEntityCount,
 		AllowUnresolvedQueryOperands: ctx.AllowUnresolvedQueryOperands,
 	}
@@ -296,7 +301,7 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 	}
 	if root, scoped := workflowExpressionQueryOperandScope(raw); scoped {
 		switch root {
-		case "entity", "event", "payload", "policy", "fan_out":
+		case "entity", "event", "payload", "policy", "fan_out", "batch_agent":
 			if ctx.AllowUnresolvedQueryOperands {
 				return raw, nil
 			}
@@ -339,6 +344,8 @@ func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionCont
 		return workflowExpressionLookupPath(ctx.Policy, strings.TrimPrefix(ref, "policy."))
 	case strings.HasPrefix(ref, "fan_out."):
 		return workflowExpressionLookupPath(ctx.FanOut, strings.TrimPrefix(ref, "fan_out."))
+	case strings.HasPrefix(ref, "batch_agent."):
+		return workflowExpressionLookupPath(ctx.BatchAgent, strings.TrimPrefix(ref, "batch_agent."))
 	default:
 		return nil, false
 	}

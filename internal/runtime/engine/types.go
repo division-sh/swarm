@@ -238,6 +238,7 @@ type ExecutionState struct {
 	Computed    map[string]any
 	Accumulated map[string]any
 	FanOut      map[string]any
+	BatchAgent  map[string]any
 	Transformed map[string]any
 }
 
@@ -251,6 +252,10 @@ func (s ExecutionState) AccumulatedBucket() values.Bucket {
 
 func (s ExecutionState) FanOutBucket() values.Bucket {
 	return values.Wrap(s.FanOut)
+}
+
+func (s ExecutionState) BatchAgentBucket() values.Bucket {
+	return values.Wrap(s.BatchAgent)
 }
 
 func (s *ExecutionState) SetComputed(key string, value any) {
@@ -272,6 +277,13 @@ func (s *ExecutionState) SetFanOut(key string, value any) {
 		s.FanOut = map[string]any{}
 	}
 	values.Wrap(s.FanOut).Set(key, value)
+}
+
+func (s *ExecutionState) SetBatchAgent(key string, value any) {
+	if s.BatchAgent == nil {
+		s.BatchAgent = map[string]any{}
+	}
+	values.Wrap(s.BatchAgent).Set(key, value)
 }
 
 type EmitIntent struct {
@@ -377,6 +389,7 @@ type ExecutionResult struct {
 	SetsGate                         string
 	RuleID                           string
 	FanOutCount                      int
+	BatchAgentCount                  int
 	Computed                         map[string]any
 	StateMutation                    StateMutation
 	TimerIntents                     []TimerIntent

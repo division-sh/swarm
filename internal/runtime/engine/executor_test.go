@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -160,6 +161,11 @@ type stubGuardRegistry struct {
 	entries map[identity.GuardKey]runtimeregistry.GuardInstruction
 }
 type stubPayloadShaper struct{}
+type stubBatchAgentRunner struct {
+	output   any
+	err      error
+	requests []BatchAgentRequest
+}
 type recordingPayloadShaper struct {
 	lastReq     ExecutionRequest
 	lastPayload map[string]any
@@ -201,6 +207,13 @@ func (stubTimerApplier) ApplyTimerIntents(context.Context, identity.EntityID, []
 	return nil
 }
 func (stubDispatcher) DispatchPostCommit(context.Context, []EmitIntent) error { return nil }
+func (r *stubBatchAgentRunner) InvokeBatchAgent(_ context.Context, req BatchAgentRequest) (BatchAgentResponse, error) {
+	r.requests = append(r.requests, req)
+	if r.err != nil {
+		return BatchAgentResponse{}, r.err
+	}
+	return BatchAgentResponse{Output: r.output}, nil
+}
 func (s stubEvaluator) EvalBool(expression string, _ BaseContext) (bool, error) {
 	if err := s.errs[expression]; err != nil {
 		return false, err
@@ -575,8 +588,8 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 20 {
-		t.Fatalf("step count = %d, want 20", len(steps))
+	if len(steps) != 21 {
+		t.Fatalf("step count = %d, want 21", len(steps))
 	}
 	if steps[0] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
@@ -584,8 +597,11 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 	if steps[5] != StepGroupBy {
 		t.Fatalf("expected group_by at index 5, got order %v", steps)
 	}
-	if steps[15] != StepProjection {
-		t.Fatalf("expected projection after data_writes at index 15, got order %v", steps)
+	if steps[10] != StepBatchAgent {
+		t.Fatalf("expected batch_agent after fan_out at index 10, got order %v", steps)
+	}
+	if steps[16] != StepProjection {
+		t.Fatalf("expected projection after data_writes at index 16, got order %v", steps)
 	}
 }
 
@@ -3264,6 +3280,217 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	if !result.EmitIntents[1].Event.CreatedAt().After(result.EmitIntents[0].Event.CreatedAt()) {
 		t.Fatalf("emit CreatedAt ordering = [%s, %s]", result.EmitIntents[0].Event.CreatedAt(), result.EmitIntents[1].Event.CreatedAt())
 	}
+}
+
+func TestExecutor_BatchAgentValidatesOutOfOrderRowsAndEmitsInInputOrder(t *testing.T) {
+	runner := &stubBatchAgentRunner{output: map[string]any{
+		"results": []any{
+			map[string]any{"account_id": "b", "bucket": "review", "score": 0.7},
+			map[string]any{"account_id": "a", "bucket": "accept", "score": 0.9},
+		},
+	}}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:           stubSource(),
+		StateRepo:        stubStateRepo{},
+		TxRunner:         stubRunner{},
+		Locker:           stubLocker{},
+		Outbox:           stubOutbox{},
+		Dispatcher:       stubDispatcher{},
+		BatchAgentRunner: runner,
+		MaxChainDepth:    5,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "coordinator-1",
+		NodeID:     "coordinator",
+		FlowID:     "classifier",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "classify.ready", "", "", json.RawMessage(`{"items":[{"account_id":"a","profile":"A"},{"account_id":"b","profile":"B"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			BatchAgent: batchAgentTestSpec(),
+			AdvancesTo: "classified",
+		},
+		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.Status != OutcomeFannedOut {
+		t.Fatalf("Status = %q", result.Status)
+	}
+	if result.BatchAgentCount != 2 || len(result.EmitIntents) != 2 {
+		t.Fatalf("batch_agent results wrong: count=%d intents=%d", result.BatchAgentCount, len(result.EmitIntents))
+	}
+	if len(runner.requests) != 1 || len(runner.requests[0].Items) != 2 {
+		t.Fatalf("runner requests = %#v", runner.requests)
+	}
+	firstPayload := decodeTestPayload(t, result.EmitIntents[0].Event.Payload())
+	secondPayload := decodeTestPayload(t, result.EmitIntents[1].Event.Payload())
+	if firstPayload["account_id"] != "a" || firstPayload["bucket"] != "accept" || firstPayload["source_profile"] != "A" {
+		t.Fatalf("first payload = %#v", firstPayload)
+	}
+	if secondPayload["account_id"] != "b" || secondPayload["bucket"] != "review" || secondPayload["source_profile"] != "B" {
+		t.Fatalf("second payload = %#v", secondPayload)
+	}
+	if result.NextState != "classified" {
+		t.Fatalf("NextState = %q", result.NextState)
+	}
+}
+
+func TestExecutor_BatchAgentValidationFailuresFailClosedBeforeEmit(t *testing.T) {
+	tests := []struct {
+		name        string
+		output      any
+		wantMessage string
+	}{
+		{
+			name: "missing_result_row",
+			output: map[string]any{"results": []any{
+				map[string]any{"account_id": "a", "bucket": "accept", "score": 0.9},
+			}},
+			wantMessage: `missing row for correlation key "b"`,
+		},
+		{
+			name: "duplicate_result_row",
+			output: map[string]any{"results": []any{
+				map[string]any{"account_id": "a", "bucket": "accept", "score": 0.9},
+				map[string]any{"account_id": "a", "bucket": "review", "score": 0.5},
+			}},
+			wantMessage: `duplicate correlation key "a"`,
+		},
+		{
+			name: "unknown_result_row",
+			output: map[string]any{"results": []any{
+				map[string]any{"account_id": "a", "bucket": "accept", "score": 0.9},
+				map[string]any{"account_id": "x", "bucket": "review", "score": 0.5},
+				map[string]any{"account_id": "b", "bucket": "reject", "score": 0.1},
+			}},
+			wantMessage: `unknown correlation key "x"`,
+		},
+		{
+			name: "malformed_result_row",
+			output: map[string]any{"results": []any{
+				"not-an-object",
+				map[string]any{"account_id": "b", "bucket": "reject", "score": 0.1},
+			}},
+			wantMessage: `row 0 is malformed`,
+		},
+		{
+			name: "partial_result_row",
+			output: map[string]any{"results": []any{
+				map[string]any{"account_id": "a", "bucket": "accept", "score": 0.9},
+				map[string]any{"account_id": "b", "bucket": "reject"},
+			}},
+			wantMessage: `missing required field "score"`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := &stubBatchAgentRunner{output: tc.output}
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:           stubSource(),
+				StateRepo:        stubStateRepo{},
+				TxRunner:         stubRunner{},
+				Locker:           stubLocker{},
+				Outbox:           stubOutbox{},
+				Dispatcher:       stubDispatcher{},
+				BatchAgentRunner: runner,
+				MaxChainDepth:    5,
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID:   "coordinator-1",
+				NodeID:     "coordinator",
+				FlowID:     "classifier",
+				ChainDepth: 1,
+				Event:      eventtest.RootIngress("evt-1", "classify.ready", "", "", json.RawMessage(`{"items":[{"account_id":"a","profile":"A"},{"account_id":"b","profile":"B"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Handler: runtimecontracts.SystemNodeEventHandler{
+					BatchAgent: batchAgentTestSpec(),
+				},
+				State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+			})
+			if err == nil {
+				t.Fatal("expected batch_agent validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantMessage)
+			}
+			if len(result.EmitIntents) != 0 || len(result.DeadLetterIntents) != 0 {
+				t.Fatalf("expected no emits on validation failure, got emits=%d dead_letters=%d", len(result.EmitIntents), len(result.DeadLetterIntents))
+			}
+		})
+	}
+}
+
+func TestExecutor_BatchAgentNamespaceRejectsAuthoredStoreAs(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		MaxChainDepth: 5,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "coordinator-1",
+		NodeID:     "coordinator",
+		FlowID:     "classifier",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "classify.ready", "", "", json.RawMessage(`{"items":[{"account_id":"a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Count: &runtimecontracts.CountSpec{
+				ItemsFrom: "payload.items",
+				StoreAs:   "batch_agent.count",
+			},
+		},
+		State: testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil {
+		t.Fatal("expected batch_agent authored store_as rejection")
+	}
+	if !strings.Contains(err.Error(), "unsupported target scope") {
+		t.Fatalf("error = %q, want unsupported target scope", err.Error())
+	}
+}
+
+func batchAgentTestSpec() *runtimecontracts.BatchAgentSpec {
+	return &runtimecontracts.BatchAgentSpec{
+		Agent:     "classifier",
+		ItemsFrom: "payload.items",
+		ItemsPath: paths.Parse("payload.items"),
+		Result: runtimecontracts.BatchAgentResultSpec{
+			ItemsFrom:      "results",
+			ItemsPath:      paths.Parse("results"),
+			CorrelationKey: "account_id",
+			RequiredFields: []string{"account_id", "bucket", "score"},
+		},
+		Emit: runtimecontracts.EmitSpec{
+			Event: "account.classified",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"account_id":     runtimecontracts.RefExpression("batch_agent.result.account_id"),
+				"bucket":         runtimecontracts.RefExpression("batch_agent.result.bucket"),
+				"score":          runtimecontracts.RefExpression("batch_agent.result.score"),
+				"source_profile": runtimecontracts.RefExpression("batch_agent.source_item.profile"),
+			},
+		},
+	}
+}
+
+func decodeTestPayload(t *testing.T, raw json.RawMessage) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	return payload
 }
 
 func TestExecutor_GuardKillTransitionsToKilledStateWhenDeclared(t *testing.T) {

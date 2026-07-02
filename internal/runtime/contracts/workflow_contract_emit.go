@@ -27,6 +27,11 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 			out = append(out, eventType)
 		}
 	}
+	if handler.BatchAgent != nil {
+		if eventType := handler.BatchAgent.Emit.EventType(); eventType != "" {
+			out = append(out, eventType)
+		}
+	}
 	return uniqueOrderedStrings(out)
 }
 
@@ -45,6 +50,11 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 			out = append(out, eventType)
 		}
 	}
+	if rule.BatchAgent != nil {
+		if eventType := rule.BatchAgent.Emit.EventType(); eventType != "" {
+			out = append(out, eventType)
+		}
+	}
 	return uniqueOrderedStrings(out)
 }
 
@@ -59,7 +69,7 @@ func actionResultEvents(action ActionSpec) []string {
 }
 
 func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
-	if handler.FanOut != nil {
+	if handler.FanOut != nil || handler.BatchAgent != nil {
 		return true
 	}
 	if len(handler.Rules) > 0 {

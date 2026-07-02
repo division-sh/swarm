@@ -223,6 +223,125 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (s *BatchAgentSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if err := validateBatchAgentFieldNodes(node); err != nil {
+		return err
+	}
+	var aux struct {
+		Agent     string                     `yaml:"agent"`
+		ItemsFrom string                     `yaml:"items_from"`
+		Input     map[string]ExpressionValue `yaml:"input"`
+		Result    BatchAgentResultSpec       `yaml:"result"`
+		Emit      EmitSpec                   `yaml:"emit"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = BatchAgentSpec{
+		Agent:     strings.TrimSpace(aux.Agent),
+		ItemsFrom: strings.TrimSpace(aux.ItemsFrom),
+		ItemsPath: paths.Parse(aux.ItemsFrom),
+		Input:     cloneExpressionValueMap(aux.Input),
+		Result:    aux.Result.normalized(),
+		Emit:      aux.Emit,
+	}
+	if s.Agent == "" {
+		return fmt.Errorf("batch_agent.agent is required")
+	}
+	if s.ItemsFrom == "" {
+		return fmt.Errorf("batch_agent.items_from is required")
+	}
+	if s.Result.ItemsFrom == "" {
+		return fmt.Errorf("batch_agent.result.items_from is required")
+	}
+	if s.Result.CorrelationKey == "" {
+		return fmt.Errorf("batch_agent.result.correlation_key is required")
+	}
+	if s.Emit.EventType() == "" {
+		return fmt.Errorf("batch_agent.emit.event is required")
+	}
+	return nil
+}
+
+func validateBatchAgentFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"agent":      {},
+		"items_from": {},
+		"input":      {},
+		"result":     {},
+		"emit":       {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: batch_agent field %q not in platform spec", key)
+		}
+	}
+	return nil
+}
+
+func (s *BatchAgentResultSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if err := validateBatchAgentResultFieldNodes(node); err != nil {
+		return err
+	}
+	var aux struct {
+		ItemsFrom      string   `yaml:"items_from"`
+		CorrelationKey string   `yaml:"correlation_key"`
+		RequiredFields []string `yaml:"required_fields"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = BatchAgentResultSpec{
+		ItemsFrom:      strings.TrimSpace(aux.ItemsFrom),
+		ItemsPath:      paths.Parse(aux.ItemsFrom),
+		CorrelationKey: strings.TrimSpace(aux.CorrelationKey),
+		RequiredFields: normalizeStrings(append(aux.RequiredFields, aux.CorrelationKey)),
+	}
+	return nil
+}
+
+func validateBatchAgentResultFieldNodes(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	allowed := map[string]struct{}{
+		"items_from":      {},
+		"correlation_key": {},
+		"required_fields": {},
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: batch_agent.result field %q not in platform spec", key)
+		}
+	}
+	return nil
+}
+
+func (s BatchAgentResultSpec) normalized() BatchAgentResultSpec {
+	s.ItemsFrom = strings.TrimSpace(s.ItemsFrom)
+	s.ItemsPath = paths.Parse(s.ItemsFrom)
+	s.CorrelationKey = strings.TrimSpace(s.CorrelationKey)
+	s.RequiredFields = normalizeStrings(append(s.RequiredFields, s.CorrelationKey))
+	return s
+}
+
 func validateFanOutFieldNodes(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil

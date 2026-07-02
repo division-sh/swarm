@@ -538,11 +538,17 @@ func emitSitesReferenceEntity(handler SystemNodeEventHandler) bool {
 	if handler.FanOut != nil && emitReferencesEntity(handler.FanOut.Emit) {
 		return true
 	}
+	if handler.BatchAgent != nil && emitReferencesEntity(handler.BatchAgent.Emit) {
+		return true
+	}
 	for _, rule := range handler.Rules {
 		if emitReferencesEntity(rule.Emit) {
 			return true
 		}
 		if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+			return true
+		}
+		if rule.BatchAgent != nil && emitReferencesEntity(rule.BatchAgent.Emit) {
 			return true
 		}
 	}
@@ -551,6 +557,9 @@ func emitSitesReferenceEntity(handler SystemNodeEventHandler) bool {
 			return true
 		}
 		if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+			return true
+		}
+		if rule.BatchAgent != nil && emitReferencesEntity(rule.BatchAgent.Emit) {
 			return true
 		}
 	}
@@ -562,6 +571,9 @@ func emitSitesReferenceEntity(handler SystemNodeEventHandler) bool {
 			if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
 				return true
 			}
+			if rule.BatchAgent != nil && emitReferencesEntity(rule.BatchAgent.Emit) {
+				return true
+			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			rule := handler.Accumulate.OnTimeout
@@ -569,6 +581,9 @@ func emitSitesReferenceEntity(handler SystemNodeEventHandler) bool {
 				return true
 			}
 			if rule.FanOut != nil && emitReferencesEntity(rule.FanOut.Emit) {
+				return true
+			}
+			if rule.BatchAgent != nil && emitReferencesEntity(rule.BatchAgent.Emit) {
 				return true
 			}
 		}

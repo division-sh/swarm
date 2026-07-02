@@ -578,6 +578,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Compute              *ComputeSpec             `yaml:"compute"`
 		Query                yaml.Node                `yaml:"query"`
 		FanOut               *FanOutSpec              `yaml:"fan_out"`
+		BatchAgent           *BatchAgentSpec          `yaml:"batch_agent"`
 		GroupBy              *GroupBySpec             `yaml:"group_by"`
 		Filter               *FilterSpec              `yaml:"filter"`
 		Reduce               *ReduceSpec              `yaml:"reduce"`
@@ -601,6 +602,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Accumulate:       aux.Accumulate,
 		Compute:          aux.Compute,
 		FanOut:           aux.FanOut,
+		BatchAgent:       aux.BatchAgent,
 		GroupBy:          aux.GroupBy,
 		Filter:           aux.Filter,
 		Reduce:           aux.Reduce,
@@ -913,6 +915,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"compute":                 {},
 		"query":                   {},
 		"fan_out":                 {},
+		"batch_agent":             {},
 		"group_by":                {},
 		"filter":                  {},
 		"reduce":                  {},
@@ -1014,7 +1017,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContex
 	if err := rejectRuleActionOutsideRules(rule, context); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
+	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil && rule.BatchAgent == nil {
 		return nil, nil
 	}
 	return &rule, nil
@@ -1037,7 +1040,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
+		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out", "batch_agent") {
 			rule, err := decodeHandlerRuleEntryNode(node, context)
 			if err != nil || rule == nil {
 				return nil, err

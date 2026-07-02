@@ -40,6 +40,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		Policy:      cloneStringAnyMap(ctx.Policy.Raw()),
 		Accumulated: accumulatedItemsForCEL(ctx.Accumulated.Raw()),
 		FanOut:      cloneStringAnyMap(ctx.FanOut.Raw()),
+		BatchAgent:  cloneStringAnyMap(ctx.BatchAgent.Raw()),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
@@ -505,6 +506,7 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		GuardRunner:         pipelineEngineGuardRunner{coordinator: pc},
 		ActionRegistry:      pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
 		ActionRunner:        pipelineEngineActionRunner{coordinator: pc},
+		BatchAgentRunner:    pc.batchAgentRunner,
 		PayloadShaper:       pipelineEnginePayloadShaper{coordinator: pc},
 		TargetDescriptors:   pipelineEngineTargetDescriptorLoader(pc),
 		TransitionValidator: pipelineEngineTransitionValidator{coordinator: pc},

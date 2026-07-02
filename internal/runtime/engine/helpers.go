@@ -107,6 +107,9 @@ func resolveParsedRef(base BaseContext, state ExecutionState, ref paths.Path) (a
 		if ref.Root == paths.RootFanOut {
 			return state.FanOutBucket().Lookup(ref)
 		}
+		if ref.Root == paths.RootBatchAgent {
+			return state.BatchAgentBucket().Lookup(ref)
+		}
 		if ref.Root == paths.RootComputed {
 			return state.ComputedBucket().Lookup(ref)
 		}
@@ -230,11 +233,12 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 
 func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string, opts workflowexpr.ValueExpressionOptions) (any, error) {
 	return workflowexpr.EvalValueExpressionWithOptions(expression, workflowexpr.ValueContext{
-		Entity:  base.Entity.Raw(),
-		Event:   base.Event.Raw(),
-		Payload: base.Payload.Raw(),
-		Policy:  base.Policy.Raw(),
-		FanOut:  state.FanOut,
+		Entity:     base.Entity.Raw(),
+		Event:      base.Event.Raw(),
+		Payload:    base.Payload.Raw(),
+		Policy:     base.Policy.Raw(),
+		FanOut:     state.FanOut,
+		BatchAgent: state.BatchAgent,
 	}, opts)
 }
 

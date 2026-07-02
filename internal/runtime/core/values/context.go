@@ -11,6 +11,7 @@ type Context struct {
 	Payload     Bucket
 	Accumulated Bucket
 	FanOut      Bucket
+	BatchAgent  Bucket
 	Computed    Bucket
 }
 
@@ -24,6 +25,7 @@ func NewContext() Context {
 		Payload:     Wrap(map[string]any{}),
 		Accumulated: Wrap(map[string]any{}),
 		FanOut:      Wrap(map[string]any{}),
+		BatchAgent:  Wrap(map[string]any{}),
 		Computed:    Wrap(map[string]any{}),
 	}
 }
@@ -38,6 +40,7 @@ func (c Context) Clone() Context {
 		Payload:     c.Payload.Clone(),
 		Accumulated: c.Accumulated.Clone(),
 		FanOut:      c.FanOut.Clone(),
+		BatchAgent:  c.BatchAgent.Clone(),
 		Computed:    c.Computed.Clone(),
 	}
 }
@@ -62,6 +65,11 @@ func (c Context) WithFanOut(fanOut map[string]any) Context {
 	return c
 }
 
+func (c Context) WithBatchAgent(batchAgent map[string]any) Context {
+	c.BatchAgent = Wrap(batchAgent).Clone()
+	return c
+}
+
 func (c Context) Bucket(root paths.PathRoot) Bucket {
 	switch root {
 	case paths.RootEntity:
@@ -80,6 +88,8 @@ func (c Context) Bucket(root paths.PathRoot) Bucket {
 		return c.Accumulated
 	case paths.RootFanOut:
 		return c.FanOut
+	case paths.RootBatchAgent:
+		return c.BatchAgent
 	case paths.RootComputed:
 		return c.Computed
 	default:

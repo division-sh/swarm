@@ -134,16 +134,25 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", handler.FanOut.Emit)
 	}
+	if handler.BatchAgent != nil {
+		add("handler.batch_agent.emit", handler.BatchAgent.Emit)
+	}
 	for i, rule := range handler.Rules {
 		add(payloadCompletenessRuleLabel("rules", i, rule.ID, "emit"), rule.Emit)
 		if rule.FanOut != nil {
 			add(payloadCompletenessRuleLabel("rules", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
+		}
+		if rule.BatchAgent != nil {
+			add(payloadCompletenessRuleLabel("rules", i, rule.ID, "batch_agent.emit"), rule.BatchAgent.Emit)
 		}
 	}
 	for i, rule := range handler.OnComplete {
 		add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "emit"), rule.Emit)
 		if rule.FanOut != nil {
 			add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
+		}
+		if rule.BatchAgent != nil {
+			add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "batch_agent.emit"), rule.BatchAgent.Emit)
 		}
 	}
 	if handler.Accumulate != nil {
@@ -152,11 +161,17 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 			if rule.FanOut != nil {
 				add(payloadCompletenessRuleLabel("accumulate.on_complete", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
 			}
+			if rule.BatchAgent != nil {
+				add(payloadCompletenessRuleLabel("accumulate.on_complete", i, rule.ID, "batch_agent.emit"), rule.BatchAgent.Emit)
+			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "emit"), handler.Accumulate.OnTimeout.Emit)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
 				add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "fan_out.emit"), handler.Accumulate.OnTimeout.FanOut.Emit)
+			}
+			if handler.Accumulate.OnTimeout.BatchAgent != nil {
+				add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "batch_agent.emit"), handler.Accumulate.OnTimeout.BatchAgent.Emit)
 			}
 		}
 	}

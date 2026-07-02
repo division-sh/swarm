@@ -377,6 +377,13 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 		if rule.FanOut != nil {
 			// Fan-out has no CEL-bearing fields today.
 		}
+		if rule.BatchAgent != nil {
+			for key, value := range rule.BatchAgent.Input {
+				if expr := strings.TrimSpace(value.CEL); expr != "" {
+					out = append(out, expressionReference{Kind: kindPrefix + " batch_agent input " + strings.TrimSpace(key), Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleEmitFields})
+				}
+			}
+		}
 	}
 
 	appendWriteExpressions("expression", handler.DataAccumulation.Writes)
@@ -439,16 +446,30 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 	if handler.FanOut != nil {
 		appendEmitExpressions("fan_out", handler.FanOut.Emit, true)
 	}
+	if handler.BatchAgent != nil {
+		appendEmitExpressions("batch_agent", handler.BatchAgent.Emit, false)
+		for key, value := range handler.BatchAgent.Input {
+			if expr := strings.TrimSpace(value.CEL); expr != "" {
+				out = append(out, expressionReference{Kind: "batch_agent input " + strings.TrimSpace(key), Expression: expr, Phase: runtimepipeline.WorkflowEntityFieldLifecycleEmitFields})
+			}
+		}
+	}
 	for _, rule := range handler.Rules {
 		appendEmitExpressions("rule", rule.Emit, false)
 		if rule.FanOut != nil {
 			appendEmitExpressions("rule fan_out", rule.FanOut.Emit, true)
+		}
+		if rule.BatchAgent != nil {
+			appendEmitExpressions("rule batch_agent", rule.BatchAgent.Emit, false)
 		}
 	}
 	for _, rule := range handler.OnComplete {
 		appendEmitExpressions("on_complete", rule.Emit, false)
 		if rule.FanOut != nil {
 			appendEmitExpressions("on_complete fan_out", rule.FanOut.Emit, true)
+		}
+		if rule.BatchAgent != nil {
+			appendEmitExpressions("on_complete batch_agent", rule.BatchAgent.Emit, false)
 		}
 	}
 	if handler.Accumulate != nil {
@@ -457,11 +478,17 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			if rule.FanOut != nil {
 				appendEmitExpressions("accumulate.on_complete fan_out", rule.FanOut.Emit, true)
 			}
+			if rule.BatchAgent != nil {
+				appendEmitExpressions("accumulate.on_complete batch_agent", rule.BatchAgent.Emit, false)
+			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			appendEmitExpressions("accumulate.on_timeout", handler.Accumulate.OnTimeout.Emit, false)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
 				appendEmitExpressions("accumulate.on_timeout fan_out", handler.Accumulate.OnTimeout.FanOut.Emit, true)
+			}
+			if handler.Accumulate.OnTimeout.BatchAgent != nil {
+				appendEmitExpressions("accumulate.on_timeout batch_agent", handler.Accumulate.OnTimeout.BatchAgent.Emit, false)
 			}
 		}
 	}

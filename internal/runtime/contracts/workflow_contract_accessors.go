@@ -1081,6 +1081,11 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 		clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
 		handler.FanOut = &clone
 	}
+	if handler.BatchAgent != nil {
+		clone := *handler.BatchAgent
+		clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+		handler.BatchAgent = &clone
+	}
 	if len(handler.Rules) > 0 {
 		rules := make([]HandlerRuleEntry, 0, len(handler.Rules))
 		for _, rule := range handler.Rules {
@@ -1089,6 +1094,11 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 				clone := *rule.FanOut
 				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
 				rule.FanOut = &clone
+			}
+			if rule.BatchAgent != nil {
+				clone := *rule.BatchAgent
+				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+				rule.BatchAgent = &clone
 			}
 			rules = append(rules, rule)
 		}
@@ -1102,6 +1112,11 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 				clone := *rule.FanOut
 				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
 				rule.FanOut = &clone
+			}
+			if rule.BatchAgent != nil {
+				clone := *rule.BatchAgent
+				clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
+				rule.BatchAgent = &clone
 			}
 			rules = append(rules, rule)
 		}
@@ -1118,6 +1133,11 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 					fanOut.Emit = b.externalizeEmitSpec(nodeID, fanOut.Emit)
 					rule.FanOut = &fanOut
 				}
+				if rule.BatchAgent != nil {
+					batchAgent := *rule.BatchAgent
+					batchAgent.Emit = b.externalizeEmitSpec(nodeID, batchAgent.Emit)
+					rule.BatchAgent = &batchAgent
+				}
 				rules = append(rules, rule)
 			}
 			clone.OnComplete = rules
@@ -1129,6 +1149,11 @@ func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler S
 				fanOut := *onTimeout.FanOut
 				fanOut.Emit = b.externalizeEmitSpec(nodeID, fanOut.Emit)
 				onTimeout.FanOut = &fanOut
+			}
+			if onTimeout.BatchAgent != nil {
+				batchAgent := *onTimeout.BatchAgent
+				batchAgent.Emit = b.externalizeEmitSpec(nodeID, batchAgent.Emit)
+				onTimeout.BatchAgent = &batchAgent
 			}
 			clone.OnTimeout = &onTimeout
 		}
