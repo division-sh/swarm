@@ -453,49 +453,60 @@ func containedOperationsByFlow(source semanticview.Source, bundle *runtimecontra
 	if source == nil || bundle == nil {
 		return out
 	}
-	nodes := source.NodeEntries()
-	for _, nodeID := range sortedNodeIDs(nodes) {
-		node := nodes[nodeID]
-		flowID := ""
-		sourceFile := ""
-		if sourceRef, ok := source.NodeContractSource(nodeID); ok {
-			flowID = strings.TrimSpace(sourceRef.FlowID)
-			sourceFile = authoredFileForSource(bundle, sourceRef)
+	for _, project := range bundle.ProjectViews() {
+		for _, nodeID := range sortedNodeIDs(project.Nodes) {
+			flowID := ""
+			sourceFile := strings.TrimSpace(project.Paths.ProjectNodesFile)
+			if sourceRef, ok := source.NodeContractSource(nodeID); ok {
+				flowID = strings.TrimSpace(sourceRef.FlowID)
+				sourceFile = firstNonEmpty(authoredFileForSource(bundle, sourceRef), sourceFile)
+			}
+			appendContainedOperations(out, source, flowID, nodeID, sourceFile, project.Nodes[nodeID])
 		}
-		for _, ref := range containedOperationRefs(flowID, nodeID, node) {
-			op := ContainedOperationView{
-				FlowID:     ref.FlowID,
-				NodeID:     ref.NodeID,
-				Event:      ref.EventType,
-				Scope:      ref.Scope,
-				Operation:  strings.TrimSpace(string(ref.Write.Operation)),
-				Target:     strings.TrimSpace(ref.Write.Target()),
-				HasKey:     !ref.Write.Key.IsZero(),
-				HasIndex:   !ref.Write.Index.IsZero(),
-				SourceFile: sourceFile,
-			}
-			contract, ok := entityruntime.ResolveForFlow(source, ref.FlowID)
-			if !ok {
-				op.Error = "flow has no declared entity contract"
-				out[ref.FlowID] = append(out[ref.FlowID], op)
-				continue
-			}
-			target, err := entityruntime.ResolveContainedOperationTarget(contract, ref.Write.Target(), string(ref.Write.Operation), !ref.Write.Key.IsZero(), !ref.Write.Index.IsZero())
-			if err != nil {
-				op.Error = err.Error()
-				out[ref.FlowID] = append(out[ref.FlowID], op)
-				continue
-			}
-			op.RootField = strings.TrimSpace(target.RootField)
-			op.TargetType = strings.TrimSpace(target.TargetType)
-			op.MapKeyType = strings.TrimSpace(target.MapKeyType)
-			op.MapValueType = strings.TrimSpace(target.MapValueType)
-			op.ListItemType = strings.TrimSpace(target.ListItemType)
-			op.MapScoped = target.MapScoped
-			out[ref.FlowID] = append(out[ref.FlowID], op)
+	}
+	for _, flow := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(flow.Paths.ID)
+		sourceFile := strings.TrimSpace(flow.Paths.NodesFile)
+		for _, nodeID := range sortedNodeIDs(flow.Nodes) {
+			appendContainedOperations(out, source, flowID, nodeID, sourceFile, flow.Nodes[nodeID])
 		}
 	}
 	return out
+}
+
+func appendContainedOperations(out map[string][]ContainedOperationView, source semanticview.Source, flowID, nodeID, sourceFile string, node runtimecontracts.SystemNodeContract) {
+	for _, ref := range containedOperationRefs(flowID, nodeID, node) {
+		op := ContainedOperationView{
+			FlowID:     ref.FlowID,
+			NodeID:     ref.NodeID,
+			Event:      ref.EventType,
+			Scope:      ref.Scope,
+			Operation:  strings.TrimSpace(string(ref.Write.Operation)),
+			Target:     strings.TrimSpace(ref.Write.Target()),
+			HasKey:     !ref.Write.Key.IsZero(),
+			HasIndex:   !ref.Write.Index.IsZero(),
+			SourceFile: strings.TrimSpace(sourceFile),
+		}
+		contract, ok := entityruntime.ResolveForFlow(source, ref.FlowID)
+		if !ok {
+			op.Error = "flow has no declared entity contract"
+			out[ref.FlowID] = append(out[ref.FlowID], op)
+			continue
+		}
+		target, err := entityruntime.ResolveContainedOperationTarget(contract, ref.Write.Target(), string(ref.Write.Operation), !ref.Write.Key.IsZero(), !ref.Write.Index.IsZero())
+		if err != nil {
+			op.Error = err.Error()
+			out[ref.FlowID] = append(out[ref.FlowID], op)
+			continue
+		}
+		op.RootField = strings.TrimSpace(target.RootField)
+		op.TargetType = strings.TrimSpace(target.TargetType)
+		op.MapKeyType = strings.TrimSpace(target.MapKeyType)
+		op.MapValueType = strings.TrimSpace(target.MapValueType)
+		op.ListItemType = strings.TrimSpace(target.ListItemType)
+		op.MapScoped = target.MapScoped
+		out[ref.FlowID] = append(out[ref.FlowID], op)
+	}
 }
 
 func containedOperationRefs(flowID, nodeID string, node runtimecontracts.SystemNodeContract) []containedOperationRef {
