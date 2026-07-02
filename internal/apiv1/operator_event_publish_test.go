@@ -931,7 +931,7 @@ func TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonical
 	}
 }
 
-func TestOperatorEventPublishRootEventTemplateInputNameCollisionDoesNotRequireTarget(t *testing.T) {
+func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDDoesNotSelectTarget(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
@@ -964,18 +964,26 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionDoesNotRequireTa
 	requireAPIV1RuntimeBusEvent(t, ch, "follow-up root/template collision delivery")
 
 	var gotEventName, gotEntityID, gotFlowInstance, gotTargetRoute string
+	var gotPayload json.RawMessage
 	if err := db.QueryRow(`
-		SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}')
+		SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}'), payload
 		FROM events
 		WHERE event_id = $1::uuid
-	`, eventID).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &gotTargetRoute); err != nil {
+	`, eventID).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &gotTargetRoute, &gotPayload); err != nil {
 		t.Fatalf("load root/template collision event row: %v", err)
 	}
-	if gotEventName != "review.requested" || gotEntityID != entityID || gotFlowInstance != flowInstance {
-		t.Fatalf("event row = name:%q entity:%q flow:%q, want review.requested/%s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
+	if gotEventName != "review.requested" || gotEntityID != "" || gotFlowInstance != "" {
+		t.Fatalf("event row = name:%q entity:%q flow:%q, want unscoped review.requested despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
 	}
 	if gotTargetRoute != "{}" {
 		t.Fatalf("event target_route = %s, want empty non-target route", gotTargetRoute)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(gotPayload, &decoded); err != nil {
+		t.Fatalf("decode root/template collision payload: %v", err)
+	}
+	if decoded["entity_id"] != entityID || decoded["topic"] != "root-follow-up" {
+		t.Fatalf("event payload = %#v, want payload entity_id preserved as business data only", decoded)
 	}
 }
 

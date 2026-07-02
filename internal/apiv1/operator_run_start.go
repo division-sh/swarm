@@ -12,7 +12,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/store"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
-	"github.com/google/uuid"
 )
 
 const runStartIDempotencyTTL = 24 * time.Hour
@@ -135,25 +134,6 @@ func (p bundleIdentityParam) mismatchDetails(bootFingerprint string) map[string]
 		"boot_fingerprint":     strings.TrimSpace(bootFingerprint),
 		"provided_fingerprint": p.LegacyFingerprint,
 	}
-}
-
-func runStartPayloadEntityID(value any) (string, bool, error) {
-	if value == nil {
-		return "", false, nil
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", false, NewInvalidParamsError(map[string]any{"field": "payload.entity_id", "reason": "must be a UUID string"})
-	}
-	entityID := strings.TrimSpace(text)
-	if entityID == "" {
-		return "", false, nil
-	}
-	parsed, err := uuid.Parse(entityID)
-	if err != nil {
-		return "", false, NewInvalidParamsError(map[string]any{"field": "payload.entity_id", "reason": "must be a UUID string"})
-	}
-	return parsed.String(), true, nil
 }
 
 func runStartIdempotencyError(err error) error {
