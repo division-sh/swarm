@@ -80,6 +80,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newDoctorCommand(ctx, repo),
 		newVerifyCommand(ctx, repo),
 		newSecretsCommand(ctx, repo),
+		newContextCommand(ctx, opts),
 		newWorkspaceCommand(ctx),
 		newVersionCommand(opts),
 		newCompletionCommand(),

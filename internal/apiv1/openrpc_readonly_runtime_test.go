@@ -267,6 +267,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"run.get",
 		"run.list",
 		"run.trace",
+		"runtime.identity",
 		"runtime.incidents",
 		"runtime.logs",
 	}
@@ -302,6 +303,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"run.get":                        {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
 		"run.list":                       {Params: map[string]any{}, ResultKeys: []string{"runs"}},
 		"run.trace":                      {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
+		"runtime.identity":               {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports"}},
 		"runtime.incidents":              {Params: map[string]any{}, ResultKeys: []string{"incidents"}},
 		"runtime.logs":                   {Params: map[string]any{}, ResultKeys: []string{"logs"}},
 	}
@@ -514,6 +516,12 @@ func readOnlyRuntimeProbeOptions(t *testing.T) OperatorReadOptions {
 		Now:      func() time.Time { return now },
 		Ready:    func() bool { return true },
 		Database: fakePinger{},
+		RuntimeIdentity: RuntimeIdentityResult{
+			RuntimeInstanceID:   "runtime-1",
+			StartedAt:           now.Format(time.RFC3339Nano),
+			APIVersion:          "v1",
+			SupportedTransports: []string{"tcp"},
+		},
 		Runs: &fakeRunReadStore{
 			headers: map[string]store.RunHeader{
 				runID: {

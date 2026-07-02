@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -117,9 +118,9 @@ type doctorTargetAuth struct {
 }
 
 type doctorTargetContext struct {
-	ProjectScoped  doctorTargetPendingFact `json:"project_scoped"`
-	SelectedGlobal doctorTargetPendingFact `json:"selected_global"`
-	Registry       doctorTargetPendingFact `json:"registry"`
+	ProjectScoped  doctorTargetPendingFact    `json:"project_scoped"`
+	SelectedGlobal doctorTargetPendingFact    `json:"selected_global"`
+	Registry       localContextRegistryReport `json:"registry"`
 }
 
 type doctorTargetPendingFact struct {
@@ -145,7 +146,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
-	report, err := buildDoctorTargetReport(repo, opts, cfg, swarmDir)
+	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
@@ -156,7 +157,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 	return nil
 }
 
-func buildDoctorTargetReport(repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution) (doctorTargetReport, error) {
+func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution) (doctorTargetReport, error) {
 	api, err := resolveDoctorTargetAPI(opts, cfg)
 	if err != nil {
 		return doctorTargetReport{}, err
@@ -166,6 +167,10 @@ func buildDoctorTargetReport(repo string, opts doctorOptions, cfg cliAPIConfigFi
 		return doctorTargetReport{}, err
 	}
 	data, err := resolveDoctorTargetData(repo, opts)
+	if err != nil {
+		return doctorTargetReport{}, err
+	}
+	registryReport, err := newLocalContextRegistry(swarmDir.Path).Inspect(ctx, cliRuntimeIdentityCaller{})
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
@@ -179,30 +184,37 @@ func buildDoctorTargetReport(repo string, opts doctorOptions, cfg cliAPIConfigFi
 		Context: doctorTargetContext{
 			ProjectScoped: doctorTargetPendingFact{
 				Status: "pending",
-				Owner:  "#1613/#1614",
-				Detail: "project-scoped context registry and consumption are split; this diagnostic does not trust descriptor files yet",
+				Owner:  "#1614",
+				Detail: "project-scoped serve registration and API command consumption remain split",
 			},
 			SelectedGlobal: doctorTargetPendingFact{
-				Status: "pending",
-				Owner:  "#1613/#1614",
-				Detail: "selected/default global context lookup is specified here but implemented by the registry and command-consumption children",
+				Status: registryReport.Status,
+				Owner:  localContextRegistryOwner,
+				Detail: registryReport.Detail,
 			},
-			Registry: doctorTargetPendingFact{
-				Status: "pending",
-				Owner:  "#1613",
-				Detail: "descriptor writes, current/list/prune, atomicity, and liveness-backed identity remain split",
-			},
+			Registry: registryReport,
 		},
-		RuntimeIdentity: doctorTargetPendingFact{
-			Status: "pending",
-			Owner:  "#1613",
-			Detail: "health/PID/port are not trusted as runtime instance identity in this slice",
-		},
-		Store:          store,
-		Data:           data,
-		CommandClasses: doctorTargetCommandClasses(),
-		SplitSiblings:  doctorTargetSplitSiblings(),
+		RuntimeIdentity: doctorTargetRuntimeIdentityFact(registryReport),
+		Store:           store,
+		Data:            data,
+		CommandClasses:  doctorTargetCommandClasses(),
+		SplitSiblings:   doctorTargetSplitSiblings(),
 	}, nil
+}
+
+func doctorTargetRuntimeIdentityFact(report localContextRegistryReport) doctorTargetPendingFact {
+	if report.Current == nil {
+		return doctorTargetPendingFact{
+			Status: "unavailable",
+			Owner:  "platform-spec.yaml#api_specification.method_catalog.runtime.identity",
+			Detail: "no current context descriptor is selected; explicit API flags still use existing API auth precedence",
+		}
+	}
+	return doctorTargetPendingFact{
+		Status: report.Current.Status,
+		Owner:  "platform-spec.yaml#api_specification.method_catalog.runtime.identity",
+		Detail: report.Current.Detail,
+	}
 }
 
 func rootSwarmDirFlag(cmd *cobra.Command) (string, bool) {
@@ -276,7 +288,7 @@ func doctorTargetAPIReason(source string) string {
 	case "config api_server":
 		return "existing bootstrap config API source wins after flags and environment"
 	default:
-		return "context registry consumption is pending #1613/#1614, so this first-slice diagnostic falls through to the built-in loopback default"
+		return "API-backed command context consumption is split to #1614, so this diagnostic falls through to the built-in loopback default when no explicit API source is configured"
 	}
 }
 
@@ -438,7 +450,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		{
 			Name:        "startup_and_run",
 			Status:      "split_pending_#1614_#1615",
-			Fallthrough: "serve project registration and swarm run semantics are intentionally not implemented in #1612",
+			Fallthrough: "serve project registration and swarm run semantics are intentionally split to #1614 and #1615",
 			Commands:    []string{"swarm serve --dev", "swarm run"},
 		},
 	}
@@ -446,7 +458,6 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 
 func doctorTargetSplitSiblings() []string {
 	return []string{
-		"#1613 runtime identity and descriptor registry",
 		"#1614 project-scoped serve/API command targeting",
 		"#1615 store/data migration and swarm run semantics",
 		"#1576 transport-aware descriptors and IPC/ephemeral-port direction",
@@ -484,7 +495,14 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	fmt.Fprintf(out, "target_reason: %s\n", report.API.Reason)
 	fmt.Fprintf(out, "project_context: %s (%s)\n", report.Context.ProjectScoped.Status, report.Context.ProjectScoped.Owner)
 	fmt.Fprintf(out, "selected_global_context: %s (%s)\n", report.Context.SelectedGlobal.Status, report.Context.SelectedGlobal.Owner)
-	fmt.Fprintf(out, "descriptor_registry: %s (%s)\n", report.Context.Registry.Status, report.Context.Registry.Owner)
+	fmt.Fprintf(out, "descriptor_registry: %s (%s", report.Context.Registry.Status, report.Context.Registry.Owner)
+	if len(report.Context.Registry.Entries) > 0 {
+		fmt.Fprintf(out, "; entries=%d", len(report.Context.Registry.Entries))
+	}
+	if report.Context.Registry.Detail != "" {
+		fmt.Fprintf(out, "; %s", report.Context.Registry.Detail)
+	}
+	fmt.Fprintln(out, ")")
 	fmt.Fprintf(out, "runtime_identity: %s (%s)\n", report.RuntimeIdentity.Status, report.RuntimeIdentity.Owner)
 	fmt.Fprintf(out, "store_path: %s (source: %s; status: %s)\n", report.Store.Path, report.Store.Source, report.Store.Status)
 	if report.Data.Path != "" {

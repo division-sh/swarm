@@ -56,6 +56,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/runbundle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
+	"github.com/google/uuid"
 
 	"gopkg.in/yaml.v3"
 )
@@ -736,6 +737,7 @@ func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Res
 
 func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	bootStartedAt := time.Now().UTC()
+	runtimeInstanceID := uuid.NewString()
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
 	reporter.emit(1, "process_start", "ok", "")
 	if err := loadRepoDotEnv(repo); err != nil {
@@ -1066,6 +1068,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Source:                 source,
 		MailboxApprovalRoutes:  mailboxApprovalRoutes,
 		Bundle:                 bootBundleIdentity,
+		RuntimeIdentity: apiv1.RuntimeIdentityResult{
+			RuntimeInstanceID:   runtimeInstanceID,
+			StartedAt:           bootStartedAt.Format(time.RFC3339Nano),
+			APIVersion:          "v1",
+			SupportedTransports: []string{"tcp"},
+		},
 	}
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath: resolvedPlatformSpecPath,

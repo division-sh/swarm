@@ -103,6 +103,7 @@ type OperatorReadOptions struct {
 	Source                 semanticview.Source
 	MailboxApprovalRoutes  map[string]string
 	Bundle                 runtimecontracts.BundleIdentity
+	RuntimeIdentity        RuntimeIdentityResult
 }
 
 type healthPingResult struct {
@@ -116,6 +117,13 @@ type healthCheckResult struct {
 	DBOK      bool                            `json:"db_ok"`
 	RuntimeOK bool                            `json:"runtime_ok"`
 	Bundle    runtimecontracts.BundleIdentity `json:"bundle"`
+}
+
+type RuntimeIdentityResult struct {
+	RuntimeInstanceID   string   `json:"runtime_instance_id"`
+	StartedAt           string   `json:"started_at"`
+	APIVersion          string   `json:"api_version"`
+	SupportedTransports []string `json:"supported_transports"`
 }
 
 type runGetResult struct {
@@ -165,6 +173,16 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		},
 		"health.check": func(ctx context.Context, _ Request) (any, error) {
 			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Bundle), nil
+		},
+		"runtime.identity": func(context.Context, Request) (any, error) {
+			identity := opts.RuntimeIdentity
+			if strings.TrimSpace(identity.RuntimeInstanceID) == "" {
+				return nil, fmt.Errorf("runtime identity is not configured")
+			}
+			if identity.SupportedTransports == nil {
+				identity.SupportedTransports = []string{}
+			}
+			return identity, nil
 		},
 		"run.get": func(ctx context.Context, req Request) (any, error) {
 			runs, err := requireRunReadStore(opts.Runs)
