@@ -200,6 +200,119 @@ validation-orchestrator:
 	}
 }
 
+func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: cross-flow-on-success
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: static
+  - id: validation
+    flow: validation
+    mode: static
+`)
+	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+item:
+  item_id: string
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-on-success\n")
+	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+name: scoring
+initial_state: discovered
+terminal_states: [done]
+states: [discovered, done]
+pins:
+  inputs:
+    events: []
+  outputs:
+    events:
+      - vertical.shortlisted
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
+vertical.shortlisted:
+  entity_id: string
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), `
+scoring-node:
+  id: scoring-node
+  execution_type: system_node
+  subscribes_to:
+    - score.ready
+  produces:
+    - vertical.shortlisted
+  event_handlers:
+    score.ready:
+      emit: vertical.shortlisted
+`)
+
+	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "schema.yaml"), `
+name: validation
+initial_state: researching
+terminal_states: [done]
+states: [researching, done]
+pins:
+  inputs:
+    events:
+      - vertical.shortlisted
+  outputs:
+    events:
+      - validation.rule
+      - validation.started
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
+validation.rule:
+  entity_id: string
+validation.started:
+  entity_id: string
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "nodes.yaml"), `
+validation-orchestrator:
+  id: validation-orchestrator
+  execution_type: system_node
+  produces:
+    - validation.rule
+    - validation.started
+  event_handlers:
+    vertical.shortlisted:
+      rules:
+        accepted:
+          condition: "else"
+          emit: validation.rule
+      on_success:
+        emit: validation.started
+`)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, "")
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	handler, ok := bundle.NodeEventHandler("validation-orchestrator", "scoring/vertical.shortlisted")
+	if !ok {
+		t.Fatal("expected cross-flow qualified input event to resolve to local handler")
+	}
+	if got := len(handler.Rules); got != 1 {
+		t.Fatalf("handler rules len = %d, want 1", got)
+	}
+	if got := strings.TrimSpace(handler.Rules[0].Emit.EventType()); got != "validation/validation.rule" {
+		t.Fatalf("handler rule emit = %q, want %q", got, "validation/validation.rule")
+	}
+	if got := strings.TrimSpace(handler.OnSuccess.Emit.EventType()); got != "validation/validation.started" {
+		t.Fatalf("handler on_success emit = %q, want %q", got, "validation/validation.started")
+	}
+}
+
 func repoRootForContractsTest(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()

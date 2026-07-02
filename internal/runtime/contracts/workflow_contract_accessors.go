@@ -1096,6 +1096,7 @@ func (b *WorkflowContractBundle) nodeEventScope(nodeID string) eventidentity.Sco
 
 func (b *WorkflowContractBundle) externalizeNodeHandler(nodeID string, handler SystemNodeEventHandler) SystemNodeEventHandler {
 	handler.Emit = b.externalizeEmitSpec(nodeID, handler.Emit)
+	handler.OnSuccess.Emit = b.externalizeEmitSpec(nodeID, handler.OnSuccess.Emit)
 	if handler.FanOut != nil {
 		clone := *handler.FanOut
 		clone.Emit = b.externalizeEmitSpec(nodeID, clone.Emit)
