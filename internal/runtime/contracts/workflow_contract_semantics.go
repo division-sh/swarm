@@ -536,18 +536,6 @@ func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) Workfl
 	if strings.TrimSpace(existing.CancelOn) == "" {
 		existing.CancelOn = incoming.CancelOn
 	}
-	if existing.DelaySeconds == 0 {
-		existing.DelaySeconds = incoming.DelaySeconds
-	}
-	if existing.DelayMinutes == 0 {
-		existing.DelayMinutes = incoming.DelayMinutes
-	}
-	if existing.DelayHours == 0 {
-		existing.DelayHours = incoming.DelayHours
-	}
-	if existing.DelayDays == 0 {
-		existing.DelayDays = incoming.DelayDays
-	}
 	existing.Recurring = existing.Recurring || incoming.Recurring
 	return existing
 }

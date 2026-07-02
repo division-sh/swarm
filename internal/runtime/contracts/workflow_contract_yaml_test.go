@@ -705,6 +705,58 @@ event_handlers:
 	}
 }
 
+func TestWorkflowTimerContractDecode_RejectsRetiredDurationAliases(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "seconds", field: "delay_seconds: 30"},
+		{name: "minutes", field: "delay_minutes: 5"},
+		{name: "hours", field: "delay_hours: 2"},
+		{name: "days", field: "delay_days: 1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var timer WorkflowTimerContract
+			err := yaml.Unmarshal([]byte(`
+id: reminder
+event: timer.reminder
+`+tc.field+`
+`), &timer)
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) || !strings.Contains(err.Error(), "delay") {
+				t.Fatalf("yaml.Unmarshal error = %v, want retired alias rejection for %s", err, tc.field)
+			}
+		})
+	}
+}
+
+func TestWorkflowTimerContractDecode_RejectsMixedCanonicalAndRetiredDurationAlias(t *testing.T) {
+	var timer WorkflowTimerContract
+	err := yaml.Unmarshal([]byte(`
+id: reminder
+event: timer.reminder
+delay: 30m
+delay_minutes: 30
+`), &timer)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with canonical delay") {
+		t.Fatalf("yaml.Unmarshal error = %v, want mixed canonical+retired alias rejection", err)
+	}
+}
+
+func TestWorkflowTimerContractDecode_PreservesCanonicalDelay(t *testing.T) {
+	var timer WorkflowTimerContract
+	if err := yaml.Unmarshal([]byte(`
+id: reminder
+event: timer.reminder
+delay: 7d
+`), &timer); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := strings.TrimSpace(timer.Delay); got != "7d" {
+		t.Fatalf("Delay = %q, want 7d", got)
+	}
+}
+
 func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
 	var schema FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`

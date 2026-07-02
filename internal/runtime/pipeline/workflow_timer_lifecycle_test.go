@@ -128,6 +128,62 @@ func TestWorkflowTimerFireAtSnapshotsPolicyDelayAtStart(t *testing.T) {
 	}
 }
 
+func TestWorkflowTimerFireAtSupportsCanonicalDayDelay(t *testing.T) {
+	now := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	timer := runtimecontracts.WorkflowTimerContract{
+		ID:    "sla_timeout",
+		Owner: "support-node",
+		Event: "timer.sla_timeout",
+		Delay: "7d",
+	}
+
+	fireAt, ok := workflowTimerFireAt(timer, now, nil)
+	if !ok {
+		t.Fatal("expected canonical day delay to render")
+	}
+	if want := now.Add(7 * 24 * time.Hour); !fireAt.Equal(want) {
+		t.Fatalf("fireAt = %s, want %s", fireAt, want)
+	}
+}
+
+func TestWorkflowTimerFireAtSupportsPolicyRenderedDayDelay(t *testing.T) {
+	now := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
+	timer := runtimecontracts.WorkflowTimerContract{
+		ID:    "sla_timeout",
+		Owner: "support-node",
+		Event: "timer.sla_timeout",
+		Delay: "{{sla_timeout_days}}d",
+	}
+
+	fireAt, ok := workflowTimerFireAt(timer, now, map[string]any{
+		"sla_timeout_days": 3,
+	})
+	if !ok {
+		t.Fatal("expected policy-backed day delay to render")
+	}
+	if want := now.Add(3 * 24 * time.Hour); !fireAt.Equal(want) {
+		t.Fatalf("fireAt = %s, want %s", fireAt, want)
+	}
+}
+
+func TestWorkflowTimerRecurringSpecNormalizesCanonicalDayDelay(t *testing.T) {
+	timer := runtimecontracts.WorkflowTimerContract{
+		ID:        "daily_report",
+		Owner:     "runtime",
+		Event:     "timer.daily_report",
+		Delay:     "7d",
+		Recurring: true,
+	}
+
+	got, ok := workflowTimerRecurringSpec(timer, nil)
+	if !ok {
+		t.Fatal("expected canonical day delay recurring spec")
+	}
+	if want := "@every 168h0m0s"; got != want {
+		t.Fatalf("workflowTimerRecurringSpec = %q, want %q", got, want)
+	}
+}
+
 func TestExecuteNodeHandlerPlan_EventTimerStartOnRegistersSchedule(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier5-flow-lifecycle", "test-timer-fire")

@@ -21,6 +21,9 @@ func (t *WorkflowTimerContract) UnmarshalYAML(node *yaml.Node) error {
 		t.ID = strings.TrimSpace(node.Value)
 		return nil
 	case yaml.MappingNode:
+		if err := rejectWorkflowTimerRetiredDurationAliases(node); err != nil {
+			return err
+		}
 		type alias WorkflowTimerContract
 		var aux alias
 		if err := node.Decode(&aux); err != nil {
@@ -31,6 +34,33 @@ func (t *WorkflowTimerContract) UnmarshalYAML(node *yaml.Node) error {
 	default:
 		return fmt.Errorf("unsupported workflow timer yaml node kind %d", node.Kind)
 	}
+}
+
+func rejectWorkflowTimerRetiredDurationAliases(node *yaml.Node) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	hasDelay := false
+	retired := []string{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		switch key {
+		case "delay":
+			hasDelay = true
+		case "delay_seconds", "delay_minutes", "delay_hours", "delay_days":
+			retired = append(retired, key)
+		}
+	}
+	if len(retired) == 0 {
+		return nil
+	}
+	if hasDelay {
+		return fmt.Errorf("RETIRED timer duration fields %s cannot be combined with canonical delay; use delay only", strings.Join(retired, ", "))
+	}
+	if len(retired) == 1 {
+		return fmt.Errorf("RETIRED timer duration field %s is not accepted; use delay", retired[0])
+	}
+	return fmt.Errorf("RETIRED timer duration fields %s are not accepted; use delay", strings.Join(retired, ", "))
 }
 
 func (e *EventEmission) UnmarshalYAML(node *yaml.Node) error {

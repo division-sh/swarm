@@ -311,17 +311,12 @@ func workflowTimerFireAt(timer runtimecontracts.WorkflowTimerContract, now time.
 }
 
 func workflowTimerDuration(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) time.Duration {
-	var interval time.Duration
 	if delay := workflowTimerRenderedDelay(timer.Delay, policy); delay != "" {
-		if parsed, err := time.ParseDuration(delay); err == nil && parsed > 0 {
-			interval += parsed
+		if parsed, ok := timeridentity.ParseDelayDuration(delay); ok {
+			return parsed
 		}
 	}
-	interval += time.Duration(timer.DelaySeconds) * time.Second
-	interval += time.Duration(timer.DelayMinutes) * time.Minute
-	interval += time.Duration(timer.DelayHours) * time.Hour
-	interval += time.Duration(timer.DelayDays) * 24 * time.Hour
-	return interval
+	return 0
 }
 
 func workflowTimerRenderedDelay(delay string, policy map[string]any) string {
@@ -383,17 +378,12 @@ func workflowTimerCancelTrigger(timer runtimecontracts.WorkflowTimerContract) (t
 }
 
 func workflowTimerRecurringSpec(timer runtimecontracts.WorkflowTimerContract, policy map[string]any) (string, bool) {
-	if delay := workflowTimerRenderedDelay(timer.Delay, policy); delay != "" && !strings.Contains(delay, "{") {
-		return "@every " + delay, true
+	if delay := workflowTimerRenderedDelay(timer.Delay, policy); delay != "" {
+		if interval, ok := timeridentity.ParseDelayDuration(delay); ok {
+			return "@every " + interval.String(), true
+		}
 	}
-	interval := time.Duration(timer.DelaySeconds) * time.Second
-	interval += time.Duration(timer.DelayMinutes) * time.Minute
-	interval += time.Duration(timer.DelayHours) * time.Hour
-	interval += time.Duration(timer.DelayDays) * 24 * time.Hour
-	if interval <= 0 {
-		return "", false
-	}
-	return "@every " + interval.String(), true
+	return "", false
 }
 
 func (pc *PipelineCoordinator) registerWorkflowTimerSchedule(ctx context.Context, sc Schedule) {

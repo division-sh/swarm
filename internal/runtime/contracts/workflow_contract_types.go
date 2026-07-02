@@ -1053,10 +1053,6 @@ type WorkflowTimerContract struct {
 	Delay        string `yaml:"delay"`
 	StartOn      string `yaml:"start_on"`
 	CancelOn     string `yaml:"cancel_on"`
-	DelaySeconds int    `yaml:"delay_seconds"`
-	DelayMinutes int    `yaml:"delay_minutes"`
-	DelayHours   int    `yaml:"delay_hours"`
-	DelayDays    int    `yaml:"delay_days"`
 	Recurring    bool   `yaml:"recurring"`
 }
 type EventEmission struct {

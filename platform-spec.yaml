@@ -69,12 +69,16 @@ vocabulary:
     - event
     - owner
     optional_fields:
+    - delay
+    - cancellation
+    - recurring
+    retired_fields:
     - delay_seconds
     - delay_minutes
     - delay_hours
     - delay_days
-    - cancellation
-    - recurring
+    retirement_rule: Numeric duration aliases are retired public YAML. Timer declarations must use canonical delay
+      and retired aliases fail closed.
   agent_role:
     description: 'An entity that owns transitions, handles events, and executes logic. Three execution types with different
       semantics.
@@ -4128,7 +4132,8 @@ engine:
       fields:
         id: Unique timer name
         event: Event name to fire when timer expires (e.g., timer.scan_timeout)
-        delay: Duration string (e.g., 72h, 30m, 7d) or policy reference (e.g., policy.sla_timeout)
+        delay: Canonical duration string or policy-rendered duration. Accepts Go duration strings (e.g., 72h,
+          30m) plus a positive integer day unit (e.g., 7d).
         recurring: Boolean — if true, timer re-fires at the interval until cancelled
         start_on: Trigger that starts the timer. Canonical forms are state:<name>, event:<name>, or boot.
         cancel_on: Trigger that cancels the timer. Canonical forms are state:<name> or event:<name>. boot is invalid.

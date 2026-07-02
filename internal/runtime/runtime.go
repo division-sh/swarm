@@ -1443,17 +1443,12 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 }
 
 func bootWorkflowTimerDuration(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) time.Duration {
-	var interval time.Duration
 	if delay := bootWorkflowTimerRenderedDelay(source, timer, timer.Delay); delay != "" && !strings.Contains(delay, "{") {
-		if parsed, err := time.ParseDuration(delay); err == nil && parsed > 0 {
-			interval += parsed
+		if parsed, ok := timeridentity.ParseDelayDuration(delay); ok {
+			return parsed
 		}
 	}
-	interval += time.Duration(timer.DelaySeconds) * time.Second
-	interval += time.Duration(timer.DelayMinutes) * time.Minute
-	interval += time.Duration(timer.DelayHours) * time.Hour
-	interval += time.Duration(timer.DelayDays) * 24 * time.Hour
-	return interval
+	return 0
 }
 
 func bootWorkflowTimerRenderedDelay(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract, delay string) string {
