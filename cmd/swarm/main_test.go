@@ -3972,7 +3972,7 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing
 func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "portfolio/opco.bootstrap_requested",
+		"event_name":      "opco.bootstrap_requested",
 		"bundle_hash":     bundleHash,
 		"payload":         map[string]any{"owner": "operator"},
 		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
@@ -3986,7 +3986,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	start := time.Now()
 	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "portfolio/opco.spinup_requested",
+		"event_name":      "opco.spinup_requested",
 		"run_id":          runID,
 		"source_event_id": bootstrap.EventID,
 		"payload": map[string]any{
@@ -4026,8 +4026,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "delivered", 1)
 	waitServedEventPublishReceiptOutcomeCount(t, db, backend, spinup.EventID, "node", "portfolio-node", "no_op", 1)
-	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "portfolio/opco.spinup_requested", "portfolio-node")
-	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "portfolio/opco.spinup_requested", "portfolio-node")
+	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", "portfolio-node")
+	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", "portfolio-node")
 
 	autoEventName := "operating/" + instanceID + "/opco.product_initialization_requested"
 	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
@@ -4064,10 +4064,6 @@ func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 name: served-event-publish-followup
 version: "1.0.0"
 platform_version: ">=1.6.0"
-flows:
-  - id: validation
-    flow: validation
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 initial_state: new
@@ -4077,22 +4073,7 @@ pins:
   inputs:
     events: [thing.created]
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "schema.yaml"), `
-name: validation
-mode: static
-initial_state: new
-terminal_states: [done]
-states: [new, waiting, done]
-pins:
-  inputs:
-    events: [thing.created]
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "entities.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 widget:
   amount:
     type: integer
@@ -4100,7 +4081,7 @@ widget:
   who: text
   note: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 thing.created:
   swarm:
     source: external
@@ -4130,7 +4111,7 @@ thing.unhandled:
   required:
     - entity_id
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "nodes.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 entity-writer:
   id: entity-writer
   execution_type: system_node
@@ -4153,9 +4134,9 @@ entity-writer:
             target_field: note
       advances_to: done
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	return root
 }
 
@@ -4167,22 +4148,12 @@ name: served-event-publish-target-route
 version: "1.0.0"
 platform_version: ">=1.6.0"
 flows:
-  - id: portfolio
-    flow: portfolio
-    mode: static
   - id: operating
     flow: operating
     mode: template
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: served-event-publish-target-route`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "schema.yaml"), `
-name: portfolio
-mode: static
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: served-event-publish-target-route
 initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
@@ -4190,11 +4161,11 @@ pins:
   inputs:
     events: [opco.bootstrap_requested]
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "entities.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 portfolio:
   owner: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "events.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 opco.bootstrap_requested:
   swarm:
     source: external
@@ -4211,7 +4182,7 @@ opco.spinup_requested:
     - instance_id
     - product_id
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "nodes.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 portfolio-bootstrap:
   id: portfolio-bootstrap
   execution_type: system_node
@@ -4237,9 +4208,9 @@ portfolio-node:
         product_id: payload.product_id
       advances_to: done
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
 mode: template
@@ -4301,7 +4272,7 @@ lifecycle-orchestrator:
 func writeServedEventPublishActiveLoadFixture(t *testing.T) string {
 	t.Helper()
 	root := writeServedEventPublishFollowUpFixture(t)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "agents.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 load-agent:
   id: load-agent
   role: load_agent
@@ -4311,7 +4282,7 @@ load-agent:
   subscriptions:
     - thing.agent_hold
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "validation", "prompts", "load-agent.md"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
 Handle the active-load event and wait for test release.
 `)
 	return root
@@ -4325,22 +4296,12 @@ name: served-dynamic-auto-emit
 version: "1.0.0"
 platform_version: ">=1.6.0"
 flows:
-  - id: portfolio
-    flow: portfolio
-    mode: static
   - id: operating
     flow: operating
     mode: template
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: served-dynamic-auto-emit`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "schema.yaml"), `
-name: portfolio
-mode: static
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: served-dynamic-auto-emit
 initial_state: new
 terminal_states: [done]
 states: [new, waiting, done]
@@ -4348,11 +4309,11 @@ pins:
   inputs:
     events: [opco.bootstrap_requested]
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "entities.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 portfolio:
   owner: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "events.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 opco.bootstrap_requested:
   swarm:
     source: external
@@ -4370,7 +4331,7 @@ opco.spinup_requested:
     - instance_id
     - product_id
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "nodes.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 portfolio-bootstrap:
   id: portfolio-bootstrap
   execution_type: system_node
@@ -4396,9 +4357,9 @@ portfolio-node:
         product_id: payload.product_id
       advances_to: done
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
 name: operating
 mode: template
@@ -4695,7 +4656,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
 	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "validation/thing.reviewed",
+		"event", "publish", "thing.reviewed",
 		"--run-id", runID,
 		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"note":"approved"}`, entityID),
 		"--idempotency-key", "issue-1255-" + backend + "-follow-up",
@@ -4721,19 +4682,19 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
-	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "validation/thing.reviewed", "entity-writer")
-	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "validation/thing.reviewed", "entity-writer")
+	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "thing.reviewed", "entity-writer")
+	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "thing.reviewed", "entity-writer")
 
 	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
 		"trace", runID,
-		"--event-name", "validation/thing.reviewed",
+		"--event-name", "thing.reviewed",
 		"--entity-id", entityID,
 		"--limit", "10",
 	})
 	if traceCode != 0 {
 		t.Fatalf("trace readback code=%d stderr=%s stdout=%s", traceCode, traceStderr, traceStdout)
 	}
-	for _, want := range []string{"validation/thing.reviewed", followUpEventID, "delivered", "node/entity-writer"} {
+	for _, want := range []string{"thing.reviewed", followUpEventID, "delivered", "node/entity-writer"} {
 		if !strings.Contains(traceStdout, want) {
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
@@ -4760,7 +4721,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "validation/thing.unhandled",
+		"event_name":      "thing.unhandled",
 		"run_id":          runID,
 		"payload":         map[string]any{"entity_id": entityID, "note": "lost"},
 		"idempotency_key": unhandledIdempotencyKey,
@@ -4783,7 +4744,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
 	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "portfolio/opco.bootstrap_requested",
+		"event", "publish", "opco.bootstrap_requested",
 		"--bundle-hash", bundleHash,
 		"--payload-json", `{"owner":"operator"}`,
 		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
@@ -4801,7 +4762,7 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "portfolio/opco.spinup_requested",
+		"event", "publish", "opco.spinup_requested",
 		"--run-id", runID,
 		"--source-event-id", bootstrapEventID,
 		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"instance_id":%q,"product_id":"product-1"}`, parentEntityID, instanceID),
@@ -4886,7 +4847,7 @@ func runServedEventPublishActiveLoadProof(
 
 	holdStart := time.Now()
 	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "validation/thing.agent_hold",
+		"event_name":      "thing.agent_hold",
 		"run_id":          runID,
 		"source_event_id": initialEventID,
 		"payload":         map[string]any{"entity_id": entityID, "note": "hold active agent delivery"},
@@ -4923,7 +4884,7 @@ func runServedEventPublishActiveLoadProof(
 	unhandledKey := "issue-1434-" + backend + "-unhandled-active"
 	unhandledStart := time.Now()
 	unhandledEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "validation/thing.unhandled",
+		"event_name":      "thing.unhandled",
 		"run_id":          runID,
 		"source_event_id": hold.EventID,
 		"payload":         map[string]any{"entity_id": entityID, "note": "unhandled under active load"},
@@ -4951,7 +4912,7 @@ func runServedEventPublishActiveLoadProof(
 
 	followStart := time.Now()
 	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "validation/thing.reviewed",
+		"event_name":      "thing.reviewed",
 		"run_id":          runID,
 		"source_event_id": hold.EventID,
 		"payload":         map[string]any{"entity_id": entityID, "note": "approved under active load"},
@@ -4979,14 +4940,14 @@ func runServedEventPublishActiveLoadProof(
 	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
 		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
-	requireServedEventReadback(t, endpoint, followUp.EventID, runID, entityID, "validation/thing.reviewed", "entity-writer")
+	requireServedEventReadback(t, endpoint, followUp.EventID, runID, entityID, "thing.reviewed", "entity-writer")
 
 	releaseOnce.Do(func() { close(release) })
 	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, followUp.EventID, probe)
 	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
 	requireServedRunStatus(t, endpoint, runID, "completed")
-	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "validation/thing.reviewed", "entity-writer")
+	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "thing.reviewed", "entity-writer")
 }
 
 func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, string, int) {
