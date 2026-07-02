@@ -2,6 +2,8 @@ score.received:
   swarm:
     source: external
   entity_id: string
+  required:
+    - entity_id
   score: float
 scores.collected:
   entity_id: string

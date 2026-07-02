@@ -1,5 +1,7 @@
 export.requested:
   entity_id: string
+  required:
+    - entity_id
 item.exported:
   entity_id: string
   id: string

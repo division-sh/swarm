@@ -1,5 +1,7 @@
 retry.requested:
   entity_id: string
+  required:
+    - entity_id
 retry.dispatched:
   entity_id: string
 limit.reached:

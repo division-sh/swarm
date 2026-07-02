@@ -1,5 +1,7 @@
 attempt.requested:
   entity_id: string
+  required:
+    - entity_id
 attempt.processed:
   entity_id: string
 attempt.limit_hit:

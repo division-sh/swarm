@@ -1,5 +1,7 @@
 scores.ready:
   entity_id: string
+  required:
+    - entity_id
   scores: array
 scores.computed:
   entity_id: string

@@ -818,7 +818,7 @@ func retiredStaticMultiEntityInputHasNoOwner(source semanticview.Source, flowID,
 	if source == nil {
 		return true
 	}
-	if retiredStaticMultiEntityEventDeclaresEntityID(source, flowID, eventType) {
+	if retiredStaticMultiEntityEventRequiresEntityID(source, flowID, eventType) {
 		return false
 	}
 	if pinRoutingEventExternalSource(source, flowID, eventType) {
@@ -827,31 +827,23 @@ func retiredStaticMultiEntityInputHasNoOwner(source semanticview.Source, flowID,
 	return !pinRoutingAllKnownProducersTargeted(source, flowID, eventType)
 }
 
-func retiredStaticMultiEntityEventDeclaresEntityID(source semanticview.Source, flowID, eventType string) bool {
+func retiredStaticMultiEntityEventRequiresEntityID(source semanticview.Source, flowID, eventType string) bool {
 	if source == nil {
 		return false
 	}
-	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType); ok && eventEntryDeclaresPayloadField(entry, "entity_id") {
+	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType); ok && eventEntryRequiresPayloadField(entry, "entity_id") {
 		return true
 	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	return eventEntryDeclaresPayloadField(proof.Entry, "entity_id")
+	return eventEntryRequiresPayloadField(proof.Entry, "entity_id")
 }
 
-func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
+func eventEntryRequiresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
 	field = strings.TrimSpace(field)
 	if field == "" {
 		return false
 	}
-	if _, ok := entry.Payload.Properties[field]; ok {
-		return true
-	}
 	for _, required := range entry.Required {
-		if strings.TrimSpace(required) == field {
-			return true
-		}
-	}
-	for _, required := range entry.Payload.Required {
 		if strings.TrimSpace(required) == field {
 			return true
 		}

@@ -1,5 +1,7 @@
 score.final:
   entity_id: string
+  required:
+    - entity_id
   main_score: number
   secondary_score: number
 result.promoted:

@@ -98,6 +98,7 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 		name            string
 		handlerBody     string
 		declareEntityID bool
+		requireEntityID bool
 		checkID         string
 		wantMessage     string
 	}{
@@ -118,18 +119,29 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 				"          display_name: payload.display_name\n",
 		},
 		{
-			name: "declared entity_id root materializer is allowed",
+			name: "optional entity_id root materializer fails closed",
 			handlerBody: "      data_accumulation:\n" +
 				"        writes:\n" +
 				"          - source_field: display_name\n" +
 				"            target_field: display_name\n",
 			declareEntityID: true,
+			checkID:         "flow_boundary_create_entity_validation",
+			wantMessage:     "static multi-row entity ownership is retired",
+		},
+		{
+			name: "required entity_id root materializer is allowed",
+			handlerBody: "      data_accumulation:\n" +
+				"        writes:\n" +
+				"          - source_field: display_name\n" +
+				"            target_field: display_name\n",
+			declareEntityID: true,
+			requireEntityID: true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			source := loadRootDefaultStaticMultiEntityRetirementSource(t, tc.handlerBody, tc.declareEntityID)
+			source := loadRootDefaultStaticMultiEntityRetirementSource(t, tc.handlerBody, tc.declareEntityID, tc.requireEntityID)
 			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 			if tc.checkID != "" {
 				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) ||
@@ -215,7 +227,7 @@ treasury-node:
 	return semanticview.Wrap(bundle)
 }
 
-func loadRootDefaultStaticMultiEntityRetirementSource(t *testing.T, handlerBody string, declareEntityID bool) semanticview.Source {
+func loadRootDefaultStaticMultiEntityRetirementSource(t *testing.T, handlerBody string, declareEntityID bool, requireEntityID bool) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "package.yaml"), `
@@ -241,13 +253,20 @@ pins:
 	if declareEntityID {
 		entityIDField = "  entity_id: string\n"
 	}
+	entityIDRequired := ""
+	if requireEntityID {
+		entityIDField = "  entity_id: string\n"
+		entityIDRequired = "  required:\n    - entity_id\n"
+	}
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "events.yaml"), `
 subject.created:
   swarm:
     source: external
 `+entityIDField+`  display_name: string
+`+entityIDRequired+`
 subject.observed:
 `+entityIDField+`  display_name: string
+`+entityIDRequired+`
 `)
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "entities.yaml"), `
 subject:
