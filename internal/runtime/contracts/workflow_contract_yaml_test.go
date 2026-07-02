@@ -1650,6 +1650,40 @@ rules:
 `,
 			contains: "cannot be combined with on_success.emit",
 		},
+		{
+			name: "rule_literal_field_value",
+			raw: `
+emit:
+  event: account.bucketed
+  fields:
+    account_id: entity.id
+rules:
+  low:
+    condition: else
+    emit:
+      fields:
+        bucket:
+          literal: low
+`,
+			contains: "rules[0].emit.fields.bucket to be a CEL expression string",
+		},
+		{
+			name: "handler_template_literal_field_value",
+			raw: `
+emit:
+  event: account.bucketed
+  fields:
+    account_id:
+      literal: acct-1
+rules:
+  low:
+    condition: else
+    emit:
+      fields:
+        bucket: '"low"'
+`,
+			contains: "handler.emit.fields.account_id to be a CEL expression string",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
