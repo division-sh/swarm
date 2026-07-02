@@ -248,6 +248,13 @@ func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
 			Package:  strings.TrimSpace(bundle.Paths.ProjectPackageFile),
 		},
 	}
+	declared := ""
+	if bundle.RootSchema != nil {
+		declared = strings.TrimSpace(bundle.RootSchema.Entity)
+	}
+	if declared == "" && len(bundle.RootEntities) == 0 {
+		return out
+	}
 	primary, err := bundle.ResolveRootPrimaryEntity()
 	if err != nil {
 		out.PrimaryEntityError = err.Error()
