@@ -22,7 +22,7 @@ verifier:
     batch.scored:
       guard:
         id: confirm_scored_state
-        check: "entity.current_state == \"scored\""
+        check: "_entity.current_state == \"scored\""
         on_fail: reject
       advances_to: verified
       emit:

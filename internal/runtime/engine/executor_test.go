@@ -374,6 +374,7 @@ func TestExecutionScopeResolveOperand_AllowsEventRoot(t *testing.T) {
 		map[string]any{"entity_id": "event-entity"},
 		nil,
 		nil,
+		nil,
 	)
 
 	got, err := scope.resolveOperand("event.entity_id", executionOperandDefaultNone)
@@ -397,6 +398,7 @@ func TestCompiledExecutionCondition_AllowsEventRoot(t *testing.T) {
 		map[string]any{"entity_id": "event-entity"},
 		nil,
 		nil,
+		nil,
 	)
 
 	ok, err := compiled.Eval(scope)
@@ -405,6 +407,25 @@ func TestCompiledExecutionCondition_AllowsEventRoot(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("compiled condition evaluated false, want true")
+	}
+}
+
+func TestExecutionScopeResolveOperand_AllowsPlatformEntityRoot(t *testing.T) {
+	scope := newExecutionScope(
+		nil,
+		nil,
+		nil,
+		map[string]any{"id": "business-id"},
+		map[string]any{"id": "platform-id"},
+		nil,
+	)
+
+	got, err := scope.resolveOperand("_entity.id", executionOperandDefaultNone)
+	if err != nil {
+		t.Fatalf("resolveOperand(_entity.id) error: %v", err)
+	}
+	if got != "platform-id" {
+		t.Fatalf("resolveOperand(_entity.id) = %#v, want platform-id", got)
 	}
 }
 
@@ -3942,7 +3963,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		Outbox:     stubOutbox{},
 		Dispatcher: stubDispatcher{},
 	}, stubEvaluator{bools: map[string]bool{
-		"entity.gates.review == false": true,
+		"_entity.gates.review == false": true,
 	}})
 	if err != nil {
 		t.Fatalf("NewExecutor error: %v", err)
@@ -3955,7 +3976,7 @@ func TestExecutor_ClearGatesRunsBeforeGuardEvaluation(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			ClearGates: []string{"review"},
 			Guard: &runtimecontracts.GuardSpec{
-				Check: "entity.gates.review == false",
+				Check: "_entity.gates.review == false",
 			},
 		},
 		State: StateSnapshot{StateCarrier: NewStateCarrier(nil, map[string]bool{"review": true}, nil)},

@@ -888,7 +888,7 @@ func selectOrCreateArtifactRepoCommitHandler() runtimecontracts.SystemNodeEventH
 			ID: "artifact_repo_commit",
 			ArtifactRepo: &runtimecontracts.ArtifactRepoSpec{
 				Provider:     "local_git",
-				RepoID:       runtimecontracts.RefExpression("entity.entity_id"),
+				RepoID:       runtimecontracts.RefExpression("_entity.id"),
 				Namespace:    runtimecontracts.RefExpression("payload.namespace"),
 				PartitionKey: runtimecontracts.RefExpression("payload.partition_key"),
 				DisplaySlug:  runtimecontracts.RefExpression("payload.display_slug"),

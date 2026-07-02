@@ -9,7 +9,7 @@ lifecycle:
     phase.activate:
       guard:
         id: must_be_setup
-        check: "entity.current_state == 'setup'"
+        check: "_entity.current_state == 'setup'"
       advances_to: active
     phase.start:
       advances_to: running
@@ -20,7 +20,7 @@ lifecycle:
     phase.close:
       guard:
         id: must_be_winding
-        check: "entity.current_state == 'winding_down'"
+        check: "_entity.current_state == 'winding_down'"
       advances_to: closed
       emit:
         event: lifecycle.complete

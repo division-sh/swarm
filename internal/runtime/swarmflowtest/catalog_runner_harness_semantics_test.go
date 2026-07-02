@@ -223,7 +223,7 @@ func TestCatalogGuardPasses_ComparisonAndReferenceSemantics(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := catalogGuardPasses(tc.spec, payload, entity, policy); got != tc.want {
+			if got := catalogGuardPasses(tc.spec, payload, entity, policy, ""); got != tc.want {
 				t.Fatalf("catalogGuardPasses() = %v, want %v", got, tc.want)
 			}
 		})

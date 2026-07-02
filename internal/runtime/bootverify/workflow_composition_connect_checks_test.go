@@ -789,7 +789,7 @@ connect:
     map:
       entity_id:
         source: payload.entity_id
-        target: entity.entity_id
+        target: _entity.id
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: root-auto-emit-key-carries
@@ -822,7 +822,7 @@ pins:
         address:
           by: entity_id
           source: payload.entity_id
-          target: entity.entity_id
+          target: _entity.id
           cardinality: one
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")

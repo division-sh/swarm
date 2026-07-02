@@ -142,7 +142,7 @@ func resolveFlowInstanceConfigValue(entry runtimecontracts.ConfigBinding, handle
 	}
 	if entry.RefPath.HasExplicitRoot() {
 		switch entry.RefPath.Root {
-		case paths.RootPayload, paths.RootEntity, paths.RootEvent:
+		case paths.RootPayload, paths.RootEntity, paths.RootPlatformEntity, paths.RootEvent:
 			value, ok := lookupFlowInstanceConfigPath(handlerContext, entry.RefPath)
 			if !ok {
 				return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "resolved empty"}
@@ -166,7 +166,7 @@ func resolveFlowInstanceConfigValue(entry runtimecontracts.ConfigBinding, handle
 		}
 		return ref, nil
 	}
-	return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "requires supported root payload, entity, or event"}
+	return nil, flowInstanceConfigRefError{Key: key, Ref: ref, Reason: "requires supported root payload, entity, _entity, or event"}
 }
 
 func lookupFlowInstanceConfigPath(handlerContext values.Context, path paths.Path) (any, bool) {

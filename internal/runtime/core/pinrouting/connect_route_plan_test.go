@@ -522,7 +522,7 @@ func TestMaterializeConnectRoutePlanFanoutForTemplateDescriptors(t *testing.T) {
 				Address: &runtimecontracts.FlowInputPinAddress{
 					By:          "team_entity",
 					Source:      "payload.team_entity",
-					Target:      "entity.entity_id",
+					Target:      "_entity.id",
 					Cardinality: "many",
 				},
 			}},

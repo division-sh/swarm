@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -21,17 +22,10 @@ type wave1ResolvedType struct {
 	Type string
 }
 
-var wave1EnvelopeTypes = map[string]wave1ResolvedType{
-	"entity_id":        {Kind: "scalar", Type: "uuid"},
-	"flow_instance":    {Kind: "scalar", Type: "text"},
-	"entity_type":      {Kind: "scalar", Type: "text"},
-	"name":             {Kind: "scalar", Type: "text"},
-	"current_state":    {Kind: "scalar", Type: "text"},
-	"revision":         {Kind: "scalar", Type: "integer"},
-	"created_at":       {Kind: "scalar", Type: "timestamp"},
-	"updated_at":       {Kind: "scalar", Type: "timestamp"},
-	"workflow_name":    {Kind: "scalar", Type: "text"},
-	"workflow_version": {Kind: "scalar", Type: "text"},
+var wave1PlatformEntityTypes = map[string]wave1ResolvedType{
+	"id":            {Kind: "scalar", Type: "uuid"},
+	"flow_instance": {Kind: "scalar", Type: "text"},
+	"current_state": {Kind: "scalar", Type: "text"},
 }
 
 func wave1EntityContractForFlow(source semanticview.Source, flowID string) wave1EntityContractView {
@@ -130,19 +124,6 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 	}
 	segments := strings.Split(ref, ".")
 	head := strings.TrimSpace(segments[0])
-	if resolved, ok := wave1EnvelopeTypes[head]; ok {
-		if len(segments) > 1 {
-			return wave1ResolvedType{}, "", fmt.Errorf("entity.%s is an envelope scalar and does not support nested path %q", head, ref)
-		}
-		return resolved, "", nil
-	}
-	if head == "gates" {
-		if len(segments) == 1 {
-			return wave1ResolvedType{Kind: "named", Type: "gates"}, "", nil
-		}
-		return wave1ResolvedType{Kind: "scalar", Type: "boolean"}, "", nil
-	}
-
 	view := wave1EntityContractForFlow(source, flowID)
 	if !view.Defined || view.Contract.Fields == nil {
 		if flowID != "" && wave1FlowReadsRootField(source, flowID, head) {
@@ -165,6 +146,9 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		}
 	}
 	if !ok {
+		if platformcontext.LegacyEntityMetadataField(head) {
+			return wave1ResolvedType{}, "", fmt.Errorf("%s", legacyEntityMetadataDiagnostic(head))
+		}
 		return wave1ResolvedType{}, "", fmt.Errorf("flow %s entity_type %s does not declare field %q", defaultFlowLabel(flowID), view.EntityType, head)
 	}
 	current := strings.TrimSpace(field.Type)
@@ -203,6 +187,46 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		return wave1ResolvedType{}, "", fmt.Errorf("entity path %q: %w", ref, err)
 	}
 	return wave1ResolvedType{Kind: kind, Type: current}, view.FlowID, nil
+}
+
+func wave1ResolvePlatformEntityPath(ref string) (wave1ResolvedType, error) {
+	ref = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ref), platformcontext.EntityRoot+"."))
+	if ref == "" {
+		return wave1ResolvedType{}, fmt.Errorf("_entity field path is required")
+	}
+	segments := strings.Split(ref, ".")
+	head := strings.TrimSpace(segments[0])
+	if head == "gates" {
+		if len(segments) == 1 {
+			return wave1ResolvedType{Kind: "named", Type: "gates"}, nil
+		}
+		if len(segments) > 2 {
+			return wave1ResolvedType{}, fmt.Errorf("_entity.gates supports one gate name segment; got %q", ref)
+		}
+		return wave1ResolvedType{Kind: "scalar", Type: "boolean"}, nil
+	}
+	if resolved, ok := wave1PlatformEntityTypes[head]; ok {
+		if len(segments) > 1 {
+			return wave1ResolvedType{}, fmt.Errorf("_entity.%s is a platform scalar and does not support nested path %q", head, ref)
+		}
+		return resolved, nil
+	}
+	if platformcontext.EntityFieldUnsupported(head) {
+		return wave1ResolvedType{}, fmt.Errorf("_entity.%s is not exposed; supported _entity fields are id, current_state, flow_instance, and gates", head)
+	}
+	return wave1ResolvedType{}, fmt.Errorf("_entity.%s is not a supported platform entity metadata field", head)
+}
+
+func legacyEntityMetadataDiagnostic(field string) string {
+	field = strings.TrimSpace(field)
+	switch field {
+	case "entity_id":
+		return "entity.entity_id is platform entity metadata; use _entity.id"
+	case "current_state", "flow_instance", "gates":
+		return fmt.Sprintf("entity.%s is platform entity metadata; use _entity.%s", field, field)
+	default:
+		return fmt.Sprintf("entity.%s is platform entity metadata and is not supported through entity.*", field)
+	}
 }
 
 func wave1ResolveNamedType(types runtimecontracts.TypeCatalogDocument, typeRef string) (string, runtimecontracts.NamedTypeDecl, error) {
@@ -270,10 +294,5 @@ func defaultFlowLabel(flowID string) string {
 }
 
 func wave1EntityEnvelopeField(field string) bool {
-	field = strings.TrimSpace(field)
-	if field == "gates" {
-		return true
-	}
-	_, ok := wave1EnvelopeTypes[field]
-	return ok
+	return platformcontext.LegacyEntityMetadataField(field)
 }

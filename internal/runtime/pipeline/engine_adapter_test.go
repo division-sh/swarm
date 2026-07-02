@@ -882,7 +882,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap("ready"))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
-	base.Entity = values.Wrap(map[string]any{"entity_id": "ent-1"})
+	base.PlatformEntity = values.Wrap(map[string]any{"id": "ent-1"})
 	action := runtimecontracts.ActionSpec{
 		ID:             "create_flow_instance",
 		Template:       "review",
@@ -895,7 +895,7 @@ func TestPipelineEngineActionRunner_CreateFlowInstanceUsesExecutionBaseContextFo
 				"correlation_id":  "event.source_event_id",
 				"name":            "payload.name",
 				"template_id":     "payload.template_id",
-				"parent_entity":   "entity.entity_id",
+				"parent_entity":   "_entity.id",
 			},
 		},
 	}

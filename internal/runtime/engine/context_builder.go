@@ -30,6 +30,7 @@ func BuildBaseContext(input ContextBuilderInput) BaseContext {
 	materializedState := input.State
 	materializedState.StateCarrier.Metadata = materializedMetadata
 	base.Entity = values.Wrap(materializedState.EntityContext())
+	base.PlatformEntity = values.Wrap(materializedState.PlatformEntityContext(input.FlowID))
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Metadata))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Event = values.Wrap(input.Event.ContextMap(input.State.CurrentState))

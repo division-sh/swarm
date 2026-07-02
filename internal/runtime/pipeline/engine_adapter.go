@@ -34,17 +34,26 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		return false, runtimeengine.ErrNotImplemented
 	}
 	queryCtx := workflowExpressionContext{
-		Entity:      cloneStringAnyMap(ctx.Entity.Raw()),
-		Event:       cloneStringAnyMap(ctx.Event.Raw()),
-		Payload:     cloneStringAnyMap(ctx.Payload.Raw()),
-		Policy:      cloneStringAnyMap(ctx.Policy.Raw()),
-		Accumulated: accumulatedItemsForCEL(ctx.Accumulated.Raw()),
-		FanOut:      cloneStringAnyMap(ctx.FanOut.Raw()),
+		Entity:         cloneStringAnyMap(ctx.Entity.Raw()),
+		PlatformEntity: cloneStringAnyMap(ctx.PlatformEntity.Raw()),
+		Event:          cloneStringAnyMap(ctx.Event.Raw()),
+		Payload:        cloneStringAnyMap(ctx.Payload.Raw()),
+		Policy:         cloneStringAnyMap(ctx.Policy.Raw()),
+		Accumulated:    accumulatedItemsForCEL(ctx.Accumulated.Raw()),
+		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
+		WorkflowName:   e.workflowName(),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
 	}
 	return e.evaluator.EvalBool(expression, queryCtx)
+}
+
+func (e pipelineEngineEvaluator) workflowName() string {
+	if e.coordinator == nil || e.coordinator.module == nil || e.coordinator.module.WorkflowDefinition() == nil {
+		return ""
+	}
+	return strings.TrimSpace(e.coordinator.module.WorkflowDefinition().Name)
 }
 
 func accumulatedItemsForCEL(raw map[string]any) any {
@@ -325,7 +334,7 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 	if runID == "" {
 		return 0, fmt.Errorf("query_entities requires event.run_id in expression context")
 	}
-	flowID := strings.TrimSpace(asString(ctx.Entity["workflow_name"]))
+	flowID := strings.TrimSpace(ctx.WorkflowName)
 	contract, ok := entityruntime.ResolveForFlow(e.coordinator.SemanticSource(), flowID)
 	if !ok {
 		flowLabel := flowID

@@ -230,11 +230,12 @@ func applyDataAccumulationToState(base BaseContext, state ExecutionState, snapsh
 
 func evalWorkflowValueExpression(base BaseContext, state ExecutionState, expression string, opts workflowexpr.ValueExpressionOptions) (any, error) {
 	return workflowexpr.EvalValueExpressionWithOptions(expression, workflowexpr.ValueContext{
-		Entity:  base.Entity.Raw(),
-		Event:   base.Event.Raw(),
-		Payload: base.Payload.Raw(),
-		Policy:  base.Policy.Raw(),
-		FanOut:  state.FanOut,
+		Entity:         base.Entity.Raw(),
+		PlatformEntity: base.PlatformEntity.Raw(),
+		Event:          base.Event.Raw(),
+		Payload:        base.Payload.Raw(),
+		Policy:         base.Policy.Raw(),
+		FanOut:         state.FanOut,
 	}, opts)
 }
 
@@ -505,11 +506,12 @@ func executionItems(value any) []any {
 }
 
 type executionScope struct {
-	Item    any
-	Payload map[string]any
-	Event   map[string]any
-	Entity  map[string]any
-	Policy  map[string]any
+	Item           any
+	Payload        map[string]any
+	Event          map[string]any
+	Entity         map[string]any
+	PlatformEntity map[string]any
+	Policy         map[string]any
 }
 
 type executionOperandDefaultScope string
@@ -524,13 +526,14 @@ type compiledExecutionCondition struct {
 	program    cel.Program
 }
 
-func newExecutionScope(item any, payload, event, entity, policy map[string]any) executionScope {
+func newExecutionScope(item any, payload, event, entity, platformEntity, policy map[string]any) executionScope {
 	return executionScope{
-		Item:    normalizeCELValue(item),
-		Payload: normalizedCELInputMap(payload),
-		Event:   normalizedCELInputMap(event),
-		Entity:  normalizedCELInputMap(entity),
-		Policy:  normalizedCELInputMap(policy),
+		Item:           normalizeCELValue(item),
+		Payload:        normalizedCELInputMap(payload),
+		Event:          normalizedCELInputMap(event),
+		Entity:         normalizedCELInputMap(entity),
+		PlatformEntity: normalizedCELInputMap(platformEntity),
+		Policy:         normalizedCELInputMap(policy),
 	}
 }
 
@@ -540,6 +543,7 @@ func (s executionScope) activation() map[string]any {
 		"payload": s.Payload,
 		"event":   s.Event,
 		"entity":  s.Entity,
+		"_entity": s.PlatformEntity,
 		"policy":  s.Policy,
 	}
 }
@@ -551,6 +555,7 @@ func executionConditionEnv() (*cel.Env, error) {
 			cel.Variable("payload", cel.DynType),
 			cel.Variable("event", cel.DynType),
 			cel.Variable("entity", cel.DynType),
+			cel.Variable("_entity", cel.DynType),
 			cel.Variable("policy", cel.DynType),
 		)
 	})
@@ -663,6 +668,8 @@ func (s executionScope) lookupExplicitRoot(root paths.PathRoot, segments []strin
 		return lookupExecutionOperandPath(s.Event, segments)
 	case paths.RootEntity:
 		return lookupExecutionOperandPath(s.Entity, segments)
+	case paths.RootPlatformEntity:
+		return lookupExecutionOperandPath(s.PlatformEntity, segments)
 	case paths.RootPolicy:
 		return lookupExecutionOperandPath(s.Policy, segments)
 	default:

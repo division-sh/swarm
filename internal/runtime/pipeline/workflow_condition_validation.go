@@ -43,6 +43,7 @@ func ValidateConditionCEL(expression string, context WorkflowConditionContext) e
 func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {
 	options := []cel.EnvOption{
 		cel.Variable("entity", cel.DynType),
+		cel.Variable("_entity", cel.DynType),
 		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
@@ -89,6 +90,7 @@ func workflowConditionRecognizedPrefixes(context WorkflowConditionContext) []str
 		"payload.",
 		"event.",
 		"entity.",
+		"_entity.",
 		"policy.",
 		"query_entities(",
 	}

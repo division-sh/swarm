@@ -125,7 +125,7 @@ func nodeStateTypedCounterparts(source semanticview.Source, flowID string) []nod
 		}
 		sort.Strings(fieldNames)
 		for _, fieldName := range fieldNames {
-			if fieldName == "" || wave1EntityEnvelopeField(fieldName) {
+			if fieldName == "" {
 				continue
 			}
 			typeRef := strings.TrimSpace(view.Contract.Fields[fieldName].Type)

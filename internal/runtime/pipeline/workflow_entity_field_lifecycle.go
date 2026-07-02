@@ -30,6 +30,10 @@ func WorkflowEntityReferences(expression string) []string {
 	return workflowexpr.EntityReferences(expression)
 }
 
+func WorkflowPlatformEntityReferences(expression string) []string {
+	return workflowexpr.PlatformEntityReferences(expression)
+}
+
 func stripWorkflowExpressionStringLiterals(expression string) string {
 	return workflowexpr.StripStringLiterals(expression)
 }
@@ -39,12 +43,7 @@ func WorkflowEntityReferenceField(ref string) string {
 }
 
 func WorkflowBuiltinEntityField(field string) bool {
-	switch strings.TrimSpace(field) {
-	case "entity_id", "current_state", "workflow_name", "workflow_version", "gates":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 func WorkflowPresenceGuardedEntityFields(expression string) map[string]struct{} {
@@ -223,13 +222,7 @@ func workflowEntityFieldsAvailableBeforePhase(handler runtimecontracts.SystemNod
 }
 
 func workflowBuiltinEntityFields() map[string]struct{} {
-	return map[string]struct{}{
-		"entity_id":        {},
-		"current_state":    {},
-		"workflow_name":    {},
-		"workflow_version": {},
-		"gates":            {},
-	}
+	return map[string]struct{}{}
 }
 
 func workflowEntityFieldNameFromTarget(target string) (string, bool) {

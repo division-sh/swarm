@@ -25,7 +25,9 @@ func testCreateFlowInstanceContext(trigger workflowTriggerContext) values.Contex
 	entity := map[string]any{
 		"entity_id": workflowEventEntityID(trigger.Event),
 	}
-	return createFlowInstanceHandlerContext(trigger, payload, entity)
+	ctx := createFlowInstanceHandlerContext(trigger, payload, entity)
+	ctx.PlatformEntity = values.Wrap(map[string]any{"id": workflowEventEntityID(trigger.Event)})
+	return ctx
 }
 
 func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
@@ -209,7 +211,7 @@ func TestCreateFlowInstanceResolvesConfigFromHandlerEventContext(t *testing.T) {
 				"source_flow":     "event.source.flow_id",
 				"correlation_id":  "event.source_event_id",
 				"name":            "payload.name",
-				"parent_entity":   "entity.entity_id",
+				"parent_entity":   "_entity.id",
 			},
 		},
 	}, testCreateFlowInstanceContext(triggerCtx))

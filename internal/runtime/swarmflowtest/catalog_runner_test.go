@@ -2085,7 +2085,7 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	t.Helper()
 	payload := cloneStringAnyMapCatalog(step.Payload)
 	result.handlerOutcome = "success"
-	if !catalogGuardPasses(handler.Guard, payload, entity, policy) {
+	if !catalogGuardPasses(handler.Guard, payload, entity, policy, result.entityState) {
 		result.handlerOutcome = guardFailOutcome(handler.Guard)
 		if result.handlerOutcome == "" {
 			result.handlerOutcome = "reject"
@@ -2107,7 +2107,7 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	}
 	if len(handler.OnComplete) > 0 {
 		for _, rule := range handler.OnComplete {
-			if catalogRuleMatches(rule, payload, entity, policy) {
+			if catalogRuleMatches(rule, payload, entity, policy, result.entityState) {
 				result = applyCatalogRule(rule, payload, entity, result)
 				break
 			}
@@ -2115,7 +2115,7 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	}
 	if len(handler.Rules) > 0 {
 		for _, rule := range handler.Rules {
-			if catalogRuleMatches(rule, payload, entity, policy) {
+			if catalogRuleMatches(rule, payload, entity, policy, result.entityState) {
 				result = applyCatalogRule(rule, payload, entity, result)
 				break
 			}
@@ -2150,9 +2150,9 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	applyCatalogDataAccumulation(handler.DataAccumulation, payload, entity)
 	applyCatalogCompute(handler.Compute, entity)
 	applyCatalogFanOut(handler.FanOut, payload, entity, &result)
-	applyCatalogFilter(handler.Filter, payload, entity, policy)
+	applyCatalogFilter(handler.Filter, payload, entity, policy, result.entityState)
 	applyCatalogReduce(handler.Reduce, payload, entity)
-	applyCatalogCount(handler.Count, payload, entity, policy)
+	applyCatalogCount(handler.Count, payload, entity, policy, result.entityState)
 	applyCatalogGroupBy(handler.GroupBy, payload, entity)
 	result.entityFields = cloneStringAnyMapCatalog(entity)
 	if emit := strings.TrimSpace(handler.Emit.EventType()); emit != "" {
@@ -2161,13 +2161,13 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	return result
 }
 
-func catalogRuleMatches(rule catalogRule, payload, entity, policy map[string]any) bool {
+func catalogRuleMatches(rule catalogRule, payload, entity, policy map[string]any, state string) bool {
 	condition := strings.TrimSpace(rule.Condition)
 	switch strings.ToLower(condition) {
 	case "", "else":
 		return true
 	default:
-		return catalogEvalCondition(condition, map[string]any{"payload": payload, "entity": entity, "policy": policy})
+		return catalogEvalCondition(condition, catalogExpressionRoots(payload, entity, policy, state))
 	}
 }
 
@@ -2200,10 +2200,11 @@ func catalogAccumulationComplete(mode string, received, expected, threshold int)
 	}
 }
 
-func catalogGuardPasses(spec any, payload, entity, policy map[string]any) bool {
+func catalogGuardPasses(spec any, payload, entity, policy map[string]any, state string) bool {
 	if spec == nil {
 		return true
 	}
+	roots := catalogExpressionRoots(payload, entity, policy, state)
 	switch typed := spec.(type) {
 	case *runtimecontracts.GuardSpec:
 		if typed == nil {
@@ -2211,7 +2212,7 @@ func catalogGuardPasses(spec any, payload, entity, policy map[string]any) bool {
 		}
 		if len(typed.Checks) > 0 {
 			for _, check := range typed.Checks {
-				if !catalogEvalCondition(check.Check, map[string]any{"payload": payload, "entity": entity, "policy": policy}) {
+				if !catalogEvalCondition(check.Check, roots) {
 					return false
 				}
 			}
@@ -2220,17 +2221,40 @@ func catalogGuardPasses(spec any, payload, entity, policy map[string]any) bool {
 		if strings.TrimSpace(typed.Check) == "" {
 			return true
 		}
-		return catalogEvalCondition(typed.Check, map[string]any{"payload": payload, "entity": entity, "policy": policy})
+		return catalogEvalCondition(typed.Check, roots)
 	case runtimecontracts.GuardSpec:
-		return catalogGuardPasses(&typed, payload, entity, policy)
+		return catalogGuardPasses(&typed, payload, entity, policy, state)
 	case map[string]any:
 		if len(typed) == 0 {
 			return true
 		}
-		return catalogEvalCondition(asStringForCatalog(typed["check"]), map[string]any{"payload": payload, "entity": entity, "policy": policy})
+		return catalogEvalCondition(asStringForCatalog(typed["check"]), roots)
 	default:
 		return true
 	}
+}
+
+func catalogExpressionRoots(payload, entity, policy map[string]any, state string) map[string]any {
+	return map[string]any{
+		"payload": payload,
+		"entity":  entity,
+		"_entity": catalogPlatformEntity(entity, state),
+		"policy":  policy,
+	}
+}
+
+func catalogPlatformEntity(entity map[string]any, state string) map[string]any {
+	out := map[string]any{
+		"id":            entity["entity_id"],
+		"flow_instance": entity["flow_instance"],
+		"gates":         ensureCatalogGates(entity),
+	}
+	if strings.TrimSpace(state) != "" {
+		out["current_state"] = strings.TrimSpace(state)
+	} else {
+		out["current_state"] = entity["current_state"]
+	}
+	return out
 }
 
 func guardFailOutcome(spec any) string {
@@ -2442,14 +2466,17 @@ func applyCatalogAction(handler catalogSystemNodeEventHandler, payload, entity m
 	return "success", true
 }
 
-func applyCatalogFilter(spec *runtimecontracts.FilterSpec, payload, entity, policy map[string]any) {
+func applyCatalogFilter(spec *runtimecontracts.FilterSpec, payload, entity, policy map[string]any, state string) {
 	if spec == nil {
 		return
 	}
-	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}))
+	roots := catalogExpressionRoots(payload, entity, policy, state)
+	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, roots))
 	filtered := make([]any, 0, len(items))
 	for _, item := range items {
-		if catalogEvalCondition(spec.Condition, map[string]any{"item": item, "payload": payload, "entity": entity, "policy": policy}) {
+		itemRoots := catalogExpressionRoots(payload, entity, policy, state)
+		itemRoots["item"] = item
+		if catalogEvalCondition(spec.Condition, itemRoots) {
 			filtered = append(filtered, item)
 		}
 	}
@@ -2468,14 +2495,17 @@ func applyCatalogReduce(spec *runtimecontracts.ReduceSpec, payload, entity map[s
 	}
 }
 
-func applyCatalogCount(spec *runtimecontracts.CountSpec, payload, entity, policy map[string]any) {
+func applyCatalogCount(spec *runtimecontracts.CountSpec, payload, entity, policy map[string]any, state string) {
 	if spec == nil {
 		return
 	}
-	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity}))
+	roots := catalogExpressionRoots(payload, entity, policy, state)
+	items := catalogSlice(resolveCatalogPath(spec.ItemsPath, strings.TrimSpace(spec.ItemsFrom), entity, roots))
 	count := 0
 	for _, item := range items {
-		if strings.TrimSpace(spec.Condition) == "" || catalogEvalCondition(spec.Condition, map[string]any{"item": item, "payload": payload, "entity": entity, "policy": policy}) {
+		itemRoots := catalogExpressionRoots(payload, entity, policy, state)
+		itemRoots["item"] = item
+		if strings.TrimSpace(spec.Condition) == "" || catalogEvalCondition(spec.Condition, itemRoots) {
 			count++
 		}
 	}
@@ -2568,6 +2598,14 @@ func splitCatalogTopLevel(expr, sep string) []string {
 				depth++
 			}
 		case ')':
+			if quote == 0 && depth > 0 {
+				depth--
+			}
+		case '[':
+			if quote == 0 {
+				depth++
+			}
+		case ']':
 			if quote == 0 && depth > 0 {
 				depth--
 			}
@@ -3089,6 +3127,7 @@ func resolveCatalogRef(expr string, entity map[string]any, roots map[string]any)
 	if expr == "" {
 		return nil
 	}
+	expr = normalizeCatalogBracketRef(expr)
 	if n, err := strconv.Atoi(expr); err == nil {
 		return n
 	}
@@ -3120,6 +3159,27 @@ func resolveCatalogRef(expr string, entity map[string]any, roots map[string]any)
 		current = obj[strings.TrimSpace(segment)]
 	}
 	return current
+}
+
+func normalizeCatalogBracketRef(expr string) string {
+	expr = strings.TrimSpace(expr)
+	for {
+		start := strings.IndexByte(expr, '[')
+		if start < 0 {
+			return expr
+		}
+		end := strings.IndexByte(expr[start:], ']')
+		if end < 0 {
+			return expr
+		}
+		end += start
+		key := strings.TrimSpace(expr[start+1 : end])
+		key = strings.Trim(key, `"'`)
+		if key == "" {
+			return expr
+		}
+		expr = strings.TrimSpace(expr[:start]) + "." + key + strings.TrimSpace(expr[end+1:])
+	}
 }
 
 func resolveCatalogPath(parsed paths.Path, raw string, entity map[string]any, roots map[string]any) any {

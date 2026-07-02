@@ -1,2 +1,4 @@
 core:
-  name: text
+  name:
+    type: text
+    initial: ""

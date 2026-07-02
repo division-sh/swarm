@@ -74,10 +74,11 @@ func TestDedupIdentifier_DefaultsToEventIdentityBeforeSource(t *testing.T) {
 
 func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	base := BaseContext{
-		Entity:   values.Wrap(map[string]any{"status": "ready"}),
-		Metadata: values.Wrap(map[string]any{"status": "ready"}),
-		Payload:  values.Wrap(map[string]any{"score": 7, "nested": map[string]any{"value": "x"}}),
-		Policy:   values.Wrap(map[string]any{"mode": "strict"}),
+		Entity:         values.Wrap(map[string]any{"status": "ready"}),
+		PlatformEntity: values.Wrap(map[string]any{"current_state": "reviewing"}),
+		Metadata:       values.Wrap(map[string]any{"status": "ready"}),
+		Payload:        values.Wrap(map[string]any{"score": 7, "nested": map[string]any{"value": "x"}}),
+		Policy:         values.Wrap(map[string]any{"mode": "strict"}),
 	}
 	state := ExecutionState{
 		Accumulated: map[string]any{"count": 2},
@@ -86,14 +87,15 @@ func TestResolveRefRequiresExplicitScope(t *testing.T) {
 	}
 
 	cases := map[string]any{
-		"payload.score":        7,
-		"payload.nested.value": "x",
-		"metadata.status":      "ready",
-		"entity.status":        "ready",
-		"policy.mode":          "strict",
-		"accumulated.count":    2,
-		"fan_out.item":         "fan",
-		"computed.grade":       "A",
+		"payload.score":         7,
+		"payload.nested.value":  "x",
+		"metadata.status":       "ready",
+		"entity.status":         "ready",
+		"_entity.current_state": "reviewing",
+		"policy.mode":           "strict",
+		"accumulated.count":     2,
+		"fan_out.item":          "fan",
+		"computed.grade":        "A",
 	}
 	for ref, want := range cases {
 		if got := resolveRef(base, state, ref); got != want {
@@ -107,14 +109,14 @@ func TestResolveRefRequiresExplicitScope(t *testing.T) {
 
 func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	base := BaseContext{
-		Entity:  values.Wrap(map[string]any{"current_state": "researching"}),
-		Payload: values.Wrap(map[string]any{"score": 9}),
+		PlatformEntity: values.Wrap(map[string]any{"current_state": "researching"}),
+		Payload:        values.Wrap(map[string]any{"score": 9}),
 	}
 	state := ExecutionState{}
 	transformed, err := emitFieldsPayload(base, state, runtimecontracts.EmitSpec{
 		Fields: map[string]runtimecontracts.ExpressionValue{
 			"nested.score":   runtimecontracts.CELExpression("payload.score"),
-			"nested.state":   runtimecontracts.CELExpression("entity.current_state"),
+			"nested.state":   runtimecontracts.CELExpression("_entity.current_state"),
 			"literal.string": runtimecontracts.CELExpression(`"hello"`),
 			"explicit.ref":   runtimecontracts.RefExpression("payload.score"),
 			"explicit.value": runtimecontracts.LiteralExpression("ready"),

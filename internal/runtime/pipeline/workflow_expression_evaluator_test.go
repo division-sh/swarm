@@ -54,7 +54,7 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 	}{
 		{
 			name:       "payload entity policy event",
-			expression: `entity.entity_id != "" && payload.score >= policy.threshold && event.entity_id != ""`,
+			expression: `_entity.id != "" && payload.score >= policy.threshold && event.entity_id != ""`,
 		},
 		{
 			name:       "query entities",
@@ -169,6 +169,33 @@ func TestWorkflowExpressionEvaluator_EvalBoolFailsClosedOnMissingEntityField(t *
 	}
 	if got := err.Error(); got == "" || got == "no such key: score" {
 		t.Fatalf("expected explicit lifecycle-safe missing-field error, got %q", got)
+	}
+}
+
+func TestWorkflowExpressionEvaluator_EvalBoolSplitsBusinessEntityAndPlatformEntity(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(
+		`entity.current_state == "business-current-state" && _entity.current_state == "platform-current-state" && _entity.id == "ent-1" && _entity.gates.reviewed`,
+		workflowExpressionContext{
+			Entity: map[string]any{
+				"current_state": "business-current-state",
+			},
+			PlatformEntity: map[string]any{
+				"id":            "ent-1",
+				"current_state": "platform-current-state",
+				"gates": map[string]any{
+					"reviewed": true,
+				},
+			},
+			Payload: map[string]any{},
+			Policy:  map[string]any{},
+		},
+	)
+	if err != nil {
+		t.Fatalf("EvalBool error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected entity.* to read business fields and _entity.* to read platform metadata")
 	}
 }
 
