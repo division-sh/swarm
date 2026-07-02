@@ -2073,6 +2073,39 @@ func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *te
 	}
 }
 
+func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "else",
+				FanOut: &runtimecontracts.FanOutSpec{
+					ItemsFrom: "payload.items",
+					Emit:      runtimecontracts.EmitSpec{Event: "item.done"},
+				},
+			}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "rules[0].fan_out") {
+		t.Fatalf("ValidateRequest error = %v, want rules[0].fan_out rejection", err)
+	}
+}
+
 func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *testing.T) {
 	stateRepo := &recordingStateRepo{}
 	outbox := &recordingEmitOutbox{}

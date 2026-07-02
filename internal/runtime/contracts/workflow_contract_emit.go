@@ -122,6 +122,11 @@ func HandlerEmitSiteOwnershipError(handler SystemNodeEventHandler) error {
 	if handler.FanOut != nil {
 		return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with fan_out")
 	}
+	for idx, rule := range handler.Rules {
+		if rule.FanOut != nil {
+			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with rules[%d].fan_out", idx)
+		}
+	}
 	if handler.Accumulate != nil {
 		if len(handler.Accumulate.OnComplete) > 0 {
 			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with accumulate.on_complete")

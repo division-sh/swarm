@@ -1433,6 +1433,20 @@ fan_out:
 			contains: "not supported with fan_out",
 		},
 		{
+			name: "with_rule_fan_out",
+			raw: `
+on_success:
+  emit: handler.succeeded
+rules:
+  done:
+    condition: "else"
+    fan_out:
+      items_from: payload.items
+      emit: item.done
+`,
+			contains: "not supported with rules[0].fan_out",
+		},
+		{
 			name: "unknown_on_success_field",
 			raw: `
 on_success:
