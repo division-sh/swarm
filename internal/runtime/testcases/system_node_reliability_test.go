@@ -6,9 +6,6 @@ func TestGenericBundle_SystemNodeReliabilityPatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
 	for _, nodeID := range []string{"intake-router", "processing-node", "delivery-node"} {
 		node := bundle.Nodes[nodeID]
-		if node.IdempotencyTable == "" {
-			t.Fatalf("expected idempotency table for %s", nodeID)
-		}
 		if node.StateTable == "" {
 			t.Fatalf("expected state table for %s", nodeID)
 		}

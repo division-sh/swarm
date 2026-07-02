@@ -491,7 +491,7 @@ func writeEquivalentBundleHashFixture(t *testing.T, lineEnding, packageYAML stri
 	platform := DefaultPlatformSpecFile(t.TempDir())
 	writeBundleHashText(t, platform, strings.ReplaceAll("api_specification:\n  alpha: true\n  number: 1\n", "\n", lineEnding))
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), packageYAML)
-	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll("name: equivalent\nfields:\n  topic: string\n", "\n", lineEnding))
+	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll("name: equivalent\n", "\n", lineEnding))
 	writeBundleHashText(t, filepath.Join(root, "prompts", "guide.md"), strings.ReplaceAll("hello\nworld", "\n", lineEnding))
 	return root, platform
 }

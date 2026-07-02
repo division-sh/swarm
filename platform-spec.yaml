@@ -153,11 +153,13 @@ vocabulary:
 contract_formats:
   description: Canonical format for all flow contract files.
   loader_defaults:
-    description: Fields that are optional in contract YAML because the loader derives them from context.
+    description: Fields and identifiers that the loader derives from context. Entries marked non-authorable are not accepted
+      as public YAML fields.
     schema_name: Optional. If omitted, derived from the directory name of the flow package. A flow at flows/intake/ gets
       name "intake" automatically.
-    schema_namespace: Optional. If omitted, derived from the flow path relative to root. A flow at flows/intake/ gets namespace
-      "intake". Root flow gets empty namespace.
+    flow_namespace: Non-authorable. Derived from the flow path relative to root. A flow at flows/intake/ gets namespace "intake".
+      Root flow gets empty namespace. Public schema.yaml namespace override fields, including namespace, namespace_prefix,
+      and namespace_rule, are not accepted.
     agent_id: 'Optional. If omitted, the YAML map key IS the agent ID. agents.yaml uses map keys as canonical identifiers:
       {"classifier-agent": {model: regular, ...}} means agent_id = "classifier-agent". Explicit id field overrides the
       map key if present, but this is discouraged. Under agent_identity_model.current_supported_posture this authored
@@ -2114,7 +2116,6 @@ handler_specification:
         state_table: string — table name for node state persistence
         timers: list of timer declarations (see timer_model)
         gate_state: map — gate field definitions for this node (boolean flags on entity)
-        permissions: list of platform permissions this node requires (e.g., create_flow_instance)
       effective_semantics:
         id: YAML map key, with same-value explicit id accepted during migration
         execution_type: system_node
@@ -4352,7 +4353,7 @@ engine:
       scope: contract
       trigger: A declaration uses an unsupported or malformed field in a fail-closed contract surface. This includes node
         top-level fields outside the defined node_fields set (id, execution_type, description, subscribes_to, event_handlers,
-        state_schema, state_table, timers, gate_state, permissions, produces) and malformed external tool-provider dispatch
+        state_schema, state_table, timers, gate_state, produces) and malformed external tool-provider dispatch
         rate-limit declarations on HTTP tools, MCP servers, or policy.web_search_provider.
       when: boot-only
     - id: policy_conflict_detection

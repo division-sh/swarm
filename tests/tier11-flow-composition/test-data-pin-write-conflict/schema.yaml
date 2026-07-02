@@ -1,5 +1,4 @@
 name: test-data-pin-write-conflict
-namespace: test-data-pin-write-conflict
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]

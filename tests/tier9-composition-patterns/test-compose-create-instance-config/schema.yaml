@@ -1,5 +1,4 @@
 name: test-compose-create-instance-config
-namespace: test-compose-create-instance-config
 initial_state: idle
 terminal_states: [spawned]
 states: [idle, spawned]

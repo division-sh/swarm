@@ -1,5 +1,4 @@
 name: test-terminal-state-rejects
-namespace: test-terminal-state-rejects
 initial_state: pending
 terminal_states: [done]
 states: [pending, processing, done]

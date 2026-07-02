@@ -17,8 +17,6 @@ orchestrator:
         fields:
           worker_id: payload.worker_id
       advances_to: spawned
-  permissions:
-  - create_flow_instance
 
 assigner:
   id: assigner

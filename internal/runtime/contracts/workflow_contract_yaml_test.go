@@ -316,6 +316,28 @@ pins:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		field   string
+		wantErr string
+	}{
+		{name: "namespace_prefix", field: "namespace_prefix: worker", wantErr: "RETIRED"},
+		{name: "namespace_rule", field: "namespace_rule: path", wantErr: "RETIRED"},
+		{name: "namespace", field: "namespace: worker", wantErr: "UNDEFINED-FIELD"},
+		{name: "unknown", field: "legacy_owner: worker", wantErr: "UNDEFINED-FIELD"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc FlowSchemaDocument
+			err := yaml.Unmarshal([]byte("name: invalid-schema\n"+tc.field+"\n"), &doc)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestFlowSchemaDocumentDecode_PreservesTemplateInstanceDeclaration(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -618,6 +640,65 @@ pins:
 	}
 	if got := schema.Pins.Outputs.Events[0]; got != "check.passed" {
 		t.Fatalf("Outputs.Events[0] = %q", got)
+	}
+}
+
+func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
+	var node SystemNodeContract
+	if err := yaml.Unmarshal([]byte(`
+id: worker
+description: Worker node
+execution_type: system_node
+subscribes_to: [task.requested]
+produces: [task.completed]
+state_table: worker_state
+state_schema:
+  fields:
+    count:
+      type: integer
+timers:
+  - id: task_timeout
+    event: timer.task.timeout
+    delay: 1m
+gate_state:
+  ready: Worker is ready
+event_handlers:
+  task.requested:
+    advances_to: done
+`), &node); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := strings.TrimSpace(node.StateTable), "worker_state"; got != want {
+		t.Fatalf("StateTable = %q, want %q", got, want)
+	}
+	if _, ok := node.EventHandlers["task.requested"]; !ok {
+		t.Fatalf("task.requested handler missing: %#v", node.EventHandlers)
+	}
+	if len(node.StateSchema.Fields) != 1 {
+		t.Fatalf("StateSchema fields = %#v, want one field", node.StateSchema.Fields)
+	}
+}
+
+func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		field   string
+		wantErr string
+	}{
+		{name: "permissions", field: "permissions: [create_flow_instance]", wantErr: "RETIRED"},
+		{name: "implementation", field: "implementation: builtin", wantErr: "RETIRED"},
+		{name: "owned_transitions", field: "owned_transitions: [ticket-open]", wantErr: "RETIRED"},
+		{name: "idempotency_table", field: "idempotency_table: worker_idempotency", wantErr: "RETIRED"},
+		{name: "unknown", field: "legacy_owner: worker", wantErr: "UNDEFINED-FIELD"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var node SystemNodeContract
+			err := yaml.Unmarshal([]byte("id: worker\n"+tc.field+"\n"), &node)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+		})
 	}
 }
 

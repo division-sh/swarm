@@ -1,5 +1,4 @@
 name: test-flow-data-access
-namespace: test-flow-data-access
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

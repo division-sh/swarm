@@ -1,5 +1,4 @@
 name: test-agent-emits-to-node
-namespace: test-agent-emits-to-node
 initial_state: pending
 terminal_states: [done]
 states: [pending, assigned, done]

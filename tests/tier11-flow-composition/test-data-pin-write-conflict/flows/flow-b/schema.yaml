@@ -1,5 +1,4 @@
 name: flow-b
-namespace: flow-b
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]

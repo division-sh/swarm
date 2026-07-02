@@ -796,8 +796,8 @@ type FlowSchemaDocument struct {
 	Entity            string                          `yaml:"entity"`
 	Instance          FlowTemplateInstanceDeclaration `yaml:"instance"`
 	InitialState      string                          `yaml:"initial_state"`
-	NamespacePrefix   string                          `yaml:"namespace_prefix"`
-	NamespaceRule     string                          `yaml:"namespace_rule"`
+	NamespacePrefix   string                          `yaml:"-"`
+	NamespaceRule     string                          `yaml:"-"`
 	TerminalStates    []string                        `yaml:"terminal_states"`
 	States            []string                        `yaml:"states"`
 	Pins              FlowPins                        `yaml:"pins"`
@@ -1204,12 +1204,12 @@ type SystemNodeContract struct {
 	ID               string                            `yaml:"id"`
 	Description      string                            `yaml:"description"`
 	ExecutionType    string                            `yaml:"execution_type"`
-	Implementation   string                            `yaml:"implementation"`
+	Implementation   string                            `yaml:"-"`
 	SubscribesTo     []string                          `yaml:"subscribes_to"`
 	Produces         []string                          `yaml:"produces"`
-	OwnedTransitions []string                          `yaml:"owned_transitions"`
+	OwnedTransitions []string                          `yaml:"-"`
 	StateTable       string                            `yaml:"state_table"`
-	IdempotencyTable string                            `yaml:"idempotency_table"`
+	IdempotencyTable string                            `yaml:"-"`
 	Timers           []WorkflowTimerContract           `yaml:"timers"`
 	EventHandlers    map[string]SystemNodeEventHandler `yaml:"event_handlers"`
 	StateSchema      NodeStateSchema                   `yaml:"state_schema"`

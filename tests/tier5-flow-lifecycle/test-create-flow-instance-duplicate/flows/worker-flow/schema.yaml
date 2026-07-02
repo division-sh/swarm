@@ -1,5 +1,4 @@
 name: worker-flow
-namespace: worker-flow
 mode: template
 instance:
   by: entity_id

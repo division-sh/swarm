@@ -156,6 +156,87 @@ func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
 	t.Fatal("expected at least one record_evidence handler")
 }
 
+func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	platformSpec := DefaultPlatformSpecFile(repoRoot)
+	tests := []struct {
+		name        string
+		schemaExtra string
+		nodes       string
+		wantErr     string
+	}{
+		{
+			name:        "schema namespace is not public schema YAML",
+			schemaExtra: "namespace: legacy\n",
+			nodes:       "{}\n",
+			wantErr:     "UNDEFINED-FIELD",
+		},
+		{
+			name:        "node idempotency table is retired public YAML",
+			schemaExtra: "",
+			nodes: `
+worker:
+  id: worker
+  idempotency_table: worker_idempotency
+  event_handlers: {}
+`,
+			wantErr: "RETIRED",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeFieldReconciliationBundle(t, root, tc.schemaExtra, tc.nodes)
+			_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+			if err == nil || !contractErrorContains(err, tc.wantErr) {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadWorkflowContractBundleAllowsPublicNodeStateTable(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	root := t.TempDir()
+	writeFieldReconciliationBundle(t, root, "", `
+worker:
+  id: worker
+  state_table: worker_state
+  state_schema:
+    fields:
+      count:
+        type: integer
+  event_handlers: {}
+`)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	node, ok := bundle.Nodes["worker"]
+	if !ok {
+		t.Fatalf("worker node missing: %#v", bundle.Nodes)
+	}
+	if got, want := strings.TrimSpace(node.StateTable), "worker_state"; got != want {
+		t.Fatalf("StateTable = %q, want %q", got, want)
+	}
+}
+
+func writeFieldReconciliationBundle(t *testing.T, root, schemaExtra, nodes string) {
+	t.Helper()
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: field-reconciliation
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows: []
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: field-reconciliation\n"+schemaExtra)
+	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
+}
+
 func TestAgentRegistryEntryRejectsRetiredModelTierField(t *testing.T) {
 	var entry AgentRegistryEntry
 	err := yaml.Unmarshal([]byte(`

@@ -4240,8 +4240,6 @@ portfolio-node:
       config_from:
         product_id: payload.product_id
       advances_to: done
-  permissions:
-    - create_flow_instance
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "tools.yaml"), `{}`)
@@ -4404,8 +4402,6 @@ portfolio-node:
       config_from:
         product_id: payload.product_id
       advances_to: done
-  permissions:
-    - create_flow_instance
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "portfolio", "tools.yaml"), `{}`)

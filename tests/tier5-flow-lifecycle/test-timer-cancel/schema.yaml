@@ -1,5 +1,4 @@
 name: test-timer-cancel
-namespace: test-timer-cancel
 initial_state: waiting
 terminal_states: [done]
 states: [waiting, cancelled, done]
