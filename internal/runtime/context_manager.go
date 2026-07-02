@@ -201,8 +201,11 @@ func runtimeContextAgentIDs(source semanticview.Source) []string {
 	}
 	entries := source.AgentEntries()
 	ids := make([]string, 0, len(entries))
-	for agentID := range entries {
-		agentID = strings.TrimSpace(agentID)
+	for key, entry := range entries {
+		agentID := strings.TrimSpace(entry.ID)
+		if agentID == "" {
+			agentID = strings.TrimSpace(key)
+		}
 		if agentID == "" {
 			continue
 		}

@@ -6422,8 +6422,8 @@ func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
 		return serveRuntimeWorkspaceStub{}
 	})
 	ctx := context.Background()
-	firstRoot := writeServeRuntimeAgentSlugFixture(t, "duplicate-agent-slug-a", "shared-worker")
-	secondRoot := writeServeRuntimeAgentSlugFixture(t, "duplicate-agent-slug-b", "shared-worker")
+	firstRoot := writeServeRuntimeAgentSlugFixtureWithKey(t, "duplicate-agent-slug-a", "alpha", "shared-worker")
+	secondRoot := writeServeRuntimeAgentSlugFixtureWithKey(t, "duplicate-agent-slug-b", "beta", "shared-worker")
 	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
 	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
 	if firstHash == secondHash {
@@ -10000,6 +10000,11 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 
 func writeServeRuntimeAgentSlugFixture(t *testing.T, workflowName, agentID string) string {
 	t.Helper()
+	return writeServeRuntimeAgentSlugFixtureWithKey(t, workflowName, agentID, agentID)
+}
+
+func writeServeRuntimeAgentSlugFixtureWithKey(t *testing.T, workflowName, agentKey, agentID string) string {
+	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
 name: %s
@@ -10032,7 +10037,7 @@ agent.requested:
   model: regular
   mode: task
   subscriptions: [agent.requested]
-`, agentID, agentID, agentID, agentID))
+`, agentKey, agentID, agentID, agentID))
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", agentID+".md"), "Handle assigned work.\n")
 	return root
 }

@@ -90,6 +90,29 @@ func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextManagerRejectsDuplicateEffectiveAgentIDs(t *testing.T) {
+	_, err := NewRuntimeContextManager(nil,
+		testBundleContextWithAgentEntries(t, runtimeContextTestHashA, "alpha.requested", map[string]runtimecontracts.AgentRegistryEntry{
+			"alpha": {ID: "shared-worker", Role: "alpha"},
+		}),
+		testBundleContextWithAgentEntries(t, runtimeContextTestHashB, "beta.requested", map[string]runtimecontracts.AgentRegistryEntry{
+			"beta": {ID: "shared-worker", Role: "beta"},
+		}),
+	)
+	if err == nil {
+		t.Fatal("NewRuntimeContextManager duplicate effective agent_id error = nil")
+	}
+	for _, want := range []string{
+		`duplicate runtime context agent_id "shared-worker"`,
+		runtimeContextTestHashA,
+		runtimeContextTestHashB,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("duplicate effective agent_id error missing %q:\n%s", want, err.Error())
+		}
+	}
+}
+
 func TestRuntimeContextManagerRegisterRejectsDuplicateAgentSlugWithoutMutatingManager(t *testing.T) {
 	manager, err := NewRuntimeContextManager(nil,
 		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
@@ -205,6 +228,11 @@ func testBundleContextWithAgents(t *testing.T, bundleHash, eventName string, age
 		}
 		agents[agentID] = runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}
 	}
+	return testBundleContextWithAgentEntries(t, bundleHash, eventName, agents)
+}
+
+func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName string, agents map[string]runtimecontracts.AgentRegistryEntry) BundleContext {
+	t.Helper()
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
