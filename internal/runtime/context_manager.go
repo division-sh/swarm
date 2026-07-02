@@ -59,6 +59,12 @@ type runtimeContextEntry struct {
 	cause   string
 }
 
+type runtimeContextAgentSlugCollision struct {
+	agentID  string
+	existing BundleContext
+	incoming BundleContext
+}
+
 type RuntimeContextLookup struct {
 	Context *BundleContext
 	State   RuntimeContextState
@@ -132,6 +138,14 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	if _, exists := m.contexts[contextDef.BundleHash]; exists {
 		return fmt.Errorf("duplicate runtime context bundle_hash %s", contextDef.BundleHash)
 	}
+	if collision, ok := m.duplicateLoadedAgentSlugLocked(contextDef); ok {
+		return fmt.Errorf(
+			"duplicate runtime context agent_id %q across loaded BundleContexts: existing %s; incoming %s",
+			collision.agentID,
+			runtimeContextBundleLabel(collision.existing),
+			runtimeContextBundleLabel(collision.incoming),
+		)
+	}
 	copied := contextDef
 	m.contexts[contextDef.BundleHash] = &runtimeContextEntry{
 		context: &copied,
@@ -140,6 +154,88 @@ func (m *RuntimeContextManager) Register(contextDef BundleContext) error {
 	m.order = append(m.order, contextDef.BundleHash)
 	sort.Strings(m.order)
 	return nil
+}
+
+func (m *RuntimeContextManager) duplicateLoadedAgentSlugLocked(incoming BundleContext) (runtimeContextAgentSlugCollision, bool) {
+	incomingIDs := runtimeContextAgentIDs(incoming.Source)
+	if len(incomingIDs) == 0 {
+		return runtimeContextAgentSlugCollision{}, false
+	}
+	incomingSet := make(map[string]struct{}, len(incomingIDs))
+	for _, agentID := range incomingIDs {
+		incomingSet[agentID] = struct{}{}
+	}
+	for _, bundleHash := range m.order {
+		entry := m.contexts[bundleHash]
+		if !runtimeContextEntryLoaded(entry) {
+			continue
+		}
+		for _, existingAgentID := range runtimeContextAgentIDs(entry.context.Source) {
+			if _, ok := incomingSet[existingAgentID]; !ok {
+				continue
+			}
+			return runtimeContextAgentSlugCollision{
+				agentID:  existingAgentID,
+				existing: *entry.context,
+				incoming: incoming,
+			}, true
+		}
+	}
+	return runtimeContextAgentSlugCollision{}, false
+}
+
+func runtimeContextEntryLoaded(entry *runtimeContextEntry) bool {
+	if entry == nil || entry.context == nil {
+		return false
+	}
+	state := entry.state
+	if state == "" {
+		state = RuntimeContextStateLoaded
+	}
+	return state == RuntimeContextStateLoaded
+}
+
+func runtimeContextAgentIDs(source semanticview.Source) []string {
+	if source == nil {
+		return nil
+	}
+	entries := source.AgentEntries()
+	ids := make([]string, 0, len(entries))
+	for agentID := range entries {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		ids = append(ids, agentID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func runtimeContextBundleLabel(contextDef BundleContext) string {
+	contextDef = contextDef.normalized()
+	parts := []string{}
+	if contextDef.BundleHash != "" {
+		parts = append(parts, "bundle_hash="+contextDef.BundleHash)
+	}
+	if source := strings.TrimSpace(contextDef.BundleSourceFact.BundleSource); source != "" {
+		parts = append(parts, "bundle_source="+source)
+	}
+	if fingerprint := strings.TrimSpace(contextDef.BundleSourceFact.BundleFingerprint); fingerprint != "" {
+		parts = append(parts, "bundle_fingerprint="+fingerprint)
+	}
+	workflowName := strings.TrimSpace(contextDef.BundleIdentity.WorkflowName)
+	workflowVersion := strings.TrimSpace(contextDef.BundleIdentity.WorkflowVersion)
+	switch {
+	case workflowName != "" && workflowVersion != "":
+		parts = append(parts, "workflow="+workflowName+"@"+workflowVersion)
+	case workflowName != "":
+		parts = append(parts, "workflow="+workflowName)
+	}
+	if len(parts) == 0 {
+		return "bundle_context=<unknown>"
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m *RuntimeContextManager) Len() int {

@@ -6416,6 +6416,95 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	firstRoot := writeServeRuntimeAgentSlugFixture(t, "duplicate-agent-slug-a", "shared-worker")
+	secondRoot := writeServeRuntimeAgentSlugFixture(t, "duplicate-agent-slug-b", "shared-worker")
+	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
+	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
+	if firstHash == secondHash {
+		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
+	}
+
+	var out lockedBuffer
+	code := runServeRuntime(ctx, repoRoot(), serveOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         firstHash,
+		BundleHashes:       []string{secondHash},
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Output:             &out,
+		TestLLMRuntime:     runtimellm.NoopRuntime{},
+	})
+	if code == 0 {
+		t.Fatalf("runServeRuntime code = 0, want startup failure\noutput:\n%s", out.String())
+	}
+	for _, want := range []string{
+		"[5/22] runtime_context",
+		`duplicate runtime context agent_id "shared-worker"`,
+		firstHash,
+		secondHash,
+		"bundle_source=persisted",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, out.String())
+		}
+	}
+	for _, notWant := range []string{"[22/22]", "ready                      ok", "manager_event_loop_start", "platform_boot_event_published"} {
+		if strings.Contains(out.String(), notWant) {
+			t.Fatalf("serve reached %q after duplicate agent slug admission failure:\n%s", notWant, out.String())
+		}
+	}
+}
+
+func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	firstRoot := writeServeRuntimeAgentSlugFixture(t, "distinct-agent-slug-a", "alpha-worker")
+	secondRoot := writeServeRuntimeAgentSlugFixture(t, "distinct-agent-slug-b", "beta-worker")
+	firstHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, firstRoot)
+	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, secondRoot)
+	if firstHash == secondHash {
+		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
+	}
+
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:              writeServeRuntimeTestConfig(t),
+		BundleHash:              firstHash,
+		BundleHashes:            []string{secondHash},
+		PlatformSpecPath:        defaultPlatformSpecPath,
+		StoreMode:               "postgres",
+		APIListenAddr:           "127.0.0.1:0",
+		MCPListenAddr:           "127.0.0.1:0",
+		SelfCheck:               true,
+		RequireBundleMatch:      false,
+		Verbose:                 true,
+		TestLLMRuntime:          runtimellm.NoopRuntime{},
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	})
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
+	}
+	for _, want := range []string{firstHash, secondHash, "[22/22] ready"} {
+		if !strings.Contains(serve.outputString(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, serve.outputString())
+		}
+	}
+}
+
 func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrForkchat(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -9856,16 +9945,25 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 
 func seedServeRuntimeBundleCatalog(t *testing.T, ctx context.Context, pg *store.PostgresStore, relativeRoot string) string {
 	t.Helper()
+	return seedServeRuntimeBundleCatalogFromBundle(t, ctx, pg, relativeRoot, loadWorkflowValidationFixtureBundle(t, relativeRoot))
+}
+
+func seedServeRuntimeBundleCatalogRoot(t *testing.T, ctx context.Context, pg *store.PostgresStore, root string) string {
+	t.Helper()
+	return seedServeRuntimeBundleCatalogFromBundle(t, ctx, pg, root, loadWorkflowValidationBundleAt(t, root))
+}
+
+func seedServeRuntimeBundleCatalogFromBundle(t *testing.T, ctx context.Context, pg *store.PostgresStore, label string, bundle *runtimecontracts.WorkflowContractBundle) string {
+	t.Helper()
 	if pg == nil {
 		t.Fatal("postgres store is required")
 	}
 	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
 		t.Fatalf("BindSchemaCapabilities: %v", err)
 	}
-	bundle := loadWorkflowValidationFixtureBundle(t, relativeRoot)
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
-		t.Fatalf("BuildBundleCatalogProjection(%s): %v", relativeRoot, err)
+		t.Fatalf("BuildBundleCatalogProjection(%s): %v", label, err)
 	}
 	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
 		BundleHash:  projection.BundleHash,
@@ -9874,7 +9972,7 @@ func seedServeRuntimeBundleCatalog(t *testing.T, ctx context.Context, pg *store.
 		DataBlob:    projection.DataBlob,
 		Metadata:    projection.Metadata,
 	}); err != nil {
-		t.Fatalf("UpsertBundleCatalog(%s): %v", relativeRoot, err)
+		t.Fatalf("UpsertBundleCatalog(%s): %v", label, err)
 	}
 	return projection.BundleHash
 }
@@ -9898,6 +9996,45 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeServeRuntimeAgentSlugFixture(t *testing.T, workflowName, agentID string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
+name: %s
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows: []
+`, workflowName))
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [agent.requested]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+agent.requested:
+  swarm:
+    source: external
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf(`
+%s:
+  id: %s
+  role: %s
+  prompt_ref: %s
+  model: regular
+  mode: task
+  subscriptions: [agent.requested]
+`, agentID, agentID, agentID, agentID))
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", agentID+".md"), "Handle assigned work.\n")
+	return root
 }
 
 func writeArtifactRepoCommitServeFixture(t *testing.T) string {
