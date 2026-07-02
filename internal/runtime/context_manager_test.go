@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -68,6 +69,71 @@ func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {
 	}
 }
 
+func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
+	_, err := NewRuntimeContextManager(nil,
+		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
+		testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "shared-worker"),
+	)
+	if err == nil {
+		t.Fatal("NewRuntimeContextManager duplicate agent slug error = nil")
+	}
+	for _, want := range []string{
+		`duplicate runtime context agent_id "shared-worker"`,
+		runtimeContextTestHashA,
+		runtimeContextTestHashB,
+		"bundle_source=persisted",
+		"workflow=review@1.0.0",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("duplicate agent slug error missing %q:\n%s", want, err.Error())
+		}
+	}
+}
+
+func TestRuntimeContextManagerRegisterRejectsDuplicateAgentSlugWithoutMutatingManager(t *testing.T) {
+	manager, err := NewRuntimeContextManager(nil,
+		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
+	)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	err = manager.Register(testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "shared-worker"))
+	if err == nil {
+		t.Fatal("Register duplicate agent slug error = nil")
+	}
+	for _, want := range []string{
+		`duplicate runtime context agent_id "shared-worker"`,
+		runtimeContextTestHashA,
+		runtimeContextTestHashB,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Register duplicate agent slug error missing %q:\n%s", want, err.Error())
+		}
+	}
+	if manager.Len() != 1 || manager.MultiContext() {
+		t.Fatalf("manager Len/MultiContext after rejected register = %d/%v, want 1/false", manager.Len(), manager.MultiContext())
+	}
+	if got, want := manager.BundleHashes(), []string{runtimeContextTestHashA}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("BundleHashes after rejected register = %#v, want %#v", got, want)
+	}
+	if _, ok := manager.LookupBundleHash(runtimeContextTestHashB); ok {
+		t.Fatal("LookupBundleHash found rejected duplicate context")
+	}
+}
+
+func TestRuntimeContextManagerAllowsDistinctAgentSlugs(t *testing.T) {
+	manager, err := NewRuntimeContextManager(nil,
+		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "alpha-worker"),
+		testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "beta-worker"),
+	)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager distinct agent slugs: %v", err)
+	}
+	if manager.Len() != 2 || !manager.MultiContext() {
+		t.Fatalf("manager Len/MultiContext = %d/%v, want 2/true", manager.Len(), manager.MultiContext())
+	}
+}
+
 func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
@@ -126,11 +192,25 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 
 func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {
 	t.Helper()
+	return testBundleContextWithAgents(t, bundleHash, eventName)
+}
+
+func testBundleContextWithAgents(t *testing.T, bundleHash, eventName string, agentIDs ...string) BundleContext {
+	t.Helper()
+	agents := map[string]runtimecontracts.AgentRegistryEntry{}
+	for _, agentID := range agentIDs {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		agents[agentID] = runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}
+	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			eventName: {},
 		},
+		Agents: agents,
 	}
 	source := semanticview.Wrap(bundle)
 	bus, err := runtimebus.NewEventBusWithOptions(nil, runtimebus.EventBusOptions{

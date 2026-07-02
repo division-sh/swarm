@@ -1028,6 +1028,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Credentials:      credentialStore,
 	})
 	if err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
 		log.Printf("init runtime context manager: %v", err)
 		return 1
 	}

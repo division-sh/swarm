@@ -1019,7 +1019,9 @@ func TestAgentIdentityModelRecordsCurrentSlugConstraint(t *testing.T) {
 	constraint := mustMappingValue(t, identity, "current_multi_bundle_constraint")
 	assertScalarContains(t, mappingValue(constraint, "rule"), "globally unique authored agent_id values")
 	assertScalarContains(t, mappingValue(constraint, "rule"), "Duplicate authored agent slugs across live loaded BundleContexts are unsupported")
-	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add runtime/store enforcement")
+	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "RuntimeContextManager admission enforces")
+	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "fail closed before API readiness")
+	assertScalarContains(t, mappingValue(constraint, "enforcement_status"), "does not add duplicate-slug support")
 
 	migration := mustMappingValue(t, identity, "uuid_internal_migration_target")
 	assertScalarValue(t, mappingValue(migration, "tracker"), "#977")
