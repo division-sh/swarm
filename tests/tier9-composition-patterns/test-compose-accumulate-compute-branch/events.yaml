@@ -1,5 +1,7 @@
 score.submitted:
   entity_id: string
+  required:
+    - entity_id
   value: number
 result.high:
   entity_id: string

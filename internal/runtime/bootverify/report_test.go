@@ -4909,9 +4909,36 @@ root-observer:
 	}
 }
 
-func TestRun_AllowsRootDefaultStaticInputPinMaterializationWithDeclaredEntityID(t *testing.T) {
+func TestRun_RejectsRootDefaultStaticInputPinMaterializationWithOptionalEntityID(t *testing.T) {
 	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
 		DeclareEntityID: true,
+		Nodes: `
+root-writer:
+  id: root-writer
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  event_handlers:
+    subject.created:
+      data_accumulation:
+        writes:
+          - source_field: display_name
+            target_field: display_name
+`,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("optional entity_id must not prove root/default-static ownership, got %#v", report.Errors())
+	}
+}
+
+func TestRun_AllowsRootDefaultStaticInputPinMaterializationWithRequiredEntityID(t *testing.T) {
+	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
+		DeclareEntityID: true,
+		RequireEntityID: true,
 		Nodes: `
 root-writer:
   id: root-writer
@@ -4932,7 +4959,7 @@ root-writer:
 	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
 		reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
 		reportContains(report.Errors(), "missing_external_select_entity", "") {
-		t.Fatalf("root/default-static handler with declared entity_id owner must not be forced into retired acquisition, got %#v", report.Errors())
+		t.Fatalf("root/default-static handler with required entity_id owner must not be forced into retired acquisition, got %#v", report.Errors())
 	}
 }
 
@@ -5884,6 +5911,7 @@ func writeRootDefaultStaticInputPinFixture(t *testing.T, rootNodes string) strin
 
 type rootDefaultStaticInputPinFixtureOptions struct {
 	DeclareEntityID bool
+	RequireEntityID bool
 	Nodes           string
 }
 
@@ -5912,13 +5940,20 @@ pins:
 	if opts.DeclareEntityID {
 		entityIDField = "  entity_id: string\n"
 	}
+	entityIDRequired := ""
+	if opts.RequireEntityID {
+		entityIDField = "  entity_id: string\n"
+		entityIDRequired = "  required:\n    - entity_id\n"
+	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 subject.created:
   swarm:
     source: external
 `+entityIDField+`  display_name: string
+`+entityIDRequired+`
 subject.observed:
 `+entityIDField+`  display_name: string
+`+entityIDRequired+`
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 subject:

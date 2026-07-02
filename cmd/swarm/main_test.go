@@ -3971,10 +3971,11 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing
 
 func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
+	bootstrapEntityID := "22222222-2222-4222-8222-222222222222"
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "opco.bootstrap_requested",
 		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"owner": "operator"},
+		"payload":         map[string]any{"entity_id": bootstrapEntityID, "owner": "operator"},
 		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
 	})
 	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
@@ -3982,6 +3983,9 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	}
 	runID := bootstrap.RunID
 	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	if parentEntityID != bootstrapEntityID {
+		t.Fatalf("%s bootstrap entity_id = %q, want supplied %q", backend, parentEntityID, bootstrapEntityID)
+	}
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	start := time.Now()
@@ -4088,6 +4092,8 @@ thing.created:
   entity_id: string
   amount: integer
   who: text
+  required:
+    - entity_id
 
 thing.reviewed:
   swarm:
@@ -4171,6 +4177,8 @@ opco.bootstrap_requested:
     source: external
   entity_id: string
   owner: text
+  required:
+    - entity_id
 
 opco.spinup_requested:
   swarm:
@@ -4320,6 +4328,8 @@ opco.bootstrap_requested:
     source: external
   entity_id: string
   owner: text
+  required:
+    - entity_id
 
 opco.spinup_requested:
   swarm:
@@ -4630,10 +4640,11 @@ const (
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
+	initialEntityID := "11111111-1111-4111-8111-111111111111"
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "thing.created",
 		"--bundle-hash", bundleHash,
-		"--payload-json", `{"amount":7,"who":"operator"}`,
+		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"amount":7,"who":"operator"}`, initialEntityID),
 		"--idempotency-key", "issue-1255-" + backend + "-initial",
 	})
 	if code != 0 {
@@ -4653,7 +4664,10 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	requireServedEventReadback(t, endpoint, initialEventID, runID, runID, "thing.created", "entity-writer")
+	if entityID != initialEntityID {
+		t.Fatalf("%s initial entity_id = %q, want supplied %q", backend, entityID, initialEntityID)
+	}
+	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "thing.created", "entity-writer")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
 	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
@@ -4744,10 +4758,11 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 
 func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
+	bootstrapEntityID := "22222222-2222-4222-8222-222222222222"
 	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "opco.bootstrap_requested",
 		"--bundle-hash", bundleHash,
-		"--payload-json", `{"owner":"operator"}`,
+		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"owner":"operator"}`, bootstrapEntityID),
 		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
 	})
 	if code != 0 {
@@ -4760,6 +4775,9 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
 	}
 	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	if parentEntityID != bootstrapEntityID {
+		t.Fatalf("%s bootstrap entity_id = %q, want supplied %q", backend, parentEntityID, bootstrapEntityID)
+	}
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
@@ -4832,10 +4850,11 @@ func runServedEventPublishActiveLoadProof(
 	releaseOnce *sync.Once,
 ) {
 	t.Helper()
+	initialEntityID := "11111111-1111-4111-8111-111111111111"
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "thing.created",
 		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"amount": 7, "who": "operator"},
+		"payload":         map[string]any{"entity_id": initialEntityID, "amount": 7, "who": "operator"},
 		"idempotency_key": "issue-1434-" + backend + "-initial",
 	})
 	runID := initial.RunID
@@ -4845,6 +4864,9 @@ func runServedEventPublishActiveLoadProof(
 	}
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	if entityID != initialEntityID {
+		t.Fatalf("%s initial entity_id = %q, want supplied %q", backend, entityID, initialEntityID)
+	}
 
 	holdStart := time.Now()
 	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{

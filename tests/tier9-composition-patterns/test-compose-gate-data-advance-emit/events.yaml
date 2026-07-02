@@ -1,8 +1,12 @@
 stage.one_done:
   entity_id: string
+  required:
+    - entity_id
   result: string
 stage.two_done:
   entity_id: string
+  required:
+    - entity_id
   result: string
 stage.two_start:
   entity_id: string

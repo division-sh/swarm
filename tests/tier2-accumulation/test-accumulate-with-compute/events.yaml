@@ -2,6 +2,8 @@ score.received:
   swarm:
     source: external
   entity_id: string
+  required:
+    - entity_id
   dimension: string
   score: float
 scores.aggregated:

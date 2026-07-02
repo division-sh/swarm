@@ -1,5 +1,7 @@
 conflict.submitted:
   entity_id: string
+  required:
+    - entity_id
   strategy: string
   value_a: string
   value_b: string

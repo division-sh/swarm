@@ -2,6 +2,8 @@ item.arrived:
   swarm:
     source: external
   entity_id: string
+  required:
+    - entity_id
   item_id: string
 collection.done:
   entity_id: string
