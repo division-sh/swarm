@@ -131,6 +131,7 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 		})
 	}
 	add("handler.emit", handler.Emit)
+	add("handler.on_success.emit", handler.OnSuccess.Emit)
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", handler.FanOut.Emit)
 	}

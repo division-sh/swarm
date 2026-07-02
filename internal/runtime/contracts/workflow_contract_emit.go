@@ -1,6 +1,9 @@
 package contracts
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 	out := make([]string, 0, 8)
@@ -10,6 +13,9 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 	out = append(out, actionResultEvents(handler.Action)...)
 	for _, rule := range handler.Rules {
 		out = append(out, ruleEmitEvents(rule)...)
+	}
+	if eventType := handler.OnSuccess.Emit.EventType(); eventType != "" {
+		out = append(out, eventType)
 	}
 	for _, rule := range handler.OnComplete {
 		out = append(out, ruleEmitEvents(rule)...)
@@ -95,6 +101,36 @@ func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
 
 func HandlerHasAmbiguousTopLevelEmit(handler SystemNodeEventHandler) bool {
 	return !handler.Emit.Empty() && HandlerHasNestedEmitSites(handler)
+}
+
+func HandlerEmitSiteOwnershipError(handler SystemNodeEventHandler) error {
+	if HandlerHasAmbiguousTopLevelEmit(handler) {
+		return fmt.Errorf("AMBIGUOUS-EMIT: handler-top-level emit is only allowed on single-emit handlers; move emit ownership to the active branch, rule, timeout, or fan_out site")
+	}
+	if handler.OnSuccess.Empty() {
+		return nil
+	}
+	if !handler.Emit.Empty() {
+		return fmt.Errorf("AMBIGUOUS-EMIT: handler on_success.emit cannot be combined with handler-level emit")
+	}
+	if len(handler.Rules) == 0 {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is only supported on handlers with rules")
+	}
+	if len(handler.OnComplete) > 0 {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with on_complete")
+	}
+	if handler.FanOut != nil {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with fan_out")
+	}
+	if handler.Accumulate != nil {
+		if len(handler.Accumulate.OnComplete) > 0 {
+			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with accumulate.on_complete")
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			return fmt.Errorf("UNSUPPORTED-EMIT: handler on_success.emit is not supported with accumulate.on_timeout")
+		}
+	}
+	return nil
 }
 
 func HandlerHasAmbiguousTopLevelAction(handler SystemNodeEventHandler) bool {

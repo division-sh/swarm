@@ -126,6 +126,38 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
+func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*s = HandlerOnSuccessSpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("unsupported on_success yaml node kind %d", node.Kind)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		switch key {
+		case "", "emit":
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: on_success field %q not in platform spec", key)
+		}
+	}
+	var aux struct {
+		Emit EmitSpec `yaml:"emit"`
+	}
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = HandlerOnSuccessSpec{Emit: aux.Emit}
+	if !s.Empty() && s.Emit.EventType() == "" {
+		return fmt.Errorf("INVALID-EMIT: on_success.emit.event is required")
+	}
+	return nil
+}
+
 func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
 		return EmitTargetSpec{}, nil
@@ -563,6 +595,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		EvidenceTarget       string                   `yaml:"evidence_target"`
 		Description          string                   `yaml:"description"`
 		Emit                 EmitSpec                 `yaml:"emit"`
+		OnSuccess            HandlerOnSuccessSpec     `yaml:"on_success"`
 		Guard                yaml.Node                `yaml:"guard"`
 		AdvancesTo           yaml.Node                `yaml:"advances_to"`
 		SetsGate             yaml.Node                `yaml:"sets_gate"`
@@ -593,6 +626,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		EvidenceTarget:   strings.TrimSpace(aux.EvidenceTarget),
 		Description:      strings.TrimSpace(aux.Description),
 		Emit:             aux.Emit,
+		OnSuccess:        aux.OnSuccess,
 		DataAccumulation: aux.DataAccumulation,
 		Condition:        strings.TrimSpace(aux.Condition),
 		CompletionRule:   strings.TrimSpace(aux.CompletionRule),
@@ -657,8 +691,8 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	if h.Branch, err = decodeBranchSpecsNode(&aux.Branch); err != nil {
 		return err
 	}
-	if HandlerHasAmbiguousTopLevelEmit(*h) {
-		return fmt.Errorf("AMBIGUOUS-EMIT: handler-top-level emit is only allowed on single-emit handlers; move emit ownership to the active branch, rule, timeout, or fan_out site")
+	if err := HandlerEmitSiteOwnershipError(*h); err != nil {
+		return err
 	}
 	if HandlerHasAmbiguousTopLevelAction(*h) {
 		return fmt.Errorf("AMBIGUOUS-ACTION: handler-top-level action is only allowed on handlers without rules; move action ownership to the active rule")
@@ -898,6 +932,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"select_entity":           {},
 		"select_or_create_entity": {},
 		"emit":                    {},
+		"on_success":              {},
 		"guard":                   {},
 		"advances_to":             {},
 		"sets_gate":               {},

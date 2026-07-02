@@ -129,6 +129,7 @@ type HandlerTransitionSemantic struct {
 	ClearGates           []string
 	DataAccumulation     WorkflowDataAccumulation
 	Emit                 EmitSpec
+	OnSuccess            HandlerOnSuccessSpec
 	Condition            string
 	CompletionRule       string
 	OnComplete           []HandlerRuleEntry
@@ -266,6 +267,14 @@ type FanOutSpec struct {
 	Target    string     `yaml:"target"`
 	Emit      EmitSpec   `yaml:"emit"`
 }
+type HandlerOnSuccessSpec struct {
+	Emit EmitSpec `yaml:"emit"`
+}
+
+func (s HandlerOnSuccessSpec) Empty() bool {
+	return s.Emit.Empty()
+}
+
 type GroupBySpec struct {
 	ItemsFrom string     `yaml:"items_from"`
 	ItemsPath paths.Path `yaml:"-"`
@@ -1215,6 +1224,7 @@ type SystemNodeEventHandler struct {
 	Description          string                    `yaml:"description"`
 	EvidenceTarget       string                    `yaml:"evidence_target"`
 	Emit                 EmitSpec                  `yaml:"emit"`
+	OnSuccess            HandlerOnSuccessSpec      `yaml:"on_success"`
 	Guard                *GuardSpec                `yaml:"guard"`
 	AdvancesTo           string                    `yaml:"advances_to"`
 	SetsGate             *GateSpec                 `yaml:"sets_gate"`

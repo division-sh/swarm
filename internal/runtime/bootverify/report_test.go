@@ -3418,6 +3418,46 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 	}
 }
 
+func TestRun_ErrorsForOnSuccessEmitSitePayloadDrift(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	bundle.Events["market_research.audit_logged"] = runtimecontracts.EventCatalogEntry{
+		Payload: runtimecontracts.EventPayloadSpec{
+			Properties: map[string]runtimecontracts.EventFieldSpec{
+				"audit_id": {Type: "string"},
+			},
+		},
+		Required: []string{"audit_id"},
+	}
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{}
+	handler.OnSuccess = runtimecontracts.HandlerOnSuccessSpec{
+		Emit: runtimecontracts.EmitSpec{Event: "market_research.audit_logged"},
+	}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		ID:        "complete",
+		Condition: "else",
+		Emit: runtimecontracts.EmitSpec{
+			Event: "market_research.scan_assigned",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+			},
+		},
+	}}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.on_success.emit") {
+		t.Fatalf("expected payload completeness error for on_success emit site, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "audit_id is not statically provable") {
+		t.Fatalf("expected missing audit_id error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ErrorsForOnCompleteEmitSitePayloadDrift(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	node := bundle.Nodes["dispatcher"]

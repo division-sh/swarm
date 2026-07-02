@@ -68,3 +68,18 @@ func TestHandlerHasNestedEmitSitesIncludesBranch(t *testing.T) {
 		t.Fatal("HandlerHasNestedEmitSites() = false, want true for branch emit sites")
 	}
 }
+
+func TestHandlerEmitEventsIncludesOnSuccessAfterRules(t *testing.T) {
+	handler := SystemNodeEventHandler{
+		OnSuccess: HandlerOnSuccessSpec{Emit: EmitSpec{Event: "handler.succeeded"}},
+		Rules: []HandlerRuleEntry{{
+			Emit: EmitSpec{Event: "rule.emitted"},
+		}},
+	}
+
+	got := HandlerEmitEvents(handler)
+	want := []string{"rule.emitted", "handler.succeeded"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
+	}
+}
