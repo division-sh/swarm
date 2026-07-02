@@ -1200,7 +1200,7 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"mailbox_read_api_after_mailbox_write",
 		"mailbox_read_cli",
 		"serve_dev_abandon_active_runs",
-		"handler_create_entity_exact_once",
+		"handler_static_create_entity_retirement",
 		"remaining_openrpc_selected_backend_tail",
 		"bundle_hash_catalog_boot_postgres_only",
 	})

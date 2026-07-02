@@ -181,7 +181,7 @@ func TestRedundantInTopologySelectEntityAllowsTemplateInstanceConnectReplacement
 	}
 }
 
-func TestRedundantInTopologySelectEntityAllowsExternalAndMixedProvenanceAcquisition(t *testing.T) {
+func TestRedundantInTopologySelectEntityRejectsExternalAndMixedStaticAcquisitionByRetirement(t *testing.T) {
 	tests := []struct {
 		name         string
 		acquisition  string
@@ -205,10 +205,10 @@ func TestRedundantInTopologySelectEntityAllowsExternalAndMixedProvenanceAcquisit
 
 			if reportContains(report.Errors(), "redundant_in_topology_select_entity", "") ||
 				reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
-				t.Fatalf("external/mixed provenance acquisition must remain allowed, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+				t.Fatalf("external/mixed provenance must not be mislabeled as in-topology, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
 			}
-			if reportContains(report.Errors(), "select_entity_validation", "") {
-				t.Fatalf("external/mixed provenance acquisition should keep valid binding semantics, got %#v", report.Errors())
+			if !reportContains(report.Errors(), "select_entity_validation", "static multi-row entity ownership is retired") {
+				t.Fatalf("external/mixed static acquisition should fail closed by #1554 retirement, got %#v", report.Errors())
 			}
 		})
 	}
@@ -227,6 +227,9 @@ func TestRedundantInTopologySelectEntityIgnoresProducerConnectedOnlyToOtherRecei
 	if reportContains(report.Errors(), "redundant_in_topology_select_entity", "") ||
 		reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
 		t.Fatalf("producer connected only to another receiver must not prove in-topology authority for this receiver, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+	if !reportContains(report.Errors(), "select_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("static receiver selection should still fail closed by #1554 retirement, got %#v", report.Errors())
 	}
 }
 
@@ -948,7 +951,6 @@ producer-node:
   execution_type: system_node
   event_handlers:
     deploy.requested:
-      create_entity: true
       emit:
         event: deploy.done
         fields:

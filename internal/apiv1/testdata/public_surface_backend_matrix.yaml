@@ -448,26 +448,24 @@ rows:
       - kind: go_test
         name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon
 
-  - id: handler_create_entity_exact_once
-    surface: create-entity handler effect exact-once and mutation-log cardinality after #1253
+  - id: handler_static_create_entity_retirement
+    surface: retired static create_entity handler fail-closed admission after #1554
     classification: already_covered_by_existing_proof
     tier: full_conformance
     backends: [postgres_only]
     store_owners:
-      - WorkflowInstanceStore
-      - SystemNodeProcessed receipt owner
-      - mutation_log
-    proof_dimensions: [canonical_store_owner, full_conformance]
+      - runtimebootverify.Run
+      - flow_boundary_create_entity_validation
+    proof_dimensions: [fail_closed, full_conformance]
     proof_refs:
       - kind: go_test
-        name: TestCatalogCreateEntityHandlerEffectCardinality
+        name: TestCatalogRejectsStaticCreateEntityHandlerFixture
       - kind: manual_command
         command: go test ./internal/runtime/cataloge2e -count=1
     notes: >
-      This is a Postgres-only semantic correctness/full conformance row, not a
-      basic API or CLI registration row. It must not be used as SQLite
-      conformance proof unless a SQLite catalog E2E harness is added under a
-      separate gate.
+      #1554 retires authored static create_entity ownership. The old positive
+      exact-once mutation-log fixture is no longer a valid public-surface proof;
+      the supported proof is fail-closed admission before runtime startup.
 
   - id: remaining_openrpc_selected_backend_tail
     surface: remaining supported OpenRPC methods without selected-backend public-surface classification

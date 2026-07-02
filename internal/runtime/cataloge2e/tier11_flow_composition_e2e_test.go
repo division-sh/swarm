@@ -41,11 +41,33 @@ var tier11StartedRuntimeFixtures = map[string]struct{}{
 	"test-required-agents-child": {},
 }
 
+var tier11StaticMultiEntityRetiredFixtures = map[string]struct{}{
+	"test-child-flow-loads":                   {},
+	"test-child-flow-local-events":            {},
+	"test-nested-three-levels":                {},
+	"test-child-flow-pin-wiring":              {},
+	"test-child-flow-policy-inherit":          {},
+	"test-child-flow-tool-inherit":            {},
+	"test-data-pin-wiring":                    {},
+	"test-data-pin-write-conflict":            {},
+	"test-gates-in-child-flow":                {},
+	"test-child-flow-sibling-isolation":       {},
+	"test-multi-level-policy-inherit":         {},
+	"test-sibling-both-instantiated-isolated": {},
+	"test-subject-id-cross-flow-inherit":      {},
+	"test-subject-id-first-flow-seeds":        {},
+}
+
 func TestTier11FlowCompositionCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier11FlowCompositionFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", fixtureName)
 		t.Run(fixtureName, func(t *testing.T) {
+			if _, retired := tier11StaticMultiEntityRetiredFixtures[fixtureName]; retired {
+				assertCatalogStaticMultiEntityRetirement(t, fixtureRoot)
+				return
+			}
+
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
