@@ -100,6 +100,7 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"forkchat", "view"},
 		{"forkchat", "delete"},
 		{"doctor"},
+		{"serve"},
 	}
 	for _, command := range leafCommands {
 		if argsHaveCommandPrefix(prefix, command) {

@@ -488,6 +488,33 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	}
 }
 
+func TestServeContextFlagPassesRootPrevalidation(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var stdout, stderr bytes.Buffer
+	called := false
+	var got serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		called = true
+		got = serveOpts
+		return 0
+	}
+
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--dev", "--context", "named"}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !called {
+		t.Fatal("serve runner was not called")
+	}
+	if got.ContextName != "named" || !got.ContextNameSet {
+		t.Fatalf("serve context = %q set=%v, want named/set", got.ContextName, got.ContextNameSet)
+	}
+	if strings.Contains(stderr.String(), "unknown flag: --context") {
+		t.Fatalf("serve context flag was rejected by prevalidation: %s", stderr.String())
+	}
+}
+
 func TestAPIConnectionFlagsDriveRuntimeStateCommand(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	tokenFile := writeCLIAPITokenFile(t, "flag-token")
@@ -732,6 +759,15 @@ func TestCLIAPIProjectContextFailureClassesFailClosed(t *testing.T) {
 				writeCLIAPITestContext(t, registry, "b", "runtime-b", b.URL, project.canonicalRoot)
 			},
 			wantError: "multiple live project contexts",
+		},
+		{
+			name: "live plus stale",
+			setup: func(t *testing.T, registry localContextRegistry, project cliAPITestProject) {
+				server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
+				writeCLIAPITestContext(t, registry, "live", "runtime-live", server.URL, project.canonicalRoot)
+				writeCLIAPITestContext(t, registry, "stale", "runtime-stale", "http://127.0.0.1:1", project.canonicalRoot)
+			},
+			wantError: "no_server",
 		},
 		{
 			name: "corrupt descriptor",

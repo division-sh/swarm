@@ -80,23 +80,33 @@ func resolveServeContextRegistrationSwarmDir(opts serveOptions) (cliSwarmDirReso
 }
 
 func guardServeProjectContext(ctx context.Context, registry localContextRegistry, project cliProjectResolution, contextName string, explicitContext bool) error {
+	allEntries, err := registry.ListDescriptors()
+	if err != nil {
+		return fmt.Errorf("inspect context registry: %w", err)
+	}
 	entries, err := registry.ProjectEntries(ctx, project.canonicalProjectRoot, cliRuntimeIdentityCaller{})
 	if err != nil {
 		return fmt.Errorf("inspect project contexts: %w", err)
 	}
 	if explicitContext {
-		for _, entry := range entries {
-			if entry.Descriptor.Name == contextName {
-				if serveProjectContextEntryReclaimable(entry) {
-					if err := registry.DeleteDescriptor(entry.Descriptor.Name); err != nil {
-						return fmt.Errorf("reclaim stale project context %s: %w", contextName, err)
-					}
-					return nil
-				}
-				return fmt.Errorf("context %s already exists for project %s (%s); run `swarm context prune` after confirming stale entries, or choose another --context", contextName, project.canonicalProjectRoot, entry.Status)
-			}
+		existing, exists := serveProjectContextEntryByName(allEntries, contextName)
+		if !exists {
+			return nil
 		}
-		return nil
+		if projectEntry, sameProject := serveProjectContextEntryByName(entries, contextName); sameProject {
+			if serveProjectContextEntryReclaimable(projectEntry) {
+				if err := registry.DeleteDescriptor(projectEntry.Descriptor.Name); err != nil {
+					return fmt.Errorf("reclaim stale project context %s: %w", contextName, err)
+				}
+				return nil
+			}
+			return fmt.Errorf("context %s already exists for project %s (%s); run `swarm context prune` after confirming stale entries, or choose another --context", contextName, project.canonicalProjectRoot, projectEntry.Status)
+		}
+		existingProject := strings.TrimSpace(existing.Descriptor.ProjectRoot)
+		if existingProject == "" {
+			existingProject = "<unknown>"
+		}
+		return fmt.Errorf("context %s already exists for project %s (%s); context names are global, choose another --context", contextName, existingProject, existing.Status)
 	}
 	if len(entries) == 0 {
 		return nil
@@ -127,6 +137,15 @@ func guardServeProjectContext(ctx context.Context, registry localContextRegistry
 		parts = append(parts, fmt.Sprintf("%s=%s", name, entry.Status))
 	}
 	return fmt.Errorf("project %s already has context descriptors (%s); refusing bare `swarm serve --dev` to avoid orphaning a runtime; run `swarm context prune` for stale entries or pass --context for an intentional second runtime", project.canonicalProjectRoot, strings.Join(parts, ", "))
+}
+
+func serveProjectContextEntryByName(entries []localContextEntry, contextName string) (localContextEntry, bool) {
+	for _, entry := range entries {
+		if entry.Descriptor.Name == contextName {
+			return entry, true
+		}
+	}
+	return localContextEntry{}, false
 }
 
 func serveProjectContextEntryReclaimable(entry localContextEntry) bool {
