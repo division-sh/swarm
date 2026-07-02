@@ -1771,7 +1771,7 @@ handler_specification:
         sub_fields:
           emit: emit spec — additive success/audit/lifecycle event emitted after the selected rules emit.
         rules_only: on_success.emit is supported only on handlers with rules in this slice. It is not supported with on_complete,
-          accumulate.on_timeout, fan_out, handler-level action, or bare handler-level emit.
+          accumulate.on_timeout, handler-level fan_out, rule-level fan_out, handler-level action, or bare handler-level emit.
         ordering: When a rule matches and has emit, the rule emit is materialized first and on_success.emit second. Both events
           are emitted after rule selection, state/gate/data/projection side effects, and emit.fields evaluation for their own
           active emit site, before the handler transaction commits.
