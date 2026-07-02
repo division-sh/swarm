@@ -5780,6 +5780,27 @@ flow_model:
         typed_map_list_update_verification: '#1548'
         singleton_coordinator_contract: '#1549'
         expand_minimize_tooling: '#1551'
+      expand_minimize_tooling:
+        status: merge_bearing_supported_tooling
+        implementation_tracker: '#1551'
+        command: swarm describe
+        canonical_code_owner: internal/runtime/authoringview.Build + cmd/swarm describe
+        rule: >
+          The supported expanded authoring view is a projection over existing
+          semantic owners. It must expose inferred primary entity, template
+          instance declaration/policy, output pin `key`/`carries`, connect
+          route plans, explicit and implicit key mappings,
+          singleton/coordinator boundaries, typed contained-state operations,
+          and retired static multi-entity diagnostics without becoming a new
+          semantic owner or reimplementing verifier/runtime decisions.
+        source_location_rule: >
+          Diagnostics in the expanded view must carry check_id plus authored
+          YAML file or other stable authored location derived from contract
+          bundle source metadata.
+        non_authoritative_paths:
+        - CLI-local verifier decisions
+        - API-local verifier decisions
+        - generated expanded YAML as merge authority
     non_goals:
     - '#1538 does not implement verifier/runtime behavior.'
     - '#1538 does not migrate Empire contracts.'
