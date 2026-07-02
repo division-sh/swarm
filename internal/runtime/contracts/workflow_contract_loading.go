@@ -153,8 +153,13 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	errs := make([]error, 0, 8)
 	for nodeID, node := range bundle.Nodes {
 		nodeID = strings.TrimSpace(nodeID)
-		if err := ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
-			errs = append(errs, fmt.Errorf("%w: node %s %v", ErrInvalidField, nodeID, err))
+		if authoredID := strings.TrimSpace(node.ID); !SystemNodeIDMatchesKey(nodeID, authoredID) {
+			errs = append(errs, fmt.Errorf("%w: node %s id %q must match map key", ErrInvalidField, nodeID, authoredID))
+		}
+		if strings.TrimSpace(node.ExecutionType) != "" {
+			if err := ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+				errs = append(errs, fmt.Errorf("%w: node %s %v", ErrInvalidField, nodeID, err))
+			}
 		}
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)

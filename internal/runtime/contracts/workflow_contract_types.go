@@ -96,10 +96,18 @@ type WorkflowSemanticView struct {
 	CompositionConnects    []FlowPackageConnect
 	FlowAgents             map[string][]FlowRequiredAgent
 	WritePinOwners         map[string][]string
+	EffectiveNodes         map[string]SystemNodeEffectiveSemantics
 	NodeHandlers           map[string]map[string]SystemNodeEventHandler
 	EventOwners            map[string][]string
 	HandlerTransitions     []HandlerTransitionSemantic
 	HandlerTransitionIndex map[string]map[string]HandlerTransitionSemantic
+}
+
+type SystemNodeEffectiveSemantics struct {
+	ID                   string
+	ExecutionType        string
+	RuntimeSubscriptions []string
+	Produces             []string
 }
 
 type FlowInputAutoWireResolution struct {

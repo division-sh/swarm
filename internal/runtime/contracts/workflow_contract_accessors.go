@@ -638,8 +638,8 @@ func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItem
 		return source, true
 	}
 	for _, view := range b.ProjectViews() {
-		for key, entry := range view.Nodes {
-			if strings.TrimSpace(key) != nodeID && strings.TrimSpace(entry.ID) != nodeID {
+		for key := range view.Nodes {
+			if strings.TrimSpace(key) != nodeID {
 				continue
 			}
 			return ContractItemSource{
@@ -649,8 +649,8 @@ func (b *WorkflowContractBundle) NodeContractSource(nodeID string) (ContractItem
 		}
 	}
 	for _, view := range b.FlowViews() {
-		for key, entry := range view.Nodes {
-			if strings.TrimSpace(key) != nodeID && strings.TrimSpace(entry.ID) != nodeID {
+		for key := range view.Nodes {
+			if strings.TrimSpace(key) != nodeID {
 				continue
 			}
 			return ContractItemSource{
@@ -687,31 +687,66 @@ func (b *WorkflowContractBundle) NodeRuntimeSubscriptions(nodeID string) []strin
 	if b == nil || nodeID == "" {
 		return nil
 	}
+	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
+		return append([]string{}, effective.RuntimeSubscriptions...)
+	}
 	entry, ok := b.nodeContract(nodeID)
 	if !ok {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	out := make([]string, 0, len(entry.SubscribesTo)+len(entry.EventHandlers))
-	appendSubscription := func(value string) {
-		value = eventidentity.Normalize(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
+	return EffectiveSystemNodeSubscriptions(entry)
+}
+
+func (b *WorkflowContractBundle) NodeEffectiveProduces(nodeID string) []string {
+	nodeID = strings.TrimSpace(nodeID)
+	if b == nil || nodeID == "" {
+		return nil
 	}
-	for _, eventType := range entry.SubscribesTo {
-		appendSubscription(eventType)
+	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
+		return append([]string{}, effective.Produces...)
 	}
-	for _, eventType := range b.NodeHandlerSubscriptions(nodeID) {
-		appendSubscription(eventType)
+	entry, ok := b.nodeContract(nodeID)
+	if !ok {
+		return nil
 	}
-	sort.Strings(out)
-	return out
+	return EffectiveSystemNodeProduces(entry)
+}
+
+func (b *WorkflowContractBundle) NodeEffectiveExecutionType(nodeID string) string {
+	nodeID = strings.TrimSpace(nodeID)
+	if b == nil || nodeID == "" {
+		return ""
+	}
+	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
+		return strings.TrimSpace(effective.ExecutionType)
+	}
+	entry, ok := b.nodeContract(nodeID)
+	if !ok {
+		return ""
+	}
+	return EffectiveSystemNodeExecutionType(entry)
+}
+
+func (b *WorkflowContractBundle) NodeEffectiveSemantics(nodeID string) (SystemNodeEffectiveSemantics, bool) {
+	nodeID = strings.TrimSpace(nodeID)
+	if b == nil || nodeID == "" {
+		return SystemNodeEffectiveSemantics{}, false
+	}
+	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
+		effective.RuntimeSubscriptions = append([]string{}, effective.RuntimeSubscriptions...)
+		effective.Produces = append([]string{}, effective.Produces...)
+		return effective, true
+	}
+	entry, ok := b.nodeContract(nodeID)
+	if !ok {
+		return SystemNodeEffectiveSemantics{}, false
+	}
+	return SystemNodeEffectiveSemantics{
+		ID:                   EffectiveSystemNodeID(nodeID, entry),
+		ExecutionType:        EffectiveSystemNodeExecutionType(entry),
+		RuntimeSubscriptions: EffectiveSystemNodeSubscriptions(entry),
+		Produces:             EffectiveSystemNodeProduces(entry),
+	}, true
 }
 func (b *WorkflowContractBundle) ScopedAgentEntries() map[string]AgentRegistryEntry {
 	if b == nil {
@@ -778,29 +813,14 @@ func (b *WorkflowContractBundle) nodeContract(nodeID string) (SystemNodeContract
 	if entry, ok := b.Nodes[nodeID]; ok {
 		return entry, true
 	}
-	for _, entry := range b.Nodes {
-		if strings.TrimSpace(entry.ID) == nodeID {
-			return entry, true
-		}
-	}
 	for _, view := range b.ProjectViews() {
 		if entry, ok := view.Nodes[nodeID]; ok {
 			return entry, true
-		}
-		for _, entry := range view.Nodes {
-			if strings.TrimSpace(entry.ID) == nodeID {
-				return entry, true
-			}
 		}
 	}
 	for _, view := range b.FlowViews() {
 		if entry, ok := view.Nodes[nodeID]; ok {
 			return entry, true
-		}
-		for _, entry := range view.Nodes {
-			if strings.TrimSpace(entry.ID) == nodeID {
-				return entry, true
-			}
 		}
 	}
 	return SystemNodeContract{}, false

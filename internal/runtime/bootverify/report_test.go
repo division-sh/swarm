@@ -3159,6 +3159,35 @@ func TestRun_DoesNotWarnForProducesDriftWhenDeclaredEventsMatchEmits(t *testing.
 	}
 }
 
+func TestRun_DoesNotWarnForProducesDriftWhenProducesOmitted(t *testing.T) {
+	bundle := bootverifyDeclarationDriftBundle()
+	node := bundle.Nodes["producer"]
+	node.Produces = nil
+	bundle.Nodes["producer"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "produces_drift", "outside produces list") {
+		t.Fatalf("unexpected produces_drift warning for omitted produces, got %#v", report.Warnings())
+	}
+	if reportContains(report.Warnings(), "phantom_produces", "no handler emits") {
+		t.Fatalf("unexpected phantom_produces warning for omitted produces, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_ExplicitEmptyProducesRemainsAssertion(t *testing.T) {
+	bundle := bootverifyDeclarationDriftBundle()
+	node := bundle.Nodes["producer"]
+	node.Produces = []string{}
+	bundle.Nodes["producer"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Warnings(), "produces_drift", "outside produces list") {
+		t.Fatalf("expected produces_drift warning for explicit empty produces assertion, got %#v", report.Warnings())
+	}
+}
+
 func TestRun_MapsPhantomProducesToNamedWarning(t *testing.T) {
 	bundle := bootverifyDeclarationDriftBundle()
 	bundle.Nodes["producer"] = runtimecontracts.SystemNodeContract{

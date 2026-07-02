@@ -236,12 +236,12 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 			agentEvents[role] = appendUniqueSortedEvent(agentEvents[role], eventType)
 		}
 	}
-	for nodeID, node := range source.NodeEntries() {
+	for nodeID := range source.NodeEntries() {
 		role := canonicalRole(nodeID)
 		if role == "" {
 			continue
 		}
-		for _, eventType := range node.Produces {
+		for _, eventType := range semanticview.NodeEffectiveProduces(source, nodeID) {
 			agentEvents[role] = appendUniqueSortedEvent(agentEvents[role], eventType)
 		}
 	}

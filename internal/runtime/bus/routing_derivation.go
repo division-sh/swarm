@@ -250,7 +250,7 @@ func (rt *RouteTable) AddFlowInstanceRoute(req FlowInstanceRouteMaterializationR
 		Type: "node",
 		Path: instancePath,
 	}
-	for _, rawPattern := range normalizeStringList(req.Template.SubscribesTo) {
+	for _, rawPattern := range runtimecontracts.EffectiveSystemNodeSubscriptions(req.Template) {
 		for _, resolved := range routeResolveSubscriberPatterns(rt.source, "", templateID, nil, instancePath, localEvents, rawPattern) {
 			if strings.TrimSpace(resolved.EventPattern) == "" {
 				continue
@@ -387,18 +387,19 @@ func (rt *RouteTable) addTopLevelRootInputNodeRoutesLocked(source semanticview.S
 	for _, eventType := range sortedStringKeys(rootInputs) {
 		for _, key := range sortedStringKeys(bundle.Nodes) {
 			entry := bundle.Nodes[key]
-			nodeID := strings.TrimSpace(entry.ID)
-			if nodeID == "" {
-				nodeID = strings.TrimSpace(key)
+			semanticNodeID := strings.TrimSpace(key)
+			subscriberID := strings.TrimSpace(entry.ID)
+			if subscriberID == "" {
+				subscriberID = semanticNodeID
 			}
-			if nodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(nodeID), eventType) {
+			if semanticNodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(semanticNodeID), eventType) {
 				continue
 			}
-			if rootInputFlowOwnsNodeRoute(source, nodeID, eventType) {
+			if rootInputFlowOwnsNodeRoute(source, semanticNodeID, eventType) {
 				continue
 			}
 			rt.rootInputRoutes[eventType] = appendUniqueRootInputSubscriber(rt.rootInputRoutes[eventType], Subscriber{
-				ID:           nodeID,
+				ID:           subscriberID,
 				Type:         "node",
 				MatchPattern: eventType,
 				RouteSource:  "root_input_project",
@@ -413,11 +414,7 @@ func rootInputFlowOwnsNodeRoute(source semanticview.Source, nodeID string, event
 			continue
 		}
 		for _, key := range sortedStringKeys(scope.Nodes) {
-			entry := scope.Nodes[key]
-			scopedNodeID := strings.TrimSpace(entry.ID)
-			if scopedNodeID == "" {
-				scopedNodeID = strings.TrimSpace(key)
-			}
+			scopedNodeID := strings.TrimSpace(key)
 			if scopedNodeID == nodeID {
 				return true
 			}
@@ -449,15 +446,16 @@ func (rt *RouteTable) addRootInputFlowNodeRoutesLocked(source semanticview.Sourc
 			}
 			for _, key := range sortedStringKeys(scope.Nodes) {
 				entry := scope.Nodes[key]
-				nodeID := strings.TrimSpace(entry.ID)
-				if nodeID == "" {
-					nodeID = strings.TrimSpace(key)
+				semanticNodeID := strings.TrimSpace(key)
+				subscriberID := strings.TrimSpace(entry.ID)
+				if subscriberID == "" {
+					subscriberID = semanticNodeID
 				}
-				if nodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(nodeID), eventType) {
+				if semanticNodeID == "" || !normalizedStringListContains(source.NodeRuntimeSubscriptions(semanticNodeID), eventType) {
 					continue
 				}
 				rt.rootInputRoutes[eventType] = appendUniqueSubscriber(rt.rootInputRoutes[eventType], Subscriber{
-					ID:           nodeID,
+					ID:           subscriberID,
 					Type:         "node",
 					Path:         flowPath,
 					MatchPattern: eventType,
@@ -523,18 +521,19 @@ func (rt *RouteTable) addAgentPatternsLocked(source semanticview.Source, package
 func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageKey, flowID string, inputEvents []string, basePath string, localEvents map[string]struct{}, nodes map[string]runtimecontracts.SystemNodeContract) {
 	for _, key := range sortedStringKeys(nodes) {
 		entry := nodes[key]
-		nodeID := strings.TrimSpace(entry.ID)
-		if nodeID == "" {
-			nodeID = strings.TrimSpace(key)
+		semanticNodeID := strings.TrimSpace(key)
+		subscriberID := strings.TrimSpace(entry.ID)
+		if subscriberID == "" {
+			subscriberID = semanticNodeID
 		}
 		subscriber := Subscriber{
-			ID:   nodeID,
+			ID:   subscriberID,
 			Type: "node",
 			Path: strings.Trim(strings.TrimSpace(basePath), "/"),
 		}
-		patterns := normalizeStringList(entry.SubscribesTo)
+		patterns := runtimecontracts.EffectiveSystemNodeSubscriptions(entry)
 		if source != nil {
-			patterns = source.NodeRuntimeSubscriptions(nodeID)
+			patterns = source.NodeRuntimeSubscriptions(semanticNodeID)
 		}
 		for _, rawPattern := range patterns {
 			if routeFlowInputHasLoweredConnectReceiver(source, flowID, rawPattern) && !routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
@@ -553,7 +552,7 @@ func (rt *RouteTable) addNodePatternsLocked(source semanticview.Source, packageK
 			if routeInputAliasRequiresExclusivePatterns(source, flowID, rawPattern) {
 				continue
 			}
-			if resolved := routeResolveNodeCanonicalPattern(source, basePath, nodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
+			if resolved := routeResolveNodeCanonicalPattern(source, basePath, semanticNodeID, rawPattern); strings.TrimSpace(resolved.EventPattern) != "" {
 				resolvedSubscriber := routeApplyResolvedPattern(subscriber, resolved)
 				rt.patterns = append(rt.patterns, routePattern{
 					EventPattern: resolved.EventPattern,
@@ -721,8 +720,13 @@ func routeInputAliasRequiresExclusivePatterns(source semanticview.Source, flowID
 
 func routeNodeLocalEventSet(node runtimecontracts.SystemNodeContract) map[string]struct{} {
 	out := make(map[string]struct{})
-	for _, eventType := range normalizeStringList(node.Produces) {
+	for _, eventType := range runtimecontracts.EffectiveSystemNodeProduces(node) {
 		out[eventType] = struct{}{}
+	}
+	if len(node.EventHandlers) == 0 {
+		for _, eventType := range normalizeStringList(node.Produces) {
+			out[eventType] = struct{}{}
+		}
 	}
 	for _, timer := range node.Timers {
 		if eventType := strings.TrimSpace(timer.Event); eventType != "" {
@@ -758,19 +762,20 @@ func routeSubscriberTemplates(source semanticview.Source, scope semanticview.Flo
 	}
 	for _, key := range sortedStringKeys(scope.Nodes) {
 		entry := scope.Nodes[key]
-		nodeID := strings.TrimSpace(entry.ID)
-		if nodeID == "" {
-			nodeID = strings.TrimSpace(key)
+		semanticNodeID := strings.TrimSpace(key)
+		subscriberID := strings.TrimSpace(entry.ID)
+		if subscriberID == "" {
+			subscriberID = semanticNodeID
 		}
-		patterns := normalizeStringList(entry.SubscribesTo)
+		patterns := runtimecontracts.EffectiveSystemNodeSubscriptions(entry)
 		if source != nil {
-			patterns = source.NodeRuntimeSubscriptions(nodeID)
+			patterns = source.NodeRuntimeSubscriptions(semanticNodeID)
 		}
 		if len(patterns) == 0 {
 			continue
 		}
 		out = append(out, routeSubscriberTemplate{
-			IDTemplate:  nodeID,
+			IDTemplate:  subscriberID,
 			Type:        "node",
 			RawPatterns: append([]string{}, patterns...),
 		})

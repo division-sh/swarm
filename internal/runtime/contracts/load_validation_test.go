@@ -72,6 +72,56 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidExecutionTyp
 	}
 }
 
+func TestValidateWorkflowContractBundleLoadConstraintsAllowsMissingExecutionType(t *testing.T) {
+	bundle := loadCurrentWorkflowBundleForTest(t)
+
+	for nodeID, node := range bundle.Nodes {
+		node.ExecutionType = ""
+		bundle.Nodes[nodeID] = node
+		break
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err != nil {
+		t.Fatalf("unexpected load validation error for missing execution_type: %v", err)
+	}
+}
+
+func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *testing.T) {
+	bundle := loadCurrentWorkflowBundleForTest(t)
+
+	var expected string
+	for nodeID, node := range bundle.Nodes {
+		node.ID = nodeID + "-alias"
+		bundle.Nodes[nodeID] = node
+		expected = nodeID
+		break
+	}
+	if expected == "" {
+		t.Fatal("expected at least one node")
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil || !contractErrorContains(err, "node id") || !contractErrorContains(err, "must match map key") {
+		t.Fatalf("unexpected load validation error: %v", err)
+	}
+}
+
+func TestValidateWorkflowContractBundleLoadConstraintsAllowsRenderedNodeIDTemplate(t *testing.T) {
+	bundle := loadCurrentWorkflowBundleForTest(t)
+
+	for nodeID, node := range bundle.Nodes {
+		node.ID = nodeID + "-{instance_id}"
+		bundle.Nodes[nodeID] = node
+		break
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err != nil {
+		t.Fatalf("unexpected load validation error for rendered node id template: %v", err)
+	}
+}
+
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerAction(t *testing.T) {
 	bundle := loadCurrentWorkflowBundleForTest(t)
 

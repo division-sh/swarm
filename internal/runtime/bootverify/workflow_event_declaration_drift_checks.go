@@ -14,6 +14,9 @@ func (c *checkerContext) producesDrift() []Finding {
 	}
 	c.producesDriftLoaded = true
 	for nodeID, node := range c.source.NodeEntries() {
+		if node.Produces == nil {
+			continue
+		}
 		produces := stringSet(node.Produces)
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
@@ -43,6 +46,9 @@ func (c *checkerContext) phantomProduces() []Finding {
 	}
 	c.phantomLoaded = true
 	for nodeID, node := range c.source.NodeEntries() {
+		if node.Produces == nil {
+			continue
+		}
 		emitted := map[string]struct{}{}
 		for _, handler := range node.EventHandlers {
 			for _, eventType := range handlerEmits(handler) {

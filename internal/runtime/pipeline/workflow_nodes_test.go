@@ -189,6 +189,38 @@ func TestLoadWorkflowNodes_UsesHandlerKeysForCrossFlowPinAutoWire(t *testing.T) 
 	t.Fatalf("Subscriptions = %#v, want producer/scan.requested", nodes[0].Subscriptions)
 }
 
+func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"task.start": {
+						Emit: runtimecontracts.EmitSpec{Event: "task.done"},
+					},
+				},
+			},
+		},
+	}
+
+	nodes, err := LoadWorkflowNodes(semanticview.Wrap(bundle))
+	if err != nil {
+		t.Fatalf("LoadWorkflowNodes: %v", err)
+	}
+	worker := workflowNodeByIDForTest(nodes, "worker")
+	if worker == nil {
+		t.Fatalf("worker missing from %#v", nodes)
+	}
+	if got, want := worker.ExecutionType, runtimecontracts.SystemNodeExecutionType; got != want {
+		t.Fatalf("execution type = %q, want %q", got, want)
+	}
+	if !workflowNodeHasSubscriptionForTest(*worker, "task.start") {
+		t.Fatalf("subscriptions = %#v, want task.start", worker.Subscriptions)
+	}
+	if !workflowNodeHasProducesForTest(*worker, "task.done") {
+		t.Fatalf("produces = %#v, want task.done", worker.Produces)
+	}
+}
+
 func TestLoadWorkflowNodes_UsesImportBoundaryInputAlias(t *testing.T) {
 	source := loadPipelineImportBoundaryAliasSource(t)
 	nodes, err := LoadWorkflowNodes(source)
@@ -459,6 +491,15 @@ func workflowNodeByIDForTest(nodes []WorkflowNode, id string) *WorkflowNode {
 func workflowNodeHasSubscriptionForTest(node WorkflowNode, eventType string) bool {
 	for _, subscription := range node.Subscriptions {
 		if string(subscription) == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowNodeHasProducesForTest(node WorkflowNode, eventType string) bool {
+	for _, produced := range node.Produces {
+		if string(produced) == eventType {
 			return true
 		}
 	}

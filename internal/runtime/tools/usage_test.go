@@ -92,7 +92,11 @@ func TestValidateUsageHintCoverage_CoversRoleDerivedEmitTools(t *testing.T) {
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"reviewer": {
-				Produces: []string{"review.completed"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"review.requested": {
+						Emit: runtimecontracts.EmitSpec{Event: "review.completed"},
+					},
+				},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{

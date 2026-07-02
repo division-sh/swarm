@@ -41,6 +41,27 @@ func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	}
 }
 
+func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
+	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+		Template: runtimecontracts.SystemNodeContract{
+			ID: "reviewer-{instance_id}",
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"task.started": {Emit: runtimecontracts.EmitSpec{Event: "task.started"}},
+			},
+		},
+		Identity: runtimeflowidentity.DeriveRoute("review", "inst-1"),
+	}); err != nil {
+		t.Fatalf("AddFlowInstance: %v", err)
+	}
+	if got := eb.RouteTable().Resolve("review/inst-1/task.started"); len(got) != 1 || got[0].ID != "reviewer-inst-1" {
+		t.Fatalf("resolved subscribers = %#v, want reviewer-inst-1", got)
+	}
+}
+
 type routePersistenceTestStore struct {
 	routes           map[string]runtimebus.FlowInstanceRouteRecord
 	deliveries       map[string][]string

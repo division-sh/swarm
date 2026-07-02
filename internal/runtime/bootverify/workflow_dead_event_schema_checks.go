@@ -190,7 +190,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 			}
 		}
 		for _, node := range scope.Nodes {
-			for _, eventType := range node.SubscribesTo {
+			for _, eventType := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
 				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
 					usage.handlerSubscribes++
 				}
@@ -236,7 +236,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 	for nodeID, node := range c.source.NodeEntries() {
 		nodeSource, _ := c.source.NodeContractSource(nodeID)
 		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range node.SubscribesTo {
+		for _, eventType := range semanticview.NodeEffectiveSubscriptions(c.source, nodeID) {
 			if deadEventRoleMatches(c.source, decl, flowID, eventType) {
 				usage.handlerSubscribes++
 			}

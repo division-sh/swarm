@@ -315,10 +315,7 @@ func importBoundaryProjectWildcardSubscriptions(scope ProjectScope) []string {
 		}
 	}
 	for _, entry := range scope.Nodes {
-		for _, pattern := range entry.SubscribesTo {
-			appendPattern(pattern)
-		}
-		for pattern := range entry.EventHandlers {
+		for _, pattern := range runtimecontracts.EffectiveSystemNodeSubscriptions(entry) {
 			appendPattern(pattern)
 		}
 	}
@@ -343,10 +340,7 @@ func importBoundaryFlowWildcardSubscriptions(scope FlowScope) []string {
 		}
 	}
 	for _, entry := range scope.Nodes {
-		for _, pattern := range entry.SubscribesTo {
-			appendPattern(pattern)
-		}
-		for pattern := range entry.EventHandlers {
+		for _, pattern := range runtimecontracts.EffectiveSystemNodeSubscriptions(entry) {
 			appendPattern(pattern)
 		}
 	}
