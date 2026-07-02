@@ -331,6 +331,10 @@ type serveOptions struct {
 	PlatformSpecPath                 string
 	StoreMode                        string
 	StoreModeSet                     bool
+	SwarmDir                         string
+	SwarmDirSet                      bool
+	ContextName                      string
+	ContextNameSet                   bool
 	APIListenAddr                    string
 	MCPListenAddr                    string
 	ShutdownGrace                    time.Duration
@@ -763,6 +767,13 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("resolve CLI path config: %v", err)
 		return 1
 	}
+	projectContextRegistration, err := prepareServeProjectContextRegistration(ctx, repo, opts, resolvedPaths)
+	if err != nil {
+		reporter.emit(2, "serve_admission", "FAILED", err.Error())
+		log.Printf("prepare local project context registration: %v", err)
+		return 3
+	}
+	defer projectContextRegistration.Release()
 
 	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
 		RepoRoot:        repo,
@@ -1087,6 +1098,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	apiServer := newAPIServer(&ready, apiV1Handler)
 	mcpServer := newMCPServer(rt.ToolGateway)
+	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
+		reporter.emit(20, "context_registry", "FAILED", err.Error())
+		log.Printf("register local project context: %v", err)
+		return 3
+	}
+	defer projectContextRegistration.Unregister()
 	go serveHTTPServer("api", apiServer, apiListener)
 	go serveHTTPServer("mcp", mcpServer, mcpListener)
 	defer shutdownHTTPServer("mcp", mcpServer)

@@ -1,0 +1,140 @@
+package main
+
+import (
+	"context"
+	"net"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/division-sh/swarm/internal/apiv1"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+)
+
+func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err != nil {
+		t.Fatalf("prepare registration: %v", err)
+	}
+	defer reg.Release()
+	listener := listenLoopbackTestListener(t)
+	defer listener.Close()
+	storePath := filepath.Join(t.TempDir(), "dev.db")
+	if err := reg.WriteFinal("runtime-1", listener.Addr(), defaultLoopbackAuthResolution(), cliContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{
+		Backend:    storebackend.BackendSQLite,
+		SQLitePath: storePath,
+	}, workspaceMountSources{DataSource: filepath.Join(project.root, ".swarm", "data")}); err != nil {
+		t.Fatalf("write final: %v", err)
+	}
+
+	registry := newLocalContextRegistry(swarmDir)
+	entry, err := registry.ReadDescriptor(localProjectContextName(project.canonicalRoot))
+	if err != nil {
+		t.Fatalf("read descriptor: %v", err)
+	}
+	if entry.Status != localContextStatusOK {
+		t.Fatalf("descriptor status = %s detail=%s", entry.Status, entry.Detail)
+	}
+	desc := entry.Descriptor
+	if desc.RuntimeInstanceID != "runtime-1" || desc.ProjectRoot != project.canonicalRoot || desc.ContractsPath != project.contracts {
+		t.Fatalf("descriptor = %#v, want runtime/project/contracts metadata", desc)
+	}
+	if desc.StorePath != storePath || desc.DataDir == "" || desc.Auth.Mode != localContextAuthBuiltinLoopback {
+		t.Fatalf("descriptor = %#v, want store/data/builtin auth metadata", desc)
+	}
+	if current, err := registry.CurrentName(); err != nil || current != desc.Name {
+		t.Fatalf("current = %q err=%v, want %q", current, err, desc.Name)
+	}
+}
+
+func TestServeProjectContextRegistrationGuardsBareDoubleServe(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-live", server.URL, project.canonicalRoot)
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err == nil {
+		reg.Release()
+		t.Fatal("prepare registration returned nil error")
+	}
+	if !strings.Contains(err.Error(), "already has context descriptors") {
+		t.Fatalf("err = %q, want double-serve guard", err.Error())
+	}
+}
+
+func TestServeProjectContextRegistrationAllowsExplicitSecondContext(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-live", server.URL, project.canonicalRoot)
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+	opts.ContextName = "second"
+	opts.ContextNameSet = true
+
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err != nil {
+		t.Fatalf("prepare explicit context: %v", err)
+	}
+	defer reg.Release()
+}
+
+func TestServeProjectContextRegistrationRejectsUnsafeAuthDescriptor(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err != nil {
+		t.Fatalf("prepare registration: %v", err)
+	}
+	defer reg.Release()
+	listener := listenLoopbackTestListener(t)
+	defer listener.Close()
+	err = reg.WriteFinal("runtime-1", listener.Addr(), apiv1.AuthTokenResolution{
+		Tokens:   []string{"secret"},
+		Source:   apiv1.AuthTokenSourceEnvironment,
+		Explicit: true,
+	}, cliContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, workspaceMountSources{})
+	if err == nil || !strings.Contains(err.Error(), "cannot be snapshotted") {
+		t.Fatalf("WriteFinal err = %v, want safe-auth rejection", err)
+	}
+}
+
+func listenLoopbackTestListener(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	return listener
+}
+
+func defaultLoopbackAuthResolution() apiv1.AuthTokenResolution {
+	return apiv1.AuthTokenResolution{
+		Tokens: []string{apiv1.DefaultLoopbackAPIToken},
+		Source: apiv1.AuthTokenSourceBuiltInLoopbackToken,
+	}
+}

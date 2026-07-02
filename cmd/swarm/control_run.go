@@ -91,7 +91,7 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 		cmd.Flags().BoolVar(&cmdOpts.yes, "yes", false, "Skip the stop-all confirmation prompt")
 	}
 	cmd.Flags().StringVar(&cmdOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
-	bindCLIAPIConnectionFlags(cmd, &cmdOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &cmdOpts.apiOptions, cliAPICommandClassControl, "swarm control "+opts.action)
 	return cmd
 }
 

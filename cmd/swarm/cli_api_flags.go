@@ -7,12 +7,21 @@ import (
 )
 
 func bindCLIAPIConnectionFlags(cmd *cobra.Command, opts *rootCommandOptions) {
+	bindCLIAPIConnectionFlagsWithClass(cmd, opts, cliAPICommandClassReadOnly, "")
+}
+
+func bindCLIAPIConnectionFlagsWithClass(cmd *cobra.Command, opts *rootCommandOptions, class cliAPICommandClass, commandName string) {
+	if opts != nil {
+		opts.apiCommandClass = class
+		opts.apiCommandName = strings.TrimSpace(commandName)
+	}
 	cmd.Flags().StringVar(&opts.apiServer, "api-server", "", "Swarm API server base URL")
 	cmd.Flags().StringVar(&opts.apiTokenFile, "api-token-file", "", "Path to file containing the Swarm API bearer token")
+	cmd.Flags().StringVar(&opts.contextName, "context", "", "Local Swarm context descriptor name")
 }
 
 func cliAPIConnectionFlagsChanged(cmd *cobra.Command) bool {
-	return cmd.Flags().Changed("api-server") || cmd.Flags().Changed("api-token-file")
+	return cmd.Flags().Changed("api-server") || cmd.Flags().Changed("api-token-file") || cmd.Flags().Changed("context")
 }
 
 func validateCLIAPIConnectionFlagPlacement(args []string) error {
@@ -28,10 +37,14 @@ func firstCLIAPIConnectionFlagIndex(args []string) (int, string) {
 		switch {
 		case arg == "--api-server" || arg == "--api-token-file":
 			return i, arg
+		case arg == "--context":
+			return i, arg
 		case strings.HasPrefix(arg, "--api-server="):
 			return i, "--api-server"
 		case strings.HasPrefix(arg, "--api-token-file="):
 			return i, "--api-token-file"
+		case strings.HasPrefix(arg, "--context="):
+			return i, "--context"
 		}
 	}
 	return -1, ""
@@ -56,12 +69,18 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"bundle", "show"},
 		{"bundle", "agents"},
 		{"bundle", "register"},
+		{"bundle", "delete"},
 		{"agents", "list"},
+		{"agent", "deliveries"},
+		{"agent", "diagnose"},
 		{"agent", "view"},
 		{"agent", "restart"},
 		{"agent", "replay"},
 		{"agent", "replay-backlog"},
 		{"agent", "directive"},
+		{"conversations", "list"},
+		{"conversation", "view"},
+		{"conversation", "turn"},
 		{"entities", "list"},
 		{"entity", "view"},
 		{"entity", "aggregate"},
@@ -75,6 +94,11 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"control", "stop"},
 		{"control", "nuke"},
 		{"fork"},
+		{"forkchat", "new"},
+		{"forkchat", "resume"},
+		{"forkchat", "list"},
+		{"forkchat", "view"},
+		{"forkchat", "delete"},
 		{"doctor"},
 	}
 	for _, command := range leafCommands {

@@ -235,7 +235,7 @@ func newBundleRegisterCommand(repoRoot string, opts rootCommandOptions) *cobra.C
 	cmd.Flags().StringVar(&registerOpts.contractsDir, "contracts", "", "Package a local contracts directory into BundleRegistrationEnvelopeV1 before calling bundle.register")
 	cmd.Flags().StringVar(&registerOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.register")
 	bindCLIOutputFlags(cmd, &registerOpts.output)
-	bindCLIAPIConnectionFlags(cmd, &registerOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &registerOpts.apiOptions, cliAPICommandClassMutating, "swarm bundle register")
 	return cmd
 }
 
@@ -259,7 +259,7 @@ func newBundleDeleteCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&deleteOpts.dryRun, "dry-run", false, "Plan bundle deletion without applying destructive changes")
 	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.delete")
 	bindCLIOutputFlags(cmd, &deleteOpts.output)
-	bindCLIAPIConnectionFlags(cmd, &deleteOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &deleteOpts.apiOptions, cliAPICommandClassMutating, "swarm bundle delete")
 	return cmd
 }
 

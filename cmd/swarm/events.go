@@ -270,7 +270,7 @@ func newEventReplayCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringArrayVar(&replayOpts.subscribers, "subscriber", nil, "Original agent subscriber to replay to; repeat to select a subset")
 	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
-	bindCLIAPIConnectionFlags(cmd, &replayOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &replayOpts.apiOptions, cliAPICommandClassMutating, "swarm event replay")
 	return cmd
 }
 

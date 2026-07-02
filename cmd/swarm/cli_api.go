@@ -36,7 +36,13 @@ type rootCommandOptions struct {
 	// those paths have already resolved their own API endpoint semantics.
 	apiRPCEndpointOverride string
 	apiTokenFile           string
+	contextName            string
 	swarmDir               string
+	rootFlags              *rootCommandFlagState
+	repoRoot               string
+	apiCommandClass        cliAPICommandClass
+	apiCommandName         string
+	disableLocalTargeting  bool
 	httpClient             *http.Client
 	input                  io.Reader
 	stdinIsTerminal        func() bool
@@ -58,6 +64,25 @@ func defaultRootCommandOptions() rootCommandOptions {
 	}
 }
 
+type rootCommandFlagState struct {
+	swarmDir    string
+	swarmDirSet bool
+}
+
+func (opts rootCommandOptions) ensureRootFlagState() rootCommandOptions {
+	if opts.rootFlags == nil {
+		opts.rootFlags = &rootCommandFlagState{swarmDir: opts.swarmDir}
+	}
+	return opts
+}
+
+func (opts rootCommandOptions) swarmDirResolutionOptions() cliSwarmDirOptions {
+	if opts.rootFlags != nil {
+		return cliSwarmDirOptions{SwarmDir: opts.rootFlags.swarmDir, SwarmDirFlagSet: opts.rootFlags.swarmDirSet}
+	}
+	return cliSwarmDirOptions{SwarmDir: opts.swarmDir, SwarmDirFlagSet: strings.TrimSpace(opts.swarmDir) != ""}
+}
+
 func processStdinIsTerminal() bool {
 	info, err := os.Stdin.Stat()
 	return err == nil && info.Mode()&os.ModeCharDevice != 0
@@ -66,6 +91,7 @@ func processStdinIsTerminal() bool {
 type cliAPIClient struct {
 	endpoint   string
 	token      string
+	target     cliAPITargetResolution
 	httpClient *http.Client
 }
 
@@ -78,7 +104,7 @@ func newCLIAPIClient(opts rootCommandOptions) (*cliAPIClient, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, httpClient: client}, nil
+	return &cliAPIClient{endpoint: settings.rpcEndpoint, token: settings.token, target: settings.target, httpClient: client}, nil
 }
 
 type cliAPISettings struct {
@@ -86,6 +112,7 @@ type cliAPISettings struct {
 	token         string
 	tokenSource   string
 	tokenExplicit bool
+	target        cliAPITargetResolution
 }
 
 type cliAPIConfigFile struct {
@@ -122,19 +149,20 @@ func (e *cliAPIAuthConfigError) Error() string {
 }
 
 func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
+	opts = opts.ensureRootFlagState()
 	cfg, err := loadCLIAPIConfigFile()
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	endpoint, err := resolveCLIAPIRPCEndpoint(opts, cfg)
+	target, err := resolveCLIAPITarget(opts, cfg)
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	token, err := resolveCLIAPIToken(opts, cfg, endpoint)
+	token, err := resolveCLIAPITokenForTarget(opts, cfg, target)
 	if err != nil {
 		return cliAPISettings{}, err
 	}
-	return cliAPISettings{rpcEndpoint: endpoint, token: token.token, tokenSource: token.source, tokenExplicit: token.explicit}, nil
+	return cliAPISettings{rpcEndpoint: target.rpcEndpoint, token: token.token, tokenSource: token.source, tokenExplicit: token.explicit, target: target}, nil
 }
 
 func resolveCLIAPIRPCEndpoint(opts rootCommandOptions, cfg cliAPIConfigFile) (string, error) {
