@@ -20,6 +20,10 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
 
+	if view.Root.PrimaryEntity != nil || view.Root.PrimaryEntityError != "" {
+		t.Fatalf("root primary entity for valid no-root fixture = entity %#v error %q, want none", view.Root.PrimaryEntity, view.Root.PrimaryEntityError)
+	}
+
 	scoring := flowByID(t, view, "scoring")
 	if scoring.PrimaryEntity == nil || scoring.PrimaryEntity.Type != "validation" {
 		t.Fatalf("scoring primary entity = %#v, want validation", scoring.PrimaryEntity)

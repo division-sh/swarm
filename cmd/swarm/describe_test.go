@@ -34,6 +34,9 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 	if view.SourceAuthority != "projection_only_existing_contract_owners" {
 		t.Fatalf("source authority = %q, want projection marker", view.SourceAuthority)
 	}
+	if view.Root.PrimaryEntity != nil || view.Root.PrimaryEntityError != "" {
+		t.Fatalf("root primary entity for valid no-root fixture = entity %#v error %q, want none", view.Root.PrimaryEntity, view.Root.PrimaryEntityError)
+	}
 	if len(view.ConnectRoutePlans) != 1 {
 		t.Fatalf("connect route plans = %#v, want one", view.ConnectRoutePlans)
 	}
