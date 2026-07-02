@@ -11746,7 +11746,9 @@ cli_specification:
           `swarm doctor --target` explains explicit API flag, environment, config, project-root, Swarm-dir, current
           rollout store/data, and local context registry/identity facts. API-backed commands consume the same target
           order through the shared CLI API resolver after #1614. Unavailable facts MUST be reported as unavailable
-          rather than inferred from PID, port, URL, or health bundle fingerprint.
+          rather than inferred from PID, port, URL, or health bundle fingerprint. A project context may be selected
+          implicitly only when exactly one descriptor exists for the canonical project root and that descriptor validates
+          `ok`; mixed live/stale or otherwise non-ok project descriptors fail closed.
       command_classes:
         target_diagnostic:
           status: implemented
@@ -11911,7 +11913,8 @@ cli_specification:
           releases the claim and must not leave a descriptor selected as current. `serve --dev` may reclaim an existing
           same-project descriptor only when runtime.identity validation proves it is dead, stale, or identity-mismatched;
           live, permission-denied, corrupt, invalid, or otherwise ambiguous project descriptors fail closed instead of
-          being silently overwritten.
+          being silently overwritten. Explicit `serve --dev --context <name>` MUST also reject any existing descriptor
+          with that global context name from another project.
       validation_statuses:
       - ok
       - no_server

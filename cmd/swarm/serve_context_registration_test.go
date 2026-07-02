@@ -131,6 +131,30 @@ func TestServeProjectContextRegistrationAllowsExplicitSecondContext(t *testing.T
 	defer reg.Release()
 }
 
+func TestServeProjectContextRegistrationRejectsCrossProjectExplicitContextName(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	otherProject := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, "shared", "runtime-other", "http://127.0.0.1:1", otherProject.canonicalRoot)
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+	opts.ContextName = "shared"
+	opts.ContextNameSet = true
+
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err == nil {
+		reg.Release()
+		t.Fatal("prepare explicit context returned nil error")
+	}
+	if !strings.Contains(err.Error(), "context shared already exists for project "+otherProject.canonicalRoot) || !strings.Contains(err.Error(), "context names are global") {
+		t.Fatalf("err = %q, want cross-project name collision", err.Error())
+	}
+}
+
 func TestServeProjectContextRegistrationRejectsUnsafeAuthDescriptor(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	project := writeCLIAPIProjectFixture(t)

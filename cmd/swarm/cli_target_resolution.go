@@ -97,7 +97,7 @@ func resolveCLIAPIProjectTarget(opts rootCommandOptions, cfg cliAPIConfigFile, p
 		}
 	}
 	switch {
-	case len(okEntries) == 1:
+	case len(okEntries) == 1 && len(entries) == 1:
 		target, err := cliAPITargetFromDescriptor(okEntries[0], "project context")
 		if err != nil {
 			return cliAPITargetResolution{}, err
