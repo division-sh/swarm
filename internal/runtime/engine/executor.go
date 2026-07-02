@@ -154,8 +154,8 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if handlerDeclaresConflictingCompletion(req.Handler) {
 		return fmt.Errorf("%w: handler declares both on_complete and rules", ErrInvalidConfig)
 	}
-	if runtimecontracts.HandlerHasAmbiguousTopLevelEmit(req.Handler) {
-		return fmt.Errorf("%w: handler-top-level emit is only allowed on single-emit handlers", ErrInvalidConfig)
+	if err := runtimecontracts.HandlerEmitSiteOwnershipError(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	if runtimecontracts.HandlerHasAmbiguousTopLevelAction(req.Handler) {
 		return fmt.Errorf("%w: handler-top-level action is only allowed on handlers without rules", ErrInvalidConfig)
@@ -1389,7 +1389,11 @@ func lookupProjectionPath(raw map[string]any, path string) (any, bool) {
 }
 
 func (e *Executor) stepTransform(frame *executionFrame) error {
-	emitSpec := selectedEmitSpec(frame.req.Handler, frame.rule)
+	activeEmits := selectedDeclarativeEmitSpecs(frame.req.Handler, frame.rule)
+	if len(activeEmits) != 1 {
+		return nil
+	}
+	emitSpec := activeEmits[0].Spec
 	if emitSpec.Empty() || !emitSpec.HasFields() {
 		return nil
 	}
@@ -1407,23 +1411,44 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 }
 
 func (e *Executor) stepEmits(frame *executionFrame) error {
-	emitSpec := selectedEmitSpec(frame.req.Handler, frame.rule)
-	eventType := emitSpec.EventType()
-	if eventType == "" {
+	activeEmits := selectedDeclarativeEmitSpecs(frame.req.Handler, frame.rule)
+	if len(activeEmits) == 0 {
 		return nil
 	}
-	eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
-	emitSpec.Event = eventType
-	payload := map[string]any{}
-	if len(frame.state.Transformed) > 0 {
-		payload = frame.state.Transformed
+	seen := map[string]string{}
+	for _, activeEmit := range activeEmits {
+		emitSpec := activeEmit.Spec
+		eventType := emitSpec.EventType()
+		if eventType == "" {
+			continue
+		}
+		eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
+		if previousSource := seen[eventType]; previousSource != "" {
+			return fmt.Errorf("duplicate declarative emit event %q from %s and %s; additive on_success emits must be distinct from the selected rule emit", eventType, previousSource, activeEmit.Source)
+		}
+		seen[eventType] = activeEmit.Source
+		emitSpec.Event = eventType
+		payload := map[string]any{}
+		if emitSpec.HasFields() && len(activeEmits) == 1 && len(frame.state.Transformed) > 0 {
+			payload = frame.state.Transformed
+		} else if emitSpec.HasFields() {
+			transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})
+			if err != nil {
+				return err
+			}
+			payload = transformed
+		} else if len(activeEmits) == 1 && len(frame.state.Transformed) > 0 {
+			payload = frame.state.Transformed
+		}
+		shaped, err := e.shapeEmitPayload(frame, eventType, payload)
+		if err != nil {
+			return err
+		}
+		if _, err = e.queueEmitIntentForSpec(frame, emitSpec, eventType, shaped); err != nil {
+			return err
+		}
 	}
-	shaped, err := e.shapeEmitPayload(frame, eventType, payload)
-	if err != nil {
-		return err
-	}
-	_, err = e.queueEmitIntentForSpec(frame, emitSpec, eventType, shaped)
-	return err
+	return nil
 }
 
 func (e *Executor) stepAction(frame *executionFrame) error {
@@ -2034,11 +2059,36 @@ func (e *Executor) selectedFanOut(frame *executionFrame) *runtimecontracts.FanOu
 	return frame.req.Handler.FanOut
 }
 
-func selectedEmitSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) runtimecontracts.EmitSpec {
-	if rule != nil {
-		return rule.Emit
+type activeDeclarativeEmitSpec struct {
+	Source string
+	Spec   runtimecontracts.EmitSpec
+}
+
+func selectedDeclarativeEmitSpecs(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) []activeDeclarativeEmitSpec {
+	out := make([]activeDeclarativeEmitSpec, 0, 2)
+	if rule != nil && !rule.Emit.Empty() {
+		out = append(out, activeDeclarativeEmitSpec{
+			Source: "handler.rules.emit",
+			Spec:   rule.Emit,
+		})
 	}
-	return handler.Emit
+	if !handler.OnSuccess.Empty() {
+		out = append(out, activeDeclarativeEmitSpec{
+			Source: "handler.on_success.emit",
+			Spec:   handler.OnSuccess.Emit,
+		})
+		return out
+	}
+	if rule != nil {
+		return out
+	}
+	if !handler.Emit.Empty() {
+		out = append(out, activeDeclarativeEmitSpec{
+			Source: "handler.emit",
+			Spec:   handler.Emit,
+		})
+	}
+	return out
 }
 
 func selectedActionSpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource) runtimecontracts.ActionSpec {

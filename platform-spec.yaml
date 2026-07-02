@@ -1329,7 +1329,7 @@ handler_specification:
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
-      \           └→ emit-site selection (handler emit OR active branch/rule/timeout/fan_out emit)\n                    \
+      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit then on_success.emit, or active branch/timeout/fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
       \                         └→ projection (materialize_from, if accumulator projection eligible)\n                  \
@@ -1762,7 +1762,25 @@ handler_specification:
           broadcast/fan-out is the required route owner.
       single_emit_handler_rule: 'A handler top-level emit is valid only when the handler has exactly one possible emit site.
         If the handler also declares rules, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity.
-        Payload ownership must move to the active emit site.'
+        Payload ownership must move to the active emit site. The only approved additive rules success surface is explicit
+        on_success.emit, which is not a handler-level emit overload.'
+      on_success:
+        field: on_success
+        type: object
+        purpose: Explicit success-side effects that run after a handler execution succeeds.
+        sub_fields:
+          emit: emit spec — additive success/audit/lifecycle event emitted after the selected rules emit.
+        rules_only: on_success.emit is supported only on handlers with rules in this slice. It is not supported with on_complete,
+          accumulate.on_timeout, handler-level fan_out, rule-level fan_out, handler-level action, or bare handler-level emit.
+        ordering: When a rule matches and has emit, the rule emit is materialized first and on_success.emit second. Both events
+          are emitted after rule selection, state/gate/data/projection side effects, and emit.fields evaluation for their own
+          active emit site, before the handler transaction commits.
+        no_match: If no rule matches and no else branch exists, the handler still succeeds when no validation or runtime failure
+          occurs. on_success.emit fires, and no rule emit fires.
+        distinct_event_requirement: If on_success.emit and the selected rules emit resolve to the same event identity, runtime
+          fails closed. Same-event template specialization is outside this surface.
+        atomicity: Any payload, route, validation, persistence-prerequisite, outbox, or delivery-plan creation failure for either
+          event rolls back both emitted events and all same-handler state changes.
     rules:
       field: rules
       type: map of rule_name → rule
@@ -2125,18 +2143,22 @@ handler_specification:
     SHOULD order fields to match the dependency graph for readability, but the engine does not require it.
   rules_handler_interaction:
     description: When a handler has rules, the active rule owns conditional emit and action selection for that execution.
-    execution_order: 1. rules execute first — the matching rule determines the active condition-specific side effects (rule-level
+    execution_order: |
+      1. rules execute first — the matching rule determines the active condition-specific side effects (rule-level
       emit, action, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and
-      supplements rule-level writes in the same atomic transaction. 3. Handler-level emit and handler-level action do NOT supplement
-      rules. If rules are present, handler-level emit or handler-level action is invalid and boot fails as ambiguous. 4. The
-      selected rule action executes at the normal action step after active state/gate/data updates and selected emit queuing, and
-      remains in the same system-node handler transaction as those side effects.
+      supplements rule-level writes in the same atomic transaction. 3. Bare handler-level emit and handler-level action do NOT
+      supplement rules. If rules are present, bare handler-level emit or handler-level action is invalid and boot fails as
+      ambiguous. 4. Explicit on_success.emit supplements rules as a distinct additive success emit: the selected rule emit is
+      queued first and on_success.emit second; if no rule matches, only on_success.emit is queued. 5. The selected rule action
+      executes at the normal action step after active state/gate/data updates and selected emit queuing, and remains in the same
+      system-node handler transaction as those side effects.
     example: 'order.received may have handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
       Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission, however,
       and action must be owned by the matching rule.'
     precedence: Handler-level advances_to, sets_gate, and data_accumulation are defaults. If the matched rule specifies any
-      of these, the rule value OVERRIDES the handler-level value for that field only. emit and action never fall through from
-      a handler into a rules-based multi-emit/action handler.
+      of these, the rule value OVERRIDES the handler-level value for that field only. Bare emit and action never fall through from
+      a handler into a rules-based multi-emit/action handler; only explicit on_success.emit is additive, and only as a second
+      distinct success event.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
   flow_tree_walker:
@@ -9338,6 +9360,7 @@ observation_model:
     includes:
     - Events from handler top-level emit on single-emit handlers
     - Events from handler rules emit
+    - Events from handler on_success.emit
     - Events from handler on_complete emit
     - Events from handler accumulate.on_timeout emit
     - Events from handler fan_out emit

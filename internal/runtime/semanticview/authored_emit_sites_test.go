@@ -60,6 +60,30 @@ func TestAuthoredEmitSites_GuardEscalationObjectCarriesFields(t *testing.T) {
 	}
 }
 
+func TestAuthoredEmitSites_EnumeratesOnSuccessEmitWithRules(t *testing.T) {
+	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
+		rootNodeID:    "root-node",
+		rootRuleEmit:  "root.routed",
+		rootOnSuccess: "root.audit",
+	})
+
+	sites := AuthoredEmitSites(source)
+	ruleMatches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.routed")
+	if len(ruleMatches) != 1 {
+		t.Fatalf("expected one rules authored emit site, got %d: %#v", len(ruleMatches), authoredEmitSiteSummaries(sites))
+	}
+	if got := ruleMatches[0].Site; got != "handler.rules.emit" {
+		t.Fatalf("rule site = %q, want handler.rules.emit", got)
+	}
+	successMatches := authoredEmitSitesByFlowNodeEvent(sites, "", "root-node", "root.audit")
+	if len(successMatches) != 1 {
+		t.Fatalf("expected one on_success authored emit site, got %d: %#v", len(successMatches), authoredEmitSiteSummaries(sites))
+	}
+	if got := successMatches[0].Site; got != "handler.on_success.emit" {
+		t.Fatalf("success site = %q, want handler.on_success.emit", got)
+	}
+}
+
 func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
 		rootNodeID:      "root-node",
@@ -122,6 +146,8 @@ func TestAuthoredEmitSites_NestedFlowPackageDoesNotSuppressMainFlowScope(t *test
 type authoredEmitSiteFixture struct {
 	rootNodeID          string
 	rootEmit            string
+	rootRuleEmit        string
+	rootOnSuccess       string
 	rootGuardEmit       string
 	rootBroadcast       bool
 	flowNodeID          string
@@ -170,12 +196,17 @@ pins:
 root.start: {}
 root.ready: {}
 root.escalated: {}
+root.routed: {}
+root.audit: {}
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
 	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
+	if strings.TrimSpace(opts.rootRuleEmit) != "" || strings.TrimSpace(opts.rootOnSuccess) != "" {
+		rootNodeYAML = authoredEmitSiteRulesSuccessNodeYAML(opts.rootNodeID, "root.start", opts.rootRuleEmit, opts.rootOnSuccess)
+	}
 	if opts.rootGuardObject {
 		rootNodeYAML = authoredEmitSiteNodeYAMLWithGuardObject(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit, opts.rootBroadcast)
 	}
@@ -283,6 +314,25 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
       emit:
         event: ` + eventType + `
 ` + broadcastLine
+}
+
+func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, successEventType string) string {
+	if strings.TrimSpace(nodeID) == "" {
+		return "{}\n"
+	}
+	return `
+` + nodeID + `:
+  id: ` + nodeID + `
+  execution_type: system_node
+  event_handlers:
+    ` + trigger + `:
+      on_success:
+        emit: ` + successEventType + `
+      rules:
+        routed:
+          condition: "else"
+          emit: ` + ruleEventType + `
+`
 }
 
 func countAuthoredEmitSites(sites []AuthoredEmitSite, flowID, nodeID, eventType string) int {

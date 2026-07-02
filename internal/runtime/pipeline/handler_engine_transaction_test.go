@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -2443,6 +2444,63 @@ func TestExecuteNodeContractHandlerExecutesEmitInsideEngine(t *testing.T) {
 	}
 }
 
+func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
+	})
+	entityID := "ent-1"
+
+	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+		OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
+		},
+	}, workflowTriggerContext{
+		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), time.Time{}),
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 2 {
+		t.Fatalf("bus published count = %d, want 2", got)
+	}
+	if got := []events.EventType{bus.publishes[0].Type(), bus.publishes[1].Type()}; !reflect.DeepEqual(got, []events.EventType{"rule.emitted", "handler.succeeded"}) {
+		t.Fatalf("published order = %#v", got)
+	}
+}
+
+func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish(t *testing.T) {
+	bus := &recordingPipelineBus{outboxErr: errors.New("outbox failed")}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{bundle: additiveOnSuccessContractBundle()},
+	})
+
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+		AdvancesTo: "done",
+		OnSuccess:  runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{ID: "pick-rule", Condition: "true", Emit: runtimecontracts.EmitSpec{Event: "rule.emitted"}},
+		},
+	}, workflowTriggerContext{
+		Event: eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"), time.Time{}),
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err == nil || !strings.Contains(err.Error(), "outbox failed") {
+		t.Fatalf("executeNodeContractHandler error = %v, want outbox failed", err)
+	}
+	if got := len(bus.outboxIntents); got != 0 {
+		t.Fatalf("outbox intents len = %d, want 0 after outbox failure", got)
+	}
+	if got := bus.publishedCount(); got != 0 {
+		t.Fatalf("bus published count = %d, want 0 after outbox failure", got)
+	}
+}
+
 func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.WorkflowContractBundle {
 	return declarativeEmitContractTestBundleWithEntry(eventType, runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
@@ -2452,6 +2510,19 @@ func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.Workf
 		},
 		Required: []string{"label"},
 	})
+}
+
+func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "test",
+			Version: "v-test",
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"rule.emitted":      {},
+			"handler.succeeded": {},
+		},
+	}
 }
 
 func declarativeEmitContractTestBundleWithEntry(eventType string, entry runtimecontracts.EventCatalogEntry) *runtimecontracts.WorkflowContractBundle {

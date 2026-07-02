@@ -129,12 +129,19 @@ func sourceWithKilledState() semanticview.Source {
 }
 
 type stubStateRepo struct{}
+type recordingStateRepo struct {
+	saves int
+}
 type actionMergeStateRepo struct {
 	snapshot StateSnapshot
 }
 type stubRunner struct{}
 type stubLocker struct{}
 type stubOutbox struct{}
+type recordingEmitOutbox struct {
+	intents []EmitIntent
+	err     error
+}
 type stubTimerApplier struct{}
 type stubDispatcher struct{}
 type stubActionRegistry struct {
@@ -166,11 +173,22 @@ type recordingPayloadShaper struct {
 	lastSurface EmitSurface
 	err         error
 }
+type eventErrPayloadShaper struct {
+	failEvent string
+	shaped    []string
+}
 
 func (stubStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
 	return StateSnapshot{}, false, nil
 }
 func (stubStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error { return nil }
+func (r *recordingStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
+	return StateSnapshot{}, false, nil
+}
+func (r *recordingStateRepo) SaveState(context.Context, identity.EntityID, StateMutation) error {
+	r.saves++
+	return nil
+}
 func (r actionMergeStateRepo) LoadState(context.Context, identity.EntityID) (StateSnapshot, bool, error) {
 	return r.snapshot, true, nil
 }
@@ -197,6 +215,13 @@ func (l lockOrderLocker) WithEntityLock(ctx context.Context, _ identity.EntityID
 	return fn(ctx)
 }
 func (stubOutbox) WriteOutbox(context.Context, []EmitIntent) error { return nil }
+func (o *recordingEmitOutbox) WriteOutbox(_ context.Context, intents []EmitIntent) error {
+	if o.err != nil {
+		return o.err
+	}
+	o.intents = append(o.intents, intents...)
+	return nil
+}
 func (stubTimerApplier) ApplyTimerIntents(context.Context, identity.EntityID, []TimerIntent) error {
 	return nil
 }
@@ -252,6 +277,15 @@ func (s *recordingPayloadShaper) ShapeEmitPayload(ctx context.Context, req Execu
 	out["shaped_for"] = eventType
 	return out, nil
 }
+func (s *eventErrPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
+	s.shaped = append(s.shaped, eventType)
+	if eventType == s.failEvent {
+		return nil, errors.New("payload shape failed")
+	}
+	out := cloneStringAnyMap(payload)
+	out["shaped_for"] = eventType
+	return out, nil
+}
 
 type stubTx struct{ ctx context.Context }
 
@@ -262,6 +296,15 @@ func testStateSnapshot(currentState string, metadata map[string]any, gates map[s
 		CurrentState: currentState,
 		StateCarrier: NewStateCarrier(metadata, gates, buckets),
 	}
+}
+
+func eventPayloadMap(t *testing.T, evt events.Event) map[string]any {
+	t.Helper()
+	var out map[string]any
+	if err := json.Unmarshal(evt.Payload(), &out); err != nil {
+		t.Fatalf("json.Unmarshal payload: %v", err)
+	}
+	return out
 }
 
 func TestNewExecutor_DefaultsMaxChainDepth(t *testing.T) {
@@ -1871,6 +1914,244 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 	}
 	if !strings.Contains(err.Error(), "handler-top-level emit is only allowed on single-emit handlers") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T) {
+	outbox := &recordingEmitOutbox{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        outbox,
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{
+				Event: "handler.succeeded",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"audit": runtimecontracts.LiteralExpression("ok"),
+				},
+			}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+				Emit: runtimecontracts.EmitSpec{
+					Event: "rule.emitted",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"score": runtimecontracts.RefExpression("payload.score"),
+					},
+				},
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.RuleID; got != "rule-1" {
+		t.Fatalf("RuleID = %q, want rule-1", got)
+	}
+	if got := len(result.EmitIntents); got != 2 {
+		t.Fatalf("EmitIntents len = %d, want 2", got)
+	}
+	if got := []string{string(result.EmitIntents[0].Event.Type()), string(result.EmitIntents[1].Event.Type())}; !reflect.DeepEqual(got, []string{"rule.emitted", "handler.succeeded"}) {
+		t.Fatalf("emit order = %#v", got)
+	}
+	if got := len(outbox.intents); got != 2 {
+		t.Fatalf("outbox intents len = %d, want 2", got)
+	}
+	rulePayload := eventPayloadMap(t, result.EmitIntents[0].Event)
+	if got := rulePayload["score"]; got != float64(9) {
+		t.Fatalf("rule payload score = %#v, want 9", got)
+	}
+	successPayload := eventPayloadMap(t, result.EmitIntents[1].Event)
+	if got := successPayload["audit"]; got != "ok" {
+		t.Fatalf("success payload audit = %#v, want ok", got)
+	}
+}
+
+func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
+	outbox := &recordingEmitOutbox{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        outbox,
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": false}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":3}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.RuleID; got != "" {
+		t.Fatalf("RuleID = %q, want empty on no-match success", got)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents len = %d, want 1", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type()); got != "handler.succeeded" {
+		t.Fatalf("emit event = %q, want handler.succeeded", got)
+	}
+	if got := len(outbox.intents); got != 1 {
+		t.Fatalf("outbox intents len = %d, want 1", got)
+	}
+}
+
+func TestExecutor_OnSuccessEmitFailsClosedWhenRuleEventMatchesSuccessEvent(t *testing.T) {
+	outbox := &recordingEmitOutbox{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        outbox,
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "shared.event"}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+				Emit:      runtimecontracts.EmitSpec{Event: "shared.event"},
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "duplicate declarative emit event") {
+		t.Fatalf("Execute error = %v, want duplicate declarative emit event", err)
+	}
+	if got := len(outbox.intents); got != 0 {
+		t.Fatalf("outbox intents len = %d, want 0 after duplicate failure", got)
+	}
+}
+
+func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	err = exec.ValidateRequest(ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "else",
+				FanOut: &runtimecontracts.FanOutSpec{
+					ItemsFrom: "payload.items",
+					Emit:      runtimecontracts.EmitSpec{Event: "item.done"},
+				},
+			}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "rules[0].fan_out") {
+		t.Fatalf("ValidateRequest error = %v, want rules[0].fan_out rejection", err)
+	}
+}
+
+func TestExecutor_OnSuccessSecondEmitFailureDoesNotCommitFirstEmitOrState(t *testing.T) {
+	stateRepo := &recordingStateRepo{}
+	outbox := &recordingEmitOutbox{}
+	shaper := &eventErrPayloadShaper{failEvent: "handler.succeeded"}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stateRepo,
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        outbox,
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: shaper,
+		MaxChainDepth: 5,
+	}, stubEvaluator{bools: map[string]bool{"payload.score > 5": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "node-1",
+		FlowID:     "flow-1",
+		ChainDepth: 1,
+		Event:      eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"score":9}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			AdvancesTo: "done",
+			OnSuccess:  runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				ID:        "rule-1",
+				Condition: "payload.score > 5",
+				Emit:      runtimecontracts.EmitSpec{Event: "rule.emitted"},
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "payload shape failed") {
+		t.Fatalf("Execute error = %v, want payload shape failed", err)
+	}
+	if got := shaper.shaped; !reflect.DeepEqual(got, []string{"rule.emitted", "handler.succeeded"}) {
+		t.Fatalf("payload shaper order = %#v", got)
+	}
+	if got := len(outbox.intents); got != 0 {
+		t.Fatalf("outbox intents len = %d, want 0 after second emit failure", got)
+	}
+	if got := stateRepo.saves; got != 0 {
+		t.Fatalf("state saves = %d, want 0 after second emit failure", got)
 	}
 }
 

@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1341,6 +1342,131 @@ rules:
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-ACTION") {
 		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-ACTION", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_AllowsOnSuccessEmitWithRules(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+on_success:
+  emit:
+    event: handler.succeeded
+    fields:
+      audit:
+        literal: ok
+rules:
+  needs_human:
+    condition: "payload.amount >= 100"
+    emit:
+      event: rule.needs_human
+      fields:
+        amount: payload.amount
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := handler.OnSuccess.Emit.EventType(); got != "handler.succeeded" {
+		t.Fatalf("OnSuccess.Emit.EventType = %q, want handler.succeeded", got)
+	}
+	if got := len(handler.Rules); got != 1 {
+		t.Fatalf("Rules len = %d, want 1", got)
+	}
+	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, []string{"rule.needs_human", "handler.succeeded"}) {
+		t.Fatalf("HandlerEmitEvents = %#v", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsUnsupportedOnSuccessEmitShapes(t *testing.T) {
+	cases := []struct {
+		name     string
+		raw      string
+		contains string
+	}{
+		{
+			name: "without_rules",
+			raw: `
+on_success:
+  emit: handler.succeeded
+`,
+			contains: "only supported on handlers with rules",
+		},
+		{
+			name: "with_bare_emit",
+			raw: `
+emit: handler.default
+on_success:
+  emit: handler.succeeded
+rules:
+  done:
+    condition: "else"
+    emit: rule.done
+`,
+			contains: "handler-top-level emit is only allowed on single-emit handlers",
+		},
+		{
+			name: "with_on_complete",
+			raw: `
+on_success:
+  emit: handler.succeeded
+rules:
+  done:
+    condition: "else"
+    emit: rule.done
+on_complete:
+  - id: complete
+    emit: flow.complete
+`,
+			contains: "not supported with on_complete",
+		},
+		{
+			name: "with_fan_out",
+			raw: `
+on_success:
+  emit: handler.succeeded
+rules:
+  done:
+    condition: "else"
+    emit: rule.done
+fan_out:
+  items_from: payload.items
+  emit: item.done
+`,
+			contains: "not supported with fan_out",
+		},
+		{
+			name: "with_rule_fan_out",
+			raw: `
+on_success:
+  emit: handler.succeeded
+rules:
+  done:
+    condition: "else"
+    fan_out:
+      items_from: payload.items
+      emit: item.done
+`,
+			contains: "not supported with rules[0].fan_out",
+		},
+		{
+			name: "unknown_on_success_field",
+			raw: `
+on_success:
+  action: notify
+rules:
+  done:
+    condition: "else"
+    emit: rule.done
+`,
+			contains: "on_success field",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			if err == nil || !strings.Contains(err.Error(), tc.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want containing %q", err, tc.contains)
+			}
+		})
 	}
 }
 

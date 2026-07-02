@@ -141,6 +141,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				ClearGates:           handler.ClearGates,
 				DataAccumulation:     handler.DataAccumulation,
 				Emit:                 cloneEmitSpec(handler.Emit),
+				OnSuccess:            HandlerOnSuccessSpec{Emit: cloneEmitSpec(handler.OnSuccess.Emit)},
 				Condition:            strings.TrimSpace(handler.Condition),
 				CompletionRule:       strings.TrimSpace(handler.CompletionRule),
 				OnComplete:           handler.OnComplete,
