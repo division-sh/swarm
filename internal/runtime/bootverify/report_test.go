@@ -3483,7 +3483,7 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "market_research.scan_assigned",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+			"scan_id": runtimecontracts.CELExpression("payload.scan_id"),
 		},
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{
@@ -3492,7 +3492,7 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 			Condition: "payload.mode == 'full'",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"geography": runtimecontracts.RefExpression("payload.geography"),
+					"geography": runtimecontracts.CELExpression("payload.geography"),
 				},
 			},
 		},
@@ -3501,7 +3501,7 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 			Condition: "else",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"geography": runtimecontracts.RefExpression("payload.geography"),
+					"geography": runtimecontracts.CELExpression("payload.geography"),
 				},
 			},
 		},
@@ -3528,7 +3528,7 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 	handler.Emit = runtimecontracts.EmitSpec{
 		Event: "market_research.scan_assigned",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+			"scan_id": runtimecontracts.CELExpression("payload.scan_id"),
 		},
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{
@@ -3537,7 +3537,7 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 			Condition: "payload.mode == 'full'",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"geography": runtimecontracts.RefExpression("payload.geography"),
+					"geography": runtimecontracts.CELExpression("payload.geography"),
 				},
 			},
 		},
@@ -3546,7 +3546,7 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 			Condition: "else",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
-					"bucket": runtimecontracts.LiteralExpression("partial"),
+					"bucket": runtimecontracts.CELExpression(`"partial"`),
 				},
 			},
 		},

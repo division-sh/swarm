@@ -152,7 +152,13 @@ func EffectiveRuleEmitTemplateSpec(handler SystemNodeEventHandler, rule HandlerR
 	if strings.TrimSpace(handler.Emit.EventType()) == "" {
 		return EmitSpec{}, false
 	}
+	if !emitFieldsAreCELExpressions(handler.Emit.Fields) {
+		return EmitSpec{}, false
+	}
 	if rule.Emit.EventType() != "" || rule.Emit.Empty() || !rule.Emit.HasFields() || !rule.Emit.Target.Empty() || rule.Emit.Broadcast {
+		return EmitSpec{}, false
+	}
+	if !emitFieldsAreCELExpressions(rule.Emit.Fields) {
 		return EmitSpec{}, false
 	}
 	spec := cloneEmitSpec(handler.Emit)
@@ -320,6 +326,9 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with accumulate.on_timeout")
 		}
 	}
+	if err := validateEmitTemplateCELFields("handler.emit.fields", handler.Emit.Fields); err != nil {
+		return err
+	}
 	hasElse := false
 	for idx, rule := range handler.Rules {
 		if strings.TrimSpace(rule.Condition) == "" || strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
@@ -340,6 +349,9 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 		if !rule.Emit.HasFields() {
 			return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires rules[%d].emit.fields", idx)
 		}
+		if err := validateEmitTemplateCELFields(fmt.Sprintf("rules[%d].emit.fields", idx), rule.Emit.Fields); err != nil {
+			return err
+		}
 		for field := range rule.Emit.Fields {
 			field = strings.TrimSpace(field)
 			if field == "" {
@@ -352,6 +364,28 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 	}
 	if !hasElse {
 		return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires an else rule")
+	}
+	return nil
+}
+
+func emitFieldsAreCELExpressions(fields map[string]ExpressionValue) bool {
+	for _, expr := range fields {
+		if expr.Kind != ExpressionKindCEL {
+			return false
+		}
+	}
+	return true
+}
+
+func validateEmitTemplateCELFields(prefix string, fields map[string]ExpressionValue) error {
+	for field, expr := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if expr.Kind != ExpressionKindCEL {
+			return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires %s.%s to be a CEL expression string", prefix, field)
+		}
 	}
 	return nil
 }
