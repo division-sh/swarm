@@ -1,5 +1,4 @@
 flow.spawn_requested:
-  entity_id: string
   instance_id: string
+  worker_id: string
 flow.spawned:
-  entity_id: string

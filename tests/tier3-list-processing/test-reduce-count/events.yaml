@@ -1,5 +1,3 @@
 items.submitted:
-  entity_id: string
   items: array
 items.counted:
-  entity_id: string

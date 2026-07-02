@@ -1,8 +1,4 @@
 task.completed:
-  entity_id: string
 task.reopen_requested:
-  entity_id: string
 task.finished:
-  entity_id: string
 state.reopened:
-  entity_id: string

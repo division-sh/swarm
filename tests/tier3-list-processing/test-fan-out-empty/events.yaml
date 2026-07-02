@@ -1,6 +1,4 @@
 batch.submitted:
-  entity_id: string
   items: array
 item.assigned:
-  entity_id: string
   item: FanOutItem

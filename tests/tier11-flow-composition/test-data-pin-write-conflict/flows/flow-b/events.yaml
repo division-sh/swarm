@@ -1,4 +1,2 @@
 b.start:
-  entity_id: string
 b.done:
-  entity_id: string

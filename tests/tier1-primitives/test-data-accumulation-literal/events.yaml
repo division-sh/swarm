@@ -1,6 +1,2 @@
 item.received:
-  entity_id: string
-  required:
-    - entity_id
 item.categorized:
-  entity_id: string

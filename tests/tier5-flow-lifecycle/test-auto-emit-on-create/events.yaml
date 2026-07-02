@@ -1,6 +1,3 @@
 flow.created:
-  entity_id: string
 auto.started:
-  entity_id: string
 auto.processed:
-  entity_id: string

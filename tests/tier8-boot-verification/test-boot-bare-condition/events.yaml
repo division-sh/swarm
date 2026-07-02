@@ -1,5 +1,3 @@
 intake.requested:
-  entity_id: string
   type: string
 intake.completed:
-  entity_id: string

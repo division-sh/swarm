@@ -1,6 +1,4 @@
 task.requested:
   swarm:
     source: external
-  entity_id: string
 task.completed:
-  entity_id: string

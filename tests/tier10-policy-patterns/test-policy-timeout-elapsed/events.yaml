@@ -1,9 +1,5 @@
 task.done:
-  entity_id: string
 timer.check:
-  entity_id: string
   elapsed_hours: number
 task.completed:
-  entity_id: string
 task.timed_out:
-  entity_id: string

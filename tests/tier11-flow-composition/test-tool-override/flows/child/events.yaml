@@ -1,4 +1,2 @@
 child.start:
-  entity_id: string
 child.done:
-  entity_id: string

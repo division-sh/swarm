@@ -1,6 +1,4 @@
 flow.spawn_with_config:
-  entity_id: string
   instance_id: string
   config: WorkerConfig
 flow.spawned:
-  entity_id: string

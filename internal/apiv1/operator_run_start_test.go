@@ -712,7 +712,10 @@ func assertRunStartPersistence(t *testing.T, db *sql.DB, runID, eventName, bundl
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("decode persisted payload: %v", err)
 	}
-	if decoded["entity_id"] != runID || decoded["topic"] != "medicine" {
+	if _, ok := decoded["entity_id"]; ok {
+		t.Fatalf("persisted payload must not carry envelope entity_id: %#v", decoded)
+	}
+	if decoded["topic"] != "medicine" {
 		t.Fatalf("persisted payload = %#v", decoded)
 	}
 }

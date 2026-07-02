@@ -1,11 +1,6 @@
 item.discovered:
-  entity_id: string
   name: string
 score.requested:
-  entity_id: string
 item.dispatched:
-  entity_id: string
 scoring/score.requested:
-  entity_id: string
 scoring/score.done:
-  entity_id: string

@@ -1,8 +1,4 @@
 batch.requested:
-  entity_id: string
-  required:
-    - entity_id
   mode: string
   items: array
 batch.dispatched:
-  entity_id: string

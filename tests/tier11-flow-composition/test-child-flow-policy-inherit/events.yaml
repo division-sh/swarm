@@ -1,5 +1,3 @@
 review.requested:
-  entity_id: string
   score: integer
 review.done:
-  entity_id: string

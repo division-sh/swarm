@@ -1,8 +1,4 @@
 step.a_done:
-  entity_id: string
 step.b_done:
-  entity_id: string
 step.c_done:
-  entity_id: string
 release.ready:
-  entity_id: string

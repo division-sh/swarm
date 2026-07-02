@@ -1,10 +1,10 @@
 trigger:
   event: child/check.requested
   payload:
-    entity_id: 11111111-1111-1111-1111-111111111111
     score: 55
 
 expected:
+
   handler_outcome: success
   entity_state: approved
   emitted_events:

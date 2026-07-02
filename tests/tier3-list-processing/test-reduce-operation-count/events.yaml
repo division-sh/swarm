@@ -1,5 +1,3 @@
 batch.submitted:
-  entity_id: string
   items: array
 batch.counted:
-  entity_id: string

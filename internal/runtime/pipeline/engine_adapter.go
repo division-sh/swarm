@@ -321,17 +321,18 @@ func (e pipelineEngineEvaluator) queryEntityCount(ctx workflowExpressionContext,
 	if err != nil {
 		return 0, err
 	}
-	flowID := strings.TrimSpace(asString(ctx.Entity["workflow_name"]))
-	if flowID == "" {
-		return 0, fmt.Errorf("query_entities requires entity.workflow_name in expression context")
-	}
 	runID := strings.TrimSpace(asString(ctx.Event["run_id"]))
 	if runID == "" {
 		return 0, fmt.Errorf("query_entities requires event.run_id in expression context")
 	}
+	flowID := strings.TrimSpace(asString(ctx.Entity["workflow_name"]))
 	contract, ok := entityruntime.ResolveForFlow(e.coordinator.SemanticSource(), flowID)
 	if !ok {
-		return 0, fmt.Errorf("flow-owned entity contract is not available for workflow %s", flowID)
+		flowLabel := flowID
+		if flowLabel == "" {
+			flowLabel = "<root>"
+		}
+		return 0, fmt.Errorf("flow-owned entity contract is not available for workflow %s", flowLabel)
 	}
 	if strings.TrimSpace(parsed.Field) != "current_state" {
 		if _, err := entityruntime.ResolveLeafField(contract, parsed.Field); err != nil {
@@ -745,7 +746,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 		if bucketID == "" {
 			return true, fmt.Errorf("node %s handler %s record_evidence is missing evidence_target", execCtx.Request.NodeID.String(), recordEvidenceHandlerLabel(execCtx.Request))
 		}
-		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), bucketID, payload); err != nil {
+		if err := pc.recordWorkflowEvidence(ctx, execCtx.Request.EntityID.String(), execCtx.Request.FlowID.String(), bucketID, payload); err != nil {
 			return true, err
 		}
 		return true, nil

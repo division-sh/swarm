@@ -416,7 +416,6 @@ func eventPublicationPayload(params map[string]any, runID string, injectRunIDEnt
 		cloned["entity_id"] = entityID
 	case injectRunIDEntityID:
 		entityID = strings.TrimSpace(runID)
-		cloned["entity_id"] = entityID
 	}
 	encoded, err := json.Marshal(cloned)
 	if err != nil {
@@ -535,7 +534,7 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 		})
 	}
 	if strings.TrimSpace(params.EntityID) == "" {
-		return params, nil
+		return enrichExistingRunEventPublicationPrimaryEntity(ctx, opts, params)
 	}
 	entities, err := requireEntityReadStore(opts.Entities)
 	if err != nil {
@@ -554,6 +553,23 @@ func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorRe
 	if err != nil {
 		return params, err
 	}
+	params.FlowInstance = strings.Trim(strings.TrimSpace(entity.Entity.FlowInstance), "/")
+	return params, nil
+}
+
+func enrichExistingRunEventPublicationPrimaryEntity(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
+	entities, err := requireEntityReadStore(opts.Entities)
+	if err != nil {
+		return params, nil
+	}
+	entity, err := entities.LoadOperatorEntity(ctx, params.RunID, params.RunID)
+	if errors.Is(err, store.ErrEntityNotFound) {
+		return params, nil
+	}
+	if err != nil {
+		return params, err
+	}
+	params.EntityID = strings.TrimSpace(entity.Entity.EntityID)
 	params.FlowInstance = strings.Trim(strings.TrimSpace(entity.Entity.FlowInstance), "/")
 	return params, nil
 }

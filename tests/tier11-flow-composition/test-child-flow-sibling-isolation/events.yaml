@@ -1,14 +1,7 @@
 run.start:
-  entity_id: string
 run.complete:
-  entity_id: string
 flow-a/alpha.start:
-  entity_id: string
 flow-a/internal.done:
-  entity_id: string
 flow-a/alpha.complete:
-  entity_id: string
 flow-b/beta.start:
-  entity_id: string
 flow-b/beta.complete:
-  entity_id: string

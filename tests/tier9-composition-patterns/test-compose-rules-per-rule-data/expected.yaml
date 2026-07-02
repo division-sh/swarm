@@ -1,11 +1,11 @@
 trigger:
   event: conflict.submitted
   payload:
-    entity_id: 11111111-1111-1111-1111-111111111111
     strategy: keep_best
     value_a: low
     value_b: high
 expected:
+
   handler_outcome: success
   entity_state: resolved
   emitted_events: [conflict.resolved]

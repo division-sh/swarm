@@ -53,7 +53,7 @@ func TestHandlerExecutionStateSnapshotRejectsMalformedPersistedGateShape(t *test
 	}
 }
 
-func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
+func TestEnsureHandlerEntityIDUsesCanonicalPrimaryForEntityMaterializingHandler(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootEntities: runtimecontracts.EntityContractsDocument{
 			"subject": {
@@ -73,15 +73,15 @@ func TestEnsureHandlerEntityIDMintsForEntityMaterializingHandler(t *testing.T) {
 
 	entityID, evt := ensureHandlerEntityID(source, "", handler, "", eventtest.RootIngress("", events.EventType("custom.trigger"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 
-	if entityID == "" {
-		t.Fatal("expected minted entity_id")
+	if entityID != FlowInstanceEntityID("root") {
+		t.Fatalf("entityID = %q, want canonical root primary", entityID)
 	}
 	if got := evt.EntityID(); got == "" || got != entityID {
 		t.Fatalf("event entity_id = %q, want %q", got, entityID)
 	}
 }
 
-func TestEnsureHandlerEntityIDCreateEntityKeepsInboundEventReference(t *testing.T) {
+func TestEnsureHandlerEntityIDCreateEntityUsesInboundPrimaryReference(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	inbound := eventtest.RootIngress(
 		"",
@@ -98,8 +98,8 @@ func TestEnsureHandlerEntityIDCreateEntityKeepsInboundEventReference(t *testing.
 
 	entityID, evt := ensureHandlerEntityID(nil, "", handler, "ent-parent", inbound)
 
-	if entityID == "" || entityID == "ent-parent" {
-		t.Fatalf("entityID = %q, want fresh id", entityID)
+	if entityID != "ent-parent" {
+		t.Fatalf("entityID = %q, want inbound primary reference", entityID)
 	}
 	if got := evt.EntityID(); got != "ent-parent" {
 		t.Fatalf("event entity_id = %q, want preserved inbound reference", got)

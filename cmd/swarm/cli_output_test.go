@@ -687,7 +687,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: output-mode-verify`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
@@ -695,12 +694,7 @@ flows:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-case:
-  priority:
-    type: integer
-    _unused_reason: output-mode verification fixture field
-`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
 name: child
 initial_state: idle
@@ -715,11 +709,16 @@ pins:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+case:
+  priority:
+    type: integer
+    _unused_reason: output-mode child primary entity proof field
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
   swarm:
     source: external (output mode verify test)
-  entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 reader:

@@ -243,7 +243,7 @@ func TestRecordWorkflowEvidence_LogsMutationRow(t *testing.T) {
 	pc := testMutationLoggingCoordinator(db)
 	seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 
-	if err := pc.recordWorkflowEvidence(testPipelineCoordinatorRunContext(t, pc), entityID, "research", map[string]any{"summary": "done"}); err != nil {
+	if err := pc.recordWorkflowEvidence(testPipelineCoordinatorRunContext(t, pc), entityID, "", "research", map[string]any{"summary": "done"}); err != nil {
 		t.Fatalf("recordWorkflowEvidence: %v", err)
 	}
 
@@ -318,7 +318,7 @@ func TestMutationLoggedPipelineWritesFailClosedWithoutEntityMutationsTable(t *te
 		seedMutationLoggingInstance(t, pc.workflowStore, entityID)
 		dropEntityMutationsTable(t, db)
 
-		err := pc.recordWorkflowEvidence(testPipelineCoordinatorRunContext(t, pc), entityID, "research", map[string]any{"summary": "done"})
+		err := pc.recordWorkflowEvidence(testPipelineCoordinatorRunContext(t, pc), entityID, "", "research", map[string]any{"summary": "done"})
 		if err == nil || !strings.Contains(err.Error(), "entity_mutations") {
 			t.Fatalf("recordWorkflowEvidence err = %v, want entity_mutations failure", err)
 		}

@@ -1,4 +1,2 @@
 parent.trigger:
-  entity_id: string
 parent.result:
-  entity_id: string

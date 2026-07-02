@@ -1,8 +1,5 @@
 task.submitted:
-  required:
-  - entity_id
-  - priority
-  entity_id: string
   priority: integer
+  required:
+    - priority
 task.accepted:
-  entity_id: string

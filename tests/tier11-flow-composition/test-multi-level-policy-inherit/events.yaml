@@ -1,5 +1,3 @@
 root.check:
-  entity_id: string
   score: integer
 root.done:
-  entity_id: string

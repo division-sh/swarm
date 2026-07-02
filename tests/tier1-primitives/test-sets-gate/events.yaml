@@ -1,4 +1,2 @@
 gate.requested:
-  entity_id: string
 gate.set:
-  entity_id: string

@@ -1,5 +1,4 @@
 request.start:
-  entity_id: string
 request.complete: {}
 analyzer-flow/analysis.requested: {}
 analyzer-flow/analysis.done: {}

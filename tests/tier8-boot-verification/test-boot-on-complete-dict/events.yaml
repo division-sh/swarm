@@ -1,5 +1,3 @@
 task.requested:
-  entity_id: string
   score: integer
 task.completed:
-  entity_id: string

@@ -1,9 +1,9 @@
 trigger:
   event: task.completed
   payload:
-    entity_id: 11111111-1111-1111-1111-111111111111
     status: ok
 expected:
+
   handler_outcome: success
   entity_state: done
   emitted_events: [task.logged]

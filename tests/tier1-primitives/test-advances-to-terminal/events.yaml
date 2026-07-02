@@ -1,4 +1,2 @@
 task.completed:
-  entity_id: string
 task.finished:
-  entity_id: string

@@ -1,6 +1,4 @@
 digest.requested:
-  entity_id: string
 digest.compiled:
-  entity_id: string
   groups:
   - GroupedDigest

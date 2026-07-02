@@ -1,10 +1,5 @@
 job.created:
-  entity_id: string
 work.assigned:
-  entity_id: string
 job.done:
-  entity_id: string
 intake/work.assigned:
-  entity_id: string
 intake/item.processed:
-  entity_id: string

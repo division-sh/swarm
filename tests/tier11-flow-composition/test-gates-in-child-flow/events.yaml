@@ -1,8 +1,4 @@
 validate.requested:
-  entity_id: string
 validate.passed:
-  entity_id: string
 child/validate.start:
-  entity_id: string
 child/validation.done:
-  entity_id: string

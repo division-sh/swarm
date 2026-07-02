@@ -1,4 +1,3 @@
 support.requested:
   swarm:
     source: external
-  entity_id: string

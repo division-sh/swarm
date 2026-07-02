@@ -1,12 +1,6 @@
 start:
-  entity_id: string
 complete:
-  entity_id: string
 flow-a/a.start:
-  entity_id: string
 flow-a/a.done:
-  entity_id: string
 flow-b/b.start:
-  entity_id: string
 flow-b/b.done:
-  entity_id: string

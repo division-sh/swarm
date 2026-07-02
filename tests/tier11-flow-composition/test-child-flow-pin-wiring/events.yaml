@@ -1,9 +1,5 @@
 job.submit:
-  entity_id: string
 work.requested:
-  entity_id: string
   task_type: string
 job.done:
-  entity_id: string
 child/work.completed:
-  entity_id: string

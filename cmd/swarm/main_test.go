@@ -3528,11 +3528,9 @@ test-node:
 task.requested:
   swarm:
     source: external
-  entity_id: string
 task.completed:
   swarm:
     source: external
-  entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "entities.yaml"), `{}`)
 	targetBundle := loadWorkflowValidationBundleAt(t, targetRoot)
@@ -3971,11 +3969,10 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing
 
 func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
-	bootstrapEntityID := "22222222-2222-4222-8222-222222222222"
 	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "opco.bootstrap_requested",
 		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"entity_id": bootstrapEntityID, "owner": "operator"},
+		"payload":         map[string]any{"owner": "operator"},
 		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
 	})
 	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
@@ -3983,9 +3980,6 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	}
 	runID := bootstrap.RunID
 	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	if parentEntityID != bootstrapEntityID {
-		t.Fatalf("%s bootstrap entity_id = %q, want supplied %q", backend, parentEntityID, bootstrapEntityID)
-	}
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	start := time.Now()
@@ -3994,7 +3988,6 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		"run_id":          runID,
 		"source_event_id": bootstrap.EventID,
 		"payload": map[string]any{
-			"entity_id":   parentEntityID,
 			"instance_id": instanceID,
 			"product_id":  "product-1",
 		},
@@ -4089,33 +4082,23 @@ widget:
 thing.created:
   swarm:
     source: external
-  entity_id: string
   amount: integer
   who: text
-  required:
-    - entity_id
 
 thing.reviewed:
   swarm:
     source: external
-  entity_id: string
   note: text
 
 thing.agent_hold:
   swarm:
     source: external
-  entity_id: string
   note: text
-  required:
-    - entity_id
 
 thing.unhandled:
   swarm:
     source: external
-  entity_id: string
   note: text
-  required:
-    - entity_id
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 entity-writer:
@@ -4175,19 +4158,14 @@ portfolio:
 opco.bootstrap_requested:
   swarm:
     source: external
-  entity_id: string
   owner: text
-  required:
-    - entity_id
 
 opco.spinup_requested:
   swarm:
     source: external
-  entity_id: string
   instance_id: string
   product_id: string
   required:
-    - entity_id
     - instance_id
     - product_id
 `)
@@ -4326,19 +4304,14 @@ portfolio:
 opco.bootstrap_requested:
   swarm:
     source: external
-  entity_id: string
   owner: text
-  required:
-    - entity_id
 
 opco.spinup_requested:
   swarm:
     source: external
-  entity_id: string
   instance_id: string
   product_id: string
   required:
-    - entity_id
     - instance_id
     - product_id
 `)
@@ -4640,11 +4613,10 @@ const (
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
-	initialEntityID := "11111111-1111-4111-8111-111111111111"
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "thing.created",
 		"--bundle-hash", bundleHash,
-		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"amount":7,"who":"operator"}`, initialEntityID),
+		"--payload-json", `{"amount":7,"who":"operator"}`,
 		"--idempotency-key", "issue-1255-" + backend + "-initial",
 	})
 	if code != 0 {
@@ -4664,16 +4636,13 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	if entityID != initialEntityID {
-		t.Fatalf("%s initial entity_id = %q, want supplied %q", backend, entityID, initialEntityID)
-	}
 	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "thing.created", "entity-writer")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
 
 	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "thing.reviewed",
 		"--run-id", runID,
-		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"note":"approved"}`, entityID),
+		"--payload-json", `{"note":"approved"}`,
 		"--idempotency-key", "issue-1255-" + backend + "-follow-up",
 	})
 	if code != 0 {
@@ -4738,7 +4707,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "thing.unhandled",
 		"run_id":          runID,
-		"payload":         map[string]any{"entity_id": entityID, "note": "lost"},
+		"payload":         map[string]any{"note": "lost"},
 		"idempotency_key": unhandledIdempotencyKey,
 	})
 	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
@@ -4758,11 +4727,10 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 
 func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
-	bootstrapEntityID := "22222222-2222-4222-8222-222222222222"
 	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "opco.bootstrap_requested",
 		"--bundle-hash", bundleHash,
-		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"owner":"operator"}`, bootstrapEntityID),
+		"--payload-json", `{"owner":"operator"}`,
 		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
 	})
 	if code != 0 {
@@ -4774,17 +4742,14 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if bootstrap["new_run_created"] != "true" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
 		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
 	}
-	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	if parentEntityID != bootstrapEntityID {
-		t.Fatalf("%s bootstrap entity_id = %q, want supplied %q", backend, parentEntityID, bootstrapEntityID)
-	}
+	requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
 
 	instanceID := "11111111-1111-4111-8111-111111111111"
 	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "opco.spinup_requested",
 		"--run-id", runID,
 		"--source-event-id", bootstrapEventID,
-		"--payload-json", fmt.Sprintf(`{"entity_id":%q,"instance_id":%q,"product_id":"product-1"}`, parentEntityID, instanceID),
+		"--payload-json", fmt.Sprintf(`{"instance_id":%q,"product_id":"product-1"}`, instanceID),
 		"--idempotency-key", "issue-1438-" + backend + "-spinup",
 	})
 	if code != 0 {
@@ -4850,11 +4815,10 @@ func runServedEventPublishActiveLoadProof(
 	releaseOnce *sync.Once,
 ) {
 	t.Helper()
-	initialEntityID := "11111111-1111-4111-8111-111111111111"
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "thing.created",
 		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"entity_id": initialEntityID, "amount": 7, "who": "operator"},
+		"payload":         map[string]any{"amount": 7, "who": "operator"},
 		"idempotency_key": "issue-1434-" + backend + "-initial",
 	})
 	runID := initial.RunID
@@ -4864,16 +4828,13 @@ func runServedEventPublishActiveLoadProof(
 	}
 	waitForServedEventPublishNodeDeliveryLifecycle(t, db, backend, runID, initialEventID, probe)
 	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-	if entityID != initialEntityID {
-		t.Fatalf("%s initial entity_id = %q, want supplied %q", backend, entityID, initialEntityID)
-	}
 
 	holdStart := time.Now()
 	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
 		"event_name":      "thing.agent_hold",
 		"run_id":          runID,
 		"source_event_id": initialEventID,
-		"payload":         map[string]any{"entity_id": entityID, "note": "hold active agent delivery"},
+		"payload":         map[string]any{"note": "hold active agent delivery"},
 		"idempotency_key": "issue-1434-" + backend + "-agent-hold",
 	})
 	holdElapsed := time.Since(holdStart)
@@ -4910,7 +4871,7 @@ func runServedEventPublishActiveLoadProof(
 		"event_name":      "thing.unhandled",
 		"run_id":          runID,
 		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"entity_id": entityID, "note": "unhandled under active load"},
+		"payload":         map[string]any{"note": "unhandled under active load"},
 		"idempotency_key": unhandledKey,
 	})
 	unhandledElapsed := time.Since(unhandledStart)
@@ -4938,7 +4899,7 @@ func runServedEventPublishActiveLoadProof(
 		"event_name":      "thing.reviewed",
 		"run_id":          runID,
 		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"entity_id": entityID, "note": "approved under active load"},
+		"payload":         map[string]any{"note": "approved under active load"},
 		"idempotency_key": "issue-1434-" + backend + "-follow-up",
 	})
 	followElapsed := time.Since(followStart)
@@ -9144,7 +9105,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-lint-evidence`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
@@ -9175,11 +9135,16 @@ pins:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+case:
+  priority:
+    type: integer
+    _unused_reason: verify lint evidence child primary entity proof field
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
   swarm:
     source: external (verify lint evidence test)
-  entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 reader:
@@ -9323,7 +9288,8 @@ ticket:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 timer.reminder:
-  entity_id: string
+  swarm:
+    source: internal
 `)
 	timerBlock := `
     - id: reminder
@@ -9492,7 +9458,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
@@ -9604,7 +9569,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-float`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
@@ -9618,13 +9582,15 @@ initial_state: idle
 terminal_states: [done]
 states: [idle, done]
 `)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+case: {}
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
   swarm:
     source: external (state schema float verify test)
-  entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 accumulator:
@@ -9692,7 +9658,6 @@ vertical:
 score.dimension_complete:
   swarm:
     source: external (verify accumulator projection fixture)
-  entity_id: string
   expected_dimensions: integer
   vertical_id: string
   dimension: text
@@ -9700,8 +9665,7 @@ score.dimension_complete:
   score: integer
   evidence: text
   confidence: text
-score.completed:
-  entity_id: string
+score.completed: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 scorer:
@@ -9980,7 +9944,6 @@ pins:
 agent.requested:
   swarm:
     source: external
-  entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf(`
@@ -10044,7 +10007,6 @@ core:
 artifact.requested:
   swarm:
     source: external
-  entity_id: string
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 artifact-writer:
@@ -10092,7 +10054,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-model-alias`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
@@ -10106,6 +10067,9 @@ name: child
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+case: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), fmt.Sprintf(`
@@ -12044,7 +12008,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: verify-missing-pin-warning
@@ -12059,13 +12022,13 @@ pins:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 task.requested:
-  entity_id: string
+  swarm:
+    source: external
 task.completed:
-  entity_id: string
-child/task.assigned:
-  entity_id: string
-child/task.result:
-  entity_id: string
+  swarm:
+    source: internal
+child/task.assigned: {}
+child/task.result: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 dispatcher:
@@ -12096,14 +12059,16 @@ pins:
   outputs:
     events: [task.result]
 `)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), `
+work_item: {}
+`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
-  entity_id: string
+  swarm:
+    source: internal
 task.feedback:
-  entity_id: string
   comment: string
-task.result:
-  entity_id: string
+task.result: {}
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 worker:

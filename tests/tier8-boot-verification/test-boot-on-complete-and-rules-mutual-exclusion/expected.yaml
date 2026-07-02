@@ -2,6 +2,7 @@ trigger:
   boot: true
 
 expected:
+
   boot_result: error
   error_category: HANDLER-FIELD-CONFLICT
   error_contains: "on_complete"

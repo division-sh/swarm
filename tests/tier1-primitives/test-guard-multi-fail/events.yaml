@@ -1,6 +1,4 @@
 check.requested:
-  entity_id: string
   score: integer
   level: integer
 check.passed:
-  entity_id: string

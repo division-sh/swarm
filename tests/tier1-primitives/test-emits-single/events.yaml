@@ -1,6 +1,4 @@
 item.received:
   swarm:
     source: external
-  entity_id: string
-item.processed:
-  entity_id: string
+item.processed: {}

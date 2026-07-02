@@ -74,9 +74,8 @@ var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
 }
 
 var tier8StaticMultiEntityRetiredFixtures = map[string]struct{}{
-	"test-boot-create-entity-plus-accumulate": {},
-	"test-boot-missing-pin":                   {},
-	"test-boot-policy-conflict":               {},
+	"test-boot-missing-pin":     {},
+	"test-boot-policy-conflict": {},
 }
 
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {

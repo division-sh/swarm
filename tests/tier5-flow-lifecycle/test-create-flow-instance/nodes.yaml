@@ -9,7 +9,7 @@ test-node:
       template: worker-flow
       instance_id_from: payload.instance_id
       config_from:
-        entity_id: payload.entity_id
+        worker_id: payload.worker_id
       emit:
         event: flow.spawned
         broadcast: true

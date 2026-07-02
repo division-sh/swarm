@@ -1,7 +1,4 @@
 item.received:
-  entity_id: string
   kind: string
 routed.a:
-  entity_id: string
 routed.b:
-  entity_id: string

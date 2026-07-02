@@ -1,12 +1,6 @@
 gate.g1_set:
-  entity_id: string
 gate.g2_set:
-  entity_id: string
 gate.g3_set:
-  entity_id: string
 approval.requested:
-  entity_id: string
 approval.granted:
-  entity_id: string
 gate.set:
-  entity_id: string

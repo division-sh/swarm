@@ -1,4 +1,2 @@
 sub.requested:
-  entity_id: string
 sub.completed:
-  entity_id: string

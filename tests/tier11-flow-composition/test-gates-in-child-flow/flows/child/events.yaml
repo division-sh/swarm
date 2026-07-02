@@ -1,4 +1,2 @@
 validate.start:
-  entity_id: string
 validation.done:
-  entity_id: string

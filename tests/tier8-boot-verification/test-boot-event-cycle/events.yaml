@@ -1,4 +1,2 @@
 cycle.ping:
-  entity_id: string
 cycle.pong:
-  entity_id: string

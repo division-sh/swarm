@@ -1,3 +1,2 @@
 check.requested: {}
 check.passed:
-  entity_id: string

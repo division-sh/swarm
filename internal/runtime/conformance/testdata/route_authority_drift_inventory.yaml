@@ -163,7 +163,7 @@ search_dimensions:
     canonical_layer: event_context
   - id: entity_context
     pattern: 'entity_id|EntityID|EffectiveEntityID'
-    minimum_matching_files: 704
+    minimum_matching_files: 400
     required_paths:
       - platform-spec.yaml
       - openrpc.json

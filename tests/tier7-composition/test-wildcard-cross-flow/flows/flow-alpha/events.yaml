@@ -1,4 +1,2 @@
 trigger.alpha:
-  entity_id: string
 job.alpha_done:
-  entity_id: string

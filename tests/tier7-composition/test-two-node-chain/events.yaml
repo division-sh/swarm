@@ -1,6 +1,3 @@
 task.started:
-  entity_id: string
 task.progressed:
-  entity_id: string
 task.finished:
-  entity_id: string

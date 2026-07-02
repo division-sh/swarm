@@ -1,9 +1,8 @@
 trigger:
   event: pipeline.start
   payload:
-    entity_id: 11111111-1111-1111-1111-111111111111
-
 expected:
+
   handler_outcome: success
   emitted_events:
     - pipeline.complete

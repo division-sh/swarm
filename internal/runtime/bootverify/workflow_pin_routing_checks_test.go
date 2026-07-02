@@ -858,8 +858,7 @@ func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtu
 	if opts.withProducer {
 		flows = `
   - id: producer
-    flow: producer
-    mode: static` + flows
+    flow: producer` + flows
 		if opts.connectProducerToOther {
 			flows += `
   - id: other_consumer
@@ -917,7 +916,6 @@ func writeSelectEntityDemotionProducerFlow(t *testing.T, root string) {
 	t.Helper()
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
 name: producer
-mode: static
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
@@ -941,6 +939,8 @@ producer_request:
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
 deploy.requested:
+  swarm:
+    source: external
   vertical_id: string
 deploy.done:
   vertical_id: string

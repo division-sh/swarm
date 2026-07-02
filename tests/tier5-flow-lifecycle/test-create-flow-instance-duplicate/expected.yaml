@@ -2,23 +2,24 @@ trigger:
   sequence:
     - event: flow.spawn_requested
       payload:
-        entity_id: 11111111-1111-4111-8111-111111111111
         instance_id: worker-dup
+        worker_id: worker-dup
     - event: flow.spawn_requested
       payload:
-        entity_id: 22222222-2222-4222-8222-222222222222
         instance_id: worker-dup
+        worker_id: worker-dup
       receipt_outcome: dead_letter
       receipt_error_contains: "flow instance already exists: worker-flow/worker-dup"
 
 expected:
-  handler_outcome: success
+
   entity_state: spawned
+  dead_letter: true
   emitted_events:
     - flow.spawned
   flow_instance_created:
     template: worker-flow
     instance_id: worker-dup
     config:
-      entity_id: 11111111-1111-4111-8111-111111111111
+      worker_id: worker-dup
     auto_emitted: worker-flow/worker-dup/worker.ready

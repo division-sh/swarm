@@ -1,14 +1,7 @@
 phase.init:
-  entity_id: string
 phase.activate:
-  entity_id: string
 phase.start:
-  entity_id: string
 phase.stabilize:
-  entity_id: string
 phase.wind_down:
-  entity_id: string
 phase.close:
-  entity_id: string
 lifecycle.complete:
-  entity_id: string

@@ -1232,9 +1232,10 @@ runtime_enforcement:
     rule: |
       create_entity writes only fields declared in the inferred
       flow-owned entity contract. The caller does not supply
-      `entity_id` or `entity_type`; the runtime mints identity and
-      infers the contract from flow context. Envelope field names are
-      rejected as caller input. Missing declared fields receive
+      `entity_id` or `entity_type`; the runtime derives the canonical
+      receiving-flow primary identity from flow-instance/run context
+      and infers the contract from flow context. Envelope field names
+      are rejected as caller input. Missing declared fields receive
       explicit `initial:` or the type default.
   save_entity_field:
     rule: |
@@ -1331,7 +1332,7 @@ handler_specification:
   dependency_graph:
     description: Arrows mean "must complete before". Steps at the same level are independent — the implementer may execute
       them in any order.
-    graph: "\nentity acquisition (optional — create_entity mints a new entity; select_entity resolves exactly one target-flow-owned existing entity; select_or_create_entity resolves or mints one target-flow-owned entity by declared key)\n  └→ query (optional — pre-fetch cross-entity\
+    graph: "\nentity acquisition (optional — create_entity materializes the canonical receiving-flow primary entity; select_entity resolves exactly one target-flow-owned existing entity; select_or_create_entity resolves or creates one target-flow-owned entity by declared key)\n  └→ query (optional — pre-fetch cross-entity\
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
@@ -1370,11 +1371,10 @@ handler_specification:
     create_entity:
       field: create_entity
       type: boolean
-      purpose: When true, the handler mints a fresh entity_id before any other processing. All subsequent handler steps
-        (guard, data_accumulation, advances_to, emit, etc.) operate on the NEW entity. The inbound event's entity_id is
-        ignored for state operations — the new entity starts at the flow's initial_state with schema-declared initial values
-        already materialized. The original
-        event entity_id is preserved in the event payload for reference.
+      purpose: When true, the handler materializes the canonical receiving-flow primary entity before any other processing.
+        All subsequent handler steps (guard, data_accumulation, advances_to, emit, etc.) operate on that canonical entity.
+        The inbound event's entity_id is parent/source context only and is ignored for state ownership; the receiving-flow
+        entity starts at the flow's initial_state with schema-declared initial values already materialized.
       default: false — handler operates on the inbound event's entity_id (inherit)
       when_to_use: When an event arriving from outside the flow represents a new entity entering this flow's lifecycle.
         Example — vertical.discovered arriving at scoring creates a new vertical entity for scoring. Without create_entity,
@@ -1382,18 +1382,18 @@ handler_specification:
       execution_position: First step in the dependency graph. Runs before query, guard, and all other steps. Establishes
         the entity context for the entire handler.
       entity_creation:
-        entity_id: Auto-generated UUID
+        entity_id: Canonical receiving-flow primary entity identity derived from flow-instance/run context, not caller payload identity
         initial_state: From the flow's schema.yaml initial_state
         flow_instance: Current flow instance path
         fields: Declared entity fields materialized at create_entity time. Explicit `initial:` values apply where declared;
           otherwise the type default is materialized so every declared field is readable immediately.
       interactions:
-        with_accumulate: 'PROHIBITED. create_entity mints a new entity_id on every handler invocation. Accumulate receives
-          multiple events for the same entity. Combining them would create a different entity on each accumulation event.
+        with_accumulate: 'PROHIBITED. create_entity establishes the canonical receiving-flow lifecycle entity for this handler.
+          Accumulate waits across multiple arrivals and must not be combined with same-handler lifecycle materialization.
           Boot error if both are declared on the same handler.'
-        with_fan_out: 'ALLOWED. create_entity creates ONE entity, then fan_out emits multiple events all carrying that entity_id.
-          Fan_out items share the new entity.'
-        with_guard: 'ALLOWED. Guards evaluate against the NEWLY CREATED entity state after schema initial values materialize.
+        with_fan_out: 'ALLOWED. create_entity materializes ONE canonical entity, then fan_out emits multiple events all carrying
+          that entity_id. Fan_out items share the canonical entity.'
+        with_guard: 'ALLOWED. Guards evaluate against the materialized canonical entity state after schema initial values materialize.
           Guards may read any declared entity field directly. Declared fields are universally present with either their
           explicit initial or their type default.'
         with_on_complete: 'ALLOWED. on_complete conditions evaluate according to the handler dependency graph. They may rely on
@@ -1402,7 +1402,7 @@ handler_specification:
           values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
       note_on_static_flows: 'Retired for authored stateful static/default-static multi-row ownership. A static input-pin
-        handler MUST NOT use create_entity to mint arbitrary receiving-flow rows over time. Authors must model the state
+        handler MUST NOT use create_entity to materialize arbitrary receiving-flow rows over time. Authors must model the state
         as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a
         child flow. Historical rows are not silently rewritten by this retirement; actual persisted-row migration is
         separately gated.'
@@ -1444,8 +1444,8 @@ handler_specification:
       restrictions:
         lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
           do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
-        with_create_entity: PROHIBITED. A handler must either mint a new entity with create_entity or select an existing
-          target-flow-owned entity with select_entity, never both.
+        with_create_entity: PROHIBITED. A handler must either materialize the canonical receiving-flow primary entity with
+          create_entity or select an existing target-flow-owned entity with select_entity, never both.
         source_authority: PROHIBITED. select_entity keys must not target platform envelope/control fields such as entity_id,
           entity_type, flow_instance, current_state, workflow_name, or workflow_version. Payload refs must not be
           payload.entity_id, payload.entity_type, or payload.flow_instance.
@@ -13507,7 +13507,7 @@ cli_specification:
         the selected-run entity, entity_state.flow_instance equality, event routability for that concrete receiver route,
         and source-event same-run lineage before persistence. Caller-supplied payload.entity_id is not target or
         entity authority. If the selected handler uses create_entity, /v1/rpc event.publish rejects payload.entity_id with
-        PAYLOAD_VALIDATION_FAILED because create_entity mints the platform entity identity.
+        PAYLOAD_VALIDATION_FAILED because create_entity materializes the platform-owned canonical receiving-flow identity.
       flags:
       - name: --payload-json <json-object>
         required: true
@@ -18156,7 +18156,7 @@ api_specification:
         \ flow-scoped references through the loaded contract catalog before declaration validation, payload validation,\
         \ EventBus publish, and idempotency completion persistence. Unknown flow/event combinations and ambiguous unscoped\
         \ leaf names fail closed with EVENT_NOT_DECLARED and no mutation.\n\nCreate-entity ownership: handler create_entity\
-        \ is the only authority that mints a new entity identity. Caller-supplied payload.entity_id on an event whose selected\
+        \ is the only authority that materializes the canonical receiving-flow entity identity. Caller-supplied payload.entity_id on an event whose selected\
         \ handler declares create_entity fails closed with PAYLOAD_VALIDATION_FAILED before event/idempotency persistence.\
         \ select_entity/select_or_create_entity use their declared payload-key bindings only; payload.entity_id is not target\
         \ or stateful-context authority.\n"
@@ -18200,7 +18200,7 @@ api_specification:
         description: >-
           JSON object business payload. payload.entity_id is not an event envelope, target, or stateful-context authority.
           If the selected handler uses create_entity, caller-supplied payload.entity_id fails closed with PAYLOAD_VALIDATION_FAILED
-          because the handler mints the platform entity identity.
+          because the handler materializes the platform-owned canonical receiving-flow identity.
         schema:
           type: object
           additionalProperties: true

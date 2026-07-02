@@ -1,10 +1,10 @@
 trigger:
   event: check.requested
   payload:
-    entity_id: 11111111-1111-4111-8111-111111111111
     score: 50
 
 expected:
+
   handler_outcome: escalate
   entity_state: pending
   emitted_events:

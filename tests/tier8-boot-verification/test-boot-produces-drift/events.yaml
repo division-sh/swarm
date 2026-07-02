@@ -1,6 +1,3 @@
 item.requested:
-  entity_id: string
 item.done:
-  entity_id: string
 item.surprise:
-  entity_id: string

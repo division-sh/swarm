@@ -1,8 +1,4 @@
 review.done:
-  entity_id: string
 review.insufficient:
-  entity_id: string
 review.approved:
-  entity_id: string
 review.restarted:
-  entity_id: string

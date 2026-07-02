@@ -1,5 +1,4 @@
 task.assigned:
-  entity_id: string
 task.acknowledged: {}
 task.completed: {}
 task.finalized: {}

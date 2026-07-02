@@ -1,7 +1,7 @@
 name: worker-flow
 mode: template
 instance:
-  by: entity_id
+  by: worker_id
   on_missing: create
   on_conflict: reject
 initial_state: idle

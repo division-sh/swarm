@@ -1,9 +1,6 @@
 batch.submitted:
-  entity_id: string
   items: array
 routed.a:
-  entity_id: string
   item: FanOutItem
 routed.b:
-  entity_id: string
   item: FanOutItem

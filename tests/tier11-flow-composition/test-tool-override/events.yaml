@@ -1,8 +1,4 @@
 task.requested:
-  entity_id: string
 task.done:
-  entity_id: string
 child/child.start:
-  entity_id: string
 child/child.done:
-  entity_id: string

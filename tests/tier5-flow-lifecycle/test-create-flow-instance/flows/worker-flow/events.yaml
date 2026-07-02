@@ -1,2 +1,2 @@
 worker.ready:
-  entity_id: string
+  worker_id: string
