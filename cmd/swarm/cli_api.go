@@ -92,6 +92,7 @@ type cliAPIConfigFile struct {
 	APIServer          string `yaml:"api_server"`
 	APITokenFile       string `yaml:"api_token_file"`
 	SwarmDir           string `yaml:"swarm_dir"`
+	SwarmDirSet        bool   `yaml:"-"`
 	ContractsPath      string `yaml:"contracts_path"`
 	PlatformSpecPath   string `yaml:"platform_spec_path"`
 	ServeAPIListenAddr string `yaml:"serve_api_listen_addr"`
@@ -310,6 +311,7 @@ func parseCLIAPIConfigFile(configPath string, raw []byte) (cliAPIConfigFile, err
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return cliAPIConfigFile{}, &cliAPIValidationError{message: fmt.Sprintf("decode CLI config %s: %v", configPath, err)}
 	}
+	_, cfg.SwarmDirSet = decoded["swarm_dir"]
 	return cfg, nil
 }
 

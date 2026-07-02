@@ -263,6 +263,19 @@ func TestCLISwarmDirConfigValidation(t *testing.T) {
 	}
 }
 
+func TestCLISwarmDirBlankConfigFailsClosed(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("swarm_dir: \"  \"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("SWARM_CONFIG", path)
+
+	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "config swarm_dir must be non-empty") {
+		t.Fatalf("resolveCLISwarmDir err = %v, want blank config swarm_dir validation", err)
+	}
+}
+
 func TestCLIAPIResolverIgnoresServeListenerConfigKeys(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	tokenFile := writeCLIAPITokenFile(t, "config-token")
