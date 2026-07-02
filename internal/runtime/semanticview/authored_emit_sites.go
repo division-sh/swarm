@@ -121,6 +121,7 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 		})
 	}
 	add("handler.emit", "handler.emit", "", handler.Emit)
+	add("handler.on_success.emit", "handler.on_success.emit", "", handler.OnSuccess.Emit)
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
 			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, emitSpec)

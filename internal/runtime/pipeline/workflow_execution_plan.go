@@ -34,6 +34,7 @@ type handlerExecutionPlan struct {
 	ClearGates       bool
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 	Emit             runtimecontracts.EmitSpec
+	OnSuccess        runtimecontracts.HandlerOnSuccessSpec
 	EmitEvents       []string
 	Rules            []runtimecontracts.HandlerRuleEntry
 	OnComplete       []runtimecontracts.HandlerRuleEntry
@@ -83,6 +84,7 @@ func handlerExecutionPlanFromNodeHandler(nodeID, eventType string, handler runti
 		ClearGates:       len(handler.ClearGates) > 0,
 		DataAccumulation: handler.DataAccumulation,
 		Emit:             handler.Emit,
+		OnSuccess:        handler.OnSuccess,
 		EmitEvents:       runtimecontracts.HandlerEmitEvents(handler),
 		Rules:            append([]runtimecontracts.HandlerRuleEntry(nil), handler.Rules...),
 		OnComplete:       append([]runtimecontracts.HandlerRuleEntry(nil), handler.OnComplete...),
@@ -146,6 +148,9 @@ func handlerPlanHasRuleActions(plan handlerExecutionPlan) bool {
 
 func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
 	if plan.Emit.HasFields() {
+		return true
+	}
+	if plan.OnSuccess.Emit.HasFields() {
 		return true
 	}
 	if plan.FanOut != nil && plan.FanOut.Emit.HasFields() {
