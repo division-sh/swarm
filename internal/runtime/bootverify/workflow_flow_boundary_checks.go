@@ -815,16 +815,48 @@ func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label
 }
 
 func retiredStaticMultiEntityInputHasNoOwner(source semanticview.Source, flowID, eventType string) bool {
-	if strings.TrimSpace(flowID) == "" {
-		return false
-	}
 	if source == nil {
 		return true
+	}
+	if retiredStaticMultiEntityEventDeclaresEntityID(source, flowID, eventType) {
+		return false
 	}
 	if pinRoutingEventExternalSource(source, flowID, eventType) {
 		return true
 	}
 	return !pinRoutingAllKnownProducersTargeted(source, flowID, eventType)
+}
+
+func retiredStaticMultiEntityEventDeclaresEntityID(source semanticview.Source, flowID, eventType string) bool {
+	if source == nil {
+		return false
+	}
+	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType); ok && eventEntryDeclaresPayloadField(entry, "entity_id") {
+		return true
+	}
+	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
+	return eventEntryDeclaresPayloadField(proof.Entry, "entity_id")
+}
+
+func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return false
+	}
+	if _, ok := entry.Payload.Properties[field]; ok {
+		return true
+	}
+	for _, required := range entry.Required {
+		if strings.TrimSpace(required) == field {
+			return true
+		}
+	}
+	for _, required := range entry.Payload.Required {
+		if strings.TrimSpace(required) == field {
+			return true
+		}
+	}
+	return false
 }
 
 func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {

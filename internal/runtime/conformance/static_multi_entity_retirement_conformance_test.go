@@ -14,10 +14,11 @@ import (
 
 func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 	tests := []struct {
-		name        string
-		handlerBody string
-		checkID     string
-		wantMessage string
+		name            string
+		handlerBody     string
+		declareEntityID bool
+		checkID         string
+		wantMessage     string
 	}{
 		{
 			name: "create_entity fails closed",
@@ -92,6 +93,60 @@ func TestStaticMultiEntityRetirementConformance(t *testing.T) {
 	}
 }
 
+func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
+	tests := []struct {
+		name            string
+		handlerBody     string
+		declareEntityID bool
+		checkID         string
+		wantMessage     string
+	}{
+		{
+			name: "missing acquisition materializing root state fails closed",
+			handlerBody: "      data_accumulation:\n" +
+				"        writes:\n" +
+				"          - source_field: display_name\n" +
+				"            target_field: display_name\n",
+			checkID:     "flow_boundary_create_entity_validation",
+			wantMessage: "static multi-row entity ownership is retired",
+		},
+		{
+			name: "missing acquisition non materializing root handler is allowed",
+			handlerBody: "      emit:\n" +
+				"        event: subject.observed\n" +
+				"        fields:\n" +
+				"          display_name: payload.display_name\n",
+		},
+		{
+			name: "declared entity_id root materializer is allowed",
+			handlerBody: "      data_accumulation:\n" +
+				"        writes:\n" +
+				"          - source_field: display_name\n" +
+				"            target_field: display_name\n",
+			declareEntityID: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := loadRootDefaultStaticMultiEntityRetirementSource(t, tc.handlerBody, tc.declareEntityID)
+			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+			if tc.checkID != "" {
+				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) ||
+					!staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, "implicit entity materialization") {
+					t.Fatalf("bootverify errors = %#v, want %s containing root/default-static implicit materialization retirement", report.Errors(), tc.checkID)
+				}
+				return
+			}
+			if staticMultiEntityRetirementFindingContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+				staticMultiEntityRetirementFindingContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
+				staticMultiEntityRetirementFindingContains(report.Errors(), "missing_external_select_entity", "") {
+				t.Fatalf("root/default-static non-materializing handler must not be forced into retired acquisition, got %#v", report.Errors())
+			}
+		})
+	}
+}
+
 func loadStaticMultiEntityRetirementSource(t *testing.T, handlerBody string) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
@@ -150,6 +205,62 @@ treasury-node:
   subscribes_to: [opco.spend_requested]
   event_handlers:
     opco.spend_requested:
+`+handlerBody)
+
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func loadRootDefaultStaticMultiEntityRetirementSource(t *testing.T, handlerBody string, declareEntityID bool) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "package.yaml"), `
+name: root-default-static-multi-entity-retirement
+version: "1.0.0"
+platform_version: ">=1.0.0"
+`)
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "schema.yaml"), `
+name: root-default-static-multi-entity-retirement
+initial_state: active
+states: [active, archived]
+terminal_states: [archived]
+pins:
+  inputs:
+    events: [subject.created]
+  outputs:
+    events: [subject.observed]
+`)
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	entityIDField := ""
+	if declareEntityID {
+		entityIDField = "  entity_id: string\n"
+	}
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "events.yaml"), `
+subject.created:
+  swarm:
+    source: external
+`+entityIDField+`  display_name: string
+subject.observed:
+`+entityIDField+`  display_name: string
+`)
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "entities.yaml"), `
+subject:
+  display_name: text
+`)
+	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "nodes.yaml"), `
+root-node:
+  id: root-node
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  produces: [subject.observed]
+  event_handlers:
+    subject.created:
 `+handlerBody)
 
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
