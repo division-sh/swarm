@@ -1,10 +1,10 @@
 lookup_data:
   description: Looks up data from the knowledge base (child v2 override).
   endpoint: /api/v2/lookup
-  parameters:
+  input_schema:
     query:
       type: string
       description: The search query.
-  returns:
+  output_schema:
     type: string
     description: The search result.

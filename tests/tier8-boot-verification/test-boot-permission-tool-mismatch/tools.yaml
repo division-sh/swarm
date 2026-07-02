@@ -2,7 +2,7 @@ lookup_data:
   description: Looks up external data
   type: custom
   permission: external_api_access
-  parameters:
+  input_schema:
     query:
       type: string
       description: Search query

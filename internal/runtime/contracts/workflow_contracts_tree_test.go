@@ -101,6 +101,85 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	}
 }
 
+func TestLoadWorkflowContractBundleLoadsCanonicalToolSchemasFromRootAndFlowTools(t *testing.T) {
+	repoRoot := repoRootForContractsTest(t)
+	root := t.TempDir()
+
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: canonical-tool-schema
+version: "1.0.0"
+flows:
+  - id: worker
+    flow: worker
+    mode: static
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: canonical-tool-schema\n")
+	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), `
+root_lookup:
+  description: Root-level lookup tool.
+  handler_type: http
+  input_schema:
+    type: object
+    required: [query]
+    properties:
+      query:
+        type: string
+  output_schema:
+    type: object
+    properties:
+      result:
+        type: string
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
+name: worker
+mode: static
+`)
+	writeFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), `
+flow_lookup:
+  description: Flow-level lookup tool.
+  handler_type: http
+  input_schema:
+    type: object
+    required: [flow_id]
+    properties:
+      flow_id:
+        type: string
+  output_schema:
+    type: object
+    properties:
+      accepted:
+        type: boolean
+`)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, "")
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	rootTool, ok := bundle.Tools["root_lookup"]
+	if !ok {
+		t.Fatalf("expected root tool to load, got keys %#v", sortedContractKeys(bundle.Tools))
+	}
+	if got := strings.TrimSpace(rootTool.InputSchema.Type); got != "object" {
+		t.Fatalf("root input schema type = %q, want object", got)
+	}
+	if _, ok := rootTool.InputSchema.Properties["query"]; !ok {
+		t.Fatalf("root input schema properties = %#v, want query", rootTool.InputSchema.Properties)
+	}
+	if _, ok := rootTool.OutputSchema.Properties["result"]; !ok {
+		t.Fatalf("root output schema properties = %#v, want result", rootTool.OutputSchema.Properties)
+	}
+	flowTool, ok := bundle.Tools["flow_lookup"]
+	if !ok {
+		t.Fatalf("expected flow tool to load, got keys %#v", sortedContractKeys(bundle.Tools))
+	}
+	if _, ok := flowTool.InputSchema.Properties["flow_id"]; !ok {
+		t.Fatalf("flow input schema properties = %#v, want flow_id", flowTool.InputSchema.Properties)
+	}
+	if _, ok := flowTool.OutputSchema.Properties["accepted"]; !ok {
+		t.Fatalf("flow output schema properties = %#v, want accepted", flowTool.OutputSchema.Properties)
+	}
+}
+
 func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
@@ -507,6 +586,63 @@ additionalProperties: false
 	}
 	if got := strings.TrimSpace(schema.Properties["metadata"].AdditionalProperties.Schema.Type); got != "string" {
 		t.Fatalf("expected nested additionalProperties schema type string, got %q", got)
+	}
+}
+
+func TestToolSchemaEntryDecode_RejectsRetiredSchemaAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		want     string
+		wantNext string
+	}{
+		{
+			name: "parameters",
+			body: `
+lookup:
+  description: Lookup data.
+  parameters:
+    type: object
+`,
+			want:     "parameters",
+			wantNext: "input_schema",
+		},
+		{
+			name: "returns",
+			body: `
+lookup:
+  description: Lookup data.
+  returns:
+    type: object
+`,
+			want:     "returns",
+			wantNext: "output_schema",
+		},
+		{
+			name: "canonical plus alias",
+			body: `
+lookup:
+  description: Lookup data.
+  input_schema:
+    type: object
+  parameters:
+    type: object
+`,
+			want:     "parameters",
+			wantNext: "input_schema",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var tools map[string]ToolSchemaEntry
+			err := loadYAMLBytes([]byte(tc.body), &tools)
+			if err == nil ||
+				!strings.Contains(err.Error(), "RETIRED") ||
+				!strings.Contains(err.Error(), tc.want) ||
+				!strings.Contains(err.Error(), tc.wantNext) {
+				t.Fatalf("load tool schema error = %v, want RETIRED %s -> %s", err, tc.want, tc.wantNext)
+			}
+		})
 	}
 }
 
