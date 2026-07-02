@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,6 +36,24 @@ func TestContextListCommandSwarmDirFlagBypassesBrokenConfig(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no contexts found") {
 		t.Fatalf("output = %q, want empty registry", out.String())
+	}
+}
+
+func TestContextListCommandSurfacesZeroEntryRegistryFailure(t *testing.T) {
+	swarmDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(swarmDir, "contexts"), []byte("not a registry directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "no contexts found") {
+		t.Fatalf("output = %q, want empty-list marker", out.String())
+	}
+	if !strings.Contains(out.String(), "registry_status: invalid_descriptor") || !strings.Contains(out.String(), "detail:") {
+		t.Fatalf("output = %q, want registry failure status and detail", out.String())
 	}
 }
 

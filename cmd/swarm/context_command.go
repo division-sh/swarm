@@ -141,6 +141,12 @@ func writeContextListText(out io.Writer, report localContextRegistryReport) {
 	}
 	if len(report.Entries) == 0 {
 		fmt.Fprintf(out, "no contexts found\n")
+		if report.Status != "" && report.Status != "empty" {
+			fmt.Fprintf(out, "registry_status: %s\n", report.Status)
+			if report.Detail != "" {
+				fmt.Fprintf(out, "detail: %s\n", report.Detail)
+			}
+		}
 		return
 	}
 	fmt.Fprintf(out, "%-24s %-22s %-9s %s\n", "NAME", "STATUS", "TRANSPORT", "TARGET")
