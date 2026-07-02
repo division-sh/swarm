@@ -73,6 +73,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	}
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
+	cmd.PersistentFlags().StringVar(&opts.swarmDir, "swarm-dir", opts.swarmDir, "Path to the Swarm user/global state directory")
 	cmd.AddCommand(
 		newServeCommand(ctx, repo, opts.runServe),
 		newRunCommand(repo, opts),

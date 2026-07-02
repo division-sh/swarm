@@ -194,6 +194,7 @@ func TestCLIAPIResolverToleratesContractPathConfigKeys(t *testing.T) {
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"api_server":         "http://127.0.0.1:4444",
 		"api_token_file":     tokenFile,
+		"swarm_dir":          filepath.Join(t.TempDir(), "state"),
 		"contracts_path":     "contracts-from-config",
 		"platform_spec_path": "platform-from-config.yaml",
 	}))
@@ -207,6 +208,58 @@ func TestCLIAPIResolverToleratesContractPathConfigKeys(t *testing.T) {
 	}
 	if client.token != "config-token" {
 		t.Fatalf("token = %q", client.token)
+	}
+}
+
+func TestCLISwarmDirResolutionPrecedence(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	configDir := filepath.Join(t.TempDir(), "config-state")
+	flagDir := filepath.Join(t.TempDir(), "flag-state")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"swarm_dir": configDir,
+	}))
+	t.Setenv("SWARM_DIR", filepath.Join(t.TempDir(), "must-not-use"))
+	t.Setenv("SWARM_HOME", filepath.Join(t.TempDir(), "must-not-use"))
+
+	got, err := resolveCLISwarmDir(cliSwarmDirOptions{SwarmDir: flagDir, SwarmDirFlagSet: true})
+	if err != nil {
+		t.Fatalf("resolve flag swarm dir: %v", err)
+	}
+	if got.Path != flagDir || got.Source != "--swarm-dir" {
+		t.Fatalf("flag swarm dir = %#v, want %q from --swarm-dir", got, flagDir)
+	}
+
+	got, err = resolveCLISwarmDir(cliSwarmDirOptions{})
+	if err != nil {
+		t.Fatalf("resolve config swarm dir: %v", err)
+	}
+	if got.Path != configDir || got.Source != "config swarm_dir" {
+		t.Fatalf("config swarm dir = %#v, want %q from config swarm_dir", got, configDir)
+	}
+
+	t.Setenv("SWARM_CONFIG", "")
+	got, err = resolveCLISwarmDir(cliSwarmDirOptions{})
+	if err != nil {
+		t.Fatalf("resolve default swarm dir: %v", err)
+	}
+	if !strings.HasSuffix(got.Path, filepath.Join(".swarm")) || got.Source != "default ~/.swarm" {
+		t.Fatalf("default swarm dir = %#v, want ~/.swarm default", got)
+	}
+	if strings.Contains(got.Path, "must-not-use") {
+		t.Fatalf("default swarm dir consumed retired env source: %#v", got)
+	}
+}
+
+func TestCLISwarmDirConfigValidation(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("swarm_dir: [bad]\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("SWARM_CONFIG", path)
+
+	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "CLI config swarm_dir must be a string") {
+		t.Fatalf("resolveCLISwarmDir err = %v, want non-string swarm_dir validation", err)
 	}
 }
 
@@ -706,7 +759,7 @@ func writeCLIAPITokenFile(t *testing.T, token string) string {
 func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 	t.Helper()
 	var body strings.Builder
-	for _, key := range []string{"api_server", "api_token_file", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
+	for _, key := range []string{"api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
 		if value, ok := values[key]; ok {
 			body.WriteString(key)
 			body.WriteString(": ")

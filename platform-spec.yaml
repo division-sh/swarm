@@ -11586,6 +11586,129 @@ cli_specification:
       Runtime-state commands use v1 bearer auth through token sources governed by
       cli_specification.foundations.api_connection_auth_config_precedence. Legacy
       `SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` fallback is invalid.
+    local_target_resolution_authority:
+      promoted_by: '#1612'
+      implementation_status: implemented_first_slice
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_target_resolution_authority
+      implementation_owner: cmd/swarm local target diagnostic resolver
+      scope: >
+        Merge-bearing authority for local Swarm target/source explanation: the Swarm user/global state directory,
+        project-root facts derived from the existing contracts resolver, target precedence, command-class safety, and
+        the first inspection surface `swarm doctor --target`. This first slice is an authority and diagnostic surface
+        only. It does not write descriptor registries, trust runtime identity, retarget API-backed commands, register
+        project-scoped `serve --dev` contexts, migrate store/data paths, or change `swarm run` behavior.
+      invariant: >
+        You target the project you are in. If you are not in a project, or the project has no live known runtime after
+        the registry children exist, Swarm may use the selected/default context or built-in loopback target according to
+        command-class safety. Swarm MUST NOT silently guess between two live runtimes, and supported target diagnostics
+        MUST show what was selected and why.
+      swarm_dir:
+        accepted_sources:
+          flag: --swarm-dir <path>
+          config_key: swarm_dir
+          built_in_default: ~/.swarm
+        source_order:
+        - --swarm-dir
+        - config swarm_dir
+        - default ~/.swarm
+        rejected_sources:
+          --datadir: Not promoted; too easily confused with the agent-visible `--data` directory.
+          SWARM_DIR: Not promoted in this slice; adding environment state-dir authority requires a later gate.
+          SWARM_HOME: Not promoted in this slice; adding environment state-dir authority requires a later gate.
+          '<swarm-dir>/config.yaml': >
+            Not a bootstrap config owner. Static bootstrap config remains governed by `SWARM_CONFIG` and the XDG config
+            default in cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file.
+        normalization_rule: >
+          Explicit relative `--swarm-dir` and config `swarm_dir` paths are resolved to clean absolute filesystem paths
+          without creating the directory. Blank explicit values fail closed before target diagnostics or runtime action.
+      project_root_resolution:
+        source_owner: cli_specification.foundations.contract_platform_spec_path_resolution
+        rule: >
+          Project-root facts are derived from the resolved contracts source. If the resolved contracts root is named
+          `contracts`, the project root is its parent; otherwise the contracts root itself is the project root. The
+          canonical project key uses the realpath of that root when available. This owner consumes project-root facts
+          for explanation only until #1614 consumes them for runtime targeting.
+        no_project_rule: >
+          If no contracts source is resolved, target diagnostics report no project source. Runtime command behavior is
+          not changed by #1612.
+      target_precedence:
+        source_order:
+        - explicit_api_flags
+        - explicit_context_flag
+        - existing_api_environment
+        - existing_api_config
+        - live_project_scoped_context
+        - known_dead_or_stale_project_context_fail_closed
+        - selected_or_default_global_context
+        - built_in_loopback_default
+        current_first_slice_behavior: >
+          `swarm doctor --target` can explain explicit API flag, environment, config, project-root, Swarm-dir, current
+          rollout store/data, and pending registry/identity facts. Context registry, liveness-backed identity, and
+          API-backed command consumption are split to #1613 and #1614; unavailable facts MUST be reported as pending or
+          unavailable rather than inferred from PID, port, or health bundle fingerprint.
+      command_classes:
+        target_diagnostic:
+          status: implemented
+          commands:
+          - swarm doctor --target
+          fallthrough: not_applicable
+        read_only_inspection:
+          status: specified_pending_#1614_consumption
+          commands:
+          - swarm status
+          - swarm trace
+          - swarm logs
+          - swarm health
+          - swarm runs
+          - swarm agents list
+          fallthrough: >
+            May use project/global/default target only after #1614 consumes the registry and fails closed on stale project
+            contexts.
+        mutating_runtime_state:
+          status: specified_pending_#1614_consumption
+          commands:
+          - swarm event publish
+          - swarm agent restart
+          - swarm agent directive
+          - swarm mailbox approve
+          fallthrough: >
+            Requires explicit or unambiguous selected target; #1612 implements no mutating command behavior changes.
+        control_destructive:
+          status: specified_pending_#1614_consumption
+          commands:
+          - swarm control pause
+          - swarm control stop
+          - swarm control nuke
+          fallthrough: >
+            Requires explicit or unambiguous selected target plus existing command confirmation rules; #1612 implements
+            no control command behavior changes.
+        startup_and_run:
+          status: split_pending_#1614_#1615
+          commands:
+          - swarm serve --dev
+          - swarm run
+          fallthrough: >
+            Project registration and run semantics are explicitly split.
+      doctor_target_surface:
+        command: swarm doctor --target [--json] [--swarm-dir <path>] [--api-server <url>] [--api-token-file <path>]
+        output_owner: cli_specification.foundations.output_contract
+        behavior: >
+          The target mode is a fast, read-only diagnostic. It MUST NOT require backend preflight, start runtime, read a
+          runtime DB, write local state, create the Swarm-dir, create `.swarm/data`, trust descriptors, or mutate other
+          command JSON payloads. Human output renders only to stdout on success. `--json` renders one structured target
+          report to stdout and emits no success stderr. `--quiet` is not supported by this first slice and remains
+          fail-closed as an unknown/unsupported flag.
+      split_siblings:
+      - '#1613 runtime identity and descriptor registry'
+      - '#1614 project-scoped serve/API command targeting'
+      - '#1615 store/data migration and swarm run semantics'
+      - '#1576 transport-aware descriptors and IPC/ephemeral-port direction'
+      implementation_boundaries:
+      - 'The shared CLI config parser may accept `swarm_dir`, but API connection/auth resolution must ignore it.'
+      - 'No `SWARM_DIR`, `SWARM_HOME`, `--datadir`, or `<swarm-dir>/config.yaml` bootstrap source is promoted.'
+      - 'No descriptor files are written or trusted in #1612.'
+      - 'No API-backed command target resolver consumes project/global contexts in #1612.'
+      - 'Store and data paths may be reported as current behavior only; migration is split to #1615.'
     api_connection_auth_config_precedence:
       promoted_by: '#844'
       loopback_default_implemented_by: '#1124'
@@ -11682,6 +11805,10 @@ cli_specification:
           api_server: API server base URL consumed by API-backed commands.
           api_token_file: Path to a file containing the bearer token.
         shared_non_api_keys:
+          swarm_dir: >
+            Accepted by the shared CLI config parser for
+            cli_specification.foundations.local_target_resolution_authority; ignored by the API connection and auth
+            resolver.
           contracts_path: >
             Accepted by the shared CLI config parser for
             cli_specification.foundations.contract_platform_spec_path_resolution; ignored by the API connection
@@ -11909,22 +12036,27 @@ cli_specification:
           - remote server build date
           - server-local bundle path
     doctor:
-      command: swarm doctor --backend claude_cli [--contracts <path>] [--json]
+      command: swarm doctor [--backend claude_cli] [--target] [--contracts <path>] [--json]
       tier: should_have
       implementation_status: implemented
-      owner: cli_specification.foundations.local_claude_cli_preflight_admission
+      owner: cli_specification.foundations.local_claude_cli_preflight_admission; target mode owner cli_specification.foundations.local_target_resolution_authority
       behavior: >
-        Reports typed local prerequisite findings for the selected backend without starting runtime or reading/writing runtime
-        DB state. For `claude_cli`, the command checks backend selector authority, applies backend credential authority only
-        when the selected source declares agents, checks selected contract source when provided, contract-required secrets
-        through the credential store, Docker/workspace image/Claude CLI availability through the workspace lifecycle owner,
-        API/MCP listener availability, and stale MCP gateway env values through the serve startup owner. JSON output is
-        supported for scripts.
+        Default mode reports typed local prerequisite findings for the selected backend without starting runtime or
+        reading/writing runtime DB state. For `claude_cli`, the command checks backend selector authority, applies backend
+        credential authority only when the selected source declares agents, checks selected contract source when provided,
+        contract-required secrets through the credential store, Docker/workspace image/Claude CLI availability through the
+        workspace lifecycle owner, API/MCP listener availability, and stale MCP gateway env values through the serve startup
+        owner. `--target` is a separate fast local-target diagnostic mode owned by
+        cli_specification.foundations.local_target_resolution_authority; it reports Swarm-dir, project-root, API target,
+        pending context/identity facts, current store/data facts, command classes, and split siblings without backend
+        preflight or local state writes. JSON output is supported for scripts.
       split_scope:
       - workspace image build
       - local API connection discovery files
       - stale gateway env precedence or auto-fix policy
       - deployment-mode profile management
+      - trusted runtime identity and context registry consumption
+      - store/data migration and swarm run behavior
     workspace_build:
       command: swarm workspace build --backend claude_cli [--image <tag>]
       tier: should_have

@@ -13,12 +13,15 @@ type doctorOptions struct {
 	backend             string
 	contractsPath       string
 	dataSource          string
+	dataSourceSet       bool
 	workspaceBackend    string
 	workspaceBackendSet bool
 	platformSpecPath    string
 	apiListenAddr       string
 	mcpListenAddr       string
+	target              bool
 	asJSON              bool
+	apiOptions          rootCommandOptions
 }
 
 func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
@@ -31,11 +34,18 @@ func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
 		Short: "Diagnose local Swarm runtime prerequisites.",
 		Args:  cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if cliAPIConnectionFlagsChanged(cmd) && !opts.target {
+				return fmt.Errorf("--api-server and --api-token-file require --target")
+			}
 			if cmd.Flags().Changed("data") {
 				opts.dataSource = strings.TrimSpace(opts.dataSource)
 				if opts.dataSource == "" {
 					return fmt.Errorf("--data must be non-empty")
 				}
+			}
+			opts.dataSourceSet = cmd.Flags().Changed("data")
+			if opts.target {
+				return nil
 			}
 			if cmd.Flags().Changed("workspace-backend") {
 				backend, err := normalizeWorkspaceBackend(opts.workspaceBackend, "--workspace-backend")
@@ -76,11 +86,16 @@ func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.apiListenAddr, "api-listen-addr", opts.apiListenAddr, "HTTP bind address to preflight for API, WebSocket, health, and readiness routes")
 	cmd.Flags().StringVar(&opts.mcpListenAddr, "mcp-listen-addr", opts.mcpListenAddr, "HTTP bind address to preflight for MCP and tools routes")
+	cmd.Flags().BoolVar(&opts.target, "target", false, "Explain local target, state directory, project, and context resolution without runtime preflight")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render the diagnostic report as JSON")
+	bindCLIAPIConnectionFlags(cmd, &opts.apiOptions)
 	return cmd
 }
 
 func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions) error {
+	if opts.target {
+		return runDoctorTargetCommand(repo, cmd, opts)
+	}
 	if err := loadRepoDotEnv(repo); err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("load .env: %w", err))
 	}
