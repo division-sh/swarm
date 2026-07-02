@@ -245,22 +245,18 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	if t == nil {
 		return nil
 	}
-	type alias ToolSchemaEntry
-	var aux struct {
-		alias      `yaml:",inline"`
-		Parameters *ToolInputSchema `yaml:"parameters"`
-		Returns    *ToolInputSchema `yaml:"returns"`
+	if hasYAMLMappingKey(node, "parameters") {
+		return fmt.Errorf("RETIRED: tool field %q is retired; use input_schema", "parameters")
 	}
+	if hasYAMLMappingKey(node, "returns") {
+		return fmt.Errorf("RETIRED: tool field %q is retired; use output_schema", "returns")
+	}
+	type alias ToolSchemaEntry
+	var aux alias
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	*t = ToolSchemaEntry(aux.alias)
-	if aux.Parameters != nil && t.InputSchema.Type == "" && len(t.InputSchema.Properties) == 0 && len(t.InputSchema.Required) == 0 {
-		t.InputSchema = *aux.Parameters
-	}
-	if aux.Returns != nil && t.OutputSchema.Type == "" && len(t.OutputSchema.Properties) == 0 && len(t.OutputSchema.Required) == 0 {
-		t.OutputSchema = *aux.Returns
-	}
+	*t = ToolSchemaEntry(aux)
 	t.HandlerType = strings.TrimSpace(t.HandlerType)
 	t.Permission = strings.TrimSpace(t.Permission)
 	t.RequiredPermission = strings.TrimSpace(t.RequiredPermission)

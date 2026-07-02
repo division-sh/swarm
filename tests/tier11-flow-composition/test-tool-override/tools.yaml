@@ -1,10 +1,10 @@
 lookup_data:
   description: Looks up data from the knowledge base (root v1).
   endpoint: /api/v1/lookup
-  parameters:
+  input_schema:
     query:
       type: string
       description: The search query.
-  returns:
+  output_schema:
     type: string
     description: The search result.

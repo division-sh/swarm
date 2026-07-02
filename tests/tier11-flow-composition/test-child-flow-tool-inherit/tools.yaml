@@ -1,9 +1,9 @@
 lookup_data:
   description: Looks up data from the knowledge base.
-  parameters:
+  input_schema:
     query:
       type: string
       description: The search query.
-  returns:
+  output_schema:
     type: string
     description: The search result.

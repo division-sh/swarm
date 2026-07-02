@@ -5139,8 +5139,9 @@ tool_model:
       handler_type: string — platform_builtin | mcp | http. Default http.
       input_schema: object — parameter names and types the tool accepts
       output_schema: object — field names and types the tool returns
-      parameters: object — alias for input_schema (accepted by loader)
-      returns: object — alias for output_schema (accepted by loader)
+    retired_fields:
+      parameters: RETIRED — use input_schema
+      returns: RETIRED — use output_schema
     http_fields:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
