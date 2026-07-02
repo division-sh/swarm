@@ -206,7 +206,6 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var aux struct {
 		ItemsFrom string   `yaml:"items_from"`
-		Target    string   `yaml:"target"`
 		Emit      EmitSpec `yaml:"emit"`
 	}
 	if err := node.Decode(&aux); err != nil {
@@ -214,12 +213,10 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*f = FanOutSpec{
 		ItemsFrom: strings.TrimSpace(aux.ItemsFrom),
-		Target:    strings.TrimSpace(aux.Target),
 		Emit:      aux.Emit,
 	}
 	f.ItemsFrom = strings.TrimSpace(f.ItemsFrom)
 	f.ItemsPath = paths.Parse(f.ItemsFrom)
-	f.Target = strings.TrimSpace(f.Target)
 	return nil
 }
 
@@ -229,7 +226,6 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 	}
 	allowed := map[string]struct{}{
 		"items_from": {},
-		"target":     {},
 		"emit":       {},
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -238,6 +234,8 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 			continue
 		}
 		switch key {
+		case "target":
+			return fmt.Errorf("RETIRED: fan_out field %q is retired; route fan_out.emit through output pins and parent connect, or use emit.target only as an explicit producer escape hatch", key)
 		case "emit_per_item":
 			return fmt.Errorf("RETIRED: fan_out field %q is retired; use emit: <event> or emit: {event, fields}", key)
 		case "emit_mapping":

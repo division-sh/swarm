@@ -995,7 +995,6 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	items := sliceFromAny(itemsValue)
 	frame.result.FanOutCount = len(items)
 	frame.state.FanOut = map[string]any{}
-	frame.state.SetFanOut("target", spec.Target)
 	frame.state.SetFanOut("count", len(items))
 	// fan_out_count is platform-populated runtime bookkeeping, not an authored
 	// entity write target.

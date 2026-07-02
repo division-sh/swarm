@@ -7,7 +7,6 @@ fan-out-node:
     batch.received:
       fan_out:
         items_from: payload.items
-        target: fan-out-node
         emit:
           event: task.dispatched
           broadcast: true
