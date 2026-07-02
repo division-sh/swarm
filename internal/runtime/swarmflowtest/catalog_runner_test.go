@@ -325,10 +325,9 @@ type catalogEventSchemaEntry struct {
 type catalogAgentRegistryEntry struct {
 	ID            string   `yaml:"id"`
 	Subscriptions []string `yaml:"subscriptions"`
-	SubscribesTo  []string `yaml:"subscribes_to"`
 	Produces      []string `yaml:"produces"`
 	EmitEvents    []string `yaml:"emit_events"`
-	ToolsTier2    []string `yaml:"tools_tier2"`
+	Tools         []string `yaml:"tools"`
 	Permissions   []string `yaml:"permissions"`
 }
 
@@ -1331,7 +1330,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 		issues = append(issues, catalogRequiredAgentIssues(scope)...)
 		for _, agentID := range catalogSortedKeys(scope.Agents) {
 			agent := catalogMap(scope.Agents[agentID])
-			for _, tool := range catalogStringSlice(agent["tools_tier2"]) {
+			for _, tool := range catalogStringSlice(agent["tools"]) {
 				if tool == "" {
 					continue
 				}
@@ -1346,7 +1345,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 				}
 			}
 			issues = append(issues, catalogPromptIssues(bundle, scope, agentID, agent)...)
-			for _, deprecated := range []string{"subscriptions_bootstrap", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
+			for _, deprecated := range []string{"tools_tier2", "subscriptions_bootstrap", "subscribes_to", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
 				if _, ok := agent[deprecated]; ok {
 					issues = append(issues, catalogBootIssue{Severity: "error", Category: "DEPRECATED", Message: fmt.Sprintf("%s/%s: uses deprecated '%s'", scopeLabel, agentID, deprecated)})
 				}
@@ -1356,7 +1355,7 @@ func catalogCollectBootIssues(bundle catalogBootBundle) []catalogBootIssue {
 			node := catalogMap(scope.Nodes[nodeID])
 			for _, eventType := range catalogSortedKeys(catalogMap(node["event_handlers"])) {
 				handler := catalogMap(catalogMap(node["event_handlers"])[eventType])
-				for _, deprecated := range []string{"subscriptions_bootstrap", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
+				for _, deprecated := range []string{"tools_tier2", "subscriptions_bootstrap", "subscribes_to", "logic", "on_below_threshold", "on_dedup", "on_pass"} {
 					if _, ok := handler[deprecated]; ok {
 						issues = append(issues, catalogBootIssue{Severity: "error", Category: "DEPRECATED", Message: fmt.Sprintf("%s/%s/%s: uses deprecated '%s'", scopeLabel, nodeID, eventType, deprecated)})
 					}
@@ -1552,12 +1551,10 @@ func catalogRequiredAgentEntries(rawAgents map[string]any) map[string]runtimecon
 	for agentID, rawAgent := range rawAgents {
 		agent := catalogMap(rawAgent)
 		agents[agentID] = runtimecontracts.AgentRegistryEntry{
-			ID:                     catalogBootText(agent["id"]),
-			Role:                   catalogBootText(agent["role"]),
-			Subscriptions:          catalogStringSlice(agent["subscriptions"]),
-			SubscribesTo:           catalogStringSlice(agent["subscribes_to"]),
-			SubscriptionsBootstrap: catalogStringSlice(agent["subscriptions_bootstrap"]),
-			EmitEvents:             catalogStringSlice(agent["emit_events"]),
+			ID:            catalogBootText(agent["id"]),
+			Role:          catalogBootText(agent["role"]),
+			Subscriptions: catalogStringSlice(agent["subscriptions"]),
+			EmitEvents:    catalogStringSlice(agent["emit_events"]),
 		}
 	}
 	return agents
@@ -2331,9 +2328,6 @@ func applyCatalogClear(spec *runtimecontracts.ClearSpec, entity map[string]any) 
 		return
 	}
 	targets := append([]string{}, spec.Targets...)
-	if strings.TrimSpace(spec.Target) != "" {
-		targets = append(targets, spec.Target)
-	}
 	for _, target := range targets {
 		target = strings.TrimSpace(target)
 		switch target {
@@ -2904,7 +2898,7 @@ func catalogResolveAgents(agents map[string]catalogAgentRegistryEntry, event str
 	event = strings.TrimSpace(event)
 	out := make([]catalogAgentRegistryEntry, 0, 2)
 	for _, agent := range agents {
-		for _, pattern := range append(append([]string{}, agent.SubscribesTo...), agent.Subscriptions...) {
+		for _, pattern := range agent.Subscriptions {
 			if catalogEventPatternMatches(pattern, event) {
 				out = append(out, agent)
 				break

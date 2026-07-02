@@ -146,15 +146,15 @@ func TestValidateAgentPermissions_ReportsToolPermissionMismatch(t *testing.T) {
 		}},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"invalid-agent": {
-				ID:         "invalid-agent",
-				Role:       "operator",
-				ToolsTier2: []string{"agent_fire"},
+				ID:    "invalid-agent",
+				Role:  "operator",
+				Tools: []string{"agent_fire"},
 			},
 			"valid-agent": {
 				ID:                "valid-agent",
 				Role:              "operator",
 				PermissionsBundle: "ops",
-				ToolsTier2:        []string{"agent_fire"},
+				Tools:             []string{"agent_fire"},
 			},
 		},
 	})

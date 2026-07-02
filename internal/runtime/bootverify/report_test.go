@@ -3970,7 +3970,7 @@ func TestRun_AllowsGuardReferenceToDeclaredFieldEvenWhenHandlerClearsItLater(t *
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
 	handler.CreateEntity = true
 	handler.Guard = &runtimecontracts.GuardSpec{Check: "entity.revision_count > 0"}
-	handler.Clear = &runtimecontracts.ClearSpec{Target: "revision_count"}
+	handler.Clear = &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4001,8 +4001,7 @@ func TestHandlerEntityFieldWriters_TracksSetsGateAndClearTargets(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{
 		SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
 		Clear: &runtimecontracts.ClearSpec{
-			Target:  "revision_count",
-			Targets: []string{"entity.base_score"},
+			Targets: []string{"revision_count", "entity.base_score"},
 		},
 	}
 

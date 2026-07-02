@@ -312,6 +312,33 @@ subscriptions: [scan.requested]
 	}
 }
 
+func TestAgentRegistryEntryRejectsRetiredAuthoringAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		contains string
+	}{
+		{name: "tools_tier2", body: "tools_tier2: [lookup_data]\n", contains: "tools_tier2 is retired"},
+		{name: "subscriptions_bootstrap", body: "subscriptions_bootstrap: [scan.requested]\n", contains: "subscriptions_bootstrap is retired"},
+		{name: "subscribes_to", body: "subscribes_to: [scan.requested]\n", contains: "subscribes_to is retired for agents.yaml"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry AgentRegistryEntry
+			err := yaml.Unmarshal([]byte(`
+role: researcher
+type: managed
+model: regular
+mode: task
+subscriptions: [scan.requested]
+`+tt.body), &entry)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
+			}
+		})
+	}
+}
+
 func contractRepoRoot(t *testing.T) string {
 	t.Helper()
 	return strings.TrimSpace(repoRootForContractsTest(t))

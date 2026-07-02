@@ -1,6 +1,5 @@
 lookup_data:
   description: Looks up external data
-  type: custom
   permission: external_api_access
   input_schema:
     type: object

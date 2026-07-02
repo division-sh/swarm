@@ -7,4 +7,4 @@ expected:
   handler_outcome: success
   emitted_events: [task.done]
   tool_resolution:
-    child_agent: { tool: lookup_data, endpoint: /api/v2/lookup }
+    child_agent: { tool: lookup_data, handler_type: http, url: /api/v2/lookup }

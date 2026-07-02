@@ -1299,11 +1299,14 @@ func decodeClearSpecNode(node *yaml.Node) (*ClearSpec, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
+	if hasYAMLMappingKey(node, "target") {
+		return nil, fmt.Errorf("RETIRED: clear field target is retired; use targets")
+	}
 	var spec ClearSpec
 	if err := node.Decode(&spec); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(spec.Target) == "" && len(spec.Targets) == 0 {
+	if len(spec.Targets) == 0 {
 		return nil, nil
 	}
 	return &spec, nil

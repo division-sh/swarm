@@ -310,7 +310,7 @@ func importBoundaryProjectWildcardSubscriptions(scope ProjectScope) []string {
 		seen[pattern] = struct{}{}
 	}
 	for _, entry := range scope.Agents {
-		for _, pattern := range append(append([]string{}, entry.Subscriptions...), entry.SubscribesTo...) {
+		for _, pattern := range entry.Subscriptions {
 			appendPattern(pattern)
 		}
 	}
@@ -335,7 +335,7 @@ func importBoundaryFlowWildcardSubscriptions(scope FlowScope) []string {
 		appendPattern(pattern)
 	}
 	for _, entry := range scope.Agents {
-		for _, pattern := range append(append([]string{}, entry.Subscriptions...), entry.SubscribesTo...) {
+		for _, pattern := range entry.Subscriptions {
 			appendPattern(pattern)
 		}
 	}

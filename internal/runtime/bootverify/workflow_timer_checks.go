@@ -362,7 +362,7 @@ func timerFireEventHasAgentConsumer(source semanticview.Source, ref semanticview
 	for agentID, agent := range source.AgentEntries() {
 		agentSource, _ := source.AgentContractSource(agentID)
 		flowID := strings.TrimSpace(agentSource.FlowID)
-		for _, eventType := range append(append([]string{}, agent.Subscriptions...), agent.SubscribesTo...) {
+		for _, eventType := range agent.Subscriptions {
 			addTimerAgentSubscriptionProof(source, subscribedRefs, subscriptionPatterns, agentSource.PackageKey, flowID, eventType)
 		}
 	}

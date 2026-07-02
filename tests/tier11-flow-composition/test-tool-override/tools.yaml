@@ -1,6 +1,9 @@
 lookup_data:
   description: Looks up data from the knowledge base (root v1).
-  endpoint: /api/v1/lookup
+  handler_type: http
+  http:
+    method: GET
+    url: /api/v1/lookup
   input_schema:
     type: object
     properties:

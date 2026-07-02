@@ -663,6 +663,26 @@ lookup:
 			want:     "parameters",
 			wantNext: "input_schema",
 		},
+		{
+			name: "endpoint",
+			body: `
+lookup:
+  description: Lookup data.
+  endpoint: /api/v1/lookup
+`,
+			want:     "endpoint",
+			wantNext: "http.url",
+		},
+		{
+			name: "type",
+			body: `
+lookup:
+  description: Lookup data.
+  type: custom
+`,
+			want:     "type",
+			wantNext: "handler_type",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

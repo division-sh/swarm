@@ -1849,7 +1849,7 @@ node-a:
 
 	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
 		CreateEntity: true,
-		Clear:        &runtimecontracts.ClearSpec{Target: "entity.revision_count"},
+		Clear:        &runtimecontracts.ClearSpec{Targets: []string{"entity.revision_count"}},
 		Emit:         runtimecontracts.EmitSpec{Event: "entity.created"},
 	}, workflowTriggerContext{
 		Event: eventtest.RootIngress("", events.EventType("candidate.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}),

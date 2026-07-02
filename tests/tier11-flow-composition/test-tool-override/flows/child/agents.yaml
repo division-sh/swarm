@@ -1,7 +1,7 @@
 child-agent:
   model: regular
   mode: task
-  tools_tier2:
+  tools:
     - lookup_data
   subscriptions:
     - child.done

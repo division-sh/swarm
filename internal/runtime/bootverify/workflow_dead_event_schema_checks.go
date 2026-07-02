@@ -183,7 +183,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 					usage.agentEmitEvents++
 				}
 			}
-			for _, eventType := range append(append([]string{}, agent.Subscriptions...), agent.SubscribesTo...) {
+			for _, eventType := range agent.Subscriptions {
 				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
 					usage.agentSubscriptions++
 				}
@@ -226,7 +226,7 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 				usage.agentEmitEvents++
 			}
 		}
-		for _, eventType := range append(append([]string{}, agent.Subscriptions...), agent.SubscribesTo...) {
+		for _, eventType := range agent.Subscriptions {
 			if deadEventRoleMatches(c.source, decl, flowID, eventType) {
 				usage.agentSubscriptions++
 			}

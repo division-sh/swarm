@@ -1,7 +1,7 @@
 tool-agent:
   model: regular
   mode: task
-  tools_tier2:
+  tools:
     - lookup_data
   permissions:
     - message_peers

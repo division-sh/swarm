@@ -147,11 +147,7 @@ func ResolveAgent(agents map[string]runtimecontracts.AgentRegistryEntry, require
 }
 
 func AgentSubscriptions(agent runtimecontracts.AgentRegistryEntry) []string {
-	values := make([]string, 0, len(agent.SubscribesTo)+len(agent.Subscriptions)+len(agent.SubscriptionsBootstrap))
-	values = append(values, agent.SubscribesTo...)
-	values = append(values, agent.Subscriptions...)
-	values = append(values, agent.SubscriptionsBootstrap...)
-	return values
+	return append([]string{}, agent.Subscriptions...)
 }
 
 func MissingList(values []string) string {

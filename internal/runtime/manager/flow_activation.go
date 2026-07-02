@@ -549,10 +549,8 @@ func buildFlowAgentConfig(
 	if agentID == "" {
 		return models.AgentConfig{}, fmt.Errorf("flow agent %s resolved empty id", key)
 	}
-	subscriptions := make([]string, 0, len(entry.Subscriptions)+len(entry.SubscriptionsBootstrap)+len(entry.SubscribesTo))
+	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
-	subscriptions = append(subscriptions, entry.SubscriptionsBootstrap...)
-	subscriptions = append(subscriptions, entry.SubscribesTo...)
 	rendered := make([]string, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
 		subscription = strings.TrimSpace(renderFlowTemplate(subscription, vars))
@@ -727,10 +725,8 @@ func buildStaticFlowAgentConfig(
 	if agentID == "" {
 		return models.AgentConfig{}, fmt.Errorf("static flow agent %s resolved empty id", logicalID)
 	}
-	subscriptions := make([]string, 0, len(entry.Subscriptions)+len(entry.SubscriptionsBootstrap)+len(entry.SubscribesTo))
+	subscriptions := make([]string, 0, len(entry.Subscriptions))
 	subscriptions = append(subscriptions, entry.Subscriptions...)
-	subscriptions = append(subscriptions, entry.SubscriptionsBootstrap...)
-	subscriptions = append(subscriptions, entry.SubscribesTo...)
 	rendered := make([]string, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
 		subscription = strings.TrimSpace(renderFlowTemplate(subscription, vars))
@@ -839,7 +835,7 @@ func localEventList(localEvents map[string]struct{}) []string {
 func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEntry) map[string]struct{} {
 	out := map[string]struct{}{}
 	for _, entry := range agents {
-		for _, eventType := range append(append([]string{}, entry.Subscriptions...), append(entry.SubscriptionsBootstrap, entry.SubscribesTo...)...) {
+		for _, eventType := range entry.Subscriptions {
 			eventType = strings.TrimSpace(eventType)
 			if eventType != "" && !strings.Contains(eventType, "/") {
 				out[eventType] = struct{}{}

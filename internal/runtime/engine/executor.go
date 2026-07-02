@@ -317,9 +317,6 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 		}
 	}
 	if handler.Clear != nil {
-		if err := validateHandlerClearTarget(source, flowID, handler.Clear.Target); err != nil {
-			return err
-		}
 		for _, target := range handler.Clear.Targets {
 			if err := validateHandlerClearTarget(source, flowID, target); err != nil {
 				return err
@@ -1547,11 +1544,7 @@ func (e *Executor) stepClear(frame *executionFrame) error {
 	if spec == nil {
 		return nil
 	}
-	targets := append([]string{}, spec.Targets...)
-	if target := strings.TrimSpace(spec.Target); target != "" {
-		targets = append(targets, target)
-	}
-	for _, target := range targets {
+	for _, target := range spec.Targets {
 		target = strings.TrimSpace(target)
 		if target == "" {
 			continue
