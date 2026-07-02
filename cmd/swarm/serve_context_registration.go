@@ -87,12 +87,35 @@ func guardServeProjectContext(ctx context.Context, registry localContextRegistry
 	if explicitContext {
 		for _, entry := range entries {
 			if entry.Descriptor.Name == contextName {
+				if serveProjectContextEntryReclaimable(entry) {
+					if err := registry.DeleteDescriptor(entry.Descriptor.Name); err != nil {
+						return fmt.Errorf("reclaim stale project context %s: %w", contextName, err)
+					}
+					return nil
+				}
 				return fmt.Errorf("context %s already exists for project %s (%s); run `swarm context prune` after confirming stale entries, or choose another --context", contextName, project.canonicalProjectRoot, entry.Status)
 			}
 		}
 		return nil
 	}
 	if len(entries) == 0 {
+		return nil
+	}
+	blockers := make([]localContextEntry, 0, len(entries))
+	reclaimable := make([]localContextEntry, 0, len(entries))
+	for _, entry := range entries {
+		if serveProjectContextEntryReclaimable(entry) {
+			reclaimable = append(reclaimable, entry)
+			continue
+		}
+		blockers = append(blockers, entry)
+	}
+	if len(blockers) == 0 {
+		for _, entry := range reclaimable {
+			if err := registry.DeleteDescriptor(entry.Descriptor.Name); err != nil {
+				return fmt.Errorf("reclaim stale project context %s: %w", entry.Descriptor.Name, err)
+			}
+		}
 		return nil
 	}
 	parts := make([]string, 0, len(entries))
@@ -104,6 +127,18 @@ func guardServeProjectContext(ctx context.Context, registry localContextRegistry
 		parts = append(parts, fmt.Sprintf("%s=%s", name, entry.Status))
 	}
 	return fmt.Errorf("project %s already has context descriptors (%s); refusing bare `swarm serve --dev` to avoid orphaning a runtime; run `swarm context prune` for stale entries or pass --context for an intentional second runtime", project.canonicalProjectRoot, strings.Join(parts, ", "))
+}
+
+func serveProjectContextEntryReclaimable(entry localContextEntry) bool {
+	if strings.TrimSpace(entry.Descriptor.Name) == "" {
+		return false
+	}
+	switch entry.Status {
+	case localContextStatusNoServer, localContextStatusStaleDescriptor, localContextStatusIdentityMismatch:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *serveProjectContextRegistration) Release() {
