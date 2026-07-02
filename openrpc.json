@@ -4336,7 +4336,7 @@
     },
     {
       "name": "health.check",
-      "description": "Structured health and runtime identity. Operators use this to confirm what server they are talking to and whether it is ready to handle requests.",
+      "description": "Structured health and bundle identity. Operators use this to confirm readiness and the served bundle identity; runtime-instance descriptor trust uses runtime.identity.",
       "params": [],
       "result": {
         "name": "result",
@@ -6970,6 +6970,18 @@
           }
         }
       ]
+    },
+    {
+      "name": "runtime.identity",
+      "description": "Authenticated nonsensitive identity for the live runtime process instance. Local context descriptors use this method to prove that a discovered API endpoint is the same runtime instance named by the descriptor. It is not bundle identity, PID, port, URL, /healthz, or /readyz.\n",
+      "params": [],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/RuntimeIdentityResult"
+        }
+      }
     },
     {
       "name": "runtime.incidents",
@@ -10857,6 +10869,39 @@
           "event_id",
           "event_name",
           "event_created_at"
+        ],
+        "type": "object"
+      },
+      "RuntimeIdentityResult": {
+        "additionalProperties": false,
+        "description": "Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity: clients compare runtime_instance_id against local context descriptors after authenticating to the operator API. It is not a bundle fingerprint, PID, port, URL, or unauthenticated process probe.\n",
+        "properties": {
+          "api_version": {
+            "const": "v1",
+            "type": "string"
+          },
+          "runtime_instance_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "started_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "supported_transports": {
+            "items": {
+              "enum": [
+                "tcp",
+                "unix"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runtime_instance_id",
+          "started_at",
+          "api_version",
+          "supported_transports"
         ],
         "type": "object"
       },

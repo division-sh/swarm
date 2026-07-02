@@ -11642,8 +11642,9 @@ cli_specification:
         Merge-bearing authority for local Swarm target/source explanation: the Swarm user/global state directory,
         project-root facts derived from the existing contracts resolver, target precedence, command-class safety, and
         the first inspection surface `swarm doctor --target`. This first slice is an authority and diagnostic surface
-        only. It does not write descriptor registries, trust runtime identity, retarget API-backed commands, register
-        project-scoped `serve --dev` contexts, migrate store/data paths, or change `swarm run` behavior.
+        only. Runtime identity and local context registry primitives are promoted separately under
+        local_context_registry_authority. This owner still does not retarget API-backed commands, register project-scoped
+        `serve --dev` contexts, migrate store/data paths, or change `swarm run` behavior.
       invariant: >
         You target the project you are in. If you are not in a project, or the project has no live known runtime after
         the registry children exist, Swarm may use the selected/default context or built-in loopback target according to
@@ -11690,9 +11691,9 @@ cli_specification:
         - built_in_loopback_default
         current_first_slice_behavior: >
           `swarm doctor --target` can explain explicit API flag, environment, config, project-root, Swarm-dir, current
-          rollout store/data, and pending registry/identity facts. Context registry, liveness-backed identity, and
-          API-backed command consumption are split to #1613 and #1614; unavailable facts MUST be reported as pending or
-          unavailable rather than inferred from PID, port, or health bundle fingerprint.
+          rollout store/data, and local context registry/identity facts when registry primitives are present. API-backed
+          command consumption remains split to #1614; unavailable facts MUST be reported as unavailable rather than
+          inferred from PID, port, URL, or health bundle fingerprint.
       command_classes:
         target_diagnostic:
           status: implemented
@@ -11746,16 +11747,95 @@ cli_specification:
           report to stdout and emits no success stderr. `--quiet` is not supported by this first slice and remains
           fail-closed as an unknown/unsupported flag.
       split_siblings:
-      - '#1613 runtime identity and descriptor registry'
       - '#1614 project-scoped serve/API command targeting'
       - '#1615 store/data migration and swarm run semantics'
       - '#1576 transport-aware descriptors and IPC/ephemeral-port direction'
       implementation_boundaries:
       - 'The shared CLI config parser may accept `swarm_dir`, but API connection/auth resolution must ignore it.'
       - 'No `SWARM_DIR`, `SWARM_HOME`, `--datadir`, or `<swarm-dir>/config.yaml` bootstrap source is promoted.'
-      - 'No descriptor files are written or trusted in #1612.'
-      - 'No API-backed command target resolver consumes project/global contexts in #1612.'
+      - 'Descriptor registry primitives are written and validated only through local_context_registry_authority.'
+      - 'No API-backed command target resolver consumes project/global contexts until #1614.'
       - 'Store and data paths may be reported as current behavior only; migration is split to #1615.'
+    local_context_registry_authority:
+      promoted_by: '#1613'
+      implementation_status: implemented_primitive_registry
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_context_registry_authority
+      implementation_owner: cmd/swarm local context registry helpers and lifecycle commands
+      scope: >
+        Merge-bearing authority for local context descriptor storage under the resolved Swarm-dir, descriptor schema,
+        selected/current context storage, atomic registry writes, descriptor validation taxonomy, and minimal lifecycle
+        inspection/cleanup. It provides primitives that #1614 may consume for project/global command targeting, but it
+        does not itself change serve registration or API-backed command resolution.
+      registry_layout:
+        root: <swarm-dir>/contexts
+        descriptors: <swarm-dir>/contexts/<context-name>.json
+        current_selector: <swarm-dir>/contexts/current
+        lock: <swarm-dir>/contexts/.lock
+        name_rule: >
+          Context names are trimmed UTF-8 strings that cannot be empty, '.', '..', contain path separators, contain NUL,
+          or start with '.'. Names are registry keys only; project auto-naming is split to #1614.
+      descriptor_schema:
+        version: 1
+        required_fields:
+        - version
+        - name
+        - runtime_instance_id
+        - transport
+        - created_at
+        - updated_at
+        transport:
+          supported_values:
+          - tcp
+          - unix
+          tcp_required_field: api_server
+          unix_required_field: socket_path
+          current_implementation: >
+            tcp descriptors can be validated by calling /v1/rpc runtime.identity. unix descriptors are schema-valid
+            but validation classifies them as unsupported until #1576 promotes IPC dialing policy.
+        safe_auth:
+          allowed_modes:
+          - builtin_loopback
+          - token_file
+          rejected: inline bearer tokens, token strings, environment-token snapshots, or descriptor-local secret values
+          builtin_loopback_rule: >
+            builtin_loopback is accepted only for numeric loopback TCP API targets where the existing API auth owner
+            permits the built-in default token. Non-loopback targets require token_file.
+        optional_fields:
+        - project_root
+        - contracts_path
+        - store_path
+        - data_dir
+        - pid
+        path_fields: >
+          Path fields are explanatory metadata only in this child. Store/data migration and project registration are split
+          to #1615 and #1614.
+      atomicity:
+        rule: >
+          Registry mutations acquire the registry lock, write complete JSON/text to a temporary file in the registry
+          directory, fsync-or-equivalent that file, rename it over the destination, and best-effort fsync the directory.
+          Lock contention, permission denial, and partial/corrupt files fail closed.
+      validation_statuses:
+      - ok
+      - no_server
+      - stale_descriptor
+      - identity_mismatch
+      - unsupported_transport
+      - auth_failure
+      - permission_denied
+      - corrupt_descriptor
+      - invalid_descriptor
+      lifecycle_surface:
+        commands:
+        - swarm context current
+        - swarm context list
+        - swarm context prune
+        doctor_consumption: swarm doctor --target reports registry and runtime identity facts using these primitives
+        output_owner: cli_specification.foundations.output_contract
+      implementation_boundaries:
+      - 'No `serve --dev` or `serve` project-scoped descriptor registration in #1613; #1614 owns that behavior.'
+      - 'No API-backed command target resolver consumes context descriptors in #1613; #1614 owns consumption.'
+      - 'No runtime store/data path migration or `swarm run` behavior change in #1613; #1615 owns that behavior.'
+      - 'No unix socket dialing policy in #1613; #1576 owns actual IPC transport behavior.'
     api_connection_auth_config_precedence:
       promoted_by: '#844'
       loopback_default_implemented_by: '#1124'
@@ -15022,6 +15102,33 @@ api_specification:
             type: boolean
           bundle:
             $ref: '#/components/schemas/BundleIdentity'
+      RuntimeIdentityResult:
+        description: >
+          Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity:
+          clients compare runtime_instance_id against local context descriptors after authenticating to the operator API.
+          It is not a bundle fingerprint, PID, port, URL, or unauthenticated process probe.
+        type: object
+        additionalProperties: false
+        required:
+        - runtime_instance_id
+        - started_at
+        - api_version
+        - supported_transports
+        properties:
+          runtime_instance_id:
+            $ref: '#/components/schemas/OpaqueId'
+          started_at:
+            $ref: '#/components/schemas/Timestamp'
+          api_version:
+            type: string
+            const: v1
+          supported_transports:
+            type: array
+            items:
+              type: string
+              enum:
+              - tcp
+              - unix
       RunStatus:
         type: string
         enum:
@@ -17935,8 +18042,8 @@ api_specification:
       errors: []
     health.check:
       tier: must_have
-      description: Structured health and runtime identity. Operators use this to confirm what server they are talking to and
-        whether it is ready to handle requests.
+      description: Structured health and bundle identity. Operators use this to confirm readiness and the served bundle
+        identity; runtime-instance descriptor trust uses runtime.identity.
       scope:
         required:
         - read:health
@@ -17946,6 +18053,22 @@ api_specification:
         required: true
         schema:
           $ref: '#/components/schemas/HealthCheckResult'
+      errors: []
+    runtime.identity:
+      tier: must_have
+      description: >
+        Authenticated nonsensitive identity for the live runtime process instance. Local context descriptors use this
+        method to prove that a discovered API endpoint is the same runtime instance named by the descriptor. It is not
+        bundle identity, PID, port, URL, /healthz, or /readyz.
+      scope:
+        required:
+        - read:runtime
+      params: []
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/RuntimeIdentityResult'
       errors: []
     bundle.list:
       tier: should_have
@@ -20201,10 +20324,10 @@ api_specification:
         is the right Phase-2 API shape and is deferred until that consumer\nis real. No verify.* method is implemented in\
         \ v1 over JSON-RPC.\n"
     runtime_identity:
-      methods:
-      - runtime.identity
-      rationale: health.check covers bundle identity in v1. Break out as runtime.identity if Phase 2/3 grows non-bundle identity
-        dimensions (region, deployment, version).
+      methods: []
+      rationale: >
+        runtime.identity is promoted in v1 as the canonical runtime-instance descriptor trust owner by #1613.
+        Future non-sensitive identity dimensions may extend RuntimeIdentityResult additively.
   migration:
     description: How the previous dual-API surface is retired in favor of v1.
     builder_api_disposition:

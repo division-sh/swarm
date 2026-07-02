@@ -290,8 +290,8 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"swarm_dir: " + flagSwarmDir + " (source: --swarm-dir)",
 		"project_root: " + repo,
 		"api_server: http://127.0.0.1:19001 (source: config api_server)",
-		"descriptor_registry: pending (#1613)",
-		"runtime_identity: pending (#1613)",
+		"descriptor_registry: empty (" + localContextRegistryOwner,
+		"runtime_identity: unavailable (platform-spec.yaml#api_specification.method_catalog.runtime.identity)",
 		"store_path: " + filepath.Join(repo, ".swarm", "dev.db"),
 		"data_dir: " + filepath.Join(repo, ".swarm", "data"),
 		"command_classes:",
@@ -339,8 +339,8 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 	if report.API.Server != apiServer || report.API.Source != "--api-server" || report.API.Auth.Source != "--api-token-file" {
 		t.Fatalf("api resolution = %#v", report.API)
 	}
-	if report.Context.Registry.Status != "pending" || report.RuntimeIdentity.Status != "pending" {
-		t.Fatalf("registry/identity should be pending, report = %#v", report)
+	if report.Context.Registry.Status != "empty" || report.RuntimeIdentity.Status != "unavailable" {
+		t.Fatalf("registry should be empty and runtime identity unavailable, report = %#v", report)
 	}
 	if len(report.CommandClasses) == 0 || len(report.SplitSiblings) == 0 {
 		t.Fatalf("report missing command classes or split siblings: %#v", report)
@@ -528,6 +528,16 @@ func TestPlatformSpecLocalTargetResolutionAuthorityPromoted(t *testing.T) {
 					} `yaml:"doctor_target_surface"`
 					SplitSiblings []string `yaml:"split_siblings"`
 				} `yaml:"local_target_resolution_authority"`
+				LocalContextRegistry struct {
+					PromotedBy           string   `yaml:"promoted_by"`
+					ImplementationStatus string   `yaml:"implementation_status"`
+					CanonicalOwner       string   `yaml:"canonical_owner"`
+					ValidationStatuses   []string `yaml:"validation_statuses"`
+					LifecycleSurface     struct {
+						Commands []string `yaml:"commands"`
+					} `yaml:"lifecycle_surface"`
+					ImplementationBoundaries []string `yaml:"implementation_boundaries"`
+				} `yaml:"local_context_registry_authority"`
 			} `yaml:"foundations"`
 		} `yaml:"cli_specification"`
 	}
@@ -567,9 +577,28 @@ func TestPlatformSpecLocalTargetResolutionAuthorityPromoted(t *testing.T) {
 	if !strings.Contains(target.DoctorTargetSurface.Command, "swarm doctor --target") || !strings.Contains(target.DoctorTargetSurface.Behavior, "MUST NOT require backend preflight") {
 		t.Fatalf("doctor target surface = %#v", target.DoctorTargetSurface)
 	}
-	for _, sibling := range []string{"#1613", "#1614", "#1615", "#1576"} {
+	for _, sibling := range []string{"#1614", "#1615", "#1576"} {
 		if !stringSliceContainsPrefix(target.SplitSiblings, sibling) {
 			t.Fatalf("split siblings missing %q: %#v", sibling, target.SplitSiblings)
+		}
+	}
+	registry := spec.CLISpecification.Foundations.LocalContextRegistry
+	if registry.PromotedBy != "#1613" || registry.ImplementationStatus != "implemented_primitive_registry" || registry.CanonicalOwner != localContextRegistryOwner {
+		t.Fatalf("local context registry owner = %#v", registry)
+	}
+	for _, status := range []string{localContextStatusOK, localContextStatusNoServer, localContextStatusIdentityMismatch, localContextStatusUnsupportedTransport, localContextStatusAuthFailure, localContextStatusPermissionDenied, localContextStatusCorruptDescriptor} {
+		if !stringSliceContains(registry.ValidationStatuses, status) {
+			t.Fatalf("registry validation statuses missing %q: %#v", status, registry.ValidationStatuses)
+		}
+	}
+	for _, command := range []string{"swarm context current", "swarm context list", "swarm context prune"} {
+		if !stringSliceContains(registry.LifecycleSurface.Commands, command) {
+			t.Fatalf("registry lifecycle commands missing %q: %#v", command, registry.LifecycleSurface.Commands)
+		}
+	}
+	for _, sibling := range []string{"#1614", "#1615", "#1576"} {
+		if !stringSliceContainsPrefix(registry.ImplementationBoundaries, "No") || !strings.Contains(strings.Join(registry.ImplementationBoundaries, "\n"), sibling) {
+			t.Fatalf("registry boundaries missing %s: %#v", sibling, registry.ImplementationBoundaries)
 		}
 	}
 }

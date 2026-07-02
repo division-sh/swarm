@@ -33,8 +33,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 57 {
-		t.Fatalf("method count = %d, want 57", len(openRPCNames))
+	if len(openRPCNames) != 58 {
+		t.Fatalf("method count = %d, want 58", len(openRPCNames))
 	}
 	if _, ok := registry.Method("run.fork"); !ok {
 		t.Fatal("run.fork missing from generated registry")
@@ -397,6 +397,12 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				WorkflowVersion: "1.2.3",
 				Fingerprint:     "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			},
+			RuntimeIdentity: RuntimeIdentityResult{
+				RuntimeInstanceID:   "runtime-instance-1",
+				StartedAt:           now.Format(time.RFC3339Nano),
+				APIVersion:          "v1",
+				SupportedTransports: []string{"tcp"},
+			},
 		}),
 	})
 
@@ -422,6 +428,18 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	}
 	if raw, _ := json.Marshal(healthResult); strings.Contains(string(raw), "/") {
 		t.Fatalf("health.check leaked path-like content: %s", raw)
+	}
+
+	identity := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"identity","method":"runtime.identity","params":{}}`)
+	if identity.Error != nil {
+		t.Fatalf("runtime.identity error = %#v", identity.Error)
+	}
+	identityResult := asMap(t, identity.Result)
+	if identityResult["runtime_instance_id"] != "runtime-instance-1" || identityResult["api_version"] != "v1" {
+		t.Fatalf("runtime.identity result = %#v", identityResult)
+	}
+	if identityResult["runtime_instance_id"] == bundle["fingerprint"] {
+		t.Fatalf("runtime.identity reused bundle fingerprint: %#v", identityResult)
 	}
 
 	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":"run-1"}}`)
