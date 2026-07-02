@@ -18,6 +18,7 @@ type View struct {
 	WorkflowVersion   string                 `json:"workflow_version,omitempty"`
 	ContractsRoot     string                 `json:"contracts_root,omitempty"`
 	SourceAuthority   string                 `json:"source_authority"`
+	Root              RootView               `json:"root"`
 	Flows             []FlowView             `json:"flows"`
 	ConnectRoutePlans []ConnectRoutePlanView `json:"connect_route_plans"`
 	RoutePlanIssues   []RoutePlanIssueView   `json:"route_plan_issues,omitempty"`
@@ -28,6 +29,18 @@ type View struct {
 type EquivalenceView struct {
 	ProjectionOnly  bool     `json:"projection_only"`
 	CanonicalOwners []string `json:"canonical_owners"`
+}
+
+type RootView struct {
+	SourceFiles        RootSourceFiles    `json:"source_files"`
+	PrimaryEntity      *PrimaryEntityView `json:"primary_entity,omitempty"`
+	PrimaryEntityError string             `json:"primary_entity_error,omitempty"`
+}
+
+type RootSourceFiles struct {
+	Schema   string `json:"schema,omitempty"`
+	Entities string `json:"entities,omitempty"`
+	Package  string `json:"package,omitempty"`
 }
 
 type FlowView struct {
@@ -208,6 +221,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		WorkflowVersion:   bundle.WorkflowVersion(),
 		ContractsRoot:     strings.TrimSpace(bundle.Paths.ContractsRoot),
 		SourceAuthority:   "projection_only_existing_contract_owners",
+		Root:              buildRoot(bundle),
 		Flows:             buildFlows(source, bundle),
 		ConnectRoutePlans: buildConnectRoutePlans(bundle, plans),
 		RoutePlanIssues:   buildRoutePlanIssues(bundle, routeIssues),
@@ -224,6 +238,23 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		},
 	}
 	return view, nil
+}
+
+func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
+	out := RootView{
+		SourceFiles: RootSourceFiles{
+			Schema:   strings.TrimSpace(bundle.Paths.RootSchemaFile),
+			Entities: strings.TrimSpace(bundle.Paths.RootEntitiesFile),
+			Package:  strings.TrimSpace(bundle.Paths.ProjectPackageFile),
+		},
+	}
+	primary, err := bundle.ResolveRootPrimaryEntity()
+	if err != nil {
+		out.PrimaryEntityError = err.Error()
+		return out
+	}
+	out.PrimaryEntity = primaryEntityView(primary, bundle.Paths.RootEntitiesFile)
+	return out
 }
 
 func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []FlowView {

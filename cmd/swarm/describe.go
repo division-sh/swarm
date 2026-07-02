@@ -123,6 +123,9 @@ func writeDescribeText(out io.Writer, view authoringview.View) {
 	}
 	fmt.Fprintf(out, "describe: contracts=%s\n", view.ContractsRoot)
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
+	if view.Root.PrimaryEntity != nil {
+		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
+	}
 	if len(view.Flows) > 0 {
 		fmt.Fprintln(out, "flows:")
 		for _, flow := range view.Flows {
