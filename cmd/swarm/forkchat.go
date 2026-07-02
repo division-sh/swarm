@@ -221,7 +221,7 @@ func newForkChatNewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&newOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	bindCLIOutputFlags(cmd, &newOpts.output)
 	bindCLILoggingFlags(cmd, &newOpts.logging)
-	bindCLIAPIConnectionFlags(cmd, &newOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &newOpts.apiOptions, cliAPICommandClassMutating, "swarm forkchat new")
 	return cmd
 }
 
@@ -247,7 +247,7 @@ func newForkChatResumeCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&resumeOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	bindCLIOutputFlags(cmd, &resumeOpts.output)
 	bindCLILoggingFlags(cmd, &resumeOpts.logging)
-	bindCLIAPIConnectionFlags(cmd, &resumeOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &resumeOpts.apiOptions, cliAPICommandClassMutating, "swarm forkchat resume")
 	return cmd
 }
 
@@ -321,7 +321,7 @@ func newForkChatDeleteCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	bindCLIOutputFlags(cmd, &deleteOpts.output)
 	bindCLILoggingFlags(cmd, &deleteOpts.logging)
-	bindCLIAPIConnectionFlags(cmd, &deleteOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &deleteOpts.apiOptions, cliAPICommandClassMutating, "swarm forkchat delete")
 	return cmd
 }
 

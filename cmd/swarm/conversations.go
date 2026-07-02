@@ -185,6 +185,7 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&listOpts.runID, "run-id", "", "Filter by run id")
 	cmd.Flags().IntVar(&listOpts.limit, "limit", 0, "Optional page size, 1-500")
 	cmd.Flags().StringVar(&listOpts.cursor, "cursor", "", "Pagination cursor")
+	bindCLIAPIConnectionFlags(cmd, &listOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &listOpts.output)
 	bindCLILoggingFlags(cmd, &listOpts.logging)
 	return cmd
@@ -206,6 +207,7 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 			return runConversationViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), viewOpts, args[0])
 		},
 	}
+	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLILoggingFlags(cmd, &viewOpts.logging)
 	return cmd
@@ -227,6 +229,7 @@ func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 			return runConversationTurnCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), turnOpts, args[0], args[1])
 		},
 	}
+	bindCLIAPIConnectionFlags(cmd, &turnOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &turnOpts.output)
 	bindCLILoggingFlags(cmd, &turnOpts.logging)
 	return cmd

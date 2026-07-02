@@ -59,7 +59,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
-	bindCLIAPIConnectionFlags(cmd, &forkOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &forkOpts.apiOptions, cliAPICommandClassMutating, "swarm fork")
 	return cmd
 }
 

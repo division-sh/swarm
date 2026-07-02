@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -123,6 +125,10 @@ func (r localContextRegistry) currentPath() string {
 	return filepath.Join(r.dir(), "current")
 }
 
+func (r localContextRegistry) projectClaimDir() string {
+	return filepath.Join(r.dir(), ".project-claims")
+}
+
 func (r localContextRegistry) descriptorPath(name string) (string, error) {
 	name, err := normalizeLocalContextName(name)
 	if err != nil {
@@ -194,6 +200,75 @@ func (r localContextRegistry) ClearCurrent() error {
 		return nil
 	}
 	return err
+}
+
+func (r localContextRegistry) DeleteDescriptor(name string) error {
+	name, err := normalizeLocalContextName(name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(r.dir(), 0o700); err != nil {
+		return fmt.Errorf("create context registry: %w", err)
+	}
+	unlock, err := acquireLocalContextRegistryLock(r.lockPath())
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	path, err := r.descriptorPath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	current, err := r.CurrentName()
+	if err != nil {
+		return err
+	}
+	if current == name {
+		if err := os.Remove(r.currentPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r localContextRegistry) AcquireProjectClaim(projectRoot, contextName string) (func(), error) {
+	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
+	if projectRoot == "" || projectRoot == "." {
+		return nil, fmt.Errorf("project root is required for context claim")
+	}
+	contextName, err := normalizeLocalContextName(contextName)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(r.projectClaimDir(), 0o700); err != nil {
+		return nil, fmt.Errorf("create project context claim dir: %w", err)
+	}
+	sum := sha256.Sum256([]byte(projectRoot + "\x00" + contextName))
+	path := filepath.Join(r.projectClaimDir(), hex.EncodeToString(sum[:])[:24]+".claim")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("project context claim already exists for %s (%s); another `swarm serve --dev` startup may be in progress, remove the claim only after confirming no startup owns it", projectRoot, path)
+		}
+		return nil, fmt.Errorf("create project context claim: %w", err)
+	}
+	release := func() {
+		_ = os.Remove(path)
+	}
+	claim := fmt.Sprintf("pid=%d\nproject_root=%s\ncontext=%s\ncreated_at=%s\n", os.Getpid(), projectRoot, contextName, localContextTimestamp())
+	if _, err := io.WriteString(file, claim); err != nil {
+		_ = file.Close()
+		release()
+		return nil, fmt.Errorf("write project context claim: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		release()
+		return nil, fmt.Errorf("close project context claim: %w", err)
+	}
+	return release, nil
 }
 
 func (r localContextRegistry) CurrentName() (string, error) {
@@ -306,6 +381,26 @@ func (r localContextRegistry) Inspect(ctx context.Context, caller runtimeIdentit
 	report.Status = entry.Status
 	report.Detail = entry.Detail
 	return report, nil
+}
+
+func (r localContextRegistry) ProjectEntries(ctx context.Context, canonicalProjectRoot string, caller runtimeIdentityCaller) ([]localContextEntry, error) {
+	entries, err := r.ListDescriptors()
+	if err != nil {
+		return nil, err
+	}
+	canonicalProjectRoot = filepath.Clean(strings.TrimSpace(canonicalProjectRoot))
+	out := make([]localContextEntry, 0, len(entries))
+	for _, entry := range entries {
+		projectRoot := filepath.Clean(strings.TrimSpace(entry.Descriptor.ProjectRoot))
+		if projectRoot != canonicalProjectRoot {
+			if projectRoot == "." && (entry.Status == localContextStatusCorruptDescriptor || entry.Status == localContextStatusPermissionDenied) {
+				out = append(out, entry)
+			}
+			continue
+		}
+		out = append(out, validateLocalContextEntry(ctx, entry, caller))
+	}
+	return out, nil
 }
 
 func (r localContextRegistry) Prune(ctx context.Context, caller runtimeIdentityCaller) (localContextPruneResult, error) {

@@ -131,6 +131,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		fmt.Fprintln(errOut, err)
 		return commandExitError{code: 2}
 	}
+	apiOpts.disableLocalTargeting = true
 	opts.apiOptions = apiOpts
 
 	if strings.TrimSpace(opts.reattachRunID) != "" {

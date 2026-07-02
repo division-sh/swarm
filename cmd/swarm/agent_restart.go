@@ -38,7 +38,7 @@ func newAgentRestartCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&restartOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
-	bindCLIAPIConnectionFlags(cmd, &restartOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &restartOpts.apiOptions, cliAPICommandClassMutating, "swarm agent restart")
 	return cmd
 }
 

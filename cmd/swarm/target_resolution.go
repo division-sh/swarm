@@ -174,19 +174,16 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
+	project := resolveDoctorTargetProject(repo, opts, cfg)
 	return doctorTargetReport{
 		Owner:    localTargetOwner,
 		Mode:     "target",
 		OK:       true,
 		SwarmDir: doctorTargetPath{Path: swarmDir.Path, Source: swarmDir.Source, Status: "resolved"},
-		Project:  resolveDoctorTargetProject(repo, opts, cfg),
+		Project:  project,
 		API:      api,
 		Context: doctorTargetContext{
-			ProjectScoped: doctorTargetPendingFact{
-				Status: "pending",
-				Owner:  "#1614",
-				Detail: "project-scoped serve registration and API command consumption remain split",
-			},
+			ProjectScoped: doctorTargetProjectContextFact(ctx, newLocalContextRegistry(swarmDir.Path), project),
 			SelectedGlobal: doctorTargetPendingFact{
 				Status: registryReport.Status,
 				Owner:  localContextRegistryOwner,
@@ -200,6 +197,46 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 		CommandClasses:  doctorTargetCommandClasses(),
 		SplitSiblings:   doctorTargetSplitSiblings(),
 	}, nil
+}
+
+func doctorTargetProjectContextFact(ctx context.Context, registry localContextRegistry, project doctorTargetProject) doctorTargetPendingFact {
+	if project.Status != "resolved" || strings.TrimSpace(project.CanonicalProjectRoot) == "" {
+		return doctorTargetPendingFact{
+			Status: "no_project",
+			Owner:  localContextRegistryOwner,
+			Detail: "no resolved project root, so no project-scoped context lookup was attempted",
+		}
+	}
+	entries, err := registry.ProjectEntries(ctx, project.CanonicalProjectRoot, cliRuntimeIdentityCaller{})
+	if err != nil {
+		return doctorTargetPendingFact{Status: localContextStatusPermissionDenied, Owner: localContextRegistryOwner, Detail: err.Error()}
+	}
+	if len(entries) == 0 {
+		return doctorTargetPendingFact{
+			Status: "missing",
+			Owner:  localContextRegistryOwner,
+			Detail: "no context descriptor is registered for this project; read-only commands may fall through, mutating/control commands require explicit target",
+		}
+	}
+	okCount := 0
+	parts := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Status == localContextStatusOK {
+			okCount++
+		}
+		name := strings.TrimSpace(entry.Descriptor.Name)
+		if name == "" {
+			name = "<unknown>"
+		}
+		parts = append(parts, fmt.Sprintf("%s=%s", name, entry.Status))
+	}
+	if okCount == 1 && len(entries) == 1 {
+		return doctorTargetPendingFact{Status: localContextStatusOK, Owner: localContextRegistryOwner, Detail: strings.Join(parts, ", ")}
+	}
+	if okCount > 1 {
+		return doctorTargetPendingFact{Status: "multiple_live", Owner: localContextRegistryOwner, Detail: strings.Join(parts, ", ")}
+	}
+	return doctorTargetPendingFact{Status: "blocked", Owner: localContextRegistryOwner, Detail: strings.Join(parts, ", ")}
 }
 
 func doctorTargetRuntimeIdentityFact(report localContextRegistryReport) doctorTargetPendingFact {
@@ -288,7 +325,7 @@ func doctorTargetAPIReason(source string) string {
 	case "config api_server":
 		return "existing bootstrap config API source wins after flags and environment"
 	default:
-		return "API-backed command context consumption is split to #1614, so this diagnostic falls through to the built-in loopback default when no explicit API source is configured"
+		return "when no explicit API source is configured, API-backed commands resolve project context, selected context, or built-in loopback according to command class"
 	}
 }
 
@@ -431,26 +468,70 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		},
 		{
 			Name:        "read_only_inspection",
-			Status:      "specified_pending_#1614_consumption",
-			Fallthrough: "may use project/global/default target only after #1614 consumes the registry and fails closed on stale project contexts",
-			Commands:    []string{"swarm status", "swarm trace", "swarm logs", "swarm health", "swarm runs", "swarm agents list"},
+			Status:      "implemented_#1614",
+			Fallthrough: "may use selected/global/default target only outside a project or when a project has no known context; stale/mismatched/corrupt/multiple project contexts fail closed",
+			Commands: []string{
+				"swarm runs",
+				"swarm status",
+				"swarm trace",
+				"swarm health",
+				"swarm logs",
+				"swarm incidents",
+				"swarm version --server",
+				"swarm events list",
+				"swarm events follow",
+				"swarm event view",
+				"swarm bundle list",
+				"swarm bundle show",
+				"swarm bundle agents",
+				"swarm agents list",
+				"swarm agent deliveries",
+				"swarm agent diagnose",
+				"swarm agent view",
+				"swarm conversations list",
+				"swarm conversation view",
+				"swarm conversation turn",
+				"swarm entities list",
+				"swarm entity view",
+				"swarm entity aggregate",
+				"swarm mailbox list",
+				"swarm mailbox view",
+				"swarm forkchat list",
+				"swarm forkchat view",
+			},
 		},
 		{
 			Name:        "mutating_runtime_state",
-			Status:      "specified_pending_#1614_consumption",
-			Fallthrough: "requires explicit or unambiguous selected target; no command behavior changes are implemented in #1612",
-			Commands:    []string{"swarm event publish", "swarm agent restart", "swarm agent directive", "swarm mailbox approve"},
+			Status:      "implemented_#1614",
+			Fallthrough: "must not fall through to selected/global/default from inside a project with no live project context; requires explicit target or live project context",
+			Commands: []string{
+				"swarm event publish",
+				"swarm event replay",
+				"swarm agent restart",
+				"swarm agent replay",
+				"swarm agent replay-backlog",
+				"swarm agent directive",
+				"swarm bundle register",
+				"swarm bundle delete",
+				"swarm mailbox approve",
+				"swarm mailbox reject",
+				"swarm mailbox defer",
+				"swarm fork",
+				"swarm forkchat new",
+				"swarm forkchat resume",
+				"swarm forkchat delete",
+			},
 		},
 		{
 			Name:        "control_destructive",
-			Status:      "specified_pending_#1614_consumption",
+			Status:      "implemented_#1614",
 			Fallthrough: "requires explicit or unambiguous selected target plus existing command confirmation rules",
 			Commands:    []string{"swarm control pause", "swarm control stop", "swarm control nuke"},
 		},
 		{
 			Name:        "startup_and_run",
-			Status:      "split_pending_#1614_#1615",
-			Fallthrough: "serve project registration and swarm run semantics are intentionally split to #1614 and #1615",
+			Status:      "implemented_serve_split_run",
+			Fallthrough: "serve --dev registers a project context in #1614; swarm run default/foreground semantics remain split to #1615",
 			Commands:    []string{"swarm serve --dev", "swarm run"},
 		},
 	}

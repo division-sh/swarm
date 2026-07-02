@@ -224,7 +224,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadFile, "decision-payload", "", "Read optional approval event JSON object from file")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadJSON, "decision-payload-json", "", "Optional JSON object attached to the approval event")
-	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox approve")
 	return cmd
 }
 
@@ -244,7 +244,7 @@ func newMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actionOpts.reason, "reason", "", "Required rejection reason")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
-	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox reject")
 	return cmd
 }
 
@@ -264,7 +264,7 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actionOpts.until, "until", "", "Required RFC3339 timestamp")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
-	bindCLIAPIConnectionFlags(cmd, &actionOpts.apiOptions)
+	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox defer")
 	return cmd
 }
 

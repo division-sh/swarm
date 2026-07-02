@@ -59,6 +59,8 @@ func newRootCommand(ctx context.Context, repo string, out, errOut io.Writer) *co
 }
 
 func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.Writer, opts rootCommandOptions) *cobra.Command {
+	opts = opts.ensureRootFlagState()
+	opts.repoRoot = assetCommandRepoRoot(repo)
 	cmd := &cobra.Command{
 		Use:           "swarm",
 		Short:         "Run and inspect Swarm workflows.",
@@ -73,7 +75,7 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	}
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
-	cmd.PersistentFlags().StringVar(&opts.swarmDir, "swarm-dir", opts.swarmDir, "Path to the Swarm user/global state directory")
+	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to the Swarm user/global state directory")
 	cmd.AddCommand(
 		newServeCommand(ctx, repo, opts.runServe),
 		newRunCommand(repo, opts),
@@ -107,6 +109,32 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 		newForkCommand(opts),
 	)
 	return cmd
+}
+
+type trackedRootStringFlag struct {
+	value   *string
+	changed *bool
+}
+
+func (f *trackedRootStringFlag) Set(value string) error {
+	if f.value != nil {
+		*f.value = value
+	}
+	if f.changed != nil {
+		*f.changed = true
+	}
+	return nil
+}
+
+func (f *trackedRootStringFlag) String() string {
+	if f == nil || f.value == nil {
+		return ""
+	}
+	return *f.value
+}
+
+func (f *trackedRootStringFlag) Type() string {
+	return "string"
 }
 
 func newServeCommand(ctx context.Context, repo string, runServe func(context.Context, string, serveOptions) int) *cobra.Command {
@@ -165,6 +193,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			}
 			opts.StoreModeSet = cmd.Flags().Changed("store")
 			opts.WorkspaceBackendSet = cmd.Flags().Changed("workspace-backend")
+			opts.ContextNameSet = cmd.Flags().Changed("context")
 			if opts.ShutdownGrace <= 0 {
 				return fmt.Errorf("--shutdown-grace must be a positive duration")
 			}
@@ -189,6 +218,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.Output = cmd.OutOrStdout()
+			opts.SwarmDir, opts.SwarmDirSet = rootSwarmDirFlag(cmd)
 			code := runServe(ctx, assetCommandRepoRoot(repo), opts)
 			if code != 0 {
 				return commandExitError{code: code}
@@ -204,6 +234,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringArrayVar(&opts.BundleHashes, "bundle-hash", opts.BundleHashes, "Load a persisted bundle catalog row by canonical bundle_hash; repeat to boot multiple pinned contexts")
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, runtimeStoreBackendHelp)
+	cmd.Flags().StringVar(&opts.ContextName, "context", opts.ContextName, "Local Swarm context name to register for --dev")
 	cmd.Flags().StringVar(&opts.APIListenAddr, "api-listen-addr", opts.APIListenAddr, "HTTP bind address for API, WebSocket, health, and readiness routes")
 	cmd.Flags().StringVar(&opts.MCPListenAddr, "mcp-listen-addr", opts.MCPListenAddr, "HTTP bind address for MCP and tools routes")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")

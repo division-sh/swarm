@@ -453,12 +453,14 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	withFlags := []string{
 		"runs", "status", "trace", "health", "logs", "incidents",
 		"events list", "events follow", "event view", "event publish", "event replay",
-		"bundle list", "bundle show", "bundle agents", "bundle register",
-		"agents list", "agent view", "agent diagnose", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
+		"bundle list", "bundle show", "bundle agents", "bundle register", "bundle delete",
+		"agents list", "agent deliveries", "agent view", "agent diagnose", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
+		"conversations list", "conversation view", "conversation turn",
 		"entities list", "entity view", "entity aggregate",
 		"mailbox list", "mailbox view", "mailbox approve", "mailbox reject", "mailbox defer",
 		"control pause", "control continue", "control stop", "control nuke",
-		"fork", "version",
+		"fork", "forkchat new", "forkchat resume", "forkchat list", "forkchat view", "forkchat delete",
+		"version",
 	}
 	for _, path := range withFlags {
 		cmd := mustFindCLICommand(t, root, path)
@@ -468,11 +470,14 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 		if cmd.Flags().Lookup("api-token-file") == nil {
 			t.Fatalf("%s missing --api-token-file", path)
 		}
+		if cmd.Flags().Lookup("context") == nil {
+			t.Fatalf("%s missing --context", path)
+		}
 	}
 
 	withoutFlags := []string{
 		"", "serve", "verify", "completion", "run",
-		"events", "event", "bundle", "agents", "agent", "entities", "entity", "mailbox", "control",
+		"events", "event", "bundle", "agents", "agent", "conversations", "conversation", "entities", "entity", "mailbox", "control", "forkchat",
 		"investigate", "investigate health",
 	}
 	for _, path := range withoutFlags {
@@ -617,6 +622,213 @@ func TestCLIAPIConfigDrivesRuntimeStateCommand(t *testing.T) {
 	}
 }
 
+func TestCLIAPIProjectContextOutranksSelectedGlobal(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	projectServer := startCLIAPIRuntimeIdentityServer(t, "runtime-project")
+	globalServer := startCLIAPIRuntimeIdentityServer(t, "runtime-global")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, "global", "runtime-global", globalServer.URL, "")
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", projectServer.URL, project.canonicalRoot)
+	if err := registry.SetCurrent("global"); err != nil {
+		t.Fatalf("set current: %v", err)
+	}
+
+	client, err := newCLIAPIClient(rootCommandOptions{
+		repoRoot: project.root,
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newCLIAPIClient: %v", err)
+	}
+	if want := projectServer.URL + "/v1/rpc"; client.endpoint != want {
+		t.Fatalf("endpoint = %q, want project endpoint %q", client.endpoint, want)
+	}
+	if client.target.source != "project context" || client.target.projectRoot != project.canonicalRoot {
+		t.Fatalf("target = %#v, want project context for %s", client.target, project.canonicalRoot)
+	}
+}
+
+func TestCLIAPIExplicitAPIServerAndContextPrecedence(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	projectServer := startCLIAPIRuntimeIdentityServer(t, "runtime-project")
+	explicitContextServer := startCLIAPIRuntimeIdentityServer(t, "runtime-explicit")
+	apiServer := startCLIAPIRuntimeIdentityServer(t, "runtime-api-server")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", projectServer.URL, project.canonicalRoot)
+	writeCLIAPITestContext(t, registry, "chosen", "runtime-explicit", explicitContextServer.URL, "")
+
+	client, err := newCLIAPIClient(rootCommandOptions{
+		repoRoot:    project.root,
+		apiServer:   apiServer.URL,
+		contextName: "chosen",
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newCLIAPIClient api-server: %v", err)
+	}
+	if want := apiServer.URL + "/v1/rpc"; client.endpoint != want {
+		t.Fatalf("api-server endpoint = %q, want %q", client.endpoint, want)
+	}
+	if client.target.source != "--api-server" {
+		t.Fatalf("api-server target source = %q", client.target.source)
+	}
+
+	client, err = newCLIAPIClient(rootCommandOptions{
+		repoRoot:    project.root,
+		contextName: "chosen",
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newCLIAPIClient context: %v", err)
+	}
+	if want := explicitContextServer.URL + "/v1/rpc"; client.endpoint != want {
+		t.Fatalf("context endpoint = %q, want %q", client.endpoint, want)
+	}
+	if client.target.source != "--context" || client.target.contextName != "chosen" {
+		t.Fatalf("context target = %#v", client.target)
+	}
+}
+
+func TestCLIAPIProjectContextFailureClassesFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		setup     func(t *testing.T, registry localContextRegistry, project cliAPITestProject)
+		wantError string
+	}{
+		{
+			name: "stale descriptor",
+			setup: func(t *testing.T, registry localContextRegistry, project cliAPITestProject) {
+				writeCLIAPITestContext(t, registry, "stale", "runtime-stale", "http://127.0.0.1:1", project.canonicalRoot)
+			},
+			wantError: "project context",
+		},
+		{
+			name: "identity mismatch",
+			setup: func(t *testing.T, registry localContextRegistry, project cliAPITestProject) {
+				server := startCLIAPIRuntimeIdentityServer(t, "runtime-live")
+				writeCLIAPITestContext(t, registry, "mismatch", "runtime-descriptor", server.URL, project.canonicalRoot)
+			},
+			wantError: "identity_mismatch",
+		},
+		{
+			name: "multiple live",
+			setup: func(t *testing.T, registry localContextRegistry, project cliAPITestProject) {
+				a := startCLIAPIRuntimeIdentityServer(t, "runtime-a")
+				b := startCLIAPIRuntimeIdentityServer(t, "runtime-b")
+				writeCLIAPITestContext(t, registry, "a", "runtime-a", a.URL, project.canonicalRoot)
+				writeCLIAPITestContext(t, registry, "b", "runtime-b", b.URL, project.canonicalRoot)
+			},
+			wantError: "multiple live project contexts",
+		},
+		{
+			name: "corrupt descriptor",
+			setup: func(t *testing.T, registry localContextRegistry, project cliAPITestProject) {
+				path, err := registry.descriptorPath("corrupt")
+				if err != nil {
+					t.Fatalf("descriptor path: %v", err)
+				}
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.WriteFile(path, []byte(`{bad-json`), 0o600); err != nil {
+					t.Fatalf("write corrupt descriptor: %v", err)
+				}
+			},
+			wantError: "corrupt_descriptor",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			project := writeCLIAPIProjectFixture(t)
+			swarmDir := t.TempDir()
+			registry := newLocalContextRegistry(swarmDir)
+			tc.setup(t, registry, project)
+
+			_, err := newCLIAPIClient(rootCommandOptions{
+				repoRoot: project.root,
+				rootFlags: &rootCommandFlagState{
+					swarmDir:    swarmDir,
+					swarmDirSet: true,
+				},
+			})
+			if err == nil {
+				t.Fatal("newCLIAPIClient returned nil error")
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("err = %q, want %q", err.Error(), tc.wantError)
+			}
+		})
+	}
+}
+
+func TestCLIAPIMutatingCommandDoesNotFallThroughFromProjectWithoutContext(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	globalServer := startCLIAPIRuntimeIdentityServer(t, "runtime-global")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, "global", "runtime-global", globalServer.URL, "")
+	if err := registry.SetCurrent("global"); err != nil {
+		t.Fatalf("set current: %v", err)
+	}
+
+	_, err := newCLIAPIClient(rootCommandOptions{
+		repoRoot:        project.root,
+		apiCommandClass: cliAPICommandClassMutating,
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err == nil {
+		t.Fatal("newCLIAPIClient returned nil error")
+	}
+	if !strings.Contains(err.Error(), "no live project context") {
+		t.Fatalf("err = %q, want no live project context", err.Error())
+	}
+}
+
+func TestCLIAPIProjectContextUsesRealpathForSymlinkedRoot(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	parent := t.TempDir()
+	link := filepath.Join(parent, "link-project")
+	if err := os.Symlink(project.root, link); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	swarmDir := t.TempDir()
+	server := startCLIAPIRuntimeIdentityServer(t, "runtime-project")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", server.URL, project.canonicalRoot)
+
+	client, err := newCLIAPIClient(rootCommandOptions{
+		repoRoot: link,
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newCLIAPIClient: %v", err)
+	}
+	if want := server.URL + "/v1/rpc"; client.endpoint != want {
+		t.Fatalf("endpoint = %q, want %q", client.endpoint, want)
+	}
+}
+
 func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -747,6 +959,75 @@ func TestAPIConnectionFlagsRejectedOnNonAPISurfaces(t *testing.T) {
 	}
 }
 
+type cliAPITestProject struct {
+	root          string
+	contracts     string
+	canonicalRoot string
+}
+
+func writeCLIAPIProjectFixture(t *testing.T) cliAPITestProject {
+	t.Helper()
+	root := t.TempDir()
+	contracts := filepath.Join(root, "contracts")
+	if err := os.MkdirAll(contracts, 0o755); err != nil {
+		t.Fatalf("mkdir contracts: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contracts, "package.yaml"), []byte("name: test\nversion: 1.0.0\n"), 0o600); err != nil {
+		t.Fatalf("write package: %v", err)
+	}
+	canonical, status := canonicalizeDoctorTargetPath(root)
+	if status != "resolved" {
+		t.Fatalf("canonicalize project root status = %q", status)
+	}
+	return cliAPITestProject{root: root, contracts: contracts, canonicalRoot: canonical}
+}
+
+func startCLIAPIRuntimeIdentityServer(t *testing.T, runtimeID string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+apiv1.DefaultLoopbackAPIToken {
+			t.Fatalf("Authorization = %q, want built-in loopback bearer", got)
+		}
+		switch req.Method {
+		case "runtime.identity":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{
+				"runtime_instance_id":  runtimeID,
+				"started_at":           "2026-07-02T00:00:00Z",
+				"api_version":          "v1",
+				"supported_transports": []string{"tcp"},
+			})
+		case "run.list":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+		default:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{})
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func writeCLIAPITestContext(t *testing.T, registry localContextRegistry, name, runtimeID, apiServer, projectRoot string) {
+	t.Helper()
+	now := localContextTimestamp()
+	if err := registry.WriteDescriptor(localContextDescriptor{
+		Version:           localContextDescriptorVersion,
+		Name:              name,
+		RuntimeInstanceID: runtimeID,
+		Transport:         localContextTransportTCP,
+		APIServer:         apiServer,
+		Auth:              localContextDescriptorAuth{Mode: localContextAuthBuiltinLoopback},
+		ProjectRoot:       projectRoot,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}); err != nil {
+		t.Fatalf("write context %s: %v", name, err)
+	}
+}
+
 func isolateCLIAPIConfigEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("SWARM_CONFIG", "")
@@ -758,6 +1039,7 @@ func isolateCLIAPIConfigEnv(t *testing.T) {
 	t.Setenv("SWARM_CONTRACTS_PATH", "")
 	t.Setenv("SWARM_CONTRACTS_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 }
 
 func writeCLIAPITokenFile(t *testing.T, token string) string {

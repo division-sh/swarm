@@ -11695,8 +11695,9 @@ cli_specification:
         project-root facts derived from the existing contracts resolver, target precedence, command-class safety, and
         the first inspection surface `swarm doctor --target`. This first slice is an authority and diagnostic surface
         only. Runtime identity and local context registry primitives are promoted separately under
-        local_context_registry_authority. This owner still does not retarget API-backed commands, register project-scoped
-        `serve --dev` contexts, migrate store/data paths, or change `swarm run` behavior.
+        local_context_registry_authority. #1614 consumes those primitives for TCP project-scoped `serve --dev`
+        registration and current API-backed command targeting. This owner still does not migrate store/data paths,
+        change `swarm run` default/foreground behavior, or implement IPC/unix dialing policy.
       invariant: >
         You target the project you are in. If you are not in a project, or the project has no live known runtime after
         the registry children exist, Swarm may use the selected/default context or built-in loopback target according to
@@ -11726,8 +11727,8 @@ cli_specification:
         rule: >
           Project-root facts are derived from the resolved contracts source. If the resolved contracts root is named
           `contracts`, the project root is its parent; otherwise the contracts root itself is the project root. The
-          canonical project key uses the realpath of that root when available. This owner consumes project-root facts
-          for explanation only until #1614 consumes them for runtime targeting.
+          canonical project key uses the realpath of that root when available. #1614 uses this canonical project key
+          for TCP local context registration, project descriptor lookup, and project-first API command targeting.
         no_project_rule: >
           If no contracts source is resolved, target diagnostics report no project source. Runtime command behavior is
           not changed by #1612.
@@ -11741,11 +11742,11 @@ cli_specification:
         - known_dead_or_stale_project_context_fail_closed
         - selected_or_default_global_context
         - built_in_loopback_default
-        current_first_slice_behavior: >
-          `swarm doctor --target` can explain explicit API flag, environment, config, project-root, Swarm-dir, current
-          rollout store/data, and local context registry/identity facts when registry primitives are present. API-backed
-          command consumption remains split to #1614; unavailable facts MUST be reported as unavailable rather than
-          inferred from PID, port, URL, or health bundle fingerprint.
+        current_behavior: >
+          `swarm doctor --target` explains explicit API flag, environment, config, project-root, Swarm-dir, current
+          rollout store/data, and local context registry/identity facts. API-backed commands consume the same target
+          order through the shared CLI API resolver after #1614. Unavailable facts MUST be reported as unavailable
+          rather than inferred from PID, port, URL, or health bundle fingerprint.
       command_classes:
         target_diagnostic:
           status: implemented
@@ -11753,42 +11754,78 @@ cli_specification:
           - swarm doctor --target
           fallthrough: not_applicable
         read_only_inspection:
-          status: specified_pending_#1614_consumption
+          status: implemented_#1614
           commands:
+          - swarm runs
           - swarm status
           - swarm trace
           - swarm logs
           - swarm health
-          - swarm runs
+          - swarm incidents
+          - swarm version --server
+          - swarm events list
+          - swarm events follow
+          - swarm event view
+          - swarm bundle list
+          - swarm bundle show
+          - swarm bundle agents
           - swarm agents list
+          - swarm agent deliveries
+          - swarm agent diagnose
+          - swarm agent view
+          - swarm conversations list
+          - swarm conversation view
+          - swarm conversation turn
+          - swarm entities list
+          - swarm entity view
+          - swarm entity aggregate
+          - swarm mailbox list
+          - swarm mailbox view
+          - swarm forkchat list
+          - swarm forkchat view
           fallthrough: >
-            May use project/global/default target only after #1614 consumes the registry and fails closed on stale project
-            contexts.
+            May use selected/global/default target only outside a project or when a project has no known context. A
+            stale, mismatched, corrupt, permission-denied, or multiple-live project context fails closed rather than
+            silently falling through.
         mutating_runtime_state:
-          status: specified_pending_#1614_consumption
+          status: implemented_#1614
           commands:
           - swarm event publish
+          - swarm event replay
           - swarm agent restart
+          - swarm agent replay
+          - swarm agent replay-backlog
           - swarm agent directive
+          - swarm bundle register
+          - swarm bundle delete
           - swarm mailbox approve
+          - swarm mailbox reject
+          - swarm mailbox defer
+          - swarm fork
+          - swarm forkchat new
+          - swarm forkchat resume
+          - swarm forkchat delete
           fallthrough: >
-            Requires explicit or unambiguous selected target; #1612 implements no mutating command behavior changes.
+            Must not fall through to selected/global/default from inside a project with no live project context. Requires
+            an explicit target or a live project-scoped context.
         control_destructive:
-          status: specified_pending_#1614_consumption
+          status: implemented_#1614
           commands:
           - swarm control pause
+          - swarm control continue
           - swarm control stop
           - swarm control nuke
           fallthrough: >
-            Requires explicit or unambiguous selected target plus existing command confirmation rules; #1612 implements
-            no control command behavior changes.
+            Requires explicit or unambiguous selected target plus existing command confirmation rules. Must not fall
+            through to selected/global/default from inside a project with no live project context.
         startup_and_run:
-          status: split_pending_#1614_#1615
+          status: implemented_serve_split_run
           commands:
           - swarm serve --dev
           - swarm run
           fallthrough: >
-            Project registration and run semantics are explicitly split.
+            `serve --dev` registers a project-scoped TCP context after a pre-bind project claim and after the final API
+            target/runtime_instance_id are known. `swarm run` default/foreground semantics remain split to #1615.
       doctor_target_surface:
         command: swarm doctor --target [--json] [--swarm-dir <path>] [--api-server <url>] [--api-token-file <path>]
         output_owner: cli_specification.foundations.output_contract
@@ -11799,14 +11836,14 @@ cli_specification:
           report to stdout and emits no success stderr. `--quiet` is not supported by this first slice and remains
           fail-closed as an unknown/unsupported flag.
       split_siblings:
-      - '#1614 project-scoped serve/API command targeting'
+      - '#1614 project-scoped serve/API command targeting (implemented)'
       - '#1615 store/data migration and swarm run semantics'
       - '#1576 transport-aware descriptors and IPC/ephemeral-port direction'
       implementation_boundaries:
       - 'The shared CLI config parser may accept `swarm_dir`, but API connection/auth resolution must ignore it.'
       - 'No `SWARM_DIR`, `SWARM_HOME`, `--datadir`, or `<swarm-dir>/config.yaml` bootstrap source is promoted.'
       - 'Descriptor registry primitives are written and validated only through local_context_registry_authority.'
-      - 'No API-backed command target resolver consumes project/global contexts until #1614.'
+      - 'API-backed commands consume project/global contexts through the shared #1614 CLI API target resolver only.'
       - 'Store and data paths may be reported as current behavior only; migration is split to #1615.'
     local_context_registry_authority:
       promoted_by: '#1613'
@@ -11823,9 +11860,11 @@ cli_specification:
         descriptors: <swarm-dir>/contexts/<context-name>.json
         current_selector: <swarm-dir>/contexts/current
         lock: <swarm-dir>/contexts/.lock
+        project_claims: <swarm-dir>/contexts/.project-claims/<hash>.claim
         name_rule: >
           Context names are trimmed UTF-8 strings that cannot be empty, '.', '..', contain path separators, contain NUL,
-          or start with '.'. Names are registry keys only; project auto-naming is split to #1614.
+          or start with '.'. #1614 auto-generates project context names from the project basename plus a short hash of
+          the canonical project-root realpath when `serve --dev --context` is not supplied.
       descriptor_schema:
         version: 1
         required_fields:
@@ -11866,6 +11905,10 @@ cli_specification:
           Registry mutations acquire the registry lock, write complete JSON/text to a temporary file in the registry
           directory, fsync-or-equivalent that file, rename it over the destination, and best-effort fsync the directory.
           Lock contention, permission denial, and partial/corrupt files fail closed.
+        project_claim_rule: >
+          `serve --dev` acquires a project-claim file before listener binding and runtime-store side effects, then writes
+          the final descriptor only after the API listener address and runtime_instance_id are known. Failed startup
+          releases the claim and must not leave a descriptor selected as current.
       validation_statuses:
       - ok
       - no_server
@@ -11884,8 +11927,8 @@ cli_specification:
         doctor_consumption: swarm doctor --target reports registry and runtime identity facts using these primitives
         output_owner: cli_specification.foundations.output_contract
       implementation_boundaries:
-      - 'No `serve --dev` or `serve` project-scoped descriptor registration in #1613; #1614 owns that behavior.'
-      - 'No API-backed command target resolver consumes context descriptors in #1613; #1614 owns consumption.'
+      - '`serve --dev` project-scoped TCP descriptor registration is consumed by #1614; non-dev serve registration remains unpromoted.'
+      - 'API-backed command target resolver consumes context descriptors through #1614 only.'
       - 'No runtime store/data path migration or `swarm run` behavior change in #1613; #1615 owns that behavior.'
       - 'No unix socket dialing policy in #1613; #1576 owns actual IPC transport behavior.'
     api_connection_auth_config_precedence:
