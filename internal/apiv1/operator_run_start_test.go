@@ -452,7 +452,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid payload entity id", func(t *testing.T) {
+	t.Run("payload entity id is not envelope authority", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		pg := &store.PostgresStore{DB: db}
 		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
@@ -462,26 +462,31 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
+		payloadEntityID := uuid.NewString()
 
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"entity_id":"not-a-uuid","topic":"medicine"}`, "idem-invalid-entity-id"))
-		assertInvalidRunStartParam(t, resp, "payload.entity_id")
-		assertNoRunStartPersistence(t, db, runID)
-	})
-
-	t.Run("non-string payload entity id", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		pg := &store.PostgresStore{DB: db}
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
-		bus, err := runtimebus.NewEventBusWithOptions(pg, runStartTestEventBusOptions(source))
-		if err != nil {
-			t.Fatalf("NewEventBusWithOptions: %v", err)
+		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"medicine"}`, payloadEntityID), "idem-payload-entity-id-not-authority"))
+		if resp.Error != nil {
+			t.Fatalf("run.start payload entity_id error = %#v", resp.Error)
 		}
-		handler := runStartTestHandler(t, pg, bus, source)
-		runID := uuid.NewString()
-
-		resp := rpcCall(t, handler, runStartBody(runID, runStartTestFingerprint, "scan.requested", `{"entity_id":123,"topic":"medicine"}`, "idem-non-string-entity-id"))
-		assertInvalidRunStartParam(t, resp, "payload.entity_id")
-		assertNoRunStartPersistence(t, db, runID)
+		var eventEntityID string
+		var payload json.RawMessage
+		if err := db.QueryRow(`
+				SELECT entity_id::text, payload
+				FROM events
+				WHERE run_id = $1::uuid AND event_name = 'scan.requested'
+			`, runID).Scan(&eventEntityID, &payload); err != nil {
+			t.Fatalf("load run.start event row: %v", err)
+		}
+		if eventEntityID != runID {
+			t.Fatalf("event entity_id = %q, want canonical run_id %q", eventEntityID, runID)
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal(payload, &decoded); err != nil {
+			t.Fatalf("decode persisted payload: %v", err)
+		}
+		if decoded["entity_id"] != payloadEntityID || decoded["topic"] != "medicine" {
+			t.Fatalf("persisted payload = %#v, want business entity_id %s and topic medicine", decoded, payloadEntityID)
+		}
 	})
 
 	t.Run("publish failure", func(t *testing.T) {

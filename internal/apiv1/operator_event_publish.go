@@ -45,24 +45,24 @@ type eventPublishDelivery struct {
 }
 
 type eventPublicationParams struct {
-	BundleHash          string
-	BundleSource        string
-	BundleFingerprint   string
-	EventID             string
-	EventName           string
-	Payload             json.RawMessage
-	EntityID            string
-	EntityIDProvided    bool
-	FlowInstance        string
-	TargetRoute         events.RouteIdentity
-	TargetRouteSet      bool
-	TargetRouteRequired bool
-	RunID               string
-	SourceEventID       string
-	IdempotencyKey      string
-	Emitter             string
-	NewRunCreated       bool
-	RunIDProvided       bool
+	BundleHash             string
+	BundleSource           string
+	BundleFingerprint      string
+	EventID                string
+	EventName              string
+	Payload                json.RawMessage
+	EntityID               string
+	PayloadEntityIDPresent bool
+	FlowInstance           string
+	TargetRoute            events.RouteIdentity
+	TargetRouteSet         bool
+	TargetRouteRequired    bool
+	RunID                  string
+	SourceEventID          string
+	IdempotencyKey         string
+	Emitter                string
+	NewRunCreated          bool
+	RunIDProvided          bool
 }
 
 type eventPublicationConfig struct {
@@ -294,10 +294,13 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	} else {
 		runID = parsed.String()
 	}
-	injectEntityID := cfg.injectRunIDEntityIDWhenMissing && (!cfg.injectRunIDEntityIDOnlyNewRun || newRun)
-	payload, entityID, entityIDProvided, err := eventPublicationPayload(req.Params, runID, injectEntityID)
+	payload, payloadEntityIDPresent, err := eventPublicationPayload(req.Params)
 	if err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, err
+	}
+	entityID := ""
+	if cfg.injectRunIDEntityIDWhenMissing && (!cfg.injectRunIDEntityIDOnlyNewRun || newRun) {
+		entityID = strings.TrimSpace(runID)
 	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {
@@ -314,20 +317,20 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		emitter = cfg.sourceAgent(req)
 	}
 	return eventPublicationParams{
-		BundleFingerprint: bundleIdentity.LegacyFingerprint,
-		EventID:           uuid.NewString(),
-		EventName:         eventName,
-		Payload:           payload,
-		EntityID:          entityID,
-		EntityIDProvided:  entityIDProvided,
-		TargetRoute:       targetRoute,
-		TargetRouteSet:    targetRouteSet,
-		RunID:             runID,
-		SourceEventID:     sourceEventID,
-		IdempotencyKey:    idempotencyKey,
-		Emitter:           emitter,
-		NewRunCreated:     newRun,
-		RunIDProvided:     runIDProvided,
+		BundleFingerprint:      bundleIdentity.LegacyFingerprint,
+		EventID:                uuid.NewString(),
+		EventName:              eventName,
+		Payload:                payload,
+		EntityID:               entityID,
+		PayloadEntityIDPresent: payloadEntityIDPresent,
+		TargetRoute:            targetRoute,
+		TargetRouteSet:         targetRouteSet,
+		RunID:                  runID,
+		SourceEventID:          sourceEventID,
+		IdempotencyKey:         idempotencyKey,
+		Emitter:                emitter,
+		NewRunCreated:          newRun,
+		RunIDProvided:          runIDProvided,
 	}, bundleIdentity, nil
 }
 
@@ -391,37 +394,29 @@ func requiredTargetStringParam(params map[string]any, field, key string) (string
 	return text, nil
 }
 
-func eventPublicationPayload(params map[string]any, runID string, injectRunIDEntityID bool) (json.RawMessage, string, bool, error) {
+func eventPublicationPayload(params map[string]any) (json.RawMessage, bool, error) {
 	if params == nil {
-		return nil, "", false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
+		return nil, false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
 	}
 	raw, ok := params["payload"]
 	if !ok || isEmptyParam(raw) {
-		return nil, "", false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
+		return nil, false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "required parameter is missing"})
 	}
 	payload, ok := raw.(map[string]any)
 	if !ok {
-		return nil, "", false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "must be an object"})
+		return nil, false, NewInvalidParamsError(map[string]any{"field": "payload", "reason": "must be an object"})
 	}
-	cloned := make(map[string]any, len(payload)+1)
+	cloned := make(map[string]any, len(payload))
 	for key, value := range payload {
 		cloned[key] = value
 	}
-	entityID, supplied, err := runStartPayloadEntityID(cloned["entity_id"])
-	if err != nil {
-		return nil, "", false, err
-	}
-	switch {
-	case supplied:
-		cloned["entity_id"] = entityID
-	case injectRunIDEntityID:
-		entityID = strings.TrimSpace(runID)
-	}
+	entityID, supplied := cloned["entity_id"]
+	payloadEntityIDPresent := supplied && !isEmptyParam(entityID)
 	encoded, err := json.Marshal(cloned)
 	if err != nil {
-		return nil, "", false, err
+		return nil, false, err
 	}
-	return encoded, entityID, supplied, nil
+	return encoded, payloadEntityIDPresent, nil
 }
 
 func eventPublicationEvent(params eventPublicationParams, createdAt time.Time) events.Event {
@@ -449,7 +444,7 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 			"declared_events": declaredEventNames(opts.Source),
 		})
 	}
-	if params.EntityIDProvided && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
+	if params.PayloadEntityIDPresent && eventPublicationHasCreateEntityHandler(opts.Source, params.EventName) {
 		return params, NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$.entity_id",
@@ -523,15 +518,6 @@ func validateEventPublication(ctx context.Context, opts OperatorReadOptions, par
 func enrichExistingRunEventPublicationRoute(ctx context.Context, opts OperatorReadOptions, params eventPublicationParams) (eventPublicationParams, error) {
 	if params.TargetRouteSet {
 		return enrichExistingRunEventPublicationTargetRoute(ctx, opts, params)
-	}
-	if params.EntityIDProvided && params.TargetRouteRequired {
-		return params, NewApplicationError(EventNotDeclaredCode, false, map[string]any{
-			"event_name":      params.EventName,
-			"run_id":          params.RunID,
-			"entity_id":       params.EntityID,
-			"declared_events": declaredEventNames(opts.Source),
-			"reason":          "selected_run_target_required",
-		})
 	}
 	if strings.TrimSpace(params.EntityID) == "" {
 		return enrichExistingRunEventPublicationPrimaryEntity(ctx, opts, params)
