@@ -1147,16 +1147,18 @@ select_or_create_entity:
 	}
 }
 
-func TestHandlerRuleEntryDecode_RejectsEmitFieldsWithoutEvent(t *testing.T) {
-	var rule HandlerRuleEntry
+func TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate(t *testing.T) {
+	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`
-condition: "else"
-emit:
-  fields:
-    scan_id: payload.scan_id
-`), &rule)
-	if err == nil || !strings.Contains(err.Error(), "INVALID-EMIT") {
-		t.Fatalf("yaml.Unmarshal error = %v, want INVALID-EMIT", err)
+rules:
+  done:
+    condition: "else"
+    emit:
+      fields:
+        scan_id: payload.scan_id
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "rules[0].emit.event is required") {
+		t.Fatalf("yaml.Unmarshal error = %v, want eventless rule emit rejection", err)
 	}
 }
 
@@ -1508,6 +1510,155 @@ rules:
 	}
 	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, []string{"rule.needs_human", "handler.succeeded"}) {
 		t.Fatalf("HandlerEmitEvents = %#v", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_AllowsRulesEmitTemplateSpecialization(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+emit:
+  event: account.bucketed
+  fields:
+    account_id: entity.id
+    score: payload.score
+rules:
+  high:
+    condition: payload.score >= 80
+    emit:
+      fields:
+        bucket: '"high"'
+  medium:
+    condition: payload.score >= 40
+    emit:
+      fields:
+        bucket: '"medium"'
+  low:
+    condition: else
+    emit:
+      fields:
+        bucket: '"low"'
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got := HandlerEmitEvents(handler); !reflect.DeepEqual(got, []string{"account.bucketed"}) {
+		t.Fatalf("HandlerEmitEvents = %#v, want account.bucketed once", got)
+	}
+	sites := HandlerRuleEmitTemplateSites(handler)
+	if got := len(sites); got != 3 {
+		t.Fatalf("template sites len = %d, want 3", got)
+	}
+	if got := sites[0].Source; got != "handler.rules.emit_template" {
+		t.Fatalf("site source = %q, want handler.rules.emit_template", got)
+	}
+	if got := sites[0].Spec.EventType(); got != "account.bucketed" {
+		t.Fatalf("merged event = %q, want account.bucketed", got)
+	}
+	for _, field := range []string{"account_id", "score", "bucket"} {
+		if _, ok := sites[0].Spec.Fields[field]; !ok {
+			t.Fatalf("merged fields missing %s: %#v", field, sites[0].Spec.Fields)
+		}
+	}
+	if expr := sites[0].Spec.Fields["bucket"]; expr.Kind != ExpressionKindCEL || expr.CEL != `"high"` {
+		t.Fatalf("bucket expression = %#v, want CEL \"high\"", expr)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsInvalidRulesEmitTemplateSpecialization(t *testing.T) {
+	cases := []struct {
+		name     string
+		raw      string
+		contains string
+	}{
+		{
+			name: "missing_else",
+			raw: `
+emit:
+  event: account.bucketed
+rules:
+  high:
+    condition: payload.score >= 80
+    emit:
+      fields:
+        bucket: '"high"'
+`,
+			contains: "requires an else rule",
+		},
+		{
+			name: "field_conflict",
+			raw: `
+emit:
+  event: account.bucketed
+  fields:
+    bucket: '"base"'
+rules:
+  low:
+    condition: else
+    emit:
+      fields:
+        bucket: '"low"'
+`,
+			contains: "conflicts with handler emit template field",
+		},
+		{
+			name: "rule_own_event",
+			raw: `
+emit:
+  event: account.bucketed
+rules:
+  high:
+    condition: payload.score >= 80
+    emit:
+      fields:
+        bucket: '"high"'
+  low:
+    condition: else
+    emit:
+      event: account.dropped
+      fields:
+        bucket: '"low"'
+`,
+			contains: "rules[1].emit.event cannot be combined",
+		},
+		{
+			name: "rule_target_override",
+			raw: `
+emit:
+  event: account.bucketed
+rules:
+  low:
+    condition: else
+    emit:
+      target: sender
+      fields:
+        bucket: '"low"'
+`,
+			contains: "may only contribute fields",
+		},
+		{
+			name: "on_success_split",
+			raw: `
+emit:
+  event: account.bucketed
+on_success:
+  emit: account.audit
+rules:
+  low:
+    condition: else
+    emit:
+      fields:
+        bucket: '"low"'
+`,
+			contains: "cannot be combined with on_success.emit",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			if err == nil || !strings.Contains(err.Error(), tc.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want containing %q", err, tc.contains)
+			}
+		})
 	}
 }
 

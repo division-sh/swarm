@@ -2,17 +2,44 @@ package contracts
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
+type HandlerDeclarativeEmitSite struct {
+	Source    string
+	SiteKey   string
+	RuleID    string
+	RuleIndex int
+	Spec      EmitSpec
+}
+
 func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 	out := make([]string, 0, 8)
-	if eventType := handler.Emit.EventType(); eventType != "" {
-		out = append(out, eventType)
+	templateSites := HandlerRuleEmitTemplateSites(handler)
+	if len(templateSites) == 0 {
+		if eventType := handler.Emit.EventType(); eventType != "" {
+			out = append(out, eventType)
+		}
+	} else {
+		for _, site := range templateSites {
+			if eventType := site.Spec.EventType(); eventType != "" {
+				out = append(out, eventType)
+			}
+		}
 	}
 	out = append(out, actionResultEvents(handler.Action)...)
 	for _, rule := range handler.Rules {
-		out = append(out, ruleEmitEvents(rule)...)
+		if len(templateSites) == 0 {
+			out = append(out, ruleEmitEvents(rule)...)
+			continue
+		}
+		out = append(out, actionResultEvents(rule.Action)...)
+		if rule.FanOut != nil {
+			if eventType := rule.FanOut.Emit.EventType(); eventType != "" {
+				out = append(out, eventType)
+			}
+		}
 	}
 	if eventType := handler.OnSuccess.Emit.EventType(); eventType != "" {
 		out = append(out, eventType)
@@ -37,6 +64,113 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 		}
 	}
 	return uniqueOrderedStrings(out)
+}
+
+func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclarativeEmitSite {
+	out := make([]HandlerDeclarativeEmitSite, 0, 8)
+	add := func(source, siteKey, ruleID string, ruleIndex int, spec EmitSpec) {
+		if spec.Empty() {
+			return
+		}
+		out = append(out, HandlerDeclarativeEmitSite{
+			Source:    strings.TrimSpace(source),
+			SiteKey:   strings.TrimSpace(siteKey),
+			RuleID:    strings.TrimSpace(ruleID),
+			RuleIndex: ruleIndex,
+			Spec:      cloneEmitSpec(spec),
+		})
+	}
+	templateSites := HandlerRuleEmitTemplateSites(handler)
+	if len(templateSites) == 0 {
+		add("handler.emit", "handler.emit", "", -1, handler.Emit)
+		for idx, rule := range handler.Rules {
+			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, idx, rule.Emit)
+			if rule.FanOut != nil {
+				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit)
+			}
+		}
+	} else {
+		out = append(out, templateSites...)
+	}
+	add("handler.on_success.emit", "handler.on_success.emit", "", -1, handler.OnSuccess.Emit)
+	for idx, rule := range handler.OnComplete {
+		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
+		if rule.FanOut != nil {
+			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit)
+		}
+	}
+	if handler.Accumulate != nil {
+		for idx, rule := range handler.Accumulate.OnComplete {
+			add("handler.accumulate.on_complete.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
+			if rule.FanOut != nil {
+				add("handler.accumulate.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit)
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			add("handler.accumulate.on_timeout.emit", "handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.Emit)
+			if handler.Accumulate.OnTimeout.FanOut != nil {
+				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit)
+			}
+		}
+	}
+	for idx, branch := range handler.Branch {
+		if branch.Then != nil {
+			add("handler.branch.then.emit", indexedHandlerEmitSiteKey("handler.branch", idx, "then.emit"), branch.Then.ID, idx, branch.Then.Emit)
+		}
+		if branch.Else != nil {
+			add("handler.branch.else.emit", indexedHandlerEmitSiteKey("handler.branch", idx, "else.emit"), branch.Else.ID, idx, branch.Else.Emit)
+		}
+	}
+	if handler.FanOut != nil {
+		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit)
+	}
+	return out
+}
+
+func HandlerRuleEmitTemplateSites(handler SystemNodeEventHandler) []HandlerDeclarativeEmitSite {
+	if !handlerRulesEmitTemplateSpecializationCandidate(handler) {
+		return nil
+	}
+	out := make([]HandlerDeclarativeEmitSite, 0, len(handler.Rules))
+	for idx, rule := range handler.Rules {
+		spec, ok := EffectiveRuleEmitTemplateSpec(handler, rule)
+		if !ok {
+			return nil
+		}
+		out = append(out, HandlerDeclarativeEmitSite{
+			Source:    "handler.rules.emit_template",
+			SiteKey:   indexedHandlerEmitSiteKey("handler.rules", idx, "emit_template"),
+			RuleID:    strings.TrimSpace(rule.ID),
+			RuleIndex: idx,
+			Spec:      spec,
+		})
+	}
+	return out
+}
+
+func EffectiveRuleEmitTemplateSpec(handler SystemNodeEventHandler, rule HandlerRuleEntry) (EmitSpec, bool) {
+	if strings.TrimSpace(handler.Emit.EventType()) == "" {
+		return EmitSpec{}, false
+	}
+	if rule.Emit.EventType() != "" || rule.Emit.Empty() || !rule.Emit.HasFields() || !rule.Emit.Target.Empty() || rule.Emit.Broadcast {
+		return EmitSpec{}, false
+	}
+	spec := cloneEmitSpec(handler.Emit)
+	if spec.Fields == nil {
+		spec.Fields = map[string]ExpressionValue{}
+	}
+	for field, value := range rule.Emit.Fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if _, exists := spec.Fields[field]; exists {
+			return EmitSpec{}, false
+		}
+		value.hydrate()
+		spec.Fields[field] = value
+	}
+	return spec, true
 }
 
 func RuleEmitEvents(rule HandlerRuleEntry) []string {
@@ -100,12 +234,24 @@ func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
 }
 
 func HandlerHasAmbiguousTopLevelEmit(handler SystemNodeEventHandler) bool {
+	if handlerRulesEmitTemplateSpecializationCandidate(handler) {
+		return false
+	}
 	return !handler.Emit.Empty() && HandlerHasNestedEmitSites(handler)
 }
 
 func HandlerEmitSiteOwnershipError(handler SystemNodeEventHandler) error {
-	if HandlerHasAmbiguousTopLevelEmit(handler) {
-		return fmt.Errorf("AMBIGUOUS-EMIT: handler-top-level emit is only allowed on single-emit handlers; move emit ownership to the active branch, rule, timeout, or fan_out site")
+	if handlerRulesEmitTemplateSpecializationCandidate(handler) {
+		if err := validateHandlerRuleEmitTemplateSpecialization(handler); err != nil {
+			return err
+		}
+	} else {
+		if err := rejectEventlessEmitSpecs(handler); err != nil {
+			return err
+		}
+		if HandlerHasAmbiguousTopLevelEmit(handler) {
+			return fmt.Errorf("AMBIGUOUS-EMIT: handler-top-level emit is only allowed on single-emit handlers; move emit ownership to the active branch, rule, timeout, or fan_out site")
+		}
 	}
 	if handler.OnSuccess.Empty() {
 		return nil
@@ -136,6 +282,150 @@ func HandlerEmitSiteOwnershipError(handler SystemNodeEventHandler) error {
 		}
 	}
 	return nil
+}
+
+func handlerRulesEmitTemplateSpecializationCandidate(handler SystemNodeEventHandler) bool {
+	if handler.Emit.EventType() == "" || len(handler.Rules) == 0 {
+		return false
+	}
+	for _, rule := range handler.Rules {
+		if rule.Emit.EventType() == "" && !rule.Emit.Empty() {
+			return true
+		}
+	}
+	return false
+}
+
+func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandler) error {
+	if handler.Emit.EventType() == "" {
+		return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires handler.emit.event")
+	}
+	if !handler.OnSuccess.Empty() {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization cannot be combined with on_success.emit")
+	}
+	if len(handler.OnComplete) > 0 {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is only supported with handler.rules, not on_complete")
+	}
+	if handler.FanOut != nil {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is only supported with handler.rules, not fan_out")
+	}
+	if len(handler.Branch) > 0 {
+		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is only supported with handler.rules, not branch")
+	}
+	if handler.Accumulate != nil {
+		if len(handler.Accumulate.OnComplete) > 0 {
+			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with accumulate.on_complete")
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with accumulate.on_timeout")
+		}
+	}
+	hasElse := false
+	for idx, rule := range handler.Rules {
+		if strings.TrimSpace(rule.Condition) == "" || strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
+			hasElse = true
+		}
+		if rule.FanOut != nil {
+			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with rules[%d].fan_out", idx)
+		}
+		if rule.Emit.Empty() {
+			return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires rules[%d].emit.fields", idx)
+		}
+		if rule.Emit.EventType() != "" {
+			return fmt.Errorf("UNSUPPORTED-EMIT: rules[%d].emit.event cannot be combined with handler emit template specialization", idx)
+		}
+		if !rule.Emit.Target.Empty() || rule.Emit.Broadcast {
+			return fmt.Errorf("UNSUPPORTED-EMIT: rules[%d].emit may only contribute fields in handler emit template specialization", idx)
+		}
+		if !rule.Emit.HasFields() {
+			return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires rules[%d].emit.fields", idx)
+		}
+		for field := range rule.Emit.Fields {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, exists := handler.Emit.Fields[field]; exists {
+				return fmt.Errorf("INVALID-EMIT: rules[%d].emit.fields.%s conflicts with handler emit template field", idx, field)
+			}
+		}
+	}
+	if !hasElse {
+		return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires an else rule")
+	}
+	return nil
+}
+
+func rejectEventlessEmitSpecs(handler SystemNodeEventHandler) error {
+	if err := requireEmitEvent("handler.emit", handler.Emit); err != nil {
+		return err
+	}
+	if err := requireEmitEvent("handler.on_success.emit", handler.OnSuccess.Emit); err != nil {
+		return err
+	}
+	if handler.FanOut != nil {
+		if err := requireEmitEvent("handler.fan_out.emit", handler.FanOut.Emit); err != nil {
+			return err
+		}
+	}
+	for idx, rule := range handler.Rules {
+		if err := requireRuleEmitEvents("rules", idx, rule); err != nil {
+			return err
+		}
+	}
+	for idx, rule := range handler.OnComplete {
+		if err := requireRuleEmitEvents("on_complete", idx, rule); err != nil {
+			return err
+		}
+	}
+	if handler.Accumulate != nil {
+		for idx, rule := range handler.Accumulate.OnComplete {
+			if err := requireRuleEmitEvents("accumulate.on_complete", idx, rule); err != nil {
+				return err
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			if err := requireRuleEmitEvents("accumulate.on_timeout", 0, *handler.Accumulate.OnTimeout); err != nil {
+				return err
+			}
+		}
+	}
+	for idx, branch := range handler.Branch {
+		if branch.Then != nil {
+			if err := requireRuleEmitEvents("branch.then", idx, *branch.Then); err != nil {
+				return err
+			}
+		}
+		if branch.Else != nil {
+			if err := requireRuleEmitEvents("branch.else", idx, *branch.Else); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func requireRuleEmitEvents(scope string, idx int, rule HandlerRuleEntry) error {
+	if err := requireEmitEvent(fmt.Sprintf("%s[%d].emit", scope, idx), rule.Emit); err != nil {
+		return err
+	}
+	if rule.FanOut != nil {
+		if err := requireEmitEvent(fmt.Sprintf("%s[%d].fan_out.emit", scope, idx), rule.FanOut.Emit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requireEmitEvent(label string, spec EmitSpec) error {
+	if spec.Empty() || spec.EventType() != "" {
+		return nil
+	}
+	return fmt.Errorf("INVALID-EMIT: %s.event is required", label)
+}
+
+func indexedHandlerEmitSiteKey(prefix string, index int, suffix string) string {
+	return prefix + "[" + strconv.Itoa(index) + "]." + suffix
 }
 
 func HandlerHasAmbiguousTopLevelAction(handler SystemNodeEventHandler) bool {

@@ -959,11 +959,11 @@ contract_formats:
     agents_yaml: '{}'
   produces_derivation: >-
     The produces field on system nodes is OPTIONAL. If omitted, the platform derives the effective production surface from
-    every supported declarative emit site at boot: handler top-level emit, rule-local emit, on_complete branch emit,
-    accumulate.on_timeout emit, and fan_out emit. Runtime routing, producer authority, and transition checks consume this
-    effective production surface, not raw authored produces. If present, produces is an explicit authored assertion surface:
-    the verifier checks it matches actual emits, including an explicit empty list, with a PRODUCES-DRIFT warning. Authors
-    should omit produces and let the platform derive it.
+    every supported declarative emit site at boot: handler top-level emit, rule-local emit, rules emit template specialization
+    effective emits, on_complete branch emit, accumulate.on_timeout emit, and fan_out emit. Runtime routing, producer authority,
+    and transition checks consume this effective production surface, not raw authored produces. If present, produces is an
+    explicit authored assertion surface: the verifier checks it matches actual emits, including an explicit empty list, with
+    a PRODUCES-DRIFT warning. Authors should omit produces and let the platform derive it.
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
@@ -1331,7 +1331,7 @@ handler_specification:
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
-      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit then on_success.emit, or active branch/timeout/fan_out emit)\n                    \
+      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, or active branch/timeout/fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
       \                         └→ projection (materialize_from, if accumulator projection eligible)\n                  \
@@ -1762,10 +1762,12 @@ handler_specification:
         producer_broadcast_common_path_forbidden: Loaded flow-scope or package-root broadcast:true is used as package-internal
           delivery to receiver input pins for the same pin-declared output or connected output pin; parent connect
           broadcast/fan-out is the required route owner.
-      single_emit_handler_rule: 'A handler top-level emit is valid only when the handler has exactly one possible emit site.
-        If the handler also declares rules, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity.
-        Payload ownership must move to the active emit site. The only approved additive rules success surface is explicit
-        on_success.emit, which is not a handler-level emit overload.'
+      single_emit_handler_rule: >-
+        A handler top-level emit is valid only when the handler has exactly one possible emit site, except for the explicit
+        rules emit template specialization described under `rules.emit_template_specialization`. If the handler also declares
+        ordinary rules emit sites, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity. Payload
+        ownership must move to the active emit site. The only approved additive rules success surface is explicit
+        on_success.emit, which is not a handler-level emit overload.
       on_success:
         field: on_success
         type: object
@@ -1793,10 +1795,33 @@ handler_specification:
           are payload.*, entity.*, policy.*, event.*, and query_entities(...). accumulated.*, fan_out.*, and
           item.* are unavailable in rules.condition. entity.* reads use the pre-rule entity state and the same
           declared-field validation as other rule-phase handler conditions.
-        emit: string or object — rule-local event to emit
+        emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
+          rules emit template specialization.
         advances_to: string — optional state change
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
+      emit_template_specialization:
+        syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
+          `emit.fields`. Each rule then declares `emit.fields` without `emit.event` to add branch-specific fields. `emit`
+          remains one object shape everywhere, `{event?, fields?, target?, broadcast?}`.
+        field_values: All `emit.fields` values use the normal CEL expression string grammar. String constants are CEL string
+          literals, for example YAML value `'"high"'`. The platform does not support `emit_fields`, flattened rule emit
+          payload maps, `literal`, `value`, or any second field-value dialect for this specialization.
+        matching: Rules keep ordered first-match semantics. Threshold-style overlapping rules are valid when ordered from
+          most specific to least specific; the platform does not fail closed merely because multiple conditions could be true.
+        required_else: Every rules emit template specialization must include an `else` rule so every successful rules-handler
+          execution has a defined specialization branch.
+        effective_emit: The selected rule's eventless `emit.fields` fill-merge with the handler template. The result is exactly
+          one effective emit. Runtime evaluates that merged effective emit's fields, then emits its inherited `emit.event`.
+        fill_only: Rule specialization fields are fill-only. A rule field that redefines a handler template field is invalid
+          and boot fails closed.
+        unsupported_combinations: Rule-level specialization may not set `emit.event`, `emit.target`, or `emit.broadcast`;
+          those are not template refinements in this slice. Handler-level `on_success.emit` remains the separate additive
+          two-event surface and is not part of template specialization. on_complete, accumulate.on_timeout, fan_out, and
+          action-originated emits are out of this specialization slice.
+        proof_consumers: Bootverify, semantic view, produces derivation, route authority, runtime execution, and pipeline/outbox
+          proof consume the same merged effective emit, not the raw handler template and raw rule specialization as separate
+          events.
     fan_out:
       field: fan_out
       type: object
@@ -2176,17 +2201,21 @@ handler_specification:
       emit, action, data_accumulation, advances_to). 2. Handler-level data_accumulation executes AFTER rules when present and
       supplements rule-level writes in the same atomic transaction. 3. Bare handler-level emit and handler-level action do NOT
       supplement rules. If rules are present, bare handler-level emit or handler-level action is invalid and boot fails as
-      ambiguous. 4. Explicit on_success.emit supplements rules as a distinct additive success emit: the selected rule emit is
-      queued first and on_success.emit second; if no rule matches, only on_success.emit is queued. 5. The selected rule action
+      ambiguous, except for the explicit rules emit template specialization where handler-level emit supplies the event/shared
+      field template and the matched rule contributes eventless fields to one effective emit. 4. Explicit on_success.emit
+      supplements rules as a distinct additive success emit: the selected rule emit or template-specialized emit is queued first
+      and on_success.emit second; if no rule matches, only on_success.emit is queued. 5. The selected rule action
       executes at the normal action step after active state/gate/data updates and selected emit queuing, and remains in the same
       system-node handler transaction as those side effects.
     example: 'order.received may have handler-level data_accumulation (3 fields) + rules with per-rule data_accumulation (category_data).
       Result: all 3 handler-level fields are written, PLUS the matching rule writes category_data. Event emission, however,
-      and action must be owned by the matching rule.'
+      and action must be owned by the matching rule or by the explicit rules emit template specialization.'
     precedence: Handler-level advances_to, sets_gate, and data_accumulation are defaults. If the matched rule specifies any
       of these, the rule value OVERRIDES the handler-level value for that field only. Bare emit and action never fall through from
-      a handler into a rules-based multi-emit/action handler; only explicit on_success.emit is additive, and only as a second
-      distinct success event.
+      a handler into a rules-based multi-emit/action handler. The only handler-level emit exception is rules emit template
+      specialization, where handler-level `emit.event` and shared `emit.fields` are inherited by the matched rule's eventless
+      `emit.fields` and produce exactly one effective emit. Explicit on_success.emit is additive only as a second distinct
+      success event.
 engine:
   description: Specification for the platform engine — how it loads, validates, and executes flows.
   flow_tree_walker:

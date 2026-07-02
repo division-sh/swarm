@@ -2474,6 +2474,87 @@ func TestExecuteNodeContractHandlerOnSuccessRulesEmitsBothInOrder(t *testing.T) 
 	}
 }
 
+func TestExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEvent(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{bundle: rulesEmitTemplateContractBundle()},
+	})
+	entityID := "ent-1"
+
+	result, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Emit: runtimecontracts.EmitSpec{
+			Event: "account.bucketed",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"account_id": runtimecontracts.CELExpression("payload.account_id"),
+				"score":      runtimecontracts.CELExpression("payload.score"),
+			},
+		},
+		Rules: []runtimecontracts.HandlerRuleEntry{
+			{
+				ID:        "high",
+				Condition: "payload.score >= 80",
+				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.CELExpression(`"high"`),
+				}},
+			},
+			{
+				ID:        "medium",
+				Condition: "payload.score >= 40",
+				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.CELExpression(`"medium"`),
+				}},
+			},
+			{
+				ID:        "low",
+				Condition: "else",
+				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.CELExpression(`"low"`),
+				}},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: eventtest.RootIngress(
+			"",
+			events.EventType("account.scored"),
+			"",
+			"",
+			mustJSON(map[string]any{"account_id": "acct-1", "score": 91}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+			time.Time{},
+		),
+		State: WorkflowState{Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
+	}, false)
+	if err != nil {
+		t.Fatalf("executeNodeContractHandler: %v", err)
+	}
+	if !result.Handled {
+		t.Fatal("expected handled result")
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("bus published count = %d, want 1", got)
+	}
+	emitted := bus.publishedEvent(0)
+	if got := emitted.Type(); got != events.EventType("account.bucketed") {
+		t.Fatalf("published event = %q, want account.bucketed", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(emitted.Payload(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal payload: %v", err)
+	}
+	if got := payload["account_id"]; got != "acct-1" {
+		t.Fatalf("account_id = %#v, want acct-1", got)
+	}
+	if got := payload["bucket"]; got != "high" {
+		t.Fatalf("bucket = %#v, want high", got)
+	}
+	if got := int(payload["score"].(float64)); got != 91 {
+		t.Fatalf("score = %#v, want 91", payload["score"])
+	}
+}
+
 func TestExecuteNodeContractHandlerOnSuccessOutboxFailureDoesNotPartiallyPublish(t *testing.T) {
 	bus := &recordingPipelineBus{outboxErr: errors.New("outbox failed")}
 	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
@@ -2521,6 +2602,36 @@ func additiveOnSuccessContractBundle() *runtimecontracts.WorkflowContractBundle 
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"rule.emitted":      {},
 			"handler.succeeded": {},
+		},
+	}
+}
+
+func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "test",
+			Version: "v-test",
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"account.scored": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"account_id": {Type: "string"},
+						"score":      {Type: "number"},
+					},
+				},
+				Required: []string{"account_id", "score"},
+			},
+			"account.bucketed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"account_id": {Type: "string"},
+						"score":      {Type: "number"},
+						"bucket":     {Type: "string"},
+					},
+				},
+				Required: []string{"account_id", "score", "bucket"},
+			},
 		},
 	}
 }

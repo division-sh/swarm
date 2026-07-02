@@ -1917,6 +1917,133 @@ func TestExecutor_RejectsAmbiguousHandlerTopLevelEmitWithRulesWithoutRuleEmit(t 
 	}
 }
 
+func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing.T) {
+	cases := []struct {
+		name   string
+		score  int
+		bools  map[string]bool
+		bucket string
+		ruleID string
+	}{
+		{
+			name:   "high_first_match",
+			score:  91,
+			bools:  map[string]bool{"payload.score >= 80": true, "payload.score >= 40": true},
+			bucket: "high",
+			ruleID: "high",
+		},
+		{
+			name:   "medium_after_high_fails",
+			score:  52,
+			bools:  map[string]bool{"payload.score >= 80": false, "payload.score >= 40": true},
+			bucket: "medium",
+			ruleID: "medium",
+		},
+		{
+			name:   "else_low",
+			score:  12,
+			bools:  map[string]bool{"payload.score >= 80": false, "payload.score >= 40": false},
+			bucket: "low",
+			ruleID: "low",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outbox := &recordingEmitOutbox{}
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:        stubSource(),
+				StateRepo:     stubStateRepo{},
+				TxRunner:      stubRunner{},
+				Locker:        stubLocker{},
+				Outbox:        outbox,
+				Dispatcher:    stubDispatcher{},
+				PayloadShaper: stubPayloadShaper{},
+				MaxChainDepth: 5,
+			}, stubEvaluator{bools: tc.bools})
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID:   "entity-1",
+				NodeID:     "node-1",
+				FlowID:     "flow-1",
+				ChainDepth: 1,
+				Event: eventtest.RootIngress(
+					"evt-1",
+					"account.scored",
+					"",
+					"",
+					mustEncodeJSON(t, map[string]any{"account_id": "acct-1", "score": tc.score}),
+					0,
+					"",
+					"",
+					events.EventEnvelope{},
+					time.Time{},
+				),
+				Handler: runtimecontracts.SystemNodeEventHandler{
+					Emit: runtimecontracts.EmitSpec{
+						Event: "account.bucketed",
+						Fields: map[string]runtimecontracts.ExpressionValue{
+							"account_id": runtimecontracts.CELExpression("payload.account_id"),
+							"score":      runtimecontracts.CELExpression("payload.score"),
+						},
+					},
+					Rules: []runtimecontracts.HandlerRuleEntry{
+						{
+							ID:        "high",
+							Condition: "payload.score >= 80",
+							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+								"bucket": runtimecontracts.CELExpression(`"high"`),
+							}},
+						},
+						{
+							ID:        "medium",
+							Condition: "payload.score >= 40",
+							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+								"bucket": runtimecontracts.CELExpression(`"medium"`),
+							}},
+						},
+						{
+							ID:        "low",
+							Condition: "else",
+							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
+								"bucket": runtimecontracts.CELExpression(`"low"`),
+							}},
+						},
+					},
+				},
+				State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			})
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if got := result.RuleID; got != tc.ruleID {
+				t.Fatalf("RuleID = %q, want %q", got, tc.ruleID)
+			}
+			if got := len(result.EmitIntents); got != 1 {
+				t.Fatalf("EmitIntents len = %d, want 1", got)
+			}
+			if got := string(result.EmitIntents[0].Event.Type()); got != "account.bucketed" {
+				t.Fatalf("emit event = %q, want account.bucketed", got)
+			}
+			payload := eventPayloadMap(t, result.EmitIntents[0].Event)
+			if got := payload["account_id"]; got != "acct-1" {
+				t.Fatalf("account_id = %#v, want acct-1", got)
+			}
+			if got := payload["bucket"]; got != tc.bucket {
+				t.Fatalf("bucket = %#v, want %s", got, tc.bucket)
+			}
+			if got := int(payload["score"].(float64)); got != tc.score {
+				t.Fatalf("score = %#v, want %d", payload["score"], tc.score)
+			}
+			if got := len(outbox.intents); got != 1 {
+				t.Fatalf("outbox intents len = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T) {
 	outbox := &recordingEmitOutbox{}
 	exec, err := NewExecutor(RuntimeDependencies{

@@ -114,9 +114,6 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 			Target:    target.Normalized(),
 			Broadcast: broadcast,
 		}
-		if e.EventType() == "" && len(e.Fields) > 0 {
-			return fmt.Errorf("INVALID-EMIT: emit.event is required when emit.fields is present")
-		}
 		if e.Broadcast && e.HasTarget() {
 			return fmt.Errorf("INVALID-EMIT: emit.target and emit.broadcast:true are mutually exclusive")
 		}

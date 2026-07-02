@@ -130,15 +130,28 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 			Fields:    targets,
 		})
 	}
-	add("handler.emit", handler.Emit)
+	templateSites := runtimecontracts.HandlerRuleEmitTemplateSites(handler)
+	if len(templateSites) == 0 {
+		add("handler.emit", handler.Emit)
+	} else {
+		for _, site := range templateSites {
+			label := site.SiteKey
+			if strings.TrimSpace(site.RuleID) != "" {
+				label = "rules[" + strings.TrimSpace(site.RuleID) + "].emit_template"
+			}
+			add(label, site.Spec)
+		}
+	}
 	add("handler.on_success.emit", handler.OnSuccess.Emit)
 	if handler.FanOut != nil {
 		add("handler.fan_out.emit", handler.FanOut.Emit)
 	}
-	for i, rule := range handler.Rules {
-		add(payloadCompletenessRuleLabel("rules", i, rule.ID, "emit"), rule.Emit)
-		if rule.FanOut != nil {
-			add(payloadCompletenessRuleLabel("rules", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
+	if len(templateSites) == 0 {
+		for i, rule := range handler.Rules {
+			add(payloadCompletenessRuleLabel("rules", i, rule.ID, "emit"), rule.Emit)
+			if rule.FanOut != nil {
+				add(payloadCompletenessRuleLabel("rules", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
+			}
 		}
 	}
 	for i, rule := range handler.OnComplete {

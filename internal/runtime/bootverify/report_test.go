@@ -3473,6 +3473,101 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 	}
 }
 
+func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"scan_id", "geography"}
+	bundle.Events["market_research.scan_assigned"] = entry
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+		},
+	}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{
+		{
+			ID:        "full",
+			Condition: "payload.mode == 'full'",
+			Emit: runtimecontracts.EmitSpec{
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"geography": runtimecontracts.RefExpression("payload.geography"),
+				},
+			},
+		},
+		{
+			ID:        "partial",
+			Condition: "else",
+			Emit: runtimecontracts.EmitSpec{
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"geography": runtimecontracts.RefExpression("payload.geography"),
+				},
+			},
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "scan_id is not statically provable") ||
+		reportContains(report.Errors(), "semantic_drift_payload_completeness", "geography is not statically provable") {
+		t.Fatalf("unexpected payload completeness error for merged template fields, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"scan_id", "geography"}
+	bundle.Events["market_research.scan_assigned"] = entry
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+		},
+	}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{
+		{
+			ID:        "full",
+			Condition: "payload.mode == 'full'",
+			Emit: runtimecontracts.EmitSpec{
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"geography": runtimecontracts.RefExpression("payload.geography"),
+				},
+			},
+		},
+		{
+			ID:        "partial",
+			Condition: "else",
+			Emit: runtimecontracts.EmitSpec{
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"bucket": runtimecontracts.LiteralExpression("partial"),
+				},
+			},
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[partial].emit_template") {
+		t.Fatalf("expected template branch payload completeness error for partial rule, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "geography is not statically provable") {
+		t.Fatalf("expected missing geography error for partial rule, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[full].emit_template") {
+		t.Fatalf("unexpected payload completeness error for full rule, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ErrorsForOnSuccessEmitSitePayloadDrift(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	bundle.Events["market_research.audit_logged"] = runtimecontracts.EventCatalogEntry{
