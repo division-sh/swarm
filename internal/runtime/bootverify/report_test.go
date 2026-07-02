@@ -2972,7 +2972,6 @@ func TestRun_AcceptsYAMLScalarFanOutEmitItemExpressions(t *testing.T) {
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
   items_from: payload.industries
-  target: market-research-agent
   emit:
     event: market_research.industry_assigned
     fields:

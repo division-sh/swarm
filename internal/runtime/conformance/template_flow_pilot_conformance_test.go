@@ -2,12 +2,22 @@ package conformance
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/fanoutpinroute"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 )
 
@@ -114,12 +124,297 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 	}
 }
 
+func TestFanOutPinRouteConformance_CoversTargetlessFanOutEmitRouteAuthority(t *testing.T) {
+	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{})
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	if got := report.HardInvalidities(); len(got) != 0 {
+		t.Fatalf("fanout pin-route hard invalidities = %#v, want none", got)
+	}
+
+	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 {
+		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one instance-key plan", plans)
+	}
+	plan := plans[0]
+	if plan.Source.FlowID != "coordinator" || plan.Source.Pin != "account_classified" || plan.Source.Key != "account_id" {
+		t.Fatalf("route plan source = %#v, want coordinator.account_classified keyed by account_id", plan.Source)
+	}
+	if plan.Receiver.FlowID != "account" || plan.Receiver.Pin != "account_classified" || plan.Receiver.Mode != "template" {
+		t.Fatalf("route plan receiver = %#v, want account.account_classified template", plan.Receiver)
+	}
+	if plan.InstanceKey == nil || strings.Join(plan.InstanceKey.Fields, ",") != "account_id" {
+		t.Fatalf("route plan instance key = %#v, want account_id", plan.InstanceKey)
+	}
+
+	handler, ok := source.NodeEventHandler("classifier-coordinator", "batch.classify.completed")
+	if !ok {
+		t.Fatal("classifier-coordinator batch.classify.completed handler missing")
+	}
+	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
+		Source:     source,
+		StateRepo:  fanOutPinRouteStateRepo{},
+		TxRunner:   fanOutPinRouteTxRunner{},
+		Locker:     fanOutPinRouteLocker{},
+		Outbox:     fanOutPinRouteOutbox{},
+		Dispatcher: fanOutPinRouteDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	parent := eventtest.RootIngress(
+		"evt-fanout-pin-route-parent",
+		events.EventType("coordinator/batch.classify.completed"),
+		"",
+		"",
+		json.RawMessage(`{"coordinator_id":"singleton","results":[{"account_id":"acct-a","bucket":"priority","score":91},{"account_id":"acct-b","bucket":"nurture","score":72}]}`),
+		0,
+		"run-fanout-pin-route",
+		"",
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+			FlowID:       "coordinator",
+			FlowInstance: "coordinator",
+			EntityID:     "coordinator",
+		}),
+		time.Now().UTC(),
+	)
+	result, err := exec.Execute(context.Background(), runtimeengine.ExecutionRequest{
+		EntityID: "coordinator",
+		NodeID:   "classifier-coordinator",
+		FlowID:   "coordinator",
+		Event:    parent,
+		Handler:  handler,
+		State: runtimeengine.StateSnapshot{
+			EntityID:     "coordinator",
+			CurrentState: "active",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute fan_out: %v", err)
+	}
+	if result.Status != runtimeengine.OutcomeFannedOut || result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
+		t.Fatalf("fan_out result = status:%s count:%d intents:%d", result.Status, result.FanOutCount, len(result.EmitIntents))
+	}
+
+	store := &fanOutPinRouteMemoryStore{
+		flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
+			{InstanceID: "acct-a", EntityID: "ent-a", FlowInstance: "account/acct-a", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+			{InstanceID: "acct-b", EntityID: "ent-b", FlowInstance: "account/acct-b", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-b"}},
+		},
+	}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		ContractBundle: source,
+		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
+			t.Fatal("existing account route descriptors should satisfy fan-out delivery")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	for _, instanceID := range []string{"acct-a", "acct-b"} {
+		if err := eb.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
+			Identity: runtimeflowidentity.StoredRoute("account", instanceID, "account/"+instanceID),
+		}); err != nil {
+			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+		}
+	}
+
+	want := map[string]events.RouteIdentity{
+		"acct-a": {FlowID: "account", FlowInstance: "account/acct-a", EntityID: "ent-a"},
+		"acct-b": {FlowID: "account", FlowInstance: "account/acct-b", EntityID: "ent-b"},
+	}
+	for idx, intent := range result.EmitIntents {
+		evt := eventtest.Child(
+			"evt-fanout-pin-route-child-"+string(rune('a'+idx)),
+			intent.Event.Type(),
+			intent.Event.SourceAgent(),
+			intent.Event.TaskID(),
+			intent.Event.Payload(),
+			intent.Event.ChainDepth(),
+			parent,
+			intent.Event.Envelope(),
+			intent.Event.CreatedAt(),
+		)
+		if got, wantType := string(evt.Type()), "coordinator/account.classified"; got != wantType {
+			t.Fatalf("fan_out emitted event type = %q, want %q", got, wantType)
+		}
+		if target := evt.TargetRoute(); !target.Empty() {
+			t.Fatalf("engine fan_out emit pre-populated target = %#v, want EventBus RoutePlan ownership", target)
+		}
+		payload := map[string]any{}
+		if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+			t.Fatalf("fan_out payload json: %v", err)
+		}
+		accountID, _ := payload["account_id"].(string)
+		expected, ok := want[accountID]
+		if !ok {
+			t.Fatalf("unexpected account_id in fan_out payload: %#v", payload)
+		}
+		preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+		if err != nil {
+			t.Fatalf("CheckPublishRecipientPlan(%s): %v", accountID, err)
+		}
+		if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 ||
+			!fanOutPinRouteDeliveryRoutesContain(preflight.DeliveryRoutes, expected) {
+			t.Fatalf("preflight for %s = failure:%q routes:%#v, want only %#v", accountID, preflight.TargetFailure, preflight.DeliveryRoutes, expected)
+		}
+		if err := eb.Publish(context.Background(), evt); err != nil {
+			t.Fatalf("Publish fan_out event for %s: %v", accountID, err)
+		}
+		if routes := store.deliveryRoutes[evt.ID()]; len(routes) != 1 ||
+			!fanOutPinRouteDeliveryRoutesContain(routes, expected) {
+			t.Fatalf("persisted routes for %s = %#v, want only %#v", accountID, routes, expected)
+		}
+	}
+}
+
+func TestFanOutPinRouteConformance_FailsClosedForRouteKeyGaps(t *testing.T) {
+	source := fanoutpinroute.LoadSource(t, fanoutpinroute.Options{})
+	tests := []struct {
+		name          string
+		payload       json.RawMessage
+		flowInstances []runtimebus.ActiveFlowInstanceDescriptor
+		wantFailure   string
+	}{
+		{
+			name:        "missing account key",
+			payload:     json.RawMessage(`{"bucket":"priority","score":91}`),
+			wantFailure: string(runtimepinrouting.ConnectFailureAddressValueMissing),
+		},
+		{
+			name:    "ambiguous account key",
+			payload: json.RawMessage(`{"account_id":"acct-a","bucket":"priority","score":91}`),
+			flowInstances: []runtimebus.ActiveFlowInstanceDescriptor{
+				{InstanceID: "acct-a-one", EntityID: "ent-a1", FlowInstance: "account/acct-a-one", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+				{InstanceID: "acct-a-two", EntityID: "ent-a2", FlowInstance: "account/acct-a-two", FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-a"}},
+			},
+			wantFailure: string(runtimepinrouting.ConnectFailureTargetAmbiguous),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &fanOutPinRouteMemoryStore{flowInstances: tc.flowInstances}
+			eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+				ContractBundle: source,
+				TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
+					t.Fatal("fail-closed fan-out route should not activate an account instance")
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			evt := eventtest.RootIngress(
+				"evt-fanout-pin-route-negative",
+				events.EventType("coordinator/account.classified"),
+				"",
+				"",
+				tc.payload,
+				0,
+				"run-fanout-pin-route",
+				"",
+				events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+					FlowID:       "coordinator",
+					FlowInstance: "coordinator",
+					EntityID:     "coordinator",
+				}),
+				time.Now().UTC(),
+			)
+			preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if preflight.TargetFailure != tc.wantFailure {
+				t.Fatalf("target failure = %q, want %q", preflight.TargetFailure, tc.wantFailure)
+			}
+			if len(preflight.DeliveryRoutes) != 0 || len(preflight.Recipients) != 0 ||
+				len(preflight.RoutedRecipients) != 0 || len(preflight.SubscriptionRecipients) != 0 {
+				t.Fatalf("fail-closed fan-out route exposed executable recipients: routes=%#v recipients=%#v routed=%#v subscriptions=%#v",
+					preflight.DeliveryRoutes, preflight.Recipients, preflight.RoutedRecipients, preflight.SubscriptionRecipients)
+			}
+		})
+	}
+}
+
 func templateFlowPilotConformanceFindingContains(findings []runtimebootverify.Finding, checkID, substr string) bool {
 	for _, finding := range findings {
 		if strings.TrimSpace(finding.CheckID) != checkID {
 			continue
 		}
 		if substr == "" || strings.Contains(finding.Message, substr) {
+			return true
+		}
+	}
+	return false
+}
+
+type fanOutPinRouteStateRepo struct{}
+
+func (fanOutPinRouteStateRepo) LoadState(context.Context, runtimeidentity.EntityID) (runtimeengine.StateSnapshot, bool, error) {
+	return runtimeengine.StateSnapshot{}, false, nil
+}
+
+func (fanOutPinRouteStateRepo) SaveState(context.Context, runtimeidentity.EntityID, runtimeengine.StateMutation) error {
+	return nil
+}
+
+type fanOutPinRouteTxRunner struct{}
+type fanOutPinRouteTx struct{ ctx context.Context }
+
+func (fanOutPinRouteTxRunner) Run(ctx context.Context, fn func(runtimeengine.Tx) error) error {
+	return fn(fanOutPinRouteTx{ctx: ctx})
+}
+
+func (t fanOutPinRouteTx) Context() context.Context {
+	if t.ctx == nil {
+		return context.Background()
+	}
+	return t.ctx
+}
+
+type fanOutPinRouteLocker struct{}
+
+func (fanOutPinRouteLocker) WithEntityLock(ctx context.Context, _ runtimeidentity.EntityID, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+type fanOutPinRouteOutbox struct{}
+
+func (fanOutPinRouteOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error {
+	return nil
+}
+
+type fanOutPinRouteDispatcher struct{}
+
+func (fanOutPinRouteDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {
+	return nil
+}
+
+type fanOutPinRouteMemoryStore struct {
+	runtimebus.InMemoryEventStore
+	flowInstances  []runtimebus.ActiveFlowInstanceDescriptor
+	deliveryRoutes map[string][]events.DeliveryRoute
+}
+
+func (s *fanOutPinRouteMemoryStore) ListActiveFlowInstanceDescriptors(context.Context) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
+	return append([]runtimebus.ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+}
+
+func (s *fanOutPinRouteMemoryStore) InsertEventDeliveryRoutes(_ context.Context, eventID string, routes []events.DeliveryRoute) error {
+	if s.deliveryRoutes == nil {
+		s.deliveryRoutes = map[string][]events.DeliveryRoute{}
+	}
+	s.deliveryRoutes[eventID] = events.NormalizeDeliveryRoutes(routes)
+	return nil
+}
+
+func fanOutPinRouteDeliveryRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity) bool {
+	target = target.Normalized()
+	for _, route := range events.NormalizeDeliveryRoutes(routes) {
+		if route.SubscriberType == "node" && route.SubscriberID == "account-classifier" && route.Target == target {
 			return true
 		}
 	}

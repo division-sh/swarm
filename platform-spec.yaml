@@ -1798,11 +1798,35 @@ handler_specification:
     fan_out:
       field: fan_out
       type: object
-      purpose: For each item in a list, emit an event.
+      purpose: For each item in a list, emit one ordinary event through the normal emit pipeline.
       sub_fields:
         items_from: string — source list (payload field or entity field)
-        target: string — agent path to receive events
         emit: string or object — per-item event to emit, optionally with local fields payload construction
+      route_authority: >
+        `fan_out.emit` is a normal authored emit site. When it emits a
+        pin-declared output event, routing is owned by the same output pin,
+        parent connect / ConnectRoutePlan, and EventBus RoutePlan authority as
+        handler-level emit, rule emit, on_complete emit, and accumulate timeout
+        emit. The runtime must not route target-less fan_out output through
+        direct delivery, raw subscriber lookup, RouteTable fallback, relay,
+        replay/readback repair, receiver select_entity repair, or event-type
+        broadcast compatibility.
+      retired_target_field: >
+        `fan_out.target` is retired and invalid. It is not a route owner and
+        must not be implemented as an agent-dispatch mode. Authors that need a
+        genuine producer escape hatch use `fan_out.emit.target` with the same
+        restrictions as any other explicit emit target; common composed flow
+        delivery uses output pins and parent connect.
+      batching_scatter_pattern: >
+        The supported batched-agent scatter pattern is asynchronous and
+        event-driven: a coordinator emits a batch request event to a normal
+        authored agent, that agent emits a batch-completed event, and the
+        coordinator fans out result rows with target-less `fan_out.emit` to
+        pin-declared outputs. Each row must construct the output pin key/carries
+        payload fields from the current `fan_out.item`, and parent connect
+        routes each emitted event to the intended flow instance by correlation
+        key. No `batch_agent`, `map_agent`, inline runtime LLM invocation, or
+        runtime-owned JSON result contract is part of this pattern.
       side_effect: Writes fan_out.count to handler context (available for data_accumulation).
     query:
       field: query
@@ -1981,6 +2005,7 @@ handler_specification:
       - "`payload_transform` — retired; move payload ownership into `emit.fields` at the active emit site"
       - "`fan_out.emit_per_item` — retired; use `fan_out.emit`"
       - "`fan_out.emit_mapping` — retired; no direct replacement in the current fan_out model. Use a single `fan_out.emit` and route before or after fan-out if per-item event-name branching is required."
+      - "`fan_out.target` — retired; `fan_out.emit` routes through ordinary emit target semantics or, for composed pin-declared outputs, through output pin plus parent connect route authority."
     clear_gates:
       field: clear_gates
       type: boolean

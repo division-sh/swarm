@@ -2379,7 +2379,6 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
 				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
-				Target:    "agent-x",
 			},
 			AdvancesTo: "processing",
 			Action:     runtimecontracts.ActionSpec{ID: "should_not_run"},

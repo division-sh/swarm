@@ -698,6 +698,19 @@ emit_per_item: routed.item
 	}
 }
 
+func TestFanOutSpecDecode_RejectsRetiredTarget(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: payload.items
+target: worker-a
+emit:
+  event: routed.item
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), `fan_out field "target" is retired`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want retired fan_out target rejection", err)
+	}
+}
+
 func TestGroupBySpecDecode_HydratesPaths(t *testing.T) {
 	var spec GroupBySpec
 	if err := yaml.Unmarshal([]byte(`

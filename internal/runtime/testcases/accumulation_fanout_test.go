@@ -15,7 +15,7 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	if created.FanOut == nil {
 		t.Fatal("expected fan_out on item.created")
 	}
-	if created.FanOut.ItemsFrom != "payload.items" || created.FanOut.Target != "worker-a" || created.FanOut.Emit.EventType() != "intake/item.processed" {
+	if created.FanOut.ItemsFrom != "payload.items" || created.FanOut.Emit.EventType() != "intake/item.processed" {
 		t.Fatalf("unexpected fan_out spec: %+v", created.FanOut)
 	}
 	if len(created.Branch) != 1 || created.Branch[0].Then == nil || created.Branch[0].Else == nil {

@@ -264,7 +264,6 @@ type ComputeKeyConfig struct {
 type FanOutSpec struct {
 	ItemsFrom string     `yaml:"items_from"`
 	ItemsPath paths.Path `yaml:"-"`
-	Target    string     `yaml:"target"`
 	Emit      EmitSpec   `yaml:"emit"`
 }
 type HandlerOnSuccessSpec struct {
