@@ -367,6 +367,7 @@ seam_families:
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/route_plan.go
+      - internal/runtime/authoringview/view.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
     notes: >

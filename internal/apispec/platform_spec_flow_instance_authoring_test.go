@@ -243,4 +243,15 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 	} {
 		assertScalarValue(t, mustYAMLPath(t, analyzer, "children", tc.key), tc.want)
 	}
+	expandMinimize := mustMappingValue(t, analyzer, "expand_minimize_tooling")
+	assertScalarValue(t, mustMappingValue(t, expandMinimize, "status"), "merge_bearing_supported_tooling")
+	assertScalarValue(t, mustMappingValue(t, expandMinimize, "implementation_tracker"), "#1551")
+	assertScalarValue(t, mustMappingValue(t, expandMinimize, "command"), "swarm describe")
+	assertScalarContains(t, mustMappingValue(t, expandMinimize, "canonical_code_owner"), "internal/runtime/authoringview.Build")
+	assertScalarContains(t, mustMappingValue(t, expandMinimize, "rule"), "projection over existing semantic owners")
+	assertScalarContains(t, mustMappingValue(t, expandMinimize, "rule"), "without becoming a new semantic owner")
+	assertScalarContains(t, mustMappingValue(t, expandMinimize, "source_location_rule"), "check_id plus authored YAML file")
+	if !sequenceContainsScalar(mustMappingValue(t, expandMinimize, "non_authoritative_paths"), "generated expanded YAML as merge authority") {
+		t.Fatal("expand_minimize_tooling must keep generated expanded YAML non-authoritative")
+	}
 }
