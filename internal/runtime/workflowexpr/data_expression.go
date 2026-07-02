@@ -58,6 +58,9 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if expression == "" {
 		return fmt.Errorf("workflow data expression is empty")
 	}
+	if expressionReferencesRetiredFanOutTarget(expression) {
+		return fmt.Errorf("fan_out.target is retired; use fan_out.item for per-item values or fan_out.count for fan-out count")
+	}
 	_, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return issues.Err()
@@ -77,6 +80,9 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	normalized := strings.TrimSpace(RewriteEntityNullPresenceChecks(expression))
 	if normalized == "" {
 		return nil, fmt.Errorf("workflow data expression is empty")
+	}
+	if expressionReferencesRetiredFanOutTarget(normalized) {
+		return nil, fmt.Errorf("fan_out.target is retired; use fan_out.item for per-item values or fan_out.count for fan-out count")
 	}
 	if missing := MissingEntityReferences(normalized, ctx.Entity); len(missing) > 0 {
 		return nil, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
@@ -108,6 +114,58 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 
 func ExpressionReferencesEntity(expression string) bool {
 	return len(EntityReferences(expression)) > 0
+}
+
+func expressionReferencesRetiredFanOutTarget(expression string) bool {
+	expression = strings.TrimSpace(expression)
+	if expression == "" {
+		return false
+	}
+	for i := 0; i < len(expression); i++ {
+		switch expression[i] {
+		case '\'', '"':
+			next, ok := skipQuotedString(expression, i)
+			if ok {
+				i = next - 1
+				continue
+			}
+		}
+		if !strings.HasPrefix(expression[i:], "fan_out") {
+			continue
+		}
+		if i > 0 && isIdentifierPart(expression[i-1]) {
+			continue
+		}
+		pos := i + len("fan_out")
+		if pos < len(expression) && isIdentifierPart(expression[pos]) {
+			continue
+		}
+		pos = skipExpressionWhitespace(expression, pos)
+		if pos >= len(expression) {
+			continue
+		}
+		switch expression[pos] {
+		case '.':
+			pos = skipExpressionWhitespace(expression, pos+1)
+			if strings.HasPrefix(expression[pos:], "target") {
+				end := pos + len("target")
+				if end >= len(expression) || !isIdentifierPart(expression[end]) {
+					return true
+				}
+			}
+		case '[':
+			pos = skipExpressionWhitespace(expression, pos+1)
+			value, next, ok := readQuotedString(expression, pos)
+			if !ok {
+				continue
+			}
+			next = skipExpressionWhitespace(expression, next)
+			if next < len(expression) && expression[next] == ']' && value == "target" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func RewriteEntityNullPresenceChecks(expression string) string {
@@ -166,6 +224,59 @@ func StripStringLiterals(expression string) string {
 		out.WriteByte(ch)
 	}
 	return out.String()
+}
+
+func skipQuotedString(expression string, start int) (int, bool) {
+	_, next, ok := readQuotedString(expression, start)
+	return next, ok
+}
+
+func readQuotedString(expression string, start int) (string, int, bool) {
+	if start < 0 || start >= len(expression) {
+		return "", start, false
+	}
+	quote := expression[start]
+	if quote != '\'' && quote != '"' {
+		return "", start, false
+	}
+	var out strings.Builder
+	escaped := false
+	for i := start + 1; i < len(expression); i++ {
+		ch := expression[i]
+		if escaped {
+			out.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == quote {
+			return out.String(), i + 1, true
+		}
+		out.WriteByte(ch)
+	}
+	return "", len(expression), false
+}
+
+func skipExpressionWhitespace(expression string, pos int) int {
+	for pos < len(expression) {
+		switch expression[pos] {
+		case ' ', '\t', '\n', '\r':
+			pos++
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+func isIdentifierPart(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') ||
+		ch == '_'
 }
 
 func EntityReferences(expression string) []string {
