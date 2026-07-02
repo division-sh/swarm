@@ -18,7 +18,6 @@ intake-router:
         check: payload.item_id != ''
       fan_out:
         items_from: payload.items
-        target: worker-a
         emit:
           event: item.processed
           broadcast: true
