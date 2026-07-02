@@ -1,7 +1,6 @@
 processing-node:
   id: processing-node
   execution_type: system_node
-  idempotency_table: processing_node_idempotency
   state_table: processing_node_state
   subscribes_to:
     - item.review_requested

@@ -1,5 +1,4 @@
 name: child
-namespace: child
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]

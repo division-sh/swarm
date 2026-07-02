@@ -1,5 +1,4 @@
 name: worker
-namespace: worker
 mode: template
 instance:
   by: worker_id

@@ -1,7 +1,6 @@
 delivery-node:
   id: delivery-node
   execution_type: system_node
-  idempotency_table: delivery_node_idempotency
   state_table: delivery_node_state
   subscribes_to:
     - item.completed

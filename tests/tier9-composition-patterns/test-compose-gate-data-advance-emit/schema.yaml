@@ -1,5 +1,4 @@
 name: test-compose-gate-data-advance-emit
-namespace: test-compose-gate-data-advance-emit
 initial_state: stage_one
 terminal_states: [complete]
 states: [stage_one, stage_two, complete]

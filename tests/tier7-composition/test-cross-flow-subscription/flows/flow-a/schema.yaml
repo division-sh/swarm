@@ -1,5 +1,4 @@
 name: flow-a
-namespace: flow-a
 initial_state: pending
 terminal_states: [done]
 states: [pending, done]

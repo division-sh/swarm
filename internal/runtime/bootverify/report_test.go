@@ -6377,7 +6377,6 @@ flows:
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
 name: child
-namespace: child
 initial_state: idle
 terminal_states: [done]
 states: [idle, working, done]

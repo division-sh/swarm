@@ -1,5 +1,4 @@
 name: processor
-namespace: processor
 initial_state: waiting
 terminal_states: [finished]
 states: [waiting, finished]

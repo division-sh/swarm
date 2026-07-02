@@ -1,5 +1,4 @@
 name: test-atomicity-guard-rollback
-namespace: test-atomicity-guard-rollback
 initial_state: pending
 terminal_states: [processed]
 states: [pending, processed]

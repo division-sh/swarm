@@ -16,5 +16,3 @@ spawner:
       emit:
         event: spawn.done
         broadcast: true
-  permissions:
-  - create_flow_instance

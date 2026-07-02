@@ -3,7 +3,6 @@ stub-agent-node:
   execution_type: system_node
   subscribes_to: [task.requested]
   produces: [task.completed]
-  agent: stub-agent
   event_handlers:
     task.requested:
       advances_to: done
