@@ -120,7 +120,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 		for _, eventType := range agent.EmitEvents {
 			addEventProofLocal(emittedRefs, c.source, flowID, eventType)
 		}
-		for _, eventType := range append(append([]string{}, agent.Subscriptions...), agent.SubscribesTo...) {
+		for _, eventType := range agent.Subscriptions {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue

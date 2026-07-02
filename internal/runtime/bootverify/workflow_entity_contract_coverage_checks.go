@@ -557,7 +557,6 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 		add("handler.count", handler.Count.StoreAs)
 	}
 	if handler.Clear != nil {
-		add("handler.clear", handler.Clear.Target)
 		for _, target := range handler.Clear.Targets {
 			add("handler.clear", target)
 		}

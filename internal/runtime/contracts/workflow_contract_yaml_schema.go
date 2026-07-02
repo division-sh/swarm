@@ -251,6 +251,12 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	if hasYAMLMappingKey(node, "returns") {
 		return fmt.Errorf("RETIRED: tool field %q is retired; use output_schema", "returns")
 	}
+	if hasYAMLMappingKey(node, "endpoint") {
+		return fmt.Errorf("RETIRED: tool field %q is not accepted; use http.url", "endpoint")
+	}
+	if hasYAMLMappingKey(node, "type") {
+		return fmt.Errorf("RETIRED: tool field %q is not accepted; use handler_type", "type")
+	}
 	type alias ToolSchemaEntry
 	var aux alias
 	if err := node.Decode(&aux); err != nil {

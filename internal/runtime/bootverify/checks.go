@@ -473,17 +473,6 @@ func (c *checkerContext) deprecatedAliases() []Finding {
 		return c.deprecatedFindings
 	}
 	c.deprecatedLoaded = true
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		if len(agent.Tools) == 0 && len(agent.ToolsTier2) > 0 {
-			c.deprecatedFindings = append(c.deprecatedFindings, Finding{
-				CheckID:  "impl.deprecated_contract_alias",
-				Severity: "warning",
-				Message:  fmt.Sprintf("agent %s uses deprecated tools_tier2; rename to tools", agentID),
-				Location: agentID,
-			})
-		}
-	}
 	return c.deprecatedFindings
 }
 
@@ -609,17 +598,6 @@ func (c *checkerContext) dialectCompliance() []Finding {
 					Location: nodeID,
 				})
 			}
-		}
-	}
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		if len(agent.SubscriptionsBootstrap) > 0 {
-			c.dialectFindings = append(c.dialectFindings, Finding{
-				CheckID:  "dialect_compliance",
-				Severity: "error",
-				Message:  fmt.Sprintf("agent %s uses deprecated subscriptions_bootstrap", agentID),
-				Location: agentID,
-			})
 		}
 	}
 	return c.dialectFindings

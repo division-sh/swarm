@@ -312,7 +312,6 @@ type CountSpec struct {
 	Condition  string     `yaml:"condition"`
 }
 type ClearSpec struct {
-	Target  string   `yaml:"target"`
 	Targets []string `yaml:"targets"`
 }
 
@@ -1334,6 +1333,12 @@ func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
 				return fmt.Errorf("RETIRED: agent field session_scope is runtime-derived from mode")
 			case "session_scope_authority":
 				return fmt.Errorf("RETIRED: agent field session_scope_authority is platform-internal runtime state")
+			case "tools_tier2":
+				return fmt.Errorf("RETIRED: agent field tools_tier2 is retired; use tools")
+			case "subscriptions_bootstrap":
+				return fmt.Errorf("RETIRED: agent field subscriptions_bootstrap is retired; use subscriptions")
+			case "subscribes_to":
+				return fmt.Errorf("RETIRED: agent field subscribes_to is retired for agents.yaml; use subscriptions")
 			}
 		}
 	}
@@ -1355,9 +1360,6 @@ func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
 func (e AgentRegistryEntry) ConfiguredTools() []string {
 	if len(e.Tools) > 0 {
 		return append([]string{}, e.Tools...)
-	}
-	if len(e.ToolsTier2) > 0 {
-		return append([]string{}, e.ToolsTier2...)
 	}
 	return nil
 }

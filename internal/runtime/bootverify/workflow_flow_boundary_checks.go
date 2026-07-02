@@ -459,11 +459,6 @@ func flowHasScopedInputEscapeHatch(source semanticview.Source, flowID, eventType
 				return true
 			}
 		}
-		for _, sub := range eventidentity.NormalizeList(agent.SubscribesTo) {
-			if strings.Contains(sub, "/") && strings.HasSuffix(sub, "/"+eventType) {
-				return true
-			}
-		}
 	}
 	return false
 }

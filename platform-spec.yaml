@@ -1880,6 +1880,8 @@ handler_specification:
       purpose: Bulk reset state tables.
       sub_fields:
         targets: list of state store names to clear
+      retired_fields:
+        target: RETIRED — use targets, including a one-item list for a single clear target.
       execution_position: After action. Last step. Resets accumulator state or specific entity field buckets. Distinct from
         clear_gates which runs before guard.
     action:
@@ -3739,6 +3741,11 @@ engine:
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
         be modified at runtime. This is the agent's declared event contract.
+    retired_authored_fields:
+      tools_tier2: RETIRED — use tools.
+      subscriptions_bootstrap: RETIRED — use subscriptions.
+      subscribes_to: RETIRED for agents.yaml only — use subscriptions. Node subscribes_to and required_agents[].subscribes_to
+        remain canonical fields for their separate concepts.
     emit_tool_convention:
       description: The platform auto-generates emit tools from each agent's emit_events list. Agents do NOT need to list emit
         tools in tools.

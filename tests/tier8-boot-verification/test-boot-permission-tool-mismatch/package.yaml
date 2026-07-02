@@ -1,7 +1,7 @@
 name: test-boot-permission-tool-mismatch
 version: 1.0.0
 description: >
-  Boot verification: agent declares lookup_data in tools_tier2
+  Boot verification: agent declares lookup_data in tools
   but its permissions list does not include external_api_access.
   Platform must flag PERMISSION-MISMATCH.
 platform_version: ">=1.1.0"

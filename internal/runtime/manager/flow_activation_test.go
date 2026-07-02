@@ -1777,7 +1777,7 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 			ID:              "reviewer-{instance_id}",
 			Type:            "generic",
 			Role:            "reviewer",
-			ToolsTier2:      []string{"schedule", "check_status"},
+			Tools:           []string{"schedule", "check_status"},
 			NativeTools:     map[string]any{"bash": true, "file_io": true},
 			EmitEvents:      []string{"task.completed", "task.completed", "review.failed"},
 			MaxTurnsPerTask: 7,

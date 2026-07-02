@@ -494,6 +494,32 @@ emit: score.ready
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+clear:
+  target: entity.summary
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "targets") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED clear.target rejection", err)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_PreservesCanonicalClearTargets(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+clear:
+  targets:
+    - entity.summary
+    - pending_dedup
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if handler.Clear == nil || len(handler.Clear.Targets) != 2 {
+		t.Fatalf("Clear = %#v, want two canonical targets", handler.Clear)
+	}
+}
+
 func TestHandlerRuleEntryDecode_AcceptsSpecComputeMetadataFields(t *testing.T) {
 	var rule HandlerRuleEntry
 	if err := yaml.Unmarshal([]byte(`
@@ -676,6 +702,22 @@ event_handlers:
 	}
 	if len(node.StateSchema.Fields) != 1 {
 		t.Fatalf("StateSchema fields = %#v, want one field", node.StateSchema.Fields)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_PreservesRequiredAgentSubscribesTo(t *testing.T) {
+	var schema FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: worker
+required_agents:
+  - role: analyst
+    subscribes_to: [task.requested]
+    emits: [task.completed]
+`), &schema); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if len(schema.RequiredAgents) != 1 || len(schema.RequiredAgents[0].SubscribesTo) != 1 || schema.RequiredAgents[0].SubscribesTo[0] != "task.requested" {
+		t.Fatalf("RequiredAgents = %#v, want canonical required-agent subscribes_to", schema.RequiredAgents)
 	}
 }
 

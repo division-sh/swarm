@@ -583,7 +583,6 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 		addWriter(handler.Count.StoreAs)
 	}
 	if handler.Clear != nil {
-		addWriter(handler.Clear.Target)
 		for _, target := range handler.Clear.Targets {
 			addWriter(target)
 		}

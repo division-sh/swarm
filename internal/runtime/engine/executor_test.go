@@ -3322,7 +3322,7 @@ func TestExecutor_ClearRemovesNestedEntityLeaf(t *testing.T) {
 		NodeID:   "node-1",
 		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
-			Clear: &runtimecontracts.ClearSpec{Target: "entity.analysis.summary"},
+			Clear: &runtimecontracts.ClearSpec{Targets: []string{"entity.analysis.summary"}},
 		},
 		State: testStateSnapshot("pending", map[string]any{
 			"analysis": map[string]any{
