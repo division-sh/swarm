@@ -10970,7 +10970,10 @@ cli_specification:
         ephemeral gateway URL-env side-channel child: any production
         Claude runtime factory constructed for a live ephemeral gateway MUST receive that gateway's typed binding
         instead of depending on ambient URL env, and selected-fork gateway startup MUST NOT mutate process-global
-        `SWARM_TOOL_GATEWAY_URL` or `SWARM_TOOL_GATEWAY_CONTAINER_URL`.
+        `SWARM_TOOL_GATEWAY_URL` or `SWARM_TOOL_GATEWAY_CONTAINER_URL`. This owner also closes the #1568
+        fail-closed first slice for DB-loaded multi-context `claude_cli` serve: until a separately gated
+        context-aware gateway router exists, Swarm must not expose hidden primary-only MCP or forkchat gateway
+        behavior in a process with multiple loaded BundleContexts.
       binding_fields:
       - transport
       - host_endpoint
@@ -11003,6 +11006,15 @@ cli_specification:
         startup probes, MCP HTTP config generation, and Docker exec env injection MUST consume the binding token,
         not a later ambient env read. Selected-fork ephemeral gateways follow the same token-only rule: explicit
         `SWARM_TOOL_GATEWAY_TOKEN` may supply the binding token, and absent token generates a typed binding token.
+      multi_context_rule: >
+        In DB-loaded multi-context serve, `claude_cli` tool-gateway and forkchat sandbox materialization are
+        unsupported until a separately gated context-aware gateway router and forkchat runtime selector exist.
+        If more than one BundleContext is boot-pinned and the selected LLM backend is `claude_cli`, serve MUST
+        fail closed before readiness, before MCP `/mcp` and `/tools/` routes are exposed, and before the forkchat
+        sandbox Claude runtime can be exposed through the API. The implementation MUST NOT rely on primary
+        context `ToolGatewayBinding`, primary `rt.ToolGateway`, primary workspace resolver, or primary forkchat
+        sandbox runtime construction as implicit semantic policy. RuntimeContextManager API routing remains
+        adjacent and does not prove MCP/tool-gateway/forkchat routing is context-aware.
       consumers:
       - '`cmd/swarm` serve listener binding'
       - 'local foreground `swarm run` through the serve startup owner'
@@ -11013,12 +11025,13 @@ cli_specification:
       - Claude CLI MCP HTTP config generation
       - Claude CLI Docker exec final-boundary env injection
       - fork-chat sandbox Claude runtime factory as a local serve consumer
+      - multi-context serve admission for unsupported `claude_cli` tool-gateway and forkchat materialization
       - selected-fork ephemeral gateway Claude runtime factory as regression-guard consumer
       - local `claude_cli` preflight diagnostics as consumer-only stale-env reporter
       - non-dev serve retired URL-env admission
       split_tail:
       - '#1568 token-source migration beyond token-only env remains split.'
-      - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; selected-fork ephemeral gateway startup no longer uses process-global URL env as a propagation side channel, but broader multi-bundle materialization remains open. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
+      - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; selected-fork ephemeral gateway startup no longer uses process-global URL env as a propagation side channel, and DB-loaded multi-context claude_cli gateway/forkchat ambiguity now fails closed, but full context-aware MCP/forkchat routing remains open. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1138/#1213 host workspace `claude_cli` execution remains split.'
       - '#1567 API connection discovery and connection-file authority remain split.'
       - 'IPC/unix socket transports and remote/Kubernetes routing remain split.'

@@ -2484,6 +2484,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 					SourceRule           string   `yaml:"source_rule"`
 					EndpointEnvRule      string   `yaml:"endpoint_env_rule"`
 					AuthRule             string   `yaml:"auth_rule"`
+					MultiContextRule     string   `yaml:"multi_context_rule"`
 					Consumers            []string `yaml:"consumers"`
 					SplitTail            []string `yaml:"split_tail"`
 				} `yaml:"local_tool_gateway_binding"`
@@ -2530,6 +2531,11 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "token-only source authority", "per-boot token", "binding token", "Selected-fork ephemeral gateways follow the same token-only rule"} {
 		if !strings.Contains(binding.AuthRule, want) {
 			t.Fatalf("auth rule missing %q:\n%s", want, binding.AuthRule)
+		}
+	}
+	for _, want := range []string{"multi-context", "claude_cli", "ToolGatewayBinding", "MCP `/mcp` and `/tools/`", "forkchat sandbox", "MUST fail closed before readiness", "MUST NOT rely on primary"} {
+		if !strings.Contains(binding.MultiContextRule, want) {
+			t.Fatalf("multi context rule missing %q:\n%s", want, binding.MultiContextRule)
 		}
 	}
 	for _, want := range []string{"serve listener binding", "RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "MCP HTTP config", "Docker exec", "fork-chat sandbox", "selected-fork ephemeral gateway", "non-dev serve retired URL-env admission"} {
@@ -6348,6 +6354,128 @@ func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	}
 }
 
+func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
+	claudeCfg := &config.Config{}
+	claudeCfg.LLM.Backend = "claude_cli"
+	anthropicCfg := &config.Config{}
+	anthropicCfg.LLM.Backend = "anthropic"
+	twoContexts := []serveRuntimeBundle{{}, {}}
+
+	tests := []struct {
+		name        string
+		cfg         *config.Config
+		loaded      []serveRuntimeBundle
+		wantErr     string
+		wantDetails bool
+	}{
+		{
+			name:   "single claude context allowed",
+			cfg:    claudeCfg,
+			loaded: []serveRuntimeBundle{{}},
+		},
+		{
+			name:   "multi context non claude backend allowed",
+			cfg:    anthropicCfg,
+			loaded: twoContexts,
+		},
+		{
+			name:        "multi context claude backend fails closed",
+			cfg:         claudeCfg,
+			loaded:      twoContexts,
+			wantErr:     "multi-context swarm serve --bundle-hash with llm.backend=claude_cli is unsupported",
+			wantDetails: true,
+		},
+		{
+			name:    "multi context needs config",
+			cfg:     nil,
+			loaded:  twoContexts,
+			wantErr: "runtime config is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateServeMultiContextToolGatewayAdmission(tt.cfg, tt.loaded)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateServeMultiContextToolGatewayAdmission: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validateServeMultiContextToolGatewayAdmission err = %v, want %q", err, tt.wantErr)
+			}
+			if tt.wantDetails {
+				for _, want := range []string{"ToolGatewayBinding", "MCP /mcp and /tools routes", "forkchat sandbox runtime", "context-aware gateway router"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("admission error missing %q:\n%s", want, err.Error())
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrForkchat(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+
+	var workspaceConfigured atomic.Bool
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
+		workspaceConfigured.Store(true)
+		return serveRuntimeWorkspaceStub{}
+	})
+	ctx := context.Background()
+	firstHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
+	secondHash := seedServeRuntimeBundleCatalog(t, ctx, pg, filepath.Join("tests", "tier1-primitives", "test-emits-single"))
+	if firstHash == secondHash {
+		t.Fatalf("test fixtures produced duplicate bundle hash %s", firstHash)
+	}
+
+	var out lockedBuffer
+	code := runServeRuntime(ctx, repoRoot(), serveOptions{
+		ConfigPath:         writeDoctorClaudeConfig(t),
+		Backend:            "claude_cli",
+		BundleHash:         firstHash,
+		BundleHashes:       []string{secondHash},
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Output:             &out,
+	})
+	if code != 3 {
+		t.Fatalf("runServeRuntime code = %d, want 3\noutput:\n%s", code, out.String())
+	}
+	for _, want := range []string{
+		"[4/22] bundle_load",
+		"[5/22] runtime_context",
+		"multi-context swarm serve --bundle-hash",
+		"llm.backend=claude_cli",
+		"ToolGatewayBinding",
+		"MCP /mcp and /tools routes",
+		"forkchat sandbox runtime",
+		"context-aware gateway router",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing %q:\n%s", want, out.String())
+		}
+	}
+	for _, notWant := range []string{"http_listener_bind", "[20/22]", "[22/22]", "ready                      ok", "init forkchat sandbox runtime"} {
+		if strings.Contains(out.String(), notWant) {
+			t.Fatalf("serve reached %q after multi-context claude_cli admission failure:\n%s", notWant, out.String())
+		}
+	}
+	if workspaceConfigured.Load() {
+		t.Fatalf("workspace lifecycle was configured despite fail-closed admission:\n%s", out.String())
+	}
+}
+
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
 	_, db, _ := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -9724,6 +9852,31 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
 	}
 	return bundle
+}
+
+func seedServeRuntimeBundleCatalog(t *testing.T, ctx context.Context, pg *store.PostgresStore, relativeRoot string) string {
+	t.Helper()
+	if pg == nil {
+		t.Fatal("postgres store is required")
+	}
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+	bundle := loadWorkflowValidationFixtureBundle(t, relativeRoot)
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection(%s): %v", relativeRoot, err)
+	}
+	if _, err := pg.UpsertBundleCatalog(ctx, store.BundleCatalogUpsert{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: projection.ContentYAML,
+		ParsedJSON:  projection.ParsedJSON,
+		DataBlob:    projection.DataBlob,
+		Metadata:    projection.Metadata,
+	}); err != nil {
+		t.Fatalf("UpsertBundleCatalog(%s): %v", relativeRoot, err)
+	}
+	return projection.BundleHash
 }
 
 func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimecontracts.WorkflowContractBundle {
