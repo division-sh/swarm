@@ -1,10 +1,10 @@
 trigger:
   event: order.submitted
   payload:
-    entity_id: 11111111-1111-1111-1111-111111111111
     amount: 100
 
 expected:
+
   handler_outcome: success
   entity_state: complete
   gates:

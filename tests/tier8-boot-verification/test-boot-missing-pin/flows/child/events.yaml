@@ -1,7 +1,4 @@
 task.assigned:
-  entity_id: string
 task.feedback:
-  entity_id: string
   comment: string
 task.result:
-  entity_id: string

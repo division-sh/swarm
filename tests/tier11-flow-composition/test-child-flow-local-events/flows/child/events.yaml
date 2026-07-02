@@ -1,5 +1,4 @@
 child.start:
-  entity_id: string
 child.internal:
   step: string
 child.done: {}

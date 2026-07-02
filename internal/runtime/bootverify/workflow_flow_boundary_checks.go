@@ -723,7 +723,6 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 					if !handler.CreateEntity &&
 						(handler.SelectEntity == nil || handler.SelectEntity.Empty()) &&
 						(handler.SelectOrCreateEntity == nil || handler.SelectOrCreateEntity.Empty()) &&
-						retiredStaticMultiEntityInputHasNoOwner(c.source, validationScope.semanticFlowID, eventType) &&
 						bootverifyHandlerMaterializesEntity(c.source, validationScope.semanticFlowID, handler) {
 						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 							CheckID:  "flow_boundary_create_entity_validation",
@@ -732,6 +731,19 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 							Location: validationScope.displayFlowID,
 						})
 					}
+					continue
+				}
+				if normalPrimaryEntityFlow(validationScope.schema) &&
+					bootverifyHandlerMaterializesEntity(c.source, validationScope.semanticFlowID, handler) &&
+					flowInputEventDeclaresPayloadField(c.source, validationScope.semanticFlowID, eventType, "entity_id") {
+					c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
+						CheckID:  "flow_boundary_create_entity_validation",
+						Severity: "error",
+						Message:  fmt.Sprintf("flow %s handler %s on node %s materializes entity state from caller-selected entity_id, but normal flow instances must write the canonical primary entity", validationScope.displayFlowID, eventType, nodeID),
+						Location: validationScope.displayFlowID,
+					})
+				}
+				if normalPrimaryEntityFlow(validationScope.schema) {
 					continue
 				}
 				if handler.CreateEntity {
@@ -807,43 +819,42 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 
 func retiredStaticMultiEntityAcquisitionFlow(schema runtimecontracts.FlowSchemaDocument) bool {
 	mode := strings.TrimSpace(schema.Mode)
-	return strings.TrimSpace(schema.InitialState) != "" && (mode == "" || strings.EqualFold(mode, runtimecontracts.FlowModeStatic))
+	return strings.TrimSpace(schema.InitialState) != "" && strings.EqualFold(mode, runtimecontracts.FlowModeStatic)
 }
 
 func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label string) string {
 	return fmt.Sprintf("flow %s handler %s on node %s uses %s, but stateful static multi-row entity ownership is retired; model this as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a child flow", flowID, eventType, nodeID, label)
 }
 
-func retiredStaticMultiEntityInputHasNoOwner(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
-		return true
-	}
-	if retiredStaticMultiEntityEventRequiresEntityID(source, flowID, eventType) {
-		return false
-	}
-	if pinRoutingEventExternalSource(source, flowID, eventType) {
-		return true
-	}
-	return !pinRoutingAllKnownProducersTargeted(source, flowID, eventType)
+func normalPrimaryEntityFlow(schema runtimecontracts.FlowSchemaDocument) bool {
+	return strings.TrimSpace(schema.InitialState) != "" && strings.TrimSpace(schema.Mode) == ""
 }
 
-func retiredStaticMultiEntityEventRequiresEntityID(source semanticview.Source, flowID, eventType string) bool {
+func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, eventType, field string) bool {
 	if source == nil {
 		return false
 	}
-	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType); ok && eventEntryRequiresPayloadField(entry, "entity_id") {
+	if entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType); ok && eventEntryDeclaresPayloadField(entry, field) {
 		return true
 	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	return eventEntryRequiresPayloadField(proof.Entry, "entity_id")
+	return eventEntryDeclaresPayloadField(proof.Entry, field)
 }
 
-func eventEntryRequiresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
+func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
 	field = strings.TrimSpace(field)
 	if field == "" {
 		return false
 	}
+	if _, ok := entry.Payload.Properties[field]; ok {
+		return true
+	}
 	for _, required := range entry.Required {
+		if strings.TrimSpace(required) == field {
+			return true
+		}
+	}
+	for _, required := range entry.Payload.Required {
 		if strings.TrimSpace(required) == field {
 			return true
 		}
@@ -853,6 +864,18 @@ func eventEntryRequiresPayloadField(entry runtimecontracts.EventCatalogEntry, fi
 
 func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
 	if handler.CreateEntity {
+		return true
+	}
+	if bootverifyHandlerActionMaterializesEntity(handler) {
+		return true
+	}
+	if bootverifyHandlerMutatesEntityLifecycle(handler) {
+		return true
+	}
+	if bootverifyEmitSitesReferenceEntity(handler) {
+		return true
+	}
+	if bootverifyAccumulateReferencesEntity(handler.Accumulate) {
 		return true
 	}
 	allowedFields := bootverifyWorkflowEntitySchemaFields(source, flowID)
@@ -865,29 +888,97 @@ func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID stri
 	if bootverifyComputeStoresEntityField(handler.Compute, allowedFields) {
 		return true
 	}
-	if bootverifyEmitSitesReferenceEntity(handler) {
-		return true
-	}
-	if bootverifyAccumulateReferencesEntity(handler.Accumulate) {
-		return true
-	}
 	for _, rule := range handler.Rules {
-		if bootverifyDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
-			return true
-		}
-		if bootverifyComputeStoresEntityField(rule.Compute, allowedFields) {
+		if bootverifyRuleWritesEntityFields(rule, allowedFields) {
 			return true
 		}
 	}
 	for _, rule := range handler.OnComplete {
-		if bootverifyDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
+		if bootverifyRuleWritesEntityFields(rule, allowedFields) {
 			return true
 		}
-		if bootverifyComputeStoresEntityField(rule.Compute, allowedFields) {
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if bootverifyRuleWritesEntityFields(rule, allowedFields) {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && bootverifyRuleWritesEntityFields(*handler.Accumulate.OnTimeout, allowedFields) {
 			return true
 		}
 	}
 	return false
+}
+
+func bootverifyHandlerActionMaterializesEntity(handler runtimecontracts.SystemNodeEventHandler) bool {
+	if bootverifyActionMaterializesEntity(handler.Action) {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if bootverifyActionMaterializesEntity(rule.Action) {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if bootverifyActionMaterializesEntity(rule.Action) {
+			return true
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if bootverifyActionMaterializesEntity(rule.Action) {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && bootverifyActionMaterializesEntity(handler.Accumulate.OnTimeout.Action) {
+			return true
+		}
+	}
+	return false
+}
+
+func bootverifyActionMaterializesEntity(action runtimecontracts.ActionSpec) bool {
+	switch runtimecontracts.NormalizeHandlerActionID(action.ID) {
+	case "record_evidence":
+		return true
+	default:
+		return false
+	}
+}
+
+func bootverifyHandlerMutatesEntityLifecycle(handler runtimecontracts.SystemNodeEventHandler) bool {
+	if strings.TrimSpace(handler.AdvancesTo) != "" ||
+		gateNameLocal(handler.SetsGate) != "" ||
+		len(handler.ClearGates) > 0 {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if strings.TrimSpace(rule.AdvancesTo) != "" {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if strings.TrimSpace(rule.AdvancesTo) != "" {
+			return true
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if strings.TrimSpace(rule.AdvancesTo) != "" {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && strings.TrimSpace(handler.Accumulate.OnTimeout.AdvancesTo) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func bootverifyRuleWritesEntityFields(rule runtimecontracts.HandlerRuleEntry, allowedFields map[string]struct{}) bool {
+	return bootverifyDataWritesEntityFields(rule.DataAccumulation, allowedFields) ||
+		bootverifyComputeStoresEntityField(rule.Compute, allowedFields)
 }
 
 func bootverifyWorkflowEntitySchemaFields(source semanticview.Source, flowID string) map[string]struct{} {

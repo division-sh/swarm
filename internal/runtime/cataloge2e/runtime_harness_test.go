@@ -328,6 +328,8 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 		eventEnvelope := events.EventEnvelope{}
 		if entityID := triggerPayloadEntityID(payload); entityID != "" {
 			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
+		} else {
+			eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 		}
 		evt := eventtest.RootIngress(uuid.NewString(),
 			events.EventType(strings.TrimSpace(step.Event)),
@@ -368,6 +370,9 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	if err := h.rt.WaitForQuiescence(ctx); err != nil {
 		h.t.Fatalf("WaitForQuiescence(concurrent): %v", err)
 	}
+	for _, item := range items {
+		h.refreshPublishedEventEntityID(item.evt.ID())
+	}
 }
 
 func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) {
@@ -386,6 +391,8 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	eventEnvelope := events.EventEnvelope{}
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
+	} else {
+		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	}
 	evt := eventtest.RootIngress(uuid.NewString(),
 		events.EventType(strings.TrimSpace(eventType)),
@@ -417,7 +424,35 @@ func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string
 	if err := h.rt.WaitForQuiescence(ctx); err != nil {
 		return err
 	}
+	h.refreshPublishedEventEntityID(evt.ID())
 	return nil
+}
+
+func (h *runtimeHarness) refreshPublishedEventEntityID(eventID string) {
+	h.t.Helper()
+	eventID = strings.TrimSpace(eventID)
+	if h == nil || h.db == nil || eventID == "" {
+		return
+	}
+	var entityID string
+	err := h.db.QueryRowContext(h.ctx, `
+		SELECT COALESCE(entity_id::text, '')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&entityID)
+	if err == sql.ErrNoRows {
+		return
+	}
+	if err != nil {
+		h.t.Fatalf("query published event entity_id for %s: %v", eventID, err)
+	}
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return
+	}
+	h.mu.Lock()
+	h.eventEntityIDs[eventID] = entityID
+	h.mu.Unlock()
 }
 
 func (h *runtimeHarness) publishBusEvent(ctx context.Context, evt events.Event) error {
@@ -484,17 +519,7 @@ func (h *runtimeHarness) rootAutoEmitOnCreateEvent() string {
 
 func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDocument, timeout time.Duration) {
 	h.t.Helper()
-	entityID := ""
-	if len(expected.Trigger.Sequence) > 0 {
-		for _, step := range expected.Trigger.Sequence {
-			if entityID = triggerPayloadEntityID(step.Payload); entityID != "" {
-				break
-			}
-		}
-	}
-	if entityID == "" {
-		entityID = triggerPayloadEntityID(expected.Trigger.Payload)
-	}
+	entityID := h.expectedTriggerEntityID(expected)
 	if entityID == "" || len(expected.Expected.EmittedEvents) == 0 {
 		return
 	}
@@ -517,6 +542,35 @@ func (h *runtimeHarness) waitForExpectedEmittedEvents(expected catalogExpectedDo
 		case <-ticker.C:
 		}
 	}
+}
+
+func (h *runtimeHarness) expectedTriggerEntityID(expected catalogExpectedDocument) string {
+	if h == nil {
+		return ""
+	}
+	for _, step := range expected.triggerSequence() {
+		if entityID := triggerPayloadEntityID(step.Payload); entityID != "" {
+			return entityID
+		}
+	}
+	if entityID := triggerPayloadEntityID(expected.Trigger.Payload); entityID != "" {
+		return entityID
+	}
+	return h.firstPublishedEntityID()
+}
+
+func (h *runtimeHarness) firstPublishedEntityID() string {
+	if h == nil {
+		return ""
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, eventID := range h.publishedOrder {
+		if entityID := strings.TrimSpace(h.eventEntityIDs[strings.TrimSpace(eventID)]); entityID != "" {
+			return entityID
+		}
+	}
+	return ""
 }
 
 func (h *runtimeHarness) hasExpectedEmittedEvents(ctx context.Context, entityID string, want []string, flowPrefix string, source semanticview.Source) bool {
@@ -662,7 +716,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	}
 	entityID = strings.TrimSpace(entityID)
 	if entityID == "" {
-		h.t.Fatal("trigger entity seeding requires a trigger payload entity_id")
+		entityID = runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID)
 	}
 	h.seedInitialState(entityID)
 	instance, ok, err := h.workflow.Load(h.ctx, entityID)

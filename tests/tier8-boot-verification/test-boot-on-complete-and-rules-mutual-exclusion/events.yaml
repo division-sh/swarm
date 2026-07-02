@@ -1,8 +1,5 @@
 task.submitted:
-  entity_id: string
   score: integer
   type: string
 task.completed:
-  entity_id: string
 task.routed:
-  entity_id: string

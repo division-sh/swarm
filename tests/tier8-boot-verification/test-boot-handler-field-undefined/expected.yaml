@@ -2,6 +2,7 @@ trigger:
   boot: true
 
 expected:
+
   boot_result: error
   error_category: UNDEFINED-FIELD
   error_contains: "custom_logic"

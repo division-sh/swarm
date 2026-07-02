@@ -103,13 +103,11 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 		wantMessage     string
 	}{
 		{
-			name: "missing acquisition materializing root state fails closed",
+			name: "missing acquisition materializing root state writes canonical primary entity",
 			handlerBody: "      data_accumulation:\n" +
 				"        writes:\n" +
 				"          - source_field: display_name\n" +
 				"            target_field: display_name\n",
-			checkID:     "flow_boundary_create_entity_validation",
-			wantMessage: "static multi-row entity ownership is retired",
 		},
 		{
 			name: "missing acquisition non materializing root handler is allowed",
@@ -126,16 +124,18 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 				"            target_field: display_name\n",
 			declareEntityID: true,
 			checkID:         "flow_boundary_create_entity_validation",
-			wantMessage:     "static multi-row entity ownership is retired",
+			wantMessage:     "caller-selected entity_id",
 		},
 		{
-			name: "required entity_id root materializer is allowed",
+			name: "required entity_id root materializer fails closed",
 			handlerBody: "      data_accumulation:\n" +
 				"        writes:\n" +
 				"          - source_field: display_name\n" +
 				"            target_field: display_name\n",
 			declareEntityID: true,
 			requireEntityID: true,
+			checkID:         "flow_boundary_create_entity_validation",
+			wantMessage:     "caller-selected entity_id",
 		},
 	}
 
@@ -144,8 +144,7 @@ func TestRootDefaultStaticMultiEntityRetirementConformance(t *testing.T) {
 			source := loadRootDefaultStaticMultiEntityRetirementSource(t, tc.handlerBody, tc.declareEntityID, tc.requireEntityID)
 			report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 			if tc.checkID != "" {
-				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) ||
-					!staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, "implicit entity materialization") {
+				if !staticMultiEntityRetirementFindingContains(report.Errors(), tc.checkID, tc.wantMessage) {
 					t.Fatalf("bootverify errors = %#v, want %s containing root/default-static implicit materialization retirement", report.Errors(), tc.checkID)
 				}
 				return

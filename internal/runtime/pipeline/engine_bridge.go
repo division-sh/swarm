@@ -12,7 +12,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type HandlerOutcomeStatus string
@@ -309,7 +308,7 @@ func resolveHandlerEntityIDForFlow(
 	entityID = strings.TrimSpace(entityID)
 	if handler.CreateEntity {
 		sourceEntityID := strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
-		instanceID := uuid.NewString()
+		instanceID := canonicalHandlerInstanceID(flowID, evt)
 		instance := deriveFlowInstanceIdentity(source, flowID, instanceID)
 		instance.ParentEntityID = sourceEntityID
 		entityID = instance.EntityID
@@ -329,6 +328,26 @@ func resolveHandlerEntityIDForFlow(
 		state.EntityID = entityID
 	}
 	return entityID, evt
+}
+
+func canonicalHandlerInstanceID(flowID string, evt events.Event) string {
+	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
+		if idx := strings.LastIndex(flowInstance, "/"); idx >= 0 {
+			return strings.TrimSpace(flowInstance[idx+1:])
+		}
+		return flowInstance
+	}
+	if strings.TrimSpace(flowID) == "" {
+		if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+			return runID
+		}
+		return "root"
+	}
+	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
+	if idx := strings.LastIndex(flowID, "/"); idx >= 0 {
+		return strings.TrimSpace(flowID[idx+1:])
+	}
+	return flowID
 }
 
 func workflowCreateEntityMetadata(source semanticview.Source, flowID string, instance FlowInstanceIdentity) map[string]any {

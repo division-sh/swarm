@@ -1,4 +1,2 @@
 admission.requested:
-  entity_id: string
 admission.granted:
-  entity_id: string

@@ -2,16 +2,15 @@ trigger:
   sequence:
     - event: spawn.requested
       payload:
-        entity_id: 11111111-1111-1111-1111-111111111111
         worker_id: w-001
         task_label: route-me
     - event: assign.requested
       payload:
-        entity_id: 11111111-1111-1111-1111-111111111111
         worker_id: w-001
         task_label: route-me
 
 expected:
+
   handler_outcome: success
   entity_state: done
   flow_instance_created:

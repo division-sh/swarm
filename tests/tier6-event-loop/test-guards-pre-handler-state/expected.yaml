@@ -1,11 +1,11 @@
 trigger:
   event: process.requested
   payload:
-    entity_id: 11111111-1111-4111-8111-111111111111
   entity_state_before: active
   entity_fields_before:
     counter: 5
 expected:
+
   handler_outcome: reject
   entity_state: active
   emitted_events: []

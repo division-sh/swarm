@@ -1,11 +1,6 @@
 score.received:
   swarm:
     source: external
-  entity_id: string
-  required:
-    - entity_id
   score: integer
 batch.scored:
-  entity_id: string
 scores.verified:
-  entity_id: string

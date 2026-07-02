@@ -1,10 +1,5 @@
 task.started:
-  entity_id: string
-  required:
-    - entity_id
   ready: boolean
   batch_id: string
 phase.advanced:
-  entity_id: string
 task.done:
-  entity_id: string

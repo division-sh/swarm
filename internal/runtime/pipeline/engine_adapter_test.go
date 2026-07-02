@@ -681,7 +681,7 @@ func TestRecordWorkflowEvidence_ReturnsWorkflowStoreMutationError(t *testing.T) 
 		workflowStore: NewWorkflowInstanceStore(db),
 	}
 
-	err := pc.recordWorkflowEvidence(testPipelineRunContextNoSeed(), "11111111-1111-1111-1111-111111111111", "research", map[string]any{"summary": "done"})
+	err := pc.recordWorkflowEvidence(testPipelineRunContextNoSeed(), "11111111-1111-1111-1111-111111111111", "", "research", map[string]any{"summary": "done"})
 	if err == nil {
 		t.Fatal("expected recordWorkflowEvidence to fail when workflow store mutate fails")
 	}

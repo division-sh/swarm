@@ -1,8 +1,4 @@
 item.received:
-  entity_id: string
-  required:
-    - entity_id
   name: string
   score: integer
 item.stored:
-  entity_id: string

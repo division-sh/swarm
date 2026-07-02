@@ -309,7 +309,7 @@ node-a:
 		t.Fatalf("bus published count = %d, want 1", got)
 	}
 	if got := bus.publishedEvent(0).EntityID(); got == "" {
-		t.Fatal("expected emitted event to carry minted entity_id")
+		t.Fatal("expected emitted event to carry canonical entity_id")
 	}
 }
 
@@ -1288,8 +1288,8 @@ vertical:
 
 	gotID, gotEvt := resolveHandlerEntityIDForFlow(source, "scoring", handler, inboundEntityID, inbound, &state)
 
-	if gotID == "" || gotID == inboundEntityID {
-		t.Fatalf("entityID = %q, want fresh id", gotID)
+	if gotID != FlowInstanceEntityID("scoring/scoring") {
+		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, FlowInstanceEntityID("scoring/scoring"))
 	}
 	if got := gotEvt.EntityID(); got != inboundEntityID {
 		t.Fatalf("inbound event entity_id = %q, want preserved %q", got, inboundEntityID)
@@ -1400,8 +1400,8 @@ func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testin
 
 	gotID, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", eventtest.RootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
 
-	if gotID == "" {
-		t.Fatal("expected fresh entity id")
+	if want := FlowInstanceEntityID("scoring/scoring"); gotID != want {
+		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, want)
 	}
 	if state.Metadata == nil {
 		t.Fatal("state metadata = nil, want create entity metadata")

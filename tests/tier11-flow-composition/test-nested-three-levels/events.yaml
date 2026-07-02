@@ -1,8 +1,4 @@
 pipeline.start:
-  entity_id: string
 pipeline.complete:
-  entity_id: string
 child/step.begin:
-  entity_id: string
 child/grandchild/micro.done:
-  entity_id: string

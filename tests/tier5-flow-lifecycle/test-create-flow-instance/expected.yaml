@@ -1,10 +1,11 @@
 trigger:
   event: flow.spawn_requested
   payload:
-    entity_id: 11111111-1111-4111-8111-111111111111
     instance_id: worker-001
+    worker_id: worker-001
 
 expected:
+
   handler_outcome: success
   entity_state: spawned
   emitted_events:
@@ -13,5 +14,5 @@ expected:
     template: worker-flow
     instance_id: worker-001
     config:
-      entity_id: 11111111-1111-4111-8111-111111111111
+      worker_id: worker-001
     auto_emitted: worker-flow/worker-001/worker.ready

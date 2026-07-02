@@ -1,11 +1,11 @@
 trigger:
   event: task.started
   payload:
-    entity_id: 11111111-1111-4111-8111-111111111111
     ready: true
     batch_id: batch-42
 
 expected:
+
   handler_outcome: success
   entity_state: done
   entity_fields:

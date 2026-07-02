@@ -1,6 +1,7 @@
 trigger:
   boot: true
 expected:
+
   boot_result: error
   error_category: EMIT-MISMATCH
   error_contains: "task.completed"

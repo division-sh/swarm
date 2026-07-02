@@ -1,5 +1,3 @@
 item.reviewed:
-  entity_id: string
   decision: string
 item.approved:
-  entity_id: string

@@ -1,8 +1,4 @@
 work.begin:
-  entity_id: string
 work.finished:
-  entity_id: string
 grandchild/task.start:
-  entity_id: string
 grandchild/task.done:
-  entity_id: string

@@ -1,6 +1,4 @@
 item.received:
-  entity_id: string
   raw_score: integer
 item.scored:
-  entity_id: string
   score: integer

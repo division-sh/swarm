@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -39,7 +40,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
 	h.rt.Bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{AgentID: "test-agent"})
 	_ = h.rt.Bus.Subscribe("test-agent", events.EventType("task.ready"))
-	h.seedInitialState(triggerPayloadEntityID(expected.triggerSequence()[0].Payload))
+	h.seedInitialState(runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	pauseCatalogRun(t, h)
 	sourceEventID := publishCatalogTriggerAtFuture(t, h, expected.triggerSequence()[0], 10*time.Second)
 	sourceRunID := catalogRuntimeRunID
@@ -436,6 +437,8 @@ func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalog
 	eventEnvelope := events.EventEnvelope{}
 	if entityID := triggerPayloadEntityID(payload); entityID != "" {
 		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, entityID)
+	} else {
+		eventEnvelope = events.EnvelopeForEntityID(eventEnvelope, runtimepipeline.FlowInstanceEntityID(catalogRuntimeRunID))
 	}
 	evt := eventtest.RootIngress(eventID,
 		events.EventType(strings.TrimSpace(step.Event)),
@@ -448,9 +451,7 @@ func publishCatalogTriggerAtFuture(t testing.TB, h *runtimeHarness, step catalog
 	h.mu.Lock()
 	h.publishedIDs[eventID] = struct{}{}
 	h.publishedOrder = append(h.publishedOrder, eventID)
-	if entityID := triggerPayloadEntityID(payload); entityID != "" {
-		h.eventEntityIDs[eventID] = entityID
-	}
+	h.eventEntityIDs[eventID] = strings.TrimSpace(eventEnvelope.EntityID)
 	h.mu.Unlock()
 	return eventID
 }

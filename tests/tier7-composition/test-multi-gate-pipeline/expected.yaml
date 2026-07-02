@@ -1,15 +1,16 @@
 trigger:
   sequence:
     - event: gate.g1_set
-      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
+      payload: {}
     - event: gate.g2_set
-      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
+      payload: {}
     - event: gate.g3_set
-      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
+      payload: {}
     - event: approval.requested
-      payload: { entity_id: 11111111-1111-1111-1111-111111111111 }
+      payload: {}
 
 expected:
+
   handler_outcome: success
   entity_state: approved
   gates:

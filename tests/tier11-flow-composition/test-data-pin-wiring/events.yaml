@@ -1,10 +1,6 @@
 job.start:
-  entity_id: string
   mode: string
   threshold: string
 job.complete:
-  entity_id: string
 processor/process.run:
-  entity_id: string
 processor/process.done:
-  entity_id: string

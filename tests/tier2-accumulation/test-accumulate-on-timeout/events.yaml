@@ -1,13 +1,7 @@
 item.arrived:
   swarm:
     source: external
-  entity_id: string
-  required:
-    - entity_id
   item_id: string
 accumulate.timeout:
-  entity_id: string
 collection.done:
-  entity_id: string
 collection.partial:
-  entity_id: string

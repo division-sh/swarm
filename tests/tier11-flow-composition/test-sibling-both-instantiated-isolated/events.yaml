@@ -1,16 +1,8 @@
 start.all:
-  entity_id: string
 work.begin:
-  entity_id: string
 all.done:
-  entity_id: string
 flow-a/work.begin:
-  entity_id: string
 flow-a/internal.step2:
-  entity_id: string
 flow-a/alpha.done:
-  entity_id: string
 flow-b/work.begin:
-  entity_id: string
 flow-b/beta.done:
-  entity_id: string

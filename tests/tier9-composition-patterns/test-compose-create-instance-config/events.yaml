@@ -1,8 +1,6 @@
 spawn.requested:
-  entity_id: string
   instance_id: string
   name: string
   priority: integer
   owner: string
 spawn.done:
-  entity_id: string

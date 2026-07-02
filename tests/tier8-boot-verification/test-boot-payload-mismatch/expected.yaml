@@ -2,6 +2,7 @@ trigger:
   boot: true
 
 expected:
+
   boot_result: error
   error_category: payload_field_coverage
   error_contains: "writes 'foo'"

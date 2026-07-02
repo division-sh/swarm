@@ -1,7 +1,4 @@
 task.completed:
-  entity_id: string
   status: string
 task.logged:
-  entity_id: string
 tracker/task.record:
-  entity_id: string

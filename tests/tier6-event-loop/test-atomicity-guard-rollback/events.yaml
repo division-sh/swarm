@@ -1,6 +1,2 @@
 process.requested:
-  entity_id: string
-  required:
-    - entity_id
 process.done:
-  entity_id: string

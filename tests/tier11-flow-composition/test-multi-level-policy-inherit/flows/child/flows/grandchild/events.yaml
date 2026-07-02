@@ -1,5 +1,3 @@
 grandchild.check:
-  entity_id: string
   score: integer
 grandchild.passed:
-  entity_id: string

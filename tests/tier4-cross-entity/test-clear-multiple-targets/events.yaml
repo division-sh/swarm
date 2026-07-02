@@ -1,4 +1,2 @@
 state.reset_requested:
-  entity_id: string
 state.reset_completed:
-  entity_id: string

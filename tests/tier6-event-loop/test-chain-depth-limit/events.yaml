@@ -1,16 +1,8 @@
 chain.start:
-  entity_id: string
 chain.e1:
-  entity_id: string
 chain.e2:
-  entity_id: string
 chain.e3:
-  entity_id: string
 chain.e4:
-  entity_id: string
 chain.e5:
-  entity_id: string
 chain.e6:
-  entity_id: string
 chain.e7:
-  entity_id: string

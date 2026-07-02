@@ -1,5 +1,3 @@
 task.submitted:
-  entity_id: string
   score: number
 task.accepted:
-  entity_id: string

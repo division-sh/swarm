@@ -1,6 +1,3 @@
 '*.completed':
-  entity_id: string
 task.completed:
-  entity_id: string
 match.found:
-  entity_id: string

@@ -1,6 +1,7 @@
 trigger:
   boot: true
 expected:
+
   boot_result: error
   error_category: DIALECT-GUARD
   error_contains: "guard is string"

@@ -1,6 +1,3 @@
-item.received:
-  entity_id: string
-item.processed:
-  entity_id: string
-item.logged:
-  entity_id: string
+item.received: {}
+item.processed: {}
+item.logged: {}

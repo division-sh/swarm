@@ -25,12 +25,7 @@ func assertCatalogRuntimeOutcome(t testing.TB, h *runtimeHarness, expected catal
 		assertCatalogRuntimeEntities(t, h, expected.Expected.Entities, flowPrefix)
 		return
 	}
-	entityID := ""
-	for _, step := range expected.triggerSequence() {
-		if entityID = triggerPayloadEntityID(step.Payload); entityID != "" {
-			break
-		}
-	}
+	entityID := h.expectedTriggerEntityID(expected)
 	assertCatalogRecognizedHandlerOutcome(t, expected.Expected.HandlerOutcome)
 	if len(h.publishedIDs) > 0 && catalogAssertsAuthoritativeHandlerOutcome(expected.Expected.HandlerOutcome) {
 		assertHandlerOutcome(t, h, expected.Expected.HandlerOutcome, entityID, expected.Expected.ChainDepthExceeded)
@@ -112,7 +107,7 @@ func assertCausalFlowEntities(t testing.TB, h *runtimeHarness, rootEntityID stri
 func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[string]catalogEntityExpected, flowPrefix string) {
 	t.Helper()
 	for entityID, want := range expected {
-		entityID = strings.TrimSpace(entityID)
+		entityID = h.resolveExpectedEntityID(strings.TrimSpace(entityID))
 		if entityID == "" {
 			continue
 		}
@@ -128,6 +123,16 @@ func assertCatalogRuntimeEntities(t testing.TB, h *runtimeHarness, expected map[
 		assertEmittedEvents(t, h.db, h.startedAt, h.publishedIDs, entityID, want.EmittedEvents, flowPrefix, semanticview.Wrap(h.bundle))
 		assertCausalEvents(t, h, want.CausalEvents, flowPrefix)
 		assertDeadLetter(t, h.db, h.startedAt, entityID, want.DeadLetter)
+	}
+}
+
+func (h *runtimeHarness) resolveExpectedEntityID(entityID string) string {
+	entityID = strings.TrimSpace(entityID)
+	switch strings.ToLower(entityID) {
+	case "null", "unknown":
+		return h.firstPublishedEntityID()
+	default:
+		return entityID
 	}
 }
 

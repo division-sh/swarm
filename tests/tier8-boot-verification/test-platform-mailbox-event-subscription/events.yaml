@@ -1,5 +1,4 @@
 review.requested:
   swarm:
     source: external
-  entity_id: uuid
   title: text

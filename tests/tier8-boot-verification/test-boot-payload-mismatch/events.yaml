@@ -1,5 +1,3 @@
 item.received:
-  entity_id: string
   name: string
 item.stored:
-  entity_id: string

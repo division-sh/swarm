@@ -1,7 +1,3 @@
 item.received:
-  entity_id: string
-  required:
-    - entity_id
   src_name: string
 item.stored:
-  entity_id: string

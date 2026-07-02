@@ -1,4 +1,2 @@
 trigger.beta:
-  entity_id: string
 job.beta_done:
-  entity_id: string

@@ -1,6 +1,4 @@
 batch.received:
-  entity_id: string
   items: array
 task.dispatched:
-  entity_id: string
   item: FanOutItem

@@ -3615,8 +3615,11 @@ func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
-	entry.Required = []string{"entity_id", "reason"}
+	entry.Required = []string{"reason"}
 	bundle.Events["check.escalated"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -3632,6 +3635,9 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Required = []string{"score", "reason"}
@@ -3654,6 +3660,9 @@ func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *tes
 func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
+	if entry.Payload.Properties == nil {
+		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
+	}
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	entry.Required = []string{"score", "reason"}
@@ -4734,13 +4743,28 @@ func TestRun_RejectsCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) 
 	}
 }
 
-func TestRun_RejectsCreateEntityForStatefulDefaultStaticInputPinHandlers(t *testing.T) {
-	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))
+func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *testing.T) {
+	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
+		DeclareEntityID: true,
+		Nodes: `
+root-writer:
+  id: root-writer
+  execution_type: system_node
+  subscribes_to: [subject.created]
+  event_handlers:
+    subject.created:
+      data_accumulation:
+        writes:
+          - source_field: display_name
+            target_field: display_name
+`,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired default-static create_entity error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") {
+		t.Fatalf("expected caller-selected entity_id materialization error, got %#v", report.Errors())
 	}
 }
 
@@ -4767,7 +4791,7 @@ treasury-node:
 	}
 }
 
-func TestRun_RejectsImplicitMaterializationForRootDefaultStaticInputPinHandlers(t *testing.T) {
+func TestRun_AllowsRootNormalInputPinMaterializationWithoutEntityID(t *testing.T) {
 	root := writeRootDefaultStaticInputPinFixture(t, `
 root-writer:
   id: root-writer
@@ -4784,9 +4808,11 @@ root-writer:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
-		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
-		t.Fatalf("expected retired root/default-static implicit materialization error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
+		reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
+		reportContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") ||
+		reportContains(report.Errors(), "missing_external_select_entity", "") {
+		t.Fatalf("root normal materializer without caller entity_id must write the canonical primary entity, got %#v", report.Errors())
 	}
 }
 
@@ -4835,13 +4861,13 @@ root-writer:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
-		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") ||
+		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "canonical primary entity") {
 		t.Fatalf("optional entity_id must not prove root/default-static ownership, got %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsRootDefaultStaticInputPinMaterializationWithRequiredEntityID(t *testing.T) {
+func TestRun_RejectsRootDefaultStaticInputPinMaterializationWithRequiredEntityID(t *testing.T) {
 	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
 		DeclareEntityID: true,
 		RequireEntityID: true,
@@ -4862,10 +4888,9 @@ root-writer:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "implicit entity materialization") ||
-		reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
-		reportContains(report.Errors(), "missing_external_select_entity", "") {
-		t.Fatalf("root/default-static handler with required entity_id owner must not be forced into retired acquisition, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "caller-selected entity_id") ||
+		!reportContains(report.Errors(), "flow_boundary_create_entity_validation", "canonical primary entity") {
+		t.Fatalf("required entity_id must not prove root/default-static ownership, got %#v", report.Errors())
 	}
 }
 
@@ -6570,7 +6595,6 @@ platform: ">=1.6.0"
 flows:
   - id: child
     flow: child
-    mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-expression-fixture\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -6624,13 +6648,10 @@ task:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
-  entity_id: string
   score: numeric
 task.feedback:
-  entity_id: string
   comment: string
 task.result:
-  entity_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 worker:

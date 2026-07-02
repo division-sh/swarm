@@ -1,8 +1,4 @@
 item.received:
-  entity_id: string
-  required:
-    - entity_id
   kind: string
   value: integer
 item.accumulated:
-  entity_id: string

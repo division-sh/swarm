@@ -1,7 +1,4 @@
 order.submitted:
-  entity_id: string
   amount: integer
 order.validated:
-  entity_id: string
 order.finalized:
-  entity_id: string

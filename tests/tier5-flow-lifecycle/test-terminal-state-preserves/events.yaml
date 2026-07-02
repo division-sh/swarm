@@ -1,9 +1,5 @@
 task.completed:
-  entity_id: string
 task.updated:
-  entity_id: string
   data: string
 task.finished:
-  entity_id: string
 state.updated:
-  entity_id: string

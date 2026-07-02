@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
-	"github.com/google/uuid"
 )
 
 type Event = events.Event
@@ -411,9 +410,6 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 }
 
 func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event) {
-	if handler.CreateEntity {
-		return uuid.NewString(), evt
-	}
 	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.EntityID()))
 	if entityID != "" {
 		if strings.TrimSpace(evt.EntityID()) == "" {
@@ -435,7 +431,10 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	if !handlerMaterializesEntity(source, flowID, handler) {
 		return "", evt
 	}
-	entityID = uuid.NewString()
+	entityID = canonicalHandlerEntityID(source, flowID, evt)
+	if entityID == "" {
+		return "", evt
+	}
 	return entityID, events.NewProjectionEvent(
 		evt.ID(),
 		evt.Type(),
@@ -450,8 +449,39 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 	)
 }
 
+func canonicalHandlerEntityID(source semanticview.Source, flowID string, evt Event) string {
+	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
+		return FlowInstanceEntityID(flowInstance)
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID != "" {
+		if source != nil {
+			if flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); flowPath != "" {
+				return FlowInstanceEntityID(flowPath)
+			}
+		}
+		return FlowInstanceEntityID(flowID)
+	}
+	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
+		return FlowInstanceEntityID(runID)
+	}
+	return FlowInstanceEntityID("root")
+}
+
 func handlerMaterializesEntity(source semanticview.Source, flowID string, handler SystemNodeEventHandler) bool {
 	if handler.CreateEntity {
+		return true
+	}
+	if handlerActionMaterializesEntity(handler) {
+		return true
+	}
+	if handlerMutatesEntityLifecycle(handler) {
+		return true
+	}
+	if emitSitesReferenceEntity(handler) {
+		return true
+	}
+	if accumulateReferencesEntity(handler.Accumulate) {
 		return true
 	}
 	allowedFields := workflowEntitySchemaFields(source, flowID)
@@ -464,29 +494,104 @@ func handlerMaterializesEntity(source semanticview.Source, flowID string, handle
 	if computeStoresEntityField(handler.Compute, allowedFields) {
 		return true
 	}
-	if emitSitesReferenceEntity(handler) {
-		return true
-	}
-	if accumulateReferencesEntity(handler.Accumulate) {
-		return true
-	}
 	for _, rule := range handler.Rules {
-		if workflowDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
-			return true
-		}
-		if computeStoresEntityField(rule.Compute, allowedFields) {
+		if ruleWritesEntityFields(rule, allowedFields) {
 			return true
 		}
 	}
 	for _, rule := range handler.OnComplete {
-		if workflowDataWritesEntityFields(rule.DataAccumulation, allowedFields) {
+		if ruleWritesEntityFields(rule, allowedFields) {
 			return true
 		}
-		if computeStoresEntityField(rule.Compute, allowedFields) {
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if ruleWritesEntityFields(rule, allowedFields) {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && ruleWritesEntityFields(*handler.Accumulate.OnTimeout, allowedFields) {
 			return true
 		}
 	}
 	return false
+}
+
+func handlerActionMaterializesEntity(handler SystemNodeEventHandler) bool {
+	if actionMaterializesEntity(handler.Action) {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if actionMaterializesEntity(rule.Action) {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if actionMaterializesEntity(rule.Action) {
+			return true
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if actionMaterializesEntity(rule.Action) {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && actionMaterializesEntity(handler.Accumulate.OnTimeout.Action) {
+			return true
+		}
+	}
+	return false
+}
+
+func actionMaterializesEntity(action runtimecontracts.ActionSpec) bool {
+	switch runtimecontracts.NormalizeHandlerActionID(action.ID) {
+	case "record_evidence":
+		return true
+	default:
+		return false
+	}
+}
+
+func handlerMutatesEntityLifecycle(handler SystemNodeEventHandler) bool {
+	if strings.TrimSpace(handler.AdvancesTo) != "" ||
+		gateSpecName(handler.SetsGate) != "" ||
+		len(handler.ClearGates) > 0 {
+		return true
+	}
+	for _, rule := range handler.Rules {
+		if strings.TrimSpace(rule.AdvancesTo) != "" {
+			return true
+		}
+	}
+	for _, rule := range handler.OnComplete {
+		if strings.TrimSpace(rule.AdvancesTo) != "" {
+			return true
+		}
+	}
+	if handler.Accumulate != nil {
+		for _, rule := range handler.Accumulate.OnComplete {
+			if strings.TrimSpace(rule.AdvancesTo) != "" {
+				return true
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && strings.TrimSpace(handler.Accumulate.OnTimeout.AdvancesTo) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func gateSpecName(spec *runtimecontracts.GateSpec) string {
+	if spec == nil {
+		return ""
+	}
+	return strings.TrimSpace(spec.Name)
+}
+
+func ruleWritesEntityFields(rule runtimecontracts.HandlerRuleEntry, allowedFields map[string]struct{}) bool {
+	return workflowDataWritesEntityFields(rule.DataAccumulation, allowedFields) ||
+		computeStoresEntityField(rule.Compute, allowedFields)
 }
 
 func handlerExecutionStateSnapshot(handler SystemNodeEventHandler, entityID string, state WorkflowState, workflowName string, workflowVersion string) (runtimeengine.StateSnapshot, error) {

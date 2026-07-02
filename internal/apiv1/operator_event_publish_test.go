@@ -2284,7 +2284,10 @@ func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eve
 	if err := json.Unmarshal(payload, &decoded); err != nil {
 		t.Fatalf("decode event.publish payload: %v", err)
 	}
-	if decoded["entity_id"] != runID || decoded["topic"] != "medicine" {
+	if _, ok := decoded["entity_id"]; ok {
+		t.Fatalf("event.publish payload must not carry envelope entity_id: %#v", decoded)
+	}
+	if decoded["topic"] != "medicine" {
 		t.Fatalf("event.publish payload = %#v", decoded)
 	}
 }
@@ -2320,7 +2323,10 @@ func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, even
 	if err := json.Unmarshal([]byte(payloadText), &decoded); err != nil {
 		t.Fatalf("decode sqlite event.publish payload: %v", err)
 	}
-	if decoded["entity_id"] != runID || decoded["topic"] != "medicine" {
+	if _, ok := decoded["entity_id"]; ok {
+		t.Fatalf("sqlite event.publish payload must not carry envelope entity_id: %#v", decoded)
+	}
+	if decoded["topic"] != "medicine" {
 		t.Fatalf("sqlite event.publish payload = %#v", decoded)
 	}
 }

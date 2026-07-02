@@ -1,12 +1,6 @@
 score.final:
-  entity_id: string
-  required:
-    - entity_id
   main_score: number
   secondary_score: number
 result.promoted:
-  entity_id: string
 result.demoted:
-  entity_id: string
 result.rejected:
-  entity_id: string

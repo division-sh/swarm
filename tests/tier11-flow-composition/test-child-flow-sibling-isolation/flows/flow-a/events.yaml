@@ -1,6 +1,3 @@
 alpha.start:
-  entity_id: string
 internal.done:
-  entity_id: string
 alpha.complete:
-  entity_id: string

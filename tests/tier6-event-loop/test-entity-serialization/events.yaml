@@ -1,8 +1,4 @@
 step.first:
-  entity_id: string
 step.second:
-  entity_id: string
 step.first_done:
-  entity_id: string
 step.second_done:
-  entity_id: string

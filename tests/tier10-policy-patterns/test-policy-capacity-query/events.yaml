@@ -1,4 +1,2 @@
 slot.requested:
-  entity_id: string
 slot.granted:
-  entity_id: string

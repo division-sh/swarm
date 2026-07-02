@@ -1,5 +1,3 @@
 work.requested:
-  entity_id: string
   task_type: string
 work.completed:
-  entity_id: string

@@ -1,4 +1,2 @@
 child.task:
-  entity_id: string
 child.result:
-  entity_id: string

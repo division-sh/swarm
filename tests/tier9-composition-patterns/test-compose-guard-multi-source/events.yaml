@@ -1,6 +1,4 @@
 candidate.submitted:
-  entity_id: string
   name: string
   score: integer
 candidate.accepted:
-  entity_id: string

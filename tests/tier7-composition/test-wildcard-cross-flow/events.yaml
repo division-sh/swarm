@@ -1,10 +1,6 @@
 audit.logged:
-  entity_id: string
 flow-alpha/trigger.alpha:
-  entity_id: string
 flow-alpha/job.alpha_done:
   description: Cross-flow event from flow-alpha indicating alpha job completion
-  entity_id: string
 flow-beta/job.beta_done:
   description: Cross-flow event from flow-beta indicating beta job completion
-  entity_id: string

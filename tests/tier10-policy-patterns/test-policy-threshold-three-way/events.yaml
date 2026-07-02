@@ -1,11 +1,5 @@
 eval.submitted:
-  entity_id: string
-  required:
-    - entity_id
   score: number
 eval.tier_a:
-  entity_id: string
 eval.tier_b:
-  entity_id: string
 eval.tier_c:
-  entity_id: string

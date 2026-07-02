@@ -1,5 +1,3 @@
 entity.create_requested:
-  entity_id: string
   child_id: string
 entity.created:
-  entity_id: string

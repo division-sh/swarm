@@ -1,5 +1,3 @@
 child.check:
-  entity_id: string
   score: integer
 child.done:
-  entity_id: string

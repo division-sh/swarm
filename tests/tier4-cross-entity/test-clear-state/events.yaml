@@ -1,4 +1,2 @@
 state.clear_requested:
-  entity_id: string
 state.cleared:
-  entity_id: string

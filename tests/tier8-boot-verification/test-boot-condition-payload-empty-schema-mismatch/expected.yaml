@@ -2,6 +2,7 @@ trigger:
   boot: true
 
 expected:
+
   boot_result: error
   error_category: CONDITION-PAYLOAD
   error_contains: "empty_schema_guard"

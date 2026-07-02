@@ -1,4 +1,2 @@
 order.submitted:
-  entity_id: string
 order.completed:
-  entity_id: string

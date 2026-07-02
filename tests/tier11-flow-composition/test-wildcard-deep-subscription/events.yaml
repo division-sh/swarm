@@ -1,12 +1,6 @@
 pipeline.start:
-  entity_id: string
 pipeline.complete:
-  entity_id: string
 child/work.begin:
-  entity_id: string
 child/work.finished:
-  entity_id: string
 child/grandchild/task.start:
-  entity_id: string
 child/grandchild/task.done:
-  entity_id: string

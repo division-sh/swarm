@@ -1,6 +1,4 @@
 filter.requested:
-  entity_id: string
 filter.completed:
-  entity_id: string
   results:
   - FilterResult

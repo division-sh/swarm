@@ -2,6 +2,7 @@ trigger:
   boot: true
 
 expected:
+
   boot_result: warning
   error_category: TOOL-MISSING
   error_contains: "nonexistent_tool"

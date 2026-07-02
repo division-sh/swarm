@@ -102,16 +102,35 @@ func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, en
 	})
 }
 
-func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, bucketID string, payload map[string]any) error {
+func (pc *PipelineCoordinator) recordWorkflowEvidence(ctx context.Context, entityID string, flowID string, bucketID string, payload map[string]any) error {
 	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
 		return nil
 	}
 	entityID = strings.TrimSpace(entityID)
+	flowID = strings.TrimSpace(flowID)
 	bucketID = strings.TrimSpace(bucketID)
 	if entityID == "" || bucketID == "" {
 		return nil
 	}
 	return pc.workflowStore.Mutate(ctx, entityID, func(instance *WorkflowInstance) {
+		source := pc.SemanticSource()
+		if strings.TrimSpace(instance.WorkflowName) == "" {
+			defaultWorkflowName := flowID
+			if defaultWorkflowName == "" && source != nil {
+				defaultWorkflowName = strings.TrimSpace(source.WorkflowName())
+			}
+			instance.WorkflowName = defaultWorkflowName
+		}
+		if strings.TrimSpace(instance.WorkflowVersion) == "" && source != nil {
+			instance.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+		}
+		if strings.TrimSpace(instance.CurrentState) == "" {
+			instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		}
+		if instance.EnteredStageAt.IsZero() {
+			instance.EnteredStageAt = time.Now().UTC()
+		}
+		instance.Metadata = workflowMaterializeEntityMetadata(source, flowID, instance.Metadata)
 		bucket := workflowMutableStateBucket(instance, "evidence")
 		workflowAppendEvidence(bucket, bucketID, payload)
 		workflowSetStateBucket(instance, "evidence", bucket)
