@@ -2887,6 +2887,32 @@ func TestRun_RejectsAccumulatedNamespaceInDataAccumulationExpressions(t *testing
 	}
 }
 
+func TestRun_RejectsRetiredFanOutTargetInDataAccumulationExpressions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{
+								{TargetField: "last_target", Value: runtimecontracts.CELExpression("fan_out.target")},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "data_accumulation_expression_validation", "fan_out.target") ||
+		!reportContains(report.Errors(), "data_accumulation_expression_validation", "retired") {
+		t.Fatalf("expected retired fan_out.target in data_accumulation expression to fail validation, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -2910,6 +2936,36 @@ func TestRun_RejectsAccumulatedNamespaceInEmitFieldExpressions(t *testing.T) {
 
 	if !reportContains(report.Errors(), "emit_field_expression_validation", "accumulated.size()") {
 		t.Fatalf("expected accumulated namespace in emit.fields expression to fail validation, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsRetiredFanOutTargetInFanOutEmitFieldExpressions(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID: "test-node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						FanOut: &runtimecontracts.FanOutSpec{
+							ItemsFrom: "payload.items",
+							Emit: runtimecontracts.EmitSpec{
+								Event: "item.scored",
+								Fields: map[string]runtimecontracts.ExpressionValue{
+									"bad": runtimecontracts.CELExpression(`fan_out["target"]`),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	report := Run(context.Background(), source, Options{})
+
+	if !reportContains(report.Errors(), "emit_field_expression_validation", "fan_out.target") ||
+		!reportContains(report.Errors(), "emit_field_expression_validation", "retired") {
+		t.Fatalf("expected retired fan_out.target in fan_out.emit.fields to fail validation, got %#v", report.Errors())
 	}
 }
 

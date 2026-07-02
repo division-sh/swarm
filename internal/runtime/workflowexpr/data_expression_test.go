@@ -1,6 +1,9 @@
 package workflowexpr
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T) {
 	value, err := EvalValueExpression(`entity.kill_reason == null`, ValueContext{
@@ -62,6 +65,42 @@ func TestValidateValueExpression_RejectsAccumulatedNamespace(t *testing.T) {
 	}
 }
 
+func TestValidateValueExpression_RejectsRetiredFanOutTarget(t *testing.T) {
+	tests := []string{
+		`fan_out.target`,
+		`fan_out.target.flow_instance`,
+		`fan_out["target"]`,
+		`fan_out['target']`,
+	}
+	for _, expression := range tests {
+		t.Run(expression, func(t *testing.T) {
+			err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{AllowBareItem: true})
+			if err == nil {
+				t.Fatalf("expected %q to reject retired fan_out.target", expression)
+			}
+			if got := err.Error(); got == "" || !containsAll(got, "fan_out.target", "retired") {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %q, want retired fan_out.target", expression, got)
+			}
+		})
+	}
+}
+
+func TestValidateValueExpression_AllowsFanOutItemAndStringLiteralTargetText(t *testing.T) {
+	tests := []string{
+		`fan_out.item.target`,
+		`item.target`,
+		`"fan_out.target"`,
+		`payload.note == "fan_out.target"`,
+	}
+	for _, expression := range tests {
+		t.Run(expression, func(t *testing.T) {
+			if err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{AllowBareItem: true}); err != nil {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", expression, err)
+			}
+		})
+	}
+}
+
 func TestExpressionReferencesEntity_IgnoresStringLiterals(t *testing.T) {
 	if ExpressionReferencesEntity(`payload.reason == "entity.kill_reason"`) {
 		t.Fatal("expected quoted entity reference text to be ignored")
@@ -69,4 +108,13 @@ func TestExpressionReferencesEntity_IgnoresStringLiterals(t *testing.T) {
 	if !ExpressionReferencesEntity(`has(entity.kill_reason) ? entity.kill_reason : payload.reason`) {
 		t.Fatal("expected real entity reference to be detected")
 	}
+}
+
+func containsAll(value string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(value, part) {
+			return false
+		}
+	}
+	return true
 }
