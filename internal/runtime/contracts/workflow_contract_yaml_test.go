@@ -743,6 +743,36 @@ delay_minutes: 30
 	}
 }
 
+func TestWorkflowTimerContractDecode_RejectsMergedRetiredDurationAliases(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "seconds", field: "delay_seconds: 30"},
+		{name: "minutes", field: "delay_minutes: 5"},
+		{name: "hours", field: "delay_hours: 2"},
+		{name: "days", field: "delay_days: 1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc struct {
+				Timer WorkflowTimerContract `yaml:"timer"`
+			}
+			err := yaml.Unmarshal([]byte(`
+timer_defaults: &timer_defaults
+  `+tc.field+`
+timer:
+  <<: *timer_defaults
+  id: reminder
+  event: timer.reminder
+`), &doc)
+			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), strings.Split(tc.field, ":")[0]) {
+				t.Fatalf("yaml.Unmarshal error = %v, want merged retired alias rejection for %s", err, tc.field)
+			}
+		})
+	}
+}
+
 func TestWorkflowTimerContractDecode_PreservesCanonicalDelay(t *testing.T) {
 	var timer WorkflowTimerContract
 	if err := yaml.Unmarshal([]byte(`

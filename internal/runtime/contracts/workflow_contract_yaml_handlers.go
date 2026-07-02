@@ -40,17 +40,7 @@ func rejectWorkflowTimerRetiredDurationAliases(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
-	hasDelay := false
-	retired := []string{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		switch key {
-		case "delay":
-			hasDelay = true
-		case "delay_seconds", "delay_minutes", "delay_hours", "delay_days":
-			retired = append(retired, key)
-		}
-	}
+	hasDelay, retired := workflowTimerDurationKeys(node, map[*yaml.Node]bool{})
 	if len(retired) == 0 {
 		return nil
 	}
@@ -61,6 +51,69 @@ func rejectWorkflowTimerRetiredDurationAliases(node *yaml.Node) error {
 		return fmt.Errorf("RETIRED timer duration field %s is not accepted; use delay", retired[0])
 	}
 	return fmt.Errorf("RETIRED timer duration fields %s are not accepted; use delay", strings.Join(retired, ", "))
+}
+
+func workflowTimerDurationKeys(node *yaml.Node, seen map[*yaml.Node]bool) (bool, []string) {
+	if node == nil {
+		return false, nil
+	}
+	if seen[node] {
+		return false, nil
+	}
+	seen[node] = true
+	switch node.Kind {
+	case yaml.AliasNode:
+		return workflowTimerDurationKeys(node.Alias, seen)
+	case yaml.SequenceNode:
+		hasDelay := false
+		retired := []string{}
+		for _, child := range node.Content {
+			childHasDelay, childRetired := workflowTimerDurationKeys(child, seen)
+			hasDelay = hasDelay || childHasDelay
+			retired = appendRetiredTimerDurationFields(retired, childRetired...)
+		}
+		return hasDelay, retired
+	case yaml.MappingNode:
+		hasDelay := false
+		retired := []string{}
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key := strings.TrimSpace(node.Content[i].Value)
+			if key == "<<" || strings.TrimSpace(node.Content[i].Tag) == "!!merge" {
+				mergeHasDelay, mergeRetired := workflowTimerDurationKeys(node.Content[i+1], seen)
+				hasDelay = hasDelay || mergeHasDelay
+				retired = appendRetiredTimerDurationFields(retired, mergeRetired...)
+				continue
+			}
+			switch key {
+			case "delay":
+				hasDelay = true
+			case "delay_seconds", "delay_minutes", "delay_hours", "delay_days":
+				retired = appendRetiredTimerDurationFields(retired, key)
+			}
+		}
+		return hasDelay, retired
+	default:
+		return false, nil
+	}
+}
+
+func appendRetiredTimerDurationFields(fields []string, candidates ...string) []string {
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		seen := false
+		for _, existing := range fields {
+			if existing == candidate {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			fields = append(fields, candidate)
+		}
+	}
+	return fields
 }
 
 func (e *EventEmission) UnmarshalYAML(node *yaml.Node) error {
