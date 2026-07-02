@@ -324,6 +324,7 @@ func (r localContextRegistry) Prune(ctx context.Context, caller runtimeIdentityC
 	currentName, _ := r.CurrentName()
 	result := localContextPruneResult{}
 	prunedCurrent := false
+	currentSeen := false
 	for _, entry := range report.Entries {
 		if localContextStatusPruneable(entry.Status) {
 			if entry.Path != "" {
@@ -333,11 +334,24 @@ func (r localContextRegistry) Prune(ctx context.Context, caller runtimeIdentityC
 			}
 			result.Removed = append(result.Removed, entry)
 			if entry.Descriptor.Name == currentName {
+				currentSeen = true
 				prunedCurrent = true
 			}
 			continue
 		}
 		result.Kept = append(result.Kept, entry)
+		if entry.Descriptor.Name == currentName {
+			currentSeen = true
+		}
+	}
+	if !currentSeen && report.Current != nil && localContextStatusPruneable(report.Current.Status) {
+		if report.Current.Path != "" {
+			if err := os.Remove(report.Current.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return result, err
+			}
+		}
+		result.Removed = append(result.Removed, *report.Current)
+		prunedCurrent = true
 	}
 	if prunedCurrent {
 		if err := os.Remove(r.currentPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
