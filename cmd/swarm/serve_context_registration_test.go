@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,6 +75,38 @@ func TestServeProjectContextRegistrationGuardsBareDoubleServe(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already has context descriptors") {
 		t.Fatalf("err = %q, want double-serve guard", err.Error())
+	}
+}
+
+func TestServeProjectContextRegistrationReclaimsDeadProjectDescriptor(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	registry := newLocalContextRegistry(swarmDir)
+	contextName := localProjectContextName(project.canonicalRoot)
+	writeCLIAPITestContext(t, registry, contextName, "runtime-dead", "http://127.0.0.1:1", project.canonicalRoot)
+	if err := registry.SetCurrent(contextName); err != nil {
+		t.Fatalf("set current context: %v", err)
+	}
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err != nil {
+		t.Fatalf("prepare registration: %v", err)
+	}
+	defer reg.Release()
+	path, err := registry.descriptorPath(contextName)
+	if err != nil {
+		t.Fatalf("descriptor path: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("dead descriptor stat err = %v, want removed", err)
+	}
+	if current, err := registry.CurrentName(); err != nil || current != "" {
+		t.Fatalf("current = %q err=%v, want cleared", current, err)
 	}
 }
 

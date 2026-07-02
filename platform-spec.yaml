@@ -11908,7 +11908,10 @@ cli_specification:
         project_claim_rule: >
           `serve --dev` acquires a project-claim file before listener binding and runtime-store side effects, then writes
           the final descriptor only after the API listener address and runtime_instance_id are known. Failed startup
-          releases the claim and must not leave a descriptor selected as current.
+          releases the claim and must not leave a descriptor selected as current. `serve --dev` may reclaim an existing
+          same-project descriptor only when runtime.identity validation proves it is dead, stale, or identity-mismatched;
+          live, permission-denied, corrupt, invalid, or otherwise ambiguous project descriptors fail closed instead of
+          being silently overwritten.
       validation_statuses:
       - ok
       - no_server
