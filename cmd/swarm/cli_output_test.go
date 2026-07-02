@@ -728,7 +728,6 @@ reader:
   subscribes_to: [task.assigned]
   event_handlers:
     task.assigned:
-      create_entity: true
       guard:
         check: "entity.priority >= 0"
       advances_to: done

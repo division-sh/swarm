@@ -4107,8 +4107,6 @@ thing.created:
   entity_id: string
   amount: integer
   who: text
-  required:
-    - entity_id
 
 thing.reviewed:
   swarm:
@@ -4139,7 +4137,6 @@ entity-writer:
   subscribes_to: [thing.created, thing.reviewed]
   event_handlers:
     thing.created:
-      create_entity: true
       data_accumulation:
         source_event: thing.created
         writes:
@@ -4221,7 +4218,6 @@ portfolio-bootstrap:
   subscribes_to: [opco.bootstrap_requested]
   event_handlers:
     opco.bootstrap_requested:
-      create_entity: true
       data_accumulation:
         source_event: opco.bootstrap_requested
         writes:
@@ -4362,8 +4358,6 @@ opco.bootstrap_requested:
     source: external
   entity_id: string
   owner: text
-  required:
-    - entity_id
 
 opco.spinup_requested:
   swarm:
@@ -4383,7 +4377,6 @@ portfolio-bootstrap:
   subscribes_to: [opco.bootstrap_requested]
   event_handlers:
     opco.bootstrap_requested:
-      create_entity: true
       data_accumulation:
         source_event: opco.bootstrap_requested
         writes:
@@ -4675,23 +4668,6 @@ const (
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
-	createRejectIdempotencyKey := "issue-1255-" + backend + "-create-entity-reject"
-	createReject := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "thing.created",
-		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"entity_id": "11111111-1111-4111-8111-111111111111", "amount": 7, "who": "operator"},
-		"idempotency_key": createRejectIdempotencyKey,
-	})
-	if createReject.Data["code"] != apiv1.PayloadValidationFailedCode {
-		t.Fatalf("create-entity rejection data = %#v, want %s", createReject.Data, apiv1.PayloadValidationFailedCode)
-	}
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, createRejectIdempotencyKey); got != 0 {
-		t.Fatalf("%s event rows for rejected create-entity idempotency key = %d, want 0", backend, got)
-	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", createRejectIdempotencyKey); got != 0 {
-		t.Fatalf("%s idempotency rows for rejected create-entity publish = %d, want 0", backend, got)
-	}
-
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "thing.created",
 		"--bundle-hash", bundleHash,
@@ -9228,7 +9204,6 @@ reader:
   subscribes_to: [task.assigned]
   event_handlers:
     task.assigned:
-      create_entity: true
       guard:
         check: "entity.priority >= 0"
       advances_to: done
@@ -9313,7 +9288,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	code := runVerifyCommandWithContractsOutputForTest(
 		context.Background(),
 		repoRoot(),
-		filepath.Join(repoRoot(), "tests", "tier8-boot-verification", "test-boot-missing-pin"),
+		writeVerifyMissingPinWarningFixture(t),
 		&stdout,
 		&stderr,
 	)
@@ -9674,7 +9649,6 @@ accumulator:
   subscribes_to: [task.assigned]
   event_handlers:
     task.assigned:
-      create_entity: true
       advances_to: done
   state_schema:
     fields:
@@ -12057,7 +12031,7 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-missing-pin"))))
+	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))))
 	if err == nil {
 		t.Fatal("verifyBundle error = nil, want warning-only failure from missing producer path")
 	}
@@ -12074,6 +12048,97 @@ func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
 			t.Fatalf("verifyBundle error = %v, want substring %q", err, want)
 		}
 	}
+}
+
+func writeVerifyMissingPinWarningFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: verify-missing-pin-warning
+version: "1.0.0"
+platform: ">=1.6.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: verify-missing-pin-warning
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [task.requested]
+  outputs:
+    events: [task.completed]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+task.requested:
+  entity_id: string
+task.completed:
+  entity_id: string
+child/task.assigned:
+  entity_id: string
+child/task.result:
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+dispatcher:
+  id: dispatcher
+  execution_type: system_node
+  subscribes_to: [task.requested, child/task.result]
+  produces: [task.completed, child/task.assigned]
+  event_handlers:
+    task.requested:
+      emit: child/task.assigned
+    child/task.result:
+      advances_to: done
+      emit:
+        event: task.completed
+        broadcast: true
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, working, done]
+pins:
+  inputs:
+    events: [task.assigned, task.feedback]
+  outputs:
+    events: [task.result]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
+task.assigned:
+  entity_id: string
+task.feedback:
+  entity_id: string
+  comment: string
+task.result:
+  entity_id: string
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
+worker:
+  id: worker
+  execution_type: system_node
+  subscribes_to: [task.assigned, task.feedback]
+  produces: [task.result]
+  event_handlers:
+    task.assigned:
+      advances_to: working
+    task.feedback:
+      advances_to: done
+      emit:
+        event: task.result
+        broadcast: true
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `{}`)
+	return root
 }
 
 func TestVerifyBundle_UnreachableStateReturnsWarningSurface(t *testing.T) {

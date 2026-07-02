@@ -19,7 +19,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 		"Lists and maps are contained state",
 		"child/template flows",
 		"lifecycle, routing, timers, retries, agents, or audit",
-		"Static multi-entity flows remain an advanced/legacy escape hatch",
+		"Static multi-entity flow ownership is retired model debt",
 	} {
 		assertScalarContains(t, locked, want)
 	}
@@ -193,12 +193,12 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 
 	escapeHatches := mustMappingValue(t, authoring, "escape_hatches")
 	staticMulti := mustMappingValue(t, escapeHatches, "static_multi_entity_flows")
-	assertScalarValue(t, mustMappingValue(t, staticMulti, "status"), "advanced_legacy_escape_hatch")
+	assertScalarValue(t, mustMappingValue(t, staticMulti, "status"), "retired_unsupported")
 	assertScalarValue(t, mustMappingValue(t, staticMulti, "implementation_tracker"), "#1554")
-	assertScalarContains(t, mustMappingValue(t, staticMulti, "rule"), "not the default authoring model")
+	assertScalarContains(t, mustMappingValue(t, staticMulti, "rule"), "Static multi-row ownership is retired")
 	selectEntity := mustMappingValue(t, escapeHatches, "select_entity")
 	assertScalarValue(t, mustMappingValue(t, selectEntity, "implementation_tracker"), "#1547")
-	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "external ingress, legacy migration")
+	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "separately owned non-static/runtime surfaces")
 	assertScalarContains(t, mustMappingValue(t, selectEntity, "rule"), "Normal in-topology composition")
 	producerTarget := mustMappingValue(t, escapeHatches, "producer_emit_target")
 	assertScalarValue(t, mustMappingValue(t, producerTarget, "status"), "exotic_dynamic_routing_escape_hatch")
@@ -213,7 +213,7 @@ func TestPlatformSpecFlowInstanceAuthoringSourceAuthority(t *testing.T) {
 
 	migration := mustMappingValue(t, authoring, "migration_model")
 	assertScalarValue(t, mustMappingValue(t, migration, "status"), "child_tracked")
-	assertScalarContains(t, mustMappingValue(t, migration, "rule"), "must not be migrated blindly")
+	assertScalarContains(t, mustMappingValue(t, migration, "rule"), "migrated blindly")
 	assertScalarValue(t, mustYAMLPath(t, migration, "implementation_trackers", "template_pilot"), "#1552")
 	assertScalarValue(t, mustYAMLPath(t, migration, "implementation_trackers", "singleton_map_pilot"), "#1553")
 	assertScalarValue(t, mustYAMLPath(t, migration, "implementation_trackers", "static_multi_entity_escape_hatch_policy"), "#1554")

@@ -465,17 +465,8 @@ func flowHasScopedInputEscapeHatch(source semanticview.Source, flowID, eventType
 
 func (c *checkerContext) selectEntityValidation() []Finding {
 	findings := []Finding{}
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
-			continue
-		}
-		inputs := normalizeStringSet(c.source.FlowInputEvents(flowID))
-		scope, ok := c.source.FlowScopeByID(flowID)
-		if !ok {
-			continue
-		}
-		for nodeID, node := range scope.Nodes {
+	for _, validationScope := range c.flowAcquisitionValidationScopes() {
+		for nodeID, node := range validationScope.nodes {
 			nodeID = strings.TrimSpace(nodeID)
 			for eventType, handler := range node.EventHandlers {
 				eventType = strings.TrimSpace(eventType)
@@ -484,7 +475,7 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 				if !hasSelectEntity && !hasSelectOrCreateEntity {
 					continue
 				}
-				location := flowID
+				location := validationScope.displayFlowID
 				label := "select_entity"
 				if hasSelectOrCreateEntity && !hasSelectEntity {
 					label = "select_or_create_entity"
@@ -495,7 +486,7 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("flow %s handler %s on node %s must not declare create_entity with select_entity or select_or_create_entity", flowID, eventType, nodeID),
+						Message:  fmt.Sprintf("flow %s handler %s on node %s must not declare create_entity with select_entity or select_or_create_entity", validationScope.displayFlowID, eventType, nodeID),
 						Location: location,
 					})
 				}
@@ -503,64 +494,72 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("flow %s handler %s on node %s must not declare both select_entity and select_or_create_entity", flowID, eventType, nodeID),
+						Message:  fmt.Sprintf("flow %s handler %s on node %s must not declare both select_entity and select_or_create_entity", validationScope.displayFlowID, eventType, nodeID),
 						Location: location,
 					})
 				}
-				if strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+				if retiredStaticMultiEntityAcquisitionFlow(validationScope.schema) {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s, but template flows must use create_flow_instance routing rather than service-owned static entity acquisition", flowID, eventType, nodeID, label),
+						Message:  retiredStaticMultiEntityAcquisitionMessage(validationScope.displayFlowID, eventType, nodeID, label),
 						Location: location,
 					})
 				}
-				if strings.TrimSpace(schema.InitialState) == "" {
+				if strings.EqualFold(strings.TrimSpace(validationScope.schema.Mode), "template") {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s, but stateless flows do not have stateful input-pin entity acquisition", flowID, eventType, nodeID, label),
+						Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s, but template flows must use create_flow_instance routing rather than service-owned static entity acquisition", validationScope.displayFlowID, eventType, nodeID, label),
 						Location: location,
 					})
 				}
-				if _, ok := inputs[eventType]; !ok {
+				if strings.TrimSpace(validationScope.schema.InitialState) == "" {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
-						Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s outside a declared input pin", flowID, eventType, nodeID, label),
+						Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s, but stateless flows do not have stateful input-pin entity acquisition", validationScope.displayFlowID, eventType, nodeID, label),
 						Location: location,
 					})
 				}
-				findings = append(findings, validateSelectEntityBindings(c.source, flowID, eventType, nodeID, "select_entity", handler.SelectEntity)...)
-				findings = append(findings, validateSelectOrCreateEntityBindings(c.source, flowID, eventType, nodeID, handler.SelectOrCreateEntity)...)
+				if _, ok := validationScope.inputs[eventType]; !ok {
+					findings = append(findings, Finding{
+						CheckID:  "select_entity_validation",
+						Severity: "error",
+						Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s outside a declared input pin", validationScope.displayFlowID, eventType, nodeID, label),
+						Location: location,
+					})
+				}
+				findings = append(findings, validateSelectEntityBindings(c.source, validationScope.semanticFlowID, validationScope.displayFlowID, eventType, nodeID, "select_entity", handler.SelectEntity)...)
+				findings = append(findings, validateSelectOrCreateEntityBindings(c.source, validationScope.semanticFlowID, validationScope.displayFlowID, eventType, nodeID, handler.SelectOrCreateEntity)...)
 			}
 		}
 	}
 	return findings
 }
 
-func validateSelectEntityBindings(source semanticview.Source, flowID, eventType, nodeID, label string, spec *runtimecontracts.SelectEntitySpec) []Finding {
+func validateSelectEntityBindings(source semanticview.Source, semanticFlowID, displayFlowID, eventType, nodeID, label string, spec *runtimecontracts.SelectEntitySpec) []Finding {
 	if spec == nil || spec.Empty() {
 		return nil
 	}
-	return validateEntityAcquisitionBindings(source, flowID, eventType, nodeID, label, spec.Bindings)
+	return validateEntityAcquisitionBindings(source, semanticFlowID, displayFlowID, eventType, nodeID, label, spec.Bindings)
 }
 
-func validateSelectOrCreateEntityBindings(source semanticview.Source, flowID, eventType, nodeID string, spec *runtimecontracts.SelectOrCreateEntitySpec) []Finding {
+func validateSelectOrCreateEntityBindings(source semanticview.Source, semanticFlowID, displayFlowID, eventType, nodeID string, spec *runtimecontracts.SelectOrCreateEntitySpec) []Finding {
 	if spec == nil || spec.Empty() {
 		return nil
 	}
-	return validateEntityAcquisitionBindings(source, flowID, eventType, nodeID, "select_or_create_entity", spec.Bindings)
+	return validateEntityAcquisitionBindings(source, semanticFlowID, displayFlowID, eventType, nodeID, "select_or_create_entity", spec.Bindings)
 }
 
-func validateEntityAcquisitionBindings(source semanticview.Source, flowID, eventType, nodeID, label string, bindings []runtimecontracts.SelectEntityKeyBinding) []Finding {
-	location := strings.TrimSpace(flowID)
-	contract, ok := entityruntime.ResolveForFlow(source, flowID)
+func validateEntityAcquisitionBindings(source semanticview.Source, semanticFlowID, displayFlowID, eventType, nodeID, label string, bindings []runtimecontracts.SelectEntityKeyBinding) []Finding {
+	location := strings.TrimSpace(displayFlowID)
+	contract, ok := entityruntime.ResolveForFlow(source, semanticFlowID)
 	if !ok {
 		return []Finding{{
 			CheckID:  "select_entity_validation",
 			Severity: "error",
-			Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s but the target flow entity contract is unavailable", flowID, eventType, nodeID, label),
+			Message:  fmt.Sprintf("flow %s handler %s on node %s uses %s but the target flow entity contract is unavailable", displayFlowID, eventType, nodeID, label),
 			Location: location,
 		}}
 	}
@@ -573,7 +572,7 @@ func validateEntityAcquisitionBindings(source semanticview.Source, flowID, event
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s is declared more than once", flowID, eventType, nodeID, label, field),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s is declared more than once", displayFlowID, eventType, nodeID, label, field),
 				Location: location,
 			})
 			continue
@@ -583,7 +582,7 @@ func validateEntityAcquisitionBindings(source semanticview.Source, flowID, event
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s is not an entity contract field selection target", flowID, eventType, nodeID, label, field),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s is not an entity contract field selection target", displayFlowID, eventType, nodeID, label, field),
 				Location: location,
 			})
 			continue
@@ -592,7 +591,7 @@ func validateEntityAcquisitionBindings(source semanticview.Source, flowID, event
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s is invalid: %v", flowID, eventType, nodeID, label, field, err),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s is invalid: %v", displayFlowID, eventType, nodeID, label, field, err),
 				Location: location,
 			})
 		}
@@ -604,7 +603,7 @@ func validateEntityAcquisitionBindings(source semanticview.Source, flowID, event
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s must resolve from payload.*, got %q", flowID, eventType, nodeID, label, field, ref),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s must resolve from payload.*, got %q", displayFlowID, eventType, nodeID, label, field, ref),
 				Location: location,
 			})
 			continue
@@ -613,7 +612,7 @@ func validateEntityAcquisitionBindings(source semanticview.Source, flowID, event
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s has an empty payload ref", flowID, eventType, nodeID, label, field),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s has an empty payload ref", displayFlowID, eventType, nodeID, label, field),
 				Location: location,
 			})
 			continue
@@ -622,16 +621,16 @@ func validateEntityAcquisitionBindings(source semanticview.Source, flowID, event
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s must not use source envelope authority %q", flowID, eventType, nodeID, label, field, ref),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s must not use source envelope authority %q", displayFlowID, eventType, nodeID, label, field, ref),
 				Location: location,
 			})
 			continue
 		}
-		if !selectEntityPayloadFieldDeclared(source, flowID, eventType, parsed.Segments[0]) {
+		if !selectEntityPayloadFieldDeclared(source, semanticFlowID, eventType, parsed.Segments[0]) {
 			findings = append(findings, Finding{
 				CheckID:  "select_entity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s references undeclared payload field %q", flowID, eventType, nodeID, label, field, parsed.Segments[0]),
+				Message:  fmt.Sprintf("flow %s handler %s on node %s %s field %s references undeclared payload field %q", displayFlowID, eventType, nodeID, label, field, parsed.Segments[0]),
 				Location: location,
 			})
 		}
@@ -686,33 +685,35 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 		return c.flowBoundaryCreateEntityFindings
 	}
 	c.flowBoundaryCreateEntityLoaded = true
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
+	for _, validationScope := range c.flowAcquisitionValidationScopes() {
+		if strings.EqualFold(strings.TrimSpace(validationScope.schema.Mode), "template") {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+		if strings.TrimSpace(validationScope.schema.InitialState) == "" {
 			continue
 		}
-		if strings.TrimSpace(schema.InitialState) == "" {
+		if len(validationScope.inputs) == 0 {
 			continue
 		}
-		inputs := normalizeStringSet(c.source.FlowInputEvents(flowID))
-		if len(inputs) == 0 {
-			continue
-		}
-		scope, ok := c.source.FlowScopeByID(flowID)
-		if !ok {
-			continue
-		}
-		for nodeID, node := range scope.Nodes {
+		for nodeID, node := range validationScope.nodes {
 			nodeID = strings.TrimSpace(nodeID)
 			for eventType, handler := range node.EventHandlers {
 				eventType = strings.TrimSpace(eventType)
 				if eventType == "" {
 					continue
 				}
-				if _, ok := inputs[eventType]; !ok {
+				if _, ok := validationScope.inputs[eventType]; !ok {
+					continue
+				}
+				if retiredStaticMultiEntityAcquisitionFlow(validationScope.schema) {
+					if handler.CreateEntity {
+						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
+							CheckID:  "flow_boundary_create_entity_validation",
+							Severity: "error",
+							Message:  retiredStaticMultiEntityAcquisitionMessage(validationScope.displayFlowID, eventType, nodeID, "create_entity"),
+							Location: validationScope.displayFlowID,
+						})
+					}
 					continue
 				}
 				if handler.CreateEntity {
@@ -727,13 +728,72 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 					CheckID:  "flow_boundary_create_entity_validation",
 					Severity: "error",
-					Message:  fmt.Sprintf("flow %s input pin handler %s on node %s must declare create_entity: true, select_entity, or select_or_create_entity", flowID, eventType, nodeID),
-					Location: flowID,
+					Message:  fmt.Sprintf("flow %s input pin handler %s on node %s must declare create_entity: true, select_entity, or select_or_create_entity", validationScope.displayFlowID, eventType, nodeID),
+					Location: validationScope.displayFlowID,
 				})
 			}
 		}
 	}
 	return c.flowBoundaryCreateEntityFindings
+}
+
+type flowAcquisitionValidationScope struct {
+	displayFlowID  string
+	semanticFlowID string
+	schema         runtimecontracts.FlowSchemaDocument
+	inputs         map[string]struct{}
+	nodes          map[string]runtimecontracts.SystemNodeContract
+}
+
+func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionValidationScope {
+	scopes := []flowAcquisitionValidationScope{}
+	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil && bundle.RootSchema != nil {
+		rootNodes := map[string]runtimecontracts.SystemNodeContract{}
+		for _, view := range bundle.RootProjectViews() {
+			for nodeID, node := range view.Nodes {
+				nodeID = strings.TrimSpace(nodeID)
+				if nodeID != "" {
+					rootNodes[nodeID] = node
+				}
+			}
+		}
+		if len(rootNodes) > 0 {
+			scopes = append(scopes, flowAcquisitionValidationScope{
+				displayFlowID:  "root",
+				semanticFlowID: "",
+				schema:         *bundle.RootSchema,
+				inputs:         normalizeStringSet(bundle.RootSchema.Pins.Inputs.Events),
+				nodes:          rootNodes,
+			})
+		}
+	}
+	for flowID, schema := range c.source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		scope, ok := c.source.FlowScopeByID(flowID)
+		if !ok {
+			continue
+		}
+		scopes = append(scopes, flowAcquisitionValidationScope{
+			displayFlowID:  flowID,
+			semanticFlowID: flowID,
+			schema:         schema,
+			inputs:         normalizeStringSet(c.source.FlowInputEvents(flowID)),
+			nodes:          scope.Nodes,
+		})
+	}
+	return scopes
+}
+
+func retiredStaticMultiEntityAcquisitionFlow(schema runtimecontracts.FlowSchemaDocument) bool {
+	mode := strings.TrimSpace(schema.Mode)
+	return strings.TrimSpace(schema.InitialState) != "" && (mode == "" || strings.EqualFold(mode, runtimecontracts.FlowModeStatic))
+}
+
+func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label string) string {
+	return fmt.Sprintf("flow %s handler %s on node %s uses %s, but stateful static multi-row entity ownership is retired; model this as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a child flow", flowID, eventType, nodeID, label)
 }
 
 func normalizeStringSet(values []string) map[string]struct{} {

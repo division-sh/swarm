@@ -24,11 +24,21 @@ var tier7StartedRuntimeFixtures = map[string]struct{}{
 	"test-agent-emits-to-node": {},
 }
 
+var tier7StaticMultiEntityRetiredFixtures = map[string]struct{}{
+	"test-cross-flow-subscription": {},
+	"test-wildcard-cross-flow":     {},
+}
+
 func TestTier7CompositionCatalogFixtures_RealRuntime(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier7CompositionFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier7-composition", fixtureName)
 		t.Run(fixtureName, func(t *testing.T) {
+			if _, retired := tier7StaticMultiEntityRetiredFixtures[fixtureName]; retired {
+				assertCatalogStaticMultiEntityRetirement(t, fixtureRoot)
+				return
+			}
+
 			var expected catalogExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 

@@ -73,11 +73,22 @@ var tier8ExcludedFixtures = map[string]tier8ExcludedFixture{
 	"test-boot-state-machine-unreachable": {reason: "supported verify warning fixture for analyzer slice 4; not a runtime boot catalog fixture"},
 }
 
+var tier8StaticMultiEntityRetiredFixtures = map[string]struct{}{
+	"test-boot-create-entity-plus-accumulate": {},
+	"test-boot-missing-pin":                   {},
+	"test-boot-policy-conflict":               {},
+}
+
 func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 	repoRoot := repoRootFromCatalogE2E(t)
 	for _, fixtureName := range tier8SupportedFixtures {
 		fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", fixtureName)
 		t.Run(fixtureName, func(t *testing.T) {
+			if _, retired := tier8StaticMultiEntityRetiredFixtures[fixtureName]; retired {
+				assertCatalogStaticMultiEntityRetirement(t, fixtureRoot)
+				return
+			}
+
 			var expected tier8ExpectedDocument
 			loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 

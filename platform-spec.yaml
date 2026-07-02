@@ -139,11 +139,11 @@ vocabulary:
     flow_entity_id: 'The canonical entity identity within a flow is scoped by the concrete instance
       path, but cardinality depends on the authoring model. Under the normal
       flow-instance-centered authoring model, a flow instance owns one primary
-      state entity. Advanced/legacy static multi-entity escape hatches may
-      create many entity_state rows over time; template flow instances use the
-      instance identity plus their primary entity. The runtime MUST NOT maintain
-      competing identities for the same entity row or blur flow-instance identity
-      with entity identity.'
+      state entity. Static multi-entity ownership is retired and MUST NOT create
+      many entity_state rows over time from authored static handlers; template
+      flow instances use the instance identity plus their primary entity. The
+      runtime MUST NOT maintain competing identities for the same entity row or
+      blur flow-instance identity with entity identity.'
   state:
     description: 'A named state in a workflow. An entity (e.g. a ticket, an order, a document) is always in exactly one
       state. States belong to phases for grouping. Some states are terminal (no outgoing transitions).
@@ -1191,11 +1191,11 @@ entity_contracts:
     root read/tool surfaces cannot silently disappear behind a local
     interpretation. A missing normal child-flow entity type, multiple root or
     flow entity types, or a schema-level entity selector is fail-closed.
-    Static package/service flows, template
-    instance-key behavior, and any future advanced/static multi-entity escape
-    hatch remain separate explicit classifications; they are not silent
-    fallback semantics for normal flows. The old Wave 1 rule is preserved as a
-    product decision for normal flow authoring, not as a temporary limitation.
+    Static package/service flows and template instance-key behavior remain
+    separate explicit classifications; they are not silent fallback semantics
+    for normal flows. Static multi-entity ownership is retired rather than a
+    future escape hatch. The old Wave 1 rule is preserved as a product decision
+    for normal flow authoring, not as a temporary limitation.
   state_machine_link:
     description: |
       State is flow-scoped and declared in schema.yaml. The entity
@@ -1401,12 +1401,11 @@ handler_specification:
         with_rules: 'ALLOWED. rule conditions evaluate according to the handler dependency graph. They may rely on schema initial
           values and earlier step outputs, but not on same-handler top-level data_accumulation writes.'
         with_advances_to: ALLOWED. Advances the new entity from initial_state to the target state.
-      note_on_static_flows: 'For advanced/legacy static multi-entity flows, create_entity is the explicit mechanism for entity
-        creation. Without it, the first event arriving from outside the flow has no entity to write to unless the runtime
-        creates one implicitly. create_entity makes this explicit and unambiguous for those escape-hatch flows. Under the
-        normal flow-instance-centered authoring model, process/case/job state should be modeled as a flow instance with
-        one primary entity. For dynamic instances (mode: template), entity creation happens in create_flow_instance step
-        9 — create_entity is not needed on those flows.'
+      note_on_static_flows: 'Retired for authored stateful static/default-static multi-row ownership. A static input-pin
+        handler MUST NOT use create_entity to mint arbitrary receiving-flow rows over time. Authors must model the state
+        as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a
+        child flow. Historical rows are not silently rewritten by this retirement; actual persisted-row migration is
+        separately gated.'
     select_entity:
       field: select_entity
       type: object
@@ -1438,11 +1437,13 @@ handler_specification:
         non_canonical_use: In-topology receivers for pin-declared events whose producers are also in the pin topology. Pin routing
           already supplies event.target; select_entity is a hard invalidity under the normal composition model and should
           be replaced with receiver instance.by plus parent connect routing.
-        boot_verify: Redundant normal in-topology select_entity is a hard invalidity. Missing select_entity on external/no-target
-          stateful handlers is an error because the handler would otherwise run against the wrong entity context.
+        boot_verify: Redundant normal in-topology select_entity is a hard invalidity. Stateful static/default-static authored
+          handlers using select_entity fail closed because static multi-row ownership is retired. Missing select_entity on
+          external/no-target static handlers is not repaired by requiring the retired acquisition field; authors must use
+          a supported template, singleton, contained-state, or child-flow model.
       restrictions:
-        lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
-          acquisition. Template flows acquire entities through create_flow_instance.
+        lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
+          do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
         with_create_entity: PROHIBITED. A handler must either mint a new entity with create_entity or select an existing
           target-flow-owned entity with select_entity, never both.
         source_authority: PROHIBITED. select_entity keys must not target platform envelope/control fields such as entity_id,
@@ -1492,11 +1493,11 @@ handler_specification:
           to mint the entity on zero-match.
         non_canonical_use: In-topology pin routing where lowered parent connect, the explicit target escape hatch, structural
           fallback, or target_set delivery already supplies the receiver route context.
-        boot_verify: Redundant normal in-topology select_or_create_entity is a hard invalidity. External or mixed-provenance
-          acquisition remains valid when event.target may be absent.
+        boot_verify: Redundant normal in-topology select_or_create_entity is a hard invalidity. Stateful static/default-static
+          authored handlers using select_or_create_entity fail closed because static multi-row ownership is retired.
       restrictions:
-        lifecycle_scope: Valid only on stateful static-flow input-pin handlers. Stateless flows do not have stateful entity
-          acquisition. Template flows acquire entities through create_flow_instance.
+        lifecycle_scope: Not valid for authored stateful static/default-static input-pin multi-row ownership. Stateless flows
+          do not have stateful entity acquisition. Template flows acquire entities through create_flow_instance.
         with_create_entity: 'PROHIBITED. A handler must choose exactly one acquisition mode: create_entity, select_entity,
           or select_or_create_entity.'
         with_select_entity: PROHIBITED. select_entity and select_or_create_entity cannot appear on the same handler.
@@ -2492,8 +2493,9 @@ engine:
       - event.target
       - select_entity_or_select_or_create_entity
       - event.source
-      boot_verify: Redundant normal in-topology select_entity/select_or_create_entity is hard invalidity. Missing select_entity
-        on external/no-target stateful handlers is an error.
+      boot_verify: Redundant normal in-topology select_entity/select_or_create_entity is hard invalidity. Stateful
+        static/default-static handlers using receiver-side acquisition fail
+        closed because static multi-row ownership is retired.
     auth_boundary:
       v1_rule: Existing emit authorization plus pin topology are the v1 authorization boundary.
       no_separate_acl: No separate per-target ACL layer exists in v1.
@@ -5270,8 +5272,8 @@ flow_model:
       flow instances through `connect` and instance keys. Lists and maps are
       contained state inside the primary entity. Authors promote contained state
       to child/template flows only when it needs independent lifecycle, routing,
-      timers, retries, agents, or audit. Static multi-entity flows remain an
-      advanced/legacy escape hatch, not the common path.
+      timers, retries, agents, or audit. Static multi-entity flow ownership is
+      retired model debt, not an authoring escape hatch.
     source_context:
       locked_design: '#1476'
       parent_tracker: '#1537'
@@ -5467,9 +5469,9 @@ flow_model:
         If exactly one entity type exists for a normal child flow, that entity
         type is the primary entity. More than one entity type is invalid for
         normal flow authoring; authors must split flows, use contained state,
-        or use a separately approved advanced/static multi-entity
-        classification. If the bundle root declares entity contracts, multiple
-        root entity types are invalid under the same resolver.
+        template instances, singleton/coordinator contained state, or child
+        flows. If the bundle root declares entity contracts, multiple root
+        entity types are invalid under the same resolver.
         `schema.yaml entity` is not a supported selector because it would
         restate entity ownership in a second file. Missing, duplicate, or
         restated entity ownership fails closed. Verification and direct runtime
@@ -5665,24 +5667,28 @@ flow_model:
       - producer target, broadcast:true, direct delivery, RouteTable, raw subscribers, delivery rows, replay rows
     escape_hatches:
       static_multi_entity_flows:
-        status: advanced_legacy_escape_hatch
+        status: retired_unsupported
         implementation_tracker: '#1554'
         rule: >
-          Static flows that create, select, or own multiple entity rows remain
-          possible only as explicit advanced/legacy escape hatches. They are not
-          the default authoring model and must not be used to avoid declaring
-          template instances, contained state, child flows, or singleton
-          coordinator ownership.
+          Stateful static/default-static authored flows MUST NOT create, select,
+          or own multiple runtime entity rows through `create_entity`,
+          `select_entity`, or `select_or_create_entity`. Static multi-row
+          ownership is retired. Authors must model the state as one primary
+          entity with contained state, a `mode: template` flow instance, a
+          `mode: singleton` coordinator, or a child flow. Existing historical
+          rows are not silently rewritten; actual persisted-row migration
+          requires a separately gated migration.
       select_entity:
         status: retained_escape_hatch_pending_child
         implementation_tracker: '#1547'
         rule: >
           `select_entity` and `select_or_create_entity` remain acquisition
-          primitives for external ingress, legacy migration, and explicit
-          advanced database-like flows. Normal in-topology composition should
-          route to the receiving flow instance through parent `connect` and
-          instance keys instead; normal in-topology receiver acquisition fails
-          boot verification rather than remaining a warning.
+          primitives only for separately owned non-static/runtime surfaces.
+          They are not an escape hatch for authored static multi-row ownership.
+          Normal in-topology composition should route to the receiving flow
+          instance through parent `connect` and instance keys instead; normal
+          in-topology receiver acquisition fails boot verification rather than
+          remaining a warning.
       producer_emit_target:
         status: exotic_dynamic_routing_escape_hatch
         implementation_tracker: '#1545'
@@ -5707,10 +5713,12 @@ flow_model:
     migration_model:
       status: child_tracked
       rule: >
-        Existing static multi-entity flows must not be migrated blindly to
-        template flows. The target shape depends on whether the keyed item
-        needs platform state-machine machinery, cross-flow addressability, or
-        only contained data plus shared coordination.
+        Existing static multi-entity flows must not be preserved as a static
+        multi-row escape hatch or migrated blindly to template flows. The target
+        shape depends on whether the keyed item needs platform state-machine
+        machinery, cross-flow addressability, or only contained data plus shared
+        coordination. Historical rows are not silently rewritten; actual
+        persisted-row migration is separately gated.
       implementation_trackers:
         template_pilot: '#1552'
         singleton_map_pilot: '#1553'
@@ -6602,29 +6610,27 @@ flow_model:
         the owning flow. No flow_states disambiguation needed.'
     cross_flow_handoff:
       description: 'When a business object moves from one flow to the next, the transition is an explicit
-        handoff via events. The receiving flow creates its own entity or, for service-owned request handlers,
-        selects or deterministically selects-or-creates one receiving-flow-owned entity by declared business key.'
+        handoff via events. The receiving flow is addressed as a supported flow instance through parent connect and
+        instance keys, or the receiving state is modeled as contained state, a singleton coordinator, or a child flow.'
       pattern:
       - '1. Source flow handler emits a cross-flow event (output pin). Example: scoring emits vertical.shortlisted.'
-      - '2. Destination flow handler receives the event (input pin) with create_entity: true.'
-      - '3. Destination creates its OWN entity row — new entity_id, own current_state, own fields.'
+      - '2. Destination flow handler receives the event through parent-owned connect / instance-key routing or another
+        supported route owner.'
+      - '3. Destination updates its primary entity, contained state, singleton coordinator state, or child/template flow
+        instance. Static input-pin handlers do not create or select arbitrary receiving-flow rows.'
       - '4. Data from the source entity is passed via the event payload or create_flow_instance
         config_from bindings. Direct runtime entity reads do not cross flow ownership boundaries.'
       service_request_pattern:
       - '1. Source flow emits a typed request event containing declared business keys, not target entity_id,
         entity_type, or flow_instance.'
-      - '2. Destination static-flow input-pin handler declares select_entity.by or select_or_create_entity.by bindings from payload.* to
-        receiving-flow entity fields.'
-      - '3. Runtime resolves exactly one receiving-flow-owned entity for select_entity. For select_or_create_entity, runtime
-        resolves one active receiving-flow-owned entity or deterministically mints one when no active match exists. Multiple
-        matches fail closed. The selected or created entity becomes the handler context.'
-      - '4. Handler writes and transitions remain same-flow owned. select_entity and select_or_create_entity do not authorize generic
-        cross-flow existing-entity continuation.'
-      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST declare either
-        create_entity: true when the event introduces a new receiving-flow entity, select_entity when the
-        event addresses exactly one existing receiving-flow-owned service entity by declared business key, or
-        select_or_create_entity when the receiving service owns replay-safe create-or-resolve acquisition by declared
-        key. Boot error otherwise. Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2)
+      - '2. Destination declares a supported ownership model: mode: template with instance.by, mode: singleton with contained
+        state, one primary entity with contained data, or a child flow.'
+      - '3. Parent connect / route-plan authority supplies the target flow-instance context; static receiver-side
+        create_entity, select_entity, and select_or_create_entity are not repair paths.'
+      - '4. Handler writes and transitions remain same-flow owned under the supported receiver ownership model.'
+      enforcement: 'Input pin events into a stateful static flow (mode: static) MUST NOT declare create_entity,
+        select_entity, or select_or_create_entity as static multi-row ownership. Boot verification fails closed with
+        migration diagnostics. Exemptions: (1) stateless flows (initial_state: null) — no entity state machine. (2)
         Template flows (mode: template) — entity creation happens via create_flow_instance, not create_entity,
         select_entity, or select_or_create_entity.'
     cross_flow_writes:

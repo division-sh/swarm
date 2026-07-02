@@ -4405,8 +4405,9 @@ func TestRun_AllowsOnCompleteReferenceToPersistedFieldEvenWhenHandlerWritesField
 func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+	clearWave1ExpressionStaticCreateEntity(t, bundle, flowID, nodeID)
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
-	handler.CreateEntity = true
+	handler.CreateEntity = false
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		ID:        "ready",
 		Condition: `entity.revision_count == 0 && payload.score >= 0 && event.entity_id != ""`,
@@ -4459,6 +4460,19 @@ func clearWave1ExpressionFeedbackEmit(t *testing.T, bundle *runtimecontracts.Wor
 	}
 	feedbackHandler.Emit = runtimecontracts.EmitSpec{}
 	writeFlowHandler(t, bundle, flowID, nodeID, "task.feedback", feedbackHandler)
+}
+
+func clearWave1ExpressionStaticCreateEntity(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID string) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	node := flowView.Nodes[nodeID]
+	for eventType, handler := range node.EventHandlers {
+		handler.CreateEntity = false
+		writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+	}
 }
 
 func TestRun_AllowsCreateEntityGuardReferenceToSchemaInitializedField(t *testing.T) {
@@ -4771,7 +4785,7 @@ func TestRun_RejectsCreateEntityAccumulateWhenExpectedFromIsNotDynamicEntityFiel
 	}
 }
 
-func TestRun_RequiresCreateEntityForStatefulInputPinHandlers(t *testing.T) {
+func TestRun_DoesNotRequireRetiredStaticAcquisitionForStatefulInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	flowView, ok := bundle.FlowViewByID(flowID)
@@ -4787,12 +4801,13 @@ func TestRun_RequiresCreateEntityForStatefulInputPinHandlers(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
-		t.Fatalf("expected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
+		reportContains(report.Errors(), "missing_external_select_entity", "") {
+		t.Fatalf("static handlers must not be forced into retired acquisition, got %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsCreateEntityForStatefulInputPinHandlers(t *testing.T) {
+func TestRun_RejectsCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	flowView, ok := bundle.FlowViewByID(flowID)
@@ -4808,12 +4823,22 @@ func TestRun_AllowsCreateEntityForStatefulInputPinHandlers(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
-		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired static create_entity error, got %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsSelectEntityForStatefulInputPinHandlers(t *testing.T) {
+func TestRun_RejectsCreateEntityForStatefulDefaultStaticInputPinHandlers(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-create-entity-plus-accumulate"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired default-static create_entity error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsSelectEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -4833,15 +4858,12 @@ treasury-node:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
-		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
-	}
-	if reportContains(report.Errors(), "select_entity_validation", "") {
-		t.Fatalf("unexpected select_entity_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "select_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired static select_entity error, got %#v", report.Errors())
 	}
 }
 
-func TestRun_AllowsSelectOrCreateEntityForStatefulInputPinHandlers(t *testing.T) {
+func TestRun_RejectsSelectOrCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:
   id: treasury-node
@@ -4861,11 +4883,8 @@ treasury-node:
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
-		t.Fatalf("unexpected flow_boundary_create_entity_validation error, got %#v", report.Errors())
-	}
-	if reportContains(report.Errors(), "select_entity_validation", "") {
-		t.Fatalf("unexpected select_entity_validation error, got %#v", report.Errors())
+	if !reportContains(report.Errors(), "select_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired static select_or_create_entity error, got %#v", report.Errors())
 	}
 }
 
@@ -5118,7 +5137,7 @@ func TestRun_AllowsStatelessFlowInputPinHandlersWithoutCreateEntity(t *testing.T
 	}
 }
 
-func TestRun_RequiresCreateEntityForBackpropInputPinHandlers(t *testing.T) {
+func TestRun_DoesNotRequireRetiredStaticAcquisitionForBackpropInputPinHandlers(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
 	flowID := "child"
 	flowView, ok := bundle.FlowViewByID(flowID)
@@ -5152,8 +5171,9 @@ func TestRun_RequiresCreateEntityForBackpropInputPinHandlers(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity: true") {
-		t.Fatalf("expected flow_boundary_create_entity_validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "flow_boundary_create_entity_validation", "must declare create_entity") ||
+		reportContains(report.Errors(), "missing_external_select_entity", "") {
+		t.Fatalf("backprop input pin must not be forced into retired acquisition, got %#v", report.Errors())
 	}
 }
 
