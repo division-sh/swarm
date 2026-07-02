@@ -64,6 +64,24 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	}
 }
 
+func TestBuildShowsRootPrimaryEntity(t *testing.T) {
+	source := loadRootPrimaryEntitySource(t)
+	view := mustBuild(t, source, nil)
+
+	if view.Root.PrimaryEntity == nil {
+		t.Fatalf("root primary entity missing: %#v", view.Root)
+	}
+	if view.Root.PrimaryEntity.Type != "workspace" {
+		t.Fatalf("root primary entity type = %q, want workspace", view.Root.PrimaryEntity.Type)
+	}
+	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
+		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
+	}
+	if view.Root.PrimaryEntity.SourceFile == "" || !strings.HasSuffix(view.Root.PrimaryEntity.SourceFile, "entities.yaml") {
+		t.Fatalf("root primary entity source file = %q, want entities.yaml", view.Root.PrimaryEntity.SourceFile)
+	}
+}
+
 func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{BadConnectMapping: true})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
@@ -199,6 +217,40 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func loadRootPrimaryEntitySource(t testing.TB) semanticview.Source {
+	t.Helper()
+	root := writeRootPrimaryEntityContracts(t)
+	repo := authoringViewRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func writeRootPrimaryEntityContracts(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
+name: root-primary-entity
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows: []
+`)
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "entities.yaml"), `
+workspace:
+  org_id: text
+  region: text
+`)
+	return root
 }
 
 func loadDuplicateNodeIDContainedOpsSource(t testing.TB) semanticview.Source {
