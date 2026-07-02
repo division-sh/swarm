@@ -383,8 +383,9 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 				subscriptions = append(subscriptions, events.EventType(resolved))
 			}
 		}
-		produces := make([]events.EventType, 0, len(entry.Produces))
-		for _, evt := range entry.Produces {
+		effectiveProduces := semanticview.NodeEffectiveProduces(source, nodeID)
+		produces := make([]events.EventType, 0, len(effectiveProduces))
+		for _, evt := range effectiveProduces {
 			evt = workflowNodeExternalEventType(source, nodeID, evt)
 			if evt == "" {
 				continue
@@ -397,7 +398,7 @@ func LoadWorkflowNodes(source semanticview.Source) ([]WorkflowNode, error) {
 			Produces:         produces,
 			OwnedTransitions: append([]string{}, entry.OwnedTransitions...),
 			Timers:           workflowNodeTimerIDs(entry.Timers),
-			ExecutionType:    strings.TrimSpace(entry.ExecutionType),
+			ExecutionType:    runtimecontracts.EffectiveSystemNodeExecutionType(entry),
 			Implementation:   strings.TrimSpace(entry.Implementation),
 			StateTable:       strings.TrimSpace(entry.StateTable),
 			IdempotencyTable: strings.TrimSpace(entry.IdempotencyTable),
@@ -563,7 +564,7 @@ func workflowRuntimeNodeIDs(source semanticview.Source) []string {
 		if _, ok := seen[nodeID]; ok {
 			continue
 		}
-		if len(node.SubscribesTo) == 0 && len(node.OwnedTransitions) == 0 && len(node.Timers) == 0 {
+		if len(source.NodeRuntimeSubscriptions(nodeID)) == 0 && len(node.OwnedTransitions) == 0 && len(node.Timers) == 0 {
 			continue
 		}
 		seen[nodeID] = struct{}{}

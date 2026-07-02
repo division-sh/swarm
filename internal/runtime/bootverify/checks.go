@@ -668,20 +668,23 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			if strings.TrimSpace(node.ExecutionType) == "" {
+			if authoredID := strings.TrimSpace(node.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing required field execution_type", nodeLabel),
+					Message:  fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID),
 					Location: nodeLabel,
 				})
-			} else if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
-					Location: nodeLabel,
-				})
+			}
+			if strings.TrimSpace(node.ExecutionType) != "" {
+				if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+					c.invalidFindings = append(c.invalidFindings, Finding{
+						CheckID:  "invalid_field_detection",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
+						Location: nodeLabel,
+					})
+				}
 			}
 			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{
@@ -775,20 +778,23 @@ func (c *checkerContext) invalidFieldDetection() []Finding {
 				})
 				continue
 			}
-			if strings.TrimSpace(node.ExecutionType) == "" {
+			if authoredID := strings.TrimSpace(node.ID); !runtimecontracts.SystemNodeIDMatchesKey(nodeID, authoredID) {
 				c.invalidFindings = append(c.invalidFindings, Finding{
 					CheckID:  "invalid_field_detection",
 					Severity: "error",
-					Message:  fmt.Sprintf("node %s missing required field execution_type", nodeLabel),
+					Message:  fmt.Sprintf("node %s id %q must match map key", nodeLabel, authoredID),
 					Location: nodeLabel,
 				})
-			} else if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
-				c.invalidFindings = append(c.invalidFindings, Finding{
-					CheckID:  "invalid_field_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
-					Location: nodeLabel,
-				})
+			}
+			if strings.TrimSpace(node.ExecutionType) != "" {
+				if err := runtimecontracts.ValidateSystemNodeExecutionType(node.ExecutionType); err != nil {
+					c.invalidFindings = append(c.invalidFindings, Finding{
+						CheckID:  "invalid_field_detection",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s execution_type must be %s", nodeLabel, runtimecontracts.SystemNodeExecutionType),
+						Location: nodeLabel,
+					})
+				}
 			}
 			if len(c.source.NodeRuntimeSubscriptions(nodeID)) == 0 {
 				c.invalidFindings = append(c.invalidFindings, Finding{

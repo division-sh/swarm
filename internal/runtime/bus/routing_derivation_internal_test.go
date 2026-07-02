@@ -6,8 +6,21 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"time"
 )
+
+func TestRouteNodeLocalEventSetDerivesProducesFromHandlerEmits(t *testing.T) {
+	events := routeNodeLocalEventSet(runtimecontracts.SystemNodeContract{
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
+		},
+	})
+
+	if _, ok := events["task.done"]; !ok {
+		t.Fatalf("local events = %#v, want task.done derived from handler emit", events)
+	}
+}
 
 func TestRouteTableResolve_WildcardSubscriberMatchesActiveConcreteChildEventWithoutMaterializedKey(t *testing.T) {
 	const pattern = "component-scaffold/*/component.scaffolded"

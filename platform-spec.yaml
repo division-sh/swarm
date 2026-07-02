@@ -951,16 +951,17 @@ contract_formats:
       flows: []'
     schema_yaml: "initial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events:\
       \ [hello.requested]\n  outputs:\n    events: [hello.completed]"
-    nodes_yaml: "hello-node:\n  id: hello-node\n  execution_type: system_node\n  subscribes_to: [hello.requested]\n  produces:\
-      \ [hello.completed]\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
+    nodes_yaml: "hello-node:\n  event_handlers:\n    hello.requested:\n      advances_to: done\n      emit:\n        event: hello.completed\n\
       \        fields:\n          result: payload.message"
     events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"
     agents_yaml: '{}'
   produces_derivation: >-
-    The produces field on system nodes is OPTIONAL. If omitted, the platform derives it from every supported declarative
-    emit site at boot: handler top-level emit, rule-local emit, on_complete branch emit, accumulate.on_timeout emit, and
-    fan_out emit. If present, the verifier checks it matches actual emits (PRODUCES-DRIFT warning). Authors should omit
-    produces and let the platform derive it.
+    The produces field on system nodes is OPTIONAL. If omitted, the platform derives the effective production surface from
+    every supported declarative emit site at boot: handler top-level emit, rule-local emit, on_complete branch emit,
+    accumulate.on_timeout emit, and fan_out emit. Runtime routing, producer authority, and transition checks consume this
+    effective production surface, not raw authored produces. If present, produces is an explicit authored assertion surface:
+    the verifier checks it matches actual emits, including an explicit empty list, with a PRODUCES-DRIFT warning. Authors
+    should omit produces and let the platform derive it.
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
@@ -1693,7 +1694,8 @@ handler_specification:
       - writes is always a list
       - each item is exactly one of the five forms above
       - value and expression are mutually exclusive on the same write item (boot error if both present)
-      - source_event is optional — if omitted, the trigger event is the source
+      - source_event is optional — if omitted, the trigger event is the source; this effective default must be visible in
+        the normalized handler semantics used by boot and runtime
       - source_event payload must contain all fields referenced by direct and mapped writes (verified at boot)
       - literal writes do not reference source_event or handler context — the value is used as-is
       - computed writes do not reference source_event — they use the handler context directly
@@ -2053,17 +2055,28 @@ handler_specification:
     node_fields:
       description: Top-level fields on a system node declaration.
       required:
-        id: string — unique node identifier within the flow
-        execution_type: string — must be "system_node"
-        subscribes_to: list of event names this node receives
         event_handlers: map of event_name → handler declaration
       optional:
+        id: string — migration spelling for the node identifier; if omitted, the YAML map key is the effective node id.
+          If present as a plain value, it must exactly match the YAML map key. Existing rendered runtime-id templates such
+          as node-key-{instance_id} are subscriber naming templates, not a separate semantic node identity owner.
+        execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
+        subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
+          event_handlers keys when omitted. Wildcard/import-boundary escape-hatch subscriptions remain explicit.
+        produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
+          from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
+          emits.
         description: string — human-readable description
         state_schema: map — fields the node persists per entity (accumulator state)
         state_table: string — table name for node state persistence
         timers: list of timer declarations (see timer_model)
         gate_state: map — gate field definitions for this node (boolean flags on entity)
         permissions: list of platform permissions this node requires (e.g., create_flow_instance)
+      effective_semantics:
+        id: YAML map key, with same-value explicit id accepted during migration
+        execution_type: system_node
+        runtime_subscriptions: union of explicit subscribes_to entries and event_handlers keys
+        produces: events derived from supported declarative emit sites
     description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
       Every field used in nodes.yaml must be defined here.
   dependency_rules:
@@ -4584,8 +4597,10 @@ compliance:
   - Root-level nodes must not duplicate flow-level node IDs
   - All handoff events must have both an emitter (source flow) and subscriber (target flow or declarative handoff)
   node_coherence:
-  - Every event in event_handlers must appear in subscribes_to
-  - Every event in produces must have a payload schema in events.yaml
+  - The effective runtime subscription surface includes every event in event_handlers. Explicit subscribes_to is required
+    only for wildcard/import-boundary escape hatches that cannot be derived from exact handler keys.
+  - Every event in the effective production surface must have a payload schema in events.yaml. Explicit produces, when
+    authored, is an assertion checked against handler-derived emits.
   - Guards must reference fields that exist on the entity or in policy.yaml
   - advances_to states must be reachable from the current flow state space
   agent_coherence:

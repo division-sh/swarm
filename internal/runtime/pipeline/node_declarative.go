@@ -54,8 +54,9 @@ type ProductHookRegistry struct {
 
 func NewNode(contract SystemNodeContract, source semanticview.Source, engine HandlerExecutionEngine, hooks *ProductHookRegistry) NodeExecutor {
 	nodeID := strings.TrimSpace(contract.ID)
-	subscriptions := make([]events.EventType, 0, len(contract.SubscribesTo))
-	for _, evt := range contract.SubscribesTo {
+	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(contract)
+	subscriptions := make([]events.EventType, 0, len(effectiveSubscriptions))
+	for _, evt := range effectiveSubscriptions {
 		evt = strings.TrimSpace(evt)
 		if evt == "" {
 			continue
@@ -130,8 +131,9 @@ func (n *DeclarativeNode) Subscriptions() []events.EventType {
 	if n == nil {
 		return nil
 	}
-	out := make([]events.EventType, 0, len(n.contract.SubscribesTo))
-	for _, evt := range n.contract.SubscribesTo {
+	effectiveSubscriptions := runtimecontracts.EffectiveSystemNodeSubscriptions(n.contract)
+	out := make([]events.EventType, 0, len(effectiveSubscriptions))
+	for _, evt := range effectiveSubscriptions {
 		evt = strings.TrimSpace(evt)
 		if evt == "" {
 			continue
@@ -198,7 +200,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 			}
 		}
 	}
-	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsString(n.contract.SubscribesTo, eventType) {
+	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsEventType(n.Subscriptions(), events.EventType(eventType)) {
 		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
 			for candidateEventType, candidate := range n.contract.EventHandlers {
 				if strings.TrimSpace(candidateEventType) != bucket.EventType {
@@ -233,6 +235,19 @@ func (n *DeclarativeNode) resolvedHandlerForDelivery(evt Event) (SystemNodeEvent
 	}
 	resolved := workflowNodeEventHandlerResolutionForDelivery(n.source, n.NodeID(), evt)
 	return resolved.Handler, resolved.Matched
+}
+
+func containsEventType(values []events.EventType, want events.EventType) bool {
+	want = events.EventType(strings.TrimSpace(string(want)))
+	if want == "" {
+		return false
+	}
+	for _, value := range values {
+		if events.EventType(strings.TrimSpace(string(value))) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *ProductHookRegistry) Register(actionID string, handler ActionHandler) {

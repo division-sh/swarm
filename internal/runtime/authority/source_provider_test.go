@@ -53,6 +53,24 @@ func TestNewSourceProvider_UsesDeclaredRoleForProducerEvents(t *testing.T) {
 	}
 }
 
+func TestNewSourceProvider_UsesEffectiveSystemNodeProduces(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"work.started": {Emit: runtimecontracts.EmitSpec{Event: "work.completed"}},
+				},
+			},
+		},
+	}
+
+	provider := NewSourceProvider(semanticview.Wrap(bundle))
+	got := provider.ProducerEventsForRole("worker")
+	if len(got) != 1 || got[0] != "work.completed" {
+		t.Fatalf("ProducerEventsForRole(worker) = %#v, want [work.completed]", got)
+	}
+}
+
 func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	provider := NewSourceProvider(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{

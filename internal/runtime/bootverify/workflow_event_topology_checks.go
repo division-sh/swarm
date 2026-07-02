@@ -92,18 +92,7 @@ func (c *checkerContext) eventWarnings() []Finding {
 	for nodeID, node := range c.source.NodeEntries() {
 		nodeSource, _ := c.source.NodeContractSource(nodeID)
 		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range node.SubscribesTo {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, nodeSource.PackageKey, flowID, eventType)
-			} else {
-				addEventProofLocal(subscribedRefs, c.source, flowID, eventType)
-			}
-		}
-		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
+		for _, eventType := range semanticview.NodeEffectiveSubscriptions(c.source, nodeID) {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue

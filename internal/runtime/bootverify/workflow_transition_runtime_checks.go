@@ -123,7 +123,7 @@ func (c *checkerContext) transitionOwnership() []Finding {
 			continue
 		}
 		subs := stringSet(c.source.NodeRuntimeSubscriptions(nodeID))
-		produces := stringSet(node.Produces)
+		produces := stringSet(semanticview.NodeEffectiveProduces(c.source, nodeID))
 		for _, transitionID := range node.OwnedTransitions {
 			transitionID = strings.TrimSpace(transitionID)
 			if transitionID == "" {

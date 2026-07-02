@@ -1,6 +1,9 @@
 package contracts
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) {
 	bundle := &WorkflowContractBundle{
@@ -49,5 +52,77 @@ func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) 
 		if transition.ID == "auto-approve" {
 			t.Fatalf("derived fallback transition for rule without action: %#v", transition)
 		}
+	}
+}
+
+func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		Nodes: map[string]SystemNodeContract{
+			"worker": {
+				EventHandlers: map[string]SystemNodeEventHandler{
+					"task.start": {
+						DataAccumulation: WorkflowDataAccumulation{
+							Writes: []WorkflowDataWrite{{Field: "status"}},
+						},
+						Emit: EmitSpec{Event: "task.done"},
+					},
+					"task.review": {
+						Rules: []HandlerRuleEntry{{Emit: EmitSpec{Event: "task.approved"}}},
+					},
+					"task.timeout": {
+						Accumulate: &AccumulateSpec{
+							OnTimeout: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.expired"}},
+						},
+					},
+					"task.branch": {
+						Branch: []BranchSpec{{
+							Then: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.branch.then"}},
+							Else: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.branch.else"}},
+						}},
+						FanOut: &FanOutSpec{Emit: EmitSpec{Event: "task.child"}},
+					},
+				},
+			},
+		},
+	}
+
+	populateWorkflowSemantics(bundle)
+
+	node := bundle.Nodes["worker"]
+	if node.ID != "worker" {
+		t.Fatalf("normalized node ID = %q, want worker", node.ID)
+	}
+	if node.ExecutionType != SystemNodeExecutionType {
+		t.Fatalf("normalized execution_type = %q, want %q", node.ExecutionType, SystemNodeExecutionType)
+	}
+	effective, ok := bundle.NodeEffectiveSemantics("worker")
+	if !ok {
+		t.Fatal("missing effective node semantics")
+	}
+	if got, want := effective.ID, "worker"; got != want {
+		t.Fatalf("effective ID = %q, want %q", got, want)
+	}
+	if got, want := effective.ExecutionType, SystemNodeExecutionType; got != want {
+		t.Fatalf("effective execution type = %q, want %q", got, want)
+	}
+	if got, want := effective.RuntimeSubscriptions, []string{"task.branch", "task.review", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("effective subscriptions = %#v, want %#v", got, want)
+	}
+	if got, want := effective.Produces, []string{"task.approved", "task.branch.else", "task.branch.then", "task.child", "task.done", "task.expired"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("effective produces = %#v, want %#v", got, want)
+	}
+	handler, ok := bundle.NodeEventHandler("worker", "task.start")
+	if !ok {
+		t.Fatal("missing task.start handler")
+	}
+	if got, want := handler.DataAccumulation.SourceEvent, "task.start"; got != want {
+		t.Fatalf("effective source_event = %q, want %q", got, want)
+	}
+	transition, ok := bundle.DerivedHandlerTransition("worker", "task.start")
+	if !ok {
+		t.Fatal("missing task.start transition")
+	}
+	if got, want := transition.DataAccumulation.SourceEvent, "task.start"; got != want {
+		t.Fatalf("transition source_event = %q, want %q", got, want)
 	}
 }

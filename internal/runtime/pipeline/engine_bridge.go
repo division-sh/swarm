@@ -113,14 +113,14 @@ func isAccumulationTimeoutEvent(eventType events.EventType) bool {
 
 func findAccumulationTimeoutHandlerForBucket(source interface {
 	NodeEntries() map[string]runtimecontracts.SystemNodeContract
+	NodeRuntimeSubscriptions(nodeID string) []string
 	NodeEventHandlers(nodeID string) map[string]runtimecontracts.SystemNodeEventHandler
 }, bucket timeridentity.AccumulatorBucketRef) (runtimecontracts.SystemNodeEventHandler, bool) {
 	bucket = bucket.Normalize()
 	if source == nil || !bucket.Valid() {
 		return runtimecontracts.SystemNodeEventHandler{}, false
 	}
-	node, ok := source.NodeEntries()[bucket.NodeID]
-	if !ok || !containsString(node.SubscribesTo, "accumulate.timeout") {
+	if _, ok := source.NodeEntries()[bucket.NodeID]; !ok || !containsString(source.NodeRuntimeSubscriptions(bucket.NodeID), "accumulate.timeout") {
 		return runtimecontracts.SystemNodeEventHandler{}, false
 	}
 	for eventType, candidate := range source.NodeEventHandlers(bucket.NodeID) {

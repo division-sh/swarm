@@ -41,6 +41,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		CompositionConnects:    nil,
 		FlowAgents:             map[string][]FlowRequiredAgent{},
 		WritePinOwners:         map[string][]string{},
+		EffectiveNodes:         map[string]SystemNodeEffectiveSemantics{},
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
 		EventOwners:            map[string][]string{},
 		HandlerTransitionIndex: map[string]map[string]HandlerTransitionSemantic{},
@@ -94,7 +95,22 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	}
 	for nodeID, node := range bundle.Nodes {
 		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" || len(node.EventHandlers) == 0 {
+		if nodeID == "" {
+			continue
+		}
+		effective := SystemNodeEffectiveSemantics{
+			ID:                   EffectiveSystemNodeID(nodeID, node),
+			ExecutionType:        EffectiveSystemNodeExecutionType(node),
+			RuntimeSubscriptions: EffectiveSystemNodeSubscriptions(node),
+			Produces:             EffectiveSystemNodeProduces(node),
+		}
+		semantics.EffectiveNodes[nodeID] = effective
+		if strings.TrimSpace(node.ID) == "" || strings.TrimSpace(node.ExecutionType) == "" {
+			node.ID = effective.ID
+			node.ExecutionType = effective.ExecutionType
+			bundle.Nodes[nodeID] = node
+		}
+		if len(node.EventHandlers) == 0 {
 			continue
 		}
 		handlers := make(map[string]SystemNodeEventHandler, len(node.EventHandlers))
@@ -104,6 +120,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 			if rawEventType == "" {
 				continue
 			}
+			handler = DefaultSystemNodeHandlerSourceEvent(handler, rawEventType)
 			handlers[rawEventType] = handler
 			ownerEventType := strings.TrimSpace(bundle.resolveNodeEventOwnerPattern(nodeID, rawEventType))
 			if ownerEventType == "" {
@@ -555,7 +572,7 @@ func inferWorkflowTimerEvent(bundle *WorkflowContractBundle, node SystemNodeCont
 			return candidate
 		}
 	}
-	for _, subscribed := range node.SubscribesTo {
+	for _, subscribed := range EffectiveSystemNodeSubscriptions(node) {
 		subscribed = strings.TrimSpace(subscribed)
 		if subscribed == "" {
 			continue
