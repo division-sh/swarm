@@ -2,7 +2,9 @@ package timeridentity
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type TriggerKind string
@@ -44,6 +46,30 @@ func ParseStartTrigger(raw string) (Trigger, error) {
 
 func ParseCancelTrigger(raw string) (Trigger, error) {
 	return parseTrigger(raw, false)
+}
+
+func ParseDelayDuration(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	if duration, err := time.ParseDuration(raw); err == nil && duration > 0 {
+		return duration, true
+	}
+	if !strings.HasSuffix(raw, "d") {
+		return 0, false
+	}
+	daysRaw := strings.TrimSpace(strings.TrimSuffix(raw, "d"))
+	days, err := strconv.ParseInt(daysRaw, 10, 64)
+	if err != nil || days <= 0 {
+		return 0, false
+	}
+	const day = 24 * time.Hour
+	const maxDuration = time.Duration(1<<63 - 1)
+	if days > int64(maxDuration/day) {
+		return 0, false
+	}
+	return time.Duration(days) * day, true
 }
 
 func parseTrigger(raw string, allowBoot bool) (Trigger, error) {

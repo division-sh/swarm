@@ -82,4 +82,4 @@ workflow:
       owner: delivery-node
       start_on: state:approved
       cancel_on: state:completed
-      delay_minutes: 30
+      delay: 30m

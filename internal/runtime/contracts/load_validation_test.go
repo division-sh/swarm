@@ -221,6 +221,24 @@ worker:
 	}
 }
 
+func TestLoadWorkflowContractBundleRejectsRetiredTimerDurationAlias(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	root := t.TempDir()
+	writeFieldReconciliationBundle(t, root, "", `
+worker:
+  id: worker
+  timers:
+    - id: reminder
+      event: timer.reminder
+      delay_minutes: 5
+  event_handlers: {}
+`)
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !contractErrorContains(err, "RETIRED") || !contractErrorContains(err, "delay_minutes") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want retired delay_minutes rejection", err)
+	}
+}
+
 func writeFieldReconciliationBundle(t *testing.T, root, schemaExtra, nodes string) {
 	t.Helper()
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `

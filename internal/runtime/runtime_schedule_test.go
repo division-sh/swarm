@@ -304,6 +304,34 @@ func TestEnsureBootWorkflowSchedulesRegistersGlobalBootOneShotTimers(t *testing.
 	}
 }
 
+func TestEnsureBootWorkflowSchedulesSupportsCanonicalDayDelay(t *testing.T) {
+	store := &recordingRuntimeScheduleStore{}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID:      "boot_day",
+				Owner:   "runtime",
+				Event:   "timer.boot_day",
+				Delay:   "1d",
+				StartOn: "boot",
+			}},
+		},
+	}
+	before := time.Now().UTC()
+	err := ensureBootWorkflowSchedules(context.Background(), store, nil, semanticOnlyWorkflowRuntime{
+		source: semanticview.Wrap(bundle),
+	})
+	if err != nil {
+		t.Fatalf("ensureBootWorkflowSchedules: %v", err)
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("startup boot schedules = %#v, want 1 one-shot boot schedule", store.schedules)
+	}
+	if got := store.schedules[0].At; got.Before(before.Add(24*time.Hour)) || got.After(time.Now().UTC().Add(24*time.Hour+time.Second)) {
+		t.Fatalf("schedule At = %v, want roughly 1d after startup", got)
+	}
+}
+
 func TestEnsureBootWorkflowSchedulesPreservesActiveExactBootSchedule(t *testing.T) {
 	activeAt := time.Now().UTC().Add(-1 * time.Minute)
 	store := &recordingRuntimeScheduleStore{

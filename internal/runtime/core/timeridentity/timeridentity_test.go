@@ -1,6 +1,9 @@
 package timeridentity
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestParseStartTrigger(t *testing.T) {
 	trigger, err := ParseStartTrigger("state:active")
@@ -24,6 +27,38 @@ func TestParseTriggerRejectsUnprefixedValues(t *testing.T) {
 func TestParseCancelTriggerRejectsBoot(t *testing.T) {
 	if _, err := ParseCancelTrigger("boot"); err == nil {
 		t.Fatal("expected cancel_on boot to be rejected")
+	}
+}
+
+func TestParseDelayDurationSupportsGoDurationAndDayUnit(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want time.Duration
+	}{
+		{raw: "30m", want: 30 * time.Minute},
+		{raw: "1h30m", want: 90 * time.Minute},
+		{raw: "7d", want: 7 * 24 * time.Hour},
+	}
+	for _, tc := range tests {
+		t.Run(tc.raw, func(t *testing.T) {
+			got, ok := ParseDelayDuration(tc.raw)
+			if !ok {
+				t.Fatalf("ParseDelayDuration(%q) did not parse", tc.raw)
+			}
+			if got != tc.want {
+				t.Fatalf("ParseDelayDuration(%q) = %s, want %s", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseDelayDurationRejectsInvalidOrNonPositiveValues(t *testing.T) {
+	for _, raw := range []string{"", "0s", "-1s", "1.5d", "soon"} {
+		t.Run(raw, func(t *testing.T) {
+			if got, ok := ParseDelayDuration(raw); ok {
+				t.Fatalf("ParseDelayDuration(%q) = %s, want rejection", raw, got)
+			}
+		})
 	}
 }
 
