@@ -7672,6 +7672,36 @@ func TestRunForkRuntimeOwnerHarness_ActivateWithContractsReachesSelectedActivati
 	}
 }
 
+func TestRunForkRuntimeOwnerHarness_SelectedContractsBorrowedRequireExplicitData(t *testing.T) {
+	dsn, _, _ := testutil.StartPostgres(t)
+	setPostgresEnvFromDSN(t, dsn)
+	repo := repoRoot()
+	borrowedRoot := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(borrowedRoot, "package.yaml"), `
+name: borrowed-selected-contracts
+version: 1.0.0
+flows: []
+`)
+
+	var buf bytes.Buffer
+	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
+		"--store", "postgres",
+		"--contracts", borrowedRoot,
+		"--run", uuid.NewString(),
+		"--at", uuid.NewString(),
+	}, &buf)
+	if code != 1 {
+		t.Fatalf("runForkRuntimeOwnerHarness code=%d, want missing data-source failure; output=%s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "resolve workspace data source") ||
+		!strings.Contains(buf.String(), "workspace data source is required") {
+		t.Fatalf("output = %q, want borrowed selected contracts to require explicit workspace data", buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(borrowedRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
+		t.Fatalf("borrowed contracts data stat error = %v, want no default data source created", err)
+	}
+}
+
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
