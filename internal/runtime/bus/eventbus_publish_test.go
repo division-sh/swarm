@@ -2393,6 +2393,265 @@ func contains(items []string, want string) bool {
 	return false
 }
 
+func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	ctx := eventBusTestRunContext(t, db)
+	pg := &store.PostgresStore{DB: db}
+	module, bundle := mixedNodeRouteWorkflowModule(t)
+	const eventType = "child/child.start"
+	const rootEntityID = "11111111-1111-1111-1111-222222222222"
+	const childEntityID = "11111111-1111-1111-1111-333333333333"
+	emptyRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "project-observer",
+	}
+	targetRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "child-intake",
+		Target: events.RouteIdentity{
+			FlowInstance: "child",
+			EntityID:     childEntityID,
+		},
+	}
+
+	var pc *runtimepipeline.PipelineCoordinator
+	eb, err := runtimebus.NewEventBusWithOptions(pg, runtimebus.EventBusOptions{
+		ContractBundle: semanticview.Wrap(bundle),
+		RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			return []events.DeliveryRoute{emptyRoute, targetRoute}, nil
+		},
+		InterceptorProvider: func() []runtimebus.EventInterceptor {
+			if pc == nil {
+				return nil
+			}
+			return []runtimebus.EventInterceptor{pc}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	pc = runtimepipeline.NewPipelineCoordinatorWithOptions(eb, db, runtimepipeline.PipelineCoordinatorOptions{
+		Module:                  module,
+		EventReceiptsCapability: pg.CanonicalEventReceiptsCapability,
+	})
+	if _, ok := any(pc).(runtimebus.DeliveryRouteInterceptor); !ok {
+		t.Fatal("PipelineCoordinator does not implement DeliveryRouteInterceptor")
+	}
+	workflowStore := runtimepipeline.NewWorkflowInstanceStore(db)
+	for _, instance := range []runtimepipeline.WorkflowInstance{
+		{
+			InstanceID:      rootEntityID,
+			StorageRef:      rootEntityID,
+			WorkflowName:    "mixed-route",
+			WorkflowVersion: "v-test",
+			CurrentState:    "active",
+		},
+		{
+			InstanceID:      childEntityID,
+			StorageRef:      "child",
+			WorkflowName:    "child",
+			WorkflowVersion: "v-test",
+			CurrentState:    "active",
+		},
+	} {
+		if err := workflowStore.Upsert(ctx, instance); err != nil {
+			t.Fatalf("seed workflow instance %s: %v", instance.InstanceID, err)
+		}
+	}
+
+	live := eb.SubscribeInternal("workflow-runtime", events.EventType(eventType))
+	defer eb.Unsubscribe("workflow-runtime")
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType(eventType),
+		"source",
+		"",
+		[]byte(`{"entity_id":"`+rootEntityID+`"}`),
+		0,
+		eventBusTestRunID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, rootEntityID),
+		time.Now().UTC(),
+	)
+	plan, err := eb.CheckPublishRecipientPlan(ctx, evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, emptyRoute) || !deliveryRoutesContain(plan.DeliveryRoutes, targetRoute) {
+		t.Fatalf("delivery routes = %#v, want empty route %#v and target route %#v", plan.DeliveryRoutes, emptyRoute, targetRoute)
+	}
+	if err := eb.Publish(ctx, evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := eb.WaitForQuiescence(ctx); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+	assertNodeDeliveryStatus(t, db, evt.ID(), emptyRoute.SubscriberID, "delivered")
+	assertNodeDeliveryStatus(t, db, evt.ID(), targetRoute.SubscriberID, "delivered")
+	select {
+	case got := <-live:
+		t.Fatalf("consumed mixed node route event leaked to workflow-runtime carrier: %#v", got)
+	default:
+	}
+}
+
+func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			ID:        "accept",
+			Condition: "true",
+		}},
+	}
+	child := runtimecontracts.FlowContractView{
+		Path:  "child",
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"child.start": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"child-intake": {
+				ID:            "child-intake",
+				ExecutionType: "system_node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"child.start": handler,
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{
+		Path:  "",
+		Paths: runtimecontracts.FlowContractPaths{ID: "mixed-route"},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"child/child.start": {},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"project-observer": {
+				ID:            "project-observer",
+				ExecutionType: "system_node",
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"child/child.start": handler,
+				},
+			},
+		},
+		Children: []runtimecontracts.FlowContractView{child},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:    "mixed-route",
+			Version: "v-test",
+			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
+				"project-observer": {ID: "project-observer", ExecutionType: "system_node"},
+				"child-intake":     {ID: "child-intake", ExecutionType: "system_node"},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"project-observer": {
+					"child/child.start": handler,
+				},
+				"child-intake": {
+					"child.start": handler,
+				},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"mixed-route": &root,
+				"child":       &root.Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"mixed-route": {},
+			"child":       {},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	return &fixtureWorkflowModule{
+		source: source,
+		workflow: runtimepipeline.NewWorkflowDefinition("mixed-route", []runtimepipeline.WorkflowStage{
+			{Name: "active"},
+		}, nil),
+		workflowNodes: []runtimepipeline.WorkflowNode{
+			{
+				ID:            "project-observer",
+				Subscriptions: []events.EventType{"child/child.start"},
+				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
+					"child/child.start": {Consume: true},
+				},
+			},
+			{
+				ID:            "child-intake",
+				Subscriptions: []events.EventType{"child/child.start"},
+				Policies: map[string]runtimepipeline.WorkflowEventPolicy{
+					"child/child.start": {Consume: true},
+				},
+			},
+		},
+		guardRegistry:  runtimepipeline.NewContractGuardRegistry(source),
+		actionRegistry: runtimepipeline.NewContractActionRegistry(source),
+	}, bundle
+}
+
+func assertNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, want string) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND status = $3
+	`, eventID, nodeID, want).Scan(&count); err != nil {
+		t.Fatalf("query delivery status for %s: %v", nodeID, err)
+	}
+	if count != 1 {
+		rows, err := db.QueryContext(context.Background(), `
+			SELECT subscriber_id, COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(delivery_target_route::text, '')
+			FROM event_deliveries
+			WHERE event_id = $1::uuid
+			ORDER BY subscriber_id, delivery_target_route::text
+		`, eventID)
+		if err != nil {
+			t.Fatalf("delivery rows for %s status %q = %d, want 1; dump query failed: %v", nodeID, want, count, err)
+		}
+		defer rows.Close()
+		dump := make([]string, 0)
+		for rows.Next() {
+			var subscriber, status, reason, target string
+			if err := rows.Scan(&subscriber, &status, &reason, &target); err != nil {
+				t.Fatalf("scan delivery dump: %v", err)
+			}
+			dump = append(dump, subscriber+" status="+status+" reason="+reason+" target="+target)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate delivery dump: %v", err)
+		}
+		deadLetters := make([]string, 0)
+		deadRows, err := db.QueryContext(context.Background(), `
+			SELECT COALESCE(handler_node, ''), COALESCE(failure_type, ''), COALESCE(error_message, '')
+			FROM dead_letters
+			WHERE original_event_id = $1::uuid
+			ORDER BY created_at ASC
+		`, eventID)
+		if err == nil {
+			defer deadRows.Close()
+			for deadRows.Next() {
+				var node, failure, message string
+				if err := deadRows.Scan(&node, &failure, &message); err != nil {
+					t.Fatalf("scan dead letter dump: %v", err)
+				}
+				deadLetters = append(deadLetters, node+" failure="+failure+" error="+message)
+			}
+			if err := deadRows.Err(); err != nil {
+				t.Fatalf("iterate dead letter dump: %v", err)
+			}
+		}
+		t.Fatalf("delivery rows for %s status %q = %d, want 1; rows=%v dead_letters=%v", nodeID, want, count, dump, deadLetters)
+	}
+}
+
 func TestEventBusPublish_NestedThreeLevelChain_FromRootStartCompletesWithoutChildContinuation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-nested-three-levels")

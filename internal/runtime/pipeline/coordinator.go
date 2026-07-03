@@ -220,6 +220,17 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	return !consume, emitted, nil
 }
 
+func (pc *PipelineCoordinator) InterceptDeliveryRoute(ctx context.Context, evt events.Event, route events.DeliveryRoute) (bool, []events.Event, error) {
+	route = route.Normalized()
+	if route.SubscriberType != "node" || route.SubscriberID == "" {
+		return true, nil, nil
+	}
+	if route.Target.Normalized() != evt.TargetRoute().Normalized() {
+		return true, nil, fmt.Errorf("workflow node delivery route target mismatch for %s: route=%#v event=%#v", route.SubscriberID, route.Target.Normalized(), evt.TargetRoute().Normalized())
+	}
+	return pc.Intercept(withWorkflowNodeDeliveryRoute(ctx, route), evt)
+}
+
 func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType string, evt events.Event) (consume bool, handled bool) {
 	if strings.TrimSpace(eventType) == "" {
 		return false, false

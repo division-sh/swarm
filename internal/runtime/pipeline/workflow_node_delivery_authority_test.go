@@ -42,7 +42,7 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 	}
 }
 
-func TestPipelineCoordinatorInterceptSuppressesUntargetedAuthorityWhenTargetRouteOwnsExecution(t *testing.T) {
+func TestPipelineCoordinatorInterceptDeliveryRouteConsumesTargetWithoutGenericAuthorityLog(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := context.Background()
 	pc, bus := newDeliveryAuthorityCoordinator(t, db)
@@ -50,38 +50,29 @@ func TestPipelineCoordinatorInterceptSuppressesUntargetedAuthorityWhenTargetRout
 	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
 	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
 
-	genericPostCommit := make([]func(), 0, 1)
-	genericCtx := WithPipelinePostCommitActions(WithSuppressedUntargetedWorkflowNodeInterception(ctx), &genericPostCommit)
-	passthrough, _, err := pc.Intercept(genericCtx, evt)
-	if err != nil {
-		t.Fatalf("generic Intercept: %v", err)
-	}
-	if !passthrough {
-		t.Fatal("generic Intercept passthrough = false, want true when target route owns execution")
-	}
-	if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
-		t.Fatalf("generic runtime logs = %#v, want no delivery_authority_missing when untargeted authority is suppressed", bus.runtimeLogEntries())
-	}
-	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), "node-a", 0)
-
 	target := events.RouteIdentity{
 		EntityID: evt.EntityID(),
 	}
-	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), "node-a", target)
+	route := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "node-a",
+		Target:         target,
+	}
+	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), route.SubscriberID, target)
 	targetEvt := eventtest.TargetRouted(evt, target)
 	targetPostCommit := make([]func(), 0, 1)
-	targetCtx := WithPipelinePostCommitActions(WithSuppressedUntargetedWorkflowNodeInterception(ctx), &targetPostCommit)
-	passthrough, _, err = pc.Intercept(targetCtx, targetEvt)
+	targetCtx := WithPipelinePostCommitActions(ctx, &targetPostCommit)
+	passthrough, _, err := pc.InterceptDeliveryRoute(targetCtx, targetEvt, route)
 	if err != nil {
-		t.Fatalf("target Intercept: %v", err)
+		t.Fatalf("target InterceptDeliveryRoute: %v", err)
 	}
 	if passthrough {
-		t.Fatal("target Intercept passthrough = true, want false for consumed target-routed node event")
+		t.Fatal("target InterceptDeliveryRoute passthrough = true, want false for consumed target-routed node event")
 	}
 	if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
 		t.Fatalf("target runtime logs = %#v, want no false delivery_authority_missing log", bus.runtimeLogEntries())
 	}
-	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), "node-a", 1)
+	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), route.SubscriberID, 1)
 }
 
 func TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode(t *testing.T) {

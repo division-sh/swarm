@@ -22,6 +22,14 @@ type EventInterceptor interface {
 	Intercept(ctx context.Context, evt events.Event) (passthrough bool, deferred []events.Event, err error)
 }
 
+// DeliveryRouteInterceptor runs deterministic coordination for one
+// authoritative delivery route. EventBus uses this for workflow-node delivery
+// routes so Pipeline receives "execute this node for this route" semantics
+// instead of inferring route authority from an event-wide context.
+type DeliveryRouteInterceptor interface {
+	InterceptDeliveryRoute(ctx context.Context, evt events.Event, route events.DeliveryRoute) (passthrough bool, deferred []events.Event, err error)
+}
+
 // PayloadValidator validates canonical event-store admission before an event is
 // persisted or direct-recipient eligibility is reported. It does not own
 // producer-surface shaping or routing/delivery/source-target semantics.
