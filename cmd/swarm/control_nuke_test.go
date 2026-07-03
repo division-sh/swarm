@@ -14,7 +14,7 @@ import (
 )
 
 func TestControlNukeDryRunSendsV1RPCRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -52,7 +52,7 @@ func TestControlNukeDryRunSendsV1RPCRequest(t *testing.T) {
 }
 
 func TestControlNukeYesAppliesThroughV1RPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -84,7 +84,7 @@ func TestControlNukeYesAppliesThroughV1RPC(t *testing.T) {
 }
 
 func TestControlNukeSendsIdempotencyKey(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	for _, tc := range []struct {
 		name          string
 		args          []string
@@ -153,7 +153,7 @@ func TestControlNukeSendsIdempotencyKey(t *testing.T) {
 }
 
 func TestControlNukeNoOpResultExitsZero(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -175,7 +175,7 @@ func TestControlNukeNoOpResultExitsZero(t *testing.T) {
 }
 
 func TestControlNukeConfirmationAndNoCallPaths(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -221,7 +221,7 @@ func TestControlNukeConfirmationAndNoCallPaths(t *testing.T) {
 }
 
 func TestControlNukeRejectsBlankIdempotencyKeyBeforePromptOrRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -324,7 +324,7 @@ func TestControlNukeMapsFailureExitCodes(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				t.Fatal("unexpected request without SWARM_API_TOKEN")
 			},
-			wantStderr: "SWARM_API_TOKEN is required",
+			wantStderr: "API token source is required",
 		},
 		{
 			name:  "malformed response exits three",
@@ -350,7 +350,7 @@ func TestControlNukeMapsFailureExitCodes(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", tc.token)
+			setCLIAPITestToken(t, tc.token)
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -367,7 +367,7 @@ func TestControlNukeMapsFailureExitCodes(t *testing.T) {
 }
 
 func TestControlNukeTransportFailureExitsThree(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var stdout, stderr bytes.Buffer
 	opts := defaultRootCommandOptions()
 	opts.apiRPCEndpointOverride = "http://127.0.0.1:1/v1/rpc"

@@ -101,13 +101,13 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 
 func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	t.Setenv("SWARM_API_TOKEN", "test-token")
 	repo := t.TempDir()
 	configContracts := filepath.Join(t.TempDir(), "config-contracts")
 	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"contracts_path":     configContracts,
 		"platform_spec_path": configPlatform,
+		"api_token_file":     writeCLIAPITokenFile(t, "test-token"),
 	}))
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -170,7 +170,7 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 }
 
 func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -207,7 +207,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 }
 
 func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -239,7 +239,7 @@ func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 }
 
 func TestRunCommandBundleFingerprintMismatchFailsBeforeRunStart(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -263,7 +263,7 @@ func TestRunCommandBundleFingerprintMismatchFailsBeforeRunStart(t *testing.T) {
 }
 
 func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	var calls []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -304,7 +304,7 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 }
 
 func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	for _, codeName := range []string{"BUNDLE_SCOPE_REQUIRED", "BUNDLE_UNAVAILABLE", "BUNDLE_DATA_INTEGRITY_ERROR", "BUNDLE_MISMATCH", "EVENT_NOT_DECLARED", "PAYLOAD_VALIDATION_FAILED", "EVENT_PUBLISH_FAILED"} {
 		t.Run(codeName, func(t *testing.T) {
@@ -350,7 +350,7 @@ func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
 }
 
 func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -382,7 +382,7 @@ func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
 }
 
 func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -420,7 +420,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 }
 
 func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			if req.Method != "run.get" {
@@ -450,7 +450,7 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 }
 
 func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	wsSubscribed := make(chan struct{})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -486,7 +486,7 @@ func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
 }
 
 func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	wsSubscribed := make(chan struct{})
 	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
@@ -529,7 +529,7 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 }
 
 func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "bad-token")
+	setCLIAPITestToken(t, "bad-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -561,7 +561,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 }
 
 func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	var runGetCalls atomic.Int32
 	server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
@@ -602,7 +602,7 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 }
 
 func TestRunCommandMalformedWebSocketFailuresExitThree(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
 	for _, tc := range []struct {
 		name       string
@@ -692,13 +692,13 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
 		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
 		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
-		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "SWARM_API_TOKEN is required"},
+		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "API token source is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.token == "" {
-				_ = os.Unsetenv("SWARM_API_TOKEN")
+				setCLIAPITestToken(t, "")
 			} else {
-				t.Setenv("SWARM_API_TOKEN", tc.token)
+				setCLIAPITestToken(t, tc.token)
 			}
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRunCommandOptions(nil))
@@ -746,7 +746,7 @@ func TestRunCommandMapsRPCAndMalformedFailures(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

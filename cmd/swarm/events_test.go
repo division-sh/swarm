@@ -16,7 +16,7 @@ import (
 )
 
 func TestEventsListUsesEventListV1RPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -87,7 +87,7 @@ func TestEventsListUsesEventListV1RPC(t *testing.T) {
 }
 
 func TestEventViewUsesEventGetV1RPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -138,7 +138,7 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 }
 
 func TestEventReplayUsesEventReplayV1RPCWithSubscribersAndIdempotencyKey(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -195,7 +195,7 @@ func TestEventReplayUsesEventReplayV1RPCWithSubscribersAndIdempotencyKey(t *test
 }
 
 func TestEventReplayOmitsOptionalParamsWhenNotProvided(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -238,7 +238,7 @@ func TestEventReplayOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 }
 
 func TestEventsFollowUsesEventSubscribeV1WS(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, wsRequests := newEventObservationWSServer(t, eventObservationWSServerOptions{
 		events:         []map[string]any{validEventObservationEvent("event-live-1")},
 		closeAfterRows: true,
@@ -289,7 +289,7 @@ func TestEventsFollowUsesEventSubscribeV1WS(t *testing.T) {
 }
 
 func TestEventsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -351,7 +351,7 @@ func TestEventsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("args=%v code = %d, want 4 stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+		if !strings.Contains(stderr.String(), "API token source is required") {
 			t.Fatalf("stderr = %q, want token failure", stderr.String())
 		}
 		if calls.Load() != 0 {
@@ -372,7 +372,7 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 	for _, code := range replayConflictErrors {
 		code := code
 		t.Run("event replay "+code+" exits six", func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -646,7 +646,7 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -687,7 +687,7 @@ func TestEventsFollowMalformedWSFailsClosed(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server, _ := newEventObservationWSServer(t, eventObservationWSServerOptions{
 				subscriptionResult: tc.subscriptionResult,
 				events:             tc.events,
@@ -708,7 +708,7 @@ func TestEventsFollowMalformedWSFailsClosed(t *testing.T) {
 }
 
 func TestEventsFollowMapsHandshakeAuthToAuthExit(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var rpcCalls atomic.Int32
 	var wsCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

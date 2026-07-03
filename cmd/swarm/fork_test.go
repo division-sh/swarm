@@ -13,7 +13,7 @@ import (
 )
 
 func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	sourceRunID := "11111111-1111-1111-1111-111111111111"
 	forkEventID := "22222222-2222-2222-2222-222222222222"
 	bundleHash := validBundleHash("d")
@@ -59,7 +59,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 }
 
 func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	sourceRunID := "55555555-5555-5555-5555-555555555555"
 	bundleHash := validBundleHash("e")
 	var captured jsonRPCRequest
@@ -92,7 +92,7 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 }
 
 func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -201,7 +201,7 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

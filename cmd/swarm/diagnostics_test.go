@@ -18,7 +18,7 @@ import (
 )
 
 func TestRunsUseRunListV1RPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "run.list" {
 			t.Fatalf("method = %q, want run.list", req.Method)
@@ -143,7 +143,7 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 				if req.Method != tc.wantMethod {
 					t.Fatalf("method = %q, want %s", req.Method, tc.wantMethod)
@@ -222,7 +222,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
 				if callIndex < len(tc.lists) {
 					if req.Method != "run.list" {
@@ -352,7 +352,7 @@ func TestInvestigateTraceIsRetiredWithoutRequest(t *testing.T) {
 }
 
 func TestTraceUsesRunTraceSnapshot(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "run.trace" {
 			t.Fatalf("method = %q, want run.trace", req.Method)
@@ -425,7 +425,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 }
 
 func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "run.trace" {
 			t.Fatalf("method = %q, want run.trace", req.Method)
@@ -484,7 +484,7 @@ func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
 }
 
 func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
 		if req.Method != "run.trace" {
 			t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
@@ -603,7 +603,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 }
 
 func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var capturedUntil string
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
 		switch callIndex {
@@ -684,7 +684,7 @@ func wantFullTraceFilterParams() map[string]any {
 }
 
 func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, callIndex int) map[string]any {
 		switch callIndex {
 		case 0:
@@ -757,7 +757,7 @@ func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 				wsRows:           []map[string]any{validRunCommandTraceRow("evt-follow")},
 				wsCloseAfterRows: true,
@@ -782,7 +782,7 @@ func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 }
 
 func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
 			if req.Method != "run.list" {
@@ -841,7 +841,7 @@ func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 }
 
 func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var mu sync.Mutex
 	rpcRequests := []jsonRPCRequest{}
 	wsRequests := []jsonRPCRequest{}
@@ -966,7 +966,7 @@ func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
 }
 
 func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var mu sync.Mutex
 	wsRequests := []jsonRPCRequest{}
 	recoveredRowSent := make(chan struct{})
@@ -1076,7 +1076,7 @@ func TestTraceFollowClassifiesPlainEOFAsRetryableTransportClose(t *testing.T) {
 }
 
 func TestTraceFollowCtrlCDetachesWithoutRunStop(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	wsSubscribed := make(chan struct{})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -1108,7 +1108,7 @@ func TestTraceFollowCtrlCDetachesWithoutRunStop(t *testing.T) {
 }
 
 func TestTraceFollowMalformedWebSocketFailuresExitThree(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	for _, tc := range []struct {
 		name       string
 		serverOpts runCommandServerOptions
@@ -1149,7 +1149,7 @@ func TestTraceFollowMalformedWebSocketFailuresExitThree(t *testing.T) {
 }
 
 func TestHealthUsesHealthCheck(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "health.check" {
 			t.Fatalf("method = %q, want health.check", req.Method)
@@ -1211,7 +1211,7 @@ func TestInvestigateHealthIsRetiredWithoutRequest(t *testing.T) {
 }
 
 func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -1305,7 +1305,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 			if code != 4 {
 				t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+			if !strings.Contains(stderr.String(), "API token source is required") {
 				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
 			}
 			if calls.Load() != 0 {
@@ -1322,7 +1322,7 @@ func TestOmittedRunResolverFailsClosedWhenNoRunsExist(t *testing.T) {
 		{"trace"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 				if req.Method != "run.list" {
 					t.Fatalf("method = %q, want run.list", req.Method)
@@ -1652,7 +1652,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

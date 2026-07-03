@@ -13,7 +13,7 @@ import (
 )
 
 func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -83,7 +83,7 @@ func TestEventPublishUsesEventPublishV1RPCWithBoundParams(t *testing.T) {
 }
 
 func TestEventPublishSerializesTargetRouteParam(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -126,7 +126,7 @@ func TestEventPublishSerializesTargetRouteParam(t *testing.T) {
 }
 
 func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -161,7 +161,7 @@ func TestEventPublishPassesFlowScopedEventNameToV1RPC(t *testing.T) {
 }
 
 func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -192,7 +192,7 @@ func TestEventPublishBundleHashSerializesCanonicalParamAndMapsUnsupported(t *tes
 }
 
 func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -242,7 +242,7 @@ func TestEventPublishPayloadEntityIDServerRejectionMapsSupportedCLISurface(t *te
 }
 
 func TestEventPublishLegacyBundleFingerprintSerializesBundleRef(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -270,7 +270,7 @@ func TestEventPublishLegacyBundleFingerprintSerializesBundleRef(t *testing.T) {
 }
 
 func TestEventPublishOmitsOptionalParamsWhenNotProvided(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -301,7 +301,7 @@ func TestEventPublishOmitsOptionalParamsWhenNotProvided(t *testing.T) {
 }
 
 func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -372,7 +372,7 @@ func TestEventPublishFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+	if !strings.Contains(stderr.String(), "API token source is required") {
 		t.Fatalf("stderr = %q, want token failure", stderr.String())
 	}
 	if calls.Load() != 0 {
@@ -572,7 +572,7 @@ func TestEventPublishMapsFailureExitCodes(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -669,7 +669,7 @@ func TestEventPublishMalformedResultsFailClosed(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

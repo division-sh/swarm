@@ -11841,16 +11841,16 @@ cli_specification:
         source_order:
         - explicit_api_flags
         - explicit_context_flag
-        - existing_api_environment
-        - existing_api_config
         - live_project_scoped_context
         - known_dead_or_stale_project_context_fail_closed
         - selected_or_default_global_context
+        - existing_api_config
         - built_in_loopback_default
         current_behavior: >
-          `swarm doctor --target` explains explicit API flag, environment, config, project-root, Swarm-dir, current
+          `swarm doctor --target` explains explicit API flag, config, project-root, Swarm-dir, current
           rollout store/data, and local context registry/identity facts. API-backed commands consume the same target
-          order through the shared CLI API resolver after #1614. Unavailable facts MUST be reported as unavailable
+          order through the shared CLI API resolver after #1614 and #1636. Client-side `SWARM_API_SERVER`,
+          `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are not target/auth sources. Unavailable facts MUST be reported as unavailable
           rather than inferred from PID, port, URL, or health bundle fingerprint. A project context may be selected
           implicitly only when exactly one descriptor exists for the canonical project root and that descriptor validates
           `ok`; mixed live/stale or otherwise non-ok project descriptors fail closed.
@@ -12143,13 +12143,16 @@ cli_specification:
     api_connection_auth_config_precedence:
       promoted_by: '#844'
       loopback_default_implemented_by: '#1124'
-      implementation_status: implemented_loopback_default
+      client_env_removed_by: '#1636'
+      implementation_status: implemented_loopback_default_no_client_env_sources
       canonical_owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence
       scope: >
         Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
         discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
-        `SWARM_API_SERVER`, `SWARM_API_TOKEN`, `SWARM_API_TOKEN_FILE`, `SWARM_CONFIG`, XDG config, and built-in
-        defaults through one shared resolver. When no explicit token source is configured, the shared resolver may
+        project/selected context descriptors, `SWARM_CONFIG`, XDG config, typed config, and built-in defaults
+        through one shared resolver. `SWARM_API_SERVER`, `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are removed as
+        client-side API target/auth sources and fail closed with replacement guidance when present. When no explicit
+        token source is configured, the shared resolver may
         use the fixed built-in dev API token only for numeric loopback API targets. This contract does not add OpenRPC behavior, retry behavior,
         output rendering, root/global `--config`, inline token flags, or serve listener binding.
       applies_to:
@@ -12163,15 +12166,19 @@ cli_specification:
       - Output mode, logging verbosity, retry, and color.
       precedence_order:
       - flag
-      - environment
+      - context_descriptor
       - config_file
       - built_in_default
       api_server:
         accepted_sources:
           flag: --api-server <url>
-          environment: SWARM_API_SERVER
+          context_descriptor: project/selected context descriptor api_server
           config_key: api_server
           built_in_default: http://127.0.0.1:8081
+        rejected_sources:
+          SWARM_API_SERVER: >
+            Removed by #1636. Client-side API target env is hidden mutable source authority; use `--api-server`,
+            `--context`, a project/selected context, or config `api_server`.
         value_model: >
           The configured value is an API server base URL, not a direct `/v1/rpc` endpoint. It MUST include an
           `http` or `https` scheme and host, MUST NOT include query or fragment components, and SHOULD use an
@@ -12184,20 +12191,24 @@ cli_specification:
       api_token:
         accepted_sources:
           flag_file: --api-token-file <path>
-          environment_token: SWARM_API_TOKEN
-          environment_file: SWARM_API_TOKEN_FILE
+          context_descriptor: project/selected context descriptor auth
           config_file_key: api_token_file
         source_order:
         - --api-token-file
-        - SWARM_API_TOKEN
-        - SWARM_API_TOKEN_FILE
+        - context descriptor auth
         - config api_token_file
         - built-in loopback default
         rejected_sources:
+          SWARM_API_TOKEN: >
+            Removed as a client-side API token source by #1636. Use `--api-token-file`, context descriptor auth, or
+            config `api_token_file`. Server-side `swarm serve` API auth source ownership is a separate seam tracked by
+            #1647.
+          SWARM_API_TOKEN_FILE: >
+            Removed as a client-side API token-file source by #1636. Use `--api-token-file`, context descriptor auth,
+            or config `api_token_file`.
           --api-token: >
             Not promoted. Inline token flags leak secrets into shell history and process listings; operators
-            must use `SWARM_API_TOKEN` for ephemeral credentials or token-file sources for file-backed
-            credentials.
+            must use token-file, context descriptor, or future secure-source owners for file-backed credentials.
           config api_token: >
             Not promoted. The config file may point at a token file but MUST NOT store the bearer token inline.
         token_file_rule: >
@@ -12208,8 +12219,8 @@ cli_specification:
           token_value: swarm-dev-loopback-api-token
           source: built-in-loopback-default
           applies_when: >
-            Applies only after `--api-token-file`, `SWARM_API_TOKEN`, `SWARM_API_TOKEN_FILE`, and config
-            `api_token_file` are all absent, and only when the API target host is numeric loopback.
+            Applies only after `--api-token-file`, context descriptor auth, and config `api_token_file` are all
+            absent, and only when the API target host is numeric loopback.
           allowed_target_hosts:
           - 127.0.0.0/8
           - ::1
@@ -12282,11 +12293,15 @@ cli_specification:
       - '#848 output modes/shared renderer; spec promoted, implementation pending'
       - '#846 error-channel and exit-code classification; closed first slice'
       - '#844 later behavior child for API config/auth resolver implementation'
+      - '#1636 client-side API target/auth env removal'
+      - '#1647 server-side swarm serve API token secure-source ownership'
       - '#884/#750 serve listener enable-disable controls and runtime topology siblings'
       - '#743 swarm run behavior and follow semantics'
       - '`--no-retry` retry policy'
       implementation_boundaries:
       - 'API-backed command leaves consume one cmd/swarm resolver for this owner.'
+      - 'Client-side `SWARM_API_SERVER`, `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are invalid sources after #1636.'
+      - 'Server-side `swarm serve` API auth token sourcing remains split to #1647.'
       - 'No root/global --config, inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
       - 'Future API-backed CLI commands MUST consume this owner rather than the ignored review artifact.'
     contract_platform_spec_path_resolution:
@@ -12733,7 +12748,7 @@ cli_specification:
           - '`swarm serve` MCP listener bind address.'
           not_applies_to:
           - '`swarm run` local foreground listener startup.'
-          - API client connection/auth configuration such as `--api-server`, `SWARM_API_SERVER`, and `api_server`.
+          - API client connection/auth configuration such as `--api-server`, context descriptors, and `api_server`.
           - '`swarm serve --config`, which remains command-local runtime configuration.'
           source_order:
           - flag
@@ -14076,7 +14091,7 @@ cli_specification:
       - exact /v1/rpc bundle.register call with only content_yaml, optional data_blob, and optional idempotency_key
       - exact /v1/rpc bundle.delete call with only bundle_hash, optional force, optional dry_run, and optional idempotency_key
       - local directory packaging proves traversal/root escape, symlink fail-closed behavior, ignored file/dir policy, slash-relative NFC paths, duplicate and ASCII case-collision failure, text-vs-every-discovered-flow-data split including empty raw data, deterministic ordering, and no bundle_hash param
-      - invalid args, invalid local envelope/data blob files, invalid local contracts directories, and missing SWARM_API_TOKEN make zero API calls
+      - invalid args, invalid local envelope/data blob files, invalid local contracts directories, and missing API token source make zero API calls
       - human and --json output render only server-owned result fields
       - BUNDLE_NOT_FOUND, BUNDLE_REGISTER_CONFLICT, BUNDLE_HAS_ACTIVE_RUNS, BUNDLE_DELETE_IN_PROGRESS, IDEMPOTENCY_CONFLICT, invalid params, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/hash-owner bundle reads or writes from CLI
@@ -14110,7 +14125,7 @@ cli_specification:
       - no direct DB/store/runtime/fork harness access from CLI
       - cross-bundle targets select already loaded/boot-pinned RuntimeContextManager BundleContexts; valid but unloaded/unavailable targets fail with BUNDLE_UNAVAILABLE and corrupt target catalog bytes fail with BUNDLE_DATA_INTEGRITY_ERROR
       - DB-loaded same-bundle source loading is exercised through /v1/rpc run.fork, not a direct CLI runtime/store helper
-      - missing SWARM_API_TOKEN, invalid args, and legacy harness flags make zero API calls
+      - missing API token source, invalid args, and legacy harness flags make zero API calls
       - RUN_NOT_FOUND, EVENT_NOT_FOUND, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, IDEMPOTENCY_CONFLICT, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
     forkchat:
       command: swarm forkchat new|resume|list|view|delete
@@ -20685,8 +20700,8 @@ api_specification:
     auth_token_disposition:
       v1_model: >
         User-facing API bearer-token sources are governed by
-        cli_specification.foundations.api_connection_auth_config_precedence. `SWARM_API_TOKEN` remains the
-        current direct environment-token implementation source until behavior consumes that owner.
+        cli_specification.foundations.api_connection_auth_config_precedence. Client-side `SWARM_API_TOKEN` is not
+        a valid API bearer-token source after #1636; server-side `swarm serve` API auth sourcing remains tracked by #1647.
         `SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` are retired and MUST NOT authorize /v1/rpc
         or /v1/ws.
       auth_boundary_bug_fix: "The current bug where /api/rpc and /api/ws bypass operator auth is moot under v1 \u2014 one\

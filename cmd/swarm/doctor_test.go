@@ -346,6 +346,31 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 	}
 }
 
+func TestDoctorTargetRejectsRemovedAPIClientEnv(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:19002")
+	t.Setenv("SWARM_API_TOKEN", "env-token")
+	t.Setenv("SWARM_API_TOKEN_FILE", writeCLIAPITokenFile(t, "env-file-token"))
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"doctor", "--target",
+		"--contracts", filepath.Join(repo, "contracts"),
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"client-side API environment sources are no longer accepted", "SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "--api-server", "--api-token-file"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+	if stdout.String() != "" {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
 func TestDoctorTargetConsumesRuntimeConfigStoreAndData(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
@@ -640,6 +665,9 @@ func TestPlatformSpecLocalTargetResolutionAuthorityPromoted(t *testing.T) {
 		if !stringSliceContains(target.TargetPrecedence.SourceOrder, want) {
 			t.Fatalf("target precedence missing %q: %#v", want, target.TargetPrecedence.SourceOrder)
 		}
+	}
+	if stringSliceContains(target.TargetPrecedence.SourceOrder, "existing_api_environment") {
+		t.Fatalf("target precedence still includes removed API environment source: %#v", target.TargetPrecedence.SourceOrder)
 	}
 	for _, class := range []string{"target_diagnostic", "read_only_inspection", "mutating_runtime_state", "control_destructive", "startup_and_run"} {
 		if _, ok := target.CommandClasses[class]; !ok {

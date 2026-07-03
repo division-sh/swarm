@@ -225,7 +225,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 			if code != cliExitAuth {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitAuth, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+			if !strings.Contains(stderr.String(), "API token source is required") {
 				t.Fatalf("stderr = %q, want shared missing-token error", stderr.String())
 			}
 			if calls.Load() != 0 {
