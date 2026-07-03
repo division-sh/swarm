@@ -932,7 +932,8 @@ contract_formats:
         save_field: 'save_{entity_type}_{field}({value}) writes exactly one top-level declared field authorized by agents.yaml
           entity_writes.<entity_type>.save or entity_writes.<flow_id>.<entity_type>.save.'
         update_path: 'update_{entity_type}_{field}_{subpath}({value}) updates one generated top-level subpath for a writable
-          named-object field. The value schema is the exact declared subpath type.'
+          named-object field. The value schema is the exact declared subpath type. Runtime lowering consumes the same
+          declared dotted replacement owner as save_entity_field.'
         materialized_field_exclusion: 'Fields declaring materialize_from, and every nested subpath below them, MUST NOT
           appear in generated write tools or writable-path summaries. They are runtime-owned projection fields.'
         create_rule: 'create authorization in entity_writes is author evidence for prompt/boot coverage. Path alpha does not
@@ -1251,10 +1252,14 @@ runtime_enforcement:
       explicit `initial:` or the type default.
   save_entity_field:
     rule: |
-      save_entity_field targets only declared non-envelope fields on the
-      inferred entity contract. Wave 1 writes are top-level only;
-      dotted-path writes are rejected. Immutable fields reject
-      post-create writes. Values must satisfy the declared type.
+      save_entity_field targets only declared non-envelope top-level fields
+      or declared dotted subpaths on the inferred entity contract. Dotted
+      paths must resolve from a declared top-level field through declared
+      named types; the operation is whole-value replacement at the resolved
+      field path, not keyed or indexed contained-state mutation. Bracket,
+      index, and dynamic path writes are rejected. Immutable fields reject
+      post-create writes. Materialized/runtime-owned fields are rejected.
+      Values must satisfy the resolved declared type.
   get_entity:
     rule: |
       get_entity returns the full entity object with every declared
@@ -5013,14 +5018,16 @@ tool_model:
         input:
           flow_instance: string — required existing addressing surface for the owning flow instance
           entity_id: string — required
-          field: string — required top-level field name. Must exist on the inferred entity contract and must not be an envelope field.
+          field: string — required declared top-level field name or declared dotted subpath. Must resolve on the inferred
+            entity contract and must not be an envelope field.
           value: any — required, the value to write
         output:
           entity_id: string
           field: string
           revision: integer — new revision after write
-        validation: The field name must exist on the inferred entity contract. Undeclared fields, dotted-path writes, envelope
-          fields, and post-create writes to immutable fields are rejected.
+        validation: The field path must exist on the inferred entity contract. Undeclared fields, envelope fields,
+          bracket/index/dynamic paths, materialized/runtime-owned fields, and post-create writes to immutable fields are
+          rejected. Values must satisfy the resolved declared type.
       search_entities:
         description: Query entities by state, field values, or metadata. Returns matching entities from entity_state.
         input:

@@ -327,22 +327,64 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 			})
 			continue
 		}
-		if !item.SaveEntity || writeDecl.Save.All {
+		if !item.SaveEntity {
 			continue
 		}
 		for _, field := range item.SaveFields {
-			if writeDecl.Save.AllowsField(field) {
+			if err := wave1PromptSaveEntityFieldPathValid(source, contract, field); err != nil {
+				findings = append(findings, Finding{
+					CheckID:  "entity_writer_coverage",
+					Severity: SeverityHardInvalidity,
+					Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for undeclared field path %s on flow %s entity_type %s: %v", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, err),
+					Location: item.PromptFile,
+				})
 				continue
 			}
-			findings = append(findings, Finding{
-				CheckID:  "entity_writer_coverage",
-				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for field %s on flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
-				Location: item.PromptFile,
-			})
+			if writeDecl.Save.All {
+				continue
+			}
+			if !wave1PromptSaveEntityFieldAuthorized(writeDecl.Save, field) {
+				findings = append(findings, Finding{
+					CheckID:  "entity_writer_coverage",
+					Severity: SeverityHardInvalidity,
+					Message:  fmt.Sprintf("agent %s prompt declares save_entity_field for field %s on flow %s entity_type %s without matching agents.yaml entity_writes.%s.save authorization", item.AgentID, field, defaultFlowLabel(contract.FlowID), contract.EntityType, contract.EntityType),
+					Location: item.PromptFile,
+				})
+			}
 		}
 	}
 	return findings
+}
+
+func wave1PromptSaveEntityFieldPathValid(source semanticview.Source, contract wave1EntityContractView, field string) error {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return fmt.Errorf("field is required")
+	}
+	_, err := wave1ResolveEntityPath(source, contract.FlowID, "entity."+field)
+	return err
+}
+
+func wave1PromptSaveEntityFieldAuthorized(rule runtimecontracts.AgentEntityWriteRule, field string) bool {
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return false
+	}
+	if rule.All {
+		return true
+	}
+	root, _, _ := strings.Cut(field, ".")
+	root = strings.TrimSpace(root)
+	for _, candidate := range rule.Fields {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if candidate == field || candidate == root {
+			return true
+		}
+	}
+	return false
 }
 
 func wave1PromptEntityWriteDecl(entry runtimecontracts.AgentRegistryEntry, contract wave1EntityContractView) (runtimecontracts.AgentEntityWriteDecl, bool) {

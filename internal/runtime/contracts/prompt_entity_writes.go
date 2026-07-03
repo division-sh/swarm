@@ -18,7 +18,7 @@ type PromptEntityWriteEvidence struct {
 	SaveFields   []string
 }
 
-var promptSaveFieldPattern = regexp.MustCompile("`([a-zA-Z_][a-zA-Z0-9_]*)`")
+var promptSaveFieldPattern = regexp.MustCompile("`([a-zA-Z_][a-zA-Z0-9_]*(?:\\.[a-zA-Z_][a-zA-Z0-9_]*)*)`")
 
 func DerivePromptEntityWriteEvidence(bundle *WorkflowContractBundle) ([]PromptEntityWriteEvidence, error) {
 	if bundle == nil {
