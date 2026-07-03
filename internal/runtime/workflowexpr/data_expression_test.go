@@ -90,6 +90,10 @@ func TestValidateValueExpression_RejectsLegacyEventReceiverProjections(t *testin
 		`event.entity_id`,
 		`event.flow_instance`,
 		`event.entity_id == "ent-1"`,
+		`event["entity_id"]`,
+		`event['flow_instance']`,
+		`event["entity_id"] == "ent-1"`,
+		`event[payload.key]`,
 	} {
 		t.Run(expression, func(t *testing.T) {
 			err := ValidateValueExpression(expression)
@@ -120,6 +124,26 @@ func TestEventReferences_OnlyMatchesRootEventContext(t *testing.T) {
 			want:       []string{"flow_instance"},
 		},
 		{
+			name:       "bracket root",
+			expression: `event["entity_id"]`,
+			want:       []string{"entity_id"},
+		},
+		{
+			name:       "single-quote bracket root",
+			expression: `event['flow_instance']`,
+			want:       []string{"flow_instance"},
+		},
+		{
+			name:       "mixed route access",
+			expression: `event["source"].entity_id == event.target["flow_instance"]`,
+			want:       []string{"source.entity_id", "target.flow_instance"},
+		},
+		{
+			name:       "nested bracket route access",
+			expression: `event["source"]["flow_id"]`,
+			want:       []string{"source.flow_id"},
+		},
+		{
 			name:       "nested payload event object",
 			expression: `payload.event.entity_id`,
 			want:       nil,
@@ -132,6 +156,11 @@ func TestEventReferences_OnlyMatchesRootEventContext(t *testing.T) {
 		{
 			name:       "nested event object with spaced dot",
 			expression: `payload . event.entity_id`,
+			want:       nil,
+		},
+		{
+			name:       "nested event bracket object",
+			expression: `payload.event["entity_id"]`,
 			want:       nil,
 		},
 		{
@@ -155,12 +184,54 @@ func TestEventReferences_OnlyMatchesRootEventContext(t *testing.T) {
 	}
 }
 
+func TestValidateValueExpression_RejectsUnsupportedEventBracketRefs(t *testing.T) {
+	tests := []struct {
+		expression string
+		want       string
+	}{
+		{expression: `event["entity_id"]`, want: "event.entity_id is unsupported"},
+		{expression: `event['flow_instance']`, want: "event.flow_instance is unsupported"},
+		{expression: `event["source"]["entity_id"]["extra"]`, want: "event.source.entity_id is a route identity scalar"},
+		{expression: `event["source.entity_id"]`, want: `event["source.entity_id"] is not a supported handler event context field`},
+		{expression: `event[payload.key]`, want: "event[...] dynamic field access is unsupported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.expression, func(t *testing.T) {
+			err := ValidateValueExpression(tt.expression)
+			if err == nil {
+				t.Fatalf("expected %q to reject unsupported event bracket ref", tt.expression)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateValueExpression_AllowsSupportedEventBracketRefs(t *testing.T) {
+	for _, expression := range []string{
+		`event["id"]`,
+		`event["source"]["entity_id"]`,
+		`event["source"].flow_instance`,
+		`event.target["flow_id"]`,
+		`event["target_set"]`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			if err := ValidateValueExpression(expression); err != nil {
+				t.Fatalf("ValidateValueExpression(%q) error = %v", expression, err)
+			}
+		})
+	}
+}
+
 func TestValidateValueExpression_AllowsNestedAuthorEventFields(t *testing.T) {
 	for _, expression := range []string{
 		`payload.event.entity_id`,
 		`payload.event.flow_instance == "flow-1"`,
 		`_entity.event.flow_instance`,
 		`payload.event.entity_id == event.source.entity_id`,
+		`payload.event["entity_id"]`,
+		`_entity.event["flow_instance"]`,
 	} {
 		t.Run(expression, func(t *testing.T) {
 			if err := ValidateValueExpression(expression); err != nil {

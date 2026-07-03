@@ -4492,6 +4492,18 @@ func TestRun_RejectsLegacyEventReceiverProjectionReferences(t *testing.T) {
 			want:      "event.flow_instance is unsupported",
 		},
 		{
+			checkID:   "condition_expression_validation",
+			name:      "condition bracket entity_id",
+			condition: `event["entity_id"] != ""`,
+			want:      "event.entity_id is unsupported",
+		},
+		{
+			checkID:   "condition_expression_validation",
+			name:      "condition dynamic bracket",
+			condition: `event[payload.key] != ""`,
+			want:      "event[...] dynamic field access is unsupported",
+		},
+		{
 			name:    "emit field entity_id",
 			checkID: "emit_field_expression_validation",
 			emitFields: map[string]runtimecontracts.ExpressionValue{
@@ -4504,6 +4516,14 @@ func TestRun_RejectsLegacyEventReceiverProjectionReferences(t *testing.T) {
 			checkID: "emit_field_expression_validation",
 			emitFields: map[string]runtimecontracts.ExpressionValue{
 				"summary.flow": runtimecontracts.CELExpression("event.flow_instance"),
+			},
+			want: "event.flow_instance is unsupported",
+		},
+		{
+			name:    "emit field bracket flow_instance",
+			checkID: "emit_field_expression_validation",
+			emitFields: map[string]runtimecontracts.ExpressionValue{
+				"summary.flow": runtimecontracts.CELExpression(`event["flow_instance"]`),
 			},
 			want: "event.flow_instance is unsupported",
 		},
