@@ -346,6 +346,24 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 			wantErr: "reserved",
 		},
 		{
+			name: "profile key whitespace rejected",
+			limits: map[string]LLMProviderLimitPolicy{
+				"anthropic ": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+			},
+			wantErr: "profile key must not contain leading or trailing whitespace",
+		},
+		{
+			name: "model key whitespace rejected",
+			limits: map[string]LLMProviderLimitPolicy{
+				"anthropic": {
+					Models: map[string]LLMProviderLimitPolicy{
+						"regular ": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+					},
+				},
+			},
+			wantErr: "model key must not contain leading or trailing whitespace",
+		},
+		{
 			name: "model nested models rejected",
 			limits: map[string]LLMProviderLimitPolicy{
 				"anthropic": {

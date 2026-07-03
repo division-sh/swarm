@@ -189,14 +189,18 @@ func concurrencyPolicyForModel(base config.LLMProviderLimitPolicy, resolvedModel
 }
 
 func (c *llmProviderAdmissionController) Admit(ctx context.Context, policy llmProviderAdmissionPolicy) (func(), error) {
+	cancelRateReservation := noopProviderAdmissionRelease
 	if policy.Rate.Enabled {
-		if err := c.admitRate(ctx, policy); err != nil {
+		var err error
+		cancelRateReservation, err = c.admitRate(ctx, policy)
+		if err != nil {
 			return noopProviderAdmissionRelease, err
 		}
 	}
 	if policy.Concurrency.Enabled {
 		concurrencyRelease, err := c.acquireConcurrency(ctx, policy)
 		if err != nil {
+			cancelRateReservation()
 			return noopProviderAdmissionRelease, err
 		}
 		return concurrencyRelease, nil
@@ -204,27 +208,30 @@ func (c *llmProviderAdmissionController) Admit(ctx context.Context, policy llmPr
 	return noopProviderAdmissionRelease, nil
 }
 
-func (c *llmProviderAdmissionController) admitRate(ctx context.Context, policy llmProviderAdmissionPolicy) error {
+func (c *llmProviderAdmissionController) admitRate(ctx context.Context, policy llmProviderAdmissionPolicy) (func(), error) {
 	key := strings.TrimSpace(policy.RateBucketKey)
 	if key == "" {
-		return fmt.Errorf("llm provider rate admission bucket key is required")
+		return noopProviderAdmissionRelease, fmt.Errorf("llm provider rate admission bucket key is required")
 	}
 	bucket := c.rateBucket(key)
 	wait, scheduled, timedOut := bucket.reserve(policy.Rate.Limit, policy.Rate.Period, policy.Rate.MaxWait)
 	if timedOut {
-		return newLLMProviderAdmissionRateLimitedError(policy)
+		return noopProviderAdmissionRelease, newLLMProviderAdmissionRateLimitedError(policy)
+	}
+	cancelReservation := func() {
+		bucket.cancelReservation(scheduled)
 	}
 	if wait <= 0 {
-		return nil
+		return cancelReservation, nil
 	}
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		bucket.cancelReservation(scheduled)
-		return ctx.Err()
+		return noopProviderAdmissionRelease, ctx.Err()
 	case <-timer.C:
-		return nil
+		return cancelReservation, nil
 	}
 }
 

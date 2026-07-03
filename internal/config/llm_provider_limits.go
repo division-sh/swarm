@@ -38,6 +38,9 @@ func (c *Config) validateLLMProviderLimits() error {
 		if trimmedProfile == "" {
 			return fmt.Errorf("llm.provider_limits profile key is required")
 		}
+		if profile != trimmedProfile {
+			return fmt.Errorf("llm.provider_limits.%q: profile key must not contain leading or trailing whitespace", profile)
+		}
 		if _, err := llmselection.ResolveActiveBackend(trimmedProfile); err != nil {
 			return fmt.Errorf("llm.provider_limits.%s: %w", trimmedProfile, err)
 		}
@@ -70,6 +73,9 @@ func validateLLMProviderLimitPolicy(location string, policy LLMProviderLimitPoli
 		trimmedModel := strings.TrimSpace(model)
 		if trimmedModel == "" {
 			return fmt.Errorf("%s.models: model key is required", location)
+		}
+		if model != trimmedModel {
+			return fmt.Errorf("%s.models.%q: model key must not contain leading or trailing whitespace", location, model)
 		}
 		if err := validateLLMProviderLimitPolicy(location+".models."+trimmedModel, policy.Models[model], false); err != nil {
 			return err
