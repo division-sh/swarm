@@ -5466,6 +5466,7 @@ flow_model:
     template_instance_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1543'
+      policy_default_tracker: '#1595'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveFlowTemplateInstance
       declaration_surface:
       - 'mode: template'
@@ -5476,9 +5477,10 @@ flow_model:
         Template flow instances are the common shape for process/case/job state
         that needs independent lifecycle, routing, timers, retries, agents, or
         audit. #1543 owns the receiver template-instance declaration and verifier
-        contract: `mode: template` flows MUST declare `instance.by`,
-        `on_missing`, and `on_conflict`; runtime route-plan lowering remains
-        tracked by #1545.
+        contract: `mode: template` flows MUST declare `instance.by`. #1595
+        owns policy default expansion: when omitted, `on_missing` defaults to
+        `create` and `on_conflict` defaults to `reject`; runtime route-plan
+        lowering remains tracked by #1545.
       primary_entity_dependency: >
         `instance.by` is checked against the flow primary entity resolved by
         internal/runtime/contracts.WorkflowContractBundle.ResolveFlowPrimaryEntity.
@@ -5491,9 +5493,12 @@ flow_model:
         material is ordered exactly as declared in `instance.by` so identity is
         deterministic and unambiguous.
       policy_rule: >
-        `on_missing` is required and MUST be `create` or `reject`. `on_conflict`
-        is required and MUST be `reject` or `reuse`. Missing or unsupported
-        policy values fail closed during verification.
+        `on_missing` MAY be omitted and defaults to `create`. `on_conflict`
+        MAY be omitted and defaults to `reject`. When explicitly authored,
+        `on_missing` MUST be `create` or `reject`, and `on_conflict` MUST be
+        `reject` or `reuse`. Unsupported, explicit empty, or null-like policy
+        values fail closed during verification. Generated/expanded authoring
+        views MUST show the effective explicit policy values.
       connect_time_lifecycle_rule: >
         For normal parent `connect` into an addressless template receiver, the
         runtime owner is the EventBus connect-time template instance lifecycle

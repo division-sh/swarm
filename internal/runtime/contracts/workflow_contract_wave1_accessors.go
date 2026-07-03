@@ -35,7 +35,7 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s is not mode: template", flowID)
 	}
 	if schema.Instance.Empty() {
-		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s mode: template must declare instance.by, instance.on_missing, and instance.on_conflict", flowID)
+		return TemplateInstanceContract{}, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s mode: template must declare instance.by", flowID)
 	}
 	primary, err := b.ResolveFlowPrimaryEntity(flowID)
 	if err != nil {
@@ -45,11 +45,11 @@ func (b *WorkflowContractBundle) ResolveFlowTemplateInstance(flowID string) (Tem
 	if err != nil {
 		return TemplateInstanceContract{}, err
 	}
-	onMissing, err := validateTemplateInstancePolicy(flowID, "on_missing", schema.Instance.OnMissing, "create", "reject")
+	onMissing, err := validateTemplateInstancePolicy(flowID, "on_missing", schema.Instance.OnMissing, schema.Instance.OnMissingDeclared, "create", "create", "reject")
 	if err != nil {
 		return TemplateInstanceContract{}, err
 	}
-	onConflict, err := validateTemplateInstancePolicy(flowID, "on_conflict", schema.Instance.OnConflict, "reject", "reuse")
+	onConflict, err := validateTemplateInstancePolicy(flowID, "on_conflict", schema.Instance.OnConflict, schema.Instance.OnConflictDeclared, "reject", "reject", "reuse")
 	if err != nil {
 		return TemplateInstanceContract{}, err
 	}
@@ -363,10 +363,13 @@ func templateInstanceIsListType(typeRef string) bool {
 		strings.HasPrefix(typeRef, "[]")
 }
 
-func validateTemplateInstancePolicy(flowID, field, value string, allowed ...string) (string, error) {
+func validateTemplateInstancePolicy(flowID, field, value string, declared bool, defaultValue string, allowed ...string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.%s is required", defaultPrimaryEntityFlowLabel(flowID), field)
+		if !declared {
+			return defaultValue, nil
+		}
+		return "", fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance.%s is empty", defaultPrimaryEntityFlowLabel(flowID), field)
 	}
 	for _, option := range allowed {
 		if value == option {

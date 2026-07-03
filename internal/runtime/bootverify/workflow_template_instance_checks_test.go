@@ -29,8 +29,6 @@ name: scoring
 mode: template
 instance:
   by: `+tc.instanceBy+`
-  on_missing: create
-  on_conflict: reject
 pins:
   inputs:
     events: []
@@ -180,13 +178,14 @@ account:
 			want: "on_missing",
 		},
 		{
-			name: "missing on_conflict policy",
+			name: "explicit empty on_conflict policy",
 			flowSchema: `
 name: scoring
 mode: template
 instance:
   by: account_id
   on_missing: create
+  on_conflict: ""
 pins:
   inputs:
     events: []

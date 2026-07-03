@@ -52,6 +52,24 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 	}
 }
 
+func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
+	contractsRoot := writeDescribeDefaultedTemplatePolicyContracts(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe",
+		"--contracts", contractsRoot,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("describe stderr = %q, want empty", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "instance: by=account_id on_missing=create on_conflict=reject") {
+		t.Fatalf("describe output missing defaulted policy readback:\n%s", stdout.String())
+	}
+}
+
 func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 	contractsRoot := writeDescribeRootPrimaryEntityContracts(t)
 	var stdout, stderr bytes.Buffer
@@ -79,6 +97,47 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
 	}
+}
+
+func writeDescribeDefaultedTemplatePolicyContracts(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
+name: defaulted-template-policy
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: template
+`)
+	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
+	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+name: scoring
+mode: template
+instance:
+  by: account_id
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`)
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "tools.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "agents.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+account:
+  account_id: uuid
+`)
+	return root
 }
 
 func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {

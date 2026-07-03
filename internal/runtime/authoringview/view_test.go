@@ -68,6 +68,26 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	}
 }
 
+func TestBuildShowsDefaultedTemplateInstancePolicies(t *testing.T) {
+	source := loadDefaultedTemplatePolicySource(t)
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	view := mustBuild(t, source, &report)
+
+	scoring := flowByID(t, view, "scoring")
+	if scoring.TemplateInstance == nil {
+		t.Fatalf("scoring template instance missing")
+	}
+	if got := strings.Join(scoring.TemplateInstance.By, ","); got != "account_id" {
+		t.Fatalf("scoring instance.by = %q, want account_id", got)
+	}
+	if scoring.TemplateInstance.OnMissing != "create" || scoring.TemplateInstance.OnConflict != "reject" {
+		t.Fatalf("scoring defaulted instance policy = %#v, want create/reject", scoring.TemplateInstance)
+	}
+	if diagnosticByCheckIDOrNil(view, "template_instance_validation") != nil {
+		t.Fatalf("template_instance_validation diagnostic present for defaulted policies: %#v", view.Diagnostics)
+	}
+}
+
 func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 	source := loadRootPrimaryEntitySource(t)
 	view := mustBuild(t, source, nil)
@@ -194,13 +214,21 @@ func outputPinByName(t testing.TB, flow FlowView, name string) OutputPinView {
 
 func diagnosticByCheckID(t testing.TB, view View, checkID string) DiagnosticView {
 	t.Helper()
-	for _, diagnostic := range view.Diagnostics {
-		if diagnostic.CheckID == checkID {
-			return diagnostic
-		}
+	if diagnostic := diagnosticByCheckIDOrNil(view, checkID); diagnostic != nil {
+		return *diagnostic
 	}
 	t.Fatalf("diagnostic %q not found in %#v", checkID, view.Diagnostics)
 	return DiagnosticView{}
+}
+
+func diagnosticByCheckIDOrNil(view View, checkID string) *DiagnosticView {
+	for _, diagnostic := range view.Diagnostics {
+		if diagnostic.CheckID == checkID {
+			diagnostic := diagnostic
+			return &diagnostic
+		}
+	}
+	return nil
 }
 
 func containedOperationByTargetAndOp(t testing.TB, flow FlowView, target, op string) ContainedOperationView {
@@ -226,6 +254,52 @@ func containsString(values []string, want string) bool {
 func loadRootPrimaryEntitySource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := writeRootPrimaryEntityContracts(t)
+	repo := authoringViewRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func loadDefaultedTemplatePolicySource(t testing.TB) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	writeAuthoringViewTestFile(t, filepath.Join(root, "package.yaml"), `
+name: defaulted-template-policy
+version: "1.0.0"
+platform_version: ">=1.6.0"
+flows:
+  - id: scoring
+    flow: scoring
+    mode: template
+`)
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
+name: scoring
+mode: template
+instance:
+  by: account_id
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`)
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "tools.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "agents.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), "{}\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
+account:
+  account_id: uuid
+`)
 	repo := authoringViewRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

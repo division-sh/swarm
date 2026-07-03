@@ -939,6 +939,48 @@ func TestEventBusPublish_ConnectRoutePlanCreateRejectSameEventRetryUsesCommitted
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanDefaultedPoliciesMatchCreateReject(t *testing.T) {
+	source := connectRoutePlanInstanceKeySourceWithDefaultedPolicies(t)
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress(uuid.NewString(),
+		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish defaulted policies: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %d, want 1", len(store.activations))
+	}
+	activation := store.activations[0]
+	if activation.Config["template_instance_on_missing"] != "create" || activation.Config["template_instance_on_conflict"] != "reject" {
+		t.Fatalf("activation policy config = %#v, want defaulted create/reject", activation.Config)
+	}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "consumer-node-" + activation.Instance.InstanceID,
+		Target: events.RouteIdentity{
+			FlowID:       "consumer",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[evt.ID()], want) || len(store.routes[evt.ID()]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want defaulted create/reject route %#v", store.routes[evt.ID()], want)
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanCreatesRenamedTemplateInstanceKeyTarget(t *testing.T) {
 	source := connectRoutePlanRenamedInstanceKeySourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
@@ -1901,14 +1943,24 @@ func connectRoutePlanInstanceKeySource(t testing.TB) semanticview.Source {
 	return connectRoutePlanInstanceKeySourceWithPolicy(t, "reject", "reject")
 }
 
+func connectRoutePlanInstanceKeySourceWithDefaultedPolicies(t testing.TB) semanticview.Source {
+	t.Helper()
+	return connectRoutePlanInstanceKeySourceWithPolicyLines(t, "")
+}
+
 func connectRoutePlanInstanceKeySourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
+	return connectRoutePlanInstanceKeySourceWithPolicyLines(t, "  on_missing: "+onMissing+"\n  on_conflict: "+onConflict+"\n")
+}
+
+func connectRoutePlanInstanceKeySourceWithPolicyLines(t testing.TB, policyLines string) semanticview.Source {
 	t.Helper()
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t, "one", onMissing, onConflict)
+	root := writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t, "one", policyLines)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -2056,6 +2108,11 @@ func writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t testing.TB, delivery 
 
 func writeConnectRoutePlanInstanceKeyFixtureWithPolicy(t testing.TB, delivery, onMissing, onConflict string) string {
 	t.Helper()
+	return writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t, delivery, "  on_missing: "+onMissing+"\n  on_conflict: "+onConflict+"\n")
+}
+
+func writeConnectRoutePlanInstanceKeyFixtureWithPolicyLines(t testing.TB, delivery, policyLines string) string {
+	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: instance-key-connect-route-plan-bus
@@ -2100,9 +2157,7 @@ name: consumer
 mode: template
 instance:
   by: vertical_id
-  on_missing: `+onMissing+`
-  on_conflict: `+onConflict+`
-pins:
+`+policyLines+`pins:
   inputs:
     events:
       - name: deploy_completed
