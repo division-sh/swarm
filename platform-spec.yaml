@@ -10938,7 +10938,7 @@ test_specification:
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'
-    implementation_status: source_authority_only
+    implementation_status: implemented_first_slice
     owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
     purpose: >
       Define the public deterministic scenario/injection runner semantics for
@@ -10950,11 +10950,11 @@ test_specification:
     selected_public_surface:
       command_family: swarm test
       command_catalog_status: >
-        `swarm test` is the selected user-facing runner family for later
-        implementation. The concrete cli_specification.command_catalog row,
-        flags, exit codes, and output rendering remain a separate
-        implementation child that consumes this owner. Until that child lands,
-        no `swarm test` behavior is implied by this source-authority slice.
+        `swarm test` is the selected and implemented first-slice user-facing
+        runner family. The concrete cli_specification.command_catalog row
+        defines the implemented flags, exit codes, output rendering, and
+        proof expectations while this source-authority section remains the
+        semantic owner for scenario format and runner behavior.
       scenario_roots:
       - contracts/tests
       - contracts/flows/<flow>/tests
@@ -12873,6 +12873,55 @@ cli_specification:
       - deployment-mode profile management
       - trusted runtime identity and context registry consumption
       - store/data migration and swarm run behavior
+    test:
+      command: swarm test [scenario-file ...] [--contracts <path>] [--platform-spec <path>] [--timeout <duration>] [--poll-interval <duration>]
+      tier: should_have
+      implementation_status: implemented_first_slice
+      owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
+      behavior: >-
+        Public deterministic scenario-runner CLI consumer. The command discovers v1 YAML scenarios only under
+        contracts/tests/... and contracts/flows/<flow>/tests/...; automatic discovery treats YAML files with version, steps,
+        or invalid top-level scenario sentinels as scenario documents and leaves fixture YAML uninterpreted, while explicit
+        scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the
+        canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing
+        event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps
+        call /v1/rpc event.publish; mailbox approve/reject/defer steps locate exactly one pending mailbox item through
+        mailbox.list and then call the matching mailbox decision RPC. The command waits for test quiescence by repeatedly
+        reading canonical run.trace delivery state until pending and in_progress deliveries are absent; --timeout is a safety
+        failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, and
+        entity.list. The command does not activate mock/local providers, implement ProviderContract, test live agent sessions/
+        tool calls/audit/spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/
+        mailbox tables directly.
+      flags:
+      - name: --contracts <path>
+        behavior: Contract package root used for bundle loading and scenario discovery. Omitted uses config contracts_path,
+          then repo-local contracts when present, then the repo root.
+      - name: --platform-spec <path>
+        behavior: platform-spec.yaml path used for bundle loading. Omitted uses config platform_spec_path, then the repo-local
+          default platform-spec.yaml.
+      - name: --timeout <duration>
+        behavior: Positive safety deadline for test quiescence waits. Reaching it fails the scenario with diagnostic context.
+      - name: --poll-interval <duration>
+        behavior: Positive interval between canonical readback probes while waiting for test quiescence.
+      output:
+        success_detail: >-
+          One scenario ok line per scenario file followed by
+          `swarm test ok: scenarios=<n>`.
+      exit_codes:
+        success: 0
+        cli_validation: 2
+        transport_or_malformed_response: 3
+        auth_or_missing_token: 4
+        not_found: 5
+        scenario_rejected: 6
+      proof_expectations:
+      - exact /v1/rpc event.publish calls with event_name, payload, canonical bundle_hash, optional run_id/source_event_id/
+        target/emitter/idempotency_key params only; no direct DB/store/runtime/EventBus publish path
+      - mailbox decisions are preceded by mailbox.list and fail closed unless exactly one pending mailbox item matches
+      - scenario discovery rejects files outside contracts/tests and contracts/flows/<flow>/tests
+      - fixture from paths cannot escape the contract root, set overrides are applied before schema validation, and invalid
+        fixture/schema variants fail before mutation
+      - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
     workspace_build:
       command: swarm workspace build --backend claude_cli [--image <tag>]
       group: getting_started

@@ -54,6 +54,7 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 	prefix = stripRootPersistentFlagsForCLIAPIPlacement(prefix)
 	leafCommands := [][]string{
 		{"runs"},
+		{"test"},
 		{"status"},
 		{"trace"},
 		{"health"},
