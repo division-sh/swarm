@@ -820,7 +820,7 @@ func mailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecontracts.Workflow
 				ItemType: runtimecontracts.LiteralExpression("review_request"),
 				Severity: runtimecontracts.LiteralExpression("urgent"),
 				Summary:  runtimecontracts.LiteralExpression("Review validation package"),
-				EntityID: runtimecontracts.RefExpression("event.entity_id"),
+				EntityID: runtimecontracts.RefExpression("_entity.id"),
 				Payload: map[string]runtimecontracts.ExpressionValue{
 					"review_kind": runtimecontracts.LiteralExpression("validation"),
 					"who":         runtimecontracts.RefExpression("payload.who"),
@@ -900,7 +900,7 @@ func conditionalRuleMailboxWriteSupportedSurfaceBundle(t *testing.T) *runtimecon
 					Mailbox: &runtimecontracts.MailboxWriteSpec{
 						ItemType: runtimecontracts.LiteralExpression("approval"),
 						Summary:  runtimecontracts.LiteralExpression("Review refund"),
-						EntityID: runtimecontracts.RefExpression("event.entity_id"),
+						EntityID: runtimecontracts.RefExpression("_entity.id"),
 						Payload: map[string]runtimecontracts.ExpressionValue{
 							"review_kind": runtimecontracts.LiteralExpression("conditional"),
 							"who":         runtimecontracts.RefExpression("payload.who"),

@@ -2013,9 +2013,9 @@ action:
     summary:
       literal: Review validation package
     entity_id:
-      ref: event.entity_id
+      ref: _entity.id
     flow_instance:
-      ref: event.flow_instance
+      ref: _entity.flow_instance
     payload:
       review_kind:
         ref: payload.review_kind
@@ -2033,7 +2033,7 @@ action:
 	if got := handler.Action.Mailbox.ItemType.Literal; got != "review_request" {
 		t.Fatalf("Mailbox.ItemType.Literal = %#v", got)
 	}
-	if got := handler.Action.Mailbox.EntityID.Ref; got != "event.entity_id" {
+	if got := handler.Action.Mailbox.EntityID.Ref; got != "_entity.id" {
 		t.Fatalf("Mailbox.EntityID.Ref = %q", got)
 	}
 	if got := handler.Action.Mailbox.Payload["review_kind"].Ref; got != "payload.review_kind" {

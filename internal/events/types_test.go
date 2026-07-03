@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -84,6 +85,80 @@ func TestEventTargetSetDoesNotMaterializeFirstTargetProjection(t *testing.T) {
 	}
 	if got := delivered.TargetRoutes(); len(got) != 0 {
 		t.Fatalf("delivered TargetRoutes() count = %d, want 0 after singular delivery target", len(got))
+	}
+}
+
+func TestEventContextMapOmitsLegacyReceiverProjectionFields(t *testing.T) {
+	envelope := EnvelopeForSourceRoute(EventEnvelope{
+		EntityID:     "legacy-ent",
+		FlowInstance: "legacy-flow",
+		Scope:        EventScopeEntity,
+	}, RouteIdentity{EntityID: "source-ent", FlowInstance: "source-flow", FlowID: "source"})
+	envelope = EnvelopeForTargetRoute(envelope, RouteIdentity{EntityID: "target-ent", FlowInstance: "target-flow", FlowID: "target"})
+	evt := NewProjectionEvent(
+		"evt-1",
+		EventType("custom.triggered"),
+		"runtime",
+		"task-1",
+		nil,
+		0,
+		"run-1",
+		"parent-1",
+		envelope,
+		time.Date(2026, 7, 3, 1, 2, 3, 0, time.UTC),
+	)
+
+	got := evt.ContextMap("ready")
+	if _, ok := got["entity_id"]; ok {
+		t.Fatalf("ContextMap exposed legacy entity_id = %#v", got["entity_id"])
+	}
+	if _, ok := got["flow_instance"]; ok {
+		t.Fatalf("ContextMap exposed legacy flow_instance = %#v", got["flow_instance"])
+	}
+	for _, field := range []string{"id", "type", "trigger_event_type", "source_agent", "task_id", "source", "target", "source_event_id", "emitted_at", "current_state", "run_id", "scope"} {
+		if _, ok := got[field]; !ok {
+			t.Fatalf("ContextMap missing supported event field %q in %#v", field, got)
+		}
+	}
+}
+
+func TestValidateEventContextReferenceRejectsLegacyReceiverProjections(t *testing.T) {
+	for _, ref := range []string{"entity_id", "flow_instance"} {
+		t.Run(ref, func(t *testing.T) {
+			err := ValidateEventContextReference(ref)
+			if err == nil {
+				t.Fatalf("expected %s to be unsupported", ref)
+			}
+			if !strings.Contains(err.Error(), "_entity.") {
+				t.Fatalf("error = %q, want replacement guidance", err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateEventContextReferenceAllowsRouteIdentity(t *testing.T) {
+	for _, ref := range []string{
+		"id",
+		"type",
+		"source.entity_id",
+		"source.flow_instance",
+		"source.flow_id",
+		"target.entity_id",
+		"target.flow_instance",
+		"target.flow_id",
+		"target_set",
+		"source_event_id",
+		"emitted_at",
+		"trigger_event_type",
+		"current_state",
+		"run_id",
+		"scope",
+	} {
+		t.Run(ref, func(t *testing.T) {
+			if err := ValidateEventContextReference(ref); err != nil {
+				t.Fatalf("ValidateEventContextReference(%q) error = %v", ref, err)
+			}
+		})
 	}
 }
 

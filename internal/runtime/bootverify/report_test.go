@@ -3819,7 +3819,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
 		Fields: map[string]runtimecontracts.ExpressionValue{
-			"entity_id": runtimecontracts.RefExpression("event.entity_id"),
+			"entity_id": runtimecontracts.RefExpression("_entity.id"),
 		},
 	})
 
@@ -4451,7 +4451,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	handler.CreateEntity = false
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		ID:        "ready",
-		Condition: `entity.revision_count == 0 && payload.score >= 0 && event.entity_id != ""`,
+		Condition: `entity.revision_count == 0 && payload.score >= 0 && event.source.entity_id != ""`,
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -4463,11 +4463,78 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
 		t.Fatalf("unexpected rule-condition entity reference error, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "condition_expression_validation", "event.entity_id") {
+	if reportContains(report.Errors(), "condition_expression_validation", "event.source.entity_id") {
 		t.Fatalf("unexpected rule-condition event context validation error, got %#v", report.Errors())
 	}
 	if reportContains(report.Errors(), "condition_payload_alignment", "payload.score") {
 		t.Fatalf("unexpected rule-condition payload alignment error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsLegacyEventReceiverProjectionReferences(t *testing.T) {
+	cases := []struct {
+		name       string
+		checkID    string
+		condition  string
+		emitFields map[string]runtimecontracts.ExpressionValue
+		want       string
+	}{
+		{
+			checkID:   "condition_expression_validation",
+			name:      "condition entity_id",
+			condition: `event.entity_id != ""`,
+			want:      "event.entity_id is unsupported",
+		},
+		{
+			checkID:   "condition_expression_validation",
+			name:      "condition flow_instance",
+			condition: `event.flow_instance != ""`,
+			want:      "event.flow_instance is unsupported",
+		},
+		{
+			name:    "emit field entity_id",
+			checkID: "emit_field_expression_validation",
+			emitFields: map[string]runtimecontracts.ExpressionValue{
+				"summary.entity": runtimecontracts.RefExpression("event.entity_id"),
+			},
+			want: "event.entity_id is unsupported",
+		},
+		{
+			name:    "emit field flow_instance",
+			checkID: "emit_field_expression_validation",
+			emitFields: map[string]runtimecontracts.ExpressionValue{
+				"summary.flow": runtimecontracts.CELExpression("event.flow_instance"),
+			},
+			want: "event.flow_instance is unsupported",
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			bundle := loadWave1ExpressionFixtureBundle(t)
+			flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
+			clearWave1ExpressionStaticCreateEntity(t, bundle, flowID, nodeID)
+			clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
+			handler.CreateEntity = false
+			if tt.condition != "" {
+				handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+					ID:        "legacy",
+					Condition: tt.condition,
+				}}
+			}
+			if len(tt.emitFields) > 0 {
+				handler.Emit = runtimecontracts.EmitSpec{
+					Event:  "wave1.feedback",
+					Fields: tt.emitFields,
+				}
+			}
+			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Errors(), tt.checkID, tt.want) {
+				t.Fatalf("expected legacy event receiver projection error %q, got %#v", tt.want, report.Errors())
+			}
+		})
 	}
 }
 

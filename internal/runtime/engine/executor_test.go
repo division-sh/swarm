@@ -406,27 +406,46 @@ func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T)
 	}
 }
 
-func TestExecutionScopeResolveOperand_AllowsEventRoot(t *testing.T) {
+func TestExecutionScopeResolveOperand_AllowsSupportedEventRouteRoot(t *testing.T) {
 	scope := newExecutionScope(
 		nil,
 		map[string]any{"entity_id": "payload-entity"},
-		map[string]any{"entity_id": "event-entity"},
+		map[string]any{"source": map[string]any{"entity_id": "source-entity"}},
 		nil,
 		nil,
 		nil,
 	)
 
-	got, err := scope.resolveOperand("event.entity_id", executionOperandDefaultNone)
+	got, err := scope.resolveOperand("event.source.entity_id", executionOperandDefaultNone)
 	if err != nil {
-		t.Fatalf("resolveOperand(event.entity_id) error: %v", err)
+		t.Fatalf("resolveOperand(event.source.entity_id) error: %v", err)
 	}
-	if got != "event-entity" {
-		t.Fatalf("resolveOperand(event.entity_id) = %#v, want event-entity", got)
+	if got != "source-entity" {
+		t.Fatalf("resolveOperand(event.source.entity_id) = %#v, want source-entity", got)
 	}
 }
 
-func TestCompiledExecutionCondition_AllowsEventRoot(t *testing.T) {
-	compiled, err := compileExecutionCondition(`event.entity_id == "event-entity"`)
+func TestExecutionScopeResolveOperand_RejectsLegacyEventReceiverProjection(t *testing.T) {
+	scope := newExecutionScope(
+		nil,
+		nil,
+		map[string]any{"entity_id": "legacy-entity"},
+		nil,
+		nil,
+		nil,
+	)
+
+	_, err := scope.resolveOperand("event.entity_id", executionOperandDefaultNone)
+	if err == nil {
+		t.Fatal("expected event.entity_id to fail closed")
+	}
+	if !strings.Contains(err.Error(), "event.entity_id is unsupported") {
+		t.Fatalf("resolveOperand error = %q, want event.entity_id unsupported", err.Error())
+	}
+}
+
+func TestCompiledExecutionCondition_AllowsSupportedEventRouteRoot(t *testing.T) {
+	compiled, err := compileExecutionCondition(`event.source.entity_id == "source-entity"`)
 	if err != nil {
 		t.Fatalf("compileExecutionCondition error: %v", err)
 	}
@@ -434,7 +453,7 @@ func TestCompiledExecutionCondition_AllowsEventRoot(t *testing.T) {
 	scope := newExecutionScope(
 		nil,
 		map[string]any{"entity_id": "payload-entity"},
-		map[string]any{"entity_id": "event-entity"},
+		map[string]any{"source": map[string]any{"entity_id": "source-entity"}},
 		nil,
 		nil,
 		nil,
@@ -446,6 +465,16 @@ func TestCompiledExecutionCondition_AllowsEventRoot(t *testing.T) {
 	}
 	if !ok {
 		t.Fatal("compiled condition evaluated false, want true")
+	}
+}
+
+func TestCompiledExecutionCondition_RejectsLegacyEventReceiverProjection(t *testing.T) {
+	_, err := compileExecutionCondition(`event.flow_instance == "legacy-flow"`)
+	if err == nil {
+		t.Fatal("expected event.flow_instance to fail closed")
+	}
+	if !strings.Contains(err.Error(), "event.flow_instance is unsupported") {
+		t.Fatalf("compileExecutionCondition error = %q, want event.flow_instance unsupported", err.Error())
 	}
 }
 
@@ -2805,7 +2834,11 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 					0,
 					"",
 					"",
-					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, sourceEntityID), sourceFlowInstance),
+					events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{
+						EntityID:     sourceEntityID,
+						FlowInstance: sourceFlowInstance,
+						FlowID:       "scoring",
+					}),
 					time.Time{},
 				),
 
@@ -2813,8 +2846,8 @@ func TestExecutor_EmitIntentUsesTargetStateFlowIdentityBeforeInboundSource(t *te
 					Emit: runtimecontracts.EmitSpec{
 						Event: eventType,
 						Fields: map[string]runtimecontracts.ExpressionValue{
-							"source_entity_id":     runtimecontracts.CELExpression("event.entity_id"),
-							"source_flow_instance": runtimecontracts.CELExpression("event.flow_instance"),
+							"source_entity_id":     runtimecontracts.CELExpression("event.source.entity_id"),
+							"source_flow_instance": runtimecontracts.CELExpression("event.source.flow_instance"),
 						},
 					},
 				},

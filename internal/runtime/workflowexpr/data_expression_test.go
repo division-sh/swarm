@@ -85,6 +85,62 @@ func TestValidateValueExpression_RejectsRetiredFanOutTarget(t *testing.T) {
 	}
 }
 
+func TestValidateValueExpression_RejectsLegacyEventReceiverProjections(t *testing.T) {
+	for _, expression := range []string{
+		`event.entity_id`,
+		`event.flow_instance`,
+		`event.entity_id == "ent-1"`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			err := ValidateValueExpression(expression)
+			if err == nil {
+				t.Fatalf("expected %q to reject legacy event receiver projection", expression)
+			}
+			if !strings.Contains(err.Error(), "unsupported event context reference") {
+				t.Fatalf("error = %q, want unsupported event context reference", err.Error())
+			}
+		})
+	}
+}
+
+func TestEvalValueExpression_RejectsLegacyEventReceiverProjectionEvenWhenMapContainsValue(t *testing.T) {
+	_, err := EvalValueExpression(`event.entity_id`, ValueContext{
+		Event: map[string]any{"entity_id": "legacy-ent"},
+	})
+	if err == nil {
+		t.Fatal("expected eval to reject legacy event receiver projection")
+	}
+	if !strings.Contains(err.Error(), "event.entity_id is unsupported") {
+		t.Fatalf("error = %q, want event.entity_id unsupported", err.Error())
+	}
+}
+
+func TestValidateValueExpression_AllowsSupportedEventContextRefs(t *testing.T) {
+	for _, expression := range []string{
+		`event.id`,
+		`event.type`,
+		`event.source.entity_id`,
+		`event.source.flow_instance`,
+		`event.source.flow_id`,
+		`event.target.entity_id`,
+		`event.target.flow_instance`,
+		`event.target.flow_id`,
+		`event.target_set`,
+		`event.source_event_id`,
+		`event.emitted_at`,
+		`event.trigger_event_type`,
+		`event.current_state`,
+		`event.run_id`,
+		`event.scope`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			if err := ValidateValueExpression(expression); err != nil {
+				t.Fatalf("ValidateValueExpression(%q) error = %v", expression, err)
+			}
+		})
+	}
+}
+
 func TestValidateValueExpression_AllowsFanOutItemAndStringLiteralTargetText(t *testing.T) {
 	tests := []string{
 		`fan_out.item.target`,

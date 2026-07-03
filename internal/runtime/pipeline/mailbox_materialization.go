@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
@@ -162,15 +163,21 @@ func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecont
 	case runtimecontracts.ExpressionKindLiteral:
 		return expr.Literal, true, nil
 	case runtimecontracts.ExpressionKindRef:
+		if expr.RefPath.Root == paths.RootEvent {
+			if err := events.ValidateEventContextReference(strings.Join(expr.RefPath.Segments, ".")); err != nil {
+				return nil, false, err
+			}
+		}
 		value, ok := base.Lookup(expr.RefPath)
 		return value, ok, nil
 	case runtimecontracts.ExpressionKindCEL:
 		value, err := workflowexpr.EvalValueExpressionWithOptions(expr.CEL, workflowexpr.ValueContext{
-			Entity:  base.Entity.Raw(),
-			Event:   base.Event.Raw(),
-			Payload: base.Payload.Raw(),
-			Policy:  base.Policy.Raw(),
-			FanOut:  base.FanOut.Raw(),
+			Entity:         base.Entity.Raw(),
+			PlatformEntity: base.PlatformEntity.Raw(),
+			Event:          base.Event.Raw(),
+			Payload:        base.Payload.Raw(),
+			Policy:         base.Policy.Raw(),
+			FanOut:         base.FanOut.Raw(),
 		}, workflowexpr.ValueExpressionOptions{})
 		if err != nil {
 			return nil, false, err

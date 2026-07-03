@@ -145,6 +145,11 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 	case runtimecontracts.ExpressionKindLiteral:
 		return expr.Literal, true, nil
 	case runtimecontracts.ExpressionKindRef:
+		if expr.RefPath.Root == paths.RootEvent {
+			if err := events.ValidateEventContextReference(strings.Join(expr.RefPath.Segments, ".")); err != nil {
+				return nil, false, err
+			}
+		}
 		if value, ok := resolveParsedRef(base, state, expr.RefPath); ok {
 			return value, true, nil
 		}
@@ -567,6 +572,9 @@ func compileExecutionCondition(expr string) (*compiledExecutionCondition, error)
 	if expr == "" {
 		return nil, nil
 	}
+	if err := workflowexpr.ValidateEventReferences(expr); err != nil {
+		return nil, err
+	}
 	env, err := executionConditionEnv()
 	if err != nil {
 		return nil, err
@@ -644,6 +652,11 @@ func (s executionScope) resolveOperand(expr string, defaultScope executionOperan
 	}
 	parsed := paths.Parse(expr)
 	if parsed.HasExplicitRoot() {
+		if parsed.Root == paths.RootEvent {
+			if err := events.ValidateEventContextReference(strings.Join(parsed.Segments, ".")); err != nil {
+				return nil, err
+			}
+		}
 		value, ok := s.lookupExplicitRoot(parsed.Root, parsed.Segments)
 		if !ok {
 			return nil, fmt.Errorf("operand %q is unavailable in %s scope", expr, parsed.Root.String())

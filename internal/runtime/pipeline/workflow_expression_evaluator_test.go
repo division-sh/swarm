@@ -54,7 +54,7 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 	}{
 		{
 			name:       "payload entity policy event",
-			expression: `_entity.id != "" && payload.score >= policy.threshold && event.entity_id != ""`,
+			expression: `_entity.id != "" && payload.score >= policy.threshold && event.source.entity_id != ""`,
 		},
 		{
 			name:       "query entities",
@@ -88,6 +88,24 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("expected rule condition %q to validate, got %v", tt.expression, err)
+			}
+		})
+	}
+}
+
+func TestValidateConditionCEL_RejectsLegacyEventReceiverProjections(t *testing.T) {
+	for _, expression := range []string{
+		`event.entity_id != ""`,
+		`event.flow_instance != ""`,
+		`query_entities(name == event.entity_id).count == 0`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			err := ValidateConditionCEL(expression, WorkflowConditionContextRule)
+			if err == nil {
+				t.Fatalf("expected %q to reject legacy event receiver projection", expression)
+			}
+			if !strings.Contains(err.Error(), "unsupported event context reference") {
+				t.Fatalf("error = %q, want unsupported event context reference", err.Error())
 			}
 		})
 	}
