@@ -1788,7 +1788,8 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx.Metadata = values.Wrap(cloneStringAnyMap(frame.state.State.StateCarrier.Metadata))
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
-	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(frame.req.FlowID.String()))
+	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.FlowID.String())))
+	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), strings.TrimSpace(frame.req.FlowID.String()))
 	ctx.Computed = values.Wrap(cloneStringAnyMap(frame.state.Computed))
 	return ctx
 }

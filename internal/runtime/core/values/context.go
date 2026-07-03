@@ -5,6 +5,7 @@ import "github.com/division-sh/swarm/internal/runtime/core/paths"
 type Context struct {
 	Entity         Bucket
 	PlatformEntity Bucket
+	FlowID         string
 	Event          Bucket
 	Policy         Bucket
 	Metadata       Bucket
@@ -19,6 +20,7 @@ func NewContext() Context {
 	return Context{
 		Entity:         Wrap(map[string]any{}),
 		PlatformEntity: Wrap(map[string]any{}),
+		FlowID:         "",
 		Event:          Wrap(map[string]any{}),
 		Policy:         Wrap(map[string]any{}),
 		Metadata:       Wrap(map[string]any{}),
@@ -34,6 +36,7 @@ func (c Context) Clone() Context {
 	return Context{
 		Entity:         c.Entity.Clone(),
 		PlatformEntity: c.PlatformEntity.Clone(),
+		FlowID:         c.FlowID,
 		Event:          c.Event.Clone(),
 		Policy:         c.Policy.Clone(),
 		Metadata:       c.Metadata.Clone(),

@@ -47,6 +47,29 @@ func TestBuildBaseContext_CopiesPayloadMetadataAndPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildBaseContext_UsesConcreteFlowInstanceForPlatformEntity(t *testing.T) {
+	input := ContextBuilderInput{
+		FlowID: "child",
+		State: StateSnapshot{
+			EntityID:     "entity-1",
+			WorkflowName: "child",
+			CurrentState: "waiting",
+			StateCarrier: NewStateCarrier(map[string]any{
+				"flow_path": "child/inst-1",
+			}, nil, nil),
+		},
+	}
+
+	base := BuildBaseContext(input)
+
+	if got := base.PlatformEntity.Raw()["flow_instance"]; got != "child/inst-1" {
+		t.Fatalf("_entity.flow_instance = %#v, want concrete flow path", got)
+	}
+	if got := base.FlowID; got != "child" {
+		t.Fatalf("base FlowID = %q, want executing flow id", got)
+	}
+}
+
 func TestContextOverlayHelpers_DoNotMutateOriginal(t *testing.T) {
 	base := BaseContext{
 		Payload:     values.Wrap(map[string]any{"a": 1}),

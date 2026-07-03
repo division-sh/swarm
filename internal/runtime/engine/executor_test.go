@@ -367,6 +367,45 @@ func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.
 	}
 }
 
+func TestExecutor_ValidateRequestRejectsPlatformEntityWriteTargets(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	cases := map[string]runtimecontracts.SystemNodeEventHandler{
+		"data accumulation": {
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+				Writes: []runtimecontracts.WorkflowDataWrite{{
+					TargetPathRef: "_entity.current_state",
+					Value:         runtimecontracts.CELExpression(`"done"`),
+				}},
+			},
+		},
+		"shared store_as": {
+			Count: &runtimecontracts.CountSpec{
+				Source:  "payload.items",
+				StoreAs: "_entity.current_state",
+			},
+		},
+	}
+	for name, handler := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := exec.ValidateRequest(ExecutionRequest{Handler: handler})
+			if err == nil || !strings.Contains(err.Error(), "_entity is read-only platform entity metadata") {
+				t.Fatalf("ValidateRequest error = %v, want _entity read-only write-target rejection", err)
+			}
+		})
+	}
+}
+
 func TestExecutionScopeResolveOperand_AllowsEventRoot(t *testing.T) {
 	scope := newExecutionScope(
 		nil,

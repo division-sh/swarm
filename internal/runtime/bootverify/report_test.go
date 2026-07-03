@@ -5133,6 +5133,70 @@ treasury-node:
 	}
 }
 
+func TestRun_RejectsPlatformEntityDataAccumulationWriteTarget(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"business": {Type: "text"},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
+							Writes: []runtimecontracts.WorkflowDataWrite{{
+								TargetPathRef: "_entity.current_state",
+								Value:         runtimecontracts.CELExpression(`"done"`),
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_write_target_compliance", "_entity.current_state") ||
+		!reportContains(report.Errors(), "entity_write_target_compliance", "read-only platform entity metadata") {
+		t.Fatalf("expected platform entity data_accumulation write target error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_RejectsPlatformEntityStoreAsWriteTarget(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"business": {Type: "text"},
+				},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.received": {
+						Count: &runtimecontracts.CountSpec{
+							Source:  "payload.items",
+							StoreAs: "_entity.current_state",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_write_target_compliance", "_entity.current_state") ||
+		!reportContains(report.Errors(), "entity_write_target_compliance", "read-only platform entity metadata") {
+		t.Fatalf("expected platform entity store_as write target error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsSelectOrCreateEntityWithUndeclaredPayloadRef(t *testing.T) {
 	root := writeSelectEntityInputPinFixture(t, `
 treasury-node:

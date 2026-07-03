@@ -117,6 +117,73 @@ func TestApplyEngineStateMutationScopesChildFlowGates(t *testing.T) {
 	}
 }
 
+func TestPipelineEngineEvaluatorQueryEntitiesUsesExecutingFlowID(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	source := loadWorkflowTempSource(t, map[string]string{
+		"package.yaml": `
+name: runtime-test
+version: "1.0.0"
+platform_version: ">=1.0.0"
+flows:
+  - id: child
+    flow: child
+    mode: static
+`,
+		"schema.yaml": `
+name: runtime-test
+initial_state: ready
+states: [ready]
+`,
+		"flows/child/schema.yaml": `
+name: child
+mode: static
+initial_state: queued
+states: [queued]
+`,
+		"flows/child/entities.yaml": `
+child_entity:
+  request_id: text
+`,
+		"flows/child/nodes.yaml": "{}\n",
+	})
+	pc := NewPipelineCoordinatorWithOptions(noopPipelineBus{}, db, PipelineCoordinatorOptions{
+		Module: &pipelineFixtureWorkflowModule{
+			source:   source,
+			workflow: NewWorkflowDefinition("runtime-test", []WorkflowStage{{Name: "ready"}}, nil),
+		},
+	})
+	const entityID = "11111111-1111-1111-1111-111111111111"
+	if err := pc.workflowStore.Upsert(testPipelineCoordinatorRunContext(t, pc), WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      "child/existing",
+		WorkflowName:    "child",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "queued",
+		Metadata: map[string]any{
+			"entity_id":  entityID,
+			"request_id": "req-existing",
+			"flow_path":  "child/existing",
+		},
+	}); err != nil {
+		t.Fatalf("seed child workflow instance: %v", err)
+	}
+
+	eval := pipelineEngineEvaluator{evaluator: pc.expressionEval, coordinator: pc}
+	ok, err := eval.EvalBool(`query_entities(request_id == payload.request_id).count == 1`, runtimeengine.BaseContext{
+		FlowID:  "child",
+		Event:   values.Wrap(map[string]any{"run_id": testPipelineRunID}),
+		Payload: values.Wrap(map[string]any{"request_id": "req-existing"}),
+	})
+	if err != nil {
+		t.Fatalf("EvalBool query_entities: %v", err)
+	}
+	if !ok {
+		t.Fatal("query_entities did not count the child-flow entity")
+	}
+}
+
 func TestApplyEngineStateMutationPreservesExistingMetadataOnGateOnlyMutation(t *testing.T) {
 	instance := &WorkflowInstance{
 		Metadata: map[string]any{
