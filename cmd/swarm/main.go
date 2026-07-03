@@ -1622,11 +1622,6 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			return 1
 		}
 		selectedProject := resolveLocalRuntimeStateProject(repo, cliContractPlatformSpecPaths{ContractsPath: contractsRoot})
-		if strings.TrimSpace(selectedProject.CanonicalProjectRoot) != "" {
-			selectedProject.ProjectLocal = true
-			selectedProject.Status = "project_local"
-			selectedProject.Detail = "selected-contract execution project root owns workspace data"
-		}
 		mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, "", cfg, selectedProject, true)
 		if err != nil {
 			if out != nil {
