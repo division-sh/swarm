@@ -94,6 +94,16 @@ func TestExtractPromptEntityWriteEvidence_SkipsToolToken(t *testing.T) {
 	}
 }
 
+func TestExtractPromptEntityWriteEvidence_IncludesDottedFields(t *testing.T) {
+	_, saveEntity, saveFields := extractPromptEntityWriteEvidence("Use `save_entity_field` for `metadata.region` and `business_brief`.\n")
+	if !saveEntity {
+		t.Fatal("expected save_entity_field evidence")
+	}
+	if !reflect.DeepEqual(saveFields, []string{"metadata.region", "business_brief"}) {
+		t.Fatalf("SaveFields = %#v", saveFields)
+	}
+}
+
 func TestDerivePromptEntityWriteEvidence_IncludesScopedDuplicateAgentIDs(t *testing.T) {
 	repo := repoRoot(t)
 	root := t.TempDir()
