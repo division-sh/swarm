@@ -10833,6 +10833,266 @@ static_analyzer:
       - delivery/session-primer derivation
     rule: Emit hard invalidity when a parseable structural prompt reference drifts from the declared event or entity contract.
 
+test_specification:
+  description: Public Swarm-authored test and conformance surfaces.
+  deterministic_scenario_runner:
+    id: testing.deterministic_scenario_runner_source_authority
+    promoted_by: '#1646'
+    implementation_status: source_authority_only
+    owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
+    purpose: >
+      Define the public deterministic scenario/injection runner semantics for
+      cost-free proof of flow routing, system-node behavior, mailbox decisions,
+      emitted events, entity state, dead letters, idempotency facts, and invalid
+      fixture variants. This runner drives normal platform mutation and read
+      owners with authored events and decisions; it does not invoke or simulate
+      live LLM provider sessions.
+    selected_public_surface:
+      command_family: swarm test
+      command_catalog_status: >
+        `swarm test` is the selected user-facing runner family for later
+        implementation. The concrete cli_specification.command_catalog row,
+        flags, exit codes, and output rendering remain a separate
+        implementation child that consumes this owner. Until that child lands,
+        no `swarm test` behavior is implied by this source-authority slice.
+      scenario_roots:
+      - contracts/tests
+      - contracts/flows/<flow>/tests
+      package_level_tests: >
+        `contracts/tests/...` contains package-wide or cross-flow scenario
+        proofs that may involve multiple flows in the package.
+      flow_local_tests: >
+        `contracts/flows/<flow>/tests/...` contains scenarios whose default
+        flow scope is the owning flow. Flow-local tests are intended to ship
+        with imported/published flow packages so consumers can run executable
+        conformance scenarios against their bindings.
+    source_authority:
+      merge_bearing_owner: platform-spec.yaml
+      rule: >
+        Scenario-runner implementation PRs, generated schemas, examples,
+        public documentation, and tracker closeouts MUST bind runner semantics
+        to this section. Empire scripts, internal catalog fixtures, private
+        design notes, README text, and manual event-publish workflows are
+        evidence only unless their exact semantics are promoted here.
+      consumed_owners:
+        expressions: platform-spec.yaml#handler_specification.expression_context
+        event_injection: platform-spec.yaml#cli_specification.command_catalog.event_publish and /v1/rpc event.publish
+        mailbox_decisions: platform-spec.yaml#api_specification.method_catalog.mailbox.approve/reject/defer
+        run_readback: platform-spec.yaml#api_specification.method_catalog.run.get/trace/diagnose
+        entity_readback: platform-spec.yaml#api_specification.method_catalog.entity.*
+        dead_letter_readback: event/delivery/dead-letter read owners consumed by run.trace and run.diagnose
+        test_quiescence_inputs: platform-spec.yaml#run_model.lifecycle.completion and ProjectRunOperationalStatus
+        contract_validation: engine.boot_verification.checks plus existing event payload/schema validation owners
+    non_goals:
+    - No runtime/backend/provider implementation is promoted by this section.
+    - No active `mock` or `local` LLM backend profile is promoted.
+    - The runner does not satisfy, weaken, or bypass internal/runtime/llm.ProviderContract.
+    - The runner does not prove live agent sessions, tool-call translation, conversation modes, turn/audit persistence,
+      retry lineage, native-tool capability truth, or spend/budget accounting.
+    - The runner must not execute arbitrary inline Python, JavaScript, shell, subprocesses, network calls, filesystem reads,
+      imports, or mutable global code from scenario files.
+    - Static grep/prompt/schema residue checks such as `forbid_text` are not scenario-runtime assertions; they belong to
+      static_analyzer or a future verify/lint owner.
+    - Documentation/README cleanup consumes this owner but does not define it.
+    scenario_document:
+      format: YAML
+      versioning: >
+        The v1 scenario format is the public initial format. A scenario file may
+        omit an explicit version while the runner is v1-only; once a future
+        incompatible format exists, a version field is required for that new
+        format and omitted version continues to mean v1.
+      top_level_fields:
+        name: Optional human-readable scenario name.
+        vars: Optional map of literal values or CEL expressions evaluated once before the first step.
+        steps: Required non-empty list of scenario actions.
+        expect: Optional final assertion block evaluated after the final step reaches test quiescence.
+        invalid: Optional table of invalid fixture variants. Each case derives from a base fixture/action and expects a
+          specific reject/fail-closed outcome.
+      literal_model: >
+        Plain YAML scalars, arrays, and objects are literal data by default.
+        A string of the exact form `${...}` is a CEL expression. No other
+        sigil, unquoted bare-token rule, or alternate expression grammar is
+        authoritative.
+      expression_model:
+        evaluator: Existing CEL expression authority.
+        scenario_namespaces:
+          vars: Scenario-local variables evaluated from the `vars` block.
+          scenario: Deterministic helper namespace owned by this runner.
+        helper_policy: >
+          Helpers must be deterministic and replayable. Generated identifiers
+          are derived from scenario identity, case name, helper arguments, and
+          the recorded scenario seed; they are not random wall-clock values.
+        initial_helpers:
+          scenario.uuid: Deterministic UUID derived from the scenario seed and a caller-provided label.
+          scenario.sha40: Deterministic 40-character lowercase hex digest of its normalized string argument.
+        forbidden_helpers:
+        - wall-clock now
+        - random
+        - environment lookup
+        - filesystem lookup
+        - network lookup
+        - subprocess execution
+      fixture_payloads:
+        forms:
+          inline_object: Payload may be an inline YAML object.
+          from_file: >
+            Payload may specify `from: <relative-path>` to load a YAML or
+            JSON object fixture.
+          set_overrides: >
+            Payload may specify `set: {path: value}` to override fields after
+            fixture load.
+        validation_rule: >
+          The effective payload after `from` loading, `set` overrides, and CEL
+          interpolation MUST be validated against the target event/action schema
+          before the mutating step is submitted. Schema mismatch fails the
+          scenario before publication/decision mutation.
+        path_rule: >
+          Fixture paths are relative to the scenario file unless explicitly
+          rooted by the future runner command. Paths must not escape the
+          contract package root.
+    action_steps:
+      run_context:
+        rule: >
+          A scenario has one current run context. The first mutating publish
+          that creates work records the server-owned run_id. Later publish and
+          mailbox-decision steps use that run_id unless a future spec explicitly
+          promotes multi-run scenarios.
+        bundle_scope: >
+          For create-new-work publish steps, the runner supplies the canonical
+          bundle_hash for the loaded contract package to event.publish. It must
+          not use deprecated bundle fingerprints as canonical scope.
+      publish:
+        syntax: >
+          `publish: <event-name>` with `payload` as an inline object or
+          `payload: {from, set}` fixture construction.
+        owner: /v1/rpc event.publish
+        rule: >
+          Publish steps consume event.publish. The runner sends the authored
+          event name and effective payload to the server owner and preserves the
+          server-owned EventPublishResult. It must not validate routability,
+          persist events, create delivery rows, or call EventBus/store APIs
+          directly.
+      mailbox_approve:
+        syntax: "`mailbox.approve` or `approve_mailbox` as a scenario action alias."
+        owner: /v1/rpc mailbox.approve
+        rule: >
+          Approval steps locate exactly one pending mailbox item in the current
+          run using API-owned mailbox read surfaces and then call mailbox.approve
+          with the effective decision payload. Zero or multiple matches fail
+          closed before mutation.
+      mailbox_reject:
+        syntax: "`mailbox.reject` or `reject_mailbox` as a scenario action alias."
+        owner: /v1/rpc mailbox.reject
+        rule: >
+          Reject steps locate exactly one pending mailbox item in the current
+          run and call mailbox.reject with a non-empty reason. Zero or multiple
+          matches fail closed before mutation.
+      mailbox_defer:
+        syntax: "`mailbox.defer` or `defer_mailbox` as a scenario action alias."
+        owner: /v1/rpc mailbox.defer
+        rule: >
+          Defer steps locate exactly one pending mailbox item in the current run
+          and call mailbox.defer with an RFC3339 timestamp or deterministic CEL
+          expression resolving to one. Zero or multiple matches fail closed
+          before mutation.
+      unsupported_actions:
+      - direct database writes
+      - direct EventBus publish
+      - direct mailbox table mutation
+      - provider/runtime fake-response injection
+      - shell/script execution
+    test_quiescence:
+      owner: platform-spec.yaml#test_specification.deterministic_scenario_runner.test_quiescence
+      relationship_to_runtime_completion: >
+        Runtime run completion remains owned by run_model.lifecycle.completion:
+        all entities terminal and no pending deliveries, with active timers
+        keeping the run running. Test quiescence is a runner assertion barrier,
+        not a replacement run status.
+      rule: >
+        After each mutating step and before final assertions, the runner waits
+        until the current run has no pending or in_progress deliveries, no
+        immediate queued/outbox work owned by committed post-commit callbacks,
+        no currently due timer work, and no active platform callback that can
+        synchronously enqueue more work for the same run.
+      timers: >
+        Non-due active timers do not prevent test quiescence. Due timers do.
+        A scenario that needs timer behavior must either advance time through a
+        future spec-owned test-time control or leave timer firing to a later
+        implementation child; wall-clock sleeps are not semantic proof.
+      failures: >
+        Dead-letter and terminal failed-delivery evidence is observable at
+        quiescence and must not be hidden. Retryable delivery state that can
+        still enqueue immediate work is not quiescent.
+      deadline: >
+        Runner-level deadlines are safety bounds only. Reaching a deadline is
+        a scenario failure with diagnostic evidence; it is not a quiescent
+        success condition and must not define done.
+    expectations:
+      evaluation_point: Final `expect` blocks run only after the final step reaches test quiescence.
+      events:
+        shorthand: A YAML list under `expect.events` means unordered subset/include matching within the current run.
+        include: Unordered subset match. Every listed event must appear at least once.
+        exact: Unordered exact set of event names for the assertion window. Multiplicity must be specified explicitly if
+          future runner syntax supports event counts.
+        ordered: Ordered subsequence match by canonical event ordering; unrelated events may appear between matched events.
+        window: Current scenario run from the first scenario-created event through final quiescence unless a future spec
+          promotes narrower windows.
+      entities:
+        rule: >
+          Entity assertions consume canonical entity read owners. The runner may
+          match by explicit entity id, by current run plus declared entity type
+          plus field predicates, or by a mailbox/event-derived id. Zero or
+          multiple matches fail closed unless the assertion explicitly expects a
+          count.
+      mailbox:
+        rule: >
+          Mailbox assertions consume mailbox read owners and are scoped to the
+          current run by default. Zero or multiple matches fail closed unless
+          the assertion explicitly expects a count.
+      no_dead_letters:
+        shorthand: >
+          `no_dead_letters: true`
+        rule: >
+          Assert that no dead-letter records or platform.dead_letter events
+          exist for the current scenario run in the assertion window. The
+          runner must query canonical dead-letter/readback surfaces and must
+          not infer absence from missing stderr text or delivery counts alone.
+      invalid_variants:
+        rule: >
+          Invalid variant cases execute from a base fixture/action plus
+          declared `set` overrides and assert fail-closed rejection categories.
+          A rejection that occurs after mutating state is not equivalent to a
+          pre-mutation validation rejection unless the expected category says so.
+    catalog_convergence:
+      decision: split_follow_up
+      rule: >
+        The public scenario format defined here is the target authority for new
+        authored scenarios. Existing internal `tests/**/expected.yaml`,
+        `tests/**/fixtures.yaml`, `internal/runtime/swarmflowtest`, and
+        `internal/runtime/cataloge2e` remain internal evidence until a separate
+        migration/convergence child updates them or explicitly keeps them
+        private. Implementation PRs must not leak those private formats as
+        public schema by copying them into CLI behavior.
+    proof_obligations:
+      source_authority_pr:
+      - platform-spec.yaml contains this section as the canonical runner owner.
+      - The section names consumed owners for CEL, event.publish, mailbox decisions, readback, dead letters, and
+        test quiescence.
+      - The section explicitly rejects ProviderContract/backend activation and arbitrary inline code.
+      - The section defines scenario locations, fixture validation, expectation modes, dead-letter windows, and catalog
+        convergence disposition.
+      later_implementation_pr:
+      - Adds the concrete CLI command catalog row and command behavior for `swarm test`.
+      - Runs scenarios through public API/runtime owners, with no direct DB/EventBus/mailbox table mutation.
+      - Proves at least one catalog-derived fixture and one Empire-style deterministic scenario with no live LLM credentials.
+      - Runs `go test ./...`.
+      split_siblings:
+      - '#1252 faithful scripted LLM backend / ProviderContract-backed fixture replay'
+      - static verify/lint residue checks
+      - internal catalog fixture convergence
+      - README/docs cleanup
+      - broader operational stalled-run UI/diagnosis changes
+
 cli_specification:
   description: |
     Authoritative Swarm CLI v2 UX contract. This section is the merge artifact
