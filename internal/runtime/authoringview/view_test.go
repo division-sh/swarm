@@ -11,6 +11,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 )
@@ -159,6 +160,63 @@ func TestBuildShowsSingletonContainedOperations(t *testing.T) {
 	listAppend := containedOperationByTargetAndOp(t, flow, "entity.audit_log", "append")
 	if listAppend.ListItemType != "AuditEntry" || listAppend.SourceFile == "" {
 		t.Fatalf("audit_log append view = %#v, want typed list target and source file", listAppend)
+	}
+}
+
+func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
+	source := finalflowinstanceauthoring.LoadSource(t, finalflowinstanceauthoring.Options{})
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	view := mustBuild(t, source, &report)
+
+	if !view.Equivalence.ProjectionOnly {
+		t.Fatalf("equivalence projection_only = false, want true")
+	}
+	if !containsString(view.Equivalence.CanonicalOwners, "runtime/core/pinrouting.LowerCompositionConnectRoutePlans") {
+		t.Fatalf("canonical owners = %#v, want pinrouting owner", view.Equivalence.CanonicalOwners)
+	}
+
+	account := flowByID(t, view, finalflowinstanceauthoring.TemplateFlowID)
+	if account.PrimaryEntity == nil || account.PrimaryEntity.Type != finalflowinstanceauthoring.TemplateEntityType {
+		t.Fatalf("account primary entity = %#v, want %s", account.PrimaryEntity, finalflowinstanceauthoring.TemplateEntityType)
+	}
+	if account.TemplateInstance == nil || strings.Join(account.TemplateInstance.By, ",") != finalflowinstanceauthoring.TemplateInstanceBy {
+		t.Fatalf("account template instance = %#v, want %s", account.TemplateInstance, finalflowinstanceauthoring.TemplateInstanceBy)
+	}
+
+	producer := flowByID(t, view, finalflowinstanceauthoring.ProducerFlowID)
+	output := outputPinByName(t, producer, finalflowinstanceauthoring.ProducerOutputPin)
+	if output.Key != finalflowinstanceauthoring.TemplatePayloadKey || !containsString(output.Carries, finalflowinstanceauthoring.TemplatePayloadKey) {
+		t.Fatalf("producer output = %#v, want %s key/carry", output, finalflowinstanceauthoring.TemplatePayloadKey)
+	}
+	if len(view.ConnectRoutePlans) != 1 {
+		t.Fatalf("connect route plan count = %d, want 1: %#v", len(view.ConnectRoutePlans), view.ConnectRoutePlans)
+	}
+	plan := view.ConnectRoutePlans[0]
+	if plan.Source.FlowID != finalflowinstanceauthoring.ProducerFlowID || plan.Receiver.FlowID != finalflowinstanceauthoring.TemplateFlowID {
+		t.Fatalf("route endpoints = %#v -> %#v, want final fixture producer to template", plan.Source, plan.Receiver)
+	}
+	if plan.InstanceKey == nil || len(plan.InstanceKey.Mappings) != 1 ||
+		plan.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
+		plan.InstanceKey.Mappings[0].Target != finalflowinstanceauthoring.TemplateInstanceBy ||
+		!plan.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("route instance key = %#v, want explicit renamed mapping", plan.InstanceKey)
+	}
+
+	coordinator := flowByID(t, view, finalflowinstanceauthoring.CoordinatorFlowID)
+	if coordinator.SingletonCoordinator == nil || coordinator.SingletonCoordinator.PrimaryEntity != finalflowinstanceauthoring.CoordinatorEntityType {
+		t.Fatalf("coordinator singleton view = %#v, want primary %s", coordinator.SingletonCoordinator, finalflowinstanceauthoring.CoordinatorEntityType)
+	}
+	if !containsContainedField(coordinator.SingletonCoordinator.ContainedState, "lead_index", "map") ||
+		!containsContainedField(coordinator.SingletonCoordinator.ContainedState, "audit_log", "list") {
+		t.Fatalf("coordinator contained state = %#v, want lead_index map and audit_log list", coordinator.SingletonCoordinator.ContainedState)
+	}
+	mapSet := containedOperationByTargetAndOp(t, coordinator, "entity.lead_index", "set")
+	if mapSet.MapKeyType != "text" || mapSet.MapValueType != "LeadScore" {
+		t.Fatalf("lead_index set view = %#v, want typed map target", mapSet)
+	}
+	listAppend := containedOperationByTargetAndOp(t, coordinator, "entity.audit_log", "append")
+	if listAppend.ListItemType != "AuditEntry" {
+		t.Fatalf("audit_log append view = %#v, want typed list target", listAppend)
 	}
 }
 
