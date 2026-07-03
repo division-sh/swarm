@@ -28,6 +28,7 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -76,6 +77,7 @@ type RuntimeOptions struct {
 	WorkflowModule                   runtimepipeline.WorkflowModule
 	LLMRuntime                       llm.Runtime
 	Credentials                      runtimecredentials.Store
+	ManagedCredentials               runtimemanagedcredentials.Store
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -100,6 +102,7 @@ type validatedRuntimeDeps struct {
 	Source                   semanticview.Source
 	PromptResolver           runtimecontracts.PromptResolver
 	Credentials              runtimecredentials.Store
+	ManagedCredentials       runtimemanagedcredentials.Store
 	Authority                runtimeauthority.Provider
 	EmitRegistry             *runtimetools.EmitRegistry
 	EventReceiptCapability   func(context.Context) (bool, error)
@@ -135,28 +138,29 @@ type Runtime struct {
 	ownerID        string
 	shutdownGate   shutdownAdmission
 
-	Config         *config.Config
-	Stores         Stores
-	Options        RuntimeOptions
-	Bus            *runtimebus.EventBus
-	Logger         *RuntimeLogger
-	Pipeline       *runtimepipeline.PipelineCoordinator
-	SystemNodes    []runtimepipeline.BackgroundNode
-	Scheduler      *runtimepipeline.Scheduler
-	Workspace      workspace.Lifecycle
-	Budget         *BudgetTracker
-	Credentials    runtimecredentials.Store
-	LLM            llm.Runtime
-	ToolExecutor   *runtimetools.Executor
-	Manager        *runtimemanager.AgentManager
-	RuntimeIngress *runtimeingress.Controller
-	RunControl     *runtimeruncontrol.Controller
-	InboundGateway *InboundGateway
-	ToolGateway    *runtimemcp.Gateway
-	MCPTurns       *runtimemcp.TurnContextRegistry
-	Authority      runtimeauthority.Provider
-	EmitRegistry   *runtimetools.EmitRegistry
-	PromptResolver runtimecontracts.PromptResolver
+	Config             *config.Config
+	Stores             Stores
+	Options            RuntimeOptions
+	Bus                *runtimebus.EventBus
+	Logger             *RuntimeLogger
+	Pipeline           *runtimepipeline.PipelineCoordinator
+	SystemNodes        []runtimepipeline.BackgroundNode
+	Scheduler          *runtimepipeline.Scheduler
+	Workspace          workspace.Lifecycle
+	Budget             *BudgetTracker
+	Credentials        runtimecredentials.Store
+	ManagedCredentials runtimemanagedcredentials.Store
+	LLM                llm.Runtime
+	ToolExecutor       *runtimetools.Executor
+	Manager            *runtimemanager.AgentManager
+	RuntimeIngress     *runtimeingress.Controller
+	RunControl         *runtimeruncontrol.Controller
+	InboundGateway     *InboundGateway
+	ToolGateway        *runtimemcp.Gateway
+	MCPTurns           *runtimemcp.TurnContextRegistry
+	Authority          runtimeauthority.Provider
+	EmitRegistry       *runtimetools.EmitRegistry
+	PromptResolver     runtimecontracts.PromptResolver
 }
 
 func (rt *Runtime) emitBootProgress(step int, name, status, detail string) {
@@ -260,7 +264,9 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 			return fmt.Errorf("workspace validation failed: %w", err)
 		}
 	}
-	result, err := ValidateWorkflowContractSurface(context.Background(), source, DefaultWorkflowContractValidationOptions(opts.Credentials))
+	validationOpts := DefaultWorkflowContractValidationOptions(opts.Credentials)
+	validationOpts.ManagedCredentials = opts.ManagedCredentials
+	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
 	if err != nil {
 		return err
 	}
@@ -349,6 +355,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		EventReceiptCapability:   canonicalEventReceiptCapabilities(stores),
 		TrimmedBundleFingerprint: strings.TrimSpace(opts.BundleFingerprint),
 		BundleSourceFact:         opts.BundleSourceFact.Normalized(),
+		ManagedCredentials:       opts.ManagedCredentials,
 	}, nil
 }
 
@@ -379,16 +386,17 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	source := boot.Source
 	mcpTurns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	rt := &Runtime{
-		ownerID:        newRuntimeOwnerID(),
-		Config:         cfg,
-		Stores:         stores,
-		Options:        opts,
-		Workspace:      opts.WorkspaceLifecycle,
-		MCPTurns:       mcpTurns,
-		Authority:      boot.Authority,
-		EmitRegistry:   boot.EmitRegistry,
-		PromptResolver: boot.PromptResolver,
-		Credentials:    boot.Credentials,
+		ownerID:            newRuntimeOwnerID(),
+		Config:             cfg,
+		Stores:             stores,
+		Options:            opts,
+		Workspace:          opts.WorkspaceLifecycle,
+		MCPTurns:           mcpTurns,
+		Authority:          boot.Authority,
+		EmitRegistry:       boot.EmitRegistry,
+		PromptResolver:     boot.PromptResolver,
+		Credentials:        boot.Credentials,
+		ManagedCredentials: boot.ManagedCredentials,
 	}
 
 	if stores.RuntimeLogStore != nil {
@@ -529,17 +537,18 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 
 	rt.ToolExecutor = runtimetools.NewExecutorWithOptions(rt.Bus, rt.Scheduler, runtimetools.ExecutorOptions{
-		Config:            cfg,
-		Credentials:       rt.Credentials,
-		MailboxStore:      stores.MailboxStore,
-		EntityStore:       stores.ToolEntityStore,
-		HumanTaskStore:    stores.HumanTaskStore,
-		WorkflowInstances: pipelineStore,
-		WorkflowSource:    source,
-		WorkspaceResolver: rt.Workspace,
-		ModelRuntime:      rt.LLM,
-		AuthorityProvider: rt.Authority,
-		EmitRegistry:      rt.EmitRegistry,
+		Config:             cfg,
+		Credentials:        rt.Credentials,
+		ManagedCredentials: rt.ManagedCredentials,
+		MailboxStore:       stores.MailboxStore,
+		EntityStore:        stores.ToolEntityStore,
+		HumanTaskStore:     stores.HumanTaskStore,
+		WorkflowInstances:  pipelineStore,
+		WorkflowSource:     source,
+		WorkspaceResolver:  rt.Workspace,
+		ModelRuntime:       rt.LLM,
+		AuthorityProvider:  rt.Authority,
+		EmitRegistry:       rt.EmitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},
@@ -566,6 +575,34 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+":"+strings.TrimSpace(ref.Name))
 			}
 			slog.Warn("credential requirement warning", "key", item.Key, "required_by", strings.Join(requiredBy, ", "))
+		}
+	}
+	if missing, err := runtimemanagedcredentials.MissingOrUnusableRequired(ctx, rt.ManagedCredentials, source); err != nil {
+		return nil, fmt.Errorf("managed credential validation failed: %w", err)
+	} else {
+		if bootWarningsFatal() && len(missing) > 0 {
+			parts := make([]string, 0, len(missing))
+			for _, item := range missing {
+				requiredBy := make([]string, 0, len(item.RequiredBy))
+				for _, ref := range item.RequiredBy {
+					requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+":"+strings.TrimSpace(ref.Name))
+				}
+				sort.Strings(requiredBy)
+				status := strings.TrimSpace(item.Status)
+				if status == "" {
+					status = runtimemanagedcredentials.StatusUnconnected
+				}
+				parts = append(parts, fmt.Sprintf("%s status=%s required by %s", strings.TrimSpace(item.Key), status, strings.Join(requiredBy, ", ")))
+			}
+			sort.Strings(parts)
+			return nil, fmt.Errorf("unusable required managed credentials: %s", strings.Join(parts, "; "))
+		}
+		for _, item := range missing {
+			requiredBy := make([]string, 0, len(item.RequiredBy))
+			for _, ref := range item.RequiredBy {
+				requiredBy = append(requiredBy, strings.TrimSpace(ref.Kind)+":"+strings.TrimSpace(ref.Name))
+			}
+			slog.Warn("managed credential requirement warning", "key", item.Key, "status", item.Status, "required_by", strings.Join(requiredBy, ", "))
 		}
 	}
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLM, rt.ToolExecutor, rt.ToolExecutor.ToolDefinitions(), runtimeagents.LLMAgentOptions{

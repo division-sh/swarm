@@ -8,6 +8,7 @@ import (
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -39,6 +40,7 @@ type Report struct {
 
 type Options struct {
 	Credentials             runtimecredentials.Store
+	ManagedCredentials      runtimemanagedcredentials.Store
 	CheckMCPReachable       bool
 	ValidateModelResolution bool
 	LLMProfile              llmselection.Profile

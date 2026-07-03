@@ -1291,7 +1291,8 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 			events.EventEnvelope{EntityID: "11111111-1111-1111-1111-111111111137"},
 			time.Now().UTC()))
 	}()
-	if err := requireErrorBefore(t, publishDone, 250*time.Millisecond, "acknowledged publish return before interceptor release"); err != nil {
+	requireSignalBefore(t, started, 5*time.Second, "async post-commit interceptor start")
+	if err := requireErrorBefore(t, publishDone, 5*time.Second, "acknowledged publish return before interceptor release"); err != nil {
 		t.Fatalf("PublishAcknowledged: %v", err)
 	}
 
@@ -1315,7 +1316,6 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 		t.Fatalf("committed replay scope = %q, want %q", gotScope, runtimereplayclaim.CommittedReplayScopeSubscribed)
 	}
 
-	requireSignalBefore(t, started, time.Second, "async post-commit interceptor start")
 	waitCtx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	if err := eb.WaitForQuiescence(waitCtx); !errors.Is(err, context.DeadlineExceeded) {

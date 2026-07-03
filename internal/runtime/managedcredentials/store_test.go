@@ -1,0 +1,476 @@
+package managedcredentials
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestTokenSourceAuthCodePKCEPersistsStructuredTokenRecord(t *testing.T) {
+	ctx := context.Background()
+	var sawGrant string
+	var sawVerifier string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		sawGrant = r.Form.Get("grant_type")
+		sawVerifier = r.Form.Get("code_verifier")
+		if got := r.Form.Get("code"); got != "auth-code" {
+			t.Fatalf("code = %q, want auth-code", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "access-secret",
+			"refresh_token": "refresh-secret",
+			"expires_in":    3600,
+			"token_type":    "Bearer",
+			"scope":         "drive.read",
+		})
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "managed.json")
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	source := TokenSource{Store: store}
+	begin, err := source.BeginAuthCodePKCE(ctx, BeginAuthCodeRequest{
+		Key:         "google_drive",
+		Provider:    "google",
+		AuthURL:     server.URL + "/auth",
+		TokenURL:    server.URL + "/token",
+		ClientID:    "client-id",
+		RedirectURL: "http://127.0.0.1/callback",
+		Scopes:      []string{"drive.read"},
+		Account:     "ops@example.test",
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthCodePKCE: %v", err)
+	}
+	authorizeURL, err := url.Parse(begin.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("Parse authorize URL: %v", err)
+	}
+	if got := authorizeURL.Query().Get("code_challenge_method"); got != "S256" {
+		t.Fatalf("code_challenge_method = %q, want S256", got)
+	}
+	if authorizeURL.Query().Get("code_challenge") == "" || authorizeURL.Query().Get("state") == "" {
+		t.Fatalf("authorize URL missing PKCE challenge/state: %s", begin.AuthorizeURL)
+	}
+	if begin.CodeVerifier == "" {
+		t.Fatal("CodeVerifier is empty")
+	}
+
+	record, err := source.CompleteAuthCode(ctx, CompleteAuthCodeRequest{
+		Key:   "google_drive",
+		State: begin.State,
+		Code:  "auth-code",
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthCode: %v", err)
+	}
+	if sawGrant != "authorization_code" || sawVerifier == "" {
+		t.Fatalf("token request grant/verifier = (%q, %q), want authorization_code and verifier", sawGrant, sawVerifier)
+	}
+	if record.Status != StatusConnected || record.AccessToken != "access-secret" || record.RefreshToken != "refresh-secret" {
+		t.Fatalf("record = %#v, want connected token record", record)
+	}
+	if record.PKCEVerifier != "" || record.OAuthState != "" {
+		t.Fatalf("record retained transient PKCE data: %#v", record)
+	}
+	reopened, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore(reopen): %v", err)
+	}
+	persisted, ok, err := reopened.Get(ctx, "google_drive")
+	if err != nil || !ok {
+		t.Fatalf("reopened.Get = (%#v, %v, %v), want persisted record", persisted, ok, err)
+	}
+	if persisted.AccessToken != "access-secret" || persisted.RefreshToken != "refresh-secret" {
+		t.Fatalf("persisted tokens = (%q, %q), want stored tokens", persisted.AccessToken, persisted.RefreshToken)
+	}
+	desc := persisted.Descriptor()
+	raw, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatalf("Marshal descriptor: %v", err)
+	}
+	if strings.Contains(string(raw), "access-secret") || strings.Contains(string(raw), "refresh-secret") {
+		t.Fatalf("descriptor leaked token material: %s", string(raw))
+	}
+}
+
+func TestTokenSourceAuthCodeFailureRedactsCallbackCode(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_grant",
+			"error_description": "authorization code callback-code was rejected",
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore()
+	source := TokenSource{Store: store}
+	begin, err := source.BeginAuthCodePKCE(ctx, BeginAuthCodeRequest{
+		Key:         "google_drive",
+		Provider:    "google",
+		AuthURL:     server.URL + "/auth",
+		TokenURL:    server.URL,
+		ClientID:    "client-id",
+		RedirectURL: "http://127.0.0.1/callback",
+		Scopes:      []string{"drive.read"},
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthCodePKCE: %v", err)
+	}
+	_, err = source.CompleteAuthCode(ctx, CompleteAuthCodeRequest{
+		Key:   "google_drive",
+		State: begin.State,
+		Code:  "callback-code",
+	})
+	if err == nil {
+		t.Fatal("CompleteAuthCode error = nil, want redacted token endpoint failure")
+	}
+	if strings.Contains(err.Error(), "callback-code") {
+		t.Fatalf("CompleteAuthCode error leaked callback code: %v", err)
+	}
+	stored, ok, getErr := store.Get(ctx, "google_drive")
+	if getErr != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, getErr)
+	}
+	if stored.Status != StatusRefreshFailed {
+		t.Fatalf("stored status = %q, want refresh_failed", stored.Status)
+	}
+	if strings.Contains(stored.Failure, "callback-code") {
+		t.Fatalf("stored failure leaked callback code: %q", stored.Failure)
+	}
+}
+
+func TestTokenSourceClientCredentialsRefreshBeforeUseAndFailureEvidence(t *testing.T) {
+	ctx := context.Background()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("grant_type"); got != "client_credentials" {
+			t.Fatalf("grant_type = %q, want client_credentials", got)
+		}
+		if requests == 1 {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "first-token",
+				"expires_in":   1,
+				"scope":        "repo.read",
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "refreshed-token",
+			"expires_in":   3600,
+			"scope":        "repo.read",
+		})
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	source := TokenSource{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+	}
+	record, err := source.ConnectClientCredentials(ctx, ClientCredentialsRequest{
+		Key:      "github",
+		Provider: "github",
+		TokenURL: server.URL,
+		ClientID: "client-id",
+		Scopes:   []string{"repo.read"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectClientCredentials: %v", err)
+	}
+	if record.Status != StatusConnected || record.AccessToken != "first-token" {
+		t.Fatalf("record = %#v, want connected first token", record)
+	}
+	now = now.Add(2 * time.Second)
+	token, record, err := source.AccessToken(ctx, AccessTokenRequest{Key: "github", Scopes: []string{"repo.read"}})
+	if err != nil {
+		t.Fatalf("AccessToken refresh-before-use: %v", err)
+	}
+	if token != "refreshed-token" || record.AccessToken != "refreshed-token" {
+		t.Fatalf("refreshed token = (%q, %q), want refreshed-token", token, record.AccessToken)
+	}
+	if requests != 2 {
+		t.Fatalf("token endpoint requests = %d, want 2", requests)
+	}
+}
+
+func TestTokenSourceClientCredentialsFailureRedactsProviderSecretEcho(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_client",
+			"error_description": "client secret cli-secret was rejected",
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore()
+	source := TokenSource{Store: store}
+	_, err := source.ConnectClientCredentials(ctx, ClientCredentialsRequest{
+		Key:          "github",
+		Provider:     "github",
+		TokenURL:     server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "cli-secret",
+		Scopes:       []string{"repo.read"},
+	})
+	if err == nil {
+		t.Fatal("ConnectClientCredentials error = nil, want redacted token endpoint failure")
+	}
+	if strings.Contains(err.Error(), "cli-secret") {
+		t.Fatalf("ConnectClientCredentials error leaked client secret: %v", err)
+	}
+	stored, ok, getErr := store.Get(ctx, "github")
+	if getErr != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, getErr)
+	}
+	if stored.Status != StatusRefreshFailed {
+		t.Fatalf("stored status = %q, want refresh_failed", stored.Status)
+	}
+	if strings.Contains(stored.Failure, "cli-secret") {
+		t.Fatalf("stored failure leaked client secret: %q", stored.Failure)
+	}
+}
+
+func TestTokenSourceClientCredentialsFailurePropagatesFailureStatePersistenceError(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_client",
+			"error_description": "client secret cli-secret was rejected",
+		})
+	}))
+	defer server.Close()
+
+	store := failingPutStore{
+		Store: NewMemoryStore(),
+		err:   errors.New("permission denied while writing cli-secret"),
+	}
+	source := TokenSource{Store: store}
+	record, err := source.ConnectClientCredentials(ctx, ClientCredentialsRequest{
+		Key:          "github",
+		Provider:     "github",
+		TokenURL:     server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "cli-secret",
+		Scopes:       []string{"repo.read"},
+	})
+	if err == nil {
+		t.Fatal("ConnectClientCredentials error = nil, want persistence failure surfaced")
+	}
+	if !strings.Contains(err.Error(), "persist refresh_failed state") {
+		t.Fatalf("ConnectClientCredentials error = %v, want persistence failure context", err)
+	}
+	if strings.Contains(err.Error(), "cli-secret") {
+		t.Fatalf("ConnectClientCredentials error leaked client secret: %v", err)
+	}
+	if record.Status != StatusRefreshFailed {
+		t.Fatalf("returned record status = %q, want refresh_failed", record.Status)
+	}
+	if strings.Contains(record.Failure, "cli-secret") {
+		t.Fatalf("returned record failure leaked client secret: %q", record.Failure)
+	}
+	if _, ok, getErr := store.Store.Get(ctx, "github"); getErr != nil || ok {
+		t.Fatalf("underlying store.Get = (_, %v, %v), want no silently persisted record", ok, getErr)
+	}
+}
+
+func TestTokenSourceAccessTokenFailsClosedWhenRefreshNarrowsScopes(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		if got := r.Form.Get("grant_type"); got != "client_credentials" {
+			t.Fatalf("grant_type = %q, want client_credentials", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "narrow-token",
+			"expires_in":   3600,
+			"scope":        "repo.read",
+		})
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	store := NewMemoryStore(Record{
+		Key:         "github",
+		GrantType:   GrantClientCredentials,
+		TokenURL:    server.URL,
+		ClientID:    "client-id",
+		AccessToken: "expired-token",
+		ExpiresAt:   now.Add(-time.Second),
+		Scopes:      []string{"repo.read", "repo.write"},
+		Status:      StatusConnected,
+	})
+	source := TokenSource{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+	}
+	token, record, err := source.AccessToken(ctx, AccessTokenRequest{Key: "github", Scopes: []string{"repo.write"}})
+	if err == nil {
+		t.Fatal("AccessToken error = nil, want scope-insufficient after narrowed refresh")
+	}
+	if token != "" {
+		t.Fatalf("token = %q, want empty token on narrowed scope", token)
+	}
+	if !strings.Contains(err.Error(), "scope-insufficient") || !strings.Contains(err.Error(), "repo.write") {
+		t.Fatalf("AccessToken error = %v, want scope-insufficient repo.write", err)
+	}
+	if record.AccessToken != "narrow-token" {
+		t.Fatalf("returned record token = %q, want refreshed narrow token retained only in record", record.AccessToken)
+	}
+	if record.Status != StatusConnected {
+		t.Fatalf("returned record status = %q, want connected for per-request scope failure", record.Status)
+	}
+	stored, ok, getErr := store.Get(ctx, "github")
+	if getErr != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, getErr)
+	}
+	if got := strings.Join(stored.Scopes, " "); got != "repo.read" {
+		t.Fatalf("stored scopes = %q, want provider-narrowed repo.read", got)
+	}
+	if stored.Status != StatusConnected {
+		t.Fatalf("stored status = %q, want connected for per-request scope failure", stored.Status)
+	}
+}
+
+func TestTokenSourceRefreshFailureFailsClosedAndRedactsSecrets(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_client",
+			"error_description": "client-secret was rejected with refresh-secret",
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore(Record{
+		Key:          "github",
+		GrantType:    GrantAuthorizationCodePKCE,
+		TokenURL:     server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		AccessToken:  "access-secret",
+		RefreshToken: "refresh-secret",
+		Status:       StatusConnected,
+	})
+	source := TokenSource{Store: store}
+	_, record, err := source.Refresh(ctx, "github")
+	if err == nil {
+		t.Fatal("Refresh error = nil, want fail-closed error")
+	}
+	if strings.Contains(err.Error(), "client-secret") || strings.Contains(err.Error(), "refresh-secret") {
+		t.Fatalf("refresh error leaked secret material: %v", err)
+	}
+	stored, ok, getErr := store.Get(ctx, "github")
+	if getErr != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, getErr)
+	}
+	if stored.Status != StatusRefreshFailed {
+		t.Fatalf("stored status = %q, want refresh_failed", stored.Status)
+	}
+	if strings.Contains(stored.Failure, "client-secret") || strings.Contains(stored.Failure, "refresh-secret") {
+		t.Fatalf("stored failure leaked secret material: %q", stored.Failure)
+	}
+	if record.Status != StatusRefreshFailed {
+		t.Fatalf("returned record status = %q, want refresh_failed", record.Status)
+	}
+}
+
+func TestTokenSourceRefreshFailurePropagatesFailureStatePersistenceError(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":             "invalid_client",
+			"error_description": "client-secret was rejected with refresh-secret",
+		})
+	}))
+	defer server.Close()
+
+	inner := NewMemoryStore(Record{
+		Key:          "github",
+		GrantType:    GrantAuthorizationCodePKCE,
+		TokenURL:     server.URL,
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		AccessToken:  "access-secret",
+		RefreshToken: "refresh-secret",
+		Status:       StatusConnected,
+	})
+	store := failingPutStore{
+		Store: inner,
+		err:   errors.New("database locked while writing client-secret and refresh-secret"),
+	}
+	source := TokenSource{Store: store}
+	_, record, err := source.Refresh(ctx, "github")
+	if err == nil {
+		t.Fatal("Refresh error = nil, want persistence failure surfaced")
+	}
+	if !strings.Contains(err.Error(), "persist refresh_failed state") {
+		t.Fatalf("Refresh error = %v, want persistence failure context", err)
+	}
+	if strings.Contains(err.Error(), "client-secret") || strings.Contains(err.Error(), "refresh-secret") {
+		t.Fatalf("Refresh error leaked secret material: %v", err)
+	}
+	if record.Status != StatusRefreshFailed {
+		t.Fatalf("returned record status = %q, want refresh_failed", record.Status)
+	}
+	if strings.Contains(record.Failure, "client-secret") || strings.Contains(record.Failure, "refresh-secret") {
+		t.Fatalf("returned record failure leaked secret material: %q", record.Failure)
+	}
+	stored, ok, getErr := inner.Get(ctx, "github")
+	if getErr != nil || !ok {
+		t.Fatalf("inner.Get = (%#v, %v, %v), want original stale record", stored, ok, getErr)
+	}
+	if stored.Status != StatusConnected {
+		t.Fatalf("stale stored status = %q, want connected to prove write failure was not hidden", stored.Status)
+	}
+}
+
+type failingPutStore struct {
+	Store
+	err error
+}
+
+func (s failingPutStore) Put(context.Context, Record) error {
+	if s.err != nil {
+		return s.err
+	}
+	return errors.New("put failed")
+}

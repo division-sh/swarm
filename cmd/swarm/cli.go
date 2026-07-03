@@ -112,6 +112,7 @@ start work with 'swarm run' or 'swarm event publish' and watch it with
 		newDescribeCommand(ctx, repo),
 		newBundleCommand(repo, opts),
 		newSecretsCommand(ctx, repo),
+		newConnectionsCommand(ctx, repo),
 	)
 	addToGroup(commandGroupOperate,
 		newRunCommand(repo, opts),

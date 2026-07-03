@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -38,6 +39,7 @@ type Executor struct {
 	workflowInstances              WorkflowInstanceLoader
 	cfg                            *config.Config
 	credentials                    runtimecredentials.Store
+	managedCredentials             runtimemanagedcredentials.Store
 	httpClient                     *http.Client
 	mcpClient                      *runtimemcp.Client
 	workflowSource                 semanticview.Source
@@ -80,6 +82,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		workflowInstances:              opts.WorkflowInstances,
 		cfg:                            opts.Config,
 		credentials:                    opts.Credentials,
+		managedCredentials:             opts.ManagedCredentials,
 		httpClient:                     &http.Client{Timeout: 30 * time.Second},
 		mcpClient:                      opts.MCPClient,
 		workflowSource:                 opts.WorkflowSource,

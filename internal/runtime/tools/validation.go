@@ -32,6 +32,9 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 		}
 		switch normalized {
 		case implementationPlatformBuiltin:
+			if entry.ManagedCredential != nil {
+				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)
+			}
 			if _, ok := supportedRuntimeToolNames[name]; !ok {
 				return warnings, fmt.Errorf("tool %s declares handler_type platform_builtin but is not shipped by the generic runtime", name)
 			}
@@ -45,7 +48,16 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 			if strings.TrimSpace(entry.HTTP.URL) == "" {
 				return warnings, fmt.Errorf("tool %s http.url is required", name)
 			}
+			if entry.ManagedCredential != nil && strings.TrimSpace(entry.ManagedCredential.Key) == "" {
+				return warnings, fmt.Errorf("tool %s managed_credential.key is required", name)
+			}
+			if entry.ManagedCredential != nil && strings.TrimSpace(entry.ManagedCredential.Header) == "" && strings.TrimSpace(entry.ManagedCredential.Prefix) != "" {
+				return warnings, fmt.Errorf("tool %s managed_credential.header is required when prefix is set", name)
+			}
 		case implementationMCP:
+			if entry.ManagedCredential != nil {
+				return warnings, fmt.Errorf("tool %s managed_credential is only supported for handler_type http", name)
+			}
 			if !strings.Contains(name, ".") {
 				warnings = append(warnings, fmt.Errorf("tool %s uses handler_type mcp but is not prefixed with a server namespace", name))
 			}

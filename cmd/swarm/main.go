@@ -38,6 +38,7 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -211,16 +212,17 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				SourceLoader:                   runForkSourceLoader,
 				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
 				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-					Config:            req.Config,
-					EntityStore:       stores.ToolEntityStore,
-					HumanTaskStore:    stores.HumanTaskStore,
-					SessionRegistry:   stores.SessionRegistry,
-					ConversationStore: stores.ConversationStore,
-					TurnStore:         stores.TurnStore,
-					ScheduleStore:     stores.ScheduleStore,
-					MailboxStore:      stores.MailboxStore,
-					Workspace:         req.Workspaces,
-					Credentials:       req.Credentials,
+					Config:             req.Config,
+					EntityStore:        stores.ToolEntityStore,
+					HumanTaskStore:     stores.HumanTaskStore,
+					SessionRegistry:    stores.SessionRegistry,
+					ConversationStore:  stores.ConversationStore,
+					TurnStore:          stores.TurnStore,
+					ScheduleStore:      stores.ScheduleStore,
+					MailboxStore:       stores.MailboxStore,
+					Workspace:          req.Workspaces,
+					Credentials:        req.Credentials,
+					ManagedCredentials: req.ManagedCredentials,
 				},
 			},
 			RuntimeContexts:  apiRuntimeContexts,
@@ -389,6 +391,7 @@ type serveRuntimeBundleContextRequest struct {
 	MountSources           workspaceMountSources
 	WorkspaceBackend       workspaceBackendSelection
 	Credentials            runtimecredentials.Store
+	ManagedCredentials     runtimemanagedcredentials.Store
 	BootStartedAt          time.Time
 	BootProgress           func(runtime.BootProgressEvent)
 	EnableToolGateway      bool
@@ -689,7 +692,9 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err := workspaces.EnsureSystemWorkspaces(req.Ctx); err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
 	}
-	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, runtime.DefaultWorkflowContractValidationOptions(req.Credentials))
+	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
+	validationOpts.ManagedCredentials = req.ManagedCredentials
+	validation, err := runtime.ValidateWorkflowContractSurface(req.Ctx, loaded.source, validationOpts)
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
@@ -714,6 +719,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			BundleFingerprint:                bootIdentity.Fingerprint,
 			BundleSourceFact:                 bundleSourceFact,
 			Credentials:                      req.Credentials,
+			ManagedCredentials:               req.ManagedCredentials,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -964,6 +970,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("configure credentials", "error", err)
 		return 1
 	}
+	managedCredentialStore, err := buildManagedCredentialStore()
+	if err != nil {
+		slog.Error("configure managed credentials", "error", err)
+		return 1
+	}
 
 	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
@@ -1005,6 +1016,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			MountSources:           mountSources,
 			WorkspaceBackend:       workspaceBackend,
 			Credentials:            credentialStore,
+			ManagedCredentials:     managedCredentialStore,
 			BootStartedAt:          bootStartedAt,
 			BootProgress:           reporter.runtimeSink(),
 			EnableToolGateway:      i == 0,
@@ -1065,6 +1077,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Config:                  cfg,
 		Workspaces:              workspaces,
 		Credentials:             credentialStore,
+		ManagedCredentials:      managedCredentialStore,
 	})
 	if err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
@@ -1623,6 +1636,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
+		managedCredentialStore, err := buildManagedCredentialStore()
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: configure managed credentials: %v\n", err)
+			}
+			return 1
+		}
 		selectedProject := resolveLocalRuntimeStateProject(repo, cliContractPlatformSpecPaths{ContractsPath: contractsRoot})
 		mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, "", cfg, selectedProject, true)
 		if err != nil {
@@ -1654,16 +1674,17 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			},
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config:            cfg,
-				EntityStore:       stores.ToolEntityStore,
-				HumanTaskStore:    stores.HumanTaskStore,
-				SessionRegistry:   stores.SessionRegistry,
-				ConversationStore: stores.ConversationStore,
-				TurnStore:         stores.TurnStore,
-				ScheduleStore:     stores.ScheduleStore,
-				MailboxStore:      stores.MailboxStore,
-				Workspace:         workspaces,
-				Credentials:       credentialStore,
+				Config:             cfg,
+				EntityStore:        stores.ToolEntityStore,
+				HumanTaskStore:     stores.HumanTaskStore,
+				SessionRegistry:    stores.SessionRegistry,
+				ConversationStore:  stores.ConversationStore,
+				TurnStore:          stores.TurnStore,
+				ScheduleStore:      stores.ScheduleStore,
+				MailboxStore:       stores.MailboxStore,
+				Workspace:          workspaces,
+				Credentials:        credentialStore,
+				ManagedCredentials: managedCredentialStore,
 			},
 		})
 		if err != nil {
@@ -2175,7 +2196,13 @@ func verifyBundleResult(ctx context.Context, source semanticview.Source) (runtim
 	if err != nil {
 		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure credentials: %w", err)
 	}
-	return verifyBundleResultWithOptions(ctx, source, runtime.DefaultWorkflowContractValidationOptions(credentialStore))
+	managedCredentialStore, err := buildManagedCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationResult{}, fmt.Errorf("configure managed credentials: %w", err)
+	}
+	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+	opts.ManagedCredentials = managedCredentialStore
+	return verifyBundleResultWithOptions(ctx, source, opts)
 }
 
 func verifyBundleResultWithOptions(ctx context.Context, source semanticview.Source, opts runtime.WorkflowContractValidationOptions) (runtime.WorkflowContractValidationResult, error) {
@@ -2191,6 +2218,11 @@ func verifyWorkflowContractValidationOptions(repo string) (runtime.WorkflowContr
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure credentials: %w", err)
 	}
 	opts := runtime.DefaultWorkflowContractValidationOptions(credentialStore)
+	managedCredentialStore, err := buildManagedCredentialStore()
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("configure managed credentials: %w", err)
+	}
+	opts.ManagedCredentials = managedCredentialStore
 	configResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
 	if err != nil {
 		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("load runtime config: %w", err)
@@ -3256,6 +3288,10 @@ func buildCredentialStore() (runtimecredentials.Store, error) {
 		return nil, err
 	}
 	return runtimecredentials.NewOverlayStore(runtimecredentials.NewEnvStore(), fileStore), nil
+}
+
+func buildManagedCredentialStore() (runtimemanagedcredentials.Store, error) {
+	return runtimemanagedcredentials.NewDefaultFileStore()
 }
 
 func configuredWorkspaceLifecycle(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.DockerManager, error) {

@@ -19,6 +19,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -33,18 +34,19 @@ import (
 const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
 
 type SelectedContractAgentRuntimeOptions struct {
-	Config            *config.Config
-	EntityStore       runtimetools.EntityPersistence
-	HumanTaskStore    runtimetools.HumanTaskPersistence
-	SessionRegistry   runtimesessions.Registry
-	ConversationStore runtimellm.ConversationPersistence
-	TurnStore         runtimellm.TurnPersistence
-	ScheduleStore     runtimepipeline.SchedulePersistence
-	MailboxStore      runtimetools.MailboxPersistence
-	Workspace         workspace.Lifecycle
-	Credentials       runtimecredentials.Store
-	LLMRuntime        runtimellm.Runtime
-	MCPClient         *runtimemcp.Client
+	Config             *config.Config
+	EntityStore        runtimetools.EntityPersistence
+	HumanTaskStore     runtimetools.HumanTaskPersistence
+	SessionRegistry    runtimesessions.Registry
+	ConversationStore  runtimellm.ConversationPersistence
+	TurnStore          runtimellm.TurnPersistence
+	ScheduleStore      runtimepipeline.SchedulePersistence
+	MailboxStore       runtimetools.MailboxPersistence
+	Workspace          workspace.Lifecycle
+	Credentials        runtimecredentials.Store
+	ManagedCredentials runtimemanagedcredentials.Store
+	LLMRuntime         runtimellm.Runtime
+	MCPClient          *runtimemcp.Client
 
 	AgentFactory        runtimemanager.AgentFactory
 	AgentManagerOptions runtimemanager.AgentManagerOptions
@@ -252,17 +254,18 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	modelRuntime := options.LLMRuntime
 	var managerRef runtimetools.Manager
 	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
-		Config:            options.Config,
-		Credentials:       credentials,
-		MailboxStore:      options.MailboxStore,
-		MCPClient:         options.MCPClient,
-		EntityStore:       options.EntityStore,
-		HumanTaskStore:    options.HumanTaskStore,
-		WorkflowSource:    source,
-		WorkspaceResolver: options.Workspace,
-		ModelRuntime:      modelRuntime,
-		AuthorityProvider: authority,
-		EmitRegistry:      emitRegistry,
+		Config:             options.Config,
+		Credentials:        credentials,
+		ManagedCredentials: options.ManagedCredentials,
+		MailboxStore:       options.MailboxStore,
+		MCPClient:          options.MCPClient,
+		EntityStore:        options.EntityStore,
+		HumanTaskStore:     options.HumanTaskStore,
+		WorkflowSource:     source,
+		WorkspaceResolver:  options.Workspace,
+		ModelRuntime:       modelRuntime,
+		AuthorityProvider:  authority,
+		EmitRegistry:       emitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
 			return managerRef
 		},

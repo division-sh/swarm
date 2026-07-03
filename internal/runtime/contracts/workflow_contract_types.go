@@ -618,6 +618,12 @@ type HTTPToolSpec struct {
 	TimeoutSeconds int               `yaml:"timeout_seconds"`
 	Retry          HTTPToolRetrySpec `yaml:"retry"`
 }
+type ManagedCredentialRef struct {
+	Key    string   `yaml:"key"`
+	Header string   `yaml:"header"`
+	Prefix string   `yaml:"prefix"`
+	Scopes []string `yaml:"scopes"`
+}
 type ToolInputSchema struct {
 	Type                 string                     `yaml:"type"`
 	Description          string                     `yaml:"description"`
@@ -1363,18 +1369,19 @@ func (e AgentRegistryEntry) ConfiguredTools() []string {
 }
 
 type ToolSchemaEntry struct {
-	Category           string          `yaml:"category"`
-	Description        string          `yaml:"description"`
-	HandlerType        string          `yaml:"handler_type"`
-	Permission         string          `yaml:"permission"`
-	RequiredPermission string          `yaml:"required_permission"`
-	RateLimit          string          `yaml:"rate_limit"`
-	RateLimitMaxWait   string          `yaml:"rate_limit_max_wait"`
-	InputSchema        ToolInputSchema `yaml:"input_schema"`
-	OutputSchema       ToolInputSchema `yaml:"output_schema"`
-	HTTP               *HTTPToolSpec   `yaml:"http"`
-	ResponseMapping    map[string]any  `yaml:"response_mapping"`
-	Credentials        []string        `yaml:"credentials"`
+	Category           string                `yaml:"category"`
+	Description        string                `yaml:"description"`
+	HandlerType        string                `yaml:"handler_type"`
+	Permission         string                `yaml:"permission"`
+	RequiredPermission string                `yaml:"required_permission"`
+	RateLimit          string                `yaml:"rate_limit"`
+	RateLimitMaxWait   string                `yaml:"rate_limit_max_wait"`
+	InputSchema        ToolInputSchema       `yaml:"input_schema"`
+	OutputSchema       ToolInputSchema       `yaml:"output_schema"`
+	HTTP               *HTTPToolSpec         `yaml:"http"`
+	ResponseMapping    map[string]any        `yaml:"response_mapping"`
+	Credentials        []string              `yaml:"credentials"`
+	ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential"`
 }
 type PlatformSpecDocument struct {
 	Platform struct {
