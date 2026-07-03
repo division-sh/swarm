@@ -41,7 +41,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		Policy:         cloneStringAnyMap(ctx.Policy.Raw()),
 		Accumulated:    accumulatedItemsForCEL(ctx.Accumulated.Raw()),
 		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
-		WorkflowName:   e.workflowName(),
+		WorkflowName:   firstNonEmptyString(strings.TrimSpace(ctx.FlowID), e.workflowName()),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)

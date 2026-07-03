@@ -606,6 +606,11 @@ func wave1ParseWriteTarget(flowID, nodeID, eventType, kind, target string) wave1
 	if strings.HasPrefix(target, "metadata.") {
 		return write
 	}
+	if target == platformcontext.EntityRoot || strings.HasPrefix(target, platformcontext.EntityRoot+".") {
+		write.Entity = true
+		write.Field = platformcontext.EntityRoot
+		return write
+	}
 	if strings.HasPrefix(target, "gates.") || target == "gates" {
 		write.Field = "gates"
 		write.Entity = false

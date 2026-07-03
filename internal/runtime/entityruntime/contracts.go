@@ -394,6 +394,8 @@ func EntityWritePath(target string) (string, bool, error) {
 			return strings.Join(parsed.Segments, "."), true, nil
 		case paths.RootMetadata:
 			return "", false, nil
+		case paths.RootPlatformEntity:
+			return "", false, fmt.Errorf("%s is read-only platform entity metadata and cannot be used as a write target", paths.RootPlatformEntity.String())
 		default:
 			return "", false, nil
 		}
