@@ -78,6 +78,69 @@ func TestPlatformSpecHandlerSpecificationHierarchy(t *testing.T) {
 	}
 }
 
+func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	testSpec := mustMappingValue(t, root, "test_specification")
+	runner := mustMappingValue(t, testSpec, "deterministic_scenario_runner")
+
+	if got := scalarValue(mappingValue(runner, "implementation_status")); got != "source_authority_only" {
+		t.Fatalf("deterministic scenario runner implementation_status = %q, want source_authority_only", got)
+	}
+
+	selectedSurface := mustMappingValue(t, runner, "selected_public_surface")
+	if got := scalarValue(mappingValue(selectedSurface, "command_family")); got != "swarm test" {
+		t.Fatalf("deterministic scenario runner command_family = %q, want swarm test", got)
+	}
+
+	sourceAuthority := mustMappingValue(t, runner, "source_authority")
+	if got := scalarValue(mappingValue(sourceAuthority, "merge_bearing_owner")); got != "platform-spec.yaml" {
+		t.Fatalf("deterministic scenario runner merge_bearing_owner = %q, want platform-spec.yaml", got)
+	}
+	consumedOwners := mustMappingValue(t, sourceAuthority, "consumed_owners")
+	for _, key := range []string{
+		"expressions",
+		"event_injection",
+		"mailbox_decisions",
+		"run_readback",
+		"entity_readback",
+		"dead_letter_readback",
+		"test_quiescence_inputs",
+		"contract_validation",
+	} {
+		if !hasMappingKey(consumedOwners, key) {
+			t.Fatalf("deterministic scenario runner consumed_owners.%s missing", key)
+		}
+	}
+
+	scenarioDocument := mustMappingValue(t, runner, "scenario_document")
+	expressionModel := mustMappingValue(t, scenarioDocument, "expression_model")
+	namespaces := mustMappingValue(t, expressionModel, "scenario_namespaces")
+	for _, key := range []string{"vars", "scenario"} {
+		if !hasMappingKey(namespaces, key) {
+			t.Fatalf("deterministic scenario runner scenario_namespaces.%s missing", key)
+		}
+	}
+
+	actionSteps := mustMappingValue(t, runner, "action_steps")
+	for _, key := range []string{"publish", "mailbox_approve", "mailbox_reject", "mailbox_defer"} {
+		if !hasMappingKey(actionSteps, key) {
+			t.Fatalf("deterministic scenario runner action_steps.%s missing", key)
+		}
+	}
+
+	expectations := mustMappingValue(t, runner, "expectations")
+	for _, key := range []string{"events", "entities", "mailbox", "no_dead_letters", "invalid_variants"} {
+		if !hasMappingKey(expectations, key) {
+			t.Fatalf("deterministic scenario runner expectations.%s missing", key)
+		}
+	}
+
+	catalogConvergence := mustMappingValue(t, runner, "catalog_convergence")
+	if got := scalarValue(mappingValue(catalogConvergence, "decision")); got != "split_follow_up" {
+		t.Fatalf("deterministic scenario runner catalog_convergence.decision = %q, want split_follow_up", got)
+	}
+}
+
 func TestPlatformEventsCatalogSchemaAuthorityRefsResolve(t *testing.T) {
 	root := loadPlatformSpecYAMLNode(t)
 	catalog := mustMappingValue(t, mustMappingValue(t, root, "platform_events"), "catalog")
