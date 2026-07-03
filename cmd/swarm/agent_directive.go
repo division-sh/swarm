@@ -44,14 +44,15 @@ func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
 	directiveOpts := agentDirectiveCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "directive <agent-id> <message>",
-		Short: "Send a directive to an agent through v1 RPC.",
+		Short: "Send a directive message to a running agent.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentDirectiveCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, directiveOpts)
 		},
 	}
 	cmd.Flags().StringVar(&directiveOpts.runID, "run-id", "", "Optional explicit nonterminal run target")
-	cmd.Flags().StringVar(&directiveOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&directiveOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &directiveOpts.apiOptions, cliAPICommandClassMutating, "swarm agent directive")
 	return cmd
 }

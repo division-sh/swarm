@@ -57,7 +57,7 @@ func newIncidentsCommand(opts rootCommandOptions) *cobra.Command {
 	incidentOpts := runtimeIncidentCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "incidents [filters]",
-		Short: "List runtime incidents through /v1/rpc runtime.incidents.",
+		Short: "List runtime incidents.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			incidentOpts.sinceHoursSet = cmd.Flags().Changed("since-hours")

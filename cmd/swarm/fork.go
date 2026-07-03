@@ -41,10 +41,11 @@ type runForkResult struct {
 func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	forkOpts := forkCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "fork <source-run-id>",
-		Short: "Fork one run through /v1/rpc run.fork.",
-		Long:  runForkCommandShape + "\n\nFork one run through /v1/rpc run.fork.",
-		Args:  cobra.ExactArgs(1),
+		Use:     "fork <source-run-id>",
+		Short:   "Branch a run to replay it with changed contracts or policy.",
+		Example: `  swarm fork <source-run-id> --at-event <event-id>`,
+		Long:    runForkCommandShape + "\n\nBranch a run to replay it with changed contracts or policy.",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			forkOpts.bundleHashSet = cmd.Flags().Changed("bundle-hash")
 			forkOpts.atEventSet = cmd.Flags().Changed("at-event")
@@ -58,6 +59,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &forkOpts.output)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &forkOpts.apiOptions, cliAPICommandClassMutating, "swarm fork")
 	return cmd

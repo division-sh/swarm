@@ -70,9 +70,10 @@ type eventPublishDelivery struct {
 func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	publishOpts := eventPublishCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "publish <event-name>",
-		Short: "Publish one event through /v1/rpc event.publish.",
-		Args:  cobra.ExactArgs(1),
+		Use:     "publish <event-name>",
+		Short:   "Publish an event onto the bus.",
+		Example: `  swarm event publish account.scan_requested --payload payload.json`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			publishOpts.payloadJSONSet = cmd.Flags().Changed("payload-json")
 			publishOpts.runIDSet = cmd.Flags().Changed("run-id")
@@ -94,7 +95,8 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&publishOpts.bundleHash, "bundle-hash", "", "Optional expected server canonical bundle hash")
 	cmd.Flags().StringVar(&publishOpts.bundleFingerprint, "bundle-fingerprint", "", "Optional expected server bundle fingerprint")
 	cmd.Flags().StringVar(&publishOpts.emitter, "emitter", "", "Optional producer identifier")
-	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&publishOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &publishOpts.apiOptions, cliAPICommandClassMutating, "swarm event publish")
 	return cmd
 }

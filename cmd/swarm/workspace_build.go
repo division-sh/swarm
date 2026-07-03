@@ -26,7 +26,7 @@ type workspaceBuildOptions struct {
 func newWorkspaceCommand(ctx context.Context) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workspace",
-		Short: "Manage local workspace setup surfaces.",
+		Short: "Manage local workspace setup.",
 	}
 	cmd.AddCommand(newWorkspaceBuildCommand(ctx))
 	return cmd

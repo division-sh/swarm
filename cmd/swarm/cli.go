@@ -62,8 +62,19 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	opts = opts.ensureRootFlagState()
 	opts.repoRoot = assetCommandRepoRoot(repo)
 	cmd := &cobra.Command{
-		Use:           "swarm",
-		Short:         "Run and inspect Swarm workflows.",
+		Use:   "swarm",
+		Short: "Run and inspect Swarm workflows.",
+		Long: `Swarm runs event-driven agent workflows defined by declarative contracts.
+
+The typical path: check your setup with 'swarm doctor', validate contracts
+with 'swarm verify', start the local runtime with 'swarm serve --dev', then
+start work with 'swarm run' or 'swarm event publish' and watch it with
+'swarm trace', 'swarm events', and 'swarm mailbox'.`,
+		Example: `  swarm doctor                                      # check local prerequisites
+  swarm verify --contracts ./contracts              # validate contracts before boot
+  swarm serve --dev                                 # start a local development runtime
+  swarm run --event <event-name> --payload payload.json
+  swarm trace <run-id>                              # see what a run did`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -76,40 +87,72 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
 	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to the Swarm user/global state directory")
-	cmd.AddCommand(
-		newServeCommand(ctx, repo, opts.runServe),
-		newRunCommand(repo, opts),
+	cmd.AddGroup(
+		&cobra.Group{ID: commandGroupStart, Title: "Getting started:"},
+		&cobra.Group{ID: commandGroupAuthor, Title: "Author & validate:"},
+		&cobra.Group{ID: commandGroupOperate, Title: "Run & operate:"},
+		&cobra.Group{ID: commandGroupObserve, Title: "Observe & debug:"},
+		&cobra.Group{ID: commandGroupUtility, Title: "Utilities:"},
+	)
+	addToGroup := func(groupID string, subs ...*cobra.Command) {
+		for _, sub := range subs {
+			sub.GroupID = groupID
+			cmd.AddCommand(sub)
+		}
+	}
+	addToGroup(commandGroupStart,
 		newDoctorCommand(ctx, repo),
+		newWorkspaceCommand(ctx),
+		newContextCommand(ctx, opts),
+		newServeCommand(ctx, repo, opts.runServe),
+		newVersionCommand(opts),
+	)
+	addToGroup(commandGroupAuthor,
 		newVerifyCommand(ctx, repo),
 		newDescribeCommand(ctx, repo),
+		newBundleCommand(repo, opts),
 		newSecretsCommand(ctx, repo),
-		newContextCommand(ctx, opts),
-		newWorkspaceCommand(ctx),
-		newVersionCommand(opts),
-		newCompletionCommand(),
+	)
+	addToGroup(commandGroupOperate,
+		newRunCommand(repo, opts),
+		newControlCommand(opts),
+		newEventCommand(opts),
+		newMailboxCommand(opts),
+		newAgentCommand(opts),
+		newForkCommand(opts),
+		newForkChatCommand(opts),
+	)
+	addToGroup(commandGroupObserve,
 		newRunsCommand(opts),
 		newStatusCommand(opts),
 		newTraceCommand(opts),
-		newHealthCommand(opts),
-		newLogsCommand(opts),
-		newIncidentsCommand(opts),
-		newInvestigateCommand(opts),
 		newEventsCommand(opts),
-		newEventCommand(opts),
+		newEntitiesCommand(opts),
+		newEntityCommand(opts),
 		newConversationsCommand(opts),
 		newConversationCommand(opts),
 		newAgentsCommand(opts),
-		newAgentCommand(opts),
-		newForkChatCommand(opts),
-		newBundleCommand(repo, opts),
-		newEntitiesCommand(opts),
-		newEntityCommand(opts),
-		newMailboxCommand(opts),
-		newControlCommand(opts),
-		newForkCommand(opts),
+		newLogsCommand(opts),
+		newHealthCommand(opts),
+		newIncidentsCommand(opts),
 	)
+	addToGroup(commandGroupUtility,
+		newCompletionCommand(),
+	)
+	// Retired hidden stub; intentionally ungrouped so it never renders in help.
+	cmd.AddCommand(newInvestigateCommand(opts))
+	cmd.SetHelpCommandGroupID(commandGroupUtility)
 	return cmd
 }
+
+// Help groups, ordered as the newcomer journey: set up, author, run, observe.
+const (
+	commandGroupStart   = "getting-started"
+	commandGroupAuthor  = "author"
+	commandGroupOperate = "operate"
+	commandGroupObserve = "observe"
+	commandGroupUtility = "utilities"
+)
 
 type trackedRootStringFlag struct {
 	value   *string
@@ -144,8 +187,10 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	}
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the Swarm runtime, API, health, and MCP surfaces.",
-		Args:  cobra.NoArgs,
+		Short: "Start the Swarm runtime (server): engine, API, health, and MCP.",
+		Example: `  swarm serve --dev                      # local development runtime
+  swarm serve --contracts ./contracts    # serve a specific contract bundle`,
+		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("require-bundle-match") && cmd.Flags().Changed("no-require-bundle-match") && opts.RequireBundleMatch && opts.NoRequireBundleMatch {
 				return fmt.Errorf("--require-bundle-match and --no-require-bundle-match cannot both be set")
@@ -250,8 +295,9 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 	opts := defaultVerifyCommandOptions()
 	cmd := &cobra.Command{
-		Use:   "verify",
-		Short: "Validate local Swarm contract files.",
+		Use:     "verify",
+		Short:   "Validate contract files before boot.",
+		Example: `  swarm verify --contracts ./contracts`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := opts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -314,7 +360,7 @@ func newVersionCommand(opts rootCommandOptions) *cobra.Command {
 			return runVersionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), versionOpts)
 		},
 	}
-	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query /v1/rpc health.check and print server bundle/runtime identity")
+	cmd.Flags().BoolVar(&versionOpts.server, "server", false, "Also query the connected server and print its bundle/runtime identity")
 	bindCLIOutputFlags(cmd, &versionOpts.output)
 	bindCLILoggingFlags(cmd, &versionOpts.logging)
 	bindCLIAPIConnectionFlags(cmd, &versionOpts.apiOptions)

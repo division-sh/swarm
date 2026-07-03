@@ -85,8 +85,10 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := runCommandOptions{apiOptions: rootOpts}
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Start or reattach to a Swarm run through v1 RPC and trace subscriptions.",
-		Args:  cobra.NoArgs,
+		Short: "Start a workflow run on a running runtime, or reattach to one.",
+		Example: `  swarm run --event <event-name> --payload payload.json
+  swarm run --reattach <run-id>`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := opts
 			runOpts.changedFlags = runCommandChangedFlags(cmd)
@@ -106,6 +108,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.dataSource, "data", "", "Path to agent-visible read-only /data reference directory")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", "Path to platform spec yaml for local foreground startup")
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&opts.runID, "run-id", "", "Optional caller-provided run id for run.start")
 	cmd.Flags().IntVar(&opts.apiPort, "api-port", 0, "Local API listener port for local foreground startup")
 	cmd.Flags().IntVar(&opts.mcpPort, "mcp-port", 0, "Reserved local MCP port for local foreground startup")

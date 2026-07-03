@@ -100,7 +100,7 @@ func newLogsCommand(opts rootCommandOptions) *cobra.Command {
 	logOpts := runtimeLogCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "logs [filters]",
-		Short: "List or follow runtime logs through v1 API owners.",
+		Short: "List or follow runtime logs.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			logOpts.limitSet = cmd.Flags().Changed("limit")
@@ -118,7 +118,7 @@ func newLogsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&logOpts.level, "level", "", "Filter by log level: debug, info, warn, or error")
 	cmd.Flags().StringVar(&logOpts.errorCode, "error-code", "", "Filter by error code")
 	cmd.Flags().StringVar(&logOpts.source, "source", "", "Filter by log source")
-	cmd.Flags().BoolVar(&logOpts.follow, "follow", false, "Follow matching runtime logs through /v1/ws runtime.subscribe_logs")
+	cmd.Flags().BoolVar(&logOpts.follow, "follow", false, "Follow matching runtime logs as they stream")
 	cmd.Flags().StringVar(&logOpts.replaySince, "replay-since", "", "With --follow, optional RFC3339 catch-up window start")
 	cmd.Flags().StringVar(&logOpts.since, "since", "", "Snapshot-only RFC3339 lower timestamp bound")
 	cmd.Flags().StringVar(&logOpts.until, "until", "", "Snapshot-only RFC3339 upper timestamp bound")

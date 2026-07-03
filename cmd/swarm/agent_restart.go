@@ -31,13 +31,14 @@ func newAgentRestartCommand(opts rootCommandOptions) *cobra.Command {
 	restartOpts := agentRestartCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "restart <agent-id>",
-		Short: "Restart an agent through v1 RPC.",
+		Short: "Restart a stuck or failed agent.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentRestartCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, restartOpts)
 		},
 	}
-	cmd.Flags().StringVar(&restartOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&restartOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &restartOpts.apiOptions, cliAPICommandClassMutating, "swarm agent restart")
 	return cmd
 }

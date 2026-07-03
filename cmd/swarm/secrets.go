@@ -60,7 +60,9 @@ type secretsCheckResult struct {
 func newSecretsCommand(ctx context.Context, repo string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "secrets",
-		Short: "Manage local Swarm secrets.",
+		Short: "Manage local secrets used by tools and providers.",
+		Example: `  swarm secrets set MY_API_KEY
+  swarm secrets check    # verify required secrets are present`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},

@@ -175,7 +175,7 @@ var agentValidSessionScopes = map[string]struct{}{
 func newAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
-		Short: "List agents through v1 RPC.",
+		Short: "List agents and their current state.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -188,7 +188,7 @@ func newAgentsCommand(opts rootCommandOptions) *cobra.Command {
 func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
-		Short: "View or direct one agent through v1 RPC.",
+		Short: "Inspect, direct, restart, or replay a single agent.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -210,7 +210,7 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 	deliveryOpts := agentDeliveriesCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "deliveries <agent-id>",
-		Short: "List one agent's delivery lifecycle rows through v1 RPC.",
+		Short: "List one agent's event delivery history.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deliveryOpts.runIDSet = cmd.Flags().Changed("run-id")
@@ -232,7 +232,7 @@ func newAgentDiagnoseCommand(opts rootCommandOptions) *cobra.Command {
 	diagnoseOpts := agentDiagnoseCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "diagnose <agent-id>",
-		Short: "Diagnose one agent through v1 RPC.",
+		Short: "Diagnose why an agent is stuck or failing.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diagnoseOpts.queueLimitSet = cmd.Flags().Changed("queue-limit")
@@ -251,7 +251,7 @@ func newAgentsListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := agentListCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List declared agents through v1 RPC.",
+		Short: "List declared agents and their status.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentListCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), listOpts)
@@ -267,7 +267,7 @@ func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
 	apiOpts := opts
 	cmd := &cobra.Command{
 		Use:   "view <agent-id>",
-		Short: "View one agent through v1 RPC.",
+		Short: "View one agent's configuration and state.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])

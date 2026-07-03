@@ -78,7 +78,7 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 	cmdOpts := opts
 	cmd := &cobra.Command{
 		Use:   opts.action + " [<run-id>] [--all]",
-		Short: fmt.Sprintf("%s a run or the supported all-runs scope through v1 RPC.", controlCommandTitle(opts.action)),
+		Short: fmt.Sprintf("%s a run, or all runs with --all.", controlCommandTitle(opts.action)),
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := cmdOpts
@@ -90,7 +90,8 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 	if opts.action == "stop" {
 		cmd.Flags().BoolVar(&cmdOpts.yes, "yes", false, "Skip the stop-all confirmation prompt")
 	}
-	cmd.Flags().StringVar(&cmdOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&cmdOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &cmdOpts.apiOptions, cliAPICommandClassControl, "swarm control "+opts.action)
 	return cmd
 }
