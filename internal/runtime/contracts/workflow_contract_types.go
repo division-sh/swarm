@@ -817,14 +817,16 @@ type FlowToolSurfaceContract struct {
 }
 
 type FlowTemplateInstanceDeclaration struct {
-	Declared   bool     `yaml:"-"`
-	By         []string `yaml:"by"`
-	OnMissing  string   `yaml:"on_missing"`
-	OnConflict string   `yaml:"on_conflict"`
+	Declared           bool     `yaml:"-"`
+	By                 []string `yaml:"by"`
+	OnMissing          string   `yaml:"on_missing"`
+	OnMissingDeclared  bool     `yaml:"-"`
+	OnConflict         string   `yaml:"on_conflict"`
+	OnConflictDeclared bool     `yaml:"-"`
 }
 
 func (i FlowTemplateInstanceDeclaration) Empty() bool {
-	return !i.Declared && len(i.By) == 0 && strings.TrimSpace(i.OnMissing) == "" && strings.TrimSpace(i.OnConflict) == ""
+	return !i.Declared && len(i.By) == 0 && strings.TrimSpace(i.OnMissing) == "" && !i.OnMissingDeclared && strings.TrimSpace(i.OnConflict) == "" && !i.OnConflictDeclared
 }
 
 type TemplateInstanceContract struct {

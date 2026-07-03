@@ -180,6 +180,87 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesOrderedCompo
 	}
 }
 
+func TestWorkflowContractBundleResolveFlowTemplateInstance_DefaultsOmittedPolicies(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"spec_repo": {
+				Name: "spec_repo",
+				Mode: "template",
+				Instance: FlowTemplateInstanceDeclaration{
+					Declared: true,
+					By:       []string{"scope_id"},
+				},
+			},
+		},
+		flowEntities: map[string]EntityContractsDocument{
+			"spec_repo": {
+				"artifact_repo": {
+					Fields: map[string]EntityFieldDecl{
+						"scope_id": {Type: "uuid"},
+					},
+				},
+			},
+		},
+	}
+
+	resolved, err := bundle.ResolveFlowTemplateInstance("spec_repo")
+	if err != nil {
+		t.Fatalf("ResolveFlowTemplateInstance: %v", err)
+	}
+	if resolved.OnMissing != "create" || resolved.OnConflict != "reject" {
+		t.Fatalf("resolved policies = %s/%s, want create/reject", resolved.OnMissing, resolved.OnConflict)
+	}
+}
+
+func TestWorkflowContractBundleResolveFlowTemplateInstance_PreservesExplicitPolicies(t *testing.T) {
+	tests := []struct {
+		name       string
+		onMissing  string
+		onConflict string
+	}{
+		{name: "create reject", onMissing: "create", onConflict: "reject"},
+		{name: "reject reject", onMissing: "reject", onConflict: "reject"},
+		{name: "create reuse", onMissing: "create", onConflict: "reuse"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := &WorkflowContractBundle{
+				FlowSchemas: map[string]FlowSchemaDocument{
+					"spec_repo": {
+						Name: "spec_repo",
+						Mode: "template",
+						Instance: FlowTemplateInstanceDeclaration{
+							Declared:           true,
+							By:                 []string{"scope_id"},
+							OnMissing:          tc.onMissing,
+							OnMissingDeclared:  true,
+							OnConflict:         tc.onConflict,
+							OnConflictDeclared: true,
+						},
+					},
+				},
+				flowEntities: map[string]EntityContractsDocument{
+					"spec_repo": {
+						"artifact_repo": {
+							Fields: map[string]EntityFieldDecl{
+								"scope_id": {Type: "uuid"},
+							},
+						},
+					},
+				},
+			}
+
+			resolved, err := bundle.ResolveFlowTemplateInstance("spec_repo")
+			if err != nil {
+				t.Fatalf("ResolveFlowTemplateInstance: %v", err)
+			}
+			if resolved.OnMissing != tc.onMissing || resolved.OnConflict != tc.onConflict {
+				t.Fatalf("resolved policies = %s/%s, want %s/%s", resolved.OnMissing, resolved.OnConflict, tc.onMissing, tc.onConflict)
+			}
+		})
+	}
+}
+
 func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclarations(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -227,12 +308,15 @@ func TestWorkflowContractBundleResolveFlowTemplateInstance_RejectsInvalidDeclara
 			wantErr:  "top-level",
 		},
 		{
-			name: "missing policy",
+			name: "explicit empty policy",
 			schema: FlowSchemaDocument{
 				Mode: "template",
 				Instance: FlowTemplateInstanceDeclaration{
-					By:         []string{"tenant_id"},
-					OnConflict: "reject",
+					Declared:           true,
+					By:                 []string{"tenant_id"},
+					OnMissingDeclared:  true,
+					OnConflict:         "reject",
+					OnConflictDeclared: true,
 				},
 			},
 			entities: EntityContractsDocument{"tenant": {Fields: map[string]EntityFieldDecl{"tenant_id": {Type: "text"}}}},

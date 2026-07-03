@@ -135,11 +135,13 @@ func (i *FlowTemplateInstanceDeclaration) UnmarshalYAML(node *yaml.Node) error {
 			}
 			out.By = by
 		case "on_missing":
+			out.OnMissingDeclared = true
 			if err := value.Decode(&out.OnMissing); err != nil {
 				return fmt.Errorf("template instance on_missing: %w", err)
 			}
 			out.OnMissing = strings.TrimSpace(out.OnMissing)
 		case "on_conflict":
+			out.OnConflictDeclared = true
 			if err := value.Decode(&out.OnConflict); err != nil {
 				return fmt.Errorf("template instance on_conflict: %w", err)
 			}

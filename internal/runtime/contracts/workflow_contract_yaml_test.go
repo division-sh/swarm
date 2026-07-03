@@ -359,8 +359,58 @@ instance:
 	if got, want := doc.Instance.OnMissing, "create"; got != want {
 		t.Fatalf("Instance.OnMissing = %q, want %q", got, want)
 	}
+	if !doc.Instance.OnMissingDeclared {
+		t.Fatal("Instance.OnMissingDeclared = false, want true")
+	}
 	if got, want := doc.Instance.OnConflict, "reject"; got != want {
 		t.Fatalf("Instance.OnConflict = %q, want %q", got, want)
+	}
+	if !doc.Instance.OnConflictDeclared {
+		t.Fatal("Instance.OnConflictDeclared = false, want true")
+	}
+}
+
+func TestFlowSchemaDocumentDecode_PreservesOmittedTemplateInstancePolicyPresence(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: template-flow
+mode: template
+instance:
+  by: scope_id
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !doc.Instance.Declared {
+		t.Fatal("Instance.Declared = false, want true")
+	}
+	if got, want := strings.Join(doc.Instance.By, ","), "scope_id"; got != want {
+		t.Fatalf("Instance.By = %q, want %q", got, want)
+	}
+	if doc.Instance.OnMissingDeclared || doc.Instance.OnConflictDeclared {
+		t.Fatalf("policy presence = %v/%v, want both omitted", doc.Instance.OnMissingDeclared, doc.Instance.OnConflictDeclared)
+	}
+	if doc.Instance.OnMissing != "" || doc.Instance.OnConflict != "" {
+		t.Fatalf("raw policies = %q/%q, want empty before resolver defaults", doc.Instance.OnMissing, doc.Instance.OnConflict)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_PreservesExplicitEmptyTemplateInstancePolicies(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: template-flow
+mode: template
+instance:
+  by: scope_id
+  on_missing: ""
+  on_conflict:
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !doc.Instance.OnMissingDeclared || !doc.Instance.OnConflictDeclared {
+		t.Fatalf("policy presence = %v/%v, want both explicit", doc.Instance.OnMissingDeclared, doc.Instance.OnConflictDeclared)
+	}
+	if doc.Instance.OnMissing != "" || doc.Instance.OnConflict != "" {
+		t.Fatalf("raw policies = %q/%q, want empty explicit values", doc.Instance.OnMissing, doc.Instance.OnConflict)
 	}
 }
 
