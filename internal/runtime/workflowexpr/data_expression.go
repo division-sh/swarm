@@ -361,43 +361,166 @@ func PlatformEntityReferences(expression string) []string {
 }
 
 func EventReferences(expression string) []string {
-	expression = strings.TrimSpace(StripStringLiterals(expression))
+	refs, _ := scanEventReferences(expression)
+	return refs
+}
+
+func scanEventReferences(expression string) ([]string, []string) {
+	expression = strings.TrimSpace(expression)
 	if expression == "" {
-		return nil
+		return nil, nil
 	}
-	const eventPrefix = events.EventContextRoot + "."
 	out := []string{}
+	invalid := []string{}
 	seen := map[string]struct{}{}
-	for searchStart := 0; searchStart < len(expression); {
-		idx := strings.Index(expression[searchStart:], eventPrefix)
-		if idx < 0 {
-			break
-		}
-		start := searchStart + idx
-		refStart := start + len(eventPrefix)
-		searchStart = refStart
-		if !isRootReferenceStart(expression, start) {
-			continue
-		}
-		if refStart >= len(expression) || !isIdentifierStart(expression[refStart]) {
-			continue
-		}
-		refEnd := refStart + 1
-		for refEnd < len(expression) && (isIdentifierPart(expression[refEnd]) || expression[refEnd] == '.') {
-			refEnd++
-		}
-		searchStart = refEnd
-		ref := strings.Trim(strings.TrimSpace(expression[refStart:refEnd]), ".")
+	seenInvalid := map[string]struct{}{}
+	addRef := func(ref string) {
+		ref = strings.Trim(strings.TrimSpace(ref), ".")
 		if ref == "" {
-			continue
+			return
 		}
 		if _, ok := seen[ref]; ok {
-			continue
+			return
 		}
 		seen[ref] = struct{}{}
 		out = append(out, ref)
 	}
-	return out
+	addInvalid := func(message string) {
+		message = strings.TrimSpace(message)
+		if message == "" {
+			return
+		}
+		if _, ok := seenInvalid[message]; ok {
+			return
+		}
+		seenInvalid[message] = struct{}{}
+		invalid = append(invalid, message)
+	}
+	for pos := 0; pos < len(expression); {
+		switch expression[pos] {
+		case '\'', '"':
+			next, ok := skipQuotedString(expression, pos)
+			if ok {
+				pos = next
+				continue
+			}
+		}
+		if !strings.HasPrefix(expression[pos:], events.EventContextRoot) {
+			pos++
+			continue
+		}
+		rootStart := pos
+		rootEnd := pos + len(events.EventContextRoot)
+		pos = rootEnd
+		if !isRootReferenceStart(expression, rootStart) {
+			continue
+		}
+		if rootEnd < len(expression) && isIdentifierPart(expression[rootEnd]) {
+			continue
+		}
+		next := skipExpressionWhitespace(expression, rootEnd)
+		if next >= len(expression) || (expression[next] != '.' && expression[next] != '[') {
+			continue
+		}
+		ref, next, invalidMessage, ok := readEventReferenceAfterRoot(expression, next)
+		if invalidMessage != "" {
+			addInvalid(invalidMessage)
+		}
+		if ok {
+			addRef(ref)
+		}
+		if next > pos {
+			pos = next
+		}
+	}
+	return out, invalid
+}
+
+func readEventReferenceAfterRoot(expression string, pos int) (string, int, string, bool) {
+	segments := []string{}
+	for {
+		pos = skipExpressionWhitespace(expression, pos)
+		if pos >= len(expression) {
+			break
+		}
+		switch expression[pos] {
+		case '.':
+			pos = skipExpressionWhitespace(expression, pos+1)
+			if pos >= len(expression) || !isIdentifierStart(expression[pos]) {
+				return strings.Join(segments, "."), pos, "", len(segments) > 0
+			}
+			start := pos
+			pos++
+			for pos < len(expression) && isIdentifierPart(expression[pos]) {
+				pos++
+			}
+			segments = append(segments, expression[start:pos])
+		case '[':
+			segment, next, invalid, ok := readEventBracketSegment(expression, pos)
+			if invalid != "" {
+				return "", next, invalid, false
+			}
+			if !ok {
+				return strings.Join(segments, "."), next, "", len(segments) > 0
+			}
+			segments = append(segments, segment)
+			pos = next
+		default:
+			return strings.Join(segments, "."), pos, "", len(segments) > 0
+		}
+	}
+	return strings.Join(segments, "."), pos, "", len(segments) > 0
+}
+
+func readEventBracketSegment(expression string, pos int) (string, int, string, bool) {
+	start := pos
+	pos = skipExpressionWhitespace(expression, pos+1)
+	if pos >= len(expression) {
+		return "", len(expression), "event[...] field access is malformed", false
+	}
+	if expression[pos] != '\'' && expression[pos] != '"' {
+		return "", skipBracketExpression(expression, start), "event[...] dynamic field access is unsupported on handler expression surfaces; use literal event field names so unsupported fields fail closed", false
+	}
+	value, next, ok := readQuotedString(expression, pos)
+	if !ok {
+		return "", len(expression), "event[...] field access is malformed", false
+	}
+	next = skipExpressionWhitespace(expression, next)
+	if next >= len(expression) || expression[next] != ']' {
+		return "", next, "event[...] field access is malformed", false
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", next + 1, `event[""] is not a supported handler event context field`, false
+	}
+	if strings.Contains(value, ".") {
+		return "", next + 1, fmt.Sprintf("event[%q] is not a supported handler event context field; use dotted or nested bracket route fields instead", value), false
+	}
+	return value, next + 1, "", true
+}
+
+func skipBracketExpression(expression string, start int) int {
+	if start < 0 || start >= len(expression) || expression[start] != '[' {
+		return start
+	}
+	depth := 0
+	for pos := start; pos < len(expression); pos++ {
+		switch expression[pos] {
+		case '\'', '"':
+			next, ok := skipQuotedString(expression, pos)
+			if ok {
+				pos = next - 1
+			}
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth <= 0 {
+				return pos + 1
+			}
+		}
+	}
+	return len(expression)
 }
 
 func ValidateEventReferences(expression string) error {
@@ -409,11 +532,9 @@ func ValidateEventReferences(expression string) error {
 }
 
 func InvalidEventReferences(expression string) []string {
-	refs := EventReferences(expression)
-	if len(refs) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(refs))
+	refs, invalid := scanEventReferences(expression)
+	out := make([]string, 0, len(refs)+len(invalid))
+	out = append(out, invalid...)
 	for _, ref := range refs {
 		if err := events.ValidateEventContextReference(ref); err != nil {
 			out = append(out, err.Error())

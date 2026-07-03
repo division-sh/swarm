@@ -469,12 +469,19 @@ func TestCompiledExecutionCondition_AllowsSupportedEventRouteRoot(t *testing.T) 
 }
 
 func TestCompiledExecutionCondition_RejectsLegacyEventReceiverProjection(t *testing.T) {
-	_, err := compileExecutionCondition(`event.flow_instance == "legacy-flow"`)
-	if err == nil {
-		t.Fatal("expected event.flow_instance to fail closed")
-	}
-	if !strings.Contains(err.Error(), "event.flow_instance is unsupported") {
-		t.Fatalf("compileExecutionCondition error = %q, want event.flow_instance unsupported", err.Error())
+	for _, expression := range []string{
+		`event.flow_instance == "legacy-flow"`,
+		`event["flow_instance"] == "legacy-flow"`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			_, err := compileExecutionCondition(expression)
+			if err == nil {
+				t.Fatalf("expected %q to fail closed", expression)
+			}
+			if !strings.Contains(err.Error(), "event.flow_instance is unsupported") {
+				t.Fatalf("compileExecutionCondition error = %q, want event.flow_instance unsupported", err.Error())
+			}
+		})
 	}
 }
 

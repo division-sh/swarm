@@ -98,6 +98,9 @@ func TestValidateConditionCEL_RejectsLegacyEventReceiverProjections(t *testing.T
 		`event.entity_id != ""`,
 		`event.flow_instance != ""`,
 		`query_entities(name == event.entity_id).count == 0`,
+		`event["entity_id"] != ""`,
+		`event["flow_instance"] != ""`,
+		`query_entities(name == event["entity_id"]).count == 0`,
 	} {
 		t.Run(expression, func(t *testing.T) {
 			err := ValidateConditionCEL(expression, WorkflowConditionContextRule)
