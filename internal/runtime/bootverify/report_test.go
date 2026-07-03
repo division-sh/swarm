@@ -4338,6 +4338,42 @@ types:
 	}
 }
 
+func TestRun_ReportsPromptSaveEntityFieldMultilineDottedPathWithoutRootAuthorization(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  role: writer
+  mode: task
+  prompt_ref: writer
+  workspace_class: factory
+  manager_fallback: ops
+  entity_writes:
+    case:
+      save:
+      - research_context
+`, `
+case:
+  metadata:
+    type: Metadata
+    _unused_reason: prompt save auth proof
+  research_context:
+    type: text
+    _unused_reason: prompt save auth proof
+`, "Use save_entity_field.\n- `metadata.region`\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+types:
+  Metadata:
+    region: text
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_writer_coverage", "metadata.region") {
+		t.Fatalf("expected multiline prompt save_entity_field dotted authorization error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_ReportsPromptSaveEntityFieldUndeclaredDottedPath(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:

@@ -86,22 +86,55 @@ func extractPromptEntityWriteEvidence(promptText string) (bool, bool, []string) 
 		return createEntity, false, nil
 	}
 	fields := make([]string, 0)
+	collectingSaveFields := false
+	sawSaveFieldInBlock := false
+	blankContinuationBudget := 0
 	for _, rawLine := range strings.Split(promptText, "\n") {
 		line := strings.TrimSpace(rawLine)
-		if line == "" || !promptContainsToken(line, "save_entity_field") {
+		lineHasSaveEntity := promptContainsToken(line, "save_entity_field")
+		switch {
+		case lineHasSaveEntity:
+			collectingSaveFields = true
+			sawSaveFieldInBlock = false
+			blankContinuationBudget = 1
+		case !collectingSaveFields:
+			continue
+		case line == "":
+			if sawSaveFieldInBlock || blankContinuationBudget == 0 {
+				collectingSaveFields = false
+				sawSaveFieldInBlock = false
+				blankContinuationBudget = 0
+			} else {
+				blankContinuationBudget--
+			}
 			continue
 		}
 		matches := promptSaveFieldPattern.FindAllStringSubmatch(line, -1)
+		collectedFromLine := false
 		for _, match := range matches {
 			if len(match) < 2 {
 				continue
 			}
 			field := strings.TrimSpace(match[1])
-			if field == "" || field == "save_entity_field" {
+			if promptEntityWriteToolToken(field) {
 				continue
 			}
 			fields = append(fields, field)
+			collectedFromLine = true
+		}
+		if collectedFromLine {
+			sawSaveFieldInBlock = true
+			blankContinuationBudget = 0
 		}
 	}
 	return createEntity, true, uniquePromptStrings(fields)
+}
+
+func promptEntityWriteToolToken(token string) bool {
+	switch strings.TrimSpace(token) {
+	case "", "create_entity", "get_entity", "query_entities", "query_metrics", "save_entity_field", "search_entities":
+		return true
+	default:
+		return false
+	}
 }
