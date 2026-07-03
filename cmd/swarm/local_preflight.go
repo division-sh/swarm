@@ -70,6 +70,7 @@ type localPreflightRequest struct {
 	Config                 *config.Config
 	ResolvedPaths          cliContractPlatformSpecPaths
 	DataSource             string
+	MountSources           workspaceMountSources
 	WorkspaceBackend       workspaceBackendSelection
 	APIListenAddr          string
 	MCPListenAddr          string
@@ -129,7 +130,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	} else {
 		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is present", strings.TrimSpace(profile.Credential.EnvVar)), "")
 	}
-	report.checkWorkspace(ctx, req.RepoRoot, req.Config, source, contractsRoot, req.DataSource, req.WorkspaceBackend)
+	report.checkWorkspace(ctx, source, contractsRoot, req.MountSources, req.WorkspaceBackend, req.Config.LLM.ClaudeCLI.Command)
 	return report.finalize()
 }
 
@@ -258,12 +259,7 @@ func (r *localPreflightReport) checkContractSecrets(ctx context.Context, source 
 	}
 }
 
-func (r *localPreflightReport) checkWorkspace(ctx context.Context, repo string, cfg *config.Config, source semanticview.Source, contractsRoot, dataSource string, backend workspaceBackendSelection) {
-	mountSources, err := resolveWorkspaceMountSources(repo, dataSource, cfg)
-	if err != nil {
-		r.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --data, workspace.data_source, or SWARM_WORKSPACE_DATA_SOURCE")
-		return
-	}
+func (r *localPreflightReport) checkWorkspace(ctx context.Context, source semanticview.Source, contractsRoot string, mountSources workspaceMountSources, backend workspaceBackendSelection, claudeCLICommand string) {
 	workspaces, err := configuredWorkspaceLifecycleForServe(nil, contractsRoot, source, mountSources, backend)
 	if err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_config_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix workspace backend or mount configuration")
@@ -292,7 +288,7 @@ func (r *localPreflightReport) checkWorkspace(ctx context.Context, repo string, 
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_image_available", localPreflightSeverityInfo, localPreflightStatusOK, "workspace image is available", "")
 	}
-	if err := dockerManager.CheckWorkspaceCLICommandAvailable(ctx, cfg.LLM.ClaudeCLI.Command); err != nil {
+	if err := dockerManager.CheckWorkspaceCLICommandAvailable(ctx, claudeCLICommand); err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "run `swarm workspace build --backend claude_cli` or pull a workspace image that contains the configured Claude CLI command")
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_claude_cli_available", localPreflightSeverityInfo, localPreflightStatusOK, "workspace image can execute the configured Claude CLI command", "")
@@ -383,7 +379,7 @@ func serveLocalPreflightMode(opts serveOptions) string {
 	return "serve"
 }
 
-func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serveOptions, cfg *config.Config, resolvedPaths cliContractPlatformSpecPaths, workspaceBackend workspaceBackendSelection) localPreflightReport {
+func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serveOptions, cfg *config.Config, resolvedPaths cliContractPlatformSpecPaths, workspaceBackend workspaceBackendSelection, mountSources workspaceMountSources) localPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,
@@ -391,6 +387,7 @@ func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serv
 		Config:                 cfg,
 		ResolvedPaths:          resolvedPaths,
 		DataSource:             opts.DataSource,
+		MountSources:           mountSources,
 		WorkspaceBackend:       workspaceBackend,
 		APIListenAddr:          opts.APIListenAddr,
 		MCPListenAddr:          opts.MCPListenAddr,

@@ -2942,13 +2942,20 @@ engine:
       canonical_owner: internal/store/backendselection SQLite path resolver
       environment: SWARM_SQLITE_PATH
       runtime_config_key: store.sqlite.path
-      default_repo_relative_path: .swarm/dev.db
+      default_authority: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
+      project_default_path: .swarm/stores/dev.db
+      no_project_default_path: <swarm-dir>/stores/default/dev.db
+      borrowed_project_default_path: <swarm-dir>/stores/projects/<project-key>/dev.db
+      legacy_repo_relative_path: .swarm/dev.db
       source_order:
       - environment
       - runtime_config
-      - rollout_default
+      - local_runtime_state_default
       lifecycle:
-      - The default path is repo-relative.
+      - Project-local startup whose canonical project root matches the active repo root uses `<project-root>/.swarm/stores/dev.db`.
+      - Startup with no project uses `<swarm-dir>/stores/default/dev.db`.
+      - Startup pointed at a contracts root outside the active repo root uses a Swarm-dir project hash store and MUST NOT silently write `.swarm` state into the borrowed contracts tree.
+      - A legacy `<project-root>/.swarm/dev.db` file MUST NOT be silently orphaned behind an empty replacement; startup must either migrate/read through it or fail closed with the old path, new path, and remediation.
       - Runtime SQLite support must create parent directories on demand when the SQLite backend is implemented.
       - The SQLite file is persistent until the operator deletes it.
       - The runtime must never silently replace the local/dev SQLite store with an in-memory database.
@@ -9711,13 +9718,15 @@ workspace_model:
     - --data
     - workspace.data_source
     - SWARM_WORKSPACE_DATA_SOURCE
-    - default
+    - project_default
     default_behavior: >
       If no explicit path source is selected and no deployment alternate such as `SWARM_WORKSPACE_VOLUMES_FROM` is active,
-      the command resolver MUST select the managed local default `.swarm/data` under the active repo root, or relative
-      `.swarm/data` when no repo root is available, create it with mode 0755 before workspace validation, and report source
-      label `default`. The runtime MUST NOT synthesize `/data` from the Swarm source checkout or from a repo-local `data/`
-      directory unless that path was explicitly selected through the authoritative source order.
+      the local runtime state resolver MUST select and create `<project-root>/.swarm/data` with mode 0755 only when the canonical
+      contracts project root is the active repo root or is under it. If there is no project, or the command points at a borrowed
+      contracts root outside the active repo root, startup MUST fail closed with guidance to pass `--data` or configure
+      `workspace.data_source`/`SWARM_WORKSPACE_DATA_SOURCE`; it MUST NOT create cwd-relative `.swarm/data` or pollute the
+      borrowed contracts tree. The runtime MUST NOT synthesize `/data` from the Swarm source checkout or from a repo-local
+      `data/` directory unless that path was explicitly selected through the authoritative source order.
     path_resolution_rule: >
       Non-empty relative path sources are resolved through the command path resolver with the active repo root when present;
       absolute path sources are used as-is after cleaning. Empty explicit values are invalid.
@@ -11837,13 +11846,15 @@ cli_specification:
             Requires explicit or unambiguous selected target plus existing command confirmation rules. Must not fall
             through to selected/global/default from inside a project with no live project context.
         startup_and_run:
-          status: implemented_serve_split_run
+          status: implemented
           commands:
           - swarm serve --dev
           - swarm run
           fallthrough: >
             `serve --dev` registers a project-scoped TCP context after a pre-bind project claim and after the final API
-            target/runtime_instance_id are known. `swarm run` default/foreground semantics remain split to #1615.
+            target/runtime_instance_id are known. Default foreground `swarm run` consumes the same local runtime state
+            authority and project live-runtime guard; it fails closed inside a project that already has a live runtime
+            unless the user targets that runtime explicitly through connected API mode.
       doctor_target_surface:
         command: swarm doctor --target [--json] [--swarm-dir <path>] [--api-server <url>] [--api-token-file <path>]
         output_owner: cli_specification.foundations.output_contract
@@ -11855,14 +11866,71 @@ cli_specification:
           fail-closed as an unknown/unsupported flag.
       split_siblings:
       - '#1614 project-scoped serve/API command targeting (implemented)'
-      - '#1615 store/data migration and swarm run semantics'
+      - '#1615 store/data migration and swarm run semantics (implemented)'
       - '#1576 transport-aware descriptors and IPC/ephemeral-port direction'
       implementation_boundaries:
       - 'The shared CLI config parser may accept `swarm_dir`, but API connection/auth resolution must ignore it.'
       - 'No `SWARM_DIR`, `SWARM_HOME`, `--datadir`, or `<swarm-dir>/config.yaml` bootstrap source is promoted.'
       - 'Descriptor registry primitives are written and validated only through local_context_registry_authority.'
       - 'API-backed commands consume project/global contexts through the shared #1614 CLI API target resolver only.'
-      - 'Store and data paths may be reported as current behavior only; migration is split to #1615.'
+      - 'Store/data/run startup decisions consume local_runtime_state_authority; API-backed connected commands do not start local stores or workspace data.'
+    local_runtime_state_authority:
+      promoted_by: '#1615'
+      implementation_status: implemented
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
+      implementation_owner: cmd/swarm local runtime state resolver
+      scope: >
+        Merge-bearing authority for local runtime store path, agent-visible data source defaulting, descriptor store/data
+        metadata, doctor target reporting, and foreground `swarm run` local-start admission. It closes the previous
+        asymmetry where store/data could resolve from cwd while command targeting resolved through project/global context
+        selection.
+      invariant: >
+        Explicit store/data/backend inputs win. Otherwise, if the command is in a real project whose canonical contracts
+        project root matches the active repo root, local state is project-local. If there is no project, Swarm-dir
+        managed store state is allowed but workspace data must be explicit. If contracts point at a borrowed project
+        outside the active repo root, Swarm MUST NOT write `.swarm` state into that borrowed tree.
+      project_resolution:
+        owner: cli_specification.foundations.contract_platform_spec_path_resolution
+        local_project_rule: >
+          A project is project-local only when the resolved contracts-derived project root canonicalizes to the active repo
+          root or a directory under it. Explicit `--contracts` paths outside the active repo root are borrowed-project inputs.
+      store_resolution:
+        sqlite_source_order:
+        - SWARM_SQLITE_PATH
+        - store.sqlite.path
+        - project_default_or_swarm_dir_default
+        project_default: <project-root>/.swarm/stores/dev.db
+        no_project_default: <swarm-dir>/stores/default/dev.db
+        borrowed_project_default: <swarm-dir>/stores/projects/<project-key>/dev.db
+        legacy_rule: >
+          If `<project-root>/.swarm/dev.db` exists and the canonical `<project-root>/.swarm/stores/dev.db` does not,
+          startup must fail closed with both paths and remediation instead of silently orphaning the old DB.
+        postgres_rule: >
+          Explicit Postgres backend selection remains governed by runtime_store_backend_selection and bypasses SQLite
+          path defaults.
+      data_resolution:
+        source_order:
+        - --data
+        - workspace.data_source
+        - SWARM_WORKSPACE_DATA_SOURCE
+        - SWARM_WORKSPACE_VOLUMES_FROM deployment alternate
+        - project_default
+        project_default: <project-root>/.swarm/data
+        rule: >
+          The project default is created with mode 0755 only for a project-local root. No-project and borrowed-project
+          local startup fail closed unless an explicit data source or deployment alternate is selected.
+      run_startup_rule: >
+        Default foreground `swarm run` starts a descriptorless local runtime only after the same project live-runtime
+        guard used by `serve --dev`. A live project context blocks local foreground startup with guidance to use
+        connected targeting or stop the existing runtime. Connected and reattach paths are API-owned and MUST NOT start
+        local store/data.
+      consumers:
+      - swarm serve startup
+      - local foreground swarm run startup
+      - workspace data source selection and local preflight validation
+      - runtime store selection before store construction
+      - serve --dev context descriptor store_path/data_dir metadata
+      - swarm doctor --target dry-run diagnostics
     local_context_registry_authority:
       promoted_by: '#1613'
       implementation_status: implemented_primitive_registry
@@ -12394,7 +12462,9 @@ cli_specification:
           `workspace_model.data_source_authority` before constructing any workspace lifecycle. The command MUST NOT
           derive `/data` from the Swarm source checkout or from a repo-local `data/` directory unless that path was
           explicitly selected by the operator through the promoted source order. When no explicit path source and no
-          deployment alternate are selected, the shared resolver MUST create and use the managed `.swarm/data` default.
+          deployment alternate are selected, the shared local runtime state resolver MUST create and use
+          `<project-root>/.swarm/data` only for a canonical project root that matches the active repo root; no-project and
+          borrowed-contract startup fail closed instead of creating cwd-relative or borrowed-tree state.
         consumers:
         - serve boot workspace lifecycle
         - local foreground swarm run startup through the serve startup owner

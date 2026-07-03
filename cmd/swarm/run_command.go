@@ -363,7 +363,14 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	if err != nil {
 		return nil, err
 	}
+	releaseProjectClaim, err := prepareLocalRunProjectClaim(ctx, repo, opts, resolvedPaths)
+	if err != nil {
+		return nil, err
+	}
 	serveOpts := defaultServeOptions()
+	swarmDirOpts := opts.apiOptions.swarmDirResolutionOptions()
+	serveOpts.SwarmDir = swarmDirOpts.SwarmDir
+	serveOpts.SwarmDirSet = swarmDirOpts.SwarmDirFlagSet
 	serveOpts.ConfigPath = opts.configPath
 	serveOpts.Backend = opts.backend
 	serveOpts.ContractsPath = resolvedPaths.ContractsPath
@@ -384,12 +391,42 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 		case <-done:
 		case <-time.After(5 * time.Second):
 		}
+		if releaseProjectClaim != nil {
+			releaseProjectClaim()
+			releaseProjectClaim = nil
+		}
 	}
 	if err := waitForRunCommandReady(ctx, opts, done); err != nil {
 		stop()
 		return nil, err
 	}
 	return stop, nil
+}
+
+func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runCommandOptions, resolvedPaths cliContractPlatformSpecPaths) (func(), error) {
+	project := resolveLocalRuntimeStateProject(repo, resolvedPaths)
+	if strings.TrimSpace(project.CanonicalProjectRoot) == "" {
+		return nil, nil
+	}
+	swarmDir, err := resolveCLISwarmDir(opts.apiOptions.swarmDirResolutionOptions())
+	if err != nil {
+		return nil, err
+	}
+	contextName := localProjectContextName(project.CanonicalProjectRoot)
+	registry := newLocalContextRegistry(swarmDir.Path)
+	cliProject := cliProjectResolution{
+		contractsPath:        project.ContractsPath,
+		projectRoot:          project.ProjectRoot,
+		canonicalProjectRoot: project.CanonicalProjectRoot,
+	}
+	if err := guardServeProjectContext(ctx, registry, cliProject, contextName, false); err != nil {
+		return nil, fmt.Errorf("local swarm run requires exclusive project runtime: %w; use --connect to target an existing runtime explicitly or stop the existing project runtime", err)
+	}
+	release, err := registry.AcquireProjectClaim(project.CanonicalProjectRoot, contextName)
+	if err != nil {
+		return nil, err
+	}
+	return release, nil
 }
 
 func waitForRunCommandReady(ctx context.Context, opts runCommandOptions, done <-chan int) error {

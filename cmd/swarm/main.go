@@ -794,12 +794,29 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return 3
 		}
 	}
-	mountSources, err := resolveWorkspaceMountSources(repo, opts.DataSource, cfg)
+	swarmDir, err := resolveServeContextRegistrationSwarmDir(opts)
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("resolve workspace data source: %v", err)
+		log.Printf("resolve Swarm dir: %v", err)
 		return 1
 	}
+	localState, err := resolveLocalRuntimeState(localRuntimeStateOptions{
+		RepoRoot:                repo,
+		ResolvedPaths:           resolvedPaths,
+		SwarmDir:                swarmDir,
+		Config:                  cfg,
+		StoreMode:               opts.StoreMode,
+		StoreModeSet:            opts.StoreModeSet,
+		DataSource:              opts.DataSource,
+		CreateDefaultDataSource: true,
+		EnforceLegacySQLite:     true,
+	})
+	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("resolve local runtime state: %v", err)
+		return 1
+	}
+	mountSources := localState.MountSources
 	workspaceBackend, err := resolveWorkspaceBackend(opts.WorkspaceBackend, opts.WorkspaceBackendSet, cfg)
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
@@ -807,7 +824,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	if shouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackend)
+		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackend, mountSources)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			reporter.emit(2, "local_preflight", "FAILED", detail)
@@ -818,12 +835,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			return 3
 		}
 	}
-	storeSelection, err := resolveRuntimeStoreSelection(repo, opts.StoreMode, opts.StoreModeSet, cfg)
-	if err != nil {
-		reporter.emit(3, "db_connection", "FAILED", err.Error())
-		log.Printf("resolve store backend: %v", err)
-		return 1
-	}
+	storeSelection := localState.StoreSelection
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		reporter.emit(3, "db_connection", "FAILED", err.Error())
@@ -1609,7 +1621,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		mountSources, err := resolveWorkspaceMountSources(repo, "", cfg)
+		selectedProject := resolveLocalRuntimeStateProject(repo, cliContractPlatformSpecPaths{ContractsPath: contractsRoot})
+		if strings.TrimSpace(selectedProject.CanonicalProjectRoot) != "" {
+			selectedProject.ProjectLocal = true
+			selectedProject.Status = "project_local"
+			selectedProject.Detail = "selected-contract execution project root owns workspace data"
+		}
+		mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, "", cfg, selectedProject, true)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: resolve workspace data source: %v\n", err)
@@ -2367,25 +2385,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 		return nil, err
 	}
 	return cfg, nil
-}
-
-func resolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bool, cfg *config.Config) (storebackend.Selection, error) {
-	if cfg == nil {
-		return storebackend.Selection{}, errors.New("runtime config is required")
-	}
-	envBackend, envBackendSet := os.LookupEnv(storebackend.EnvStoreBackend)
-	envSQLitePath, envSQLitePathSet := os.LookupEnv(storebackend.EnvSQLitePath)
-	return storebackend.Resolve(storebackend.Input{
-		RepoRoot:         repo,
-		FlagBackend:      storeMode,
-		FlagBackendSet:   storeModeSet,
-		EnvBackend:       envBackend,
-		EnvBackendSet:    envBackendSet,
-		ConfigBackend:    cfg.Store.Backend,
-		EnvSQLitePath:    envSQLitePath,
-		EnvSQLitePathSet: envSQLitePathSet,
-		ConfigSQLitePath: cfg.Store.SQLite.Path,
-	})
 }
 
 func rejectUnsupportedRuntimeControlEnv() error {

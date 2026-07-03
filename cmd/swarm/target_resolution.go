@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/spf13/cobra"
 )
@@ -162,19 +163,17 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
-	store, err := resolveDoctorTargetStore(repo)
-	if err != nil {
-		return doctorTargetReport{}, err
-	}
-	data, err := resolveDoctorTargetData(repo, opts)
-	if err != nil {
-		return doctorTargetReport{}, err
-	}
 	registryReport, err := newLocalContextRegistry(swarmDir.Path).Inspect(ctx, cliRuntimeIdentityCaller{})
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
 	project := resolveDoctorTargetProject(repo, opts, cfg)
+	localStateProject := doctorTargetLocalRuntimeProject(repo, project)
+	store, err := resolveDoctorTargetStore(repo, swarmDir, localStateProject)
+	if err != nil {
+		return doctorTargetReport{}, err
+	}
+	data := resolveDoctorTargetData(repo, opts, localStateProject)
 	return doctorTargetReport{
 		Owner:    localTargetOwner,
 		Mode:     "target",
@@ -392,24 +391,47 @@ func canonicalizeDoctorTargetPath(path string) (string, string) {
 	return filepath.Clean(real), "resolved"
 }
 
-func resolveDoctorTargetStore(repo string) (doctorTargetPath, error) {
-	if raw, ok := os.LookupEnv(storebackend.EnvSQLitePath); ok {
-		path, err := normalizeDoctorTargetSQLitePath(repo, raw, storebackend.EnvSQLitePath)
-		if err != nil {
-			return doctorTargetPath{}, err
-		}
-		return doctorTargetPath{
-			Path:   path,
-			Source: storebackend.EnvSQLitePath,
-			Status: "current_behavior",
-			Detail: "runtime store migration and project-local defaults remain split to #1615",
-		}, nil
+func doctorTargetLocalRuntimeProject(repo string, project doctorTargetProject) localRuntimeStateProject {
+	if project.Status != "resolved" {
+		return localRuntimeStateProject{Status: "no_project", Detail: project.Detail}
+	}
+	canonicalProjectRoot := strings.TrimSpace(project.CanonicalProjectRoot)
+	canonicalRepoRoot, _ := canonicalizeDoctorTargetPath(repo)
+	projectLocal := localRuntimePathWithin(canonicalProjectRoot, canonicalRepoRoot)
+	status := "borrowed_project"
+	if projectLocal {
+		status = "project_local"
+	}
+	return localRuntimeStateProject{
+		ContractsPath:        project.ContractsPath,
+		ProjectRoot:          project.ProjectRoot,
+		CanonicalProjectRoot: canonicalProjectRoot,
+		ProjectLocal:         projectLocal,
+		Status:               status,
+		Detail:               "doctor target dry-run",
+	}
+}
+
+func resolveDoctorTargetStore(repo string, swarmDir cliSwarmDirResolution, project localRuntimeStateProject) (doctorTargetPath, error) {
+	defaultPath, defaultSource := localRuntimeSQLiteDefault(swarmDir, project)
+	selection, err := resolveRuntimeStoreSelectionWithDefault(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{}, defaultPath, defaultSource)
+	if err != nil {
+		return doctorTargetPath{}, err
+	}
+	if selection.Backend != storebackend.BackendSQLite {
+		return doctorTargetPath{Source: string(selection.BackendSource), Status: "not_applicable", Detail: "postgres runtime store selected"}, nil
+	}
+	status := "resolved"
+	detail := "target dry-run; no store directories were created"
+	if err := legacyProjectSQLiteStoreError(project, selection); err != nil {
+		status = "legacy_conflict"
+		detail = err.Error()
 	}
 	return doctorTargetPath{
-		Path:   filepath.Clean(resolvePath(repo, storebackend.DefaultSQLiteRelativePath)),
-		Source: "current rollout default",
-		Status: "current_behavior",
-		Detail: "runtime config store.sqlite.path is not loaded in target-only mode; store/data migration remains split to #1615",
+		Path:   selection.SQLitePath,
+		Source: string(selection.SQLitePathSource),
+		Status: status,
+		Detail: detail,
 	}, nil
 }
 
@@ -428,34 +450,27 @@ func normalizeDoctorTargetSQLitePath(repo, raw, source string) (string, error) {
 	return filepath.Clean(filepath.Join(root, path)), nil
 }
 
-func resolveDoctorTargetData(repo string, opts doctorOptions) (doctorTargetPath, error) {
-	if opts.dataSourceSet {
-		path, err := normalizeWorkspaceDataSourcePath(repo, opts.dataSource, "--data")
-		if err != nil {
-			return doctorTargetPath{}, err
-		}
-		return doctorTargetPath{Path: path, Source: "--data", Status: "resolved"}, nil
+func resolveDoctorTargetData(repo string, opts doctorOptions, project localRuntimeStateProject) doctorTargetPath {
+	mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, doctorTargetDataSourceFlag(opts), &config.Config{}, project, false)
+	if err != nil {
+		return doctorTargetPath{Status: "missing", Detail: err.Error()}
 	}
-	if raw, ok := os.LookupEnv(envWorkspaceDataSource); ok {
-		path, err := normalizeWorkspaceDataSourcePath(repo, raw, envWorkspaceDataSource)
-		if err != nil {
-			return doctorTargetPath{}, err
-		}
-		return doctorTargetPath{Path: path, Source: envWorkspaceDataSource, Status: "current_behavior"}, nil
-	}
-	if raw, ok := os.LookupEnv(envWorkspaceVolumesFrom); ok && strings.TrimSpace(raw) != "" {
-		return doctorTargetPath{
-			Source: envWorkspaceVolumesFrom,
-			Status: "no_host_data_dir",
-			Detail: "workspace volumes_from supplies container mounts; store/data migration remains split to #1615",
-		}, nil
+	if strings.TrimSpace(mountSources.DataSource) == "" {
+		return doctorTargetPath{Source: envWorkspaceVolumesFrom, Status: "no_host_data_dir", Detail: "workspace volumes_from supplies container mounts"}
 	}
 	return doctorTargetPath{
-		Path:   filepath.Clean(resolvePath(repo, defaultWorkspaceDataSourceRelativePath)),
-		Source: defaultWorkspaceDataSourceSource,
-		Status: "current_behavior",
-		Detail: "directory is reported only; target mode does not create it and migration remains split to #1615",
-	}, nil
+		Path:   mountSources.DataSource,
+		Source: mountSources.DataSourceSource,
+		Status: "resolved",
+		Detail: "target dry-run; no data directory was created",
+	}
+}
+
+func doctorTargetDataSourceFlag(opts doctorOptions) string {
+	if opts.dataSourceSet {
+		return opts.dataSource
+	}
+	return ""
 }
 
 func doctorTargetCommandClasses() []doctorTargetCommandClass {
@@ -530,8 +545,8 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		},
 		{
 			Name:        "startup_and_run",
-			Status:      "implemented_serve_split_run",
-			Fallthrough: "serve --dev registers a project context in #1614; swarm run default/foreground semantics remain split to #1615",
+			Status:      "implemented",
+			Fallthrough: "serve --dev and default foreground swarm run consume local runtime state authority; swarm run blocks when a live project runtime exists unless connected targeting is explicit",
 			Commands:    []string{"swarm serve --dev", "swarm run"},
 		},
 	}
@@ -540,7 +555,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 func doctorTargetSplitSiblings() []string {
 	return []string{
 		"#1614 project-scoped serve/API command targeting",
-		"#1615 store/data migration and swarm run semantics",
+		"#1615 store/data migration and swarm run semantics (implemented)",
 		"#1576 transport-aware descriptors and IPC/ephemeral-port direction",
 	}
 }

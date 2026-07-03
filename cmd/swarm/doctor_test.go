@@ -285,6 +285,7 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 	if code != cliExitOK {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
 	}
+	canonicalRepo, _ := canonicalizeDoctorTargetPath(repo)
 	for _, want := range []string{
 		"swarm target diagnostics: ok",
 		"swarm_dir: " + flagSwarmDir + " (source: --swarm-dir)",
@@ -292,11 +293,11 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"api_server: http://127.0.0.1:19001 (source: config api_server)",
 		"descriptor_registry: empty (" + localContextRegistryOwner,
 		"runtime_identity: unavailable (platform-spec.yaml#api_specification.method_catalog.runtime.identity)",
-		"store_path: " + filepath.Join(repo, ".swarm", "dev.db"),
-		"data_dir: " + filepath.Join(repo, ".swarm", "data"),
+		"store_path: " + filepath.Join(canonicalRepo, ".swarm", "stores", "dev.db"),
+		"data_dir: " + filepath.Join(canonicalRepo, ".swarm", "data"),
 		"command_classes:",
 		"#1614",
-		"#1615",
+		"#1615 store/data migration and swarm run semantics (implemented)",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor target output missing %q:\n%s", want, stdout.String())
@@ -629,6 +630,8 @@ func writeDoctorClaudeConfig(t *testing.T) string {
 	writeRuntimeConfigText(t, path, strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
 		"llm:",
 		"  backend: claude_cli",
 		"  session:",

@@ -21,8 +21,11 @@ import (
 
 func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 	t.Run("rollout default is sqlite", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
 		unsetStoreSelectorEnv(t)
 		repo := t.TempDir()
+		swarmDir := t.TempDir()
+		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{"swarm_dir": swarmDir}))
 		got, err := resolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
 		if err != nil {
 			t.Fatalf("resolveRuntimeStoreSelection: %v", err)
@@ -30,8 +33,8 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		if got.Backend != storebackend.BackendSQLite || got.BackendSource != storebackend.SourceRolloutDefault {
 			t.Fatalf("selection = %#v, want sqlite rollout default", got)
 		}
-		if want := filepath.Join(repo, ".swarm", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceRolloutDefault {
-			t.Fatalf("sqlite path = %q source %q, want %q from rollout default", got.SQLitePath, got.SQLitePathSource, want)
+		if want := filepath.Join(swarmDir, "stores", "default", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceSwarmDirDefault {
+			t.Fatalf("sqlite path = %q source %q, want %q from swarm-dir default", got.SQLitePath, got.SQLitePathSource, want)
 		}
 	})
 
@@ -373,6 +376,8 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	lines := []string{
 		"runtime:",
 		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
 	}
 	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {
 		lines = append(lines,
