@@ -14,7 +14,7 @@ const (
 	envWorkspaceVolumesFrom = "SWARM_WORKSPACE_VOLUMES_FROM"
 
 	defaultWorkspaceDataSourceRelativePath = ".swarm/data"
-	defaultWorkspaceDataSourceSource       = "default"
+	defaultWorkspaceDataSourceSource       = "project_default"
 )
 
 type workspaceMountSources struct {
@@ -35,22 +35,10 @@ type workspaceDataSourceInput struct {
 
 	VolumesFrom    string
 	VolumesFromSet bool
-}
 
-func resolveWorkspaceMountSources(repoRoot string, flagDataSource string, cfg *config.Config) (workspaceMountSources, error) {
-	envDataSource, envDataSourceSet := os.LookupEnv(envWorkspaceDataSource)
-	configDataSource, configDataSourceSet := runtimeConfigWorkspaceDataSource(cfg)
-	volumesFrom, volumesFromSet := os.LookupEnv(envWorkspaceVolumesFrom)
-	return resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:            repoRoot,
-		FlagDataSource:      flagDataSource,
-		ConfigDataSource:    configDataSource,
-		ConfigDataSourceSet: configDataSourceSet,
-		EnvDataSource:       envDataSource,
-		EnvDataSourceSet:    envDataSourceSet,
-		VolumesFrom:         volumesFrom,
-		VolumesFromSet:      volumesFromSet,
-	})
+	DefaultDataSource       string
+	DefaultDataSourceSource string
+	CreateDefaultDataSource bool
 }
 
 func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (workspaceMountSources, error) {
@@ -66,13 +54,28 @@ func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (workspa
 		return workspaceMountSources{DataSource: path, DataSourceSource: envWorkspaceDataSource}, err
 	case in.VolumesFromSet && strings.TrimSpace(in.VolumesFrom) != "":
 		return workspaceMountSources{}, nil
-	default:
-		path := filepath.Clean(resolvePath(in.RepoRoot, defaultWorkspaceDataSourceRelativePath))
-		if err := os.MkdirAll(path, 0o755); err != nil {
-			return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSource}, fmt.Errorf("create default workspace data source %s: %w", path, err)
+	case strings.TrimSpace(in.DefaultDataSource) != "":
+		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.DefaultDataSource, defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource))
+		if err != nil {
+			return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, err
 		}
-		return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSource}, nil
+		if in.CreateDefaultDataSource {
+			if err := os.MkdirAll(path, 0o755); err != nil {
+				return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, fmt.Errorf("create default workspace data source %s: %w", path, err)
+			}
+		}
+		return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, nil
+	default:
+		return workspaceMountSources{}, fmt.Errorf("workspace data source is required: pass --data, set workspace.data_source, set %s, or run from a project with a managed %s default", envWorkspaceDataSource, defaultWorkspaceDataSourceRelativePath)
 	}
+}
+
+func defaultWorkspaceDataSourceSourceLabel(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return defaultWorkspaceDataSourceSource
+	}
+	return source
 }
 
 func runtimeConfigWorkspaceDataSource(cfg *config.Config) (string, bool) {

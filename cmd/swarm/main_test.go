@@ -1631,7 +1631,10 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	}
 
 	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot: repoRoot,
+		RepoRoot:                repoRoot,
+		DefaultDataSource:       filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath),
+		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
+		CreateDefaultDataSource: true,
 	})
 	if err != nil {
 		t.Fatalf("resolve default workspace mount source: %v", err)
@@ -1689,7 +1692,12 @@ func TestResolveWorkspaceMountSourcesDefaultsToSwarmDataNotRepoData(t *testing.T
 	if err := os.MkdirAll(repoDataDir, 0o755); err != nil {
 		t.Fatalf("mkdir repo data: %v", err)
 	}
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{RepoRoot: repoRoot})
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+		RepoRoot:                repoRoot,
+		DefaultDataSource:       filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath),
+		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
+		CreateDefaultDataSource: true,
+	})
 	if err != nil {
 		t.Fatalf("resolve workspace mount sources: %v", err)
 	}
@@ -1705,7 +1713,7 @@ func TestResolveWorkspaceMountSourcesDefaultsToSwarmDataNotRepoData(t *testing.T
 	}
 }
 
-func TestResolveWorkspaceMountSourcesDefaultWithoutRepoRoot(t *testing.T) {
+func TestResolveWorkspaceMountSourcesRejectsDefaultWithoutProjectSource(t *testing.T) {
 	oldWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get cwd: %v", err)
@@ -1721,14 +1729,14 @@ func TestResolveWorkspaceMountSourcesDefaultWithoutRepoRoot(t *testing.T) {
 	})
 
 	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{})
-	if err != nil {
-		t.Fatalf("resolve workspace mount sources: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "workspace data source is required") {
+		t.Fatalf("resolve workspace mount sources error = %v, want missing data source failure", err)
 	}
-	if result.DataSource != defaultWorkspaceDataSourceRelativePath || result.DataSourceSource != defaultWorkspaceDataSourceSource {
-		t.Fatalf("workspace mount sources = %#v, want relative default source", result)
+	if result.DataSource != "" || result.DataSourceSource != "" {
+		t.Fatalf("workspace mount sources = %#v, want no default source", result)
 	}
-	if info, err := os.Stat(filepath.Join(tmp, defaultWorkspaceDataSourceRelativePath)); err != nil || !info.IsDir() {
-		t.Fatalf("default data source stat = (%v, %v), want created directory", info, err)
+	if _, err := os.Stat(filepath.Join(tmp, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
+		t.Fatalf("default data source stat error = %v, want not created", err)
 	}
 }
 
@@ -11019,7 +11027,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts serveOptions, wa
 	if err != nil {
 		t.Fatalf("resolve workspace backend for preflight proof: %v", err)
 	}
-	report := runServeLocalClaudeCLIPreflight(context.Background(), repoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend)
+	report := runServeLocalClaudeCLIPreflight(context.Background(), repoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, workspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"})
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -11811,6 +11819,8 @@ func writeServeRuntimeTestConfig(t *testing.T) string {
 	configText := strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
 		"llm:",
 		"  backend: anthropic",
 		"  session:",

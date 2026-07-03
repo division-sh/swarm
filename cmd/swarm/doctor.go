@@ -124,12 +124,35 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --workspace-backend, workspace.backend, or SWARM_WORKSPACE_BACKEND")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
+	cliCfg, err := loadCLIAPIConfigFile()
+	if err != nil {
+		return returnCLIValidationError(cmd.ErrOrStderr(), err)
+	}
+	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
+	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
+	if err != nil {
+		return returnCLIValidationError(cmd.ErrOrStderr(), err)
+	}
+	localState, err := resolveLocalRuntimeState(localRuntimeStateOptions{
+		RepoRoot:                repo,
+		ResolvedPaths:           resolvedPaths,
+		SwarmDir:                swarmDir,
+		Config:                  cfgResult.Config,
+		DataSource:              opts.dataSource,
+		CreateDefaultDataSource: true,
+	})
+	if err != nil {
+		report := localPreflightReport{Owner: localPreflightOwner, Mode: "doctor"}
+		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --data, workspace.data_source, or SWARM_WORKSPACE_DATA_SOURCE")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
 	report := runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   "doctor",
 		RepoRoot:               repo,
 		Config:                 cfgResult.Config,
 		ResolvedPaths:          resolvedPaths,
 		DataSource:             opts.dataSource,
+		MountSources:           localState.MountSources,
 		WorkspaceBackend:       workspaceBackend,
 		APIListenAddr:          opts.apiListenAddr,
 		MCPListenAddr:          opts.mcpListenAddr,

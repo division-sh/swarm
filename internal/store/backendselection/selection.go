@@ -18,16 +18,18 @@ const (
 	ConfigStoreBackendKey = "store.backend"
 	ConfigSQLitePathKey   = "store.sqlite.path"
 
-	DefaultSQLiteRelativePath = ".swarm/dev.db"
+	LegacySQLiteRelativePath = ".swarm/dev.db"
 )
 
 type Source string
 
 const (
-	SourceFlag           Source = "flag"
-	SourceEnvironment    Source = "environment"
-	SourceRuntimeConfig  Source = "runtime_config"
-	SourceRolloutDefault Source = "rollout_default"
+	SourceFlag            Source = "flag"
+	SourceEnvironment     Source = "environment"
+	SourceRuntimeConfig   Source = "runtime_config"
+	SourceRolloutDefault  Source = "rollout_default"
+	SourceProjectDefault  Source = "project_default"
+	SourceSwarmDirDefault Source = "swarm_dir_default"
 )
 
 type Input struct {
@@ -45,6 +47,9 @@ type Input struct {
 	EnvSQLitePathSet bool
 
 	ConfigSQLitePath string
+
+	DefaultSQLitePath       string
+	DefaultSQLitePathSource Source
 }
 
 type Selection struct {
@@ -123,8 +128,12 @@ func resolveSQLitePath(in Input) (string, Source, error) {
 		path, err := normalizeSQLitePath(in.RepoRoot, in.ConfigSQLitePath, SourceRuntimeConfig)
 		return path, SourceRuntimeConfig, err
 	default:
-		path, err := normalizeSQLitePath(in.RepoRoot, DefaultSQLiteRelativePath, SourceRolloutDefault)
-		return path, SourceRolloutDefault, err
+		source := in.DefaultSQLitePathSource
+		if source == "" {
+			source = SourceRolloutDefault
+		}
+		path, err := normalizeSQLitePath(in.RepoRoot, in.DefaultSQLitePath, source)
+		return path, source, err
 	}
 }
 
