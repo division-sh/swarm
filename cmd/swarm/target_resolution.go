@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -168,7 +169,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 }
 
 func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
-	api, err := resolveDoctorTargetAPI(repo, opts, cfg)
+	api, err := resolveDoctorTargetAPI(repo, opts, cfg, swarmDir)
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
@@ -273,25 +274,20 @@ func rootSwarmDirFlag(cmd *cobra.Command) (string, bool) {
 	return flag.Value.String(), flag.Changed
 }
 
-func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFile) (doctorTargetAPI, error) {
+func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution) (doctorTargetAPI, error) {
 	if err := rejectRemovedClientAPIEnvSources(); err != nil {
 		return doctorTargetAPI{}, err
 	}
-	target, err := resolveCLIAPITarget(rootCommandOptions{
+	targetOpts := rootCommandOptions{
 		apiServer:       opts.apiOptions.apiServer,
 		apiTokenFile:    opts.apiOptions.apiTokenFile,
 		contextName:     opts.apiOptions.contextName,
-		swarmDir:        opts.apiOptions.swarmDir,
-		rootFlags:       opts.apiOptions.rootFlags,
+		swarmDir:        swarmDir.Path,
+		rootFlags:       &rootCommandFlagState{swarmDir: swarmDir.Path, swarmDirSet: true},
 		repoRoot:        repo,
 		apiCommandClass: cliAPICommandClassTargetDiagnostic,
-	}, cfg)
-	if err != nil {
-		return doctorTargetAPI{}, err
 	}
-	token, err := resolveCLIAPITokenForTarget(rootCommandOptions{
-		apiTokenFile: opts.apiOptions.apiTokenFile,
-	}, cfg, target)
+	target, err := resolveCLIAPITarget(targetOpts, cfg)
 	if err != nil {
 		return doctorTargetAPI{}, err
 	}
@@ -299,11 +295,23 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFil
 	if err != nil {
 		return doctorTargetAPI{}, err
 	}
+	token, err := resolveCLIAPITokenForTarget(rootCommandOptions{
+		apiTokenFile: opts.apiOptions.apiTokenFile,
+	}, cfg, target)
+	auth := doctorTargetAuth{}
+	if err != nil {
+		if !errors.Is(err, errCLIAPITokenRequired) {
+			return doctorTargetAPI{}, err
+		}
+		auth = doctorTargetMissingExplicitTokenAuth()
+	} else {
+		auth = doctorTargetAuthFromTokenResolution(token)
+	}
 	return doctorTargetAPI{
 		Server:      server,
 		RPCEndpoint: target.rpcEndpoint,
 		Source:      target.source,
-		Auth:        doctorTargetAuthFromTokenResolution(token),
+		Auth:        auth,
 		Reason:      doctorTargetAPIReason(target.source),
 	}, nil
 }
@@ -328,6 +336,14 @@ func doctorTargetAuthFromTokenResolution(token cliAPITokenResolution) doctorTarg
 		return doctorTargetAuth{Source: token.source, Status: "available", Detail: "numeric loopback target"}
 	default:
 		return doctorTargetAuth{Source: token.source, Status: "configured", Detail: "context/runtime auth"}
+	}
+}
+
+func doctorTargetMissingExplicitTokenAuth() doctorTargetAuth {
+	return doctorTargetAuth{
+		Source: "none",
+		Status: "missing_explicit_token",
+		Detail: "non-loopback target requires --api-token-file, context descriptor auth, or config api_token_file",
 	}
 }
 

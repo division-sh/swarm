@@ -346,6 +346,35 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 	}
 }
 
+func TestDoctorTargetJSONReportsMissingAuthWithoutAborting(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	apiServer := "http://192.0.2.10:8081"
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"doctor", "--target", "--json",
+		"--api-server", apiServer,
+		"--contracts", filepath.Join(repo, "contracts"),
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
+	}
+	if report.API.Server != apiServer || report.API.Source != "--api-server" {
+		t.Fatalf("api target = %#v, want %q from --api-server", report.API, apiServer)
+	}
+	if report.API.Auth.Source != "none" || report.API.Auth.Status != "missing_explicit_token" {
+		t.Fatalf("api auth = %#v, want structured missing token diagnostic", report.API.Auth)
+	}
+}
+
 func TestDoctorTargetRejectsRemovedAPIClientEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := writeDoctorTargetRepo(t)
@@ -368,6 +397,42 @@ func TestDoctorTargetRejectsRemovedAPIClientEnv(t *testing.T) {
 	}
 	if stdout.String() != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestDoctorTargetUsesResolvedSwarmDirForExplicitContext(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	swarmDir := filepath.Join(t.TempDir(), "state")
+	server := startCLIAPIRuntimeIdentityServer(t, "runtime-target")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, "target", "runtime-target", server.URL, "")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"--swarm-dir", swarmDir,
+		"doctor", "--target", "--json",
+		"--context", "target",
+		"--contracts", filepath.Join(repo, "contracts"),
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
+	}
+	if report.SwarmDir.Path != swarmDir || report.SwarmDir.Source != "--swarm-dir" {
+		t.Fatalf("swarm dir = %#v, want %q from --swarm-dir", report.SwarmDir, swarmDir)
+	}
+	if report.API.Server != server.URL || report.API.Source != "--context" {
+		t.Fatalf("api target = %#v, want explicit context from resolved swarm-dir", report.API)
+	}
+	if report.API.Auth.Source != "context descriptor "+localContextAuthBuiltinLoopback || report.API.Auth.Status != "configured" {
+		t.Fatalf("api auth = %#v, want context descriptor auth", report.API.Auth)
 	}
 }
 

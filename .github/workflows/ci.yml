@@ -34,7 +34,6 @@ jobs:
 
       - name: Prove no-selector SQLite local run
         env:
-          SWARM_API_TOKEN: ci-local-dev-token
           SWARM_WORKSPACE_DATA_SOURCE: ${{ github.workspace }}/data
         run: |
           payload=$(mktemp)
