@@ -30,12 +30,24 @@ func TestResolveBackendSourcePrecedence(t *testing.T) {
 			src:  SourceFlag,
 		},
 		{
-			name: "environment beats config",
+			name: "runtime config beats environment",
 			in: Input{
 				RepoRoot:                repo,
 				EnvBackend:              "sqlite",
 				EnvBackendSet:           true,
 				ConfigBackend:           "postgres",
+				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
+				DefaultSQLitePathSource: SourceRolloutDefault,
+			},
+			want: BackendPostgres,
+			src:  SourceRuntimeConfig,
+		},
+		{
+			name: "environment fallback beats rollout default",
+			in: Input{
+				RepoRoot:                repo,
+				EnvBackend:              "sqlite",
+				EnvBackendSet:           true,
 				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
 				DefaultSQLitePathSource: SourceRolloutDefault,
 			},
@@ -101,6 +113,20 @@ func TestResolveIgnoresInvalidLowerPriorityConfigBackend(t *testing.T) {
 	}
 }
 
+func TestResolveIgnoresInvalidLowerPriorityEnvironmentBackend(t *testing.T) {
+	got, err := Resolve(Input{
+		EnvBackend:    "mysql",
+		EnvBackendSet: true,
+		ConfigBackend: "postgres",
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.Backend != BackendPostgres || got.BackendSource != SourceRuntimeConfig {
+		t.Fatalf("selection = %#v, want config-selected postgres", got)
+	}
+}
+
 func TestResolveSQLitePathSources(t *testing.T) {
 	repo := t.TempDir()
 	tests := []struct {
@@ -110,7 +136,7 @@ func TestResolveSQLitePathSources(t *testing.T) {
 		src  Source
 	}{
 		{
-			name: "env path beats config",
+			name: "config path beats env path",
 			in: Input{
 				RepoRoot:                repo,
 				FlagBackend:             "sqlite",
@@ -118,6 +144,20 @@ func TestResolveSQLitePathSources(t *testing.T) {
 				EnvSQLitePath:           "env/dev.db",
 				EnvSQLitePathSet:        true,
 				ConfigSQLitePath:        "config/dev.db",
+				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
+				DefaultSQLitePathSource: SourceRolloutDefault,
+			},
+			want: filepath.Join(repo, "config", "dev.db"),
+			src:  SourceRuntimeConfig,
+		},
+		{
+			name: "env path fallback beats default",
+			in: Input{
+				RepoRoot:                repo,
+				FlagBackend:             "sqlite",
+				FlagBackendSet:          true,
+				EnvSQLitePath:           "env/dev.db",
+				EnvSQLitePathSet:        true,
 				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
 				DefaultSQLitePathSource: SourceRolloutDefault,
 			},

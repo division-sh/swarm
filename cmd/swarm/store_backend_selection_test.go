@@ -38,7 +38,7 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		}
 	})
 
-	t.Run("env beats runtime config", func(t *testing.T) {
+	t.Run("runtime config beats env", func(t *testing.T) {
 		unsetStoreSelectorEnv(t)
 		t.Setenv(storebackend.EnvStoreBackend, storebackend.BackendPostgres.String())
 		got, err := resolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{
@@ -47,8 +47,51 @@ func TestResolveRuntimeStoreSelectionConsumesCanonicalSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolveRuntimeStoreSelection: %v", err)
 		}
+		if got.Backend != storebackend.BackendSQLite || got.BackendSource != storebackend.SourceRuntimeConfig {
+			t.Fatalf("selection = %#v, want config-selected sqlite", got)
+		}
+	})
+
+	t.Run("env fallback remains visible", func(t *testing.T) {
+		unsetStoreSelectorEnv(t)
+		t.Setenv(storebackend.EnvStoreBackend, storebackend.BackendPostgres.String())
+		got, err := resolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
+		if err != nil {
+			t.Fatalf("resolveRuntimeStoreSelection: %v", err)
+		}
 		if got.Backend != storebackend.BackendPostgres || got.BackendSource != storebackend.SourceEnvironment {
-			t.Fatalf("selection = %#v, want env-selected postgres", got)
+			t.Fatalf("selection = %#v, want env fallback postgres", got)
+		}
+	})
+
+	t.Run("runtime config sqlite path beats env", func(t *testing.T) {
+		unsetStoreSelectorEnv(t)
+		repo := t.TempDir()
+		t.Setenv(storebackend.EnvSQLitePath, "env/dev.db")
+		got, err := resolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{
+			Store: config.StoreConfig{
+				Backend: storebackend.BackendSQLite.String(),
+				SQLite:  config.StoreSQLiteConfig{Path: "config/dev.db"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("resolveRuntimeStoreSelection: %v", err)
+		}
+		if want := filepath.Join(repo, "config", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceRuntimeConfig {
+			t.Fatalf("sqlite path = %q source %q, want %q from runtime config", got.SQLitePath, got.SQLitePathSource, want)
+		}
+	})
+
+	t.Run("env sqlite path fallback remains visible", func(t *testing.T) {
+		unsetStoreSelectorEnv(t)
+		repo := t.TempDir()
+		t.Setenv(storebackend.EnvSQLitePath, "env/dev.db")
+		got, err := resolveRuntimeStoreSelection(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{})
+		if err != nil {
+			t.Fatalf("resolveRuntimeStoreSelection: %v", err)
+		}
+		if want := filepath.Join(repo, "env", "dev.db"); got.SQLitePath != want || got.SQLitePathSource != storebackend.SourceEnvironment {
+			t.Fatalf("sqlite path = %q source %q, want %q from env fallback", got.SQLitePath, got.SQLitePathSource, want)
 		}
 	})
 
@@ -80,15 +123,19 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 		storeMode   string
 		storeFlag   bool
 		envBackend  string
+		envPath     string
 		configStore string
+		configPath  string
 		wantBackend storebackend.Backend
 		wantSource  storebackend.Source
+		wantPathSrc storebackend.Source
 	}{
 		{
 			name:        "rollout default sqlite reaches store construction",
 			storeMode:   storebackend.ActiveDefaultBackend().String(),
 			wantBackend: storebackend.BackendSQLite,
 			wantSource:  storebackend.SourceRolloutDefault,
+			wantPathSrc: storebackend.SourceSwarmDirDefault,
 		},
 		{
 			name:        "flag postgres reaches store construction",
@@ -96,16 +143,27 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			storeFlag:   true,
 			envBackend:  storebackend.BackendSQLite.String(),
 			configStore: storebackend.BackendSQLite.String(),
+			configPath:  "config/dev.db",
 			wantBackend: storebackend.BackendPostgres,
 			wantSource:  storebackend.SourceFlag,
 		},
 		{
-			name:        "env postgres reaches store construction",
+			name:        "env postgres fallback reaches store construction",
 			storeMode:   storebackend.ActiveDefaultBackend().String(),
 			envBackend:  storebackend.BackendPostgres.String(),
-			configStore: storebackend.BackendSQLite.String(),
 			wantBackend: storebackend.BackendPostgres,
 			wantSource:  storebackend.SourceEnvironment,
+		},
+		{
+			name:        "config sqlite beats env selectors before store construction",
+			storeMode:   storebackend.ActiveDefaultBackend().String(),
+			envBackend:  storebackend.BackendPostgres.String(),
+			envPath:     "env/dev.db",
+			configStore: storebackend.BackendSQLite.String(),
+			configPath:  "config/dev.db",
+			wantBackend: storebackend.BackendSQLite,
+			wantSource:  storebackend.SourceRuntimeConfig,
+			wantPathSrc: storebackend.SourceRuntimeConfig,
 		},
 		{
 			name:        "config postgres reaches store construction",
@@ -121,6 +179,9 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			if tt.envBackend != "" {
 				t.Setenv(storebackend.EnvStoreBackend, tt.envBackend)
 			}
+			if tt.envPath != "" {
+				t.Setenv(storebackend.EnvSQLitePath, tt.envPath)
+			}
 			oldBuildStores := buildStoresForServe
 			var captured storebackend.Selection
 			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (storeBundle, error) {
@@ -133,7 +194,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 
 			var out bytes.Buffer
 			code := runServeRuntime(context.Background(), t.TempDir(), serveOptions{
-				ConfigPath:         writeStoreBackendRuntimeConfig(t, tt.configStore, "config/dev.db"),
+				ConfigPath:         writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath),
 				StoreMode:          tt.storeMode,
 				StoreModeSet:       tt.storeFlag,
 				APIListenAddr:      defaultAPIListenAddr,
@@ -150,7 +211,71 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			if captured.Backend != tt.wantBackend || captured.BackendSource != tt.wantSource {
 				t.Fatalf("selection = %#v, want %s from %s", captured, tt.wantBackend, tt.wantSource)
 			}
+			if tt.wantPathSrc != "" && captured.SQLitePathSource != tt.wantPathSrc {
+				t.Fatalf("sqlite path source = %q, want %q in selection %#v", captured.SQLitePathSource, tt.wantPathSrc, captured)
+			}
 		})
+	}
+}
+
+func TestDatabaseEnvDetailsDoNotImplyPostgresSelection(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	t.Setenv("SWARM_DB_HOST", "db-env-host")
+	t.Setenv("SWARM_DB_PORT", "15432")
+	t.Setenv("SWARM_DB_NAME", "db_env_name")
+	t.Setenv("SWARM_DB_USER", "db_env_user")
+	t.Setenv("SWARM_DB_SSLMODE", "require")
+	t.Setenv("SWARM_DB_POOL_SIZE", "9")
+
+	cfg, err := defaultRuntimeConfig()
+	if err != nil {
+		t.Fatalf("defaultRuntimeConfig: %v", err)
+	}
+	if cfg.Database.Host != "db-env-host" || cfg.Database.Port != 15432 || cfg.Database.Name != "db_env_name" || cfg.Database.User != "db_env_user" || cfg.Database.SSLMode != "require" || cfg.Database.PoolSize != 9 {
+		t.Fatalf("database env fallback not reflected in built-in default config: %#v", cfg.Database)
+	}
+	got, err := resolveRuntimeStoreSelection(t.TempDir(), storebackend.ActiveDefaultBackend().String(), false, cfg)
+	if err != nil {
+		t.Fatalf("resolveRuntimeStoreSelection: %v", err)
+	}
+	if got.Backend != storebackend.BackendSQLite || got.BackendSource != storebackend.SourceRolloutDefault {
+		t.Fatalf("selection = %#v, want DB env details to leave backend at rollout default sqlite", got)
+	}
+}
+
+func TestExplicitRuntimeConfigDatabaseBeatsDatabaseEnv(t *testing.T) {
+	t.Setenv("SWARM_DB_HOST", "db-env-host")
+	t.Setenv("PGHOST", "pg-env-host")
+	t.Setenv("SWARM_DB_PASSWORD", "env-password")
+	t.Setenv("PGPASSWORD", "pg-env-password")
+
+	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
+		RepoRoot:     t.TempDir(),
+		ExplicitPath: writeStoreDatabaseRuntimeConfig(t),
+	})
+	if err != nil {
+		t.Fatalf("loadRuntimeConfigWithOptions: %v", err)
+	}
+	got := cfgResult.Config.Database
+	if got.Host != "db-config-host" || got.Port != 15433 || got.Name != "db_config_name" || got.User != "db_config_user" || got.SSLMode != "verify-full" || got.PoolSize != 11 {
+		t.Fatalf("database config = %#v, want explicit runtime config values", got)
+	}
+	if got.Password != "" {
+		t.Fatalf("database password = %q, want absent password to remain unset rather than sourced from env", got.Password)
+	}
+}
+
+func TestRuntimeConfigExampleDoesNotPromoteDatabasePassword(t *testing.T) {
+	runtimeConfig, err := os.ReadFile(filepath.Join(repoRoot(), "runtime-config.example.yaml"))
+	if err != nil {
+		t.Fatalf("read runtime-config.example.yaml: %v", err)
+	}
+	text := string(runtimeConfig)
+	if strings.Contains(text, "password:") {
+		t.Fatalf("runtime-config.example.yaml must not promote plaintext DB password config:\n%s", text)
+	}
+	if !strings.Contains(text, "Keep credentials") || !strings.Contains(text, "swarm secrets") {
+		t.Fatalf("runtime-config.example.yaml must keep credential guidance out of plaintext config:\n%s", text)
 	}
 }
 
@@ -397,6 +522,32 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+	return path
+}
+
+func writeStoreDatabaseRuntimeConfig(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	contents := strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"database:",
+		"  host: db-config-host",
+		"  port: 15433",
+		"  name: db_config_name",
+		"  user: db_config_user",
+		"  sslmode: verify-full",
+		"  pool_size: 11",
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
 	return path

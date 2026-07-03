@@ -93,12 +93,12 @@ func resolveBackend(in Input) (Backend, Source, error) {
 	case in.FlagBackendSet:
 		backend, err := parseBackend(in.FlagBackend, SourceFlag)
 		return backend, SourceFlag, err
-	case in.EnvBackendSet:
-		backend, err := parseBackend(in.EnvBackend, SourceEnvironment)
-		return backend, SourceEnvironment, err
 	case strings.TrimSpace(in.ConfigBackend) != "":
 		backend, err := parseBackend(in.ConfigBackend, SourceRuntimeConfig)
 		return backend, SourceRuntimeConfig, err
+	case in.EnvBackendSet:
+		backend, err := parseBackend(in.EnvBackend, SourceEnvironment)
+		return backend, SourceEnvironment, err
 	default:
 		return ActiveDefaultBackend(), SourceRolloutDefault, nil
 	}
@@ -121,12 +121,12 @@ func parseBackend(raw string, source Source) (Backend, error) {
 
 func resolveSQLitePath(in Input) (string, Source, error) {
 	switch {
-	case in.EnvSQLitePathSet:
-		path, err := normalizeSQLitePath(in.RepoRoot, in.EnvSQLitePath, SourceEnvironment)
-		return path, SourceEnvironment, err
 	case strings.TrimSpace(in.ConfigSQLitePath) != "":
 		path, err := normalizeSQLitePath(in.RepoRoot, in.ConfigSQLitePath, SourceRuntimeConfig)
 		return path, SourceRuntimeConfig, err
+	case in.EnvSQLitePathSet:
+		path, err := normalizeSQLitePath(in.RepoRoot, in.EnvSQLitePath, SourceEnvironment)
+		return path, SourceEnvironment, err
 	default:
 		source := in.DefaultSQLitePathSource
 		if source == "" {

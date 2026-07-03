@@ -219,7 +219,7 @@ relative paths for workspace files, and absolute paths follow the host
 deployment namespace and OS permissions. It is not command-limited or
 Docker-equivalent isolation, and Claude/provider host execution remains
 unsupported.
-Plain local `swarm run --contracts ...` uses SQLite at `.swarm/dev.db` unless
+Plain local `swarm run --contracts ...` uses SQLite at `.swarm/stores/dev.db` unless
 you explicitly opt into Postgres with `store.backend: postgres` in runtime
 config. Build or pull the configured workspace image (`swarm-workspace:latest`
 by default), or configure a compatible image before commands that start the

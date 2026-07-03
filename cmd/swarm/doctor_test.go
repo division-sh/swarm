@@ -348,9 +348,12 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 
 func TestDoctorTargetConsumesRuntimeConfigStoreAndData(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
 	repo := writeDoctorTargetRepo(t)
 	sqlitePath := filepath.Join(t.TempDir(), "configured-dev.db")
 	dataDir := filepath.Join(t.TempDir(), "configured-data")
+	t.Setenv(storebackend.EnvStoreBackend, storebackend.BackendPostgres.String())
+	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "env-dev.db"))
 	configPath := writeDoctorTargetRuntimeConfig(t, `
 store:
   backend: sqlite
