@@ -107,7 +107,7 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, mode := range []string{"", "--json", "--quiet"} {
 				t.Run("mode "+mode, func(t *testing.T) {
-					t.Setenv("SWARM_API_TOKEN", "test-token")
+					setCLIAPITestToken(t, "test-token")
 
 					args := append([]string{}, tc.args(t)...)
 					if mode != "" {
@@ -166,7 +166,7 @@ func TestCLILoggingAcceptedLevelsOnConsumer(t *testing.T) {
 }
 
 func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -236,7 +236,7 @@ func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
 }
 
 func TestCLILoggingUnsupportedSurfacesFailClosedBeforeSideEffects(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	var rpcCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

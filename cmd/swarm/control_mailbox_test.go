@@ -57,7 +57,7 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			var captured jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/v1/rpc" {
@@ -117,7 +117,7 @@ func TestMailboxCommandsSendV1RPCRequests(t *testing.T) {
 }
 
 func TestMailboxApproveDecisionPayloadFileSendsV1RPCRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	payloadPath := filepath.Join(t.TempDir(), "decision-payload.json")
 	if err := os.WriteFile(payloadPath, []byte(`{"approved":true,"source":"file"}`), 0o600); err != nil {
 		t.Fatalf("write payload file: %v", err)
@@ -175,7 +175,7 @@ func TestMailboxApproveDecisionPayloadFileSendsV1RPCRequest(t *testing.T) {
 }
 
 func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -243,7 +243,7 @@ func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
 }
 
 func TestMailboxListDefaultsToPendingAndRendersEmptyResult(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -270,7 +270,7 @@ func TestMailboxListDefaultsToPendingAndRendersEmptyResult(t *testing.T) {
 }
 
 func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
@@ -327,7 +327,7 @@ func TestMailboxViewSendsV1RPCRequestAndRendersDetail(t *testing.T) {
 }
 
 func TestMailboxRejectsInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -473,7 +473,7 @@ func TestMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 			if code != 4 {
 				t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+			if !strings.Contains(stderr.String(), "API token source is required") {
 				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
 			}
 			if calls.Load() != 0 {
@@ -484,7 +484,7 @@ func TestMailboxRequiresAPITokenBeforeRequest(t *testing.T) {
 }
 
 func TestControlMailboxRetiredAliasesFailClosedBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -613,7 +613,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -781,7 +781,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -827,7 +827,7 @@ func TestMailboxRejectsMalformedStatusByAction(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -900,7 +900,11 @@ func decisionForMailboxStatus(status string) string {
 
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
-	if strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")) == "" && strings.TrimSpace(os.Getenv("SWARM_API_TOKEN_FILE")) == "" {
+	hasTokenSource := strings.TrimSpace(opts.apiTokenFile) != ""
+	if cfg, err := loadCLIAPIConfigFile(); err == nil && strings.TrimSpace(cfg.APITokenFile) != "" {
+		hasTokenSource = true
+	}
+	if !hasTokenSource {
 		// Missing-token tests now prove fail-closed behavior on non-loopback targets.
 		opts.apiRPCEndpointOverride = "http://192.0.2.10:8081/v1/rpc"
 		return opts

@@ -12,7 +12,7 @@ import (
 )
 
 func TestAgentDeliveriesUsesAgentDeliveryLifecycleAndRendersRows(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -71,7 +71,7 @@ func TestAgentDeliveriesUsesAgentDeliveryLifecycleAndRendersRows(t *testing.T) {
 }
 
 func TestAgentDeliveriesEmptyResult(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -102,7 +102,7 @@ func TestAgentDeliveriesEmptyResult(t *testing.T) {
 }
 
 func TestAgentDeliveriesJSONPreservesAPIResultShape(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -150,7 +150,7 @@ func TestAgentDeliveriesJSONPreservesAPIResultShape(t *testing.T) {
 }
 
 func TestAgentDeliveriesRejectsInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -207,7 +207,7 @@ func TestAgentDeliveriesFailClosedWithoutToken(t *testing.T) {
 	if code != cliExitAuth {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitAuth, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+	if !strings.Contains(stderr.String(), "API token source is required") {
 		t.Fatalf("stderr = %q, want token failure", stderr.String())
 	}
 	if calls.Load() != 0 {
@@ -326,7 +326,7 @@ func TestAgentDeliveriesFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

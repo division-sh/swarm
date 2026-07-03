@@ -18,7 +18,7 @@ import (
 )
 
 func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("a")
 	var requests []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +88,7 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 }
 
 func TestBundleCommandsJSONPreserveAPIShape(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("b")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +123,7 @@ func TestBundleCommandsJSONPreserveAPIShape(t *testing.T) {
 }
 
 func TestBundleDeleteUsesCanonicalRPCAndRenders(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("d")
 	var requests []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -207,7 +207,7 @@ func TestBundleDeleteUsesCanonicalRPCAndRenders(t *testing.T) {
 }
 
 func TestBundleDeleteJSONPreservesAPIShape(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("e")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +249,7 @@ func TestBundleDeleteJSONPreservesAPIShape(t *testing.T) {
 }
 
 func TestBundleDeletePartialFailureRendersAndExitsRuntime(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("9")
 	for _, tc := range []struct {
 		name string
@@ -301,7 +301,7 @@ func TestBundleDeletePartialFailureRendersAndExitsRuntime(t *testing.T) {
 }
 
 func TestBundleAgentsJSONUsesCanonicalModelField(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("f")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -397,7 +397,7 @@ func TestBundleRegisterHelpDocumentsPreparedEnvelopeAndContractsBoundary(t *test
 }
 
 func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("9")
 	contractsDir := writeBundleRegisterContractsFixture(t)
 	var captured jsonRPCRequest
@@ -482,7 +482,7 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 }
 
 func TestBundleRegisterContractsPackageFileShorthandUsesCanonicalRPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("8")
 	contractsDir := writeBundleRegisterContractsFixture(t)
 	var captured jsonRPCRequest
@@ -524,7 +524,7 @@ func TestBundleRegisterContractsPackageFileShorthandUsesCanonicalRPC(t *testing.
 }
 
 func TestBundleRegisterPreparedEnvelopeUsesCanonicalRPCAndRenders(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("e")
 	envelopePath := writeBundleRegisterFixture(t, "bundle-register.yaml", "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n")
 	dataBlobPath := writeBundleRegisterFixture(t, "bundle-data.json", `{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/alpha/data/payload.bin","data_base64":"AQI="}]}`)
@@ -568,7 +568,7 @@ func TestBundleRegisterPreparedEnvelopeUsesCanonicalRPCAndRenders(t *testing.T) 
 }
 
 func TestBundleRegisterJSONPreservesAPIShape(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	bundleHash := validBundleHash("f")
 	envelopePath := writeBundleRegisterFixture(t, "bundle-register.yaml", "api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n")
 	var captured jsonRPCRequest
@@ -598,7 +598,7 @@ func TestBundleRegisterJSONPreservesAPIShape(t *testing.T) {
 }
 
 func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -666,7 +666,7 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 }
 
 func TestBundleRegisterContractsDirectoryRejectsSymlinkBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	contractsDir := writeBundleRegisterContractsFixture(t)
 	if err := os.Symlink(filepath.Join(contractsDir, "prompts", "root.md"), filepath.Join(contractsDir, "prompts", "link.md")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)
@@ -878,7 +878,7 @@ func TestBundleCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

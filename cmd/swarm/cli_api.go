@@ -154,6 +154,9 @@ func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	if err != nil {
 		return cliAPISettings{}, err
 	}
+	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+		return cliAPISettings{}, err
+	}
 	target, err := resolveCLIAPITarget(opts, cfg)
 	if err != nil {
 		return cliAPISettings{}, err
@@ -165,19 +168,6 @@ func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	return cliAPISettings{rpcEndpoint: target.rpcEndpoint, token: token.token, tokenSource: token.source, tokenExplicit: token.explicit, target: target}, nil
 }
 
-func resolveCLIAPIRPCEndpoint(opts rootCommandOptions, cfg cliAPIConfigFile) (string, error) {
-	if endpoint := strings.TrimSpace(opts.apiRPCEndpointOverride); endpoint != "" {
-		return normalizeCLIAPIRPCEndpoint(endpoint, "internal API endpoint")
-	}
-	server := firstNonEmpty(
-		opts.apiServer,
-		os.Getenv("SWARM_API_SERVER"),
-		cfg.APIServer,
-		defaultCLIAPIServer,
-	)
-	return cliAPIRPCEndpointFromServer(server, "API server")
-}
-
 type cliAPITokenResolution struct {
 	token    string
 	source   string
@@ -185,14 +175,11 @@ type cliAPITokenResolution struct {
 }
 
 func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoint string) (cliAPITokenResolution, error) {
+	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+		return cliAPITokenResolution{}, err
+	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
 		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
-	}
-	if token := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")); token != "" {
-		return cliAPITokenResolution{token: token, source: string(apiv1.AuthTokenSourceEnvironment), explicit: true}, nil
-	}
-	if tokenFile := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN_FILE")); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "SWARM_API_TOKEN_FILE")
 	}
 	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
 		return readCLIAPIExplicitTokenFile(tokenFile, "config api_token_file")
@@ -204,6 +191,24 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoi
 		}, nil
 	}
 	return cliAPITokenResolution{}, errCLIAPITokenRequired
+}
+
+func rejectRemovedClientAPIEnvSources() error {
+	replacements := map[string]string{
+		"SWARM_API_SERVER":     "use --api-server, --context, project/selected context, or config api_server",
+		"SWARM_API_TOKEN":      "use --api-token-file, context descriptor auth, or config api_token_file",
+		"SWARM_API_TOKEN_FILE": "use --api-token-file, context descriptor auth, or config api_token_file",
+	}
+	var found []string
+	for _, name := range []string{"SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE"} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			found = append(found, fmt.Sprintf("%s (%s)", name, replacements[name]))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return &cliAPIValidationError{message: "client-side API environment sources are no longer accepted: " + strings.Join(found, "; ")}
 }
 
 type cliServeListenerAddressOptions struct {

@@ -13,7 +13,7 @@ import (
 )
 
 func TestForkChatNewCreatesForkAndOptionalChatViaCanonicalRPC(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var requests []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -85,7 +85,7 @@ func TestForkChatNewCreatesForkAndOptionalChatViaCanonicalRPC(t *testing.T) {
 }
 
 func TestForkChatNewSelectorMappings(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	for _, tc := range []struct {
 		name          string
 		args          []string
@@ -129,7 +129,7 @@ func TestForkChatNewSelectorMappings(t *testing.T) {
 }
 
 func TestForkChatResumeJSONUsesConversationForkChat(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -166,7 +166,7 @@ func TestForkChatResumeJSONUsesConversationForkChat(t *testing.T) {
 }
 
 func TestForkChatListViewDeleteUseCanonicalMethods(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var requests []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -222,7 +222,7 @@ func TestForkChatListViewDeleteUseCanonicalMethods(t *testing.T) {
 }
 
 func TestForkChatCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -266,7 +266,7 @@ func TestForkChatCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 }
 
 func TestForkChatAPIErrorAndMalformedResultHandling(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	for _, tc := range []struct {
 		name       string
 		args       []string
@@ -336,7 +336,7 @@ func TestForkChatAPIErrorAndMalformedResultHandling(t *testing.T) {
 }
 
 func TestForkChatRejectsMalformedSnapshotIdentityFields(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	for _, tc := range []struct {
 		name       string
 		mutate     func(map[string]any)

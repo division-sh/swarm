@@ -1170,7 +1170,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	for _, stale := range []string{
 		"Runtime-state commands use v1 bearer auth through `SWARM_API_TOKEN`",
 		"SWARM_API_TOKEN is the only user-facing API bearer-token source",
-		"SWARM_API_TOKEN is required.",
+		"API token source is required.",
 	} {
 		if strings.Contains(platformSpecText, stale) {
 			t.Fatalf("platform spec still contains stale SWARM_API_TOKEN-only bearer-token authority %q", stale)
@@ -1188,8 +1188,11 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if strings.TrimSpace(spec.PromotedBy) != "#844" {
 		t.Fatalf("api connection/auth/config promoted_by = %q, want #844", spec.PromotedBy)
 	}
-	if strings.TrimSpace(spec.ImplementationStatus) != "implemented_loopback_default" {
-		t.Fatalf("api connection/auth/config implementation_status = %q, want implemented_loopback_default", spec.ImplementationStatus)
+	if strings.TrimSpace(spec.ClientEnvRemovedBy) != "#1636" {
+		t.Fatalf("api connection/auth/config client_env_removed_by = %q, want #1636", spec.ClientEnvRemovedBy)
+	}
+	if strings.TrimSpace(spec.ImplementationStatus) != "implemented_loopback_default_no_client_env_sources" {
+		t.Fatalf("api connection/auth/config implementation_status = %q, want implemented_loopback_default_no_client_env_sources", spec.ImplementationStatus)
 	}
 	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.api_connection_auth_config_precedence") {
 		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
@@ -1199,7 +1202,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("scope missing boundary %q:\n%s", want, spec.Scope)
 		}
 	}
-	wantPrecedence := []string{"flag", "environment", "config_file", "built_in_default"}
+	wantPrecedence := []string{"flag", "context_descriptor", "config_file", "built_in_default"}
 	if len(spec.PrecedenceOrder) != len(wantPrecedence) {
 		t.Fatalf("precedence order = %#v, want %#v", spec.PrecedenceOrder, wantPrecedence)
 	}
@@ -1211,14 +1214,17 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if spec.APIServer.AcceptedSources.Flag != "--api-server <url>" {
 		t.Fatalf("api_server flag = %q, want --api-server <url>", spec.APIServer.AcceptedSources.Flag)
 	}
-	if spec.APIServer.AcceptedSources.Environment != "SWARM_API_SERVER" {
-		t.Fatalf("api_server environment = %q, want SWARM_API_SERVER", spec.APIServer.AcceptedSources.Environment)
+	if !strings.Contains(spec.APIServer.AcceptedSources.ContextDescriptor, "context descriptor") {
+		t.Fatalf("api_server context_descriptor = %q, want context descriptor source", spec.APIServer.AcceptedSources.ContextDescriptor)
 	}
 	if spec.APIServer.AcceptedSources.ConfigKey != "api_server" {
 		t.Fatalf("api_server config key = %q, want api_server", spec.APIServer.AcceptedSources.ConfigKey)
 	}
 	if spec.APIServer.AcceptedSources.BuiltInDefault != "http://127.0.0.1:8081" {
 		t.Fatalf("api_server default = %q, want http://127.0.0.1:8081", spec.APIServer.AcceptedSources.BuiltInDefault)
+	}
+	if !strings.Contains(spec.APIServer.RejectedSources["SWARM_API_SERVER"], "#1636") {
+		t.Fatalf("api_server SWARM_API_SERVER rejection missing #1636:\n%s", spec.APIServer.RejectedSources["SWARM_API_SERVER"])
 	}
 	for _, want := range []string{"base URL", "`/v1/rpc`", "`/v1/ws`"} {
 		if !strings.Contains(spec.APIServer.ValueModel, want) {
@@ -1230,12 +1236,17 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("api_server rationale missing %q:\n%s", want, spec.APIServer.Rationale)
 		}
 	}
-	for _, want := range []string{"flag_file", "environment_token", "environment_file", "config_file_key"} {
+	for _, want := range []string{"flag_file", "context_descriptor", "config_file_key"} {
 		if strings.TrimSpace(spec.APIToken.AcceptedSources[want]) == "" {
 			t.Fatalf("api_token accepted sources missing %q: %#v", want, spec.APIToken.AcceptedSources)
 		}
 	}
-	wantTokenSourceOrder := []string{"--api-token-file", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "config api_token_file", "built-in loopback default"}
+	for _, removed := range []string{"environment_token", "environment_file"} {
+		if strings.TrimSpace(spec.APIToken.AcceptedSources[removed]) != "" {
+			t.Fatalf("api_token accepted source %q should be removed: %#v", removed, spec.APIToken.AcceptedSources)
+		}
+	}
+	wantTokenSourceOrder := []string{"--api-token-file", "context descriptor auth", "config api_token_file", "built-in loopback default"}
 	if len(spec.APIToken.SourceOrder) != len(wantTokenSourceOrder) {
 		t.Fatalf("api_token source order = %#v, want %#v", spec.APIToken.SourceOrder, wantTokenSourceOrder)
 	}
@@ -1245,8 +1256,10 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for key, want := range map[string]string{
-		"--api-token":      "shell history",
-		"config api_token": "inline",
+		"--api-token":          "shell history",
+		"config api_token":     "inline",
+		"SWARM_API_TOKEN":      "#1636",
+		"SWARM_API_TOKEN_FILE": "config `api_token_file`",
 	} {
 		if !strings.Contains(spec.APIToken.RejectedSources[key], want) {
 			t.Fatalf("api_token rejected source %q missing %q:\n%s", key, want, spec.APIToken.RejectedSources[key])
@@ -1264,6 +1277,14 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		if !stringSliceContains(spec.APIToken.BuiltInLoopbackDefault.RejectedWithoutExplicitToken, want) {
 			t.Fatalf("built-in default rejected hosts missing %q: %#v", want, spec.APIToken.BuiltInLoopbackDefault.RejectedWithoutExplicitToken)
 		}
+	}
+	for _, stale := range []string{"SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE"} {
+		if strings.Contains(spec.APIToken.BuiltInLoopbackDefault.AppliesWhen, stale) {
+			t.Fatalf("built-in default applies_when still names removed client env %q:\n%s", stale, spec.APIToken.BuiltInLoopbackDefault.AppliesWhen)
+		}
+	}
+	if !strings.Contains(spec.APIToken.BuiltInLoopbackDefault.AppliesWhen, "numeric loopback") {
+		t.Fatalf("built-in default applies_when missing loopback boundary:\n%s", spec.APIToken.BuiltInLoopbackDefault.AppliesWhen)
 	}
 	for _, want := range []string{"no-auth", "Authorization: Bearer"} {
 		if !strings.Contains(spec.APIToken.BuiltInLoopbackDefault.NoAuthBypassRule, want) {
@@ -1311,13 +1332,13 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("serve listener accepted env %q missing listener owner:\n%s", key, spec.ServeListenerEnvConfigBoundary.AcceptedListenerEnvironment[key])
 		}
 	}
-	for _, want := range []string{"#848", "#884/#750", "#743", "`--no-retry`"} {
+	for _, want := range []string{"#848", "#884/#750", "#743", "#1636", "#1647", "`--no-retry`"} {
 		if !stringSliceContains(spec.SplitSiblings, want) {
 			t.Fatalf("split siblings missing %q: %#v", want, spec.SplitSiblings)
 		}
 	}
-	for _, want := range []string{"API-backed command leaves consume", "OpenRPC", "Future API-backed CLI commands MUST consume this owner"} {
-		if !stringSliceContains(spec.ImplementationBoundaries, want) {
+	for _, want := range []string{"API-backed command leaves consume", "SWARM_API_SERVER", "#1647", "OpenRPC"} {
+		if !strings.Contains(strings.Join(spec.ImplementationBoundaries, "\n"), want) {
 			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}
 	}
@@ -3493,7 +3514,6 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	t.Setenv("SWARM_API_TOKEN", "test-token")
 	ctx := context.Background()
 	sourceBundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	sourceProjection, err := runtimecontracts.BuildBundleCatalogProjection(sourceBundle)
@@ -4427,7 +4447,6 @@ func servedEventPublishProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig
 
 func startServedEventPublishFollowUpRuntime(t *testing.T, opts serveOptions) (string, *runtimepkg.Runtime) {
 	t.Helper()
-	t.Setenv("SWARM_API_TOKEN", "test-token")
 	serveCtx, cancelServe := context.WithCancel(context.Background())
 	var out lockedBuffer
 	done := make(chan int, 1)
@@ -5021,7 +5040,7 @@ func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[stri
 		t.Fatalf("build %s request: %v", method, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		t.Fatalf("post %s request: %v", method, err)
@@ -11341,6 +11360,7 @@ type serveListenerTopologySpec struct {
 
 type cliAPIConnectionAuthConfigSpec struct {
 	PromotedBy           string   `yaml:"promoted_by"`
+	ClientEnvRemovedBy   string   `yaml:"client_env_removed_by"`
 	ImplementationStatus string   `yaml:"implementation_status"`
 	CanonicalOwner       string   `yaml:"canonical_owner"`
 	Scope                string   `yaml:"scope"`
@@ -11349,13 +11369,14 @@ type cliAPIConnectionAuthConfigSpec struct {
 	PrecedenceOrder      []string `yaml:"precedence_order"`
 	APIServer            struct {
 		AcceptedSources struct {
-			Flag           string `yaml:"flag"`
-			Environment    string `yaml:"environment"`
-			ConfigKey      string `yaml:"config_key"`
-			BuiltInDefault string `yaml:"built_in_default"`
+			Flag              string `yaml:"flag"`
+			ContextDescriptor string `yaml:"context_descriptor"`
+			ConfigKey         string `yaml:"config_key"`
+			BuiltInDefault    string `yaml:"built_in_default"`
 		} `yaml:"accepted_sources"`
-		ValueModel string `yaml:"value_model"`
-		Rationale  string `yaml:"rationale"`
+		RejectedSources map[string]string `yaml:"rejected_sources"`
+		ValueModel      string            `yaml:"value_model"`
+		Rationale       string            `yaml:"rationale"`
 	} `yaml:"api_server"`
 	APIToken struct {
 		AcceptedSources        map[string]string `yaml:"accepted_sources"`

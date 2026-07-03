@@ -18,7 +18,7 @@ const (
 	cliExitInterrupted = 130
 )
 
-var errCLIAPITokenRequired = errors.New("SWARM_API_TOKEN is required for non-loopback API targets")
+var errCLIAPITokenRequired = errors.New("API token source is required for non-loopback API targets; use --api-token-file, context descriptor auth, or config api_token_file")
 
 type cliAPIErrorClassifier struct {
 	runtimeExit   int

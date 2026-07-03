@@ -43,7 +43,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 		t.Fatalf("version --quiet stdout = %q, want binary version", got)
 	}
 
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	for _, mode := range []string{"--json", "--quiet"} {
 		server, requests := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 			if req.Method != "health.check" {
@@ -101,7 +101,7 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 }
 
 func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	t.Run("runs", func(t *testing.T) {
 		for _, tc := range []struct {
@@ -243,7 +243,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 }
 
 func TestCLIOutputModesForConversationConsumers(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	for _, tc := range []struct {
 		name       string
@@ -443,7 +443,7 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 				{name: "quiet environment", outputMode: "--quiet", env: "1"},
 			} {
 				t.Run(mode.name, func(t *testing.T) {
-					t.Setenv("SWARM_API_TOKEN", "test-token")
+					setCLIAPITestToken(t, "test-token")
 					t.Setenv("NO_COLOR", mode.env)
 
 					args := append([]string{}, tc.args(t)...)
@@ -523,7 +523,7 @@ func TestCLIOutputNoColorDoesNotRewriteMachineModes(t *testing.T) {
 }
 
 func TestCLIOutputModeCollisionFailsBeforeSideEffects(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	for _, args := range [][]string{
 		{"version", "--json", "--quiet", "--no-color"},
@@ -574,7 +574,7 @@ func TestCLIOutputModeCollisionFailsBeforeSideEffects(t *testing.T) {
 }
 
 func TestCLIOutputModeExceptionRowsFailClosedBeforeSideEffects(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	var rpcCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

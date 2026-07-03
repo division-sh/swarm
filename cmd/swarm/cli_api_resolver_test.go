@@ -16,19 +16,15 @@ import (
 )
 
 func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
-	t.Run("flag sources beat env config and defaults", func(t *testing.T) {
+	t.Run("flag sources beat config and defaults", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		configToken := writeCLIAPITokenFile(t, "config-token")
-		envToken := writeCLIAPITokenFile(t, "env-file-token")
 		flagToken := writeCLIAPITokenFile(t, "flag-token")
 		configPath := writeCLIAPIConfigFile(t, map[string]string{
 			"api_server":     "http://127.0.0.1:4444",
 			"api_token_file": configToken,
 		})
 		t.Setenv("SWARM_CONFIG", configPath)
-		t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:5555")
-		t.Setenv("SWARM_API_TOKEN", "env-token")
-		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
 
 		client, err := newCLIAPIClient(rootCommandOptions{
 			apiServer:    "http://127.0.0.1:6666",
@@ -45,7 +41,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		}
 	})
 
-	t.Run("environment token beats token file and config", func(t *testing.T) {
+	t.Run("client environment sources fail closed instead of shadowing config", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		configToken := writeCLIAPITokenFile(t, "config-token")
 		envToken := writeCLIAPITokenFile(t, "env-file-token")
@@ -57,19 +53,18 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		t.Setenv("SWARM_API_TOKEN", "env-token")
 		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
 
-		client, err := newCLIAPIClient(rootCommandOptions{})
-		if err != nil {
-			t.Fatalf("newCLIAPIClient: %v", err)
+		_, err := newCLIAPIClient(rootCommandOptions{})
+		if err == nil {
+			t.Fatal("newCLIAPIClient returned nil error")
 		}
-		if client.endpoint != "http://127.0.0.1:5555/v1/rpc" {
-			t.Fatalf("endpoint = %q", client.endpoint)
-		}
-		if client.token != "env-token" {
-			t.Fatalf("token = %q", client.token)
+		for _, want := range []string{"client-side API environment sources are no longer accepted", "SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "--api-server", "--api-token-file"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("err = %q, want %q", err.Error(), want)
+			}
 		}
 	})
 
-	t.Run("environment token file beats config", func(t *testing.T) {
+	t.Run("client environment token file fails closed instead of shadowing config", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		configToken := writeCLIAPITokenFile(t, "config-token")
 		envToken := writeCLIAPITokenFile(t, "env-file-token")
@@ -79,15 +74,12 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		}))
 		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
 
-		client, err := newCLIAPIClient(rootCommandOptions{})
-		if err != nil {
-			t.Fatalf("newCLIAPIClient: %v", err)
+		_, err := newCLIAPIClient(rootCommandOptions{})
+		if err == nil {
+			t.Fatal("newCLIAPIClient returned nil error")
 		}
-		if client.endpoint != "http://127.0.0.1:4444/v1/rpc" {
-			t.Fatalf("endpoint = %q", client.endpoint)
-		}
-		if client.token != "env-file-token" {
-			t.Fatalf("token = %q", client.token)
+		if !strings.Contains(err.Error(), "SWARM_API_TOKEN_FILE") || !strings.Contains(err.Error(), "config api_token_file") {
+			t.Fatalf("err = %q, want SWARM_API_TOKEN_FILE replacement guidance", err.Error())
 		}
 	})
 
@@ -150,17 +142,17 @@ func TestCLIAPISettingsDefaultTokenLoopbackBoundary(t *testing.T) {
 		{
 			name:      "localhost needs explicit token",
 			apiServer: "http://localhost:8081",
-			wantErr:   "SWARM_API_TOKEN is required",
+			wantErr:   "API token source is required",
 		},
 		{
 			name:      "wildcard needs explicit token",
 			apiServer: "http://0.0.0.0:8081",
-			wantErr:   "SWARM_API_TOKEN is required",
+			wantErr:   "API token source is required",
 		},
 		{
 			name:      "routable address needs explicit token",
 			apiServer: "http://192.0.2.10:8081",
-			wantErr:   "SWARM_API_TOKEN is required",
+			wantErr:   "API token source is required",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -361,7 +353,6 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 		{
 			name: "invalid API server query",
 			setup: func(t *testing.T) rootCommandOptions {
-				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{apiServer: "http://127.0.0.1:8081?x=1"}
 			},
 			wantExit: cliExitValidation,
@@ -370,7 +361,6 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 		{
 			name: "flag API server rejects direct RPC endpoint",
 			setup: func(t *testing.T) rootCommandOptions {
-				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{apiServer: "http://127.0.0.1:8081/v1/rpc"}
 			},
 			wantExit: cliExitValidation,
@@ -379,31 +369,30 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 		{
 			name: "flag API server rejects prefixed RPC endpoint",
 			setup: func(t *testing.T) rootCommandOptions {
-				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{apiServer: "http://127.0.0.1:8081/proxy/v1/rpc"}
 			},
 			wantExit: cliExitValidation,
 			wantErr:  "not a direct /v1/rpc endpoint",
 		},
 		{
-			name: "environment API server rejects direct websocket endpoint",
+			name: "environment API server is removed before endpoint shape validation",
 			setup: func(t *testing.T) rootCommandOptions {
 				t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:8081/v1/ws")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  "not a direct /v1/ws endpoint",
+			wantErr:  "client-side API environment sources are no longer accepted",
 		},
 		{
-			name: "environment API server rejects prefixed websocket endpoint",
+			name: "environment API server with prefix is removed before endpoint shape validation",
 			setup: func(t *testing.T) rootCommandOptions {
 				t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:8081/proxy/v1/ws")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  "not a direct /v1/ws endpoint",
+			wantErr:  "client-side API environment sources are no longer accepted",
 		},
 		{
 			name: "config API server rejects direct RPC endpoint",
@@ -411,7 +400,6 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 					"api_server": "http://127.0.0.1:8081/v1/rpc",
 				}))
-				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
@@ -423,7 +411,6 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 					"api_server": "http://127.0.0.1:8081/proxy/v1/rpc",
 				}))
-				t.Setenv("SWARM_API_TOKEN", "env-token")
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
@@ -680,6 +667,56 @@ func TestCLIAPIProjectContextOutranksSelectedGlobal(t *testing.T) {
 	}
 }
 
+func TestCLIAPIContextDescriptorAuthOutranksConfigTokenFile(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	configToken := writeCLIAPITokenFile(t, "config-token")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"api_server":     "http://127.0.0.1:4444",
+		"api_token_file": configToken,
+	}))
+	server := startCLIAPIRuntimeIdentityServer(t, "runtime-project")
+	registry := newLocalContextRegistry(swarmDir)
+	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", server.URL, project.canonicalRoot)
+
+	client, err := newCLIAPIClient(rootCommandOptions{
+		repoRoot: project.root,
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("newCLIAPIClient: %v", err)
+	}
+	if client.target.source != "project context" {
+		t.Fatalf("target source = %q, want project context", client.target.source)
+	}
+	if client.token != apiv1.DefaultLoopbackAPIToken {
+		t.Fatalf("token = %q, want descriptor built-in loopback token", client.token)
+	}
+
+	flagToken := writeCLIAPITokenFile(t, "flag-token")
+	settings, err := resolveCLIAPISettings(rootCommandOptions{
+		apiTokenFile: flagToken,
+		repoRoot:     project.root,
+		rootFlags: &rootCommandFlagState{
+			swarmDir:    swarmDir,
+			swarmDirSet: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("resolveCLIAPISettings with flag token: %v", err)
+	}
+	if settings.target.source != "project context" {
+		t.Fatalf("target source with flag token = %q, want project context", settings.target.source)
+	}
+	if settings.token != "flag-token" || settings.tokenSource != "--api-token-file" {
+		t.Fatalf("token/source = %q/%q, want flag-token/--api-token-file", settings.token, settings.tokenSource)
+	}
+}
+
 func TestCLIAPIExplicitAPIServerAndContextPrecedence(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	project := writeCLIAPIProjectFixture(t)
@@ -888,22 +925,22 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 			want: "not a direct /v1/ws endpoint",
 		},
 		{
-			name: "environment direct websocket endpoint",
+			name: "environment direct websocket endpoint is removed",
 			args: []string{"runs"},
 			setup: func(t *testing.T, serverURL string, _ string) {
 				t.Setenv("SWARM_API_SERVER", serverURL+"/v1/ws")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 			},
-			want: "not a direct /v1/ws endpoint",
+			want: "client-side API environment sources are no longer accepted",
 		},
 		{
-			name: "environment prefixed RPC endpoint",
+			name: "environment prefixed RPC endpoint is removed",
 			args: []string{"runs"},
 			setup: func(t *testing.T, serverURL string, _ string) {
 				t.Setenv("SWARM_API_SERVER", serverURL+"/proxy/v1/rpc")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
 			},
-			want: "not a direct /v1/rpc endpoint",
+			want: "client-side API environment sources are no longer accepted",
 		},
 		{
 			name: "config direct RPC endpoint",
@@ -1076,6 +1113,17 @@ func isolateCLIAPIConfigEnv(t *testing.T) {
 	t.Setenv("SWARM_CONTRACTS_DIR", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
+}
+
+func setCLIAPITestToken(t *testing.T, token string) {
+	t.Helper()
+	if strings.TrimSpace(token) == "" {
+		t.Setenv("SWARM_CONFIG", "")
+		return
+	}
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"api_token_file": writeCLIAPITokenFile(t, token),
+	}))
 }
 
 func writeCLIAPITokenFile(t *testing.T, token string) string {

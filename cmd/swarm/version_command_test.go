@@ -43,7 +43,7 @@ func TestVersionLocalDoesNotRequireTokenOrRequest(t *testing.T) {
 }
 
 func TestVersionServerUsesHealthCheck(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -94,7 +94,7 @@ func TestVersionServerUsesHealthCheck(t *testing.T) {
 }
 
 func TestVersionServerRejectsInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -145,7 +145,7 @@ func TestVersionServerRequiresTokenBeforeRequest(t *testing.T) {
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+	if !strings.Contains(stderr.String(), "API token source is required") {
 		t.Fatalf("stderr = %q, want missing-token message", stderr.String())
 	}
 	if strings.TrimSpace(stdout.String()) != "" {
@@ -220,7 +220,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -240,7 +240,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 }
 
 func TestVersionServerFailsClosedOnTransportError(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected request to closed server")
 	}))

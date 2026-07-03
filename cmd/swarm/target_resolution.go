@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/spf13/cobra"
@@ -167,7 +168,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 }
 
 func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
-	api, err := resolveDoctorTargetAPI(opts, cfg)
+	api, err := resolveDoctorTargetAPI(repo, opts, cfg)
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
@@ -272,65 +273,76 @@ func rootSwarmDirFlag(cmd *cobra.Command) (string, bool) {
 	return flag.Value.String(), flag.Changed
 }
 
-func resolveDoctorTargetAPI(opts doctorOptions, cfg cliAPIConfigFile) (doctorTargetAPI, error) {
-	server, source := firstDoctorTargetAPIServer(opts, cfg)
-	base, err := normalizeCLIAPIServerBase(server, source)
+func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFile) (doctorTargetAPI, error) {
+	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+		return doctorTargetAPI{}, err
+	}
+	target, err := resolveCLIAPITarget(rootCommandOptions{
+		apiServer:       opts.apiOptions.apiServer,
+		apiTokenFile:    opts.apiOptions.apiTokenFile,
+		contextName:     opts.apiOptions.contextName,
+		swarmDir:        opts.apiOptions.swarmDir,
+		rootFlags:       opts.apiOptions.rootFlags,
+		repoRoot:        repo,
+		apiCommandClass: cliAPICommandClassTargetDiagnostic,
+	}, cfg)
 	if err != nil {
 		return doctorTargetAPI{}, err
 	}
-	rpcEndpoint, err := cliAPIRPCEndpointFromServer(base.String(), source)
+	token, err := resolveCLIAPITokenForTarget(rootCommandOptions{
+		apiTokenFile: opts.apiOptions.apiTokenFile,
+	}, cfg, target)
+	if err != nil {
+		return doctorTargetAPI{}, err
+	}
+	server, err := cliAPIServerBaseFromRPCEndpoint(target.rpcEndpoint, target.source)
 	if err != nil {
 		return doctorTargetAPI{}, err
 	}
 	return doctorTargetAPI{
-		Server:      base.String(),
-		RPCEndpoint: rpcEndpoint,
-		Source:      source,
-		Auth:        resolveDoctorTargetAuth(opts, cfg, rpcEndpoint),
-		Reason:      doctorTargetAPIReason(source),
+		Server:      server,
+		RPCEndpoint: target.rpcEndpoint,
+		Source:      target.source,
+		Auth:        doctorTargetAuthFromTokenResolution(token),
+		Reason:      doctorTargetAPIReason(target.source),
 	}, nil
 }
 
-func firstDoctorTargetAPIServer(opts doctorOptions, cfg cliAPIConfigFile) (string, string) {
-	if server := strings.TrimSpace(opts.apiOptions.apiServer); server != "" {
-		return server, "--api-server"
+func cliAPIServerBaseFromRPCEndpoint(rpcEndpoint, source string) (string, error) {
+	parsed, err := normalizeCLIAPIRPCEndpoint(rpcEndpoint, source)
+	if err != nil {
+		return "", err
 	}
-	if server := strings.TrimSpace(os.Getenv("SWARM_API_SERVER")); server != "" {
-		return server, "SWARM_API_SERVER"
+	idx := strings.LastIndex(parsed, cliAPIRPCPath)
+	if idx < 0 {
+		return "", &cliAPIValidationError{message: fmt.Sprintf("%s must end with %s", source, cliAPIRPCPath)}
 	}
-	if server := strings.TrimSpace(cfg.APIServer); server != "" {
-		return server, "config api_server"
-	}
-	return defaultCLIAPIServer, "built-in loopback default"
+	return parsed[:idx], nil
 }
 
-func resolveDoctorTargetAuth(opts doctorOptions, cfg cliAPIConfigFile, rpcEndpoint string) doctorTargetAuth {
-	if tokenFile := strings.TrimSpace(opts.apiOptions.apiTokenFile); tokenFile != "" {
-		return doctorTargetAuth{Source: "--api-token-file", Status: "configured", Detail: tokenFile}
+func doctorTargetAuthFromTokenResolution(token cliAPITokenResolution) doctorTargetAuth {
+	switch token.source {
+	case "--api-token-file", "config api_token_file":
+		return doctorTargetAuth{Source: token.source, Status: "configured", Detail: "token file"}
+	case string(apiv1.AuthTokenSourceBuiltInLoopbackToken):
+		return doctorTargetAuth{Source: token.source, Status: "available", Detail: "numeric loopback target"}
+	default:
+		return doctorTargetAuth{Source: token.source, Status: "configured", Detail: "context/runtime auth"}
 	}
-	if strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")) != "" {
-		return doctorTargetAuth{Source: "SWARM_API_TOKEN", Status: "configured", Detail: "value redacted"}
-	}
-	if tokenFile := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN_FILE")); tokenFile != "" {
-		return doctorTargetAuth{Source: "SWARM_API_TOKEN_FILE", Status: "configured", Detail: tokenFile}
-	}
-	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return doctorTargetAuth{Source: "config api_token_file", Status: "configured", Detail: tokenFile}
-	}
-	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
-		return doctorTargetAuth{Source: "built-in loopback default", Status: "available", Detail: "numeric loopback target"}
-	}
-	return doctorTargetAuth{Source: "none", Status: "missing_explicit_token", Detail: "non-loopback targets require --api-token-file, SWARM_API_TOKEN, SWARM_API_TOKEN_FILE, or config api_token_file"}
 }
 
 func doctorTargetAPIReason(source string) string {
 	switch source {
 	case "--api-server":
 		return "explicit API server flag wins target precedence for this diagnostic"
-	case "SWARM_API_SERVER":
-		return "existing explicit API environment source wins after flags"
+	case "--context":
+		return "explicit context flag wins target precedence after explicit API server"
+	case "project context":
+		return "live project-scoped context wins before selected context and config"
+	case "selected context":
+		return "selected context wins before typed config when no live project context is selected"
 	case "config api_server":
-		return "existing bootstrap config API source wins after flags and environment"
+		return "typed config API source wins after explicit target and context resolution"
 	default:
 		return "when no explicit API source is configured, API-backed commands resolve project context, selected context, or built-in loopback according to command class"
 	}

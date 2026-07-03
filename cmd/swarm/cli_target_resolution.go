@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/division-sh/swarm/internal/apiv1"
 )
 
 type cliAPICommandClass string
@@ -38,6 +36,9 @@ type cliProjectResolution struct {
 }
 
 func resolveCLIAPITarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPITargetResolution, error) {
+	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+		return cliAPITargetResolution{}, err
+	}
 	if endpoint := strings.TrimSpace(opts.apiRPCEndpointOverride); endpoint != "" {
 		rpc, err := normalizeCLIAPIRPCEndpoint(endpoint, "internal API endpoint")
 		return cliAPITargetResolution{rpcEndpoint: rpc, source: "internal API endpoint"}, err
@@ -49,20 +50,12 @@ func resolveCLIAPITarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPIT
 	if contextName := strings.TrimSpace(opts.contextName); contextName != "" {
 		return resolveCLIAPIExplicitContextTarget(opts, cfg, contextName)
 	}
-	if server := strings.TrimSpace(os.Getenv("SWARM_API_SERVER")); server != "" {
-		rpc, err := cliAPIRPCEndpointFromServer(server, "SWARM_API_SERVER")
-		return cliAPITargetResolution{rpcEndpoint: rpc, source: "SWARM_API_SERVER"}, err
-	}
-	if server := strings.TrimSpace(cfg.APIServer); server != "" {
-		rpc, err := cliAPIRPCEndpointFromServer(server, "config api_server")
-		return cliAPITargetResolution{rpcEndpoint: rpc, source: "config api_server"}, err
-	}
 	if !opts.disableLocalTargeting {
 		if project, ok := resolveCLIAPIProject(opts, cfg); ok {
 			return resolveCLIAPIProjectTarget(opts, cfg, project)
 		}
 	}
-	return resolveCLIAPISelectedOrDefaultTarget(opts, cfg)
+	return resolveCLIAPISelectedConfigOrDefaultTarget(opts, cfg)
 }
 
 func resolveCLIAPIExplicitContextTarget(opts rootCommandOptions, cfg cliAPIConfigFile, contextName string) (cliAPITargetResolution, error) {
@@ -115,11 +108,11 @@ func resolveCLIAPIProjectTarget(opts rootCommandOptions, cfg cliAPIConfigFile, p
 		}
 		return cliAPITargetResolution{}, &cliAPIValidationError{message: fmt.Sprintf("no live project context for %s; refusing %s command without explicit --context or --api-server; start `swarm serve --dev` for this project or choose a target explicitly", project.canonicalProjectRoot, commandClass)}
 	default:
-		return resolveCLIAPISelectedOrDefaultTarget(opts, cfg)
+		return resolveCLIAPISelectedConfigOrDefaultTarget(opts, cfg)
 	}
 }
 
-func resolveCLIAPISelectedOrDefaultTarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPITargetResolution, error) {
+func resolveCLIAPISelectedConfigOrDefaultTarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPITargetResolution, error) {
 	registry, err := cliAPILocalContextRegistry(opts, cfg)
 	if err != nil {
 		return cliAPITargetResolution{}, err
@@ -136,6 +129,10 @@ func resolveCLIAPISelectedOrDefaultTarget(opts rootCommandOptions, cfg cliAPICon
 	}
 	if report.Status != "" && report.Status != "empty" && report.Status != "no_current" && report.Status != localContextStatusOK {
 		return cliAPITargetResolution{}, &cliAPIValidationError{message: fmt.Sprintf("local context registry is %s: %s", report.Status, report.Detail)}
+	}
+	if server := strings.TrimSpace(cfg.APIServer); server != "" {
+		rpc, err := cliAPIRPCEndpointFromServer(server, "config api_server")
+		return cliAPITargetResolution{rpcEndpoint: rpc, source: "config api_server"}, err
 	}
 	rpc, err := cliAPIRPCEndpointFromServer(defaultCLIAPIServer, "built-in loopback default")
 	return cliAPITargetResolution{rpcEndpoint: rpc, source: "built-in loopback default"}, err
@@ -187,20 +184,14 @@ func cliAPITargetFromDescriptor(entry localContextEntry, source string) (cliAPIT
 }
 
 func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliAPIConfigFile, target cliAPITargetResolution) (cliAPITokenResolution, error) {
-	if target.descriptor == nil {
-		return resolveCLIAPIToken(opts, cfg, target.rpcEndpoint)
+	if err := rejectRemovedClientAPIEnvSources(); err != nil {
+		return cliAPITokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
 		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
 	}
-	if token := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")); token != "" {
-		return cliAPITokenResolution{token: token, source: string(apiv1.AuthTokenSourceEnvironment), explicit: true}, nil
-	}
-	if tokenFile := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN_FILE")); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "SWARM_API_TOKEN_FILE")
-	}
-	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "config api_token_file")
+	if target.descriptor == nil {
+		return resolveCLIAPIToken(opts, cfg, target.rpcEndpoint)
 	}
 	token, err := localContextDescriptorToken(*target.descriptor, target.rpcEndpoint)
 	if err != nil {

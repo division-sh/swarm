@@ -13,7 +13,7 @@ import (
 )
 
 func TestIncidentsUsesRuntimeIncidentsV1RPCWithFilters(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -70,7 +70,7 @@ func TestIncidentsUsesRuntimeIncidentsV1RPCWithFilters(t *testing.T) {
 }
 
 func TestIncidentsOmitOptionalParamsWhenUnset(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -97,7 +97,7 @@ func TestIncidentsOmitOptionalParamsWhenUnset(t *testing.T) {
 }
 
 func TestIncidentsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -148,7 +148,7 @@ func TestIncidentsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+	if !strings.Contains(stderr.String(), "API token source is required") {
 		t.Fatalf("stderr = %q, want token failure", stderr.String())
 	}
 	if calls.Load() != 0 {
@@ -329,7 +329,7 @@ func TestIncidentsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

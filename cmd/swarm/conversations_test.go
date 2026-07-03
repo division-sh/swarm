@@ -13,7 +13,7 @@ import (
 )
 
 func TestConversationsListUsesConversationListV1RPCWithFilters(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -66,7 +66,7 @@ func TestConversationsListUsesConversationListV1RPCWithFilters(t *testing.T) {
 }
 
 func TestConversationsListEmptyResultOmitsUnsetParams(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -93,7 +93,7 @@ func TestConversationsListEmptyResultOmitsUnsetParams(t *testing.T) {
 }
 
 func TestConversationViewUsesConversationGetAndRendersTurns(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -130,7 +130,7 @@ func TestConversationViewUsesConversationGetAndRendersTurns(t *testing.T) {
 }
 
 func TestConversationTurnUsesConversationGetTurnAndRendersDeepTurn(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -170,7 +170,7 @@ func TestConversationTurnUsesConversationGetTurnAndRendersDeepTurn(t *testing.T)
 }
 
 func TestConversationCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -232,7 +232,7 @@ func TestConversationCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("%v code = %d, want 4 stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+		if !strings.Contains(stderr.String(), "API token source is required") {
 			t.Fatalf("%v stderr = %q, want token failure", args, stderr.String())
 		}
 	}
@@ -358,7 +358,7 @@ func TestConversationCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T)
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

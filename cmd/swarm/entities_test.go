@@ -17,7 +17,7 @@ import (
 )
 
 func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -74,7 +74,7 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 }
 
 func TestEntitiesListEmptyResultOmitsUnsetParams(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -102,7 +102,7 @@ func TestEntitiesListEmptyResultOmitsUnsetParams(t *testing.T) {
 
 func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	ctx := context.Background()
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	runID := "11111111-1111-1111-1111-111111111111"
 	entityA := "22222222-2222-2222-2222-222222222222"
@@ -186,7 +186,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 }
 
 func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
@@ -228,7 +228,7 @@ func TestEntityViewUsesEntityGetAndRendersEntityNativeDetail(t *testing.T) {
 }
 
 func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -273,7 +273,7 @@ func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 }
 
 func TestEntityCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -333,7 +333,7 @@ func TestEntityCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 		if code != 4 {
 			t.Fatalf("%v code = %d, want 4 stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+		if !strings.Contains(stderr.String(), "API token source is required") {
 			t.Fatalf("%v stderr = %q, want token failure", args, stderr.String())
 		}
 	}
@@ -442,7 +442,7 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

@@ -13,7 +13,7 @@ import (
 )
 
 func TestAgentDiagnoseUsesAgentDiagnoseAndRendersOwnedFields(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
@@ -68,7 +68,7 @@ func TestAgentDiagnoseUsesAgentDiagnoseAndRendersOwnedFields(t *testing.T) {
 }
 
 func TestAgentDiagnoseJSONPreservesAPIResultShape(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -113,7 +113,7 @@ func TestAgentDiagnoseJSONPreservesAPIResultShape(t *testing.T) {
 }
 
 func TestAgentDiagnoseRejectsInvalidInputBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -244,7 +244,7 @@ func TestAgentDiagnoseFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 

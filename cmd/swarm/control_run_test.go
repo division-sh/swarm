@@ -23,7 +23,7 @@ func TestControlRunSingleCommandsSendV1RPCRequests(t *testing.T) {
 		{action: "stop", wantMethod: controlCommandRunStopMethod, wantOutput: "control stop ok: scope=run run_id=run-1"},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			var captured jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path != "/v1/rpc" {
@@ -70,7 +70,7 @@ func TestControlRunSingleCommandsSendIdempotencyKeys(t *testing.T) {
 		{action: "stop", wantMethod: controlCommandRunStopMethod},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			var captured jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -103,7 +103,7 @@ func TestControlRunAllPauseContinueSendRuntimeRPCRequests(t *testing.T) {
 		{action: "continue", wantMethod: controlCommandRuntimeResumeMethod, wantOutput: "control continue ok: scope=runtime"},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			var captured jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -143,7 +143,7 @@ func TestControlRunAllPauseContinueSendIdempotencyKeys(t *testing.T) {
 		{action: "continue", wantMethod: controlCommandRuntimeResumeMethod},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			var captured jsonRPCRequest
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
@@ -167,7 +167,7 @@ func TestControlRunAllPauseContinueSendIdempotencyKeys(t *testing.T) {
 }
 
 func TestControlStopAllListsActiveRunsAndStopsUniqueTargets(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
@@ -227,7 +227,7 @@ func TestControlStopAllListsActiveRunsAndStopsUniqueTargets(t *testing.T) {
 }
 
 func TestControlRunRejectsInvalidTargetsBeforeRequest(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -297,7 +297,7 @@ func TestControlRunRequiresAPITokenBeforeRequest(t *testing.T) {
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			if !strings.Contains(stderr.String(), "SWARM_API_TOKEN is required") {
+			if !strings.Contains(stderr.String(), "API token source is required") {
 				t.Fatalf("stderr = %q, want missing-token message", stderr.String())
 			}
 			if calls.Load() != 0 {
@@ -358,7 +358,7 @@ func TestControlRunFailsClosedOnTransportRPCAndMalformedResponses(t *testing.T) 
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("SWARM_API_TOKEN", "test-token")
+			setCLIAPITestToken(t, "test-token")
 			server := httptest.NewServer(tc.handler)
 			defer server.Close()
 
@@ -378,7 +378,7 @@ func TestControlRunFailsClosedOnTransportRPCAndMalformedResponses(t *testing.T) 
 }
 
 func TestControlStopAllConfirmationAndNoCallPaths(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 
 	for _, tc := range []struct {
 		name          string
@@ -500,7 +500,7 @@ func TestControlStopAllConfirmationPrecedesAPIClientConstruction(t *testing.T) {
 			input:         "y\n",
 			stdinTerminal: true,
 			wantCode:      4,
-			wantStderr:    "SWARM_API_TOKEN is required",
+			wantStderr:    "API token source is required",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -531,7 +531,7 @@ func TestControlStopAllConfirmationPrecedesAPIClientConstruction(t *testing.T) {
 }
 
 func TestControlStopAllReportsPartialFailures(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
+	setCLIAPITestToken(t, "test-token")
 	var captured []jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req jsonRPCRequest
