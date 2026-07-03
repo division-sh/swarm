@@ -36,6 +36,7 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context
 				WHERE event_id = ?
 				  AND subscriber_type = 'node'
 					  AND subscriber_id = ?
+					  AND COALESCE(delivery_target_route, '{}') = '{}'
 					  AND (
 						status IN ('pending', 'in_progress')
 						OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
@@ -52,6 +53,7 @@ func (s *WorkflowInstanceStore) SystemNodeDeliveryAuthorized(ctx context.Context
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
 				  AND subscriber_id = $2
+				  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
 				  AND (
 					status IN ('pending', 'in_progress')
 					OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
@@ -381,12 +383,13 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(c
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-				  AND subscriber_id = ?
-				  AND (
-					status IN ('pending', 'in_progress')
-					OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+				WHERE event_id = ?
+				  AND subscriber_type = 'node'
+					  AND subscriber_id = ?
+					  AND COALESCE(delivery_target_route, '{}') = '{}'
+					  AND (
+						status IN ('pending', 'in_progress')
+						OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
 				  )
 			`, now, eventID, nodeID, retryLimit)
 		if err != nil {
@@ -485,12 +488,13 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgress(ctx conte
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, ?),
 			    delivered_at = NULL
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-			  AND (
-				status IN ('pending', 'in_progress')
-				OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
+				WHERE event_id = ?
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = ?
+				  AND COALESCE(delivery_target_route, '{}') = '{}'
+				  AND (
+					status IN ('pending', 'in_progress')
+					OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
 			  )
 		`, now, eventID, nodeID, retryLimit)
 		if err != nil {
@@ -563,11 +567,12 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.C
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-			  AND status IN ('pending', 'in_progress', 'failed')
-			  AND COALESCE(retry_count, 0) < ?
+				WHERE event_id = ?
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = ?
+				  AND COALESCE(delivery_target_route, '{}') = '{}'
+				  AND status IN ('pending', 'in_progress', 'failed')
+				  AND COALESCE(retry_count, 0) < ?
 		`, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_error"), strings.TrimSpace(errText), now, eventID, nodeID, retryLimit)
 		if err != nil {
 			return fmt.Errorf("mark sqlite system node delivery failed: %w", err)
@@ -639,10 +644,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx conte
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-			  AND status IN ('pending', 'in_progress', 'failed')
+				WHERE event_id = ?
+				  AND subscriber_type = 'node'
+				  AND subscriber_id = ?
+				  AND COALESCE(delivery_target_route, '{}') = '{}'
+				  AND status IN ('pending', 'in_progress', 'failed')
 		`, sanitizedSystemNodeRetryCount(retryCount), reasonCode, errText, now, eventID, nodeID)
 		if err != nil {
 			return fmt.Errorf("dead-letter sqlite system node delivery: %w", err)
@@ -760,6 +766,7 @@ func sqliteSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nodeI
 			WHERE event_id = ?
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = ?
+			  AND COALESCE(delivery_target_route, '{}') = '{}'
 			  AND (
 				status IN ('pending', 'in_progress')
 				OR (status = 'failed' AND COALESCE(retry_count, 0) < ?)
@@ -810,6 +817,7 @@ func sqliteSystemNodeDeliveryRowExistsTx(ctx context.Context, tx *sql.Tx, nodeID
 			WHERE event_id = ?
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = ?
+			  AND COALESCE(delivery_target_route, '{}') = '{}'
 		)
 	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID)).Scan(&ok)
 	return ok, err
