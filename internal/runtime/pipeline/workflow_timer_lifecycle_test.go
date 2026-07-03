@@ -302,7 +302,7 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 
 	seedPipelineNodeDeliveryAuthority(t, db, evt, "test-node")
 
-	_, handled := pc.interceptPolicy("timer.scheduled", evt)
+	_, handled := pc.interceptPolicy(context.Background(), "timer.scheduled", evt)
 	if !handled {
 		t.Fatal("expected timer.scheduled to be interceptable")
 	}
@@ -1127,7 +1127,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionAlreadyTargetedT
 	}); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled := pc.workflowNodeInterceptPolicy(context.Background(), "child/grandchild/micro.done", eventtest.RootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",

@@ -482,25 +482,42 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 }
 
 func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (bool, []events.Event, error) {
-	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	genericCtx := ctx
+	if hasTargetedNodeDeliveryRoute(deliveryRoutes) {
+		genericCtx = runtimepipeline.WithSuppressedUntargetedWorkflowNodeInterception(ctx)
+	}
+	passthrough, deferred, err := eb.runInterceptors(genericCtx, evt)
 	if err != nil {
 		return passthrough, nil, err
 	}
-	targetedDeferred, err := eb.runTargetedInternalDeliveryInterceptors(ctx, evt, deliveryRoutes)
+	targetedPassthrough, targetedDeferred, err := eb.runTargetedInternalDeliveryInterceptors(ctx, evt, deliveryRoutes)
 	if err != nil {
 		return passthrough, nil, err
 	}
 	if len(targetedDeferred) > 0 {
 		deferred = append(deferred, targetedDeferred...)
 	}
-	return passthrough, deferred, nil
+	return passthrough && targetedPassthrough, deferred, nil
 }
 
-func (eb *EventBus) runTargetedInternalDeliveryInterceptors(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) ([]events.Event, error) {
+func hasTargetedNodeDeliveryRoute(deliveryRoutes []events.DeliveryRoute) bool {
+	for _, route := range events.NormalizeDeliveryRoutes(deliveryRoutes) {
+		if strings.TrimSpace(route.SubscriberType) != "node" {
+			continue
+		}
+		if !route.Target.Normalized().Empty() {
+			return true
+		}
+	}
+	return false
+}
+
+func (eb *EventBus) runTargetedInternalDeliveryInterceptors(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (bool, []events.Event, error) {
 	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	if len(deliveryRoutes) == 0 {
-		return nil, nil
+		return true, nil, nil
 	}
+	passthrough := true
 	deferred := make([]events.Event, 0)
 	seen := map[string]struct{}{}
 	for _, route := range deliveryRoutes {
@@ -532,13 +549,16 @@ func (eb *EventBus) runTargetedInternalDeliveryInterceptors(ctx context.Context,
 			events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), target),
 			evt.CreatedAt(),
 		)
-		_, out, err := eb.runInterceptors(ctx, projected)
+		pass, out, err := eb.runInterceptors(ctx, projected)
 		if err != nil {
-			return nil, err
+			return passthrough, nil, err
+		}
+		if !pass {
+			passthrough = false
 		}
 		deferred = append(deferred, out...)
 	}
-	return deferred, nil
+	return passthrough, deferred, nil
 }
 
 func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {

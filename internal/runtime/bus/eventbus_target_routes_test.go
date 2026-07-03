@@ -131,6 +131,18 @@ func (i materializedRoutePersistedBeforeInterceptor) Intercept(ctx context.Conte
 	return true, nil, nil
 }
 
+type targetRouteConsumingInterceptor struct {
+	targetCalls int
+}
+
+func (i *targetRouteConsumingInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, error) {
+	if evt.TargetRoute().Empty() {
+		return true, nil, nil
+	}
+	i.targetCalls++
+	return false, nil, nil
+}
+
 func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
@@ -181,6 +193,75 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	}
 	if !guardSawMaterializedRoute {
 		t.Fatal("recipient plan guard did not see materialized route")
+	}
+}
+
+func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *testing.T) {
+	const eventType = "worker/work.started"
+	eventID := uuid.NewString()
+	target := events.RouteIdentity{
+		FlowID:       "worker",
+		FlowInstance: "worker/inst-1",
+		EntityID:     "ent-1",
+	}
+	targetRoute := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "target-node",
+		Target:         target,
+	}
+	rt := newRouteTable(nil)
+	rt.eventPath[eventType] = struct{}{}
+	rt.routes[eventType] = []Subscriber{{
+		ID:          "target-node",
+		Type:        "node",
+		Path:        "worker",
+		RouteSource: "subscription",
+	}}
+	interceptor := &targetRouteConsumingInterceptor{}
+	eb, err := NewEventBusWithOptions(newTargetRouteMemoryStore(), EventBusOptions{
+		RouteTable: rt,
+		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]events.DeliveryRoute, error) {
+			return []events.DeliveryRoute{targetRoute}, nil
+		},
+		Interceptors: []EventInterceptor{interceptor},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	live := eb.Subscribe("target-node", events.EventType(eventType))
+	defer eb.Unsubscribe("target-node")
+	evt := eventtest.RootIngress(
+		eventID,
+		events.EventType(eventType),
+		"",
+		"",
+		[]byte(`{}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Now().UTC(),
+	)
+	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if len(plan.Recipients) != 1 || plan.Recipients[0] != "target-node" {
+		t.Fatalf("recipients = %#v, want target-node live recipient", plan.Recipients)
+	}
+	if !deliveryRoutesContain(plan.DeliveryRoutes, targetRoute) {
+		t.Fatalf("delivery routes = %#v, want target route %#v", plan.DeliveryRoutes, targetRoute)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if interceptor.targetCalls != 1 {
+		t.Fatalf("target interceptor calls = %d, want 1", interceptor.targetCalls)
+	}
+	select {
+	case got := <-live:
+		t.Fatalf("target-consuming node event leaked to live recipient: %#v", got)
+	default:
 	}
 }
 

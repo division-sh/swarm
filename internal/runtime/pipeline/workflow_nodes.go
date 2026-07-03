@@ -829,8 +829,11 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 	return out
 }
 
-func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(eventType string, evt events.Event) (bool, bool) {
+func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, eventType string, evt events.Event) (bool, bool) {
 	eventType = strings.TrimSpace(eventType)
+	if suppressUntargetedWorkflowNodeInterception(ctx) && evt.TargetRoute().Empty() {
+		return false, false
+	}
 	source := pc.SemanticSource()
 	for _, node := range pc.WorkflowNodes() {
 		if !pc.workflowNodeMatchesDeliveryTarget(strings.TrimSpace(node.ID), evt.TargetRoute()) {
