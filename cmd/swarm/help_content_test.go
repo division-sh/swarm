@@ -146,3 +146,73 @@ func TestRootHelpHidesIdempotencyAndRetiredCommands(t *testing.T) {
 		}
 	}
 }
+
+// Example blocks are runnable invocations, not prose: every line must start
+// with "swarm", resolve to a real command path, and reference only flags that
+// command defines. Trailing "# comment" annotations are allowed.
+func TestExamplesReferenceRealCommandsAndFlags(t *testing.T) {
+	var out, errOut bytes.Buffer
+	root := newRootCommand(context.Background(), t.TempDir(), &out, &errOut)
+	walkCommands(root, func(cmd *cobra.Command) {
+		if strings.TrimSpace(cmd.Example) == "" {
+			return
+		}
+		for _, rawLine := range strings.Split(cmd.Example, "\n") {
+			line := rawLine
+			if idx := strings.Index(line, "  #"); idx >= 0 {
+				line = line[:idx]
+			}
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			if fields[0] != "swarm" {
+				t.Errorf("%s: example line does not start with \"swarm\": %q", cmd.CommandPath(), rawLine)
+				continue
+			}
+			target := root
+			args := fields[1:]
+			for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+				next := findSubcommand(target, args[0])
+				if next == nil {
+					break // positional argument, not a subcommand
+				}
+				target = next
+				args = args[1:]
+			}
+			if target == root && len(fields) > 1 {
+				t.Errorf("%s: example references unknown command %q: %q", cmd.CommandPath(), fields[1], rawLine)
+				continue
+			}
+			flags := target.LocalFlags()
+			inherited := target.InheritedFlags()
+			for _, tok := range args {
+				switch {
+				case strings.Contains(tok, "<"):
+					// placeholder value
+				case strings.HasPrefix(tok, "--"):
+					name := strings.TrimPrefix(tok, "--")
+					if idx := strings.Index(name, "="); idx >= 0 {
+						name = name[:idx]
+					}
+					if flags.Lookup(name) == nil && inherited.Lookup(name) == nil {
+						t.Errorf("%s: example references flag --%s that %s does not define: %q", cmd.CommandPath(), name, target.CommandPath(), rawLine)
+					}
+				case strings.HasPrefix(tok, "-") && len(tok) == 2:
+					if flags.ShorthandLookup(tok[1:]) == nil && inherited.ShorthandLookup(tok[1:]) == nil {
+						t.Errorf("%s: example references shorthand %s that %s does not define: %q", cmd.CommandPath(), tok, target.CommandPath(), rawLine)
+					}
+				}
+			}
+		}
+	})
+}
+
+func findSubcommand(cmd *cobra.Command, name string) *cobra.Command {
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == name || sub.HasAlias(name) {
+			return sub
+		}
+	}
+	return nil
+}
