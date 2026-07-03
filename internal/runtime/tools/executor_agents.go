@@ -229,7 +229,7 @@ func (e *Executor) execConfigureRouting(ctx context.Context, actor models.AgentC
 	return nil, errors.New("configure_routing is not yet implemented")
 }
 
-func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentHire(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -256,6 +256,9 @@ func (e *Executor) execAgentHire(actor models.AgentConfig, input any) (any, erro
 		return nil, err
 	}
 	if err := authorizeDelegableAgentConfig(actor, models.AgentConfig{}, in.Config, e.authority, e.emitRegistry); err != nil {
+		return nil, err
+	}
+	if err := e.ValidateNativeToolAdmission(ctx, in.Config); err != nil {
 		return nil, err
 	}
 	if err := manager.SpawnAgentForEntity(in.Config.EffectiveEntityID(), in.Config); err != nil {
@@ -297,7 +300,7 @@ func (e *Executor) execAgentFire(actor models.AgentConfig, input any) (any, erro
 	return map[string]any{"status": "fired", "agent_id": in.AgentID}, nil
 }
 
-func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAgentReconfigure(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	manager := e.getManager()
 	if manager == nil {
 		return nil, errors.New("agent manager is not configured")
@@ -322,6 +325,9 @@ func (e *Executor) execAgentReconfigure(actor models.AgentConfig, input any) (an
 	}
 	updatedCfg := mergeDelegablePrivilegeConfig(targetCfg, in.Config)
 	if err := authorizeDelegableAgentConfig(actor, targetCfg, updatedCfg, e.authority, e.emitRegistry); err != nil {
+		return nil, err
+	}
+	if err := e.ValidateNativeToolAdmission(ctx, updatedCfg); err != nil {
 		return nil, err
 	}
 	if err := manager.ReconfigureAgent(in.AgentID, in.Config); err != nil {

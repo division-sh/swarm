@@ -215,7 +215,10 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 		t.Fatalf("write workspace input: %v", err)
 	}
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkspaceResolver: manager})
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		ModelRuntime:      nativeCapabilityRuntimeStub{},
+		WorkspaceResolver: manager,
+	})
 	exec.execWorkspaceFn = func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
 		t.Fatalf("host file tools must use direct platform file operations, not workspace command execution")
 		return nil, nil, 0, nil
@@ -312,7 +315,10 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkspaceResolver: manager})
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		ModelRuntime:      nativeCapabilityRuntimeStub{},
+		WorkspaceResolver: manager,
+	})
 	actorCtx := models.WithActor(ctx, actor)
 
 	out, err := exec.Execute(actorCtx, "bash", map[string]any{
@@ -403,6 +409,7 @@ func TestNativeFileToolsKeepDockerWorkspaceCommandExecution(t *testing.T) {
 
 func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T) {
 	exec := &Executor{
+		modelRuntime: nativeCapabilityRuntimeStub{},
 		workspaces: relayWorkspaceResolverStub{
 			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
 		},
@@ -410,14 +417,13 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 	actor := models.AgentConfig{
 		ID: "host-agent",
 		NativeTools: models.NativeToolConfig{
-			Bash:      true,
-			FileIO:    true,
-			WebSearch: true,
+			Bash:   true,
+			FileIO: true,
 		},
 	}
 
 	defs := exec.ToolDefinitionsForActorInContext(context.Background(), actor)
-	for _, allowed := range []string{"bash", "read_file", "write_file", "web_search"} {
+	for _, allowed := range []string{"bash", "read_file", "write_file"} {
 		if !containsToolDefinition(defs, allowed) {
 			t.Fatalf("context definitions missing %q: %#v", allowed, defs)
 		}
@@ -431,8 +437,63 @@ func TestNativeFallbackToolSurfaceConsumesWorkspaceExecutionTarget(t *testing.T)
 		}
 	}
 	web := caps.ByName["web_search"]
-	if !web.Visible || !web.Callable {
-		t.Fatalf("web_search capability = %#v, want visible/callable", web)
+	if web.Visible || web.Callable {
+		t.Fatalf("web_search capability = %#v, want hidden because native_tools.web_search is not enabled", web)
+	}
+}
+
+func TestNativeFallbackToolSurfaceRejectsStrictProviderNativeRuntime(t *testing.T) {
+	workspaceDir := t.TempDir()
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		ModelRuntime: nativeCapabilityRuntimeStub{
+			caps: llm.NativeToolCapabilities{
+				Bash:      true,
+				FileIO:    true,
+				WebSearch: true,
+			},
+			strict: true,
+		},
+		WorkspaceResolver: relayWorkspaceResolverStub{
+			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: workspaceDir},
+		},
+	})
+	actor := models.AgentConfig{
+		ID: "strict-provider-agent",
+		NativeTools: models.NativeToolConfig{
+			Bash:      true,
+			FileIO:    true,
+			WebSearch: true,
+		},
+	}
+
+	defs := exec.ToolDefinitionsForActorInContext(context.Background(), actor)
+	for _, denied := range []string{"bash", "read_file", "write_file", "web_search"} {
+		if containsToolDefinition(defs, denied) {
+			t.Fatalf("strict provider-native runtime exposed platform fallback definition %q: %#v", denied, defs)
+		}
+		if _, ok, err := exec.resolveRegisteredTool(actor, denied); err != nil || ok {
+			t.Fatalf("resolveRegisteredTool(%s) = ok:%v err:%v, want denied without error", denied, ok, err)
+		}
+	}
+
+	caps := exec.ToolCapabilitiesForActorInContext(context.Background(), actor, []string{"bash", "read_file", "write_file", "web_search"}, nil)
+	for _, denied := range []string{"bash", "read_file", "write_file", "web_search"} {
+		cap := caps.ByName[denied]
+		if cap.Visible || cap.Callable {
+			t.Fatalf("strict provider-native capability %s = %#v, want hidden/non-callable fallback surface", denied, cap)
+		}
+		if !strings.Contains(cap.DenialReason, nativeToolProviderOnlyFallbackDeny) {
+			t.Fatalf("strict provider-native capability %s denial = %q, want provider-native-only denial", denied, cap.DenialReason)
+		}
+	}
+
+	exec.execWorkspaceFn = func(context.Context, workspace.ExecutionTarget, time.Duration, string, ...string) ([]byte, []byte, int, error) {
+		t.Fatal("strict provider-native runtime must not execute platform fallback workspace tools")
+		return nil, nil, 0, nil
+	}
+	_, err := exec.Execute(models.WithActor(context.Background(), actor), "read_file", map[string]any{"path": "/workspace/missing.txt"})
+	if err == nil || !strings.Contains(err.Error(), "unsupported runtime tool") {
+		t.Fatalf("Execute(read_file) error = %v, want fallback execution denial", err)
 	}
 }
 

@@ -9,120 +9,32 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime) ([]error, error) {
+func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime, workspaces workspace.Resolver) ([]error, error) {
 	if source == nil {
 		return nil, nil
 	}
-	enabled := enabledNativeCapabilities(source)
-	if len(enabled) == 0 {
-		return nil, nil
-	}
-	if !runtimeEnforcesProviderNativeTools(runtime) {
-		return validateFallbackNativeToolBootConfig(ctx, source, store, runtime)
-	}
-	caps := llm.NativeToolCapabilitiesForRuntime(runtime)
-	unsupported := make([]string, 0, len(enabled))
-	for _, capability := range enabled {
-		if nativeToolCapabilitySupported(caps, capability) {
+	var failures []string
+	for _, agentID := range sortedAgentIDs(source.AgentEntries()) {
+		entry := source.AgentEntries()[agentID]
+		actor := nativeToolAgentConfig(agentID, entry)
+		if !actor.NativeTools.Any() {
 			continue
 		}
-		unsupported = append(unsupported, capability)
-	}
-	if len(unsupported) == 0 {
-		return nil, nil
-	}
-	sort.Strings(unsupported)
-	parts := make([]string, 0, len(unsupported))
-	for _, capability := range unsupported {
-		parts = append(parts, "native_tools."+capability)
-	}
-	return nil, fmt.Errorf("%s enabled but runtime does not support provider-native capability", strings.Join(parts, ", "))
-}
-
-func runtimeEnforcesProviderNativeTools(runtime llm.Runtime) bool {
-	return llm.RuntimeEnforcesProviderNativeTools(runtime)
-}
-
-func validateFallbackNativeToolBootConfig(ctx context.Context, source semanticview.Source, store runtimecredentials.Store, runtime llm.Runtime) ([]error, error) {
-	if !nativeToolCapabilityEnabled(source, "web_search") {
-		return nil, nil
-	}
-	caps := llm.NativeToolCapabilitiesForRuntime(runtime)
-	if caps.WebSearch {
-		return nil, nil
-	}
-	if _, ok := semanticview.PolicyValueForFlow(source, "", "web_search_provider"); !ok {
-		return []error{fmt.Errorf("native_tools.web_search is enabled but policy.web_search_provider is not configured")}, nil
-	}
-	cfg, err := resolveWebSearchProviderConfigFromSource(source)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(cfg.CredentialsKey) == "" || store == nil {
-		return nil, nil
-	}
-	_, ok, err := store.Get(ctx, cfg.CredentialsKey)
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		return nil, nil
-	}
-	return []error{fmt.Errorf("web_search provider credential %q is not present in the credential store", cfg.CredentialsKey)}, nil
-}
-
-func enabledNativeCapabilities(source semanticview.Source) []string {
-	if source == nil {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	for _, agent := range source.AgentEntries() {
-		for capability, raw := range agent.NativeTools {
-			capability = strings.TrimSpace(capability)
-			flag, isBool := raw.(bool)
-			if capability == "" || !isBool || !flag {
-				continue
-			}
-			seen[capability] = struct{}{}
+		if err := ValidateNativeToolAgentAdmission(ctx, actor, NativeToolAdmissionOptions{
+			Runtime:     runtime,
+			Credentials: store,
+			Source:      source,
+			Workspaces:  workspaces,
+		}); err != nil {
+			failures = append(failures, err.Error())
 		}
 	}
-	out := make([]string, 0, len(seen))
-	for capability := range seen {
-		out = append(out, capability)
+	if len(failures) == 0 {
+		return nil, nil
 	}
-	sort.Strings(out)
-	return out
-}
-
-func nativeToolCapabilityEnabled(source semanticview.Source, capability string) bool {
-	if source == nil {
-		return false
-	}
-	capability = strings.TrimSpace(capability)
-	if capability == "" {
-		return false
-	}
-	for _, agent := range source.AgentEntries() {
-		raw, ok := agent.NativeTools[capability]
-		flag, isBool := raw.(bool)
-		if ok && isBool && flag {
-			return true
-		}
-	}
-	return false
-}
-
-func nativeToolCapabilitySupported(caps llm.NativeToolCapabilities, capability string) bool {
-	switch strings.TrimSpace(capability) {
-	case "bash":
-		return caps.Bash
-	case "web_search":
-		return caps.WebSearch
-	case "file_io":
-		return caps.FileIO
-	default:
-		return false
-	}
+	sort.Strings(failures)
+	return nil, fmt.Errorf("native tool admission failed: %s", strings.Join(failures, "; "))
 }

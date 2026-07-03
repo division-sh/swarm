@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func TestNormalizeNativeToolNameCanonicalAliases(t *testing.T) {
@@ -140,7 +141,12 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 func TestToolDefinitionsForActor_IncludesEnabledNativeTools(t *testing.T) {
 	t.Parallel()
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{})
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		ModelRuntime: nativeCapabilityRuntimeStub{},
+		WorkspaceResolver: relayWorkspaceResolverStub{
+			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
+		},
+	})
 	defs := exec.ToolDefinitionsForActor(models.AgentConfig{
 		ID:          "analysis-agent",
 		NativeTools: models.NativeToolConfig{FileIO: true},

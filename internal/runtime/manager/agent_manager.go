@@ -34,6 +34,7 @@ type AgentManager struct {
 	resetRuntimeOwnedState          func()
 	runtimeShutdownAdmissionClosed  func() bool
 	runtimeIngressSafetyPause       func(context.Context, string) error
+	nativeToolAdmissionValidator    func(context.Context, models.AgentConfig) error
 	runtimeMode                     string
 	llmBackend                      string
 	modelAliases                    llmselection.ModelAliases
@@ -123,6 +124,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		resetRuntimeOwnedState:          opts.ResetRuntimeOwnedState,
 		runtimeShutdownAdmissionClosed:  opts.RuntimeShutdownAdmissionClosed,
 		runtimeIngressSafetyPause:       opts.RuntimeIngressSafetyPause,
+		nativeToolAdmissionValidator:    opts.NativeToolAdmissionValidator,
 		throttleSuppressPrefixes:        throttleSuppressPrefixes,
 		llmBackend:                      normalizeManagerLLMBackend(opts.LLMBackend),
 		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
@@ -267,6 +269,9 @@ func (am *AgentManager) spawnAgentInternal(ctx context.Context, rec PersistedAge
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		return err
 	}
+	if err := am.validateNativeToolAdmission(ctx, rec.Config); err != nil {
+		return err
+	}
 	if _, err := sessions.ValidateAgentSessionScopeConfig(rec.Config); err != nil {
 		return fmt.Errorf("invalid agent session scope: %w", err)
 	}
@@ -341,6 +346,19 @@ func (am *AgentManager) resolveAgentModel(cfg *models.AgentConfig) error {
 	return nil
 }
 
+func (am *AgentManager) validateNativeToolAdmission(ctx context.Context, cfg models.AgentConfig) error {
+	if am == nil || am.nativeToolAdmissionValidator == nil || !cfg.NativeTools.Any() {
+		return nil
+	}
+	if ctx == nil {
+		ctx = am.runtimeContext()
+	}
+	if err := am.nativeToolAdmissionValidator(ctx, cfg); err != nil {
+		return fmt.Errorf("native tool admission failed: %w", err)
+	}
+	return nil
+}
+
 func (am *AgentManager) buildAgent(cfg models.AgentConfig) (Agent, error) {
 	var err error
 	cfg, err = am.applyContractPrompt(cfg)
@@ -398,6 +416,12 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 	}
 	if updated.ID != agentID {
 		return fmt.Errorf("agent id mismatch: target=%s config.id=%s", agentID, updated.ID)
+	}
+	if err := am.resolveAgentModel(&updated); err != nil {
+		return err
+	}
+	if err := am.validateNativeToolAdmission(am.runtimeContext(), updated); err != nil {
+		return err
 	}
 	if _, err := sessions.ValidateAgentSessionScopeConfig(updated); err != nil {
 		return fmt.Errorf("invalid agent session scope: %w", err)

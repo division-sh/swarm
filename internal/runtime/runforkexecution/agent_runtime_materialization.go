@@ -249,6 +249,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if credentials == nil {
 		credentials = runtimecredentials.NewEnvStore()
 	}
+	modelRuntime := options.LLMRuntime
 	var managerRef runtimetools.Manager
 	exec := runtimetools.NewExecutorWithOptions(bus, nil, runtimetools.ExecutorOptions{
 		Config:            options.Config,
@@ -259,6 +260,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		HumanTaskStore:    options.HumanTaskStore,
 		WorkflowSource:    source,
 		WorkspaceResolver: options.Workspace,
+		ModelRuntime:      modelRuntime,
 		AuthorityProvider: authority,
 		EmitRegistry:      emitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
@@ -274,7 +276,6 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("start selected-fork tool gateway: %w", err)
 	}
-	modelRuntime := options.LLMRuntime
 	if modelRuntime == nil {
 		modelRuntime, err = runtimellm.RuntimeFactory{
 			Cfg:           options.Config,
@@ -293,6 +294,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			return selectedContractAgentRuntimeFactory{}, fmt.Errorf("build selected-fork agent runtime: %w", err)
 		}
 	}
+	exec.SetModelRuntime(modelRuntime)
 	factory := runtimeagents.NewLLMAgentFactory(modelRuntime, exec, exec.ToolDefinitions(), runtimeagents.LLMAgentOptions{
 		PromptResolver:    promptResolver,
 		AuthorityProvider: authority,

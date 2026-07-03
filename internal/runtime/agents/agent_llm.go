@@ -137,7 +137,6 @@ func composeConversationTools(cfg models.AgentConfig, modelRuntime llm.Runtime, 
 		roleScopedToolSet = catalog.RoleScopedEntityToolNamesForActor(cfg)
 	}
 	tools = mergeTools(filterTools(tools, allowedToolSet, constrained, roleScopedToolSet), emitToolDefinitions(cfg, authority, emitRegistry))
-	tools = mergeTools(tools, nativeFallbackToolDefinitions(cfg, modelRuntime))
 	return tools
 }
 
@@ -618,74 +617,6 @@ func extractAllowedToolSet(cfg models.AgentConfig) (map[string]struct{}, bool) {
 		allowed[name] = struct{}{}
 	}
 	return allowed, found
-}
-
-func extractNativeToolConfig(cfg models.AgentConfig) map[string]bool {
-	if !cfg.NativeTools.Any() {
-		return nil
-	}
-	return map[string]bool{
-		"bash":       cfg.NativeTools.Bash,
-		"web_search": cfg.NativeTools.WebSearch,
-		"file_io":    cfg.NativeTools.FileIO,
-	}
-}
-
-func supportedNativeToolCapabilities(runtime llm.Runtime) llm.NativeToolCapabilities {
-	return llm.NativeToolCapabilitiesForRuntime(runtime)
-}
-
-func nativeFallbackToolDefinitions(cfg models.AgentConfig, modelRuntime llm.Runtime) []llm.ToolDefinition {
-	native := extractNativeToolConfig(cfg)
-	if len(native) == 0 {
-		return nil
-	}
-	supported := supportedNativeToolCapabilities(modelRuntime)
-	defs := make([]llm.ToolDefinition, 0, 4)
-	if native["bash"] && !supported.Bash {
-		defs = append(defs, llm.ToolDefinition{
-			Name:        "bash",
-			Description: "Execute a shell command locally in the agent workspace and return stdout, stderr, exit code, and duration.",
-			Usage:       runtimetools.NativeFallbackToolUsage("bash"),
-			Schema: runtimetools.ObjectSchema(map[string]any{
-				"command":         map[string]any{"type": "string"},
-				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 300},
-			}, "command"),
-		})
-	}
-	if native["web_search"] && !supported.WebSearch {
-		defs = append(defs, llm.ToolDefinition{
-			Name:        "web_search",
-			Description: "Search the web and return normalized results with title, url, and snippet.",
-			Usage:       runtimetools.NativeFallbackToolUsage("web_search"),
-			Schema: runtimetools.ObjectSchema(map[string]any{
-				"query":       map[string]any{"type": "string"},
-				"max_results": map[string]any{"type": "integer", "minimum": 1, "maximum": 20},
-			}, "query"),
-		})
-	}
-	if native["file_io"] && !supported.FileIO {
-		defs = append(defs,
-			llm.ToolDefinition{
-				Name:        "read_file",
-				Description: "Read a file from the agent workspace or mounted read-only data/contracts paths.",
-				Usage:       runtimetools.NativeFallbackToolUsage("read_file"),
-				Schema: runtimetools.ObjectSchema(map[string]any{
-					"path": map[string]any{"type": "string"},
-				}, "path"),
-			},
-			llm.ToolDefinition{
-				Name:        "write_file",
-				Description: "Write a file within the agent workspace.",
-				Usage:       runtimetools.NativeFallbackToolUsage("write_file"),
-				Schema: runtimetools.ObjectSchema(map[string]any{
-					"path":    map[string]any{"type": "string"},
-					"content": map[string]any{"type": "string"},
-				}, "path", "content"),
-			},
-		)
-	}
-	return defs
 }
 
 func extractEmitEvents(cfg models.AgentConfig) []string {
