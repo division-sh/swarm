@@ -39,6 +39,25 @@ func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.
 }
 
 type pipelineFlowScopeKey struct{}
+type suppressUntargetedWorkflowNodeInterceptionKey struct{}
+
+// WithSuppressedUntargetedWorkflowNodeInterception tells PipelineCoordinator that
+// EventBus has authoritative target-specific node delivery routes for this
+// publish, so the untargeted workflow-node interceptor pass is not authoritative.
+func WithSuppressedUntargetedWorkflowNodeInterception(ctx context.Context) context.Context {
+	if ctx == nil {
+		return nil
+	}
+	return context.WithValue(ctx, suppressUntargetedWorkflowNodeInterceptionKey{}, true)
+}
+
+func suppressUntargetedWorkflowNodeInterception(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(suppressUntargetedWorkflowNodeInterceptionKey{}).(bool)
+	return v
+}
 
 func withPipelineFlowScope(ctx context.Context, flowID string) context.Context {
 	if ctx == nil {

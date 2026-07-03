@@ -201,7 +201,7 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	if eventType == "" {
 		return true, nil, nil
 	}
-	consume, handled := pc.interceptPolicy(eventType, evt)
+	consume, handled := pc.interceptPolicy(ctx, eventType, evt)
 	if !handled {
 		return true, nil, nil
 	}
@@ -220,11 +220,11 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	return !consume, emitted, nil
 }
 
-func (pc *PipelineCoordinator) interceptPolicy(eventType string, evt events.Event) (consume bool, handled bool) {
+func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType string, evt events.Event) (consume bool, handled bool) {
 	if strings.TrimSpace(eventType) == "" {
 		return false, false
 	}
-	return pc.workflowNodeInterceptPolicy(eventType, evt)
+	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
 }
 
 func (pc *PipelineCoordinator) subscribe() <-chan events.Event {

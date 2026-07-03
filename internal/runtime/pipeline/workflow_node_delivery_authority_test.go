@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -39,6 +40,48 @@ func TestPipelineCoordinatorInterceptSkipsNodeWithoutPersistedDeliveryAuthority(
 	if len(logs) != 1 || logs[0].Action != "delivery_authority_missing" {
 		t.Fatalf("runtime logs = %#v, want one delivery_authority_missing entry", logs)
 	}
+}
+
+func TestPipelineCoordinatorInterceptSuppressesUntargetedAuthorityWhenTargetRouteOwnsExecution(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pc, bus := newDeliveryAuthorityCoordinator(t, db)
+	runCtx := testPipelineCoordinatorRunContext(t, pc)
+	evt := seedDeliveryAuthorityEvent(t, db, runCtx)
+	seedDeliveryAuthorityWorkflowInstance(t, pc, runCtx, evt.EntityID())
+
+	genericPostCommit := make([]func(), 0, 1)
+	genericCtx := WithPipelinePostCommitActions(WithSuppressedUntargetedWorkflowNodeInterception(ctx), &genericPostCommit)
+	passthrough, _, err := pc.Intercept(genericCtx, evt)
+	if err != nil {
+		t.Fatalf("generic Intercept: %v", err)
+	}
+	if !passthrough {
+		t.Fatal("generic Intercept passthrough = false, want true when target route owns execution")
+	}
+	if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
+		t.Fatalf("generic runtime logs = %#v, want no delivery_authority_missing when untargeted authority is suppressed", bus.runtimeLogEntries())
+	}
+	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), "node-a", 0)
+
+	target := events.RouteIdentity{
+		EntityID: evt.EntityID(),
+	}
+	seedDeliveryAuthorityNodeDeliveryForTarget(t, db, evt.ID(), "node-a", target)
+	targetEvt := eventtest.TargetRouted(evt, target)
+	targetPostCommit := make([]func(), 0, 1)
+	targetCtx := WithPipelinePostCommitActions(WithSuppressedUntargetedWorkflowNodeInterception(ctx), &targetPostCommit)
+	passthrough, _, err = pc.Intercept(targetCtx, targetEvt)
+	if err != nil {
+		t.Fatalf("target Intercept: %v", err)
+	}
+	if passthrough {
+		t.Fatal("target Intercept passthrough = true, want false for consumed target-routed node event")
+	}
+	if deliveryAuthorityLogCount(bus.runtimeLogEntries()) != 0 {
+		t.Fatalf("target runtime logs = %#v, want no false delivery_authority_missing log", bus.runtimeLogEntries())
+	}
+	assertDeliveryAuthorityReceiptCount(t, db, evt.ID(), "node-a", 1)
 }
 
 func TestPipelineCoordinatorInterceptReplayScopeMarkerDoesNotAuthorizeConcreteNode(t *testing.T) {
@@ -263,6 +306,20 @@ func seedDeliveryAuthorityNodeDelivery(t *testing.T, db *sql.DB, eventID, nodeID
 	seedDeliveryAuthorityNodeDeliveryStatus(t, db, eventID, nodeID, "pending", 0)
 }
 
+func seedDeliveryAuthorityNodeDeliveryForTarget(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) {
+	t.Helper()
+	raw, err := json.Marshal(target.Normalized())
+	if err != nil {
+		t.Fatalf("marshal delivery authority target: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, delivery_target_route, status, retry_count, created_at)
+		VALUES ($1::uuid, $2::uuid, 'node', $3, $4::jsonb, 'pending', 0, now())
+	`, testPipelineRunID, eventID, nodeID, string(raw)); err != nil {
+		t.Fatalf("seed target delivery authority node delivery: %v", err)
+	}
+}
+
 func seedDeliveryAuthorityNodeDeliveryStatus(t *testing.T, db *sql.DB, eventID, nodeID, status string, retryCount int) {
 	t.Helper()
 	if _, err := db.ExecContext(context.Background(), `
@@ -305,4 +362,14 @@ func assertDeliveryAuthorityDeliveryCount(t *testing.T, db *sql.DB, eventID, nod
 	if got != want {
 		t.Fatalf("delivery authority node deliveries = %d, want %d", got, want)
 	}
+}
+
+func deliveryAuthorityLogCount(logs []RuntimeLogEntry) int {
+	count := 0
+	for _, log := range logs {
+		if log.Action == "delivery_authority_missing" {
+			count++
+		}
+	}
+	return count
 }

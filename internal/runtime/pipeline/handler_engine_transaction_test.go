@@ -2265,7 +2265,7 @@ func TestExecuteNodeHandlerPlanResult_NestedDescendantCompletionDoesNotBackPropa
 	}); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
-	if consume, handled := pc.workflowNodeInterceptPolicy("child/grandchild/micro.done", eventtest.RootIngress(
+	if consume, handled := pc.workflowNodeInterceptPolicy(context.Background(), "child/grandchild/micro.done", eventtest.RootIngress(
 		"",
 		events.EventType("child/grandchild/micro.done"),
 		"",

@@ -61,6 +61,12 @@ func RouteProbe(eventType events.EventType) events.Event {
 	return events.NewRouteProbeEvent(eventType)
 }
 
+// TargetRouted returns a fixture event projected onto a concrete delivery
+// target route.
+func TargetRouted(evt events.Event, target events.RouteIdentity) events.Event {
+	return evt.WithTargetRoute(target)
+}
+
 // MalformedChildWithoutLineage builds the explicit negative fixture for
 // admission tests that assert child events without lineage are rejected.
 func MalformedChildWithoutLineage(eventType events.EventType, sourceAgent string, payload json.RawMessage) events.Event {
