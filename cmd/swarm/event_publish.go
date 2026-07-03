@@ -72,7 +72,7 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "publish <event-name>",
 		Short:   "Publish an event onto the bus.",
-		Example: `  swarm event publish account.scan_requested --payload payload.json`,
+		Example: `  swarm event publish account.scan_requested --payload-json '{"handle": "@acme"}'`,
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			publishOpts.payloadJSONSet = cmd.Flags().Changed("payload-json")
