@@ -67,12 +67,6 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		}
 		return 2
 	}
-	if err := loadRepoDotEnv(repo); err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "describe failed: load .env: %v\n", err)
-		}
-		return 1
-	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,

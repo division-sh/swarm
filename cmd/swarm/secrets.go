@@ -89,9 +89,6 @@ func newSecretsSetCommand(ctx context.Context, repo string) *cobra.Command {
 			return fmt.Errorf("secret key is required")
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := loadRepoDotEnv(assetCommandRepoRoot(repo)); err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("load .env: %w", err))
-			}
 			value, err := readSecretValue(cmd.InOrStdin(), cmd.ErrOrStderr(), stdin)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -132,9 +129,6 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			if opts.source != "" && opts.source != runtimecredentials.SourceEnv && opts.source != runtimecredentials.SourceFile {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--source must be env or file"))
 			}
-			if err := loadRepoDotEnv(assetCommandRepoRoot(repo)); err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("load .env: %w", err))
-			}
 			store, err := buildCredentialStore()
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
@@ -172,9 +166,6 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 		Short: "Validate required Swarm secrets are configured.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := loadRepoDotEnv(assetCommandRepoRoot(repo)); err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("load .env: %w", err))
-			}
 			store, err := buildCredentialStore()
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
@@ -218,9 +209,6 @@ func newSecretsRemoveCommand(ctx context.Context, repo string) *cobra.Command {
 		Short:   "Remove a secret from the local file tier.",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := loadRepoDotEnv(assetCommandRepoRoot(repo)); err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("load .env: %w", err))
-			}
 			store, err := buildCredentialStore()
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))

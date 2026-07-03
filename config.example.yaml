@@ -1,0 +1,13 @@
+# Example Swarm CLI config.
+#
+# Copy this shape to ${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml, or
+# point SWARM_CONFIG at a file with this shape when bootstrap config discovery
+# is required. Keep secrets out of this file.
+
+# api_server: http://127.0.0.1:8081
+# api_token_file: /path/to/swarm-api-token
+# swarm_dir: ~/.swarm
+# contracts_path: ./contracts
+# platform_spec_path: ./platform-spec.yaml
+# serve_api_listen_addr: 127.0.0.1:8081
+# serve_mcp_listen_addr: 127.0.0.1:8082

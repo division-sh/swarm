@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -744,11 +743,6 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	runtimeInstanceID := uuid.NewString()
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
 	reporter.emit(1, "process_start", "ok", "")
-	if err := loadRepoDotEnv(repo); err != nil {
-		reporter.emit(2, "config_load", "FAILED", err.Error())
-		log.Printf("load .env: %v", err)
-		return 1
-	}
 	apiAuth := apiv1.ResolveAuthTokensFromEnvironment()
 	if err := validateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
@@ -1264,12 +1258,6 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 2
 	}
-	if err := loadRepoDotEnv(repo); err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: load .env: %v\n", err)
-		}
-		return 1
-	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,
@@ -1486,12 +1474,6 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			fmt.Fprintln(out, "fork failed: --activate targets --run <fork_run_id> and does not accept --at")
 		}
 		return 2
-	}
-	if err := loadRepoDotEnv(repo); err != nil {
-		if out != nil {
-			fmt.Fprintf(out, "fork failed: load .env: %v\n", err)
-		}
-		return 1
 	}
 	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
 		RepoRoot:        repo,
@@ -2414,67 +2396,6 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
-}
-
-func loadRepoDotEnv(repo string) error {
-	repo = strings.TrimSpace(repo)
-	if repo == "" {
-		return nil
-	}
-	path := filepath.Join(repo, ".env")
-	return loadDotEnvFile(path)
-}
-
-func loadDotEnvFile(path string) error {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	for lineNo := 1; scanner.Scan(); lineNo++ {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "export ") {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		}
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
-			return fmt.Errorf("%s:%d: expected KEY=VALUE", path, lineNo)
-		}
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return fmt.Errorf("%s:%d: empty env key", path, lineNo)
-		}
-		if _, exists := os.LookupEnv(key); exists {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if unquoted, err := strconv.Unquote(value); err == nil {
-			value = unquoted
-		} else if len(value) >= 2 {
-			if (strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) || (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) {
-				value = value[1 : len(value)-1]
-			}
-		}
-		if err := os.Setenv(key, value); err != nil {
-			return fmt.Errorf("%s:%d: set %s: %w", path, lineNo, key, err)
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	return nil
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {

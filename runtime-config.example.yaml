@@ -1,0 +1,31 @@
+# Example Swarm runtime config for `swarm serve --config` or local
+# `swarm run --config` startup.
+#
+# This file uses the runtime-config shape, which is separate from the shared
+# CLI config shape in config.example.yaml. Keep credentials in `swarm secrets`
+# or explicit token files, not in this file.
+
+runtime:
+  recovery_on_startup: true
+
+store:
+  backend: sqlite
+  sqlite:
+    path: .swarm/stores/dev.db
+
+workspace:
+  backend: docker
+  data_source: .swarm/data
+
+llm:
+  backend: claude_cli
+  session:
+    lock_ttl: 10s
+    rotate_after_turns: 40
+    rotate_on_parse_failures: 3
+  claude_cli:
+    command: claude
+    timeout: 2m
+    output_format: stream-json
+    retries: 1
+    no_session_persistence: false

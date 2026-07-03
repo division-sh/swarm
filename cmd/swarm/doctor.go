@@ -96,9 +96,6 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	if opts.target {
 		return runDoctorTargetCommand(repo, cmd, opts)
 	}
-	if err := loadRepoDotEnv(repo); err != nil {
-		return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("load .env: %w", err))
-	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,
