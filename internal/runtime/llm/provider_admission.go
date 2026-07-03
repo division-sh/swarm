@@ -189,21 +189,19 @@ func concurrencyPolicyForModel(base config.LLMProviderLimitPolicy, resolvedModel
 }
 
 func (c *llmProviderAdmissionController) Admit(ctx context.Context, policy llmProviderAdmissionPolicy) (func(), error) {
-	release := noopProviderAdmissionRelease
+	if policy.Rate.Enabled {
+		if err := c.admitRate(ctx, policy); err != nil {
+			return noopProviderAdmissionRelease, err
+		}
+	}
 	if policy.Concurrency.Enabled {
 		concurrencyRelease, err := c.acquireConcurrency(ctx, policy)
 		if err != nil {
 			return noopProviderAdmissionRelease, err
 		}
-		release = concurrencyRelease
+		return concurrencyRelease, nil
 	}
-	if policy.Rate.Enabled {
-		if err := c.admitRate(ctx, policy); err != nil {
-			release()
-			return noopProviderAdmissionRelease, err
-		}
-	}
-	return release, nil
+	return noopProviderAdmissionRelease, nil
 }
 
 func (c *llmProviderAdmissionController) admitRate(ctx context.Context, policy llmProviderAdmissionPolicy) error {
