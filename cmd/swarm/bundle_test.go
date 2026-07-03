@@ -350,7 +350,6 @@ func TestBundleDeleteHelpDocumentsCanonicalFlags(t *testing.T) {
 		"delete <bundle-hash>",
 		"--force",
 		"--dry-run",
-		"--idempotency-key",
 		"--api-server",
 		"--json",
 	} {
@@ -358,7 +357,7 @@ func TestBundleDeleteHelpDocumentsCanonicalFlags(t *testing.T) {
 			t.Fatalf("help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"archive", "contracts"} {
+	for _, notWant := range []string{"archive", "contracts", "--idempotency-key string"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("help contains out-of-scope term %q:\n%s", notWant, stdout.String())
 		}
@@ -378,7 +377,6 @@ func TestBundleRegisterHelpDocumentsPreparedEnvelopeAndContractsBoundary(t *test
 		"register <registration-envelope-yaml>",
 		"--contracts",
 		"--data-blob",
-		"--idempotency-key",
 		"--api-server",
 		"--json",
 	} {
@@ -386,7 +384,7 @@ func TestBundleRegisterHelpDocumentsPreparedEnvelopeAndContractsBoundary(t *test
 			t.Fatalf("help missing %q:\n%s", want, stdout.String())
 		}
 	}
-	for _, notWant := range []string{"archive"} {
+	for _, notWant := range []string{"archive", "--idempotency-key string"} {
 		if strings.Contains(stdout.String(), notWant) {
 			t.Fatalf("help contains unapproved packaging term %q:\n%s", notWant, stdout.String())
 		}

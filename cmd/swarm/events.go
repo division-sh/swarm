@@ -176,7 +176,7 @@ var eventObservationValidDeadLetterFailureTypes = map[string]struct{}{
 func newEventsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "events",
-		Short: "List or follow events through v1 API owners.",
+		Short: "List or follow the event stream.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -192,7 +192,7 @@ func newEventsCommand(opts rootCommandOptions) *cobra.Command {
 func newEventCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "event",
-		Short: "View or replay one event through v1 API owners.",
+		Short: "Publish, view, or replay a single event.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -210,7 +210,7 @@ func newEventsListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := eventListCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List events through /v1/rpc event.list.",
+		Short: "List events with filters.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.filter.hasDeadLetterSet = cmd.Flags().Changed("has-dead-letter")
@@ -231,7 +231,7 @@ func newEventsFollowCommand(opts rootCommandOptions) *cobra.Command {
 	followOpts := eventFollowCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "follow",
-		Short: "Follow events through /v1/ws event.subscribe.",
+		Short: "Follow the live event stream.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			followOpts.filter.hasDeadLetterSet = cmd.Flags().Changed("has-dead-letter")
@@ -248,7 +248,7 @@ func newEventViewCommand(opts rootCommandOptions) *cobra.Command {
 	apiOpts := opts
 	cmd := &cobra.Command{
 		Use:   "view <event-id>",
-		Short: "View one event through /v1/rpc event.get.",
+		Short: "View one event.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEventViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
@@ -262,14 +262,15 @@ func newEventReplayCommand(opts rootCommandOptions) *cobra.Command {
 	replayOpts := eventReplayCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "replay <event-id>",
-		Short: "Replay one event through /v1/rpc event.replay.",
+		Short: "Replay one event.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEventReplayCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, replayOpts)
 		},
 	}
 	cmd.Flags().StringArrayVar(&replayOpts.subscribers, "subscriber", nil, "Original agent subscriber to replay to; repeat to select a subset")
-	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &replayOpts.apiOptions, cliAPICommandClassMutating, "swarm event replay")
 	return cmd
 }

@@ -103,7 +103,7 @@ var (
 func newEntitiesCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "entities",
-		Short: "List entities through v1 RPC.",
+		Short: "List workflow entities.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -116,7 +116,7 @@ func newEntitiesCommand(opts rootCommandOptions) *cobra.Command {
 func newEntityCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "entity",
-		Short: "View or aggregate entities through v1 RPC.",
+		Short: "View or aggregate one entity's state.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -133,7 +133,7 @@ func newEntitiesListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := entityListCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List entities through /v1/rpc entity.list.",
+		Short: "List entities with filters.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.runIDSet = cmd.Flags().Changed("run-id")
@@ -159,7 +159,7 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 	viewOpts := entityViewCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "view <entity-id>",
-		Short: "View one entity through /v1/rpc entity.get.",
+		Short: "View one entity's state.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			viewOpts.runIDSet = cmd.Flags().Changed("run-id")
@@ -175,7 +175,7 @@ func newEntityAggregateCommand(opts rootCommandOptions) *cobra.Command {
 	aggregateOpts := entityAggregateCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "aggregate",
-		Short: "Aggregate entity counts through /v1/rpc entity.aggregate.",
+		Short: "Aggregate entity counts by field.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			aggregateOpts.runIDSet = cmd.Flags().Changed("run-id")

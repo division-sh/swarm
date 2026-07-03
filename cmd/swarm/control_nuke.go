@@ -121,7 +121,7 @@ func newControlNukeCommand(opts rootCommandOptions) *cobra.Command {
 	nukeOpts := runtimeNukeCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "nuke",
-		Short: "Destructively reset Swarm runtime state through v1 RPC.",
+		Short: "Destructively reset all Swarm runtime state.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts := nukeOpts
@@ -131,7 +131,8 @@ func newControlNukeCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().BoolVarP(&nukeOpts.yes, "yes", "y", false, "Skip the destructive confirmation prompt")
 	cmd.Flags().BoolVar(&nukeOpts.dryRun, "dry-run", false, "Preview the destructive reset without applying it")
-	cmd.Flags().StringVar(&nukeOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&nukeOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &nukeOpts.apiOptions, cliAPICommandClassControl, "swarm control nuke")
 	return cmd
 }

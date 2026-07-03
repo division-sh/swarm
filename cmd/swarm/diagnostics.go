@@ -206,7 +206,7 @@ func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 	runOpts := diagnosticRunListOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "runs",
-		Short: "List runs through the v1 RPC read owner.",
+		Short: "List runs.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("limit") && runOpts.limit == 0 {
@@ -234,7 +234,7 @@ func newHealthCommand(opts rootCommandOptions) *cobra.Command {
 	loggingOpts := cliLoggingOptions{}
 	cmd := &cobra.Command{
 		Use:   "health",
-		Short: "Print structured operator health through v1 RPC.",
+		Short: "Show runtime health.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := loggingOpts.validate(); err != nil {
@@ -256,7 +256,7 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 	runOpts := diagnosticRunOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "status [run-id]",
-		Short: "Diagnose one run through the v1 RPC read owner.",
+		Short: "Diagnose one run (state, gates, stuck points).",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runID := ""
@@ -283,8 +283,10 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	traceOpts := diagnosticTraceOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "trace [run-id]",
-		Short: "Print or follow a run trace through v1 API owners.",
-		Args:  cobra.MaximumNArgs(1),
+		Short: "Print or follow a run's execution trace.",
+		Example: `  swarm trace <run-id>
+  swarm trace -f <run-id>    # follow live`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
 			traceOpts.untilSet = cmd.Flags().Changed("until")
@@ -297,7 +299,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 			return runDiagnosticTraceCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), traceOpts, runID)
 		},
 	}
-	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows through /v1/ws run.subscribe_trace")
+	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows as they stream")
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
 	cmd.Flags().BoolVar(&traceOpts.deliveryDetail, "delivery-detail", false, "Show snapshot delivery lifecycle fields from RunTraceRow")
 	cmd.Flags().BoolVar(&traceOpts.deliverySummary, "delivery-summary", false, "Summarize snapshot delivery lifecycle fields from all RunTraceRow pages")

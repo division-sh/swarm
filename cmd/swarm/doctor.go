@@ -31,8 +31,10 @@ func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "doctor",
-		Short: "Diagnose local Swarm runtime prerequisites.",
-		Args:  cobra.NoArgs,
+		Short: "Check local prerequisites and diagnose setup problems.",
+		Example: `  swarm doctor
+  swarm doctor --target    # show which runtime this CLI targets`,
+		Args: cobra.NoArgs,
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if cliAPIConnectionFlagsChanged(cmd) && !opts.target {
 				return fmt.Errorf("--api-server and --api-token-file require --target")

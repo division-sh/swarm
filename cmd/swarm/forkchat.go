@@ -177,7 +177,7 @@ type forkChatSandboxPolicy struct {
 func newForkChatCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "forkchat",
-		Short: "Create and inspect sandboxed forkchat sessions through v1 RPC.",
+		Short: "Open sandboxed chat sessions against forked runs.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -197,7 +197,7 @@ func newForkChatNewCommand(opts rootCommandOptions) *cobra.Command {
 	newOpts := forkChatNewCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "new <source-session-id>",
-		Short: "Create a forkchat session through /v1/rpc conversation.fork.",
+		Short: "Create a sandboxed forkchat session.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			newOpts.turnIndexSet = cmd.Flags().Changed("turn-index")
@@ -218,7 +218,8 @@ func newForkChatNewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&newOpts.eventID, "event-id", "", "Fork at the source turn triggered by this event id")
 	cmd.Flags().StringVar(&newOpts.at, "at", "", "Fork at the latest source turn at or before this RFC3339 timestamp")
 	cmd.Flags().StringVarP(&newOpts.message, "message", "m", "", "Optional first sandboxed message after fork creation")
-	cmd.Flags().StringVar(&newOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&newOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &newOpts.output)
 	bindCLILoggingFlags(cmd, &newOpts.logging)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &newOpts.apiOptions, cliAPICommandClassMutating, "swarm forkchat new")
@@ -229,7 +230,7 @@ func newForkChatResumeCommand(opts rootCommandOptions) *cobra.Command {
 	resumeOpts := forkChatResumeCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "resume <fork-id>",
-		Short: "Send a sandboxed message through /v1/rpc conversation.fork_chat.",
+		Short: "Send a message in a forkchat session.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			resumeOpts.messageSet = cmd.Flags().Changed("message")
@@ -244,7 +245,8 @@ func newForkChatResumeCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&resumeOpts.message, "message", "m", "", "Required sandboxed message to send")
-	cmd.Flags().StringVar(&resumeOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&resumeOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &resumeOpts.output)
 	bindCLILoggingFlags(cmd, &resumeOpts.logging)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &resumeOpts.apiOptions, cliAPICommandClassMutating, "swarm forkchat resume")
@@ -255,7 +257,7 @@ func newForkChatListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := forkChatListCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List forkchat sessions through /v1/rpc conversation.fork_list.",
+		Short: "List forkchat sessions.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.sourceSessionIDSet = cmd.Flags().Changed("source-session-id")
@@ -283,7 +285,7 @@ func newForkChatViewCommand(opts rootCommandOptions) *cobra.Command {
 	viewOpts := forkChatViewCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "view <fork-id>",
-		Short: "View one forkchat session through /v1/rpc conversation.fork_view.",
+		Short: "View one forkchat session.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := viewOpts.logging.validate(); err != nil {
@@ -305,7 +307,7 @@ func newForkChatDeleteCommand(opts rootCommandOptions) *cobra.Command {
 	deleteOpts := forkChatDeleteCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "delete <fork-id>",
-		Short: "Delete one forkchat session through /v1/rpc conversation.fork_delete.",
+		Short: "Delete one forkchat session.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
@@ -318,7 +320,8 @@ func newForkChatDeleteCommand(opts rootCommandOptions) *cobra.Command {
 			return runForkChatDeleteCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), deleteOpts, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &deleteOpts.output)
 	bindCLILoggingFlags(cmd, &deleteOpts.logging)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &deleteOpts.apiOptions, cliAPICommandClassMutating, "swarm forkchat delete")

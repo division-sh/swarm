@@ -105,7 +105,7 @@ type mailboxDecisionCommandOptions struct {
 func newControlCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "control",
-		Short: "Run supported v1 operator control actions.",
+		Short: "Pause, continue, stop, or reset runs (operator actions).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -124,8 +124,10 @@ func newControlCommand(opts rootCommandOptions) *cobra.Command {
 func newMailboxCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "mailbox",
-		Short: "List, view, and decide mailbox items through v1 RPC.",
-		Args:  cobra.NoArgs,
+		Short: "List, view, and decide pending human decisions.",
+		Example: `  swarm mailbox list
+  swarm mailbox approve <mailbox-item-id>`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
@@ -171,7 +173,7 @@ func newMailboxListCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List mailbox items through v1 RPC.",
+		Short: "List mailbox items.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.limitSet = cmd.Flags().Changed("limit")
@@ -194,7 +196,7 @@ func newMailboxViewCommand(opts rootCommandOptions) *cobra.Command {
 	apiOpts := opts
 	cmd := &cobra.Command{
 		Use:   "view <mailbox-item-id>",
-		Short: "View one mailbox item through v1 RPC.",
+		Short: "View one mailbox item.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
@@ -212,7 +214,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "approve <mailbox-item-id>",
-		Short: "Approve a pending mailbox item through v1 RPC.",
+		Short: "Approve a pending mailbox item.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := actionOpts
@@ -221,7 +223,8 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadFile, "decision-payload", "", "Read optional approval event JSON object from file")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadJSON, "decision-payload-json", "", "Optional JSON object attached to the approval event")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox approve")
@@ -236,14 +239,15 @@ func newMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "reject <mailbox-item-id>",
-		Short: "Reject a pending mailbox item through v1 RPC.",
+		Short: "Reject a pending mailbox item.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.reason, "reason", "", "Required rejection reason")
-	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox reject")
 	return cmd
 }
@@ -256,14 +260,15 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "defer <mailbox-item-id>",
-		Short: "Defer a pending mailbox item through v1 RPC.",
+		Short: "Defer a pending mailbox item.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
 	cmd.Flags().StringVar(&actionOpts.until, "until", "", "Required RFC3339 timestamp")
-	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox defer")
 	return cmd
 }

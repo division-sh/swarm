@@ -32,13 +32,14 @@ func newAgentReplayBacklogCommand(opts rootCommandOptions) *cobra.Command {
 	replayOpts := agentReplayBacklogCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "replay-backlog <agent-id>",
-		Short: "Replay an agent backlog through v1 RPC.",
+		Short: "Replay an agent's undelivered event backlog.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentReplayBacklogCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, replayOpts)
 		},
 	}
-	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &replayOpts.apiOptions, cliAPICommandClassMutating, "swarm agent replay-backlog")
 	return cmd
 }

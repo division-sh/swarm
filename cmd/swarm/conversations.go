@@ -135,7 +135,7 @@ var conversationOpaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
 func newConversationsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "conversations",
-		Short: "List conversations through v1 RPC.",
+		Short: "List agent conversations.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -148,7 +148,7 @@ func newConversationsCommand(opts rootCommandOptions) *cobra.Command {
 func newConversationCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "conversation",
-		Short: "View conversation details and turns through v1 RPC.",
+		Short: "View one conversation and its turns.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -165,7 +165,7 @@ func newConversationsListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := conversationListCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List conversations through /v1/rpc conversation.list.",
+		Short: "List conversations.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.agentIDSet = cmd.Flags().Changed("agent-id")
@@ -195,7 +195,7 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 	viewOpts := conversationViewCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "view <session-id>",
-		Short: "View one conversation through /v1/rpc conversation.get.",
+		Short: "View one conversation.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := viewOpts.logging.validate(); err != nil {
@@ -217,7 +217,7 @@ func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 	turnOpts := conversationTurnCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "turn <session-id> <turn-index>",
-		Short: "View one conversation turn through /v1/rpc conversation.get_turn.",
+		Short: "View one conversation turn.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := turnOpts.logging.validate(); err != nil {

@@ -141,7 +141,7 @@ type bundleAgentDefinition struct {
 func newBundleCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bundle",
-		Short: "Inspect persisted bundle catalog entries through v1 RPC.",
+		Short: "Inspect registered contract bundles.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
@@ -161,7 +161,7 @@ func newBundleListCommand(opts rootCommandOptions) *cobra.Command {
 	listOpts := bundleListCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List persisted bundles through /v1/rpc bundle.list.",
+		Short: "List registered bundles.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listOpts.limitSet = cmd.Flags().Changed("limit")
@@ -183,7 +183,7 @@ func newBundleShowCommand(opts rootCommandOptions) *cobra.Command {
 	showOpts := bundleHashCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "show <bundle-hash>",
-		Short: "Show one persisted bundle through /v1/rpc bundle.get.",
+		Short: "Show one bundle's details.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := showOpts.output.validate(); err != nil {
@@ -201,7 +201,7 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	agentsOpts := bundleHashCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "agents <bundle-hash>",
-		Short: "List bundle agent definitions through /v1/rpc bundle.agents.",
+		Short: "List the agents a bundle declares.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := agentsOpts.output.validate(); err != nil {
@@ -219,7 +219,7 @@ func newBundleRegisterCommand(repoRoot string, opts rootCommandOptions) *cobra.C
 	registerOpts := bundleRegisterCommandOptions{apiOptions: opts, repoRoot: repoRoot}
 	cmd := &cobra.Command{
 		Use:   "register <registration-envelope-yaml> | register --contracts <contracts-directory>",
-		Short: "Register a bundle through /v1/rpc bundle.register.",
+		Short: "Register a contract bundle with the runtime.",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			registerOpts.dataBlobSet = cmd.Flags().Changed("data-blob")
@@ -234,6 +234,7 @@ func newBundleRegisterCommand(repoRoot string, opts rootCommandOptions) *cobra.C
 	cmd.Flags().StringVar(&registerOpts.dataBlobPath, "data-blob", "", "Path to a BundleRegisterDataBlobV1 JSON document")
 	cmd.Flags().StringVar(&registerOpts.contractsDir, "contracts", "", "Package a local contracts directory into BundleRegistrationEnvelopeV1 before calling bundle.register")
 	cmd.Flags().StringVar(&registerOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.register")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &registerOpts.output)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &registerOpts.apiOptions, cliAPICommandClassMutating, "swarm bundle register")
 	return cmd
@@ -243,7 +244,7 @@ func newBundleDeleteCommand(opts rootCommandOptions) *cobra.Command {
 	deleteOpts := bundleDeleteCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "delete <bundle-hash>",
-		Short: "Delete a persisted bundle through /v1/rpc bundle.delete.",
+		Short: "Delete a registered bundle.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteOpts.forceSet = cmd.Flags().Changed("force")
@@ -258,6 +259,7 @@ func newBundleDeleteCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&deleteOpts.force, "force", false, "Force bundle deletion by quiescing affected active work before deleting")
 	cmd.Flags().BoolVar(&deleteOpts.dryRun, "dry-run", false, "Plan bundle deletion without applying destructive changes")
 	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.delete")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIOutputFlags(cmd, &deleteOpts.output)
 	bindCLIAPIConnectionFlagsWithClass(cmd, &deleteOpts.apiOptions, cliAPICommandClassMutating, "swarm bundle delete")
 	return cmd

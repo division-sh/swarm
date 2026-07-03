@@ -54,14 +54,15 @@ func newAgentReplayCommand(opts rootCommandOptions) *cobra.Command {
 	replayOpts := agentReplayCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "replay <agent-id>",
-		Short: "Replay one event to an agent through v1 RPC.",
+		Short: "Replay a single event to an agent.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentReplayCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, replayOpts)
 		},
 	}
 	cmd.Flags().StringVar(&replayOpts.eventID, "event-id", "", "Required event ID to replay")
-	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional v1 API idempotency key")
+	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &replayOpts.apiOptions, cliAPICommandClassMutating, "swarm agent replay")
 	return cmd
 }

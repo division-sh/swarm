@@ -206,7 +206,7 @@ func TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("root code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Run and inspect Swarm workflows.", "serve", "verify", "completion", "version"} {
+	for _, want := range []string{"Swarm runs event-driven agent workflows", "Getting started:", "Observe & debug:", "serve", "verify", "completion", "version"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("root help missing %q:\n%s", want, stdout.String())
 		}
@@ -227,7 +227,7 @@ func TestCLI_HelpCommandPrintsRootHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Run and inspect Swarm workflows.") || !strings.Contains(stdout.String(), "serve") {
+	if !strings.Contains(stdout.String(), "Swarm runs event-driven agent workflows") || !strings.Contains(stdout.String(), "serve") {
 		t.Fatalf("help output missing root command help:\n%s", stdout.String())
 	}
 }
@@ -1334,8 +1334,8 @@ func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
 		{name: "version", args: []string{"version"}, want: "Swarm dev"},
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
 		{name: "serve help", args: []string{"serve", "--help"}, want: "Start the Swarm runtime"},
-		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate local Swarm contract files"},
-		{name: "run help", args: []string{"run", "--help"}, want: "Start or reattach to a Swarm run"},
+		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files before boot"},
+		{name: "run help", args: []string{"run", "--help"}, want: "Start a workflow run on a running runtime"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)

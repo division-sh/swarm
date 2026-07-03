@@ -17,7 +17,7 @@ type contextCommandOptions struct {
 func newContextCommand(ctx context.Context, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "context",
-		Short: "Inspect local Swarm runtime context descriptors.",
+		Short: "Show which runtime and directories this CLI targets.",
 	}
 	cmd.AddCommand(
 		newContextCurrentCommand(ctx, opts),
