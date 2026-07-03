@@ -1119,7 +1119,7 @@ func (s nativeCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
 	return contract
 }
 
-func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testing.T) {
+func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWithoutExecutorAdmission(t *testing.T) {
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{
 			ID:   "researcher-1",
@@ -1138,24 +1138,11 @@ func TestNewLLMAgent_InjectsNativeFallbackToolsWhenProviderLacksSupport(t *testi
 	for _, tool := range agent.conversation.Tools {
 		names = append(names, tool.Name)
 	}
-	for _, want := range []string{"bash", "web_search", "read_file", "write_file"} {
-		if !containsString(names, want) {
-			t.Fatalf("expected native fallback tool %s in %v", want, names)
+	for _, forbidden := range []string{"bash", "web_search", "read_file", "write_file"} {
+		if containsString(names, forbidden) {
+			t.Fatalf("did not expect unproven native fallback tool %s in %v", forbidden, names)
 		}
 	}
-	for _, tool := range agent.conversation.Tools {
-		if tool.Name != "bash" {
-			continue
-		}
-		if !strings.Contains(tool.Usage, "trusted host bash is full host-user shell execution from the workspace backing directory") {
-			t.Fatalf("bash usage = %q, want trusted host path contract", tool.Usage)
-		}
-		if !strings.Contains(tool.Usage, "absolute paths follow the host deployment namespace and OS permissions") {
-			t.Fatalf("bash usage = %q, want host namespace caveat", tool.Usage)
-		}
-		return
-	}
-	t.Fatal("bash native fallback tool missing")
 }
 
 func TestNewLLMAgent_DoesNotInjectNativeFallbackToolsWhenProviderSupportsCapability(t *testing.T) {

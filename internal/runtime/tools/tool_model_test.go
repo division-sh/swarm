@@ -15,6 +15,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
@@ -546,7 +547,13 @@ func TestExecutor_ToolDefinitionsForActor_UsesSharedActorRegistry(t *testing.T) 
 		},
 	})
 
-	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		WorkflowSource: source,
+		ModelRuntime:   nativeCapabilityRuntimeStub{},
+		WorkspaceResolver: relayWorkspaceResolverStub{
+			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
+		},
+	})
 	defs := exec.ToolDefinitionsForActor(models.AgentConfig{
 		ID:          "agent-1",
 		Tools:       []string{"check_domain"},

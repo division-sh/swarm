@@ -42,6 +42,7 @@ type Executor struct {
 	mcpClient                      *runtimemcp.Client
 	workflowSource                 semanticview.Source
 	workspaces                     workspace.Resolver
+	modelRuntime                   llm.Runtime
 	authority                      runtimeauthority.Provider
 	emitRegistry                   *EmitRegistry
 	authorizer                     *ToolAuthorizer
@@ -83,6 +84,7 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		mcpClient:                      opts.MCPClient,
 		workflowSource:                 opts.WorkflowSource,
 		workspaces:                     opts.WorkspaceResolver,
+		modelRuntime:                   opts.ModelRuntime,
 		authority:                      runtimeauthority.ProviderOrNoop(opts.AuthorityProvider),
 		externalDispatchAdmission:      newExternalDispatchAdmissionController(),
 		allowInternalLegacyEntityTools: opts.AllowInternalLegacyEntityTools,
@@ -123,6 +125,16 @@ func NewExecutorWithOptions(bus EventPublisher, scheduler Scheduler, opts Execut
 		exec.buildToolHandlers(),
 	)
 	return exec
+}
+
+// SetModelRuntime updates the provider contract used by native-tool admission.
+func (e *Executor) SetModelRuntime(runtime llm.Runtime) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.modelRuntime = runtime
 }
 
 func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {
@@ -171,7 +183,14 @@ func (e *Executor) resolveRegisteredTool(actor models.AgentConfig, name string) 
 		tool, ok := entries[name]
 		return tool, ok, nil
 	}
-	return resolveRegisteredToolForActor(source, actor, name, discovered)
+	tool, ok, err := resolveRegisteredToolForActor(source, actor, name, discovered)
+	if err != nil || !ok {
+		return tool, ok, err
+	}
+	if !e.nativeToolAdmittedForTool(context.Background(), actor, name) {
+		return RegisteredTool{}, false, nil
+	}
+	return tool, true, nil
 }
 
 func (e *Executor) ToolDefinitions() []llm.ToolDefinition {
@@ -206,6 +225,9 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	for _, name := range names {
 		entry := entries[name]
 		if !e.toolAuthorizationDecision(actor, name).allowed {
+			continue
+		}
+		if !e.nativeToolAdmittedForTool(context.Background(), actor, name) {
 			continue
 		}
 		filtered = append(filtered, llm.ToolDefinition{
@@ -271,6 +293,16 @@ func (e *Executor) ToolCapabilitiesForActor(actor models.AgentConfig, names []st
 		}
 		if !decision.allowed {
 			cap.DenialReason = "tool_not_allowed"
+		}
+		if decision.allowed && isNativeFallbackToolName(name) {
+			if admitted, reason := e.nativeToolAdmissionForTool(context.Background(), actor, name); !admitted {
+				cap.Visible = false
+				cap.Callable = false
+				if strings.TrimSpace(reason) == "" {
+					reason = "native_tool_admission_denied"
+				}
+				cap.DenialReason = reason
+			}
 		}
 		caps = append(caps, cap)
 	}
@@ -710,7 +742,7 @@ func (e *Executor) ExecConfigureRoutingDirect(actor models.AgentConfig, input an
 }
 
 func (e *Executor) ExecAgentHireDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentHire(actor, input)
+	return e.execAgentHire(context.Background(), actor, input)
 }
 
 func (e *Executor) ExecAgentFireDirect(actor models.AgentConfig, input any) (any, error) {
@@ -718,7 +750,7 @@ func (e *Executor) ExecAgentFireDirect(actor models.AgentConfig, input any) (any
 }
 
 func (e *Executor) ExecAgentReconfigureDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentReconfigure(actor, input)
+	return e.execAgentReconfigure(context.Background(), actor, input)
 }
 
 func (e *Executor) ExecMailboxSendDirect(actor models.AgentConfig, input any) (any, error) {

@@ -3483,6 +3483,14 @@ engine:
           rules:
           - The adapter must declare whether it is strict provider-native for native_tools and which native capabilities are callable.
           - Strict provider-native adapters must fail closed rather than satisfying native_tools through fallback paths.
+          - FallbackToolsAllowed only permits the runtime to consider platform fallback after a concrete fallback owner proves
+            callability; it is not itself admission.
+          - For non-strict fallback runtimes, bash and file_io native_tools are admitted only when the selected workspace
+            execution target supports the required native command and file capabilities.
+          - For non-strict fallback runtimes, web_search native_tools are admitted only when policy.web_search_provider resolves
+            to a supported provider and every provider-required credential resolves to a non-empty deployment credential.
+          - Static boot, dynamic agent_hire, and dynamic agent_reconfigure must fail closed before the affected agent's first
+            turn when provider-native support or the required fallback owner proof is missing.
           - Persisted turn visible-tool facts must reflect callable truth for the adapter's turn.
         persistence:
           rules:

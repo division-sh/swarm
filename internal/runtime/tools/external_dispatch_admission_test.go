@@ -417,6 +417,8 @@ func TestExecutor_NativeWebSearchHardcodedProviderUsesRateLimit(t *testing.T) {
 	var recorder dispatchTimeRecorder
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSource("brave", "1/40ms", "500ms", nil),
+		Credentials:    nativeWebSearchCredentialStore{"brave_search_api_key": "secret"},
+		ModelRuntime:   nativeCapabilityRuntimeStub{},
 	})
 	exec.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		recorder.record()
@@ -454,6 +456,7 @@ func TestExecutor_NativeWebSearchCustomProviderUsesRateLimit(t *testing.T) {
 	}
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSource("custom", "1/40ms", "500ms", customHTTP),
+		ModelRuntime:   nativeCapabilityRuntimeStub{},
 	})
 	ctx := models.WithActor(context.Background(), models.AgentConfig{
 		ID:          "agent-1",
@@ -480,6 +483,7 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
 		WorkflowSource: rateLimitedNativeWebSearchSiblingFlowSource(server.URL),
+		ModelRuntime:   nativeCapabilityRuntimeStub{},
 	})
 	first := models.WithActor(context.Background(), models.AgentConfig{
 		ID:          "alpha-agent",
@@ -507,6 +511,31 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 type dispatchTimeRecorder struct {
 	mu    sync.Mutex
 	times []time.Time
+}
+
+type nativeWebSearchCredentialStore map[string]string
+
+func (s nativeWebSearchCredentialStore) Get(_ context.Context, key string) (string, bool, error) {
+	value, ok := s[strings.TrimSpace(key)]
+	return value, ok, nil
+}
+
+func (s nativeWebSearchCredentialStore) Set(_ context.Context, key, value string) error {
+	s[strings.TrimSpace(key)] = value
+	return nil
+}
+
+func (s nativeWebSearchCredentialStore) List(context.Context) ([]string, error) {
+	out := make([]string, 0, len(s))
+	for key := range s {
+		out = append(out, key)
+	}
+	return out, nil
+}
+
+func (s nativeWebSearchCredentialStore) Delete(_ context.Context, key string) error {
+	delete(s, strings.TrimSpace(key))
+	return nil
 }
 
 func (r *dispatchTimeRecorder) record() {
@@ -579,6 +608,9 @@ func rateLimitedNativeWebSearchSource(provider, rateLimit, maxWait string, custo
 		"rate_limit_max_wait": maxWait,
 		"response_path":       "items",
 		"field_mapping":       map[string]any{"title": "title", "url": "link", "snippet": "summary"},
+	}
+	if provider != "custom" {
+		root["credentials_key"] = "brave_search_api_key"
 	}
 	if customHTTP != nil {
 		rawHTTP, _ := json.Marshal(customHTTP)

@@ -8,6 +8,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -54,6 +55,7 @@ type ExecutorOptions struct {
 	MCPClient         *runtimemcp.Client
 	WorkflowSource    semanticview.Source
 	WorkspaceResolver workspace.Resolver
+	ModelRuntime      llm.Runtime
 	AuthorityProvider runtimeauthority.Provider
 	EmitRegistry      *EmitRegistry
 	// Trusted runtime/test escape hatch for exercising retained legacy handlers.

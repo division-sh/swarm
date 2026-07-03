@@ -513,7 +513,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		}
 	}
 	rt.LLM = modelRuntime
-	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, modelRuntime); err != nil {
+	if warnings, err := runtimetools.ValidateNativeToolBootConfig(ctx, source, rt.Credentials, modelRuntime, rt.Workspace); err != nil {
 		return nil, fmt.Errorf("native tool validation failed: %w", err)
 	} else {
 		if bootWarningsFatal() && len(warnings) > 0 {
@@ -538,6 +538,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		WorkflowInstances: pipelineStore,
 		WorkflowSource:    source,
 		WorkspaceResolver: rt.Workspace,
+		ModelRuntime:      rt.LLM,
 		AuthorityProvider: rt.Authority,
 		EmitRegistry:      rt.EmitRegistry,
 		ManagerProvider: func() runtimetools.Manager {
@@ -599,6 +600,9 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 				ControlledBy: "runtime",
 			})
 			return err
+		},
+		NativeToolAdmissionValidator: func(ctx context.Context, cfg runtimeactors.AgentConfig) error {
+			return rt.ToolExecutor.ValidateNativeToolAdmission(ctx, cfg)
 		},
 		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
 		DisableSpinupControl:     true,

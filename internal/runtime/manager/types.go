@@ -140,6 +140,7 @@ type AgentManagerOptions struct {
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool
 	RuntimeIngressSafetyPause      func(context.Context, string) error
+	NativeToolAdmissionValidator   func(context.Context, models.AgentConfig) error
 	ThrottleSuppressPrefixes       []string
 	DisableSpinupControl           bool
 	EnableLegacySpinupControl      bool
