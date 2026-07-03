@@ -153,6 +153,41 @@ func TestProviderAdmissionDoesNotHoldConcurrencyWhileWaitingForRate(t *testing.T
 	}
 }
 
+func TestProviderAdmissionRollsBackRateReservationWhenConcurrencyRejects(t *testing.T) {
+	controller := newLLMProviderAdmissionController()
+	policy := llmProviderAdmissionPolicy{
+		Profile:       mustAdmissionProfile(t, llmselection.BackendAnthropic),
+		BucketName:    "anthropic/api/regular",
+		RateBucketKey: "rate",
+		Rate: config.LLMProviderRateLimit{
+			Enabled: true,
+			Limit:   2,
+			Period:  time.Hour,
+			MaxWait: 0,
+		},
+		ConcurrencyKey: "concurrency",
+		Concurrency: config.LLMProviderConcurrencyLimit{
+			Enabled: true,
+			Limit:   1,
+			MaxWait: 0,
+		},
+	}
+
+	release, err := controller.Admit(context.Background(), policy)
+	if err != nil {
+		t.Fatalf("first Admit: %v", err)
+	}
+	_, err = controller.Admit(context.Background(), policy)
+	requireProviderAdmissionRateLimited(t, err)
+
+	release()
+	release, err = controller.Admit(context.Background(), policy)
+	if err != nil {
+		t.Fatalf("third Admit after concurrency rejection: %v", err)
+	}
+	release()
+}
+
 func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
 	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
 	regular := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
