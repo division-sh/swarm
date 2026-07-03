@@ -366,6 +366,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/bus/final_flow_instance_authoring_route_test.go
       - internal/runtime/bus/route_plan.go
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
     search_dimensions: [connect_route_plan, route_plan, route_plan_source_reason]
@@ -386,6 +387,7 @@ seam_families:
     classification: non_authoritative_observer_projection
     paths:
       - internal/runtime/authoringview/view.go
+      - internal/runtime/authoringview/view_test.go
     search_dimensions: [connect_route_plan]
     invalid_authority:
       - route authority decisions
@@ -673,6 +675,7 @@ seam_families:
       - internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go
       - internal/runtime/bus/sealed_flow_package_fixture_test.go
       - internal/runtime/conformance/sealed_flow_package_conformance_test.go
+      - internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - internal/runtime/swarmflowtest/catalog_runner_test.go
