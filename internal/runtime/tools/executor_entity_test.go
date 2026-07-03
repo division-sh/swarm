@@ -868,6 +868,7 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 		{name: "undeclared nested path", field: "metadata.regoin"},
 		{name: "envelope field", field: "entity_id"},
 		{name: "list index path", field: "validation_kit.checklist[0]"},
+		{name: "read-only list selector", field: "validation_kit.checklist.size"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
