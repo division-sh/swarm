@@ -22,16 +22,17 @@ import (
 )
 
 type OpenAIResponsesRuntime struct {
-	cfg           *config.Config
-	sessions      sessions.Registry
-	turns         TurnPersistence
-	conversations ConversationPersistence
-	budget        BudgetGuard
-	lockOwner     string
-	httpClient    *http.Client
-	baseURL       string
-	apiKey        string
-	events        EventPublisher
+	cfg               *config.Config
+	sessions          sessions.Registry
+	turns             TurnPersistence
+	conversations     ConversationPersistence
+	budget            BudgetGuard
+	lockOwner         string
+	httpClient        *http.Client
+	baseURL           string
+	apiKey            string
+	events            EventPublisher
+	providerAdmission *ProviderAdmissionRegistry
 }
 
 func NewOpenAIResponsesRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *OpenAIResponsesRuntime {
@@ -50,9 +51,10 @@ func NewOpenAIResponsesRuntime(cfg *config.Config, sessions sessions.Registry, l
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
-		baseURL: baseURL,
-		apiKey:  llmselection.CredentialValue(profile, os.LookupEnv),
-		events:  publisher,
+		baseURL:           baseURL,
+		apiKey:            llmselection.CredentialValue(profile, os.LookupEnv),
+		events:            publisher,
+		providerAdmission: NewProviderAdmissionRegistry(cfg),
 	}
 }
 
@@ -259,9 +261,13 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai-responses request: %w", err)
 	}
+	resolvedModel, err := resolveProviderAdmissionModel(ctx, r.cfg, r.providerAdmission, profile)
+	if err != nil {
+		return nil, err
+	}
 
 	start := time.Now()
-	rawResp, parsed, err := r.sendRequest(ctx, reqJSON)
+	rawResp, parsed, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
 	latency := time.Since(start)
 	if err != nil {
 		s.ParseFailures++
@@ -354,6 +360,15 @@ func (r *OpenAIResponsesRuntime) ContinueSession(ctx context.Context, s *Session
 	}
 
 	return &resp, nil
+}
+
+func (r *OpenAIResponsesRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, openAIResponsesResponse, error) {
+	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, model)
+	if err != nil {
+		return nil, openAIResponsesResponse{}, err
+	}
+	defer release()
+	return r.sendRequest(ctx, payload)
 }
 
 func (r *OpenAIResponsesRuntime) persistConversation(ctx context.Context, s *Session) {

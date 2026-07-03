@@ -1,0 +1,365 @@
+package llm
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/config"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+)
+
+func TestProviderAdmissionDefaultsToNoLimitWhenUnconfigured(t *testing.T) {
+	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	registry := NewProviderAdmissionRegistry(&config.Config{})
+
+	for i := 0; i < 5; i++ {
+		release, err := registry.Admit(context.Background(), profile, model)
+		if err != nil {
+			t.Fatalf("Admit attempt %d: %v", i+1, err)
+		}
+		release()
+	}
+}
+
+func TestProviderAdmissionEmptyProfilePolicyDoesNotRequireModel(t *testing.T) {
+	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
+	cfg := &config.Config{
+		LLM: config.LLMConfig{
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendAnthropic: {},
+			},
+		},
+	}
+	registry := NewProviderAdmissionRegistry(cfg)
+
+	if _, err := resolveProviderAdmissionModel(context.Background(), cfg, registry, profile); err != nil {
+		t.Fatalf("resolveProviderAdmissionModel: %v", err)
+	}
+	release, err := registry.Admit(context.Background(), profile, llmselection.ResolvedModel{})
+	if err != nil {
+		t.Fatalf("Admit: %v", err)
+	}
+	release()
+}
+
+func TestProviderAdmissionRateLimitFailsClosedAtMaxWait(t *testing.T) {
+	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	registry := NewProviderAdmissionRegistry(&config.Config{
+		LLM: config.LLMConfig{
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendAnthropic: {
+					RateLimit:        "1/s",
+					RateLimitMaxWait: "0s",
+				},
+			},
+		},
+	})
+
+	release, err := registry.Admit(context.Background(), profile, model)
+	if err != nil {
+		t.Fatalf("first Admit: %v", err)
+	}
+	release()
+
+	_, err = registry.Admit(context.Background(), profile, model)
+	requireProviderAdmissionRateLimited(t, err)
+}
+
+func TestProviderAdmissionConcurrencyLimitFailsClosedAtMaxWait(t *testing.T) {
+	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	registry := NewProviderAdmissionRegistry(&config.Config{
+		LLM: config.LLMConfig{
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendAnthropic: {
+					MaxConcurrency:        1,
+					MaxConcurrencyMaxWait: "0s",
+				},
+			},
+		},
+	})
+
+	release, err := registry.Admit(context.Background(), profile, model)
+	if err != nil {
+		t.Fatalf("first Admit: %v", err)
+	}
+
+	_, err = registry.Admit(context.Background(), profile, model)
+	requireProviderAdmissionRateLimited(t, err)
+
+	release()
+	release, err = registry.Admit(context.Background(), profile, model)
+	if err != nil {
+		t.Fatalf("third Admit after release: %v", err)
+	}
+	release()
+}
+
+func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
+	profile := mustAdmissionProfile(t, llmselection.BackendAnthropic)
+	regular := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	cheap := mustAdmissionModel(t, profile, llmselection.ModelAliasCheap)
+	registry := NewProviderAdmissionRegistry(&config.Config{
+		LLM: config.LLMConfig{
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendAnthropic: {
+					RateLimit:        "1/s",
+					RateLimitMaxWait: "0s",
+					Models: map[string]config.LLMProviderLimitPolicy{
+						llmselection.ModelAliasRegular: {
+							RateLimit:        "2/s",
+							RateLimitMaxWait: "0s",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	for i := 0; i < 2; i++ {
+		release, err := registry.Admit(context.Background(), profile, regular)
+		if err != nil {
+			t.Fatalf("regular Admit %d: %v", i+1, err)
+		}
+		release()
+	}
+	_, err := registry.Admit(context.Background(), profile, regular)
+	requireProviderAdmissionRateLimited(t, err)
+
+	release, err := registry.Admit(context.Background(), profile, cheap)
+	if err != nil {
+		t.Fatalf("cheap first Admit: %v", err)
+	}
+	release()
+	_, err = registry.Admit(context.Background(), profile, cheap)
+	requireProviderAdmissionRateLimited(t, err)
+}
+
+func TestAnthropicProviderAdmissionAppliesToRetries(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "test-key")
+
+	var requests atomic.Int32
+	var firstRequest, secondRequest atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := requests.Add(1)
+		now := time.Now().UnixNano()
+		w.Header().Set("content-type", "application/json")
+		switch n {
+		case 1:
+			firstRequest.Store(now)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"provider busy"}}`))
+		case 2:
+			secondRequest.Store(now)
+			_, _ = w.Write([]byte(`{"model":"claude-3-5-sonnet","usage":{"input_tokens":1,"output_tokens":1},"content":[{"type":"text","text":"done"}]}`))
+		default:
+			t.Fatalf("unexpected request %d", n)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		LLM: config.LLMConfig{
+			Session: config.LLMSessionConfig{
+				LockTTL:               time.Second,
+				RotateAfterTurns:      40,
+				RotateOnParseFailures: 3,
+			},
+			ClaudeAPI: config.ClaudeAPIConfig{
+				MaxRetries:   2,
+				RetryBackoff: time.Millisecond,
+			},
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendAnthropic: {
+					RateLimit:        "1/40ms",
+					RateLimitMaxWait: "500ms",
+				},
+			},
+		},
+	}
+	runtime := NewAnthropicAPIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime.apiURL = server.URL
+	runtime.apiKey = "test-key"
+
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
+	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	resp, err := runtime.ContinueSession(ctx, session, Message{Role: "user", Content: "hello"})
+	if err != nil {
+		t.Fatalf("ContinueSession: %v", err)
+	}
+	if resp.Message.Content != "done" {
+		t.Fatalf("response content = %q, want done", resp.Message.Content)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("requests = %d, want retry request", got)
+	}
+	elapsed := time.Duration(secondRequest.Load() - firstRequest.Load())
+	if elapsed < 25*time.Millisecond {
+		t.Fatalf("retry elapsed = %s, want provider admission to delay retry", elapsed)
+	}
+}
+
+func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T) {
+	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "test-key")
+	cfg := openAICompatibleTestConfig("")
+	cfg.LLM.ProviderLimits = map[string]config.LLMProviderLimitPolicy{
+		llmselection.BackendOpenAICompatible: {
+			MaxConcurrency:        1,
+			MaxConcurrencyMaxWait: "0s",
+		},
+	}
+
+	entered := make(chan struct{})
+	releaseServer := make(chan struct{})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			close(entered)
+			<-releaseServer
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-compatible","choices":[{"message":{"role":"assistant","content":"done"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+	cfg.LLM.OpenAICompatible.BaseURL = server.URL
+
+	runtime := NewOpenAICompatibleRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime.apiKey = "test-key"
+	profile := mustAdmissionProfile(t, llmselection.BackendOpenAICompatible)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	firstErr := make(chan error, 1)
+	go func() {
+		_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
+		firstErr <- err
+	}()
+	<-entered
+
+	_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
+	requireProviderAdmissionRateLimited(t, err)
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
+	}
+
+	close(releaseServer)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+}
+
+func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	cfg := openAIResponsesTestConfig("")
+	cfg.LLM.ProviderLimits = map[string]config.LLMProviderLimitPolicy{
+		llmselection.BackendOpenAIResponses: {
+			MaxConcurrency:        1,
+			MaxConcurrencyMaxWait: "0s",
+		},
+	}
+
+	entered := make(chan struct{})
+	releaseServer := make(chan struct{})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			close(entered)
+			<-releaseServer
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_1","model":"gpt-5.4","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+	cfg.LLM.OpenAIResponses.BaseURL = server.URL
+
+	runtime := NewOpenAIResponsesRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil)
+	runtime.apiKey = "test-key"
+	profile := mustAdmissionProfile(t, llmselection.BackendOpenAIResponses)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+	firstErr := make(chan error, 1)
+	go func() {
+		_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
+		firstErr <- err
+	}()
+	<-entered
+
+	_, _, err := runtime.sendAdmittedRequest(context.Background(), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
+	requireProviderAdmissionRateLimited(t, err)
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
+	}
+
+	close(releaseServer)
+	if err := <-firstErr; err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+}
+
+func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T) {
+	cfg := &config.Config{
+		LLM: config.LLMConfig{
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendClaudeCLI: {
+					MaxConcurrency:        1,
+					MaxConcurrencyMaxWait: "0s",
+				},
+			},
+		},
+	}
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
+	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+
+	release, err := runtime.providerAdmission.Admit(ctx, profile, model)
+	if err != nil {
+		t.Fatalf("hold admission slot: %v", err)
+	}
+	defer release()
+
+	_, _, err = runtime.runAdmittedPromptTransportFallback(ctx, nil, nil, "hello", MonitorTurnMeta{})
+	requireProviderAdmissionRateLimited(t, err)
+}
+
+func mustAdmissionProfile(t *testing.T, backend string) llmselection.Profile {
+	t.Helper()
+	profile, err := llmselection.ResolveActiveBackend(backend)
+	if err != nil {
+		t.Fatalf("ResolveActiveBackend(%q): %v", backend, err)
+	}
+	return profile
+}
+
+func mustAdmissionModel(t *testing.T, profile llmselection.Profile, alias string) llmselection.ResolvedModel {
+	t.Helper()
+	model, err := llmselection.ResolveModel(profile, llmselection.ModelResolution{Model: alias})
+	if err != nil {
+		t.Fatalf("ResolveModel(%q, %q): %v", profile.ID, alias, err)
+	}
+	return model
+}
+
+func requireProviderAdmissionRateLimited(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want provider admission rate_limited runtime error")
+	}
+	runtimeErr, ok := runtimerterr.AsRuntimeError(err)
+	if !ok {
+		t.Fatalf("error = %T %v, want runtime error", err, err)
+	}
+	if runtimeErr.Code != llmProviderRateLimitedCode || runtimeErr.Component != llmProviderAdmissionComponent || runtimeErr.Operation != llmProviderAdmissionOperation || !runtimeErr.Retryable {
+		t.Fatalf("runtime error = %#v, want provider admission rate_limited retryable error", runtimeErr)
+	}
+}

@@ -3815,6 +3815,53 @@ engine:
       - Implementing OpenAI Responses, OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, or any other additional
         provider remains a separate provider implementation/parity gate.
       - Native multi-backend-per-run remains deferred until a separate real user need is gated.
+    llm_provider_configured_outbound_admission:
+      promoted_by: '#1457'
+      implementation_status: configured_first_slice
+      description: >
+        Runtime LLM provider outbound admission is owned by runtime config plus
+        the shared internal/runtime/llm provider-admission registry. It applies
+        only when an operator declares limits for an active backend profile.
+        Absence of matching config means no provider admission limit. The
+        platform MUST NOT invent hardcoded numeric provider defaults.
+      owner: internal/runtime/llm provider admission registry consuming config llm.provider_limits
+      config_authority:
+        config_key: llm.provider_limits
+        profile_key_rule: Keys are active backend profile ids owned by llm_provider_selection_config_authority.
+        active_profile_keys:
+        - anthropic
+        - claude_cli
+        - openai_compatible
+        - openai_responses
+        supported_fields:
+          rate_limit: '<positive integer>/<period>, for example 60/m'
+          rate_limit_max_wait: 'Duration max wait before failing closed; 0s means reject immediately when queued.'
+          max_concurrency: Positive integer for simultaneous outbound requests/dispatches.
+          max_concurrency_max_wait: 'Duration max wait before failing closed; 0s means reject immediately when saturated.'
+          models: Optional map keyed by authored model alias or concrete provider model. Model entries override only the
+            limit dimensions they declare.
+        duration_units: ms, s, m, h, d
+        malformed_or_partial_policy: >
+          Unsupported profile keys, missing paired max-wait fields, invalid
+          duration syntax, non-positive limits, and nested model limit maps fail
+          closed during config validation.
+      runtime_rules:
+      - If llm.provider_limits is absent or has no entry for the active backend profile, provider admission is a no-op.
+      - Admission happens after backend/model resolution and before the outbound provider dispatch for API requests or CLI
+        subprocess dispatch.
+      - Anthropic API retry attempts, OpenAI-compatible requests, OpenAI Responses requests, and Claude CLI subprocess
+        dispatches all re-enter the same owner when configured.
+      - Bucket identity includes backend profile id, provider identity, transport, and either the profile-wide `*` model
+        bucket or the selected model-specific alias/concrete key.
+      - A wait timeout or immediate saturation returns a retryable runtime error with code rate_limited, component llm-provider,
+        and operation provider_admission before outbound dispatch.
+      split_boundaries:
+      - Exact TPM/default provider-limit semantics remain unimplemented until separately promoted; this slice only implements
+        explicit operator-configured admission.
+      - Agent scheduler/admission, tool/MCP rate limits, budget enforcement, session locking, and backend/provider selection
+        are separate owners and MUST NOT consume this section as their authority.
+      - OpenRouter, Ollama, Bedrock, Azure OpenAI, Vertex, vLLM, provider-specific quota discovery, and dynamic provider
+        adaptation remain separate provider-matrix gates.
     conversation_modes:
       description: How the platform manages agent session context across invocations. Public authored agent contracts
         use the field `mode`; the runtime persists the derived value in the internal `conversation_mode` column.

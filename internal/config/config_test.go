@@ -286,6 +286,95 @@ func TestValidate_RejectsUnsupportedRuntimeControls(t *testing.T) {
 	}
 }
 
+func TestValidateLLMProviderLimits(t *testing.T) {
+	base := func() *Config {
+		return &Config{
+			LLM: LLMConfig{
+				Backend: "anthropic",
+				Session: LLMSessionConfig{
+					LockTTL:               time.Second,
+					RotateAfterTurns:      1,
+					RotateOnParseFailures: 1,
+				},
+			},
+		}
+	}
+	tests := []struct {
+		name    string
+		limits  map[string]LLMProviderLimitPolicy
+		wantErr string
+	}{
+		{
+			name: "valid profile and model limits",
+			limits: map[string]LLMProviderLimitPolicy{
+				"anthropic": {
+					RateLimit:             "10/s",
+					RateLimitMaxWait:      "1s",
+					MaxConcurrency:        2,
+					MaxConcurrencyMaxWait: "0s",
+					Models: map[string]LLMProviderLimitPolicy{
+						"regular": {
+							RateLimit:        "20/m",
+							RateLimitMaxWait: "5s",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "default no limit",
+		},
+		{
+			name: "missing rate wait",
+			limits: map[string]LLMProviderLimitPolicy{
+				"anthropic": {RateLimit: "1/s"},
+			},
+			wantErr: "rate_limit requires rate_limit_max_wait",
+		},
+		{
+			name: "missing concurrency wait",
+			limits: map[string]LLMProviderLimitPolicy{
+				"anthropic": {MaxConcurrency: 1},
+			},
+			wantErr: "max_concurrency requires max_concurrency_max_wait",
+		},
+		{
+			name: "reserved profile rejected",
+			limits: map[string]LLMProviderLimitPolicy{
+				"mock": {RateLimit: "1/s", RateLimitMaxWait: "1s"},
+			},
+			wantErr: "reserved",
+		},
+		{
+			name: "model nested models rejected",
+			limits: map[string]LLMProviderLimitPolicy{
+				"anthropic": {
+					Models: map[string]LLMProviderLimitPolicy{
+						"regular": {Models: map[string]LLMProviderLimitPolicy{"cheap": {}}},
+					},
+				},
+			},
+			wantErr: "nested model limits are not supported",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			cfg.LLM.ProviderLimits = tc.limits
+			err := cfg.Validate()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Validate error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"llm:",

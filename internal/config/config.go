@@ -88,20 +88,29 @@ func (w WorkspaceConfig) BackendConfigured() bool {
 }
 
 type LLMConfig struct {
-	Backend          string                    `yaml:"backend"`
-	RuntimeMode      string                    `yaml:"runtime_mode"`
-	Models           llmselection.ModelAliases `yaml:"models"`
-	Session          LLMSessionConfig          `yaml:"session"`
-	ClaudeAPI        ClaudeAPIConfig           `yaml:"claude_api"`
-	ClaudeCLI        ClaudeCLIConfig           `yaml:"claude_cli"`
-	OpenAICompatible OpenAICompatibleConfig    `yaml:"openai_compatible"`
-	OpenAIResponses  OpenAIResponsesConfig     `yaml:"openai_responses"`
+	Backend          string                            `yaml:"backend"`
+	RuntimeMode      string                            `yaml:"runtime_mode"`
+	Models           llmselection.ModelAliases         `yaml:"models"`
+	Session          LLMSessionConfig                  `yaml:"session"`
+	ProviderLimits   map[string]LLMProviderLimitPolicy `yaml:"provider_limits"`
+	ClaudeAPI        ClaudeAPIConfig                   `yaml:"claude_api"`
+	ClaudeCLI        ClaudeCLIConfig                   `yaml:"claude_cli"`
+	OpenAICompatible OpenAICompatibleConfig            `yaml:"openai_compatible"`
+	OpenAIResponses  OpenAIResponsesConfig             `yaml:"openai_responses"`
 }
 
 type LLMSessionConfig struct {
 	LockTTL               time.Duration `yaml:"lock_ttl"`
 	RotateAfterTurns      int           `yaml:"rotate_after_turns"`
 	RotateOnParseFailures int           `yaml:"rotate_on_parse_failures"`
+}
+
+type LLMProviderLimitPolicy struct {
+	RateLimit             string                            `yaml:"rate_limit"`
+	RateLimitMaxWait      string                            `yaml:"rate_limit_max_wait"`
+	MaxConcurrency        int                               `yaml:"max_concurrency"`
+	MaxConcurrencyMaxWait string                            `yaml:"max_concurrency_max_wait"`
+	Models                map[string]LLMProviderLimitPolicy `yaml:"models"`
 }
 
 type ClaudeAPIConfig struct {
@@ -179,6 +188,9 @@ func (c *Config) validate(backendOverride string) error {
 		return err
 	}
 	if err := llmselection.ValidateModelAliases(c.LLM.Models); err != nil {
+		return err
+	}
+	if err := c.validateLLMProviderLimits(); err != nil {
 		return err
 	}
 	profile, err := c.LLMBackendProfile()
