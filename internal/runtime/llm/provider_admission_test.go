@@ -4,6 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +17,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 func TestProviderAdmissionDefaultsToNoLimitWhenUnconfigured(t *testing.T) {
@@ -102,6 +107,50 @@ func TestProviderAdmissionConcurrencyLimitFailsClosedAtMaxWait(t *testing.T) {
 		t.Fatalf("third Admit after release: %v", err)
 	}
 	release()
+}
+
+func TestProviderAdmissionDoesNotHoldConcurrencyWhileWaitingForRate(t *testing.T) {
+	controller := newLLMProviderAdmissionController()
+	policy := llmProviderAdmissionPolicy{
+		Profile:       mustAdmissionProfile(t, llmselection.BackendAnthropic),
+		BucketName:    "anthropic/api/regular",
+		RateBucketKey: "rate",
+		Rate: config.LLMProviderRateLimit{
+			Enabled: true,
+			Limit:   1,
+			Period:  time.Hour,
+			MaxWait: time.Hour,
+		},
+		ConcurrencyKey: "concurrency",
+		Concurrency: config.LLMProviderConcurrencyLimit{
+			Enabled: true,
+			Limit:   1,
+			MaxWait: 0,
+		},
+	}
+	controller.rateBucket(policy.RateBucketKey).scheduled = []time.Time{time.Now()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		release, err := controller.Admit(ctx, policy)
+		if err == nil {
+			release()
+		}
+		done <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+
+	bucket := controller.concurrencyBucket(policy.ConcurrencyKey, policy.Concurrency.Limit)
+	if got := len(bucket.tokens); got != 1 {
+		t.Fatalf("available concurrency tokens = %d, want rate waiter not to hold token", got)
+	}
+
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("Admit error = nil, want context cancellation after test cleanup")
+	}
 }
 
 func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
@@ -307,8 +356,13 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 }
 
 func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
+			ClaudeCLI: config.ClaudeCLIConfig{
+				Command:      "claude",
+				OutputFormat: "json",
+			},
 			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
 				llmselection.BackendClaudeCLI: {
 					MaxConcurrency:        1,
@@ -319,6 +373,11 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
+printf '%s\n' '{"result":"done"}'
+`)
+	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
+	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 
@@ -328,8 +387,49 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 	}
 	defer release()
 
-	_, _, err = runtime.runAdmittedPromptTransportFallback(ctx, nil, nil, "hello", MonitorTurnMeta{})
+	_, err = runtime.runWithInput(ctx, nil, target, "hello", MonitorTurnMeta{})
 	requireProviderAdmissionRateLimited(t, err)
+	if got := readProviderAdmissionFakeDockerInvocations(t, countFile); got != 0 {
+		t.Fatalf("fake docker invocations = %d, want admission rejection before subprocess dispatch", got)
+	}
+}
+
+func TestClaudeCLIPromptFallbackConsumesAdmissionPerSubprocessAttempt(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	cfg := &config.Config{
+		LLM: config.LLMConfig{
+			ClaudeCLI: config.ClaudeCLIConfig{
+				Command:      "claude",
+				OutputFormat: "json",
+			},
+			ProviderLimits: map[string]config.LLMProviderLimitPolicy{
+				llmselection.BackendClaudeCLI: {
+					RateLimit:        "1/h",
+					RateLimitMaxWait: "0s",
+				},
+			},
+		},
+	}
+	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
+	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
+	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
+if [ "$count" = "1" ]; then
+  printf '%s\n' 'input must be provided either through stdin or as a prompt argument when using --print' >&2
+  exit 1
+fi
+printf '%s\n' '{"result":"done"}'
+`)
+	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
+	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
+
+	_, fallback, err := runtime.runWithPromptTransportFallback(ctx, []string{"--print"}, target, "hello", MonitorTurnMeta{})
+	requireProviderAdmissionRateLimited(t, err)
+	if !fallback.Attempted {
+		t.Fatalf("fallback = %#v, want prompt-argument fallback attempted", fallback)
+	}
+	if got := readProviderAdmissionFakeDockerInvocations(t, countFile); got != 1 {
+		t.Fatalf("fake docker invocations = %d, want second fallback subprocess rejected before dispatch", got)
+	}
 }
 
 func mustAdmissionProfile(t *testing.T, backend string) llmselection.Profile {
@@ -362,4 +462,41 @@ func requireProviderAdmissionRateLimited(t *testing.T, err error) {
 	if runtimeErr.Code != llmProviderRateLimitedCode || runtimeErr.Component != llmProviderAdmissionComponent || runtimeErr.Operation != llmProviderAdmissionOperation || !runtimeErr.Retryable {
 		t.Fatalf("runtime error = %#v, want provider admission rate_limited retryable error", runtimeErr)
 	}
+}
+
+func writeProviderAdmissionFakeDocker(t *testing.T, body string) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	countFile := filepath.Join(dir, "invocations")
+	scriptPath := filepath.Join(dir, "fake-docker.sh")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"set -eu",
+		"count_file=" + strconv.Quote(countFile),
+		"count=0",
+		"if [ -f \"$count_file\" ]; then count=$(cat \"$count_file\"); fi",
+		"count=$((count+1))",
+		"printf '%s' \"$count\" >\"$count_file\"",
+		body,
+	}, "\n") + "\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake docker script: %v", err)
+	}
+	return scriptPath, countFile
+}
+
+func readProviderAdmissionFakeDockerInvocations(t *testing.T, countFile string) int {
+	t.Helper()
+	raw, err := os.ReadFile(countFile)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read fake docker invocation count: %v", err)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse fake docker invocation count %q: %v", raw, err)
+	}
+	return count
 }

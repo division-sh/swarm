@@ -47,6 +47,11 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
 		return nil, fmt.Errorf("%w: %s is missing", ErrClaudeAuthRequired, profile.Credential.EnvVar)
 	}
+	release, err := r.admitProviderDispatch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
