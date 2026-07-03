@@ -103,6 +103,73 @@ func TestValidateValueExpression_RejectsLegacyEventReceiverProjections(t *testin
 	}
 }
 
+func TestEventReferences_OnlyMatchesRootEventContext(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		want       []string
+	}{
+		{
+			name:       "root",
+			expression: `event.entity_id`,
+			want:       []string{"entity_id"},
+		},
+		{
+			name:       "root after delimiter",
+			expression: `(event.flow_instance == "flow-1") || payload.ok`,
+			want:       []string{"flow_instance"},
+		},
+		{
+			name:       "nested payload event object",
+			expression: `payload.event.entity_id`,
+			want:       nil,
+		},
+		{
+			name:       "nested platform entity event object",
+			expression: `_entity.event.flow_instance`,
+			want:       nil,
+		},
+		{
+			name:       "nested event object with spaced dot",
+			expression: `payload . event.entity_id`,
+			want:       nil,
+		},
+		{
+			name:       "identifier prefix",
+			expression: `some_event.entity_id`,
+			want:       nil,
+		},
+		{
+			name:       "string literal",
+			expression: `"event.entity_id"`,
+			want:       nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EventReferences(tt.expression)
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Fatalf("EventReferences(%q) = %#v, want %#v", tt.expression, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateValueExpression_AllowsNestedAuthorEventFields(t *testing.T) {
+	for _, expression := range []string{
+		`payload.event.entity_id`,
+		`payload.event.flow_instance == "flow-1"`,
+		`_entity.event.flow_instance`,
+		`payload.event.entity_id == event.source.entity_id`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			if err := ValidateValueExpression(expression); err != nil {
+				t.Fatalf("ValidateValueExpression(%q) error = %v", expression, err)
+			}
+		})
+	}
+}
+
 func TestEvalValueExpression_RejectsLegacyEventReceiverProjectionEvenWhenMapContainsValue(t *testing.T) {
 	_, err := EvalValueExpression(`event.entity_id`, ValueContext{
 		Event: map[string]any{"entity_id": "legacy-ent"},
