@@ -22,16 +22,17 @@ import (
 
 // AnthropicAPIRuntime provides production API-backed LLM execution.
 type AnthropicAPIRuntime struct {
-	cfg           *config.Config
-	sessions      sessions.Registry
-	turns         TurnPersistence
-	conversations ConversationPersistence
-	budget        BudgetGuard
-	lockOwner     string
-	httpClient    *http.Client
-	apiURL        string
-	apiKey        string
-	events        EventPublisher
+	cfg               *config.Config
+	sessions          sessions.Registry
+	turns             TurnPersistence
+	conversations     ConversationPersistence
+	budget            BudgetGuard
+	lockOwner         string
+	httpClient        *http.Client
+	apiURL            string
+	apiKey            string
+	events            EventPublisher
+	providerAdmission *ProviderAdmissionRegistry
 }
 
 func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *AnthropicAPIRuntime {
@@ -46,9 +47,10 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lock
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
-		apiURL: "https://api.anthropic.com/v1/messages",
-		apiKey: llmselection.CredentialValue(profile, os.LookupEnv),
-		events: publisher,
+		apiURL:            "https://api.anthropic.com/v1/messages",
+		apiKey:            llmselection.CredentialValue(profile, os.LookupEnv),
+		events:            publisher,
+		providerAdmission: NewProviderAdmissionRegistry(cfg),
 	}
 }
 
@@ -252,6 +254,10 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, fmt.Errorf("marshal anthropic request: %w", err)
 	}
+	resolvedModel, err := resolveProviderAdmissionModel(ctx, r.cfg, r.providerAdmission, profile)
+	if err != nil {
+		return nil, err
+	}
 
 	maxRetries := r.cfg.LLM.ClaudeAPI.MaxRetries
 	if maxRetries <= 0 {
@@ -269,7 +275,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	var retryCount int
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		retryCount = attempt
-		rawResp, parsed, lastErr = r.sendRequest(ctx, reqJSON)
+		rawResp, parsed, lastErr = r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
 		if lastErr == nil {
 			break
 		}
@@ -361,6 +367,15 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	}
 
 	return &resp, nil
+}
+
+func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, anthropicResponse, error) {
+	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, model)
+	if err != nil {
+		return nil, anthropicResponse{}, err
+	}
+	defer release()
+	return r.sendRequest(ctx, payload)
 }
 
 func (r *AnthropicAPIRuntime) persistConversation(ctx context.Context, s *Session) {

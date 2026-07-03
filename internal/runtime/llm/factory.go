@@ -42,20 +42,25 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	providerAdmission := NewProviderAdmissionRegistry(f.Cfg)
 
 	var runtime Runtime
 	switch profile.ID {
 	case llmselection.BackendAnthropic:
 		runtime = NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+		runtime.(*AnthropicAPIRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendClaudeCLI:
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
 			ToolGateway:         f.ToolGateway,
 		})
+		runtime.(*ClaudeCLIRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendOpenAICompatible:
 		runtime = NewOpenAICompatibleRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+		runtime.(*OpenAICompatibleRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendOpenAIResponses:
 		runtime = NewOpenAIResponsesRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+		runtime.(*OpenAIResponsesRuntime).providerAdmission = providerAdmission
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)
 	}

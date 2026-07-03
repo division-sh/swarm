@@ -18,18 +18,19 @@ import (
 )
 
 type ClaudeCLIRuntime struct {
-	cfg             *config.Config
-	sessions        sessions.Registry
-	turns           TurnPersistence
-	conversations   ConversationPersistence
-	budget          BudgetGuard
-	lockOwner       string
-	workspaces      workspace.Resolver
-	monitor         MonitorSink
-	events          EventPublisher
-	mcpTurns        MCPTurnContextStore
-	toolGateway     toolgateway.Binding
-	execWorkspaceFn func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
+	cfg               *config.Config
+	sessions          sessions.Registry
+	turns             TurnPersistence
+	conversations     ConversationPersistence
+	budget            BudgetGuard
+	lockOwner         string
+	workspaces        workspace.Resolver
+	monitor           MonitorSink
+	events            EventPublisher
+	mcpTurns          MCPTurnContextStore
+	toolGateway       toolgateway.Binding
+	execWorkspaceFn   func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
+	providerAdmission *ProviderAdmissionRegistry
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
@@ -76,17 +77,18 @@ func NewClaudeCLIRuntimeWithOptions(
 		monitor = NewFileMonitorSink(DefaultMonitorDir())
 	}
 	return &ClaudeCLIRuntime{
-		cfg:           cfg,
-		sessions:      sessions,
-		turns:         turns,
-		conversations: conversations,
-		budget:        budget,
-		lockOwner:     lockOwner,
-		workspaces:    workspaces,
-		monitor:       monitor,
-		events:        publisher,
-		mcpTurns:      opts.MCPTurnContextStore,
-		toolGateway:   opts.ToolGateway,
+		cfg:               cfg,
+		sessions:          sessions,
+		turns:             turns,
+		conversations:     conversations,
+		budget:            budget,
+		lockOwner:         lockOwner,
+		workspaces:        workspaces,
+		monitor:           monitor,
+		events:            publisher,
+		mcpTurns:          opts.MCPTurnContextStore,
+		toolGateway:       opts.ToolGateway,
+		providerAdmission: NewProviderAdmissionRegistry(cfg),
 	}
 }
 
@@ -371,7 +373,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			return target.Container
 		}(),
 	}
-	resp, fallback, err := r.runWithPromptTransportFallback(ctx, args, target, prompt, monitorMeta)
+	resp, fallback, err := r.runAdmittedPromptTransportFallback(ctx, args, target, prompt, monitorMeta)
 	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 	transportFallback.Used = transportFallback.Used || fallback.Used
 	if err != nil && s.TurnCount == 0 && isUnsupportedCLIFlagError(err) {
@@ -391,7 +393,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		if mcpEnabled {
 			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 		}
-		resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, prompt), monitorMeta)
+		resp, fallback, err = r.runAdmittedPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, prompt), monitorMeta)
 		transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 		transportFallback.Used = transportFallback.Used || fallback.Used
 	}
@@ -442,7 +444,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 				}
 				monitorMeta.SessionID = s.ID
-				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
+				resp, fallback, err = r.runAdmittedPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
 				transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 				transportFallback.Used = transportFallback.Used || fallback.Used
 				if err != nil && isUnsupportedCLIFlagError(err) {
@@ -462,7 +464,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 					if mcpEnabled {
 						args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
 					}
-					resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content), monitorMeta)
+					resp, fallback, err = r.runAdmittedPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content), monitorMeta)
 					transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 					transportFallback.Used = transportFallback.Used || fallback.Used
 				}
@@ -574,6 +576,20 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		}
 	}
 	return resp, nil
+}
+
+func (r *ClaudeCLIRuntime) runAdmittedPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
+	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
+	resolvedModel, err := resolveProviderAdmissionModel(ctx, r.cfg, r.providerAdmission, profile)
+	if err != nil {
+		return nil, promptTransportFallback{}, err
+	}
+	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, resolvedModel)
+	if err != nil {
+		return nil, promptTransportFallback{}, err
+	}
+	defer release()
+	return r.runWithPromptTransportFallback(ctx, args, target, prompt, meta)
 }
 
 func validateCLIResponseToolCallsForTurn(actor runtimeactors.AgentConfig, tools []ToolDefinition, resp *Response) error {
