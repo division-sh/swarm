@@ -133,6 +133,18 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 			t.Fatalf("public docs missing replacement setup guidance %q", want)
 		}
 	}
+
+	runtimeConfig, err := os.ReadFile(filepath.Join(root, "runtime-config.example.yaml"))
+	if err != nil {
+		t.Fatalf("read runtime-config.example.yaml: %v", err)
+	}
+	runtimeConfigText := string(runtimeConfig)
+	if strings.Contains(runtimeConfigText, "\n  data_source:") {
+		t.Fatalf("runtime-config.example.yaml sets an explicit data_source that fresh repos may not have:\n%s", runtimeConfigText)
+	}
+	if !strings.Contains(runtimeConfigText, "default project data directory") {
+		t.Fatalf("runtime-config.example.yaml missing default data directory guidance:\n%s", runtimeConfigText)
+	}
 }
 
 func writeEnvAuthorityRepoWithMalformedDotEnv(t *testing.T) string {

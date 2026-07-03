@@ -15,7 +15,9 @@ store:
 
 workspace:
   backend: docker
-  data_source: .swarm/data
+  # Omit data_source for the default project data directory. Swarm can create
+  # that default path during local startup. Set data_source only when pointing
+  # at an existing, operator-managed directory.
 
 llm:
   backend: claude_cli
