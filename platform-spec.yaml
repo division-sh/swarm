@@ -2913,12 +2913,12 @@ engine:
     canonical_owner: internal/store/backendselection runtime store backend resolver
     description: >
       Runtime store backend selection is owned by one typed resolver before runtime store construction. CLI flags,
-      environment variables, runtime config, harnesses, and local foreground startup may collect selector input, but they
-      must consume this owner rather than interpreting backend strings independently.
+      runtime config, deprecated environment fallback, harnesses, and local foreground startup may collect selector input,
+      but they must consume this owner rather than interpreting backend strings independently.
     backend_ids:
       postgres:
         status: active_supported_runtime_backend
-        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments through flag, environment, or runtime config.
+        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments through flag, runtime config, or deprecated environment fallback.
       sqlite:
         status: active_local_dev_default_runtime_backend
         meaning: >
@@ -2930,35 +2930,37 @@ engine:
     selector_precedence:
       source_order:
       - flag
-      - environment
       - runtime_config
+      - deprecated_environment
       - rollout_default
       flag:
         command: swarm serve
         name: --store <backend>
-      environment:
-        backend: SWARM_STORE_BACKEND
       runtime_config:
         backend_key: store.backend
+      deprecated_environment:
+        backend: SWARM_STORE_BACKEND
+        status: deprecated_transition_fallback
+        rule: Environment fallback remains visible for transition only and MUST NOT outrank typed runtime config.
       rollout_default:
         active_no_selection_default: sqlite
         postgres_opt_in_backend: postgres
         rule: >
           No-selection local/dev runtime startup resolves to SQLite. Postgres remains explicitly selectable through
-          --store postgres, SWARM_STORE_BACKEND=postgres, or store.backend=postgres and remains the production/external
-          backend.
+          --store postgres, store.backend=postgres, or deprecated SWARM_STORE_BACKEND=postgres fallback and remains the
+          production/external backend.
     sqlite_path:
       canonical_owner: internal/store/backendselection SQLite path resolver
-      environment: SWARM_SQLITE_PATH
       runtime_config_key: store.sqlite.path
+      deprecated_environment: SWARM_SQLITE_PATH
       default_authority: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
       project_default_path: .swarm/stores/dev.db
       no_project_default_path: <swarm-dir>/stores/default/dev.db
       borrowed_project_default_path: <swarm-dir>/stores/projects/<project-key>/dev.db
       legacy_repo_relative_path: .swarm/dev.db
       source_order:
-      - environment
       - runtime_config
+      - deprecated_environment
       - local_runtime_state_default
       lifecycle:
       - Project-local startup whose canonical project root matches the active repo root uses `<project-root>/.swarm/stores/dev.db`.
@@ -2986,7 +2988,9 @@ engine:
       rule: >
         Existing SWARM_DB_* / PG* variables and database.* config keys are Postgres connection details after the canonical
         selector resolves to postgres. They are not generic backend selectors and must not imply backend selection by
-        presence alone.
+        presence alone. Non-secret connection details are owned by typed runtime config, with environment variables retained
+        only as deprecated transition fallback or deliberate external Postgres compatibility. SWARM_DB_PASSWORD and PGPASSWORD
+        are STORE-class secret material under #1600 and are not closed by the non-secret source-order child.
     runtime_backend_rule:
     - Unsupported backend ids fail closed with supported backend guidance.
     - >
@@ -2994,8 +2998,8 @@ engine:
       without passing a raw runtime SQL handle into Postgres-only runtime consumers. runtime.NewRuntime must consume
       backend-neutral owners for runtime construction, including #1186 mailbox_write materialization and #1157 agent.usage
       reads.
-    - Explicit postgres selection must remain available through flag, environment, and runtime config and must reach the
-      existing Postgres runtime store path.
+    - Explicit postgres selection must remain available through flag, runtime config, and deprecated environment fallback
+      and must reach the existing Postgres runtime store path.
     - >
       Local/dev SQLite `swarm run --contracts` may stamp an ephemeral bundle source fact when no Postgres bundle catalog
       is present. DB-loaded `--bundle-hash` boot remains Postgres-only until a separate bundle-catalog portability owner
@@ -11918,8 +11922,8 @@ cli_specification:
           root or a directory under it. Explicit `--contracts` paths outside the active repo root are borrowed-project inputs.
       store_resolution:
         sqlite_source_order:
-        - SWARM_SQLITE_PATH
         - store.sqlite.path
+        - SWARM_SQLITE_PATH
         - project_default_or_swarm_dir_default
         project_default: <project-root>/.swarm/stores/dev.db
         no_project_default: <swarm-dir>/stores/default/dev.db
