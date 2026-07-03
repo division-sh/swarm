@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,10 +15,25 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 var toolTemplatePattern = regexp.MustCompile(`\{\{\s*([^{}]+?)\s*\}\}`)
+
+type httpToolStatusError struct {
+	ToolName   string
+	StatusCode int
+	Body       any
+	Secrets    []string
+}
+
+func (e httpToolStatusError) Error() string {
+	return runtimemanagedcredentials.RedactString(
+		fmt.Sprintf("http tool %s returned status %d: %s", e.ToolName, e.StatusCode, strings.TrimSpace(asString(e.Body))),
+		e.Secrets...,
+	)
+}
 
 func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 	if tool.HTTP == nil {
@@ -56,6 +72,17 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 		}
 		headers.Set(strings.TrimSpace(key), strings.TrimSpace(asString(resolved)))
 	}
+	managedAuth, err := e.resolveManagedCredentialForActor(ctx, actor, tool)
+	if err != nil {
+		return nil, err
+	}
+	authSecrets := []string{}
+	if managedAuth != nil {
+		if err := applyManagedCredentialHeader(headers, managedAuth, false); err != nil {
+			return nil, err
+		}
+		authSecrets = append(authSecrets, managedAuth.SecretValues()...)
+	}
 
 	var bodyReader io.Reader
 	if tool.HTTP.Body != nil {
@@ -88,12 +115,30 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 	}
 	backoff := strings.ToLower(strings.TrimSpace(tool.HTTP.Retry.Backoff))
 	var lastErr error
+	refreshedAfterUnauthorized := false
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		result, err := e.execHTTPRequestOnce(ctx, method, url, headers, bodyReader, timeout, tool)
+		result, err := e.execHTTPRequestOnce(ctx, method, url, headers, bodyReader, timeout, tool, authSecrets)
 		if err == nil {
 			return result, nil
 		}
 		lastErr = err
+		var statusErr httpToolStatusError
+		if managedAuth != nil && errors.As(err, &statusErr) && statusErr.StatusCode == http.StatusUnauthorized && !refreshedAfterUnauthorized {
+			refreshedAfterUnauthorized = true
+			token, record, refreshErr := e.managedTokenSource().Refresh(ctx, managedAuth.StoreKey)
+			if refreshErr != nil {
+				return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(authSecrets, record.SecretValues()...)...))
+			}
+			managedAuth.Token = token
+			managedAuth.Record = record
+			authSecrets = append(authSecrets, managedAuth.SecretValues()...)
+			if err := applyManagedCredentialHeader(headers, managedAuth, true); err != nil {
+				return nil, err
+			}
+			rewindBodyReader(bodyReader)
+			attempt--
+			continue
+		}
 		if isExternalDispatchRateLimited(err) {
 			break
 		}
@@ -105,14 +150,109 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 			sleep = time.Duration(1<<attempt) * time.Second
 		}
 		time.Sleep(sleep)
-		if seeker, ok := bodyReader.(io.Seeker); ok {
-			_, _ = seeker.Seek(0, io.SeekStart)
-		}
+		rewindBodyReader(bodyReader)
 	}
 	return nil, lastErr
 }
 
-func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, headers http.Header, body io.Reader, timeout time.Duration, tool RegisteredTool) (any, error) {
+type managedHTTPAuth struct {
+	StoreKey string
+	Token    string
+	Record   runtimemanagedcredentials.Record
+	Header   string
+	Prefix   string
+}
+
+func (a managedHTTPAuth) SecretValues() []string {
+	secrets := a.Record.SecretValues()
+	token := strings.TrimSpace(a.Token)
+	if token != "" {
+		secrets = append(secrets, token)
+	}
+	return secrets
+}
+
+func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor models.AgentConfig, tool RegisteredTool) (*managedHTTPAuth, error) {
+	if tool.ManagedCredential == nil {
+		return nil, nil
+	}
+	ref := *tool.ManagedCredential
+	key := strings.TrimSpace(ref.Key)
+	if key == "" {
+		return nil, fmt.Errorf("tool %s managed_credential.key is required", strings.TrimSpace(tool.Name))
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	e.mu.RUnlock()
+	flowID := emitActorFlowID(source, actor, "")
+	storeKey, mapped := semanticview.CredentialStoreKeyForActorFlow(source, actor.ID, flowID, key)
+	if mapped && strings.TrimSpace(storeKey) == "" {
+		return nil, fmt.Errorf("managed credential %q is not declared and bound for imported package actor %s", key, strings.TrimSpace(actor.ID))
+	}
+	storeKey = strings.TrimSpace(storeKey)
+	if storeKey == "" {
+		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
+	}
+	token, record, err := e.managedTokenSource().AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
+		Key:    storeKey,
+		Scopes: ref.Scopes,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
+	}
+	header := strings.TrimSpace(ref.Header)
+	if header == "" {
+		header = "Authorization"
+	}
+	prefix := strings.TrimSpace(ref.Prefix)
+	if prefix == "" && strings.EqualFold(header, "Authorization") {
+		prefix = "Bearer"
+	}
+	return &managedHTTPAuth{
+		StoreKey: storeKey,
+		Token:    token,
+		Record:   record,
+		Header:   header,
+		Prefix:   prefix,
+	}, nil
+}
+
+func (e *Executor) managedTokenSource() *runtimemanagedcredentials.TokenSource {
+	return &runtimemanagedcredentials.TokenSource{
+		Store:      e.managedCredentials,
+		HTTPClient: e.httpClient,
+	}
+}
+
+func applyManagedCredentialHeader(headers http.Header, auth *managedHTTPAuth, replace bool) error {
+	if auth == nil {
+		return nil
+	}
+	header := strings.TrimSpace(auth.Header)
+	if header == "" {
+		header = "Authorization"
+	}
+	if existing := strings.TrimSpace(headers.Get(header)); existing != "" && !replace {
+		return fmt.Errorf("managed credential cannot set %s because the header is already configured", header)
+	}
+	value := strings.TrimSpace(auth.Token)
+	if value == "" {
+		return fmt.Errorf("managed credential %q did not provide an access token", auth.StoreKey)
+	}
+	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
+		value = prefix + " " + value
+	}
+	headers.Set(header, value)
+	return nil
+}
+
+func rewindBodyReader(body io.Reader) {
+	if seeker, ok := body.(io.Seeker); ok {
+		_, _ = seeker.Seek(0, io.SeekStart)
+	}
+}
+
+func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, headers http.Header, body io.Reader, timeout time.Duration, tool RegisteredTool, secrets []string) (any, error) {
 	if err := e.admitExternalDispatch(ctx, e.httpToolExternalDispatchPolicy(tool)); err != nil {
 		return nil, err
 	}
@@ -137,8 +277,9 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 		return nil, err
 	}
 	parsedBody := parseHTTPResponseBody(resp, rawBody)
+	parsedBody = runtimemanagedcredentials.RedactValue(parsedBody, secrets...)
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("http tool %s returned status %d: %s", tool.Name, resp.StatusCode, strings.TrimSpace(asString(parsedBody)))
+		return nil, httpToolStatusError{ToolName: tool.Name, StatusCode: resp.StatusCode, Body: parsedBody, Secrets: secrets}
 	}
 	if len(tool.ResponseMapping) == 0 {
 		return parsedBody, nil

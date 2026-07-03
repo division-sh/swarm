@@ -179,10 +179,10 @@ func TestExecutor_HTTPTimeoutStartsAfterAdmissionWait(t *testing.T) {
 			MaxWait: 500 * time.Millisecond,
 		},
 	}
-	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool); err != nil {
+	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
 		t.Fatalf("initial execHTTPRequestOnce: %v", err)
 	}
-	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool); err != nil {
+	if _, err := exec.execHTTPRequestOnce(context.Background(), http.MethodGet, server.URL, http.Header{}, nil, 20*time.Millisecond, tool, nil); err != nil {
 		t.Fatalf("second execHTTPRequestOnce after admission wait: %v", err)
 	}
 	recorder.requireGapAtLeast(t, 45*time.Millisecond)

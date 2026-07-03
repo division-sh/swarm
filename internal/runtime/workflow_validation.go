@@ -9,12 +9,14 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type WorkflowContractValidationOptions struct {
 	Credentials                    runtimecredentials.Store
+	ManagedCredentials             runtimemanagedcredentials.Store
 	CheckMCPReachable              bool
 	StrictEmitSchemas              bool
 	FatalToolImplementationWarning bool
@@ -54,6 +56,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		Credentials:             opts.Credentials,
+		ManagedCredentials:      opts.ManagedCredentials,
 		CheckMCPReachable:       opts.CheckMCPReachable,
 		ValidateModelResolution: opts.ValidateLLMModelResolution,
 		LLMProfile:              opts.LLMProfile,

@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
@@ -72,6 +73,7 @@ type selectedAPICapabilityRequest struct {
 	Config                  *config.Config
 	Workspaces              serveWorkspaceLifecycle
 	Credentials             runtimecredentials.Store
+	ManagedCredentials      runtimemanagedcredentials.Store
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)

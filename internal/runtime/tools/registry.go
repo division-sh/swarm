@@ -33,6 +33,7 @@ type RegisteredTool struct {
 	HTTP               *runtimecontracts.HTTPToolSpec
 	ResponseMapping    map[string]any
 	Credentials        []string
+	ManagedCredential  *runtimecontracts.ManagedCredentialRef
 	RateLimit          externalDispatchRateLimitConfig
 	MCPServerName      string
 	MCPRemoteName      string
@@ -239,8 +240,18 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 		HTTP:               entry.HTTP,
 		ResponseMapping:    deepCloneMap(entry.ResponseMapping),
 		Credentials:        append([]string{}, entry.Credentials...),
+		ManagedCredential:  cloneManagedCredentialRef(entry.ManagedCredential),
 		RateLimit:          rateLimit,
 	}, true, nil
+}
+
+func cloneManagedCredentialRef(ref *runtimecontracts.ManagedCredentialRef) *runtimecontracts.ManagedCredentialRef {
+	if ref == nil {
+		return nil
+	}
+	out := *ref
+	out.Scopes = append([]string{}, ref.Scopes...)
+	return &out
 }
 
 func normalizeImplementationClass(name string, entry runtimecontracts.ToolSchemaEntry) implementationClass {

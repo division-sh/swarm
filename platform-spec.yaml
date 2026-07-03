@@ -5181,6 +5181,16 @@ tool_model:
           returned as the tool result.
         credentials: list of strings — credential store key names this tool needs. The platform resolves them from the credential
           store at call time and makes them available as {{credentials.key}} in templates.
+        managed_credential: >
+          object — managed credential reference for deployment-level OAuth/token lifecycle. This is a sibling owner to
+          static `credentials`; it does not create {{credentials.*}} template variables and it is not stored in
+          `swarm secrets`. Fields: key is the required package-local credential handle; imported packages must declare the
+          handle under `requires.credentials` and the parent import site must bind it through `bind.credentials`; no ambient
+          same-name fallback is allowed. header optionally names the request header to receive the access token and defaults
+          to `Authorization`. prefix optionally names the value prefix and defaults to `Bearer` only when header is omitted
+          or `Authorization`; custom headers default to the raw access token. scopes optionally lists scopes required by this
+          tool call. Boot/verify and execution fail closed when the connected managed credential record does not cover every
+          required scope.
         rate_limit: string — optional external dispatch rate limit, format N/period.
         rate_limit_max_wait: string — required when rate_limit is present; maximum per-call admission wait before
           returning typed rate_limited.
@@ -5195,6 +5205,13 @@ tool_model:
           {{response.headers.header_name}}.
       missing_variable: If a required template variable cannot be resolved (missing input field, missing credential), the tool
         call fails with an error returned to the agent. The platform does not make the HTTP request.
+      managed_credentials: >
+        `managed_credential` is resolved after package/import credential binding and before request dispatch. The managed
+        credential owner provides only in-flight authorization material. The runtime refreshes before use when the record is
+        expired or near expiry, injects the token into the configured header, and on provider 401 refreshes once and retries
+        the request once. Missing, unconnected, refresh-failed, scope-insufficient, unsupported, or unbound managed
+        credentials fail closed before dispatch. A tool may not also configure the same header in `http.headers`; that would
+        create dual authorization ownership.
     external_provider_dispatch_rate_limit:
       description: >
         `rate_limit` on an HTTP tool declares process-local admission for outbound HTTP provider dispatch by that tool.
@@ -5301,6 +5318,80 @@ tool_model:
     platform_guarantee: The platform never logs, indexes, or persists credential values in the event store, dead letters, or
       any platform table. Credentials exist only in the credential store and in-flight tool requests. Supported operator
       surfaces never return credential values after write — only metadata.
+  managed_credential_store:
+    description: >
+      Sibling source authority for deployment-level managed OAuth/token credentials used by outbound HTTP tools. It owns
+      structured token records and lifecycle state. It is not the static credential store and MUST NOT be implemented as
+      hidden behavior inside `credentials.Store.Get(string) string`.
+    scope:
+    - single-tenant/self-hosted/operator-connected deployment token records
+    - authorization-code + PKCE consent and callback
+    - client_credentials as the first non-consent grant variant
+    - access token, refresh token when present, expiry, scopes, provider/account identity, grant type, status, refresh
+      policy, and failure evidence
+    - direct Executor.Execute, served /tools/{name}, and MCP tools/call HTTP-tool entry points
+    non_goals:
+    - multi-tenant per-user token vault or end-user account selection
+    - provider trigger/webhook adapters; those extend existing inbound.webhook in a separate owner
+    - DB connectors, AWS SigV4/AssumeRole, MCP/native connector authentication, and real-provider catalog conveniences
+    local_storage:
+      default: os.UserConfigDir()/swarm/managed_credentials.json
+      override: SWARM_MANAGED_CREDENTIALS_FILE
+      file_mode: "0600"
+      directory_mode: "0700"
+      format: JSON object containing structured managed credential records. Access tokens, refresh tokens, client secrets,
+        PKCE verifier/state, expiry, status, and failure evidence are record fields.
+      write_coordination: Cross-process advisory lock around file-tier connect/callback/disconnect writes, plus atomic
+        replace. Lock contention fails closed instead of risking lost updates or truncated token records.
+    production_storage: >
+      Production deployments may provide another implementation of the managed credential store interface. The semantic
+      record shape and resolver behavior remain the owner; production storage MUST preserve status/failure/scopes/expiry
+      semantics and redaction guarantees.
+    record_fields:
+      key: Deployment-level managed credential key after import-boundary binding.
+      provider: Provider label for operator status.
+      account: Optional connected account identity/label.
+      grant_type: authorization_code_pkce | client_credentials.
+      auth_url: Authorization endpoint for authorization_code_pkce records.
+      token_url: Token endpoint for grant and refresh requests.
+      client_id: OAuth client ID.
+      client_secret: Optional OAuth client secret.
+      redirect_url: Callback URL for authorization_code_pkce.
+      scopes: Granted/available scopes.
+      access_token: Secret access token, never returned by metadata/status surfaces.
+      refresh_token: Secret refresh token, never returned by metadata/status surfaces.
+      token_type: Token type, default Bearer.
+      expires_at: Access-token expiry timestamp when known.
+      status: unconnected | pending_consent | connected | refresh_failed | scope_insufficient.
+      failure: Redacted failure evidence for operator readback.
+    resolver_rule: >
+      HTTP tools name `managed_credential.key` as a package-local handle. Runtime consumers MUST map that handle through the
+      same import-boundary `requires.credentials` / `bind.credentials` resolver used by static credentials, then read the
+      managed credential record by the resulting deployment key. If the handle is undeclared, unbound, empty, or missing from
+      the managed store, execution fails before outbound dispatch. Same-name ambient fallback is forbidden for imported
+      packages.
+    refresh_rule: >
+      Before request dispatch, the resolver returns a valid access token or fails closed. It refreshes before use when the
+      access token is absent or expires within the configured refresh window. For provider 401 responses, the HTTP executor
+      refreshes once and retries the request once. Refresh failure sets refresh_failed state with redacted failure evidence
+      and returns a redacted runtime error.
+    operator_surface:
+      command: swarm connections connect|callback|status|disconnect
+      rule: >
+        `swarm connections` is the supported local operator CLI for managed credential lifecycle. `connect` starts
+        authorization_code_pkce consent or completes a client_credentials grant; `callback` records the authorization-code
+        callback; `status` returns metadata and required_by information only; `disconnect` deletes the token record. The
+        command is intentionally separate from `swarm secrets`, which remains static key/value secret storage. Secret
+        values accepted by the CLI, including OAuth client secrets and authorization callback codes, MUST NOT be accepted
+        as argv flag values; supported local secret input uses stdin or an equivalent non-argv source.
+    boot_validation: >
+      Boot/verify consumes managed_credential requirements and reports managed_credential_state for missing, pending,
+      refresh_failed, scope_insufficient, or otherwise unusable records. When boot warnings are fatal, these findings block
+      startup. Execution still fails closed even when boot warnings are non-fatal.
+    redaction_guarantee: >
+      Access tokens, refresh tokens, client secrets, authorization codes, PKCE verifier/state, and provider errors containing
+      those values MUST NOT be returned through logs, events, dead letters, tool results, metadata, or CLI/API/status
+      surfaces. Supported readback surfaces return only redacted metadata and failure evidence.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.
@@ -5317,6 +5408,7 @@ tool_model:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
       credentials: list of strings — credential store keys
+      managed_credential: object — managed OAuth/token credential reference; supported only for handler_type http
       rate_limit: string — optional external dispatch admission rate, supported only when handler_type resolves to http.
       rate_limit_max_wait: string — required when rate_limit is present.
     not_accepted:
@@ -5986,11 +6078,12 @@ flow_model:
           different semantic concept and must not be used as an import compatibility shim.
         credentials: >
           Imported package credential dependencies resolve exactly in this order: package-local credential handle,
-          import-site `bind.credentials` value, deployment credential-store key, credential-store value at call time.
-          Credentials have no package defaults and no same-name raw-key fallback. Tool, MCP, native web-search, bootverify,
-          and credential metadata consumers must map package handles through this resolver before reading or indexing
-          deployment credential keys. The credential store remains the only owner of secret values; the import-boundary
-          resolver never exposes or persists credential values.
+          import-site `bind.credentials` value, deployment credential key, owner-specific value or managed record at call
+          time. Credentials have no package defaults and no same-name raw-key fallback. Static HTTP/MCP/native web-search,
+          managed HTTP credential, bootverify, and credential metadata/status consumers must map package handles through
+          this resolver before reading or indexing deployment credential keys. The static credential store remains the only
+          owner of static secret values; the managed credential store remains the only owner of managed token records; the
+          import-boundary resolver never exposes or persists secret values or token material.
         fail_closed: >
           Runtime and verify consumers must use the shared import-boundary dependency resolver. A remaining same-concept
           helper that independently interprets imported package policy or credential handles is non-authoritative. Imported
@@ -12841,6 +12934,49 @@ cli_specification:
       - external vault/team secret management
       - package credential binding semantics
       - boot-check severity policy
+    connections:
+      command: swarm connections connect|callback|status|disconnect
+      tier: must_have
+      implementation_status: implemented_first_slice
+      owner: tool_model.managed_credential_store
+      behavior: >
+        Local operator CLI for deployment-level managed OAuth/token credentials. This command owns managed credential
+        lifecycle metadata and token records; it MUST NOT store OAuth lifecycle state in `swarm secrets` and MUST NOT expose
+        access tokens, refresh tokens, authorization codes, PKCE verifiers/state, or client secrets in stdout/stderr/status
+        JSON.
+      subcommands:
+        connect:
+          command: swarm connections connect <key> --grant authorization_code_pkce|client_credentials [...]
+          behavior: >
+            For authorization_code_pkce, stores a pending consent record with provider config, PKCE challenge/state, and
+            metadata, then prints only the authorization URL/state and redacted connection metadata. For client_credentials,
+            exchanges with the token endpoint immediately and stores a connected token record. OAuth client secrets, when
+            required by the provider, are read through `--client-secret-stdin`; an argv `--client-secret <value>` source is
+            unsupported because it leaks through shell history and process listings.
+        callback:
+          command: swarm connections callback <key> --state <state> --code-stdin
+          behavior: >
+            Completes an authorization_code_pkce record by validating callback state, exchanging the code with the stored
+            verifier, clearing transient verifier/state fields, and persisting connected token metadata. The authorization
+            code is read from stdin and MUST NOT be accepted as an argv flag value. Output is metadata only.
+        status:
+          command: swarm connections status [<key>] [--json] [--contracts <path>]
+          behavior: >
+            Lists managed credential metadata only: key, provider, account, grant_type, scopes, status, redacted failure,
+            expires_at, updated_at, present, and required_by where contract source context is available. Values and token
+            material are never returned.
+        disconnect:
+          command: swarm connections disconnect <key>
+          behavior: Deletes the managed credential token record for the deployment key.
+      storage_path:
+        default: os.UserConfigDir()/swarm/managed_credentials.json
+        override: SWARM_MANAGED_CREDENTIALS_FILE
+      split_scope:
+        - static `swarm secrets` API-key/PAT/bearer-token values
+        - provider trigger/webhook adapters on inbound.webhook
+        - multi-tenant per-user token vaults
+        - DB/AWS SigV4/non-HTTP/native connector auth
+        - external vault/team managed credential UI/API
     serve:
       command: swarm serve [flags]
       tier: must_have
