@@ -187,6 +187,9 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 	})
 	normalized = normalizeWorkflowExpressionStringLiterals(normalized)
 	normalized = rewriteWorkflowExpressionEntityNullPresenceChecks(normalized)
+	if err := workflowexpr.ValidateEventReferences(normalized); err != nil {
+		return "", workflowExpressionContext{}, err
+	}
 	normalizedCtx := workflowExpressionContext{
 		Entity:                       cloneStringAnyMap(ctx.Entity),
 		PlatformEntity:               cloneStringAnyMap(ctx.PlatformEntity),

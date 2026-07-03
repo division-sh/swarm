@@ -260,7 +260,7 @@ func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
 		InstanceIDPath: paths.Parse("payload.instance_id"),
 		ConfigFrom: &runtimecontracts.ConfigFromSpec{
 			Bindings: map[string]string{
-				"missing_event": "event.missing",
+				"missing_payload": "payload.missing",
 			},
 		},
 	}, testCreateFlowInstanceContext(triggerCtx))
@@ -268,7 +268,7 @@ func TestCreateFlowInstanceRejectsUnknownEventConfigRef(t *testing.T) {
 	if !errors.As(err, &refErr) {
 		t.Fatalf("createFlowInstance error = %T %v, want flowInstanceConfigRefError", err, err)
 	}
-	for _, want := range []string{`config_from "missing_event"`, `ref "event.missing"`, "resolved empty"} {
+	for _, want := range []string{`config_from "missing_payload"`, `ref "payload.missing"`, "resolved empty"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("createFlowInstance error = %v, want %q", err, want)
 		}

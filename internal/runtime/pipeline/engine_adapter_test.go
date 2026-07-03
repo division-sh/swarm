@@ -1009,8 +1009,8 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 			ItemType:     runtimecontracts.LiteralExpression("review_request"),
 			Severity:     runtimecontracts.LiteralExpression("urgent"),
 			Summary:      runtimecontracts.LiteralExpression("Review validation package"),
-			EntityID:     runtimecontracts.RefExpression("event.entity_id"),
-			FlowInstance: runtimecontracts.RefExpression("event.flow_instance"),
+			EntityID:     runtimecontracts.RefExpression("_entity.id"),
+			FlowInstance: runtimecontracts.RefExpression("_entity.flow_instance"),
 			Payload: map[string]runtimecontracts.ExpressionValue{
 				"review_kind":   runtimecontracts.RefExpression("payload.review_kind"),
 				"operator_hint": runtimecontracts.LiteralExpression("inspect_package"),
@@ -1037,6 +1037,10 @@ func TestPipelineEngineActionRunner_MailboxWriteMaterializesIdempotentRow(t *tes
 	base := values.NewContext()
 	base.Event = values.Wrap(evt.ContextMap(""))
 	base.Payload = values.Wrap(parsePayloadMap(evt.Payload()))
+	base.PlatformEntity = values.Wrap(map[string]any{
+		"id":            entityID,
+		"flow_instance": "validation/case-1",
+	})
 	execCtx := runtimeengine.ExecutionContext{
 		Base: base,
 		Request: runtimeengine.ExecutionRequest{

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types/ref"
 )
@@ -22,6 +23,7 @@ var (
 
 	workflowExpressionEntityReferencePattern         = regexp.MustCompile(`(^|[^a-zA-Z0-9_])entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
+	workflowExpressionEventReferencePattern          = regexp.MustCompile(`(^|[^a-zA-Z0-9_])event\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionEntityPresencePattern          = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
 	workflowExpressionEntityHasPattern               = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
 	workflowExpressionEntityHasTernaryTruePattern    = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
@@ -63,6 +65,9 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if expressionReferencesRetiredFanOutTarget(expression) {
 		return fmt.Errorf("fan_out.target is retired; use fan_out.item for per-item values or fan_out.count for fan-out count")
 	}
+	if err := ValidateEventReferences(expression); err != nil {
+		return err
+	}
 	_, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
 		return issues.Err()
@@ -85,6 +90,9 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	}
 	if expressionReferencesRetiredFanOutTarget(normalized) {
 		return nil, fmt.Errorf("fan_out.target is retired; use fan_out.item for per-item values or fan_out.count for fan-out count")
+	}
+	if err := ValidateEventReferences(normalized); err != nil {
+		return nil, err
 	}
 	if missing := MissingEntityReferences(normalized, ctx.Entity); len(missing) > 0 {
 		return nil, fmt.Errorf("entity field(s) unavailable in expression context: %s", strings.Join(missing, ", "))
@@ -329,6 +337,57 @@ func PlatformEntityReferences(expression string) []string {
 		seen[ref] = struct{}{}
 		out = append(out, ref)
 	}
+	return out
+}
+
+func EventReferences(expression string) []string {
+	expression = strings.TrimSpace(StripStringLiterals(expression))
+	if expression == "" {
+		return nil
+	}
+	matches := workflowExpressionEventReferencePattern.FindAllStringSubmatch(expression, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		ref := strings.TrimSpace(match[2])
+		if ref == "" {
+			continue
+		}
+		if _, ok := seen[ref]; ok {
+			continue
+		}
+		seen[ref] = struct{}{}
+		out = append(out, ref)
+	}
+	return out
+}
+
+func ValidateEventReferences(expression string) error {
+	invalid := InvalidEventReferences(expression)
+	if len(invalid) == 0 {
+		return nil
+	}
+	return fmt.Errorf("unsupported event context reference(s): %s", strings.Join(invalid, "; "))
+}
+
+func InvalidEventReferences(expression string) []string {
+	refs := EventReferences(expression)
+	if len(refs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if err := events.ValidateEventContextReference(ref); err != nil {
+			out = append(out, err.Error())
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
 	return out
 }
 

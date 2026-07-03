@@ -313,13 +313,18 @@ contract_formats:
           publish-time resolution. It is not a selector and it is not
           broadcast.
 
-        Legacy top-level event.entity_id and event.flow_instance references
-        are receiver-context projections only. They must resolve from
-        event.target when present, then from the current delivery target
-        materialized from event.target_set, then from
-        select_entity/select_or_create_entity late binding when present, then
-        from event.source. They are not a source-of-truth envelope model for
-        pin routing.
+        Top-level event.entity_id and event.flow_instance are retired
+        receiver-context projection shorthands and are unsupported on
+        handler authoring expression surfaces. Current receiver entity
+        context must be read through _entity.id and _entity.flow_instance.
+        Emitter route identity must be read through event.source.entity_id
+        and event.source.flow_instance. Singular receiver route identity
+        must be read through event.target.entity_id and
+        event.target.flow_instance. Fan-out receiver identity is represented
+        by event.target_set and by the per-recipient delivery target exposed
+        as event.target during dispatch. event.entity_id and
+        event.flow_instance are not a source-of-truth envelope model for pin
+        routing.
 
         Other envelope fields such as trigger_event_type, current_state,
         source_event_id, emitted_at, run_id, and scope remain
@@ -2126,11 +2131,15 @@ handler_specification:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
       event:
-        resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads event context fields
-          such as event.id, event.type, event.entity_id, event.flow_instance, and platform-owned routing
-          envelope values supplied by the runtime.'
+        resolves_to: 'The runtime-owned triggering event envelope/context. event.X reads the supported
+          platform-populated event context fields supplied by the runtime.'
         available_in: 'rules.condition and other handler expression surfaces when the runtime supplies current
           event context. event.* is read-only handler context, not payload.'
+        read_model:
+          supported_top_level_fields: 'event.id, event.type, event.trigger_event_type, event.source_agent, event.task_id, event.source, event.target, event.target_set, event.source_event_id, event.emitted_at, event.current_state, event.run_id, and event.scope.'
+          route_identity_fields: 'event.source.entity_id, event.source.flow_instance, event.source.flow_id, event.target.entity_id, event.target.flow_instance, and event.target.flow_id are supported route identity reads. event.target_set is a list of route identities; it is not a selector and is not a top-level receiver projection.'
+          unsupported_fields: 'Top-level event.entity_id and event.flow_instance are unsupported legacy receiver-context projection shorthands. Use _entity.id / _entity.flow_instance for current receiver context, event.source.* for emitter route identity, event.target.* for singular receiver route identity, and event.target_set for fan-out recipient route identities.'
+          source_authority: 'select_entity and select_or_create_entity keys may not use event.*, _entity.*, or payload-owned envelope fields as a source-authority bypass.'
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level).'

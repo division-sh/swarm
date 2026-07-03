@@ -10,7 +10,7 @@ test-node:
         event: item.exported
         broadcast: true
         fields:
-          id: event.entity_id
+          id: _entity.id
           name: entity.name
           status: _entity.current_state
   state_schema:

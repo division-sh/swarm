@@ -344,12 +344,6 @@ func (e Event) ContextMap(currentState string) map[string]any {
 		out["task_id"] = taskID
 	}
 	envelope := e.NormalizedEnvelope()
-	if envelope.EntityID != "" {
-		out["entity_id"] = envelope.EntityID
-	}
-	if envelope.FlowInstance != "" {
-		out["flow_instance"] = envelope.FlowInstance
-	}
 	if envelope.Scope != "" {
 		out["scope"] = string(envelope.Scope)
 	}
