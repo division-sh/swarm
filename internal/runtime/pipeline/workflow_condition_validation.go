@@ -77,28 +77,77 @@ func WorkflowConditionMissingRecognizedPrefix(expression string, context Workflo
 	case "true", "false", "null":
 		return false
 	}
-	for _, prefix := range workflowConditionRecognizedPrefixes(context) {
-		if strings.Contains(expression, prefix) {
+	for _, root := range workflowConditionRecognizedRoots(context) {
+		if workflowConditionContainsRecognizedRoot(expression, root) {
 			return false
 		}
 	}
 	return true
 }
 
-func workflowConditionRecognizedPrefixes(context WorkflowConditionContext) []string {
-	prefixes := []string{
-		"payload.",
-		"event.",
-		"entity.",
-		"_entity.",
-		"policy.",
-		"query_entities(",
+func workflowConditionContainsRecognizedRoot(expression, root string) bool {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		return false
+	}
+	if root == "query_entities" {
+		return strings.Contains(expression, "query_entities(")
+	}
+	for pos := 0; pos < len(expression); {
+		idx := strings.Index(expression[pos:], root)
+		if idx < 0 {
+			return false
+		}
+		start := pos + idx
+		end := start + len(root)
+		pos = end
+		if start > 0 && isWorkflowConditionIdentifierPart(expression[start-1]) {
+			continue
+		}
+		if end < len(expression) && isWorkflowConditionIdentifierPart(expression[end]) {
+			continue
+		}
+		next := skipWorkflowConditionWhitespace(expression, end)
+		if next < len(expression) && (expression[next] == '.' || expression[next] == '[') {
+			return true
+		}
+	}
+	return false
+}
+
+func skipWorkflowConditionWhitespace(expression string, pos int) int {
+	for pos < len(expression) {
+		switch expression[pos] {
+		case ' ', '\t', '\n', '\r':
+			pos++
+		default:
+			return pos
+		}
+	}
+	return pos
+}
+
+func isWorkflowConditionIdentifierPart(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		(ch >= '0' && ch <= '9') ||
+		ch == '_'
+}
+
+func workflowConditionRecognizedRoots(context WorkflowConditionContext) []string {
+	roots := []string{
+		"payload",
+		"event",
+		"entity",
+		"_entity",
+		"policy",
+		"query_entities",
 	}
 	switch context {
 	case WorkflowConditionContextOnComplete:
-		prefixes = append(prefixes, "accumulated.")
+		roots = append(roots, "accumulated")
 	case WorkflowConditionContextFilter, WorkflowConditionContextCount:
-		prefixes = append(prefixes, "accumulated.", "item.")
+		roots = append(roots, "accumulated", "item")
 	}
-	return prefixes
+	return roots
 }

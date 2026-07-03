@@ -114,6 +114,56 @@ func TestValidateConditionCEL_RejectsLegacyEventReceiverProjections(t *testing.T
 	}
 }
 
+func TestWorkflowConditionMissingRecognizedPrefix_AllowsStaticBracketRoots(t *testing.T) {
+	tests := []struct {
+		name       string
+		expression string
+		context    WorkflowConditionContext
+	}{
+		{
+			name:       "event route bracket root",
+			expression: `event["source"].entity_id != ""`,
+			context:    WorkflowConditionContextRule,
+		},
+		{
+			name:       "payload bracket root",
+			expression: `payload["score"] >= 0`,
+			context:    WorkflowConditionContextRule,
+		},
+		{
+			name:       "entity bracket root",
+			expression: `entity["revision_count"] == 0`,
+			context:    WorkflowConditionContextRule,
+		},
+		{
+			name:       "filter item bracket root",
+			expression: `item["score"] >= 0`,
+			context:    WorkflowConditionContextFilter,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if WorkflowConditionMissingRecognizedPrefix(tt.expression, tt.context) {
+				t.Fatalf("WorkflowConditionMissingRecognizedPrefix(%q, %s) = true, want false", tt.expression, tt.context)
+			}
+		})
+	}
+}
+
+func TestWorkflowConditionMissingRecognizedPrefix_StillRejectsBareIdentifiers(t *testing.T) {
+	for _, expression := range []string{
+		`score >= 0`,
+		`some_event["source"].entity_id != ""`,
+		`eventual.source != ""`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			if !WorkflowConditionMissingRecognizedPrefix(expression, WorkflowConditionContextRule) {
+				t.Fatalf("WorkflowConditionMissingRecognizedPrefix(%q) = false, want true", expression)
+			}
+		})
+	}
+}
+
 func TestNormalizeWorkflowExpression_RewritesQueryEntitiesCount(t *testing.T) {
 	got, _, err := normalizeWorkflowExpression(
 		`query_entities(name == payload.name).count == 0`,

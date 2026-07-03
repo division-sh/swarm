@@ -4451,7 +4451,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	handler.CreateEntity = false
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
 		ID:        "ready",
-		Condition: `entity.revision_count == 0 && payload.score >= 0 && event.source.entity_id != ""`,
+		Condition: `entity.revision_count == 0 && payload.score >= 0 && event["source"].entity_id != ""`,
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
@@ -4463,7 +4463,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	if reportContains(report.Errors(), "expression_field_reference_validation", "entity.revision_count") {
 		t.Fatalf("unexpected rule-condition entity reference error, got %#v", report.Errors())
 	}
-	if reportContains(report.Errors(), "condition_expression_validation", "event.source.entity_id") {
+	if reportContains(report.Errors(), "condition_expression_validation", `event["source"].entity_id`) {
 		t.Fatalf("unexpected rule-condition event context validation error, got %#v", report.Errors())
 	}
 	if reportContains(report.Errors(), "condition_payload_alignment", "payload.score") {
