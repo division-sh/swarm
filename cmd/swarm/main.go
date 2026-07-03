@@ -334,6 +334,8 @@ type serveOptions struct {
 	SwarmDirSet                      bool
 	ContextName                      string
 	ContextNameSet                   bool
+	APITokenFile                     string
+	APITokenFileFlagSet              bool
 	APIListenAddr                    string
 	MCPListenAddr                    string
 	ShutdownGrace                    time.Duration
@@ -743,14 +745,19 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	runtimeInstanceID := uuid.NewString()
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
 	reporter.emit(1, "process_start", "ok", "")
-	apiAuth := apiv1.ResolveAuthTokensFromEnvironment()
+	apiAuth, err := resolveServeAPIAuth(opts)
+	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("configure v1 api auth: %v", err)
+		return 1
+	}
 	if err := validateServeAPIAuthBinding(opts.APIListenAddr, apiAuth); err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("configure v1 api auth: %v", err)
 		return 1
 	}
 	if apiAuth.UsesDefaultLoopbackToken() {
-		log.Print(apiv1.DefaultLoopbackAPITokenWarning)
+		log.Print("using built-in dev API token on numeric loopback; use swarm serve --api-token-file or config serve_api_token_file before exposing")
 	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
@@ -2982,7 +2989,7 @@ func validateServeAPIAuthBinding(apiListenAddr string, auth apiv1.AuthTokenResol
 	if apiv1.DefaultLoopbackAPITokenAllowedHost(host) {
 		return nil
 	}
-	return fmt.Errorf("non-loopback API bind %s requires an explicit SWARM_API_TOKEN", strings.TrimSpace(apiListenAddr))
+	return fmt.Errorf("non-loopback API bind %s requires --api-token-file or config serve_api_token_file", strings.TrimSpace(apiListenAddr))
 }
 
 func listenServeHTTPListener(name, addr string) (net.Listener, error) {

@@ -65,30 +65,6 @@ func TestNewHandlerRejectsHandlersOutsideCanonicalCatalog(t *testing.T) {
 	}
 }
 
-func TestAuthTokensFromEnvironmentUsesOnlyUnifiedToken(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "api")
-	t.Setenv("SWARM_BUILDER_AUTH_TOKEN", "legacy")
-	t.Setenv("SWARM_OPERATOR_AUTH_TOKEN", "operator")
-
-	got := AuthTokensFromEnvironment()
-	want := []string{"api"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("AuthTokensFromEnvironment() = %v, want %v", got, want)
-	}
-}
-
-func TestResolveAuthTokensFromEnvironmentDefaultsToLoopbackToken(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "")
-	resolution := ResolveAuthTokensFromEnvironment()
-	if !resolution.UsesDefaultLoopbackToken() {
-		t.Fatalf("resolution = %#v, want default loopback token", resolution)
-	}
-	want := []string{DefaultLoopbackAPIToken}
-	if !reflect.DeepEqual(resolution.Tokens, want) {
-		t.Fatalf("tokens = %v, want %v", resolution.Tokens, want)
-	}
-}
-
 func TestDefaultLoopbackAPITokenAllowedHost(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "127.42.0.7", "::1", "[::1]"} {
 		if !DefaultLoopbackAPITokenAllowedHost(host) {
@@ -107,7 +83,7 @@ func TestLegacyEnvironmentTokensDoNotAuthorizeV1Transports(t *testing.T) {
 	t.Setenv("SWARM_BUILDER_AUTH_TOKEN", "legacy-builder")
 	t.Setenv("SWARM_OPERATOR_AUTH_TOKEN", "legacy-operator")
 
-	handler := testHandler(t, Options{AuthTokens: AuthTokensFromEnvironment()})
+	handler := testHandler(t, Options{AuthTokens: []string{DefaultLoopbackAPIToken}})
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"auth","method":"rpc.unsubscribe","params":{"subscription_id":"sub-1"}}`))
 	req.Header.Set("Authorization", "Bearer legacy-builder")

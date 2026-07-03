@@ -172,11 +172,59 @@ func TestServeProjectContextRegistrationRejectsUnsafeAuthDescriptor(t *testing.T
 	defer listener.Close()
 	err = reg.WriteFinal("runtime-1", listener.Addr(), apiv1.AuthTokenResolution{
 		Tokens:   []string{"secret"},
-		Source:   apiv1.AuthTokenSourceEnvironment,
+		Source:   apiv1.AuthTokenSource("explicit-without-token-file"),
 		Explicit: true,
 	}, cliContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, workspaceMountSources{})
-	if err == nil || !strings.Contains(err.Error(), "cannot be snapshotted") {
+	if err == nil || !strings.Contains(err.Error(), "requires token-file auth") {
 		t.Fatalf("WriteFinal err = %v, want safe-auth rejection", err)
+	}
+}
+
+func TestServeProjectContextRegistrationWritesTokenFileAuthDescriptor(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	swarmDir := t.TempDir()
+	opts := defaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = swarmDir
+	opts.SwarmDirSet = true
+	reg, err := prepareServeProjectContextRegistration(context.Background(), project.root, opts, cliContractPlatformSpecPaths{ContractsPath: project.contracts})
+	if err != nil {
+		t.Fatalf("prepare registration: %v", err)
+	}
+	defer reg.Release()
+	listener := listenLoopbackTestListener(t)
+	defer listener.Close()
+	tokenFile := writeCLIAPITokenFile(t, "serve-secret")
+	err = reg.WriteFinal("runtime-1", listener.Addr(), apiv1.AuthTokenResolution{
+		Tokens:    []string{"serve-secret"},
+		Source:    apiv1.AuthTokenSource(serveAPITokenFileFlagSource),
+		Explicit:  true,
+		TokenFile: tokenFile,
+	}, cliContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, workspaceMountSources{})
+	if err != nil {
+		t.Fatalf("WriteFinal: %v", err)
+	}
+
+	registry := newLocalContextRegistry(swarmDir)
+	entry, err := registry.ReadDescriptor(localProjectContextName(project.canonicalRoot))
+	if err != nil {
+		t.Fatalf("read descriptor: %v", err)
+	}
+	desc := entry.Descriptor
+	if desc.Auth.Mode != localContextAuthTokenFile || desc.Auth.TokenFile != tokenFile {
+		t.Fatalf("descriptor auth = %#v, want token_file %q", desc.Auth, tokenFile)
+	}
+	rpcEndpoint, err := cliAPIRPCEndpointFromServer(desc.APIServer, "descriptor api_server")
+	if err != nil {
+		t.Fatalf("rpc endpoint: %v", err)
+	}
+	token, err := localContextDescriptorToken(desc, rpcEndpoint)
+	if err != nil {
+		t.Fatalf("descriptor token: %v", err)
+	}
+	if token != "serve-secret" {
+		t.Fatalf("descriptor token = %q, want serve-secret", token)
 	}
 }
 

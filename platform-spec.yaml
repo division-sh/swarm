@@ -12527,6 +12527,11 @@ cli_specification:
             Accepted by the shared CLI config parser for
             cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence; ignored by the API
             connection and auth resolver.
+          serve_api_token_file: >
+            Accepted by the shared CLI config parser for
+            cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence.server_api_auth; ignored
+            by the API connection and auth resolver. This key is server-side `swarm serve` auth only and MUST NOT be
+            consumed as client API auth.
         rejected_keys:
           api_token: Inline bearer tokens in config files are not promoted.
           output_format: Split to #848 output renderer implementation.
@@ -12946,7 +12951,8 @@ cli_specification:
         promoted_by: '#884'
         runtime_bind_implemented_by: '#992'
         env_config_precedence_implemented_by: '#844'
-        implementation_status: runtime_bind_and_env_config_precedence_implemented_enable_disable_pending
+        server_api_auth_implemented_by: '#1647'
+        implementation_status: runtime_bind_env_config_and_server_api_auth_implemented_enable_disable_pending
         canonical_owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
         summary: >
           Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
@@ -13025,6 +13031,31 @@ cli_specification:
             environment: SWARM_MCP_LISTEN_ADDR
             config_key: serve_mcp_listen_addr
             built_in_default: 127.0.0.1:8082
+          server_api_auth:
+            accepted_sources:
+              flag_file: --api-token-file <path>
+              config_file_key: serve_api_token_file
+              built_in_loopback_default: built-in-loopback-default
+            source_order:
+            - --api-token-file
+            - config serve_api_token_file
+            - built-in loopback default
+            rejected_sources:
+              SWARM_API_TOKEN: >
+                Removed as a server-side `swarm serve` API auth source by #1647. Raw env is hidden mutable token
+                authority; use `swarm serve --api-token-file` or config `serve_api_token_file`.
+              SWARM_API_TOKEN_FILE: >
+                Not promoted as a server-side `swarm serve` API auth source. Use `swarm serve --api-token-file` or
+                config `serve_api_token_file`.
+              config api_token_file: >
+                Client-side API auth only, governed by
+                cli_specification.foundations.api_connection_auth_config_precedence. Server-side `swarm serve` auth
+                uses config `serve_api_token_file` to avoid client/server source ownership ambiguity.
+              config api_token: >
+                Not promoted. Inline bearer tokens in config files leak secret material into durable plaintext config.
+            token_file_rule: >
+              Token-file sources are read once during `swarm serve` startup. Missing, unreadable, or blank token-file
+              contents fail closed and MUST NOT fall back to the built-in loopback default.
           cli_config_file:
             accepted_sources:
             - SWARM_CONFIG
@@ -13038,9 +13069,9 @@ cli_specification:
             Values from flags, environment, and CLI config MUST use the host:port address_format above and
             fail before runtime startup if invalid.
           api_auth_coupling_rule: >
-            If no explicit `SWARM_API_TOKEN` is configured for `swarm serve`, the API listener may start only when
+            If no explicit token-file source is configured for `swarm serve`, the API listener may start only when
             its host is numeric loopback (`127.0.0.0/8` or `::1`). `localhost`, wildcard, empty, routable IP, and
-            DNS hosts require an explicit `SWARM_API_TOKEN`. The built-in API token is never valid for a
+            DNS hosts require `swarm serve --api-token-file` or config `serve_api_token_file`. The built-in API token is never valid for a
             non-loopback API listener. This rule applies to the API listener only; MCP listener and tool-gateway
             tokens remain owned by local_cli_test_gateway_startup.
           rejected_sources:
@@ -13072,7 +13103,8 @@ cli_specification:
             rule: >
               If the API listener would use the built-in loopback default token on a non-loopback host,
               `swarm serve` MUST fail closed before readiness with a diagnostic naming that non-loopback API binds
-              require explicit `SWARM_API_TOKEN`.
+              require `--api-token-file` or config `serve_api_token_file`. Raw `SWARM_API_TOKEN` MUST NOT satisfy this
+              requirement.
         flag_disposition:
           --health-addr:
             disposition: retired_final_v2_1_name_current_migration_evidence

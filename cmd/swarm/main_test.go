@@ -716,7 +716,7 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 
 func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	defaultAuth := apiv1.AuthTokenResolution{Tokens: []string{apiv1.DefaultLoopbackAPIToken}, Source: apiv1.AuthTokenSourceBuiltInLoopbackToken}
-	explicitAuth := apiv1.AuthTokenResolution{Tokens: []string{"operator-token"}, Source: apiv1.AuthTokenSourceEnvironment, Explicit: true}
+	explicitAuth := apiv1.AuthTokenResolution{Tokens: []string{"operator-token"}, Source: apiv1.AuthTokenSource(serveAPITokenFileFlagSource), Explicit: true, TokenFile: filepath.Join(t.TempDir(), "token")}
 	tests := []struct {
 		name    string
 		addr    string
@@ -725,9 +725,9 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	}{
 		{name: "default token allowed on ipv4 loopback", addr: "127.0.0.1:8081", auth: defaultAuth},
 		{name: "default token allowed on ipv6 loopback", addr: "[::1]:8081", auth: defaultAuth},
-		{name: "default token rejects localhost", addr: "localhost:8081", auth: defaultAuth, wantErr: "non-loopback API bind localhost:8081 requires an explicit SWARM_API_TOKEN"},
-		{name: "default token rejects wildcard", addr: "0.0.0.0:8081", auth: defaultAuth, wantErr: "non-loopback API bind 0.0.0.0:8081 requires an explicit SWARM_API_TOKEN"},
-		{name: "default token rejects routable", addr: "192.0.2.10:8081", auth: defaultAuth, wantErr: "non-loopback API bind 192.0.2.10:8081 requires an explicit SWARM_API_TOKEN"},
+		{name: "default token rejects localhost", addr: "localhost:8081", auth: defaultAuth, wantErr: "non-loopback API bind localhost:8081 requires --api-token-file or config serve_api_token_file"},
+		{name: "default token rejects wildcard", addr: "0.0.0.0:8081", auth: defaultAuth, wantErr: "non-loopback API bind 0.0.0.0:8081 requires --api-token-file or config serve_api_token_file"},
+		{name: "default token rejects routable", addr: "192.0.2.10:8081", auth: defaultAuth, wantErr: "non-loopback API bind 192.0.2.10:8081 requires --api-token-file or config serve_api_token_file"},
 		{name: "explicit token allows wildcard", addr: "0.0.0.0:8081", auth: explicitAuth},
 	}
 	for _, tc := range tests {
@@ -744,6 +744,78 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
+	t.Run("default loopback when no explicit source", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		auth, err := resolveServeAPIAuth(defaultServeOptions())
+		if err != nil {
+			t.Fatalf("resolveServeAPIAuth: %v", err)
+		}
+		if !auth.UsesDefaultLoopbackToken() || !reflect.DeepEqual(auth.Tokens, []string{apiv1.DefaultLoopbackAPIToken}) {
+			t.Fatalf("auth = %#v, want built-in loopback default", auth)
+		}
+	})
+
+	t.Run("flag token file wins over config", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		configTokenFile := writeCLIAPITokenFile(t, "config-token")
+		flagTokenFile := writeCLIAPITokenFile(t, "flag-token")
+		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+			"serve_api_token_file": configTokenFile,
+		}))
+		auth, err := resolveServeAPIAuth(serveOptions{APITokenFile: flagTokenFile, APITokenFileFlagSet: true})
+		if err != nil {
+			t.Fatalf("resolveServeAPIAuth: %v", err)
+		}
+		if got := auth.Tokens; !reflect.DeepEqual(got, []string{"flag-token"}) {
+			t.Fatalf("tokens = %#v, want flag token", got)
+		}
+		if auth.Source != apiv1.AuthTokenSource(serveAPITokenFileFlagSource) || !auth.Explicit || auth.TokenFile != flagTokenFile {
+			t.Fatalf("auth = %#v, want flag token-file source", auth)
+		}
+	})
+
+	t.Run("config token file used when flag absent", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		configTokenFile := writeCLIAPITokenFile(t, "config-token")
+		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+			"serve_api_token_file": configTokenFile,
+		}))
+		auth, err := resolveServeAPIAuth(defaultServeOptions())
+		if err != nil {
+			t.Fatalf("resolveServeAPIAuth: %v", err)
+		}
+		if got := auth.Tokens; !reflect.DeepEqual(got, []string{"config-token"}) {
+			t.Fatalf("tokens = %#v, want config token", got)
+		}
+		if auth.Source != apiv1.AuthTokenSource(serveAPITokenFileConfigSource) || !auth.Explicit || auth.TokenFile != configTokenFile {
+			t.Fatalf("auth = %#v, want config token-file source", auth)
+		}
+	})
+
+	t.Run("raw env source rejected even with token file", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		tokenFile := writeCLIAPITokenFile(t, "flag-token")
+		t.Setenv("SWARM_API_TOKEN", "env-token")
+		_, err := resolveServeAPIAuth(serveOptions{APITokenFile: tokenFile, APITokenFileFlagSet: true})
+		if err == nil || !strings.Contains(err.Error(), "server-side API environment source is no longer accepted") || !strings.Contains(err.Error(), "serve_api_token_file") {
+			t.Fatalf("err = %v, want removed-env diagnostic", err)
+		}
+	})
+
+	t.Run("blank and missing token files fail closed", func(t *testing.T) {
+		isolateCLIAPIConfigEnv(t)
+		blank := writeCLIAPITokenFile(t, "  \n")
+		if _, err := resolveServeAPIAuth(serveOptions{APITokenFile: blank, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "--api-token-file is blank") {
+			t.Fatalf("blank token err = %v, want blank token failure", err)
+		}
+		missing := filepath.Join(t.TempDir(), "missing-token")
+		if _, err := resolveServeAPIAuth(serveOptions{APITokenFile: missing, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "read --api-token-file") {
+			t.Fatalf("missing token err = %v, want read failure", err)
+		}
+	})
 }
 
 func TestCLI_ServeRuntimeConfigDoesNotFeedListenerConfig(t *testing.T) {
@@ -1108,7 +1180,10 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 	if strings.TrimSpace(spec.EnvConfigPrecedenceImplementedBy) != "#844" {
 		t.Fatalf("listener topology env_config_precedence_implemented_by = %q, want #844", spec.EnvConfigPrecedenceImplementedBy)
 	}
-	if strings.TrimSpace(spec.ImplementationStatus) != "runtime_bind_and_env_config_precedence_implemented_enable_disable_pending" {
+	if strings.TrimSpace(spec.ServerAPIAuthImplementedBy) != "#1647" {
+		t.Fatalf("listener topology server_api_auth_implemented_by = %q, want #1647", spec.ServerAPIAuthImplementedBy)
+	}
+	if strings.TrimSpace(spec.ImplementationStatus) != "runtime_bind_env_config_and_server_api_auth_implemented_enable_disable_pending" {
 		t.Fatalf("listener topology status = %q", spec.ImplementationStatus)
 	}
 	if spec.Listeners.API.BindFlag != "--api-listen-addr <host:port>" {
@@ -1137,6 +1212,42 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 	}
 	if spec.SourcePrecedence.MCPListenAddr.Environment != "SWARM_MCP_LISTEN_ADDR" || spec.SourcePrecedence.MCPListenAddr.ConfigKey != "serve_mcp_listen_addr" {
 		t.Fatalf("mcp listener source precedence = %#v", spec.SourcePrecedence.MCPListenAddr)
+	}
+	if spec.SourcePrecedence.ServerAPIAuth.AcceptedSources["flag_file"] != "--api-token-file <path>" {
+		t.Fatalf("server api auth flag source = %#v", spec.SourcePrecedence.ServerAPIAuth.AcceptedSources)
+	}
+	if spec.SourcePrecedence.ServerAPIAuth.AcceptedSources["config_file_key"] != "serve_api_token_file" {
+		t.Fatalf("server api auth config source = %#v", spec.SourcePrecedence.ServerAPIAuth.AcceptedSources)
+	}
+	wantServeAuthOrder := []string{"--api-token-file", "config serve_api_token_file", "built-in loopback default"}
+	if !reflect.DeepEqual(spec.SourcePrecedence.ServerAPIAuth.SourceOrder, wantServeAuthOrder) {
+		t.Fatalf("server api auth source order = %#v, want %#v", spec.SourcePrecedence.ServerAPIAuth.SourceOrder, wantServeAuthOrder)
+	}
+	for key, want := range map[string]string{
+		"SWARM_API_TOKEN":       "#1647",
+		"SWARM_API_TOKEN_FILE":  "Not promoted",
+		"config api_token_file": "Client-side API auth only",
+		"config api_token":      "Inline bearer tokens",
+	} {
+		if !strings.Contains(spec.SourcePrecedence.ServerAPIAuth.RejectedSources[key], want) {
+			t.Fatalf("server api auth rejected source %q missing %q:\n%s", key, want, spec.SourcePrecedence.ServerAPIAuth.RejectedSources[key])
+		}
+	}
+	for _, want := range []string{"Missing", "blank", "MUST NOT fall back"} {
+		if !strings.Contains(spec.SourcePrecedence.ServerAPIAuth.TokenFileRule, want) {
+			t.Fatalf("server token_file_rule missing %q:\n%s", want, spec.SourcePrecedence.ServerAPIAuth.TokenFileRule)
+		}
+	}
+	for _, want := range []string{"--api-token-file", "serve_api_token_file"} {
+		if !strings.Contains(spec.SourcePrecedence.APIAuthCouplingRule, want) {
+			t.Fatalf("api auth coupling rule missing %q:\n%s", want, spec.SourcePrecedence.APIAuthCouplingRule)
+		}
+		if !strings.Contains(spec.InteractionRules.APIDefaultTokenExposure.Rule, want) {
+			t.Fatalf("api default token exposure rule missing %q:\n%s", want, spec.InteractionRules.APIDefaultTokenExposure.Rule)
+		}
+	}
+	if strings.Contains(spec.SourcePrecedence.APIAuthCouplingRule, "explicit `SWARM_API_TOKEN`") {
+		t.Fatalf("api auth coupling still names explicit SWARM_API_TOKEN:\n%s", spec.SourcePrecedence.APIAuthCouplingRule)
 	}
 	for _, key := range []string{"SWARM_API_PORT", "SWARM_MCP_PORT", "api_listen_addr", "mcp_listen_addr"} {
 		if strings.TrimSpace(spec.SourcePrecedence.RejectedSources[key]) == "" {
@@ -1321,6 +1432,11 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "listener_topology_v2_1.source_precedence") {
 			t.Fatalf("cli config shared non-API key %q missing listener source owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
 		}
+	}
+	if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"], "server_api_auth") ||
+		!strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"], "server-side `swarm serve` auth only") ||
+		!strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"], "MUST NOT") {
+		t.Fatalf("cli config serve_api_token_file missing server/client boundary: %#v", spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"])
 	}
 	for _, key := range []string{"SWARM_API_PORT", "SWARM_MCP_PORT"} {
 		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.RejectedPorts[key], "Not promoted") {
@@ -3398,7 +3514,6 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
-	t.Setenv("SWARM_API_TOKEN", "test-token")
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier8-boot-verification", "test-boot-success"))
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
@@ -3452,7 +3567,7 @@ func TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersiste
 	if err != nil {
 		t.Fatalf("build run.fork request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -5928,7 +6043,6 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 }
 
 func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(t *testing.T) {
-	t.Setenv("SWARM_API_TOKEN", "test-token")
 	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
 	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
 	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
@@ -11320,6 +11434,7 @@ type serveListenerTopologySpec struct {
 	PromotedBy                       string `yaml:"promoted_by"`
 	RuntimeBindImplementedBy         string `yaml:"runtime_bind_implemented_by"`
 	EnvConfigPrecedenceImplementedBy string `yaml:"env_config_precedence_implemented_by"`
+	ServerAPIAuthImplementedBy       string `yaml:"server_api_auth_implemented_by"`
 	ImplementationStatus             string `yaml:"implementation_status"`
 	CanonicalOwner                   string `yaml:"canonical_owner"`
 	Summary                          string `yaml:"summary"`
@@ -11353,8 +11468,20 @@ type serveListenerTopologySpec struct {
 			ConfigKey      string `yaml:"config_key"`
 			BuiltInDefault string `yaml:"built_in_default"`
 		} `yaml:"mcp_listen_addr"`
-		RejectedSources map[string]string `yaml:"rejected_sources"`
+		ServerAPIAuth struct {
+			AcceptedSources map[string]string `yaml:"accepted_sources"`
+			SourceOrder     []string          `yaml:"source_order"`
+			RejectedSources map[string]string `yaml:"rejected_sources"`
+			TokenFileRule   string            `yaml:"token_file_rule"`
+		} `yaml:"server_api_auth"`
+		APIAuthCouplingRule string            `yaml:"api_auth_coupling_rule"`
+		RejectedSources     map[string]string `yaml:"rejected_sources"`
 	} `yaml:"source_precedence"`
+	InteractionRules struct {
+		APIDefaultTokenExposure struct {
+			Rule string `yaml:"rule"`
+		} `yaml:"api_default_token_exposure"`
+	} `yaml:"interaction_rules"`
 	ImplementationBoundaries []string `yaml:"implementation_boundaries"`
 }
 

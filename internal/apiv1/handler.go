@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,21 +36,20 @@ const (
 )
 
 const (
-	DefaultLoopbackAPIToken        = "swarm-dev-loopback-api-token"
-	DefaultLoopbackAPITokenWarning = "using built-in dev API token on loopback; set SWARM_API_TOKEN before exposing"
+	DefaultLoopbackAPIToken = "swarm-dev-loopback-api-token"
 )
 
 type AuthTokenSource string
 
 const (
-	AuthTokenSourceEnvironment          AuthTokenSource = "SWARM_API_TOKEN"
 	AuthTokenSourceBuiltInLoopbackToken AuthTokenSource = "built-in-loopback-default"
 )
 
 type AuthTokenResolution struct {
-	Tokens   []string
-	Source   AuthTokenSource
-	Explicit bool
+	Tokens    []string
+	Source    AuthTokenSource
+	Explicit  bool
+	TokenFile string
 }
 
 func (r AuthTokenResolution) UsesDefaultLoopbackToken() bool {
@@ -152,25 +150,6 @@ func NewHandler(opts Options) (*Handler, error) {
 		upgrader: websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
 		subs:     opts.Subscriptions.withDefaults(),
 	}, nil
-}
-
-func AuthTokensFromEnvironment() []string {
-	return ResolveAuthTokensFromEnvironment().Tokens
-}
-
-func ResolveAuthTokensFromEnvironment() AuthTokenResolution {
-	value := strings.TrimSpace(os.Getenv("SWARM_API_TOKEN"))
-	if value != "" {
-		return AuthTokenResolution{
-			Tokens:   []string{value},
-			Source:   AuthTokenSourceEnvironment,
-			Explicit: true,
-		}
-	}
-	return AuthTokenResolution{
-		Tokens: []string{DefaultLoopbackAPIToken},
-		Source: AuthTokenSourceBuiltInLoopbackToken,
-	}
 }
 
 func DefaultLoopbackAPITokenAllowedHost(host string) bool {

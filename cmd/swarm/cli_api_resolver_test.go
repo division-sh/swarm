@@ -463,7 +463,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	}
 
 	withoutFlags := []string{
-		"", "serve", "verify", "completion", "run",
+		"", "verify", "completion", "run",
 		"events", "event", "bundle", "agents", "agent", "conversations", "conversation", "entities", "entity", "mailbox", "control", "forkchat",
 		"investigate", "investigate health",
 	}
@@ -472,6 +472,14 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 		if cmd.Flags().Lookup("api-server") != nil || cmd.Flags().Lookup("api-token-file") != nil {
 			t.Fatalf("%s unexpectedly accepts API connection flags", path)
 		}
+	}
+
+	serve := mustFindCLICommand(t, root, "serve")
+	if serve.Flags().Lookup("api-token-file") == nil {
+		t.Fatal("serve missing server --api-token-file")
+	}
+	if serve.Flags().Lookup("api-server") != nil {
+		t.Fatal("serve unexpectedly accepts client --api-server")
 	}
 }
 
@@ -499,6 +507,34 @@ func TestServeContextFlagPassesRootPrevalidation(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "unknown flag: --context") {
 		t.Fatalf("serve context flag was rejected by prevalidation: %s", stderr.String())
+	}
+}
+
+func TestServeAPITokenFileFlagPassesRootPrevalidation(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	tokenFile := writeCLIAPITokenFile(t, "serve-token")
+	var stdout, stderr bytes.Buffer
+	called := false
+	var got serveOptions
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
+		called = true
+		got = serveOpts
+		return 0
+	}
+
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--api-token-file", tokenFile}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("serve code = %d, want 0 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !called {
+		t.Fatal("serve runner was not called")
+	}
+	if got.APITokenFile != tokenFile || !got.APITokenFileFlagSet {
+		t.Fatalf("serve API token file = %q set=%v, want %q/set", got.APITokenFile, got.APITokenFileFlagSet, tokenFile)
+	}
+	if strings.Contains(stderr.String(), "unknown flag: --api-token-file") {
+		t.Fatalf("serve api-token-file flag was rejected by prevalidation: %s", stderr.String())
 	}
 }
 
@@ -1138,7 +1174,7 @@ func writeCLIAPITokenFile(t *testing.T, token string) string {
 func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 	t.Helper()
 	var body strings.Builder
-	for _, key := range []string{"api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr"} {
+	for _, key := range []string{"api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr", "serve_api_token_file"} {
 		if value, ok := values[key]; ok {
 			body.WriteString(key)
 			body.WriteString(": ")

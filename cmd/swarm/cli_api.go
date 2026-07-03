@@ -28,6 +28,9 @@ const (
 
 	cliServeAPIListenAddrEnv = "SWARM_API_LISTEN_ADDR"
 	cliServeMCPListenAddrEnv = "SWARM_MCP_LISTEN_ADDR"
+
+	serveAPITokenFileFlagSource   = "--api-token-file"
+	serveAPITokenFileConfigSource = "config serve_api_token_file"
 )
 
 type rootCommandOptions struct {
@@ -124,6 +127,7 @@ type cliAPIConfigFile struct {
 	PlatformSpecPath   string `yaml:"platform_spec_path"`
 	ServeAPIListenAddr string `yaml:"serve_api_listen_addr"`
 	ServeMCPListenAddr string `yaml:"serve_mcp_listen_addr"`
+	ServeAPITokenFile  string `yaml:"serve_api_token_file"`
 }
 
 type cliAPIValidationError struct {
@@ -261,6 +265,58 @@ func resolveCLIServeListenerAddressHighPriority(flagValue string, flagSet bool, 
 	return "", false
 }
 
+func resolveServeAPIAuth(opts serveOptions) (apiv1.AuthTokenResolution, error) {
+	if err := rejectRemovedServeAPIEnvSource(); err != nil {
+		return apiv1.AuthTokenResolution{}, err
+	}
+	if opts.APITokenFileFlagSet || strings.TrimSpace(opts.APITokenFile) != "" {
+		tokenFile := strings.TrimSpace(opts.APITokenFile)
+		if tokenFile == "" {
+			return apiv1.AuthTokenResolution{}, &cliAPIAuthConfigError{message: serveAPITokenFileFlagSource + " is blank"}
+		}
+		return readServeAPITokenFile(tokenFile, serveAPITokenFileFlagSource)
+	}
+	cfg, err := loadCLIAPIConfigFile()
+	if err != nil {
+		return apiv1.AuthTokenResolution{}, err
+	}
+	if tokenFile := strings.TrimSpace(cfg.ServeAPITokenFile); tokenFile != "" {
+		return readServeAPITokenFile(tokenFile, serveAPITokenFileConfigSource)
+	}
+	return defaultServeAPIAuthResolution(), nil
+}
+
+func rejectRemovedServeAPIEnvSource() error {
+	if strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")) == "" {
+		return nil
+	}
+	return &cliAPIValidationError{message: "server-side API environment source is no longer accepted: SWARM_API_TOKEN (use swarm serve --api-token-file or config serve_api_token_file)"}
+}
+
+func readServeAPITokenFile(tokenFile, source string) (apiv1.AuthTokenResolution, error) {
+	token, err := readCLIAPITokenFile(tokenFile, source)
+	if err != nil {
+		return apiv1.AuthTokenResolution{}, err
+	}
+	absoluteTokenFile, err := filepath.Abs(strings.TrimSpace(tokenFile))
+	if err != nil {
+		return apiv1.AuthTokenResolution{}, &cliAPIAuthConfigError{message: fmt.Sprintf("resolve %s path: %v", source, err)}
+	}
+	return apiv1.AuthTokenResolution{
+		Tokens:    []string{token},
+		Source:    apiv1.AuthTokenSource(source),
+		Explicit:  true,
+		TokenFile: absoluteTokenFile,
+	}, nil
+}
+
+func defaultServeAPIAuthResolution() apiv1.AuthTokenResolution {
+	return apiv1.AuthTokenResolution{
+		Tokens: []string{apiv1.DefaultLoopbackAPIToken},
+		Source: apiv1.AuthTokenSourceBuiltInLoopbackToken,
+	}
+}
+
 func readCLIAPIExplicitTokenFile(tokenFile, source string) (cliAPITokenResolution, error) {
 	token, err := readCLIAPITokenFile(tokenFile, source)
 	if err != nil {
@@ -329,7 +385,7 @@ func parseCLIAPIConfigFile(configPath string, raw []byte) (cliAPIConfigFile, err
 	}
 	for key, value := range decoded {
 		switch key {
-		case "api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr":
+		case "api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr", "serve_api_token_file":
 			if value == nil {
 				continue
 			}
