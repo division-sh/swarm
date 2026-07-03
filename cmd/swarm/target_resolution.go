@@ -147,7 +147,15 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
-	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir)
+	runtimeCfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
+		RepoRoot:        repo,
+		ExplicitPath:    opts.configPath,
+		BackendOverride: opts.backend,
+	})
+	if err != nil {
+		return returnCLIValidationError(cmd.ErrOrStderr(), err)
+	}
+	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir, runtimeCfgResult.Config)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
@@ -158,7 +166,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 	return nil
 }
 
-func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution) (doctorTargetReport, error) {
+func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
 	api, err := resolveDoctorTargetAPI(opts, cfg)
 	if err != nil {
 		return doctorTargetReport{}, err
@@ -169,11 +177,11 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 	}
 	project := resolveDoctorTargetProject(repo, opts, cfg)
 	localStateProject := doctorTargetLocalRuntimeProject(repo, project)
-	store, err := resolveDoctorTargetStore(repo, swarmDir, localStateProject)
+	store, err := resolveDoctorTargetStore(repo, swarmDir, localStateProject, runtimeCfg)
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
-	data := resolveDoctorTargetData(repo, opts, localStateProject)
+	data := resolveDoctorTargetData(repo, opts, localStateProject, runtimeCfg)
 	return doctorTargetReport{
 		Owner:    localTargetOwner,
 		Mode:     "target",
@@ -412,9 +420,9 @@ func doctorTargetLocalRuntimeProject(repo string, project doctorTargetProject) l
 	}
 }
 
-func resolveDoctorTargetStore(repo string, swarmDir cliSwarmDirResolution, project localRuntimeStateProject) (doctorTargetPath, error) {
+func resolveDoctorTargetStore(repo string, swarmDir cliSwarmDirResolution, project localRuntimeStateProject, cfg *config.Config) (doctorTargetPath, error) {
 	defaultPath, defaultSource := localRuntimeSQLiteDefault(swarmDir, project)
-	selection, err := resolveRuntimeStoreSelectionWithDefault(repo, storebackend.ActiveDefaultBackend().String(), false, &config.Config{}, defaultPath, defaultSource)
+	selection, err := resolveRuntimeStoreSelectionWithDefault(repo, storebackend.ActiveDefaultBackend().String(), false, cfg, defaultPath, defaultSource)
 	if err != nil {
 		return doctorTargetPath{}, err
 	}
@@ -450,8 +458,8 @@ func normalizeDoctorTargetSQLitePath(repo, raw, source string) (string, error) {
 	return filepath.Clean(filepath.Join(root, path)), nil
 }
 
-func resolveDoctorTargetData(repo string, opts doctorOptions, project localRuntimeStateProject) doctorTargetPath {
-	mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, doctorTargetDataSourceFlag(opts), &config.Config{}, project, false)
+func resolveDoctorTargetData(repo string, opts doctorOptions, project localRuntimeStateProject, cfg *config.Config) doctorTargetPath {
+	mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, doctorTargetDataSourceFlag(opts), cfg, project, false)
 	if err != nil {
 		return doctorTargetPath{Status: "missing", Detail: err.Error()}
 	}

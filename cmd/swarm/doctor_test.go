@@ -279,8 +279,6 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"--swarm-dir", flagSwarmDir,
 		"doctor", "--target",
 		"--contracts", filepath.Join(repo, "contracts"),
-		"--config", filepath.Join(t.TempDir(), "missing-runtime-config.yaml"),
-		"--backend", "not-a-backend",
 	}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitOK {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
@@ -345,6 +343,79 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 	}
 	if len(report.CommandClasses) == 0 || len(report.SplitSiblings) == 0 {
 		t.Fatalf("report missing command classes or split siblings: %#v", report)
+	}
+}
+
+func TestDoctorTargetConsumesRuntimeConfigStoreAndData(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	sqlitePath := filepath.Join(t.TempDir(), "configured-dev.db")
+	dataDir := filepath.Join(t.TempDir(), "configured-data")
+	configPath := writeDoctorTargetRuntimeConfig(t, `
+store:
+  backend: sqlite
+  sqlite:
+    path: `+sqlitePath+`
+workspace:
+  data_source: `+dataDir+`
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"doctor", "--target", "--json",
+		"--contracts", filepath.Join(repo, "contracts"),
+		"--config", configPath,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
+	}
+	if report.Store.Path != sqlitePath || report.Store.Source != string(storebackend.SourceRuntimeConfig) || report.Store.Status != "resolved" {
+		t.Fatalf("store resolution = %#v, want configured sqlite path from runtime config", report.Store)
+	}
+	if report.Data.Path != dataDir || report.Data.Source != "workspace.data_source" || report.Data.Status != "resolved" {
+		t.Fatalf("data resolution = %#v, want configured workspace data source", report.Data)
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("configured target data stat error = %v, want dry-run without directory creation", err)
+	}
+}
+
+func TestDoctorTargetConsumesRuntimeConfigPostgresStore(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := writeDoctorTargetRepo(t)
+	configPath := writeDoctorTargetRuntimeConfig(t, `
+store:
+  backend: postgres
+`)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"doctor", "--target", "--json",
+		"--contracts", filepath.Join(repo, "contracts"),
+		"--config", configPath,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
+	}
+	if report.Store.Path != "" ||
+		report.Store.Source != string(storebackend.SourceRuntimeConfig) ||
+		report.Store.Status != "not_applicable" ||
+		!strings.Contains(report.Store.Detail, "postgres runtime store selected") {
+		t.Fatalf("store resolution = %#v, want postgres runtime-config diagnostic", report.Store)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -659,6 +730,26 @@ func writeDoctorTargetRepo(t *testing.T) string {
 		t.Fatalf("write package: %v", err)
 	}
 	return repo
+}
+
+func writeDoctorTargetRuntimeConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "runtime.yaml")
+	writeRuntimeConfigText(t, path, strings.TrimSpace(body)+"\n"+strings.Join([]string{
+		"llm:",
+		"  backend: claude_cli",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+		"  claude_cli:",
+		"    command: claude",
+		"    timeout: 2s",
+		"    output_format: json",
+		"    retries: 1",
+		"    no_session_persistence: false",
+	}, "\n")+"\n")
+	return path
 }
 
 func writeDoctorAgentFreeContractsFixture(t *testing.T) string {
