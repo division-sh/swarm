@@ -1168,7 +1168,7 @@ func (pc *PipelineCoordinator) workflowNodeMatchesDeliveryTarget(nodeID string, 
 	if workflowFlowMode(source, flowID) == runtimecontracts.FlowModeSingleton {
 		return targetPath == flowPath || targetPath == flowID
 	}
-	return targetPath == flowPath || strings.HasPrefix(targetPath, flowPath+"/")
+	return workflowNodeDeliveryTargetPathMatches(flowPath, targetPath)
 }
 
 func workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, flowID, flowInstance string) bool {
@@ -1184,6 +1184,26 @@ func workflowNodeDeliveryTargetFlowInstanceMatches(source semanticview.Source, f
 		return flowInstance == flowPath || flowInstance == strings.Trim(strings.TrimSpace(flowID), "/")
 	}
 	return true
+}
+
+func workflowNodeDeliveryTargetPathMatches(flowPath, targetPath string) bool {
+	flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
+	targetPath = strings.Trim(strings.TrimSpace(targetPath), "/")
+	if flowPath == "" || targetPath == "" {
+		return false
+	}
+	if targetPath == flowPath || strings.HasPrefix(targetPath, flowPath+"/") {
+		return true
+	}
+	head, _, ok := strings.Cut(flowPath, "/")
+	if !ok || head == "" {
+		return false
+	}
+	collapsed, ok := strings.CutPrefix(targetPath, head+"/")
+	if !ok {
+		return false
+	}
+	return collapsed == flowPath || strings.HasPrefix(collapsed, flowPath+"/")
 }
 
 func workflowFlowMode(source semanticview.Source, flowID string) string {

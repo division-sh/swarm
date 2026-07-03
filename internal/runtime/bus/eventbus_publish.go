@@ -234,7 +234,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		eb.logPublished(ictx, evt, int(time.Since(start)/time.Microsecond))
 		return eb.convergeStandaloneRuntimePlatformRun(ictx, evt)
 	}
-	if pass, out, ierr := eb.runInterceptors(ictx, evt); ierr != nil {
+	if pass, out, ierr := eb.runInterceptorsForDeliveryRoutes(ictx, evt, plan.DeliveryRoutes()); ierr != nil {
 		return ierr
 	} else {
 		passthrough = pass
@@ -441,7 +441,7 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
 	defer runtimepipeline.FlushPipelineAfterPublishActions(afterPublishActions)
 
-	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
 		eb.recordCommittedPublishReceipt(ctx, evt, err)
 		return
@@ -479,6 +479,66 @@ func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt ev
 	}
 	eb.recordCommittedPublishReceipt(ctx, evt, nil)
 	eb.recordCommittedPublishConvergence(ctx, evt)
+}
+
+func (eb *EventBus) runInterceptorsForDeliveryRoutes(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) (bool, []events.Event, error) {
+	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	if err != nil {
+		return passthrough, nil, err
+	}
+	targetedDeferred, err := eb.runTargetedInternalDeliveryInterceptors(ctx, evt, deliveryRoutes)
+	if err != nil {
+		return passthrough, nil, err
+	}
+	if len(targetedDeferred) > 0 {
+		deferred = append(deferred, targetedDeferred...)
+	}
+	return passthrough, deferred, nil
+}
+
+func (eb *EventBus) runTargetedInternalDeliveryInterceptors(ctx context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute) ([]events.Event, error) {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return nil, nil
+	}
+	deferred := make([]events.Event, 0)
+	seen := map[string]struct{}{}
+	for _, route := range deliveryRoutes {
+		if strings.TrimSpace(route.SubscriberType) != "node" {
+			continue
+		}
+		target := route.Target.Normalized()
+		if target.Empty() {
+			continue
+		}
+		key := strings.Join([]string{
+			target.FlowID,
+			target.FlowInstance,
+			target.EntityID,
+		}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		projected := events.NewProjectionEvent(
+			evt.ID(),
+			evt.Type(),
+			evt.SourceAgent(),
+			evt.TaskID(),
+			evt.Payload(),
+			evt.ChainDepth(),
+			evt.RunID(),
+			evt.ParentEventID(),
+			events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), target),
+			evt.CreatedAt(),
+		)
+		_, out, err := eb.runInterceptors(ctx, projected)
+		if err != nil {
+			return nil, err
+		}
+		deferred = append(deferred, out...)
+	}
+	return deferred, nil
 }
 
 func (eb *EventBus) withBundleFingerprint(ctx context.Context) context.Context {
@@ -602,7 +662,7 @@ func (eb *EventBus) publishTransactional(
 	dispatchCtx := runtimepipeline.WithoutPipelineSQLTxContext(ctx)
 	dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
 	dispatchCtx = runtimepipeline.WithPipelineReceiptOverride(dispatchCtx, receiptOverride)
-	passthrough, deferred, err := eb.runInterceptors(dispatchCtx, evt)
+	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(dispatchCtx, evt, inboundPlan.DeliveryRoutes())
 	if err != nil {
 		eb.recordCommittedPublishReceipt(dispatchCtx, evt, err)
 		return err
@@ -885,7 +945,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		eb.logPublished(ctx, evt, 0)
 		return nil
 	}
-	passthrough, deferred, err := eb.runInterceptors(ctx, evt)
+	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, plan.DeliveryRoutes())
 	if err != nil {
 		return err
 	}

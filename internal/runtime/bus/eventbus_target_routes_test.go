@@ -1130,8 +1130,8 @@ func TestEventBusPublish_NoTargetScopedRoutedNodePersistsSemanticRouteBeforeInte
 		t.Fatalf("Publish: %v", err)
 	}
 	got := requireBusEvent(t, ch, "static scoped workflow-runtime carrier delivery")
-	if got.FlowInstance() != "" || got.EntityID() != "ent-child" {
-		t.Fatalf("delivered identity flow=%q entity=%q, want root projection ent-child", got.FlowInstance(), got.EntityID())
+	if got.FlowInstance() != "child" || got.EntityID() != "ent-child" {
+		t.Fatalf("delivered identity flow=%q entity=%q, want child target ent-child", got.FlowInstance(), got.EntityID())
 	}
 	routes := store.routes[evt.ID()]
 	if len(routes) != 1 || !deliveryRoutesContain(routes, want) {

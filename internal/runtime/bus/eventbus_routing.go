@@ -265,6 +265,9 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	timedOut := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
 		targets := targetsByRecipient[recipient.deliveryRouteTargetKey()]
+		if len(targets) == 0 && recipient.isWorkflowRuntimeInternalCarrier() {
+			targets = workflowRuntimeInternalCarrierTargets(deliveryRoutes)
+		}
 		if len(targets) == 0 {
 			targets = []events.RouteIdentity{{}}
 		}
@@ -385,6 +388,8 @@ type agentRecipient struct {
 	kind    inMemorySubscriberKind
 }
 
+const workflowRuntimeInternalCarrierID = "workflow-runtime"
+
 func (r agentRecipient) deliveryRouteTargetKey() deliveryRouteTargetKey {
 	subscriberType := "agent"
 	if r.kind == inMemorySubscriberInternal {
@@ -394,6 +399,35 @@ func (r agentRecipient) deliveryRouteTargetKey() deliveryRouteTargetKey {
 		subscriberType: subscriberType,
 		subscriberID:   strings.TrimSpace(r.agentID),
 	}
+}
+
+func (r agentRecipient) isWorkflowRuntimeInternalCarrier() bool {
+	return r.kind == inMemorySubscriberInternal && strings.TrimSpace(r.agentID) == workflowRuntimeInternalCarrierID
+}
+
+func workflowRuntimeInternalCarrierTargets(deliveryRoutes []events.DeliveryRoute) []events.RouteIdentity {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return nil
+	}
+	out := make([]events.RouteIdentity, 0, len(deliveryRoutes))
+	seen := map[string]struct{}{}
+	for _, route := range deliveryRoutes {
+		if strings.TrimSpace(route.SubscriberType) != "node" {
+			continue
+		}
+		target := route.Target.Normalized()
+		if target.Empty() {
+			continue
+		}
+		key := strings.Join([]string{target.FlowID, target.FlowInstance, target.EntityID}, "\x00")
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, target)
+	}
+	return out
 }
 
 func (eb *EventBus) snapshotRecipientChans(agentIDs []string) []agentRecipient {

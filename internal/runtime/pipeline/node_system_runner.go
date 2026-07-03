@@ -794,6 +794,7 @@ func persistSystemNodeProcessedReceiptAndSettleDeliveryTx(ctx context.Context, t
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 			  AND subscriber_id = $2
+			  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
 			  AND (
 				status IN ('pending', 'in_progress')
 				OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
@@ -961,6 +962,7 @@ func markPostgresSystemNodeDeliveryInProgressTx(ctx context.Context, tx *sql.Tx,
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 			  AND subscriber_id = $2
+			  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
 			  AND (
 				status IN ('pending', 'in_progress')
 				OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
@@ -1108,11 +1110,12 @@ func markPostgresSystemNodeDeliveryFailedTx(ctx context.Context, tx *sql.Tx, nod
 			active_session_id = NULL,
 			started_at = COALESCE(started_at, created_at),
 			delivered_at = now()
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-		  AND status IN ('pending', 'in_progress', 'failed')
-		  AND COALESCE(retry_count, 0) < $6
+	WHERE event_id = $1::uuid
+	  AND subscriber_type = 'node'
+	  AND subscriber_id = $2
+	  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
+	  AND status IN ('pending', 'in_progress', 'failed')
+	  AND COALESCE(retry_count, 0) < $6
 	`, eventID, nodeID, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_error"), strings.TrimSpace(errText), retryLimit)
 	if err != nil {
 		return fmt.Errorf("mark system node delivery failed: %w", err)
@@ -1257,6 +1260,7 @@ func markPostgresSystemNodeDeliveryDeadLetterTx(ctx context.Context, tx *sql.Tx,
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
+		  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
 		  AND status IN ('pending', 'in_progress', 'failed')
 	`, eventID, nodeID, sanitizedSystemNodeRetryCount(retryCount), reasonCode, errText)
 	if err != nil {
@@ -1371,12 +1375,13 @@ func postgresSystemNodeDeliveryAuthorizedTx(ctx context.Context, tx *sql.Tx, nod
 		SELECT EXISTS (
 			SELECT 1
 			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-				  AND subscriber_id = $2
-				  AND (
-					status IN ('pending', 'in_progress')
-					OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
+	WHERE event_id = $1::uuid
+	  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+		  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
+		  AND (
+			status IN ('pending', 'in_progress')
+			OR (status = 'failed' AND COALESCE(retry_count, 0) < $3)
 				  )
 			)
 	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID), retryLimit).Scan(&ok)
@@ -1424,6 +1429,7 @@ func postgresSystemNodeDeliveryRowExistsTx(ctx context.Context, tx *sql.Tx, node
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = $2
+			  AND COALESCE(delivery_target_route, '{}'::jsonb) = '{}'::jsonb
 		)
 	`, strings.TrimSpace(eventID), strings.TrimSpace(nodeID)).Scan(&ok)
 	return ok, err

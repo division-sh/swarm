@@ -192,6 +192,30 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			loadError:   true,
 		},
 		{
+			name:        "bad map write wrong value shape",
+			opts:        finalflowinstanceauthoring.Options{WrongMapValueShape: true},
+			checkID:     "contained_state_operation_compliance",
+			wantMessage: "undeclared",
+		},
+		{
+			name:        "bad map write undeclared target",
+			opts:        finalflowinstanceauthoring.Options{UndeclaredMapTarget: true},
+			checkID:     "contained_state_operation_compliance",
+			wantMessage: "missing_index",
+		},
+		{
+			name:        "bad map write unsupported operation",
+			opts:        finalflowinstanceauthoring.Options{UnsupportedMapOp: true},
+			wantMessage: "unsupported workflow data write op",
+			loadError:   true,
+		},
+		{
+			name:        "bad list write negative index",
+			opts:        finalflowinstanceauthoring.Options{BadListIndex: true},
+			checkID:     "contained_state_operation_compliance",
+			wantMessage: "list index cannot be negative",
+		},
+		{
 			name:        "retired static create_entity",
 			opts:        finalflowinstanceauthoring.Options{StaticCreateEntity: true},
 			checkID:     "flow_boundary_create_entity_validation",
