@@ -12029,6 +12029,45 @@ cli_specification:
       - 'API-backed command target resolver consumes context descriptors through #1614 only.'
       - 'No runtime store/data path migration or `swarm run` behavior change in #1613; #1615 owns that behavior.'
       - 'No unix socket dialing policy in #1613; #1576 owns actual IPC transport behavior.'
+    repo_dotenv_source_authority:
+      promoted_by: '#1635'
+      implementation_status: implemented
+      canonical_owner: platform-spec.yaml#cli_specification.foundations.repo_dotenv_source_authority
+      scope: >
+        Merge-bearing authority for repository `.env` files as local CLI command input. Repo `.env` files are
+        non-authoritative for Swarm production and user-facing command startup. Commands MUST NOT implicitly read,
+        parse, or import repo `.env` values into the process environment. Public repository templates and docs MUST
+        present config files for durable non-secret settings and `swarm secrets`/token files for credentials rather
+        than teaching `.env` as normal Swarm setup.
+      applies_to:
+      - '`swarm serve` startup.'
+      - 'local foreground `swarm run` startup.'
+      - '`swarm verify` local contract validation.'
+      - '`swarm fork` runtime-owner harness.'
+      - 'default `swarm doctor` diagnostics.'
+      - '`swarm describe` local authoring view rendering.'
+      - '`swarm secrets set`, `swarm secrets list`, `swarm secrets check`, and `swarm secrets rm`.'
+      source_rule: >
+        A repo `.env` file MAY exist for external tools, but Swarm commands treat it as ordinary project data and
+        never as an implicit configuration, secret, target, path, or runtime-binding source. Malformed repo `.env`
+        contents MUST NOT fail Swarm commands unless a future explicitly gated env-file feature names the file as
+        command input.
+      explicit_process_env_boundary: >
+        This owner does not deauthorize process environment variables that are already present when Swarm starts.
+        Direct environment sources such as `SWARM_API_SERVER`, `SWARM_API_TOKEN`, `SWARM_CONTRACTS_PATH`, store and
+        database variables, provider credential variables, workspace/bootstrap variables, and final-boundary tooling
+        variables remain governed by their specific source-authority owners and #1600 sibling issues.
+      replacement_setup:
+        non_secret_settings: config.example.yaml and runtime-config.example.yaml guidance
+        credentials: '`swarm secrets set|check|list|rm` and token-file sources where explicitly owned'
+      rejected_sources:
+        repo_dotenv_autoload: >
+          Not promoted. Implicit repo dotenv loading is hidden mutable source authority and can shadow config,
+          secrets, contexts, token files, and runtime bindings.
+      implementation_boundaries:
+      - 'No direct process-env precedence migration is implied by #1635; #1636-#1640 own those sibling migrations.'
+      - 'No provider credential migration to the secrets store is implied by #1635; #1638 owns that migration.'
+      - 'No explicit `--env-file` or dotenv compatibility shim is promoted.'
     api_connection_auth_config_precedence:
       promoted_by: '#844'
       loopback_default_implemented_by: '#1124'

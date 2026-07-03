@@ -103,7 +103,10 @@ Plain local runs need no database service (SQLite at `.swarm/dev.db` is the
 default) and no LLM credential (an agent-free flow boots without one). For
 Postgres, the agent workspace image, and LLM backend setup, see
 [Installation](https://docs.division.sh/installation) and
-[Configuration](https://docs.division.sh/reference/configuration).
+[Configuration](https://docs.division.sh/reference/configuration). For local
+non-secret defaults, use [`config.example.yaml`](config.example.yaml) or
+[`runtime-config.example.yaml`](runtime-config.example.yaml). For contract
+credentials, use `swarm secrets set` and validate with `swarm secrets check`.
 
 ---
 
@@ -208,7 +211,7 @@ Available in this repo too:
 
 Requirements: Go 1.23. Docker is the default workspace-isolation backend; an
 explicit host backend is available for local-dev or trusted remote work (see
-[`.env.example`](.env.example)). Host backend command execution is
+[`runtime-config.example.yaml`](runtime-config.example.yaml)). Host backend command execution is
 trusted/unsafe: native `bash` commands run as the host user when both host
 backend selection and `native_tools.bash` authorization are present. Host bash
 is full host-user shell execution from the workspace backing directory; use
@@ -217,10 +220,18 @@ deployment namespace and OS permissions. It is not command-limited or
 Docker-equivalent isolation, and Claude/provider host execution remains
 unsupported.
 Plain local `swarm run --contracts ...` uses SQLite at `.swarm/dev.db` unless
-you explicitly opt into Postgres with `SWARM_STORE_BACKEND=postgres` or
-`store.backend: postgres`. Build or pull the configured workspace image
-(`swarm-workspace:latest` by default), or set `SWARM_WORKSPACE_IMAGE` to a
-compatible image before commands that start the runtime.
+you explicitly opt into Postgres with `store.backend: postgres` in runtime
+config. Build or pull the configured workspace image (`swarm-workspace:latest`
+by default), or configure a compatible image before commands that start the
+runtime.
+
+Repo `.env` files are not loaded by Swarm commands. Keep durable settings in
+config files and put contract-required credentials in the local secrets store:
+
+```bash
+swarm secrets set sendgrid_api_key --stdin
+swarm secrets check --contracts ./contracts
+```
 
 Set `SWARM_ARTIFACT_ROOT` to a writable host path if your machine can't write
 the default `/var/lib/swarm/artifacts` (needed for `artifact_repo_commit`).

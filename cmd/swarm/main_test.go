@@ -1378,42 +1378,41 @@ func TestAssetCommandsDiscoverRepoRootAtExecution(t *testing.T) {
 	}
 }
 
-func TestVerifyCommandLoadsRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
+func TestVerifyCommandIgnoresRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_ = os.Unsetenv("SWARM_CONTRACTS_PATH")
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
-	contractsRoot := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "package.yaml"), `
-name: dot-env-contracts
-version: "1.0.0"
-platform: ">=1.6.0"
-`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "schema.yaml"), "name: dot-env-contracts\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "events.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\n")
+	contractsRoot := writeEnvAuthorityContractsFixture(t, "dot-env-contracts")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\nBROKEN\n")
 	chdirForTest(t, repo)
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommand(context.Background(), "", []string{"verify"}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("verify unexpectedly consumed contracts path from repo .env: stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), contractsRoot) {
+		t.Fatalf("verify output referenced repo .env contracts path stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommand(context.Background(), "", []string{"verify", "--contracts", contractsRoot}, &stdout, &stderr)
 	if code != 0 {
-		t.Fatalf("verify code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+		t.Fatalf("verify with explicit contracts code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "verify ok: contracts="+contractsRoot) {
-		t.Fatalf("verify did not consume contracts path from repo .env:\n%s", stdout.String())
+		t.Fatalf("verify explicit contracts output missing success marker:\n%s", stdout.String())
 	}
 }
 
-func TestLocalRunDiscoversRepoRootBeforeDotEnvAndServe(t *testing.T) {
+func TestLocalRunDiscoversRepoRootWithoutLoadingDotEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_ = os.Unsetenv("SWARM_API_TOKEN")
 	repo := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_API_TOKEN=test-token\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_API_TOKEN=test-token\nBROKEN\n")
 	payloadPath := filepath.Join(t.TempDir(), "payload.json")
 	writeWorkflowValidationFixtureFile(t, payloadPath, "{}\n")
 	chdirForTest(t, repo)
@@ -1437,6 +1436,9 @@ func TestLocalRunDiscoversRepoRootBeforeDotEnvAndServe(t *testing.T) {
 	_ = runRunCommand(context.Background(), "", &stdout, &stderr, opts)
 	if capturedRepo != repo {
 		t.Fatalf("local run serve repo = %q, want discovered repo %q; stderr=%s stdout=%s", capturedRepo, repo, stderr.String(), stdout.String())
+	}
+	if got := os.Getenv("SWARM_API_TOKEN"); got != "" {
+		t.Fatalf("local run loaded SWARM_API_TOKEN from repo .env: %q", got)
 	}
 }
 
@@ -9026,47 +9028,6 @@ func TestLoadRunStatusReport_ProjectsScoringOutcomeStall(t *testing.T) {
 		if strings.Contains(heuristic, "run appears settled after scoring started") {
 			t.Fatalf("unexpected scoring heuristic fallback: %#v", report.Heuristics)
 		}
-	}
-}
-
-func TestLoadDotEnvFileSetsMissingVarsOnly(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".env")
-	if err := os.WriteFile(path, []byte("ALPHA=one\nBETA=\"two words\"\nexport GAMMA='three'\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	t.Setenv("ALPHA", "shell")
-
-	if err := loadDotEnvFile(path); err != nil {
-		t.Fatalf("loadDotEnvFile: %v", err)
-	}
-
-	if got := os.Getenv("ALPHA"); got != "shell" {
-		t.Fatalf("ALPHA = %q, want shell override", got)
-	}
-	if got := os.Getenv("BETA"); got != "two words" {
-		t.Fatalf("BETA = %q", got)
-	}
-	if got := os.Getenv("GAMMA"); got != "three" {
-		t.Fatalf("GAMMA = %q", got)
-	}
-}
-
-func TestLoadDotEnvFileMissingIsNoop(t *testing.T) {
-	if err := loadDotEnvFile(filepath.Join(t.TempDir(), ".env")); err != nil {
-		t.Fatalf("loadDotEnvFile: %v", err)
-	}
-}
-
-func TestLoadDotEnvFileRejectsMalformedLine(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".env")
-	if err := os.WriteFile(path, []byte("BROKEN\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	err := loadDotEnvFile(path)
-	if err == nil || !strings.Contains(err.Error(), "expected KEY=VALUE") {
-		t.Fatalf("loadDotEnvFile error = %v", err)
 	}
 }
 

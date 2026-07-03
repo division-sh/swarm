@@ -127,6 +127,71 @@ func TestSecretsListShowsEnvShadowingAndRemoveKeepsEnvEffective(t *testing.T) {
 	}
 }
 
+func TestSecretsCommandsIgnoreRepoDotEnv(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	unsetSecretEnvForTest(t, "SENDGRID_API_KEY")
+	repo := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module secrets-test\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SENDGRID_API_KEY=repo-env-secret\nBROKEN\n")
+	contractsRoot := writeSecretsCommandContractsFixture(t)
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialsPath)
+
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
+	if code != cliExitRuntime {
+		t.Fatalf("initial check code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertNoDotEnvLoadFailure(t, stdout+stderr)
+	var missing secretsCheckResult
+	if err := json.Unmarshal([]byte(stdout), &missing); err != nil {
+		t.Fatalf("decode check json: %v\n%s", err, stdout)
+	}
+	if missing.OK || len(missing.Missing) != 1 || missing.Missing[0].Key != "sendgrid_api_key" {
+		t.Fatalf("repo .env unexpectedly satisfied secret requirement: %+v", missing)
+	}
+
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "sendgrid_api_key", "--stdin"}, "file-secret-token\n")
+	if code != 0 {
+		t.Fatalf("set code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertNoDotEnvLoadFailure(t, stdout+stderr)
+
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--contracts", contractsRoot, "--json"}, "")
+	if code != 0 {
+		t.Fatalf("list code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	assertNoDotEnvLoadFailure(t, stdout+stderr)
+	var listed secretsListResult
+	if err := json.Unmarshal([]byte(stdout), &listed); err != nil {
+		t.Fatalf("decode list json: %v\n%s", err, stdout)
+	}
+	if len(listed.Secrets) != 1 {
+		t.Fatalf("list result = %+v", listed)
+	}
+	record := listed.Secrets[0]
+	if record.Source != "file" || record.Shadowed || !record.Writable || !record.Present {
+		t.Fatalf("repo .env unexpectedly supplied or shadowed file-tier secret: %+v", record)
+	}
+	if strings.Contains(stdout+stderr, "repo-env-secret") || strings.Contains(stdout+stderr, "file-secret-token") {
+		t.Fatalf("secrets output leaked secret value stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func unsetSecretEnvForTest(t *testing.T, key string) {
+	t.Helper()
+	old, ok := os.LookupEnv(key)
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("unset %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		if ok {
+			_ = os.Setenv(key, old)
+			return
+		}
+		_ = os.Unsetenv(key)
+	})
+}
+
 func TestSecretsSetRejectsPlaintextArgvValues(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
