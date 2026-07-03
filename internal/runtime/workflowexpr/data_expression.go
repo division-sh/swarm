@@ -23,7 +23,6 @@ var (
 
 	workflowExpressionEntityReferencePattern         = regexp.MustCompile(`(^|[^a-zA-Z0-9_])entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionPlatformEntityReferencePattern = regexp.MustCompile(`(^|[^a-zA-Z0-9_])_entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
-	workflowExpressionEventReferencePattern          = regexp.MustCompile(`(^|[^a-zA-Z0-9_])event\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
 	workflowExpressionEntityPresencePattern          = regexp.MustCompile(`["']([a-zA-Z_][a-zA-Z0-9_]*)["']\s+in\s+entity\b`)
 	workflowExpressionEntityHasPattern               = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)`)
 	workflowExpressionEntityHasTernaryTruePattern    = regexp.MustCompile(`\bhas\s*\(\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)\s*\?\s*entity\.([a-zA-Z_][a-zA-Z0-9_.]*)`)
@@ -290,6 +289,27 @@ func isIdentifierPart(ch byte) bool {
 		ch == '_'
 }
 
+func isIdentifierStart(ch byte) bool {
+	return (ch >= 'a' && ch <= 'z') ||
+		(ch >= 'A' && ch <= 'Z') ||
+		ch == '_'
+}
+
+func isRootReferenceStart(expression string, start int) bool {
+	if start <= 0 {
+		return true
+	}
+	for pos := start - 1; pos >= 0; pos-- {
+		switch expression[pos] {
+		case ' ', '\t', '\n', '\r':
+			continue
+		default:
+			return !isIdentifierPart(expression[pos]) && expression[pos] != '.'
+		}
+	}
+	return true
+}
+
 func EntityReferences(expression string) []string {
 	expression = strings.TrimSpace(StripStringLiterals(expression))
 	if expression == "" {
@@ -345,14 +365,29 @@ func EventReferences(expression string) []string {
 	if expression == "" {
 		return nil
 	}
-	matches := workflowExpressionEventReferencePattern.FindAllStringSubmatch(expression, -1)
-	out := make([]string, 0, len(matches))
+	const eventPrefix = events.EventContextRoot + "."
+	out := []string{}
 	seen := map[string]struct{}{}
-	for _, match := range matches {
-		if len(match) < 3 {
+	for searchStart := 0; searchStart < len(expression); {
+		idx := strings.Index(expression[searchStart:], eventPrefix)
+		if idx < 0 {
+			break
+		}
+		start := searchStart + idx
+		refStart := start + len(eventPrefix)
+		searchStart = refStart
+		if !isRootReferenceStart(expression, start) {
 			continue
 		}
-		ref := strings.TrimSpace(match[2])
+		if refStart >= len(expression) || !isIdentifierStart(expression[refStart]) {
+			continue
+		}
+		refEnd := refStart + 1
+		for refEnd < len(expression) && (isIdentifierPart(expression[refEnd]) || expression[refEnd] == '.') {
+			refEnd++
+		}
+		searchStart = refEnd
+		ref := strings.Trim(strings.TrimSpace(expression[refStart:refEnd]), ".")
 		if ref == "" {
 			continue
 		}
