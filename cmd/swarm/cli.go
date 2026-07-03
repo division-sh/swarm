@@ -239,6 +239,13 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			opts.StoreModeSet = cmd.Flags().Changed("store")
 			opts.WorkspaceBackendSet = cmd.Flags().Changed("workspace-backend")
 			opts.ContextNameSet = cmd.Flags().Changed("context")
+			opts.APITokenFileFlagSet = cmd.Flags().Changed("api-token-file")
+			if opts.APITokenFileFlagSet {
+				opts.APITokenFile = strings.TrimSpace(opts.APITokenFile)
+				if opts.APITokenFile == "" {
+					return fmt.Errorf("--api-token-file must be non-empty")
+				}
+			}
 			if opts.ShutdownGrace <= 0 {
 				return fmt.Errorf("--shutdown-grace must be a positive duration")
 			}
@@ -280,6 +287,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	cmd.Flags().StringVar(&opts.PlatformSpecPath, "platform-spec", opts.PlatformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.StoreMode, "store", opts.StoreMode, runtimeStoreBackendHelp)
 	cmd.Flags().StringVar(&opts.ContextName, "context", opts.ContextName, "Local Swarm context name to register for --dev")
+	cmd.Flags().StringVar(&opts.APITokenFile, "api-token-file", opts.APITokenFile, "Path to file containing the serve API bearer token")
 	cmd.Flags().StringVar(&opts.APIListenAddr, "api-listen-addr", opts.APIListenAddr, "HTTP bind address for API, WebSocket, health, and readiness routes")
 	cmd.Flags().StringVar(&opts.MCPListenAddr, "mcp-listen-addr", opts.MCPListenAddr, "HTTP bind address for MCP and tools routes")
 	cmd.Flags().DurationVar(&opts.ShutdownGrace, "shutdown-grace", opts.ShutdownGrace, "Time to wait for in-flight work to drain after shutdown starts")

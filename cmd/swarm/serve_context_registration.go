@@ -182,9 +182,6 @@ func (r *serveProjectContextRegistration) WriteFinal(runtimeInstanceID string, a
 	if r == nil {
 		return nil
 	}
-	if !apiAuth.UsesDefaultLoopbackToken() {
-		return fmt.Errorf("serve --dev project context registration currently supports only built-in loopback auth; explicit SWARM_API_TOKEN cannot be snapshotted into a safe context descriptor")
-	}
 	apiServer, err := serveProjectContextAPIServer(apiAddr)
 	if err != nil {
 		return err
@@ -193,7 +190,19 @@ func (r *serveProjectContextRegistration) WriteFinal(runtimeInstanceID string, a
 	if err != nil {
 		return err
 	}
-	if !cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
+	auth := localContextDescriptorAuth{Mode: localContextAuthBuiltinLoopback}
+	if apiAuth.UsesDefaultLoopbackToken() {
+		if !cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
+			return fmt.Errorf("serve --dev project context registration requires a numeric loopback API listener for built-in loopback auth, got %s", apiServer)
+		}
+	} else {
+		tokenFile := strings.TrimSpace(apiAuth.TokenFile)
+		if tokenFile == "" {
+			return fmt.Errorf("serve --dev project context registration requires token-file auth for explicit API auth source %s", apiAuth.Source)
+		}
+		auth = localContextDescriptorAuth{Mode: localContextAuthTokenFile, TokenFile: tokenFile}
+	}
+	if auth.Mode == localContextAuthBuiltinLoopback && !cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return fmt.Errorf("serve --dev project context registration requires a numeric loopback API listener, got %s", apiServer)
 	}
 	now := localContextTimestamp()
@@ -203,7 +212,7 @@ func (r *serveProjectContextRegistration) WriteFinal(runtimeInstanceID string, a
 		RuntimeInstanceID: runtimeInstanceID,
 		Transport:         localContextTransportTCP,
 		APIServer:         apiServer,
-		Auth:              localContextDescriptorAuth{Mode: localContextAuthBuiltinLoopback},
+		Auth:              auth,
 		ProjectRoot:       r.project.canonicalProjectRoot,
 		ContractsPath:     strings.TrimSpace(resolvedPaths.ContractsPath),
 		StorePath:         serveDescriptorStorePath(storeSelection),
