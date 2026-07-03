@@ -192,7 +192,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		return true, nil
 	}
 	if intent.Recipients == nil {
-		passthrough, deferred, err := d.bus.runInterceptors(ctx, intent.Event)
+		passthrough, deferred, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, d.bus.deliveryRoutesForEvent(ctx, intent.Event.ID()))
 		if err != nil {
 			return false, err
 		}

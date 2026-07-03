@@ -143,6 +143,17 @@ func (i *targetRouteConsumingInterceptor) Intercept(_ context.Context, evt event
 	return false, nil, nil
 }
 
+func (i *targetRouteConsumingInterceptor) InterceptDeliveryRoute(_ context.Context, evt events.Event, route events.DeliveryRoute) (bool, []events.Event, error) {
+	if route.Target.Normalized().Empty() {
+		return true, nil, nil
+	}
+	if evt.TargetRoute().Normalized() != route.Target.Normalized() {
+		return true, nil, nil
+	}
+	i.targetCalls++
+	return false, nil, nil
+}
+
 func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()

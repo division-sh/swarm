@@ -831,12 +831,9 @@ func (pc *PipelineCoordinator) workflowNodeExecutors() []workflowNodeExecutor {
 
 func (pc *PipelineCoordinator) workflowNodeInterceptPolicy(ctx context.Context, eventType string, evt events.Event) (bool, bool) {
 	eventType = strings.TrimSpace(eventType)
-	if suppressUntargetedWorkflowNodeInterception(ctx) && evt.TargetRoute().Empty() {
-		return false, false
-	}
 	source := pc.SemanticSource()
 	for _, node := range pc.WorkflowNodes() {
-		if !pc.workflowNodeMatchesDeliveryTarget(strings.TrimSpace(node.ID), evt.TargetRoute()) {
+		if !pc.workflowNodeDeliveryRouteMatches(ctx, strings.TrimSpace(node.ID), evt.TargetRoute()) {
 			continue
 		}
 		var (
@@ -874,7 +871,7 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 	handledAny := false
 	for _, node := range pc.WorkflowNodes() {
 		nodeID := strings.TrimSpace(node.ID)
-		if !pc.workflowNodeMatchesDeliveryTarget(nodeID, evt.TargetRoute()) {
+		if !pc.workflowNodeDeliveryRouteMatches(ctx, nodeID, evt.TargetRoute()) {
 			continue
 		}
 		handled, err := pc.executeNodeHandlerPlanResult(ctx, nodeID, evt)
@@ -887,6 +884,17 @@ func (pc *PipelineCoordinator) dispatchWorkflowNodeEventResult(ctx context.Conte
 		}
 	}
 	return handledAny, nil
+}
+
+func (pc *PipelineCoordinator) workflowNodeDeliveryRouteMatches(ctx context.Context, nodeID string, eventTarget events.RouteIdentity) bool {
+	nodeID = strings.TrimSpace(nodeID)
+	if route, ok := workflowNodeDeliveryRoute(ctx); ok {
+		if strings.TrimSpace(route.SubscriberID) != nodeID {
+			return false
+		}
+		return pc.workflowNodeMatchesDeliveryTarget(nodeID, route.Target)
+	}
+	return pc.workflowNodeMatchesDeliveryTarget(nodeID, eventTarget)
 }
 
 func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, nodeID string, evt events.Event) {
