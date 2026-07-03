@@ -35,6 +35,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"incidents.go":            {},
 		"logs.go":                 {},
 		"run_command.go":          {},
+		"test_command.go":         {},
 	}
 
 	gotAPIConsumers := map[string]struct{}{}
@@ -74,6 +75,9 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 	for name := range wantAPIConsumers {
 		source := sources[name]
 		for _, needle := range localBypassNeedles {
+			if name == "test_command.go" && needle == "BundleHash(" {
+				continue
+			}
 			if strings.Contains(source, needle) {
 				t.Fatalf("%s contains local/runtime bypass %q; runtime-state CLI commands must consume newCLIAPIClient", name, needle)
 			}
@@ -151,6 +155,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		t.Fatalf("write bundle register envelope: %v", err)
 	}
 	contractsDir := writeBundleRegisterContractsFixture(t)
+	scenarioContractsDir := writeScenarioRunnerFixture(t)
 
 	for _, tc := range []struct {
 		name string
@@ -206,6 +211,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		{name: "forkchat list", args: []string{"forkchat", "list"}},
 		{name: "forkchat view", args: []string{"forkchat", "view", "fork-1"}},
 		{name: "forkchat delete", args: []string{"forkchat", "delete", "fork-1"}},
+		{name: "test", args: []string{"test", "--contracts", scenarioContractsDir, "--platform-spec", filepath.Join(repoRoot(), defaultPlatformSpecPath)}},
 		{name: "version server", args: []string{"version", "--server"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -83,18 +83,37 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 	testSpec := mustMappingValue(t, root, "test_specification")
 	runner := mustMappingValue(t, testSpec, "deterministic_scenario_runner")
 
-	if got := scalarValue(mappingValue(runner, "implementation_status")); got != "source_authority_only" {
-		t.Fatalf("deterministic scenario runner implementation_status = %q, want source_authority_only", got)
+	if got := scalarValue(mappingValue(runner, "implementation_status")); got != "implemented_first_slice" {
+		t.Fatalf("deterministic scenario runner implementation_status = %q, want implemented_first_slice", got)
 	}
 
 	selectedSurface := mustMappingValue(t, runner, "selected_public_surface")
 	if got := scalarValue(mappingValue(selectedSurface, "command_family")); got != "swarm test" {
 		t.Fatalf("deterministic scenario runner command_family = %q, want swarm test", got)
 	}
+	commandStatus := scalarValue(mappingValue(selectedSurface, "command_catalog_status"))
+	for _, want := range []string{"implemented first-slice", "cli_specification.command_catalog"} {
+		if !strings.Contains(commandStatus, want) {
+			t.Fatalf("deterministic scenario runner command_catalog_status missing %q:\n%s", want, commandStatus)
+		}
+	}
 
 	sourceAuthority := mustMappingValue(t, runner, "source_authority")
 	if got := scalarValue(mappingValue(sourceAuthority, "merge_bearing_owner")); got != "platform-spec.yaml" {
 		t.Fatalf("deterministic scenario runner merge_bearing_owner = %q, want platform-spec.yaml", got)
+	}
+
+	cli := mustMappingValue(t, root, "cli_specification")
+	commandCatalog := mustMappingValue(t, cli, "command_catalog")
+	testCommand := mustMappingValue(t, commandCatalog, "test")
+	if got := scalarValue(mappingValue(testCommand, "command")); !strings.Contains(got, "swarm test") {
+		t.Fatalf("cli command_catalog.test.command = %q, want swarm test", got)
+	}
+	if got := scalarValue(mappingValue(testCommand, "implementation_status")); got != "implemented_first_slice" {
+		t.Fatalf("cli command_catalog.test.implementation_status = %q, want implemented_first_slice", got)
+	}
+	if got := scalarValue(mappingValue(testCommand, "owner")); got != "platform-spec.yaml#test_specification.deterministic_scenario_runner" {
+		t.Fatalf("cli command_catalog.test.owner = %q", got)
 	}
 	consumedOwners := mustMappingValue(t, sourceAuthority, "consumed_owners")
 	for _, key := range []string{

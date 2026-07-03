@@ -109,6 +109,7 @@ start work with 'swarm run' or 'swarm event publish' and watch it with
 	)
 	addToGroup(commandGroupAuthor,
 		newVerifyCommand(ctx, repo),
+		newTestCommand(repo, opts),
 		newDescribeCommand(ctx, repo),
 		newBundleCommand(repo, opts),
 		newSecretsCommand(ctx, repo),
