@@ -4401,6 +4401,81 @@ types:
 	}
 }
 
+func TestRun_ReportsPromptSaveEntityFieldReadOnlyListSelectorWithAllAuthorization(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  role: writer
+  mode: task
+  prompt_ref: writer
+  workspace_class: factory
+  manager_fallback: ops
+  entity_writes:
+    case:
+      save: all
+`, `
+case:
+  validation_kit:
+    type: ValidationKit
+`, "Use `save_entity_field` for `validation_kit.checklist.size`.\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "types.yaml"), `
+types:
+  ValidationKit:
+    checklist: list<text>
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_writer_coverage", "undeclared field path validation_kit.checklist.size") {
+		t.Fatalf("expected prompt save_entity_field list selector validation error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsPromptSaveEntityFieldRootReadPinWithAllAuthorization(t *testing.T) {
+	root := writePromptWriterCoverageFixture(t, `
+writer:
+  id: writer
+  role: writer
+  mode: task
+  prompt_ref: writer
+  workspace_class: factory
+  manager_fallback: ops
+  entity_writes:
+    case:
+      save: all
+`, `
+case:
+  local_status:
+    type: text
+`, "Use `save_entity_field` for `priority`.\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+root_case:
+  priority:
+    type: integer
+    _unused_reason: child read-pin save-path validation proof
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
+name: child
+initial_state: idle
+terminal_states: [done]
+states: [idle, done]
+pins:
+  inputs:
+    events: []
+    reads: [priority]
+  outputs:
+    events: []
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "entity_writer_coverage", "undeclared field path priority") {
+		t.Fatalf("expected prompt save_entity_field root read-pin validation error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_PromptEntityWritesPrefersFlowScopedAuthorization(t *testing.T) {
 	root := writePromptWriterCoverageFixture(t, `
 writer:

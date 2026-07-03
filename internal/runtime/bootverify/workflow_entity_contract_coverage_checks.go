@@ -331,7 +331,7 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 			continue
 		}
 		for _, field := range item.SaveFields {
-			if err := wave1PromptSaveEntityFieldPathValid(source, contract, field); err != nil {
+			if err := wave1PromptSaveEntityFieldPathValid(contract, field); err != nil {
 				findings = append(findings, Finding{
 					CheckID:  "entity_writer_coverage",
 					Severity: SeverityHardInvalidity,
@@ -356,13 +356,24 @@ func wave1PromptEntityWriteAuthorizationFindings(source semanticview.Source) []F
 	return findings
 }
 
-func wave1PromptSaveEntityFieldPathValid(source semanticview.Source, contract wave1EntityContractView, field string) error {
+func wave1PromptSaveEntityFieldPathValid(contract wave1EntityContractView, field string) error {
 	field = strings.TrimSpace(field)
 	if field == "" {
 		return fmt.Errorf("field is required")
 	}
-	_, err := wave1ResolveEntityPath(source, contract.FlowID, "entity."+field)
-	return err
+	resolved, err := entityruntime.ResolveFieldPath(entityruntime.Contract{
+		FlowID:     contract.FlowID,
+		EntityType: contract.EntityType,
+		Entity:     contract.Contract,
+		Types:      contract.Types,
+	}, field)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolved.FieldDecl.MaterializeFrom) != "" {
+		return fmt.Errorf("field %s is materialized by runtime accumulator projection and is not agent-writable", field)
+	}
+	return nil
 }
 
 func wave1PromptSaveEntityFieldAuthorized(rule runtimecontracts.AgentEntityWriteRule, field string) bool {
