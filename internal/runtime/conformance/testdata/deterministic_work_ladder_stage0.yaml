@@ -1,0 +1,399 @@
+version: 1
+kind: deterministic_work_ladder_stage0
+issue: 1664
+parent_issue: 1663
+discussion: 1460
+source_boundary:
+  platform_spec: platform-spec.yaml
+  pre_audit_comment: https://github.com/division-sh/swarm/issues/1664#issuecomment-4880202522
+  gate_comment: https://github.com/division-sh/swarm/issues/1664#issuecomment-4880229413
+  locked_design_discussion: https://github.com/division-sh/swarm/discussions/1460
+  empire_evidence_root: external:empire
+policy:
+  closure_level: stage0_evidence_gate_watchlist_owner_complete
+  claims_parent_closure: false
+  claims_runtime_behavior_closure: false
+  runtime_behavior_changes_allowed: false
+  platform_spec_changes_allowed: false
+  runtime_semantic_owner: platform-spec.yaml
+  stage0_owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
+  next_after_stage1: declarative_readability_helpers_before_pure_function
+  ordering_basis: evidence_matrix
+  ordering_decision: >
+    Stage 1 durable activity remains first because #1663/#1666 already own the
+    approved first runtime slice. After Stage 1, the current Empire inventory
+    has multiple live no-I/O readability/helper candidates and no live pure-code
+    candidate that is not already covered by existing declarative compute or
+    better classified as helper work. Therefore #1668 should run before #1669
+    unless a later Stage 0 refresh produces measured contrary evidence.
+watchlist_node:
+  id: runtime_operations.deterministic_work_ladder
+  status: created_in_this_artifact
+  private_watchlist_note: private:swarm-docs/docs/watchlists/runtime-operations.yaml#deterministic_work_ladder
+  broader_class: deterministic work currently leaks into trivial agents, complex CEL, or implicit handler chains.
+  non_closure_rule: >
+    #1663 must remain open after #1664. The parent tracker cannot close until
+    Stage 0 evidence, ADR/design record, durable activities, artifact
+    disposition, declarative helpers or their explicit deferral, pure functions
+    or their explicit deferral, orchestration functions or their explicit
+    deferral, build/CLI, trace/test, and conformance obligations are all closed
+    or superseded with proof.
+  active_trackers:
+    - {issue: 1663, role: parent_tracker, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1664, role: stage0_evidence_gates, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1665, role: adr_design_record, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1666, role: durable_activities, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1667, role: artifact_repo_commit_disposition, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1668, role: declarative_helpers, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1669, role: pure_function_step, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1670, role: function_build_cli_topology, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1671, role: orchestration_functions, watchlist: runtime_operations.deterministic_work_ladder}
+    - {issue: 1672, role: trace_test_conformance, watchlist: runtime_operations.deterministic_work_ladder}
+classification_values:
+  - durable_activity
+  - declarative_readability_helper
+  - pure_function_compute_module
+  - orchestration_function
+  - already_covered_or_not_deterministic_work_ladder_issue
+measurement_policy:
+  rough_estimates_allowed: false
+  allowed_statuses: [measured, unavailable, not_applicable]
+  default_unavailable_reason: >
+    No committed Empire runtime trace, cost, token, or latency artifact was
+    found for the specific inventory row. Rough estimates from the design
+    discussion are not carried as evidence.
+evidence_matrix:
+  - inventory_id: 1
+    dedupe_group: repo_scaffold_template_preparation
+    title: repo-scaffold-agent template validator and flow-data reader
+    classification: durable_activity
+    disposition: surviving_stage1_activity_pilot_candidate
+    consumer_issue: 1666
+    proof_refs:
+      - external:empire/contracts/flows/repo-scaffold/prompts/repo-scaffold-agent.md:11
+      - external:empire/contracts/flows/repo-scaffold/prompts/repo-scaffold-agent.md:42
+      - external:empire/contracts/flows/repo-scaffold/agents.yaml:1
+      - external:empire/contracts/flows/repo-scaffold/nodes.yaml:98
+    metric_evidence:
+      status: unavailable
+      reason: no committed trace/cost/latency artifact for repo-scaffold-agent invocations
+    notes: >
+      The live prompt performs exact tuple validation, bounded flow-data reads,
+      and a typed commit-request emit. The tuple lookup remains useful helper
+      evidence, but the row's implementation consumer is Stage 1 durable
+      activity because the author-facing gap is deterministic bounded tool/data
+      access without an LLM turn.
+
+  - inventory_id: 2
+    dedupe_group: lifecycle_marginal_review
+    title: lifecycle-review-agent promote/park/reject classifier
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: insufficient_current_deterministic_proof
+    consumer_issue: 1663
+    proof_refs:
+      - external:empire/contracts/flows/lifecycle/prompts/lifecycle-review-agent.md:7
+      - external:empire/contracts/flows/lifecycle/prompts/lifecycle-review-agent.md:23
+      - external:empire/contracts/flows/lifecycle/agents.yaml:1
+    metric_evidence:
+      status: unavailable
+      reason: no committed trace/cost/latency artifact and no exact deterministic policy predicate for strong-enough marginal evidence
+    notes: >
+      The prompt names three fixed output events, but the current evidence still
+      depends on judgment such as whether evidence is strong enough. It should
+      not be counted as a helper/function/activity candidate until a contract
+      predicate or policy table owns that decision.
+
+  - inventory_id: 3
+    dedupe_group: scanner_source_scrape
+    title: scanner-agent source scrape coordinator
+    classification: durable_activity
+    disposition: surviving_stage1_activity_candidate_with_orchestration_watch
+    consumer_issue: 1666
+    proof_refs:
+      - external:empire/contracts/flows/discovery/prompts/scanner-agent.md:1
+      - external:empire/contracts/flows/discovery/prompts/scanner-agent.md:5
+      - external:empire/contracts/flows/discovery/agents.yaml:65
+      - external:empire/contracts/flows/discovery/nodes.yaml:281
+    metric_evidence:
+      status: unavailable
+      reason: no committed trace/cost/latency artifact for scanner-agent invocations
+    notes: >
+      Existing discovery nodes already fan out sources. The live gap is bounded
+      scrape/result work per source; orchestration-function promotion is not
+      justified by this row unless a later matrix proves fan_out plus activities
+      cannot express the flow.
+
+  - inventory_id: 4
+    dedupe_group: holding_devops_resource_router
+    title: holding-devops resource request router planned refactor
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: planned_refactor_not_live_stage0_evidence
+    consumer_issue: 1663
+    proof_refs:
+      - external:empire/contracts/flows/holding-devops/agents.yaml:1
+      - external:empire/contracts/flows/holding-devops/agents.yaml:25
+    metric_evidence:
+      status: not_applicable
+      reason: planned/refactor evidence is excluded from live ordering counts
+    notes: >
+      The current contract still names a bounded side-effect executor agent.
+      This row remains parent context, not a live ladder ordering proof.
+
+  - inventory_id: 5
+    dedupe_group: validation_revision_gating
+    title: validation CTO revision-gating rules
+    classification: declarative_readability_helper
+    disposition: surviving_helper_candidate
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/validation/nodes.yaml:154
+      - external:empire/contracts/flows/validation/nodes.yaml:222
+      - external:empire/contracts/flows/validation/nodes.yaml:232
+    metric_evidence:
+      status: not_applicable
+      reason: readability/helper evidence uses contract complexity, not runtime cost
+    notes: >
+      This is a live multi-branch state/revision gate. It is helper evidence for
+      switch/FSM-like readability, not pure function evidence, because the
+      behavior is already contract-visible in ordered rules and data writes.
+
+  - inventory_id: 6
+    dedupe_group: holding_devops_manifest_validation
+    title: holding-devops deploy manifest provenance and seed-file validation
+    classification: declarative_readability_helper
+    disposition: surviving_helper_candidate
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/holding-devops/nodes.yaml:231
+      - external:empire/contracts/flows/holding-devops/nodes.yaml:251
+      - external:empire/contracts/flows/holding-devops/nodes.yaml:267
+    metric_evidence:
+      status: not_applicable
+      reason: schema/lookup readability evidence uses contract complexity, not runtime cost
+    notes: >
+      The row is a schema/manifest validation candidate. It has no code or I/O
+      requirement and should feed #1668, not function or orchestration work.
+
+  - inventory_id: 7
+    dedupe_group: scoring_composite_branching
+    title: scoring composite branch classification with existing weighted_average compute
+    classification: declarative_readability_helper
+    disposition: surviving_helper_candidate_existing_compute_covers_numeric_part
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/scoring/nodes.yaml:142
+      - external:empire/contracts/flows/scoring/nodes.yaml:145
+      - external:empire/contracts/flows/scoring/nodes.yaml:181
+    metric_evidence:
+      status: not_applicable
+      reason: existing compute already owns weighted average; remaining issue is branch readability
+    notes: >
+      The numeric aggregation is already handled by the current platform
+      compute step. The remaining awkward part is threshold/branch readability,
+      so this row supports helpers before pure code.
+
+  - inventory_id: 8
+    dedupe_group: repo_scaffold_tuple_lookup
+    title: repo-scaffold tuple to template/source path validation
+    classification: declarative_readability_helper
+    disposition: surviving_helper_candidate_deduped_with_activity_pilot
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/repo-scaffold/nodes.yaml:98
+      - external:empire/contracts/flows/repo-scaffold/nodes.yaml:100
+      - external:empire/contracts/flows/repo-scaffold/prompts/repo-scaffold-agent.md:14
+    metric_evidence:
+      status: not_applicable
+      reason: lookup readability evidence uses contract/prompt duplication, not runtime cost
+    notes: >
+      Same domain as row 1, but a different sub-shape: an explicit lookup table
+      would remove copied tuple-to-path conditionals without adding runtime I/O
+      semantics.
+
+  - inventory_id: 9
+    dedupe_group: treasury_budget_thresholds
+    title: treasury budget threshold classification
+    classification: declarative_readability_helper
+    disposition: surviving_helper_candidate
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/treasury/nodes.yaml:161
+      - external:empire/contracts/flows/treasury/nodes.yaml:162
+      - external:empire/contracts/flows/treasury/nodes.yaml:181
+      - external:empire/contracts/flows/treasury/nodes.yaml:197
+    metric_evidence:
+      status: not_applicable
+      reason: threshold/switch readability evidence uses contract complexity, not runtime cost
+    notes: >
+      Ordered emergency/throttle/warning/recorded branches are helper evidence
+      for switch or threshold-table grammar, not pure-code evidence.
+
+  - inventory_id: 10
+    dedupe_group: validation_packaging_agent
+    title: validation coordinator packaging and handoff-file writer
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: insufficient_current_deterministic_proof
+    consumer_issue: 1663
+    proof_refs:
+      - external:empire/contracts/flows/validation/agents.yaml:1
+      - external:empire/contracts/flows/validation/prompts/validation-coordinator.md:11
+      - external:empire/contracts/flows/validation/prompts/validation-coordinator.md:16
+      - external:empire/contracts/flows/validation/prompts/validation-coordinator.md:26
+    metric_evidence:
+      status: unavailable
+      reason: no committed trace/cost/latency artifact and prompt still asks for human-readable synthesis
+    notes: >
+      Some file copying is deterministic, but the current job includes summary
+      synthesis. Do not count it as pure deterministic ladder evidence until a
+      deterministic file-bundle owner is separated from the language work.
+
+  - inventory_id: 11
+    dedupe_group: repo_scaffold_template_preparation
+    title: repo-scaffold agents.yaml duplicate of row 1
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: duplicate_of_inventory_1
+    duplicate_of: 1
+    consumer_issue: 1666
+    proof_refs:
+      - external:empire/contracts/flows/repo-scaffold/agents.yaml:1
+      - external:empire/contracts/flows/repo-scaffold/agents.yaml:11
+    metric_evidence:
+      status: not_applicable
+      reason: duplicate row collapsed into row 1
+    notes: >
+      This is the agent declaration for the same repo-scaffold pattern covered
+      by row 1, not a separate manifestation.
+
+  - inventory_id: 12
+    dedupe_group: validation_revision_gating
+    title: validation revision-gating orchestration duplicate of row 5
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: duplicate_of_inventory_5
+    duplicate_of: 5
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/validation/nodes.yaml:154
+      - external:empire/contracts/flows/validation/nodes.yaml:222
+    metric_evidence:
+      status: not_applicable
+      reason: duplicate domain collapsed into row 5
+    notes: >
+      The same validation revision-gating domain appeared once as complex CEL
+      and once as multi-step orchestration. Current evidence supports a helper
+      readability child first; orchestration remains unproven for this row.
+
+  - inventory_id: 13
+    dedupe_group: discovery_scan_mode_dispatch
+    title: discovery scan-mode dispatcher
+    classification: declarative_readability_helper
+    disposition: surviving_helper_candidate
+    consumer_issue: 1668
+    proof_refs:
+      - external:empire/contracts/flows/discovery/nodes.yaml:93
+      - external:empire/contracts/flows/discovery/nodes.yaml:127
+      - external:empire/contracts/flows/discovery/nodes.yaml:161
+    metric_evidence:
+      status: not_applicable
+      reason: dispatch readability evidence uses contract duplication, not runtime cost
+    notes: >
+      The evidence is repeated dispatch shape and target/event selection.
+      Current contract already has fan_out, so this row supports switch/lookup
+      helpers rather than orchestration functions.
+
+  - inventory_id: 14
+    dedupe_group: operating_state_machine
+    title: operating state machine handler chain
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: existing_primitives_adequate
+    consumer_issue: 1663
+    proof_refs:
+      - external:empire/contracts/flows/operating/nodes.yaml:1
+      - external:empire/contracts/flows/operating/nodes.yaml:38
+      - external:empire/contracts/flows/operating/nodes.yaml:105
+      - external:empire/contracts/flows/operating/nodes.yaml:130
+    metric_evidence:
+      status: not_applicable
+      reason: existing state-machine handlers are readable enough for this Stage 0 inventory
+    notes: >
+      The operating state machine is thick but already expressed as normal
+      handlers, guards, state advances, and emits. It is not a current ladder
+      implementation candidate.
+
+  - inventory_id: 15
+    dedupe_group: opco_draft_scaffolding_gate_accumulation
+    title: OPCO draft scaffolding gate accumulation
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: draft_only_not_live_contract_evidence
+    consumer_issue: 1663
+    proof_refs:
+      - external:empire/docs/OPCO-STATE-MACHINE-DRAFT.md:236
+      - external:empire/docs/OPCO-STATE-MACHINE-DRAFT.md:242
+    metric_evidence:
+      status: not_applicable
+      reason: draft-only row excluded from live ordering counts
+    notes: >
+      The draft describes possible coordinator-shape concerns. It is not a live
+      contract manifestation and must not drive primitive promotion by itself.
+
+  - inventory_id: 16
+    dedupe_group: opco_draft_data_access_patterns
+    title: OPCO draft mixed data-access patterns
+    classification: already_covered_or_not_deterministic_work_ladder_issue
+    disposition: architecture_not_node_shape
+    consumer_issue: 1663
+    proof_refs:
+      - external:empire/docs/OPCO-STATE-MACHINE-DRAFT.md:589
+      - external:empire/docs/OPCO-STATE-MACHINE-DRAFT.md:591
+      - external:empire/docs/OPCO-STATE-MACHINE-DRAFT.md:593
+      - external:empire/docs/OPCO-STATE-MACHINE-DRAFT.md:595
+    metric_evidence:
+      status: not_applicable
+      reason: architectural data-access pattern row is not node-shape evidence
+    notes: >
+      This row belongs to cross-flow data ownership/encapsulation thinking, not
+      deterministic-work-ladder primitive ordering.
+gate_criteria:
+  - id: stage1_durable_activity_proof
+    consumer_issue: 1666
+    promotion_state: next_runtime_child
+    required_conditions:
+      - pilot uses row 1 or another explicitly classified durable-activity row
+      - minimal activity form is specified and demonstrated
+      - generated result events are materialized in bundle/catalog/verify outputs
+      - tool effect classes are authoritative for supported activity tool sources
+      - unsupported callable tool sources fail closed and are tracked
+      - activity intent commits transactionally before tool execution
+      - retry, idempotency, and fork defaults are specified for supported effect classes
+      - artifact_repo_commit disposition is recorded by #1667 or explicitly split
+    blocking_conditions:
+      - hidden runtime-only result events
+      - synchronous tool execution while holding the entity transaction
+      - MCP-discovered self-classification treated as authoritative
+      - runtime behavior implemented without matching platform-spec promotion
+
+  - id: stage2_stage3_ordering
+    consumer_issue: 1668
+    promotion_state: declarative_helpers_before_pure_function
+    required_conditions:
+      - at least two live non-draft helper candidates remain after activity rows are removed
+      - candidate helpers preserve contract visibility and fail closed on ambiguity
+      - no accepted helper introduces arbitrary code, I/O, or richer CEL grammar
+      - pure-code work remains blocked on #1665 naming and a live pure-function evidence row not covered by existing compute
+    current_matrix_result: >
+      Rows 5, 6, 7, 8, 9, and 13 support declarative helpers. No surviving row
+      requires pure code ahead of helpers. Row 7's numeric work is already
+      covered by existing compute.
+
+  - id: orchestration_function_promotion
+    consumer_issue: 1671
+    promotion_state: blocked_until_later_evidence
+    required_conditions:
+      - durable activities have landed and provide journaled activity results
+      - at least two live same-class examples cannot be expressed by fan_out, accumulate, activities, or accepted helpers
+      - journal identity includes run/fork id, flow instance, entity, source event, node/handler, call ordinal, module version, and input hash
+      - fork/replay policies from activity effect classes are explicit and consumed
+      - buffered emit failure semantics are specified and tested
+    current_matrix_result: >
+      Current Stage 0 evidence does not justify promoting orchestration before
+      activities and helpers. Scanner and discovery dispatch decompose into
+      existing fan_out plus activities/helpers.
