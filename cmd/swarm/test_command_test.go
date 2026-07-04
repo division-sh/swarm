@@ -22,6 +22,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 
 	var calls []jsonRPCRequest
+	var publishCalls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
 			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
@@ -36,26 +37,56 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		calls = append(calls, req)
 		switch req.Method {
 		case eventPublishMethod:
-			if req.Params["event_name"] != "thing.created" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") {
-				t.Fatalf("event.publish params = %#v", req.Params)
+			publishCalls++
+			switch publishCalls {
+			case 1:
+				if req.Params["event_name"] != "thing.created" || req.Params["bundle_hash"] != bundleHash || req.Params["idempotency_key"] != scenarioSHA40("empire-cost-router") {
+					t.Fatalf("event.publish initial params = %#v", req.Params)
+				}
+				payload, ok := req.Params["payload"].(map[string]any)
+				if !ok || payload["who"] != "operator" || !numberEquals(payload["amount"], 7) {
+					t.Fatalf("event.publish initial payload = %#v", req.Params["payload"])
+				}
+				writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+			case 2:
+				if req.Params["event_name"] != "thing.reviewed" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != "run-1" || req.Params["source_event_id"] != "event-1" {
+					t.Fatalf("event.publish follow-up params = %#v", req.Params)
+				}
+				payload, ok := req.Params["payload"].(map[string]any)
+				if !ok || payload["note"] != "approved" {
+					t.Fatalf("event.publish follow-up payload = %#v", req.Params["payload"])
+				}
+				result := eventPublishTestResult(false)
+				result["event_id"] = "event-2"
+				result["source_event_id"] = "event-1"
+				writeJSONRPCResult(t, w, req.ID, result)
+			default:
+				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
 			}
-			payload, ok := req.Params["payload"].(map[string]any)
-			if !ok || payload["who"] != "operator" || !numberEquals(payload["amount"], 7) {
-				t.Fatalf("event.publish payload = %#v", req.Params["payload"])
-			}
-			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
 			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		case "run.trace":
 			row := validRunCommandTraceRow("event-1")
 			row["event_name"] = "thing.created"
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{row}})
+			followUp := validRunCommandTraceRow("event-2")
+			followUp["event_name"] = "thing.reviewed"
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{row, followUp}})
 		case eventObservationMethodList:
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"events": []any{}})
 		case entityListMethod:
 			entity := validEntitySummary("entity-1")
 			entity["entity_type"] = "widget"
+			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
+		case entityGetMethod:
+			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+				t.Fatalf("entity.get params = %#v", req.Params)
+			}
+			result := validEntityFullResult("entity-1")
+			entity := result["entity"].(map[string]any)
+			entity["entity_type"] = "widget"
+			entity["current_state"] = "done"
+			writeJSONRPCResult(t, w, req.ID, result)
 		default:
 			t.Fatalf("unexpected method = %s", req.Method)
 		}
@@ -76,10 +107,13 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	assertScenarioTestMethods(t, calls, []string{
 		eventPublishMethod,
 		"run.diagnose",
+		eventPublishMethod,
+		"run.diagnose",
 		"run.diagnose",
 		"run.trace",
 		eventObservationMethodList,
 		entityListMethod,
+		entityGetMethod,
 	})
 	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
 		if !strings.Contains(stdout.String(), want) {
@@ -445,12 +479,128 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	runner := scenarioRunner{client: client}
-	if err := runner.assertEntityExpectation(context.Background(), "run-1", scenarioEntityExpect{EntityType: "widget", Count: intPtr(2)}); err != nil {
+	if err := runner.assertEntityExpectation(context.Background(), "run-1", mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{EntityType: "widget", Count: intPtr(2)}); err != nil {
 		t.Fatalf("entity expectation: %v", err)
 	}
 	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityListMethod})
 	if calls[1].Params["cursor"] != "page-2" {
 		t.Fatalf("second entity.list cursor = %#v", calls[1].Params)
+	}
+}
+
+func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case entityListMethod:
+			if req.Params["run_id"] != "run-1" || req.Params["type"] != "widget" {
+				t.Fatalf("entity.list params = %#v", req.Params)
+			}
+			entity := validEntitySummary("entity-1")
+			entity["entity_type"] = "widget"
+			entity["current_state"] = "done"
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
+		case entityGetMethod:
+			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+				t.Fatalf("entity.get params = %#v", req.Params)
+			}
+			result := validEntityFullResult("entity-1")
+			entity := result["entity"].(map[string]any)
+			entity["entity_type"] = "widget"
+			entity["current_state"] = "done"
+			writeJSONRPCResult(t, w, req.ID, result)
+		default:
+			t.Fatalf("unexpected request %#v", req)
+		}
+	}))
+	defer server.Close()
+	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	runner := scenarioRunner{client: client}
+	evaluator := mustScenarioExpressionEvaluator(t, map[string]any{
+		"done_state": "done",
+		"score":      7,
+		"ready":      true,
+	})
+	if err := runner.assertEntityExpectation(context.Background(), "run-1", evaluator, scenarioEntityExpect{
+		EntityType:   "widget",
+		CurrentState: "${vars.done_state}",
+		StateSet:     true,
+		Fields:       map[string]any{"score": "${vars.score}"},
+		FieldsSet:    true,
+		Gates:        map[string]any{"ready": "${vars.ready}"},
+		GatesSet:     true,
+	}); err != nil {
+		t.Fatalf("entity detail expectation: %v", err)
+	}
+	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityGetMethod})
+}
+
+func TestScenarioEntityDetailExpectationFailsClosedOnMultipleMatches(t *testing.T) {
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		if req.Method != entityListMethod {
+			t.Fatalf("unexpected request %#v", req)
+		}
+		entity1 := validEntitySummary("entity-1")
+		entity1["entity_type"] = "widget"
+		entity2 := validEntitySummary("entity-2")
+		entity2["entity_type"] = "widget"
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity1, entity2}})
+	}))
+	defer server.Close()
+	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	runner := scenarioRunner{client: client}
+	err = runner.assertEntityExpectation(context.Background(), "run-1", mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{
+		EntityType:   "widget",
+		CurrentState: "done",
+		StateSet:     true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "returned 2 entities, want exactly one") {
+		t.Fatalf("entity detail expectation error = %v, want multiple-match failure", err)
+	}
+	assertScenarioTestMethods(t, calls, []string{entityListMethod})
+}
+
+func TestScenarioEntityExpectationRejectsAmbiguousRows(t *testing.T) {
+	for _, raw := range []string{
+		`
+steps:
+  - publish: thing.created
+    payload: {amount: 7, who: operator}
+expect:
+  entities:
+    - type: widget
+`,
+		`
+steps:
+  - publish: thing.created
+    payload: {amount: 7, who: operator}
+expect:
+  entities:
+    - type: widget
+      count: 1
+      current_state: done
+`,
+	} {
+		if _, err := parseScenarioDocument([]byte(raw)); err == nil {
+			t.Fatalf("parseScenarioDocument(%s) unexpectedly succeeded", raw)
+		}
 	}
 }
 
@@ -473,6 +623,9 @@ steps:
       set:
         who: ${vars.who}
         amount: 7
+  - publish: thing.reviewed
+    payload:
+      note: approved
 invalid:
   base:
     publish: thing.created
@@ -485,11 +638,11 @@ invalid:
       expect: reject
 expect:
   events:
-    include: [thing.created]
+    include: [thing.created, thing.reviewed]
   no_dead_letters: true
   entities:
     - type: widget
-      count: 1
+      current_state: done
 `)
 	return contractsPath
 }
@@ -518,6 +671,15 @@ func scenarioRunDiagnoseTestResult(runID string, ready bool) map[string]any {
 
 func intPtr(value int) *int {
 	return &value
+}
+
+func mustScenarioExpressionEvaluator(t *testing.T, vars map[string]any) *scenarioExpressionEvaluator {
+	t.Helper()
+	evaluator, err := newScenarioExpressionEvaluator("test-seed", vars)
+	if err != nil {
+		t.Fatalf("newScenarioExpressionEvaluator: %v", err)
+	}
+	return evaluator
 }
 
 func assertScenarioTestMethods(t *testing.T, calls []jsonRPCRequest, want []string) {

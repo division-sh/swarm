@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -83,8 +84,14 @@ type scenarioEventExpect struct {
 }
 
 type scenarioEntityExpect struct {
-	EntityType string
-	Count      *int
+	EntityType   string
+	Count        *int
+	CurrentState any
+	StateSet     bool
+	Fields       map[string]any
+	FieldsSet    bool
+	Gates        map[string]any
+	GatesSet     bool
 }
 
 type scenarioInvalid struct {
@@ -400,7 +407,7 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 			return fmt.Errorf("%s: %w", file.Path, err)
 		}
 		if !doc.Expect.empty() {
-			if err := r.evaluateExpectations(ctx, state.RunID, doc.Expect); err != nil {
+			if err := r.evaluateExpectations(ctx, state.RunID, evaluator, doc.Expect); err != nil {
 				return fmt.Errorf("%s: %w", file.Path, err)
 			}
 		}
@@ -658,12 +665,39 @@ func parseScenarioEntityExpect(value any) ([]scenarioEntityExpect, error) {
 					return nil, fmt.Errorf("expect.entities[%d].count must be a non-negative integer", i)
 				}
 				item.Count = &count
+			case "current_state":
+				if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+					return nil, fmt.Errorf("expect.entities[%d].current_state must be non-empty", i)
+				}
+				item.CurrentState = cloneAny(value)
+				item.StateSet = true
+			case "fields":
+				fields, ok := value.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("expect.entities[%d].fields must be a mapping", i)
+				}
+				item.Fields = cloneAnyMap(fields)
+				item.FieldsSet = true
+			case "gates":
+				gates, ok := value.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("expect.entities[%d].gates must be a mapping", i)
+				}
+				item.Gates = cloneAnyMap(gates)
+				item.GatesSet = true
 			default:
 				return nil, fmt.Errorf("unsupported expect.entities[%d] field %q", i, key)
 			}
 		}
 		if item.EntityType == "" {
 			return nil, fmt.Errorf("expect.entities[%d].type is required", i)
+		}
+		detail := item.hasDetailAssertion()
+		if item.Count != nil && detail {
+			return nil, fmt.Errorf("expect.entities[%d].count cannot be combined with current_state, fields, or gates", i)
+		}
+		if item.Count == nil && !detail {
+			return nil, fmt.Errorf("expect.entities[%d] requires count, current_state, fields, or gates", i)
 		}
 		out = append(out, item)
 	}
@@ -672,6 +706,10 @@ func parseScenarioEntityExpect(value any) ([]scenarioEntityExpect, error) {
 
 func (e scenarioExpect) empty() bool {
 	return len(e.Events.Include) == 0 && len(e.Events.Exact) == 0 && len(e.Events.Ordered) == 0 && e.NoDeadLetters == nil && len(e.Entities) == 0
+}
+
+func (e scenarioEntityExpect) hasDetailAssertion() bool {
+	return e.StateSet || e.FieldsSet || e.GatesSet
 }
 
 func parseScenarioInvalid(node *yaml.Node) (scenarioInvalid, error) {
@@ -1357,7 +1395,7 @@ func (r scenarioRunner) readTestQuiescence(ctx context.Context, runID string) (d
 	return *result.TestQuiescence, nil
 }
 
-func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, expect scenarioExpect) error {
+func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, evaluator *scenarioExpressionEvaluator, expect scenarioExpect) error {
 	rows, err := r.fetchRunTraceRows(ctx, runID)
 	if err != nil {
 		return err
@@ -1372,7 +1410,7 @@ func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, 
 		}
 	}
 	for _, entity := range expect.Entities {
-		if err := r.assertEntityExpectation(ctx, runID, entity); err != nil {
+		if err := r.assertEntityExpectation(ctx, runID, evaluator, entity); err != nil {
 			return err
 		}
 	}
@@ -1491,13 +1529,13 @@ func (r scenarioRunner) assertNoDeadLetters(ctx context.Context, runID string) e
 	}
 }
 
-func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID string, expect scenarioEntityExpect) error {
+func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID string, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {
 	params := map[string]any{
 		"run_id": runID,
 		"type":   expect.EntityType,
 		"limit":  500,
 	}
-	count := 0
+	entities := []entitySummary{}
 	seen := map[string]struct{}{}
 	for {
 		var result entityListResult
@@ -1507,7 +1545,7 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID strin
 		if err := validateEntityListResult(result); err != nil {
 			return err
 		}
-		count += len(result.Entities)
+		entities = append(entities, result.Entities...)
 		cursor := strings.TrimSpace(result.NextCursor)
 		if cursor == "" {
 			break
@@ -1518,10 +1556,141 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID strin
 		seen[cursor] = struct{}{}
 		params["cursor"] = cursor
 	}
+	count := len(entities)
 	if expect.Count != nil && count != *expect.Count {
 		return fmt.Errorf("entity expectation for type %s got count %d, want %d", expect.EntityType, count, *expect.Count)
 	}
+	if !expect.hasDetailAssertion() {
+		return nil
+	}
+	if count != 1 {
+		return fmt.Errorf("entity detail expectation for type %s returned %d entities, want exactly one", expect.EntityType, count)
+	}
+	detail, err := expect.evaluatedDetail(evaluator)
+	if err != nil {
+		return err
+	}
+	entityID := entities[0].EntityID
+	var full entityFull
+	if err := r.client.call(ctx, entityGetMethod, map[string]any{"entity_id": entityID, "run_id": runID}, &full); err != nil {
+		return err
+	}
+	if err := validateEntityFullResult("entity.get result", full); err != nil {
+		return err
+	}
+	if full.Entity.EntityID != entityID {
+		return fmt.Errorf("malformed entity.get result: entity.entity_id = %q, want %q", full.Entity.EntityID, entityID)
+	}
+	if full.Entity.RunID != runID {
+		return fmt.Errorf("malformed entity.get result: entity.run_id = %q, want %q", full.Entity.RunID, runID)
+	}
+	if full.Entity.EntityType != expect.EntityType {
+		return fmt.Errorf("malformed entity.get result: entity.entity_type = %q, want %q", full.Entity.EntityType, expect.EntityType)
+	}
+	if detail.State != nil && full.Entity.CurrentState != *detail.State {
+		return fmt.Errorf("entity %s current_state = %q, want %q", entityID, full.Entity.CurrentState, *detail.State)
+	}
+	if detail.FieldsSet {
+		if err := assertScenarioJSONEqual(fmt.Sprintf("entity %s fields", entityID), full.Fields, detail.Fields); err != nil {
+			return err
+		}
+	}
+	if detail.GatesSet {
+		if err := assertScenarioJSONEqual(fmt.Sprintf("entity %s gates", entityID), full.Gates, detail.Gates); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+type evaluatedScenarioEntityDetail struct {
+	State     *string
+	Fields    map[string]any
+	FieldsSet bool
+	Gates     map[string]bool
+	GatesSet  bool
+}
+
+func (e scenarioEntityExpect) evaluatedDetail(evaluator *scenarioExpressionEvaluator) (evaluatedScenarioEntityDetail, error) {
+	var out evaluatedScenarioEntityDetail
+	if evaluator == nil {
+		return out, fmt.Errorf("scenario expression evaluator is required for entity detail assertions")
+	}
+	if e.StateSet {
+		value, err := evaluator.evalValue(e.CurrentState)
+		if err != nil {
+			return out, fmt.Errorf("expect.entities.current_state: %w", err)
+		}
+		state, ok := value.(string)
+		if !ok || strings.TrimSpace(state) == "" {
+			return out, fmt.Errorf("expect.entities.current_state must evaluate to a non-empty string")
+		}
+		state = strings.TrimSpace(state)
+		out.State = &state
+	}
+	if e.FieldsSet {
+		value, err := evaluator.evalValue(e.Fields)
+		if err != nil {
+			return out, fmt.Errorf("expect.entities.fields: %w", err)
+		}
+		fields, ok := value.(map[string]any)
+		if !ok {
+			return out, fmt.Errorf("expect.entities.fields must evaluate to a mapping")
+		}
+		out.Fields = fields
+		out.FieldsSet = true
+	}
+	if e.GatesSet {
+		value, err := evaluator.evalValue(e.Gates)
+		if err != nil {
+			return out, fmt.Errorf("expect.entities.gates: %w", err)
+		}
+		gates, ok := value.(map[string]any)
+		if !ok {
+			return out, fmt.Errorf("expect.entities.gates must evaluate to a mapping")
+		}
+		out.Gates = map[string]bool{}
+		for gate, raw := range gates {
+			value, ok := raw.(bool)
+			if !ok {
+				return out, fmt.Errorf("expect.entities.gates.%s must evaluate to boolean", gate)
+			}
+			out.Gates[gate] = value
+		}
+		out.GatesSet = true
+	}
+	return out, nil
+}
+
+func assertScenarioJSONEqual(label string, got, want any) error {
+	gotJSON, err := scenarioCanonicalJSON(got)
+	if err != nil {
+		return fmt.Errorf("%s actual value is not JSON encodable: %w", label, err)
+	}
+	wantJSON, err := scenarioCanonicalJSON(want)
+	if err != nil {
+		return fmt.Errorf("%s expected value is not JSON encodable: %w", label, err)
+	}
+	if gotJSON != wantJSON {
+		return fmt.Errorf("%s mismatch: got %s want %s", label, gotJSON, wantJSON)
+	}
+	return nil
+}
+
+func scenarioCanonicalJSON(value any) (string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	var normalized any
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return "", err
+	}
+	out, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func scenarioStringSliceContains(values []string, want string) bool {
