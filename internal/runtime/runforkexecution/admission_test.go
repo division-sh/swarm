@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -430,6 +431,31 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest
 	}
 }
 
+func TestContractBundleSourceLoaderRejectsIncompatiblePlatformVersion(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	contractsRoot := writeSelectedContractPlatformVersionFixture(t, ">=0.8.0")
+	loader := ContractBundleSourceLoader{RepoRoot: repoRoot}
+
+	_, err := loader.LoadRunForkSelectedContractSource(ctx, store.RunForkContractSelection{
+		Mode:            store.RunForkContractSelectionModeSelectedContracts,
+		ContractsRoot:   contractsRoot,
+		WorkflowName:    "selected-platform-version",
+		WorkflowVersion: "1.0.0",
+	})
+	if err == nil {
+		t.Fatal("LoadRunForkSelectedContractSource error = nil, want platform_version compatibility failure")
+	}
+	for _, want := range []string{
+		"selected-contract source admission failed",
+		`platform_version range ">=0.8.0" does not include running platform "0.7.0"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadRunForkSelectedContractSource error = %v, want substring %q", err, want)
+		}
+	}
+}
+
 func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelection(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
@@ -662,6 +688,34 @@ func loadRunForkExecutionFixtureBundle(t *testing.T, relativeRoot string) *runti
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", relativeRoot, err)
 	}
 	return bundle
+}
+
+func writeSelectedContractPlatformVersionFixture(t *testing.T, declaredRange string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "package.yaml"), `name: selected-platform-version
+version: "1.0.0"
+platform_version: "`+declaredRange+`"
+flows: []
+`)
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-platform-version\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	return root
+}
+
+func writeSelectedContractFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func testSelectedContractBinding(forkRunID string) store.RunForkSelectedContractBinding {

@@ -125,6 +125,7 @@ func writeBundleRegistrationUploadFixture(t *testing.T, root string) {
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `
 name: upload-fixture
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: packages/foo
 flows:
@@ -141,6 +142,7 @@ states:
 	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "package.yaml"), `
 name: nested-flow-package
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: gamma
     flow: gamma
@@ -154,6 +156,7 @@ states:
 	writeBundleHashText(t, filepath.Join(root, "packages", "foo", "package.yaml"), `
 name: child-package
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: beta
     flow: beta

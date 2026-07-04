@@ -1,0 +1,8 @@
+issue: 1659
+impact: minor
+platform_train: 0.7.0
+summary: Enforce package.yaml platform_version compatibility at package admission.
+spec_sections:
+  - versioning.platform_versioning
+  - versioning.compatibility
+  - boot_sequence.validate_platform_version

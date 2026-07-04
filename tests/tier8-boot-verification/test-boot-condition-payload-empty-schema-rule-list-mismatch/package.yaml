@@ -4,7 +4,7 @@ description: >
   Boot verification: list-form rule condition references payload.empty_schema_rule
   on an existing event with no payload fields. Platform must catch
   CONDITION-PAYLOAD error.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 trigger:
   boot: true

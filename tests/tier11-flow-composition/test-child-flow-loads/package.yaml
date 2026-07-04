@@ -1,7 +1,7 @@
 name: test-child-flow-loads
 version: 1.0.0
 description: Parent declares child flow in flows list. Both load at boot.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 - id: child
   flow: child

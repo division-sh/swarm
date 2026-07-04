@@ -1470,7 +1470,7 @@ func TestRunVerifyCommandUsesEmbeddedPlatformSpecWithoutRepoRoot(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: embedded-platform-spec
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: embedded-platform-spec\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -1486,6 +1486,38 @@ platform: ">=1.6.0"
 	}
 	if !strings.Contains(buf.String(), "verify ok: contracts=") {
 		t.Fatalf("verify output missing success marker:\n%s", buf.String())
+	}
+}
+
+func TestRunVerifyCommandFailsClosedForIncompatiblePlatformVersion(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	chdirForTest(t, t.TempDir())
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: incompatible-platform-spec
+version: "1.0.0"
+platform_version: ">=0.8.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: incompatible-platform-spec\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
+	}
+	for _, want := range []string{
+		"platform_version_compatibility",
+		`platform_version range ">=0.8.0" does not include running platform "0.7.0"`,
+		"remediation: update package.yaml platform_version after re-verifying",
+	} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("verify output missing %q:\n%s", want, buf.String())
+		}
 	}
 }
 
@@ -3525,7 +3557,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 name: cross-bundle-target
 version: 1.0.0
 description: Cross-bundle target fixture for run.fork.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), `
@@ -4090,7 +4122,7 @@ func writeServedEventPublishFollowUpFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: served-event-publish-followup
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 initial_state: new
@@ -4165,7 +4197,7 @@ func writeServedEventPublishTargetRouteFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: served-event-publish-target-route
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: operating
     flow: operating
@@ -4311,7 +4343,7 @@ func writeServedDynamicAutoEmitFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: served-dynamic-auto-emit
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: operating
     flow: operating
@@ -9119,7 +9151,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-lint-evidence
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -9286,7 +9318,7 @@ func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-boot-timer
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -9335,7 +9367,7 @@ func TestRunVerifyCommand_FirstFlowEquivalentSuppressesTutorialLintEvidence(t *t
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: ticket-flow
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -9470,7 +9502,7 @@ func TestRunVerifyCommand_FailsForPromptDeclaredSaveWithoutEntityWrites(t *testi
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-prompt-writer-coverage
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -9550,7 +9582,7 @@ func TestRunVerifyCommand_FailsForPseudoStateSchemaTypes(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-state-schema-pseudo-types
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
@@ -9581,7 +9613,7 @@ func TestRunVerifyCommand_AllowsCanonicalStateSchemaFloat(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-state-schema-float
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -9638,7 +9670,7 @@ func TestRunVerifyCommand_AllowsAccumulatorEntityProjection(t *testing.T) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-accumulator-entity-projection
 version: "1.0.0"
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -9813,7 +9845,7 @@ func writeVerifyAccumulatorSafetyCommandFixture(t *testing.T, opts verifyAccumul
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-accumulator-safety
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -9943,7 +9975,7 @@ func writeServeRuntimeAgentSlugFixtureWithKey(t *testing.T, workflowName, agentK
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
 name: %s
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `, workflowName))
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -9981,7 +10013,7 @@ func writeArtifactRepoCommitServeFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: artifact-root-startup
 version: "1.0.0"
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -10066,7 +10098,7 @@ func writeVerifyModelAliasFixture(t *testing.T, root, model string) {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-model-alias
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -10121,7 +10153,7 @@ func writeWorkflowValidationDeadEventSchemaFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: dead-event-schema
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -12024,7 +12056,7 @@ func writeVerifyMissingPinWarningFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-missing-pin-warning
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child

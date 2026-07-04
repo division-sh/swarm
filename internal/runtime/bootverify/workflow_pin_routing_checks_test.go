@@ -568,7 +568,7 @@ func loadPinRoutingVerifyBundle(t *testing.T, emitBlock string) *runtimecontract
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
 name: pin-routing-verify
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker
@@ -637,7 +637,7 @@ func loadPinRoutingProducerRouteBundleForEvents(t *testing.T, producerOutputEven
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
 name: pin-routing-producer-route
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -728,7 +728,7 @@ func loadPinRoutingProducerAgentRouteBundleWithRootOutputs(t *testing.T, produce
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
 name: pin-routing-producer-agent-route
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -888,7 +888,7 @@ connect:
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
 name: select-entity-demotion
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:`+flows+connectBlock+`
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-demotion\n")
@@ -1103,7 +1103,7 @@ func loadPinRoutingVerifySourceFixture(t *testing.T, opts pinRoutingVerifySource
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
 name: pin-routing-source-identity
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: extras
 flows:
@@ -1172,7 +1172,7 @@ func loadPinRoutingRootConnectBundle(t *testing.T, emitBlock string) *runtimecon
 	writePinRoutingVerifyFile(t, filepath.Join(root, "package.yaml"), `
 name: pin-routing-root-connect
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: consumer
     flow: consumer

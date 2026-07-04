@@ -14,7 +14,7 @@ func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.
 	writeFixtureFile(t, root+"/package.yaml", `
 name: wave1-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -524,7 +524,7 @@ func TestLoadWorkflowContractBundle_RejectsLegacyPackageEntitySchema(t *testing.
 	writeFixtureFile(t, root+"/package.yaml", `
 name: compat-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 entity_schema:
   item:
     item_id: text
@@ -547,7 +547,7 @@ func TestLoadWorkflowContractBundle_RejectsMixedLegacyEntitySchemaAndWave1Entiti
 	writeFixtureFile(t, root+"/package.yaml", `
 name: mixed-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 entity_schema:
   item:
     item_id: text
@@ -573,7 +573,7 @@ func TestLoadWorkflowContractBundle_RejectsLegacySubpackageEntitySchemaAlongside
 	writeFixtureFile(t, root+"/package.yaml", `
 name: mixed-subpackage-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: packages/legacy-child
 flows: []
@@ -587,7 +587,7 @@ root_entity:
 	writeFixtureFile(t, root+"/packages/legacy-child/package.yaml", `
 name: legacy-child
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 entity_schema:
   child:
@@ -607,7 +607,7 @@ func TestLoadWorkflowContractBundle_RejectsPackageScopedTypeCatalog(t *testing.T
 	writeFixtureFile(t, root+"/package.yaml", `
 name: invalid-package-types
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: packages/child
 flows: []
@@ -616,7 +616,7 @@ flows: []
 	writeFixtureFile(t, root+"/packages/child/package.yaml", `
 name: child
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, root+"/packages/child/types.yaml", "types:\n  Thing:\n    name: text\n")
@@ -634,7 +634,7 @@ func TestLoadWorkflowContractBundle_RejectsPackageScopedEntityContracts(t *testi
 	writeFixtureFile(t, root+"/package.yaml", `
 name: invalid-package-entities
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: packages/child
 flows: []
@@ -643,7 +643,7 @@ flows: []
 	writeFixtureFile(t, root+"/packages/child/package.yaml", `
 name: child
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, root+"/packages/child/entities.yaml", "child:\n  name: text\n")
@@ -661,7 +661,7 @@ func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T)
 	writeFixtureFile(t, root+"/package.yaml", `
 name: invalid-flow-entities
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -699,7 +699,7 @@ func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T)
 	writeFixtureFile(t, root+"/package.yaml", `
 name: invalid-root-entities
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, root+"/schema.yaml", `
@@ -728,7 +728,7 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	writeFixtureFile(t, root+"/package.yaml", `
 name: schema-entity-selector
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -765,7 +765,7 @@ func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T
 	writeFixtureFile(t, root+"/package.yaml", `
 name: root-schema-entity-selector
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, root+"/schema.yaml", `
@@ -793,7 +793,7 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(
 	writeFixtureFile(t, root+"/package.yaml", `
 name: schema-entity-selector-missing
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -829,7 +829,7 @@ func TestProjectPackageDocumentDecode_RejectsLegacyEntitySchema(t *testing.T) {
 name: test-accumulate-all
 version: 1.0.0
 description: Accumulate 3 items, fire on_complete when all arrive.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 entity_schema:
   core:
@@ -848,7 +848,7 @@ func TestLoadWorkflowContractBundle_InvalidLegacyPackageFieldReturnsParseError(t
 	writeFixtureFile(t, root+"/package.yaml", `
 name: invalid-legacy-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 entity_schema:
   core:
     metadata: jsonb

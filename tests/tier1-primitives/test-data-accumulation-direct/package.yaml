@@ -2,5 +2,5 @@ name: test-data-accumulation-direct
 version: 1.0.0
 description: data_accumulation writes payload fields directly to entity with matching
   field names.
-platform_version: '>=1.1.0'
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

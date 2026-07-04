@@ -180,7 +180,7 @@ func newExactOnceCoordinator(t *testing.T, db *sql.DB, store *WorkflowInstanceSt
 		"package.yaml": `
 name: exact-once-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation

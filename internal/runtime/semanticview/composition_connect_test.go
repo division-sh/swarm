@@ -110,7 +110,7 @@ func writeCompositionConnectSemanticFixture(t *testing.T) string {
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: composition-connect-semantic
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -167,7 +167,7 @@ func writeRootCompositionConnectSemanticFixture(t *testing.T) string {
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: root-composition-connect-semantic
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: consumer
     flow: consumer

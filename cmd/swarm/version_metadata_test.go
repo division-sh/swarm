@@ -7,7 +7,7 @@ import (
 )
 
 func TestResolveLocalVersionMetadataPrefersInjectedReleaseMetadata(t *testing.T) {
-	withVersionMetadataHooks(t, "v1.6.0", "release-commit", "2026-06-01T00:00:00Z", "1.6.0", &debug.BuildInfo{
+	withVersionMetadataHooks(t, "v1.6.0", "release-commit", "2026-06-01T00:00:00Z", "0.7.0", &debug.BuildInfo{
 		Main: debug.Module{Version: "v1.5.0"},
 		Settings: []debug.BuildSetting{
 			{Key: "vcs.revision", Value: "build-info-commit"},
@@ -31,13 +31,13 @@ func TestResolveLocalVersionMetadataPrefersInjectedReleaseMetadata(t *testing.T)
 	if got.Built != "2026-06-01T00:00:00Z" {
 		t.Fatalf("Built = %q, want injected date", got.Built)
 	}
-	if got.PlatformVersion != "1.6.0" {
-		t.Fatalf("PlatformVersion = %q, want 1.6.0", got.PlatformVersion)
+	if got.PlatformVersion != "0.7.0" {
+		t.Fatalf("PlatformVersion = %q, want 0.7.0", got.PlatformVersion)
 	}
 }
 
 func TestResolveLocalVersionMetadataFallsBackToBuildInfo(t *testing.T) {
-	withVersionMetadataHooks(t, "dev", "unknown", "unknown", "1.6.0", &debug.BuildInfo{
+	withVersionMetadataHooks(t, "dev", "unknown", "unknown", "0.7.0", &debug.BuildInfo{
 		Main: debug.Module{Version: "v1.6.0"},
 		Settings: []debug.BuildSetting{
 			{Key: "vcs.revision", Value: "build-info-commit"},
@@ -65,7 +65,7 @@ func TestResolveLocalVersionMetadataFallsBackToBuildInfo(t *testing.T) {
 }
 
 func TestResolveLocalVersionMetadataUsesDeterministicDevFallback(t *testing.T) {
-	withVersionMetadataHooks(t, "dev", "unknown", "unknown", "1.6.0", nil, nil)
+	withVersionMetadataHooks(t, "dev", "unknown", "unknown", "0.7.0", nil, nil)
 
 	got, err := resolveLocalVersionMetadata()
 	if err != nil {

@@ -489,7 +489,10 @@ func writeEquivalentBundleHashFixture(t *testing.T, lineEnding, packageYAML stri
 	t.Helper()
 	root := t.TempDir()
 	platform := DefaultPlatformSpecFile(t.TempDir())
-	writeBundleHashText(t, platform, strings.ReplaceAll("api_specification:\n  alpha: true\n  number: 1\n", "\n", lineEnding))
+	writeBundleHashText(t, platform, strings.ReplaceAll("platform:\n  name: swarm\n  version: 0.7.0\napi_specification:\n  alpha: true\n  number: 1\n", "\n", lineEnding))
+	if !strings.Contains(packageYAML, "platform_version:") {
+		packageYAML = strings.Replace(packageYAML, "version: \"1.0.0\"", "version: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"", 1)
+	}
 	writeBundleHashText(t, filepath.Join(root, "package.yaml"), packageYAML)
 	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), strings.ReplaceAll("name: equivalent\n", "\n", lineEnding))
 	writeBundleHashText(t, filepath.Join(root, "prompts", "guide.md"), strings.ReplaceAll("hello\nworld", "\n", lineEnding))

@@ -1,7 +1,7 @@
 name: test-child-flow-tool-inherit
 version: 1.0.0
 description: Child agents can use root-level tools without redeclaring.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 - id: child
   flow: child

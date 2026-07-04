@@ -1,5 +1,5 @@
 name: test-terminal-state-preserves
 version: 1.0.0
 description: Entity in terminal state records event but state does not change.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

@@ -1,7 +1,7 @@
 name: test-dynamic-flow-instance
 version: 1.0.0
 description: Dynamic child flow instance via create_flow_instance action.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 - id: worker
   flow: worker

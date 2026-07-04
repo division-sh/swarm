@@ -84,6 +84,9 @@ func LoadBundleCatalogRuntimeSource(repoRoot string, req BundleCatalogRuntimeLoa
 	if err != nil {
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("load bundle catalog runtime source: %w", err)
 	}
+	if err := ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
+		return BundleCatalogRuntimeSource{}, fmt.Errorf("admit bundle catalog runtime source: %w", err)
+	}
 	gotHash, err := BundleHash(bundle)
 	if err != nil {
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("verify bundle catalog runtime hash: %w", err)

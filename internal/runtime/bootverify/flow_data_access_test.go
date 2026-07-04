@@ -66,8 +66,8 @@ func TestRun_ValidatesFlowDataAccessDeclarations(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasFlowDataAccessCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 69 {
-		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
+	if got := len(bootCheckRegistry); got != 70 {
+		t.Fatalf("bootCheckRegistry count = %d, want 70", got)
 	}
 }
 
@@ -77,7 +77,7 @@ func writeFlowDataAccessFixture(t *testing.T, access []string, files map[string]
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: flow-data-access
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support

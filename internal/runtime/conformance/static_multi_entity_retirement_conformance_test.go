@@ -164,7 +164,7 @@ func loadStaticMultiEntityRetirementSource(t *testing.T, handlerBody string) sem
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "package.yaml"), `
 name: static-multi-entity-retirement
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: treasury
     flow: treasury
@@ -232,7 +232,7 @@ func loadRootDefaultStaticMultiEntityRetirementSource(t *testing.T, handlerBody 
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "package.yaml"), `
 name: root-default-static-multi-entity-retirement
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeStaticMultiEntityRetirementFile(t, filepath.Join(root, "schema.yaml"), `
 name: root-default-static-multi-entity-retirement

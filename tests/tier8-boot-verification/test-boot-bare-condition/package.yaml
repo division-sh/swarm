@@ -4,5 +4,5 @@ description: >
   Boot verification: rule condition uses a bare field reference without
   required prefix (payload./entity./policy.). Platform must catch
   DIALECT-BARE-COND error.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

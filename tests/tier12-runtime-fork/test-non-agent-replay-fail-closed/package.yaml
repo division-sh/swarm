@@ -3,5 +3,5 @@ version: 1.0.0
 description: >
   Negative runtime-fork fixture proving unsupported node/system historical
   replay remains fail-closed when a source event has pending non-agent work.
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

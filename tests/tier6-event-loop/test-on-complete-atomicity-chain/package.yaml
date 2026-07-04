@@ -3,5 +3,5 @@ version: 1.0.0
 description: >
   on_complete advances_to and emits commit atomically with data_accumulation.
   Second handler verifies state was persisted by guarding on the written field.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

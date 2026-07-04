@@ -5,7 +5,7 @@ description: 'Boot verification: declared workflow state is unreachable from the
   drift finding on the supported verify path.
 
   '
-platform_version: '>=1.1.0'
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 - id: support
   flow: support

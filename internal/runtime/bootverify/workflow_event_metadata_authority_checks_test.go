@@ -240,7 +240,7 @@ func writeEventMetadataAuthorityFixture(t *testing.T, opts eventMetadataAuthorit
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: event-metadata-authority
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: event-metadata-authority\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
@@ -287,7 +287,7 @@ func writeEventMetadataFlowAuthorityFixture(t *testing.T, opts eventMetadataFlow
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: event-metadata-flow-authority
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer

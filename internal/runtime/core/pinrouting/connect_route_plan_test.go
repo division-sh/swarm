@@ -905,7 +905,7 @@ func writeConnectRoutePlanPackageFixture(t *testing.T) string {
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: connect-route-plan-package
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -965,7 +965,7 @@ func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, de
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: instance-key-connect-route-plan-package
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -1024,7 +1024,7 @@ func writeInstanceKeyAdapterConnectRoutePlanPackageFixture(t *testing.T, usingBl
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: instance-key-adapter-connect-route-plan-package
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -1083,7 +1083,7 @@ func writeAddressedTemplateConnectRoutePlanPackageFixture(t *testing.T) string {
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: addressed-template-connect-route-plan-package
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer

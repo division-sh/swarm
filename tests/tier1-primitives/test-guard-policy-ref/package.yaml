@@ -1,5 +1,5 @@
 name: test-guard-policy-ref
 version: 1.0.0
 description: Guard reads policy value in CEL condition — passes when payload satisfies policy.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

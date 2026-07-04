@@ -1,5 +1,5 @@
 name: child-flow
 version: 1.0.0
 description: Minimal child flow created by parent entity.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

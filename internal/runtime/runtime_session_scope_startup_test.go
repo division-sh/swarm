@@ -62,7 +62,7 @@ func loadPackageBackedRuntimeSessionScopeSource(t *testing.T) semanticview.Sourc
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -87,6 +87,7 @@ item.created:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
@@ -129,7 +130,7 @@ func loadSoleParentFlowRuntimeSessionScopeSource(t *testing.T) semanticview.Sour
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: extras
 flows:
@@ -168,6 +169,7 @@ support/item.created:
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
 name: extras
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeRuntimeSessionScopeFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `

@@ -23,7 +23,7 @@ func contractComplianceBundleRoot(t *testing.T) string {
 	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: contract-compliance-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 entity_schema:
   groups:
     - name: item

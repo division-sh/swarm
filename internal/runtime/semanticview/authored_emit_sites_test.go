@@ -207,7 +207,7 @@ func loadAuthoredEmitSiteFixture(t *testing.T, opts authoredEmitSiteFixture) Sou
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: authored-emit-site-fixture
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: extras
 `+nestedPackageRef+`

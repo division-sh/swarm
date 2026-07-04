@@ -1,3 +1,4 @@
 name: flow-b
 version: 1.0.0
+platform_version: ">=0.7.0 <0.8.0"
 description: Flow B - processes orders

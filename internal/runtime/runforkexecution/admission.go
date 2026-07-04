@@ -107,6 +107,9 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
+	if err := runtimecontracts.ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("selected-contract source admission failed: %w", err)
+	}
 	source := semanticview.Wrap(bundle)
 	if strings.TrimSpace(selection.WorkflowName) == "" {
 		selection.WorkflowName = strings.TrimSpace(source.WorkflowName())

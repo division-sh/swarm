@@ -295,7 +295,7 @@ func writeAccumulatorSafetyFixture(t *testing.T, opts accumulatorSafetyFixtureOp
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: accumulator-safety
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: accumulator-safety
@@ -498,7 +498,7 @@ func writeAccumulatorWildcardSameFlowFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: accumulator-wildcard-safety
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: accumulator-wildcard-safety
@@ -535,7 +535,7 @@ connect:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: accumulator-cross-flow
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer

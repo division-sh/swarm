@@ -1,5 +1,5 @@
 name: test-dead-letter
 version: 1.0.0
 description: Guard that always fails causes handler rejection. No state change, no emitted events.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

@@ -151,7 +151,7 @@ func loadProjectionFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 	writeProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: projection-flow
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -224,7 +224,7 @@ func loadProjectionImportBoundaryWildcardBundle(t *testing.T, observeGrant strin
 	writeProjectionFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: projection-import-boundary-wildcard
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker

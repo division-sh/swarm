@@ -251,7 +251,7 @@ func TestExecuteNodeContractHandlerMintsEntityIDForEntityMaterializingHandler(t 
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -1242,7 +1242,7 @@ func TestResolveHandlerEntityIDForFlowCreateEntitySeedsInitialStateAndSchemaDefa
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -1420,7 +1420,7 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBefore
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation
@@ -1551,7 +1551,7 @@ func TestExecuteNodeContractHandlerQueryEntitiesGuardUsesWorkflowContext(t *test
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation
@@ -1677,7 +1677,7 @@ func TestExecuteNodeContractHandlerCreateEntityPersistsNonValidationChildFlowIde
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: review
     flow: review
@@ -1804,7 +1804,7 @@ func TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialVa
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation
@@ -1914,7 +1914,7 @@ func TestPreviewContractHandlerExecutionShowsInitialValuesMaterialized(t *testin
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation
@@ -2145,7 +2145,7 @@ func TestExecuteNodeContractHandlerEmitFieldsEntityPresenceCheckMintsEntityID(t 
 					"package.yaml": `
 name: runtime-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring

@@ -4,5 +4,5 @@ description: 'When a guard rejects, ALL handler side effects are rolled back ato
   No data change, no gate change, no emitted events.
 
   '
-platform_version: '>=1.1.0'
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

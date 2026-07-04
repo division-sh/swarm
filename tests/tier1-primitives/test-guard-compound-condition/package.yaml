@@ -1,5 +1,5 @@
 name: test-guard-compound-condition
 version: 1.0.0
 description: Guard with compound CEL expression using && and || operators.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

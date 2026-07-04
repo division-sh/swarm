@@ -1,5 +1,5 @@
 name: test-fan-out-empty
 version: 1.0.0
 description: fan_out with an empty list emits no events and sets count to 0.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

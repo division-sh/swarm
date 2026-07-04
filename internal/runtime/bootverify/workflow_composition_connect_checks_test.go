@@ -676,7 +676,7 @@ func writeCompositionConnectBootverifyFixture(t *testing.T, opts compositionConn
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: composition-connect-bootverify
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -711,7 +711,7 @@ func writeRootCompositionConnectBootverifyFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: root-composition-connect-bootverify
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: consumer
     flow: consumer
@@ -777,7 +777,7 @@ func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: root-auto-emit-key-carries
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: consumer
     flow: consumer
@@ -866,7 +866,7 @@ func writeCompositionConnectAmbiguityFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: composition-connect-ambiguity
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer_a
     flow: producer_a
@@ -930,7 +930,7 @@ func writeCompositionConnectRootPackage(t *testing.T, root, name, connectEntries
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: `+name+`
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -1230,7 +1230,7 @@ func writeCompositionConnectAdapterBootverifyFixture(t *testing.T, opts composit
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: composition-connect-adapter-bootverify
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer

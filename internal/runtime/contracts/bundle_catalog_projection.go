@@ -51,6 +51,9 @@ func BuildBundleCatalogProjection(bundle *WorkflowContractBundle) (BundleCatalog
 }
 
 func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opts BundleCatalogProjectionOptions) (BundleCatalogProjection, error) {
+	if err := ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
+		return BundleCatalogProjection{}, err
+	}
 	bundleHash, err := BundleHash(bundle)
 	if err != nil {
 		return BundleCatalogProjection{}, err

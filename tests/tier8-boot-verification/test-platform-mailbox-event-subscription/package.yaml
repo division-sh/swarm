@@ -3,5 +3,5 @@ version: 1.0.0
 description: >
   Boot verification: HITL-style flow subscribes to platform-owned
   mailbox.item_decided without a local events.yaml redeclaration.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

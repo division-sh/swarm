@@ -1,5 +1,5 @@
 name: test-dual-delivery
 version: 1.0.0
 description: Event routed to both a node and an agent via dual_delivery routing mode.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

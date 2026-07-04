@@ -4,5 +4,5 @@ description: >
   Boot verification: agent declares lookup_data in tools
   but its permissions list does not include external_api_access.
   Platform must flag PERMISSION-MISMATCH.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

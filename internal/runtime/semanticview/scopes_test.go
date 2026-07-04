@@ -20,7 +20,7 @@ func TestProjectScopes_PackageBackedScopeCarriesOwningFlowID(t *testing.T) {
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -92,7 +92,7 @@ func TestProjectScopes_SoleParentFlowCarriesOwningFlowIDOutsideFlowDir(t *testin
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: extras
 flows:
@@ -167,7 +167,7 @@ func TestResolveAgentSessionScopeProof_PackageBackedAgentCarriesFlowPath(t *test
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -234,7 +234,7 @@ func TestResolveAgentSessionScopeProof_FlowScopedAgentCarriesFlowPath(t *testing
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support

@@ -14,13 +14,13 @@ func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing
 	if err := yaml.Unmarshal([]byte(`
 name: package-boundary
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 requires:
   inputs: [work.requested]
   outputs: [work.completed]
   policy: [provider.threshold]
   credentials: [provider_token]
-  platform_version: ">=1.6.0"
+  platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker
@@ -67,7 +67,7 @@ connect:
 	if got := strings.Join(doc.Requires.Credentials, ","); got != "provider_token" {
 		t.Fatalf("Requires.Credentials = %q", got)
 	}
-	if got := doc.Requires.PlatformVersion; got != ">=1.6.0" {
+	if got := doc.Requires.PlatformVersion; got != ">=0.7.0 <0.8.0" {
 		t.Fatalf("Requires.PlatformVersion = %q", got)
 	}
 	if got := doc.Flows[0].Bind.Inputs["work.requested"]; got != "parent.work_requested" {

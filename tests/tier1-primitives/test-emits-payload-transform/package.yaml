@@ -1,5 +1,5 @@
 name: test-emits-payload-transform
 version: 1.0.0
 description: Handler applies emit.fields before publishing the configured event.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

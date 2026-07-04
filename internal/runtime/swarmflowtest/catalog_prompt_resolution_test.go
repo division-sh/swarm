@@ -86,7 +86,7 @@ func catalogPromptResolutionFixture(t *testing.T) string {
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "package.yaml"), `
 name: catalog-prompt-resolution
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: extras
 flows: []
@@ -102,7 +102,7 @@ flows: []
 	writeCatalogPromptResolutionFile(t, filepath.Join(dir, "extras", "package.yaml"), `
 name: extras
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support

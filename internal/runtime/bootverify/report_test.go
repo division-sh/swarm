@@ -4552,7 +4552,7 @@ func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplica
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: duplicate-agent-writer-coverage
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: alpha
     flow: alpha
@@ -5840,8 +5840,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 69 {
-		t.Fatalf("bootCheckRegistry count = %d, want 69", got)
+	if got := len(bootCheckRegistry); got != 70 {
+		t.Fatalf("bootCheckRegistry count = %d, want 70", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6310,7 +6310,7 @@ func writeSelectEntityInputPinFixture(t *testing.T, treasuryNodes string) string
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: select-entity-fixture
 version: 1.0.0
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: treasury
     flow: treasury
@@ -6371,7 +6371,7 @@ func writeRootDefaultStaticInputPinFixtureWithOptions(t *testing.T, opts rootDef
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: root-default-static-fixture
 version: 1.0.0
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: root-default-static-fixture
@@ -6440,7 +6440,7 @@ func writeSessionScopeValidationFixture(t *testing.T, rootAgents, flowSchema, fl
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:`+flows+`
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
@@ -6483,7 +6483,7 @@ func writePackageBackedSessionScopeValidationFixture(t *testing.T, flowSchema, p
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-validation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -6562,7 +6562,7 @@ func writeTimerValidationFixtureWithOptions(t *testing.T, opts timerValidationFi
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: timer-validation
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -6653,7 +6653,7 @@ func writeTimerStateCancelReachabilityFixture(t *testing.T, opts timerStateCance
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: timer-state-cancel-reachability
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -6830,7 +6830,7 @@ func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: pin-ambiguity
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer_a
     flow: producer_a
@@ -6919,7 +6919,7 @@ func writeInputPinExternalScopeFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: input-pin-external-scope
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: external_consumer
     flow: external_consumer
@@ -6969,7 +6969,7 @@ func writeLocalizedEventRoutingFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: localized-event-routing
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer
@@ -7057,7 +7057,7 @@ func writeStateReachabilityFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: state-reachability
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support
@@ -7110,7 +7110,7 @@ func writeWave1ExpressionFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: wave1-expression-fixture
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -7204,7 +7204,7 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: wave1-root-reader-coverage
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -7269,7 +7269,7 @@ func writePromptWriterCoverageFixture(t *testing.T, agentsYAML, entitiesYAML, pr
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: prompt-writer-coverage
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -7511,7 +7511,7 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 	}
 	sort.Strings(flowIDs)
 
-	packageYAML := "name: " + name + "\nversion: \"1.0.0\"\nplatform: \">=1.6.0\"\n"
+	packageYAML := "name: " + name + "\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n"
 	if len(flowIDs) > 0 {
 		packageYAML += "flows:\n"
 		for _, flowID := range flowIDs {

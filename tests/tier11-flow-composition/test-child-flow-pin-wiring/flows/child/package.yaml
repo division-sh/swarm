@@ -1,5 +1,5 @@
 name: child
 version: 1.0.0
 description: Child flow that receives work.requested via input pin and emits work.completed.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

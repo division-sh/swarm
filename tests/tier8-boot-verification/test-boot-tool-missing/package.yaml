@@ -3,5 +3,5 @@ version: 1.0.0
 description: >
   Boot verification: agent references tool 'nonexistent_tool' in
   tools but it is not defined in tools.yaml. Platform must catch TOOL-MISSING.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

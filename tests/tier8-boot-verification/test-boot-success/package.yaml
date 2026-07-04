@@ -2,5 +2,5 @@ name: test-boot-success
 version: 1.0.0
 description: >
   Boot verification: minimal valid bundle that should boot without warnings.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
