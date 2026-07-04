@@ -69,9 +69,9 @@ func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 			args: []string{"investigate"},
 			wantOutput: []string{
 				"ERROR: `swarm investigate` was retired in CLI v2.",
-				"Use `swarm runs`",
-				"Use `swarm status [run-id]`",
-				"Use `swarm trace [run-id] [--follow]`",
+				"Use `swarm run list`",
+				"Use `swarm run status [run-id]`",
+				"Use `swarm run trace [run-id] [--follow]`",
 				"Use `swarm health`",
 			},
 		},
@@ -80,7 +80,7 @@ func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 			args: []string{"investigate", "runs"},
 			wantOutput: []string{
 				"ERROR: `swarm investigate runs` was retired in CLI v2.",
-				"Use `swarm runs`.",
+				"Use `swarm run list`.",
 			},
 		},
 		{
@@ -88,7 +88,7 @@ func TestInvestigateNamespaceIsRetiredWithoutRequest(t *testing.T) {
 			args: []string{"investigate", "runs", "--status", "running", "--limit", "1", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"},
 			wantOutput: []string{
 				"ERROR: `swarm investigate runs` was retired in CLI v2.",
-				"Use `swarm runs`.",
+				"Use `swarm run list`.",
 			},
 		},
 	} {
@@ -295,7 +295,7 @@ func TestInvestigateRunIsRetiredWithoutRequest(t *testing.T) {
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate run` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm status`.") {
+			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate run` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm run status`.") {
 				t.Fatalf("stderr = %q, want retired migration message", got)
 			}
 			if calls.Load() != 0 {
@@ -329,7 +329,7 @@ func TestInvestigateTraceIsRetiredWithoutRequest(t *testing.T) {
 			if strings.TrimSpace(stdout.String()) != "" {
 				t.Fatalf("stdout = %q, want empty", stdout.String())
 			}
-			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate trace` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm trace`.") {
+			if got := stderr.String(); !strings.Contains(got, "ERROR: `swarm investigate trace` was retired in CLI v2.") || !strings.Contains(got, "Use `swarm run trace`.") {
 				t.Fatalf("stderr = %q, want retired migration message", got)
 			}
 			if calls.Load() != 0 {
@@ -1499,7 +1499,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing test quiescence",
-			args: []string{"status", "run-1"},
+			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

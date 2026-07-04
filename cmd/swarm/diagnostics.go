@@ -402,9 +402,9 @@ func writeInvestigateRetiredMessage(w io.Writer) {
 		return
 	}
 	fmt.Fprintln(w, "ERROR: `swarm investigate` was retired in CLI v2.")
-	fmt.Fprintln(w, "  Use `swarm runs` to list runs.")
-	fmt.Fprintln(w, "  Use `swarm status [run-id]` to diagnose a run.")
-	fmt.Fprintln(w, "  Use `swarm trace [run-id] [--follow]` for run traces.")
+	fmt.Fprintln(w, "  Use `swarm run list` to list runs.")
+	fmt.Fprintln(w, "  Use `swarm run status [run-id]` to diagnose a run.")
+	fmt.Fprintln(w, "  Use `swarm run trace [run-id] [--follow]` for run traces.")
 	fmt.Fprintln(w, "  Use `swarm health` for runtime health.")
 }
 
@@ -413,7 +413,7 @@ func writeInvestigateRunsRetiredMessage(w io.Writer) {
 		return
 	}
 	fmt.Fprintln(w, "ERROR: `swarm investigate runs` was retired in CLI v2.")
-	fmt.Fprintln(w, "  Use `swarm runs`.")
+	fmt.Fprintln(w, "  Use `swarm run list`.")
 }
 
 func writeInvestigateHealthRetiredMessage(w io.Writer) {
@@ -429,8 +429,8 @@ func writeInvestigateRunRetiredMessage(w io.Writer) {
 		return
 	}
 	fmt.Fprintln(w, "ERROR: `swarm investigate run` was retired in CLI v2.")
-	fmt.Fprintln(w, "  Use `swarm status`.")
-	fmt.Fprintln(w, "  Use `swarm status --no-diagnose` for the header-only run read.")
+	fmt.Fprintln(w, "  Use `swarm run status`.")
+	fmt.Fprintln(w, "  Use `swarm run status --no-diagnose` for the header-only run read.")
 }
 
 func writeInvestigateTraceRetiredMessage(w io.Writer) {
@@ -438,8 +438,8 @@ func writeInvestigateTraceRetiredMessage(w io.Writer) {
 		return
 	}
 	fmt.Fprintln(w, "ERROR: `swarm investigate trace` was retired in CLI v2.")
-	fmt.Fprintln(w, "  Use `swarm trace`.")
-	fmt.Fprintln(w, "  Use `swarm trace --follow` for live trace streaming.")
+	fmt.Fprintln(w, "  Use `swarm run trace`.")
+	fmt.Fprintln(w, "  Use `swarm run trace --follow` for live trace streaming.")
 }
 
 func bindDiagnosticRunListFlags(cmd *cobra.Command, opts *diagnosticRunListOptions) {

@@ -9500,7 +9500,7 @@ multi_bundle_persistence:
       public_status: implemented_public_command
       api_owner: /v1/rpc run.fork
       rules:
-        - Top-level swarm fork is the public command for run.fork and is no longer classified as a retired namespace.
+        - '`swarm run fork` is the public command for run.fork (CLI v2.2). The former top-level `swarm fork` spelling is retired fail-closed per cli_specification.retired_namespaces.topology_v2_2_retired_spellings.'
         - The bundle selector flag is --bundle-hash, not draft --bundle.
         - --at-event selects the fork event only and never means ambient current-run or current-event.
         - The CLI must not call internal runtime/store/fork harnesses directly.

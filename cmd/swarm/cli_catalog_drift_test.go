@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -264,6 +265,83 @@ func TestCommandPathTablesCarryNoRetiredSpellings(t *testing.T) {
 	} {
 		if got := cliLoggingFlagAfterSupportedLeafCommand(tc.prefix); got != tc.want {
 			t.Errorf("cliLoggingFlagAfterSupportedLeafCommand(%v) = %v, want %v", tc.prefix, got, tc.want)
+		}
+	}
+}
+
+// Every retirement/pointer message must reference commands that are alive and
+// visible in the current tree — a retirement pointing at another retirement
+// (the #1686 review finding on investigate) is a topology drift class of its
+// own.
+func TestRetirementPointerMessagesReferenceLiveCommands(t *testing.T) {
+	commandRef := regexp.MustCompile("`swarm ([^`]+)`")
+	nameToken := regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+	var out, errOut bytes.Buffer
+	root := newRootCommand(context.Background(), t.TempDir(), &out, &errOut)
+	retiredInvocations := [][]string{
+		{"runs"}, {"status"}, {"trace"}, {"fork"}, {"agents"}, {"events"}, {"entities"}, {"conversations"},
+		{"run", "--event", "x"},
+		{"fork", "--dry-run"},
+		{"investigate"}, {"investigate", "runs"}, {"investigate", "run"}, {"investigate", "trace"}, {"investigate", "health"},
+	}
+	for _, args := range retiredInvocations {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommand(context.Background(), t.TempDir(), args, &stdout, &stderr)
+		if code != 2 {
+			t.Errorf("%v: exit = %d, want 2", args, code)
+			continue
+		}
+		refs := commandRef.FindAllStringSubmatch(stderr.String(), -1)
+		if len(refs) == 0 {
+			t.Errorf("%v: retirement message has no `swarm ...` pointer: %q", args, stderr.String())
+			continue
+		}
+		for _, ref := range refs {
+			var path []string
+			for _, tok := range strings.Fields(ref[1]) {
+				if !nameToken.MatchString(tok) {
+					break
+				}
+				path = append(path, tok)
+			}
+			if len(path) == 0 {
+				continue // reference like `swarm run` handled above; bare flags skipped
+			}
+			if path[0] == args[0] {
+				continue // messages name the retired spelling itself before the pointer
+			}
+			target := findCommandByPath(root, path)
+			if target == nil {
+				t.Errorf("%v: pointer references `swarm %s` which does not resolve to a command", args, strings.Join(path, " "))
+			} else if target.Hidden {
+				t.Errorf("%v: pointer references `swarm %s` which is hidden/retired", args, strings.Join(path, " "))
+			}
+		}
+	}
+}
+
+// Retired spellings invoked with pre-dispatch-validated flags (API connection,
+// log level) must still reach their pointer stubs instead of dying on a
+// generic flag-placement error (#1686 review finding).
+func TestRetiredSpellingsWithConnectionFlagsStillPointToReplacement(t *testing.T) {
+	for _, tc := range []struct {
+		args        []string
+		wantPointer string
+	}{
+		{[]string{"runs", "--api-server", "http://127.0.0.1:9"}, "swarm run list"},
+		{[]string{"fork", "--context", "c"}, "swarm run fork"},
+		{[]string{"trace", "--log-level", "debug"}, "swarm run trace"},
+		{[]string{"status", "--api-token-file", "/dev/null"}, "swarm run status"},
+		{[]string{"run", "--api-server", "http://127.0.0.1:9"}, "swarm run start"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommand(context.Background(), t.TempDir(), tc.args, &stdout, &stderr)
+		if code != 2 {
+			t.Errorf("%v: exit = %d, want 2 (stderr=%q)", tc.args, code, stderr.String())
+			continue
+		}
+		if !strings.Contains(stderr.String(), tc.wantPointer) {
+			t.Errorf("%v: stderr %q missing pointer %q (generic flag error instead of promoted message?)", tc.args, stderr.String(), tc.wantPointer)
 		}
 	}
 }
