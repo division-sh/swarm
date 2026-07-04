@@ -1096,6 +1096,7 @@ func (e EventEmission) Empty() bool {
 
 type EmitSpec struct {
 	Event     string                     `yaml:"event"`
+	From      string                     `yaml:"from,omitempty"`
 	Fields    map[string]ExpressionValue `yaml:"fields"`
 	Target    EmitTargetSpec             `yaml:"target"`
 	Broadcast bool                       `yaml:"broadcast"`
@@ -1106,7 +1107,7 @@ func (e EmitSpec) EventType() string {
 }
 
 func (e EmitSpec) Empty() bool {
-	return strings.TrimSpace(e.Event) == "" && len(e.Fields) == 0 && e.Target.Empty() && !e.Broadcast
+	return strings.TrimSpace(e.Event) == "" && strings.TrimSpace(e.From) == "" && len(e.Fields) == 0 && e.Target.Empty() && !e.Broadcast
 }
 
 func (e EmitSpec) HasFields() bool {
@@ -1179,6 +1180,7 @@ func cloneEmitSpec(spec EmitSpec) EmitSpec {
 	target := spec.Target.Normalized()
 	return EmitSpec{
 		Event:     strings.TrimSpace(spec.Event),
+		From:      strings.TrimSpace(spec.From),
 		Fields:    cloneExpressionValueMap(spec.Fields),
 		Target:    cloneEmitTargetSpec(target),
 		Broadcast: spec.Broadcast,

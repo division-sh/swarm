@@ -2,7 +2,6 @@ package semanticview
 
 import (
 	"sort"
-	"strconv"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -39,6 +38,9 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 	builder := authoredEmitSiteBuilder{
 		seen: map[string]struct{}{},
 	}
+	if bundle, ok := Bundle(source); ok {
+		builder.bundle = bundle
+	}
 	projectScopes := sortedAuthoredProjectScopes(source.ProjectScopes())
 	for _, scope := range projectScopes {
 		if authoredEmitSiteSkipsProjectScope(scope) {
@@ -71,8 +73,9 @@ func authoredEmitSiteSkipsProjectScope(scope ProjectScope) bool {
 }
 
 type authoredEmitSiteBuilder struct {
-	seen  map[string]struct{}
-	sites []AuthoredEmitSite
+	bundle *runtimecontracts.WorkflowContractBundle
+	seen   map[string]struct{}
+	sites  []AuthoredEmitSite
 }
 
 func (b *authoredEmitSiteBuilder) appendScope(kind AuthoredEmitSiteSourceKind, scopeKey, flowID, flowPath, flowPackageKey string, nodes map[string]runtimecontracts.SystemNodeContract) {
@@ -98,6 +101,16 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 		if spec.Empty() {
 			return
 		}
+		if b.bundle != nil {
+			if lowered, err := b.bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
+				NodeID:           nodeID,
+				FlowID:           flowID,
+				TriggerEventType: handlerEvent,
+				Site:             siteKey,
+			}, spec); err == nil {
+				spec = lowered
+			}
+		}
 		id := authoredEmitSiteIdentity(flowID, scopeKey, nodeKey, handlerEvent, siteKey)
 		if _, ok := b.seen[id]; ok {
 			return
@@ -120,50 +133,13 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			Handler:        handler,
 		})
 	}
-	templateSites := runtimecontracts.HandlerRuleEmitTemplateSites(handler)
-	if len(templateSites) == 0 {
-		add("handler.emit", "handler.emit", "", handler.Emit)
-	} else {
-		for _, site := range templateSites {
-			add(site.Source, site.SiteKey, site.RuleID, site.Spec)
-		}
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+		add(site.Source, site.SiteKey, site.RuleID, site.Spec)
 	}
-	add("handler.on_success.emit", "handler.on_success.emit", "", handler.OnSuccess.Emit)
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
 			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, emitSpec)
 		}
-	}
-	if len(templateSites) == 0 {
-		for idx, rule := range handler.Rules {
-			add("handler.rules.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "emit"), rule.ID, rule.Emit)
-			if rule.FanOut != nil {
-				add("handler.rules.fan_out.emit", indexedAuthoredEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
-			}
-		}
-	}
-	for idx, rule := range handler.OnComplete {
-		add("handler.on_complete.emit", indexedAuthoredEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, rule.Emit)
-		if rule.FanOut != nil {
-			add("handler.on_complete.fan_out.emit", indexedAuthoredEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
-		}
-	}
-	if handler.Accumulate != nil {
-		for idx, rule := range handler.Accumulate.OnComplete {
-			add("handler.accumulate.on_complete.emit", indexedAuthoredEmitSiteKey("handler.accumulate.on_complete", idx, "emit"), rule.ID, rule.Emit)
-			if rule.FanOut != nil {
-				add("handler.accumulate.on_complete.fan_out.emit", indexedAuthoredEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, rule.FanOut.Emit)
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			add("handler.accumulate.on_timeout.emit", "handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.ID, handler.Accumulate.OnTimeout.Emit)
-			if handler.Accumulate.OnTimeout.FanOut != nil {
-				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, handler.Accumulate.OnTimeout.FanOut.Emit)
-			}
-		}
-	}
-	if handler.FanOut != nil {
-		add("handler.fan_out.emit", "handler.fan_out.emit", "", handler.FanOut.Emit)
 	}
 }
 
@@ -317,10 +293,6 @@ func authoredEmitSiteIdentity(flowID, scopeKey, nodeKey, handlerEvent, siteKey s
 		strings.TrimSpace(handlerEvent),
 		strings.TrimSpace(siteKey),
 	}, "\x1f")
-}
-
-func indexedAuthoredEmitSiteKey(prefix string, index int, suffix string) string {
-	return prefix + "[" + strconv.Itoa(index) + "]." + suffix
 }
 
 func authoredGuardEscalationEmitSpec(guard *runtimecontracts.GuardSpec) runtimecontracts.EmitSpec {

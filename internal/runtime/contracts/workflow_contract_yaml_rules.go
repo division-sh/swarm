@@ -100,6 +100,7 @@ func decodeGuardEscalationNode(node *yaml.Node) (EmitSpec, error) {
 	switch node.Kind {
 	case yaml.MappingNode:
 		var event string
+		var from string
 		var fields map[string]ExpressionValue
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
@@ -107,6 +108,13 @@ func decodeGuardEscalationNode(node *yaml.Node) (EmitSpec, error) {
 			switch key {
 			case "event":
 				if err := value.Decode(&event); err != nil {
+					return EmitSpec{}, err
+				}
+			case "from":
+				if err := value.Decode(&from); err != nil {
+					return EmitSpec{}, err
+				}
+				if err := validateEmitFromSource(from); err != nil {
 					return EmitSpec{}, err
 				}
 			case "fields":
@@ -119,7 +127,7 @@ func decodeGuardEscalationNode(node *yaml.Node) (EmitSpec, error) {
 				return EmitSpec{}, fmt.Errorf("UNDEFINED-FIELD: guard.on_fail.escalate field %q not in platform spec", key)
 			}
 		}
-		return EmitSpec{Event: strings.TrimSpace(event), Fields: fields}, nil
+		return EmitSpec{Event: strings.TrimSpace(event), From: strings.TrimSpace(from), Fields: fields}, nil
 	default:
 		return EmitSpec{}, fmt.Errorf("guard.on_fail.escalate must be a mapping with event and optional fields")
 	}
