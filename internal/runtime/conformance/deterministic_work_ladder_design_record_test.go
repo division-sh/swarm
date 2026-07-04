@@ -210,6 +210,47 @@ func TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims(t *testi
 			},
 			want: "child_consumers missing #1671",
 		},
+		{
+			name: "duplicate child consumer issue",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				record.ChildConsumers = append(record.ChildConsumers, deterministicWorkLadderDesignConsumerByIssue(t, record, 1666))
+			},
+			want: "child_consumers duplicate issue #1666",
+		},
+		{
+			name: "zero child consumer issue",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				record.ChildConsumers = append(record.ChildConsumers, deterministicWorkLadderDesignChildConsumer{
+					Role:     "invalid_zero_issue",
+					Consumes: []string{"authority.promotion_rule"},
+				})
+			},
+			want: "child_consumers contains entry with zero issue",
+		},
+		{
+			name: "missing tool call invalidated claim",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				record.InvalidatedClaims = deterministicWorkLadderStringsExcept(record.InvalidatedClaims, "tool_call_action_is_the_whole_deterministic_io_solution")
+			},
+			want: "invalidated_claims missing tool_call_action_is_the_whole_deterministic_io_solution",
+		},
+		{
+			name: "duplicate manifestation id",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				record.ManifestationCoverage = append(record.ManifestationCoverage, deterministicWorkLadderManifestationByID(t, record, "compute_name_collision"))
+			},
+			want: "manifestation_coverage duplicate id compute_name_collision",
+		},
+		{
+			name: "empty manifestation id",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				record.ManifestationCoverage = append(record.ManifestationCoverage, deterministicWorkLadderDesignManifestation{
+					Status: "closed_by_design_record",
+					Proof:  "authority",
+				})
+			},
+			want: "manifestation_coverage contains entry with empty id",
+		},
 	}
 
 	root := conformanceRepoRoot(t)
@@ -517,6 +558,14 @@ func validateDeterministicWorkLadderDesignConsumers(consumers []deterministicWor
 	var problems []string
 	byIssue := map[int]deterministicWorkLadderDesignChildConsumer{}
 	for _, consumer := range consumers {
+		if consumer.Issue == 0 {
+			problems = append(problems, "child_consumers contains entry with zero issue")
+			continue
+		}
+		if _, exists := byIssue[consumer.Issue]; exists {
+			problems = append(problems, fmt.Sprintf("child_consumers duplicate issue #%d", consumer.Issue))
+			continue
+		}
 		byIssue[consumer.Issue] = consumer
 		if consumer.Role == "" {
 			problems = append(problems, fmt.Sprintf("child_consumers #%d missing role", consumer.Issue))
@@ -554,6 +603,7 @@ func validateDeterministicWorkLadderInvalidatedClaims(claims []string) []string 
 	for _, claim := range []string{
 		"generic_logic_node_is_accepted_direction",
 		"system_node_should_be_renamed_to_routing_node",
+		"tool_call_action_is_the_whole_deterministic_io_solution",
 		"activity_result_events_can_be_hidden_runtime_only_surface",
 		"handler_fields_compute_can_be_overloaded_for_modules",
 		"minimal_activity_form_can_be_deferred_from_stage1",
@@ -573,6 +623,14 @@ func validateDeterministicWorkLadderManifestationCoverage(coverage []determinist
 	var problems []string
 	byID := map[string]deterministicWorkLadderDesignManifestation{}
 	for _, manifestation := range coverage {
+		if strings.TrimSpace(manifestation.ID) == "" {
+			problems = append(problems, "manifestation_coverage contains entry with empty id")
+			continue
+		}
+		if _, exists := byID[manifestation.ID]; exists {
+			problems = append(problems, fmt.Sprintf("manifestation_coverage duplicate id %s", manifestation.ID))
+			continue
+		}
 		byID[manifestation.ID] = manifestation
 		if manifestation.Status == "" {
 			problems = append(problems, fmt.Sprintf("manifestation %s missing status", manifestation.ID))
@@ -618,6 +676,38 @@ func deterministicWorkLadderDesignConsumersExcept(consumers []deterministicWorkL
 	for _, consumer := range consumers {
 		if consumer.Issue != issue {
 			out = append(out, consumer)
+		}
+	}
+	return out
+}
+
+func deterministicWorkLadderDesignConsumerByIssue(t *testing.T, record *deterministicWorkLadderDesignRecord, issue int) deterministicWorkLadderDesignChildConsumer {
+	t.Helper()
+	for _, consumer := range record.ChildConsumers {
+		if consumer.Issue == issue {
+			return consumer
+		}
+	}
+	t.Fatalf("child consumer #%d not found", issue)
+	return deterministicWorkLadderDesignChildConsumer{}
+}
+
+func deterministicWorkLadderManifestationByID(t *testing.T, record *deterministicWorkLadderDesignRecord, id string) deterministicWorkLadderDesignManifestation {
+	t.Helper()
+	for _, manifestation := range record.ManifestationCoverage {
+		if manifestation.ID == id {
+			return manifestation
+		}
+	}
+	t.Fatalf("manifestation %s not found", id)
+	return deterministicWorkLadderDesignManifestation{}
+}
+
+func deterministicWorkLadderStringsExcept(values []string, remove string) []string {
+	out := values[:0]
+	for _, value := range values {
+		if value != remove {
+			out = append(out, value)
 		}
 	}
 	return out
