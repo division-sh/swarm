@@ -394,7 +394,20 @@ func bundleRegistrationMetadata(projection runtimecontracts.BundleCatalogProject
 		"platform_spec_hash":        "sha256:" + platformHash,
 		"platform_spec_path_policy": "server_internal_not_user_supplied",
 	}
-	for _, key := range []string{"projection_version", "workflow_name", "workflow_version", "file_count", "data_file_count"} {
+	for _, key := range []string{
+		"projection_version",
+		"workflow_name",
+		"workflow_version",
+		"file_count",
+		"data_file_count",
+		"package_name",
+		"package_version",
+		"package_platform_version",
+		"package_keywords",
+		"package_license",
+		"package_repository",
+		"package_extra",
+	} {
 		if value, ok := projection.Metadata[key]; ok {
 			metadata[key] = value
 		}

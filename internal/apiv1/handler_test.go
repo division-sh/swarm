@@ -712,6 +712,19 @@ func TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempote
 	if upsert.Metadata["registered_by"] != "bundle.register" || upsert.Metadata["platform_spec_hash"] != "sha256:"+platformHash || upsert.Metadata["platform_spec_source"] != "server_effective" {
 		t.Fatalf("bundle.register metadata = %#v", upsert.Metadata)
 	}
+	if upsert.Metadata["package_license"] != "MIT" || upsert.Metadata["package_repository"] != "https://github.com/division-sh/swarm" {
+		t.Fatalf("bundle.register package metadata = %#v", upsert.Metadata)
+	}
+	if got, want := upsert.Metadata["package_keywords"], []string{"registered", "catalog"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("bundle.register package keywords metadata = %#v, want %#v", got, want)
+	}
+	if got, want := upsert.Metadata["package_extra"], map[string]string{"colony.division.sh/display_name": "Registered"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("bundle.register package extra metadata = %#v, want %#v", got, want)
+	}
+	pkg := asMap(t, upsert.ParsedJSON["package"])
+	if pkg["license"] != "MIT" || pkg["repository"] != "https://github.com/division-sh/swarm" {
+		t.Fatalf("bundle.register package projection = %#v", pkg)
+	}
 	agents := asMap(t, upsert.ParsedJSON["agents"])
 	researcher := asMap(t, agents["researcher"])
 	if researcher["model"] != "regular" || researcher["mode"] != "task" {
@@ -886,6 +899,11 @@ files:
       name: registered
       version: "1.0.0"
       platform_version: "` + platformVersion + `"
+      keywords: [registered, catalog]
+      license: MIT
+      repository: https://github.com/division-sh/swarm
+      extra:
+        colony.division.sh/display_name: Registered
       flows: []
   - path: agents.yaml
     text: |
