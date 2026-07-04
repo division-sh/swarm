@@ -125,6 +125,89 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	}
 }
 
+func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := filepath.Join(repoRoot(), "tests", "tier1-primitives", "test-emits-single")
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case eventPublishMethod:
+			if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash {
+				t.Fatalf("event.publish params = %#v", req.Params)
+			}
+			payload, ok := req.Params["payload"].(map[string]any)
+			if !ok || len(payload) != 0 {
+				t.Fatalf("event.publish payload = %#v, want empty mapping", req.Params["payload"])
+			}
+			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+		case "run.trace":
+			received := validRunCommandTraceRow("event-1")
+			received["event_name"] = "item.received"
+			processed := validRunCommandTraceRow("event-2")
+			processed["event_name"] = "item.processed"
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{received, processed}})
+		case entityListMethod:
+			if req.Params["run_id"] != "run-1" || req.Params["type"] != "default" {
+				t.Fatalf("entity.list params = %#v", req.Params)
+			}
+			entity := validEntitySummary("entity-1")
+			entity["entity_type"] = "default"
+			entity["current_state"] = "done"
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
+		case entityGetMethod:
+			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+				t.Fatalf("entity.get params = %#v", req.Params)
+			}
+			result := validEntityFullResult("entity-1")
+			entity := result["entity"].(map[string]any)
+			entity["entity_type"] = "default"
+			entity["current_state"] = "done"
+			writeJSONRPCResult(t, w, req.ID, result)
+		default:
+			t.Fatalf("unexpected method = %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+		"--timeout", "2s",
+		"--poll-interval", "10ms",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertScenarioTestMethods(t, calls, []string{
+		eventPublishMethod,
+		"run.diagnose",
+		"run.diagnose",
+		"run.trace",
+		entityListMethod,
+		entityGetMethod,
+	})
+	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 func TestSwarmTestRejectsInvalidFixtureSchemaBeforePublish(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
