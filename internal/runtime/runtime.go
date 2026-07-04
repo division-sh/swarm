@@ -70,7 +70,6 @@ type RuntimeOptions struct {
 	SelfCheck                        bool
 	WorkspaceLifecycle               workspace.Lifecycle
 	EnableToolGateway                bool
-	ToolGatewayToken                 string
 	ToolGatewayBinding               toolgateway.Binding
 	BundleFingerprint                string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
@@ -616,7 +615,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	if opts.EnableToolGateway {
 		toolGatewayToken := opts.ToolGatewayBinding.AuthToken()
 		if toolGatewayToken == "" {
-			toolGatewayToken = strings.TrimSpace(opts.ToolGatewayToken)
+			return nil, fmt.Errorf("tool gateway binding token is required")
 		}
 		rt.ToolGateway = runtimemcp.NewGateway(rt.ToolExecutor, toolGatewayToken, RuntimeMCPGatewayHooks(rt.Logger, rt.RuntimeIngress, func(agentID string) (runtimeactors.AgentConfig, bool) {
 			if rt.Manager == nil {

@@ -584,7 +584,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	}
 }
 
-func TestStartSelectedContractAgentRuntimeGatewayUsesExplicitTokenWithoutURLMutation(t *testing.T) {
+func TestStartSelectedContractAgentRuntimeGatewayRejectsRetiredTokenEnv(t *testing.T) {
 	const staleHostURL = "http://127.0.0.1:9998"
 	const staleContainerURL = "http://host.docker.internal:9998"
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
@@ -594,15 +594,15 @@ func TestStartSelectedContractAgentRuntimeGatewayUsesExplicitTokenWithoutURLMuta
 	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{})
 	turns := runtimemcp.NewTurnContextRegistry(runtimeactors.ActorFromContext)
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, nil, turns, nil)
-	if err != nil {
-		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
+		t.Fatalf("startSelectedContractAgentRuntimeGateway error = %v, want retired token env rejection", err)
 	}
-	if cleanup == nil {
-		t.Fatal("cleanup is nil")
+	if cleanup != nil {
+		cleanup()
+		t.Fatal("cleanup was returned for rejected retired token env")
 	}
-	defer cleanup()
-	if got := binding.AuthToken(); got != "operator-token" {
-		t.Fatalf("binding token = %q, want explicit token", got)
+	if !binding.Empty() {
+		t.Fatalf("binding = %#v, want empty rejected binding", binding)
 	}
 	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
 		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want unchanged %q", got, staleHostURL)

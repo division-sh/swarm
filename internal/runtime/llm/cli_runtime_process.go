@@ -305,9 +305,6 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		if gatewayURL != "" {
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_URL="+gatewayURL)
 		}
-		if gatewayToken := r.toolGateway.AuthToken(); gatewayToken != "" {
-			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_TOKEN="+gatewayToken)
-		}
 		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 		if oauthToken := llmselection.CredentialValue(profile, os.LookupEnv); oauthToken != "" {
 			dockerArgs = append(dockerArgs, "-e", profile.Credential.EnvVar+"="+oauthToken)

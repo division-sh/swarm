@@ -348,6 +348,9 @@ func TestBuildMCPConfigArg_UsesContextTokenWithoutLegacyCorrelationPropagation(t
 	if got := headers["X-SWARM-Trace-Id"]; got != nil {
 		t.Fatalf("unexpected trace header = %#v", got)
 	}
+	if got := headers["Authorization"]; got != "Bearer gateway-token" {
+		t.Fatalf("authorization header = %#v, want binding bearer token", got)
+	}
 	if got := headers[mcpContextTokenHeader]; got != contextToken {
 		t.Fatalf("context header = %#v, want %q", got, contextToken)
 	}

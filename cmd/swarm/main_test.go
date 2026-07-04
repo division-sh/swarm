@@ -2628,12 +2628,12 @@ func TestPlatformSpecLocalCLITestGatewayStartupPromoted(t *testing.T) {
 			t.Fatalf("local cli_test gateway startup scope missing %q:\n%s", want, startup.Scope)
 		}
 	}
-	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "token-only source", "per-boot", "SWARM_TOOL_GATEWAY_URL", "not source authority", "Local foreground `swarm run`"} {
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "removed", "per-boot", "binding token", "SWARM_TOOL_GATEWAY_URL", "not source authority", "Local foreground `swarm run`"} {
 		if !strings.Contains(startup.GatewayTokenRule, want) {
 			t.Fatalf("gateway token rule missing %q:\n%s", want, startup.GatewayTokenRule)
 		}
 	}
-	for _, want := range []string{"RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "docker exec", "MCP HTTP binding"} {
+	for _, want := range []string{"RuntimeOptions.ToolGatewayBinding", "runtime MCP gateway auth", "ValidateClaudeCLIRuntimeConfig", "MCP HTTP binding"} {
 		if !stringSliceContains(startup.GatewayTokenConsumers, want) {
 			t.Fatalf("gateway token consumers missing %q: %#v", want, startup.GatewayTokenConsumers)
 		}
@@ -2707,7 +2707,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("endpoint env rule missing %q:\n%s", want, binding.EndpointEnvRule)
 		}
 	}
-	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "token-only source authority", "per-boot token", "binding token", "Selected-fork ephemeral gateways follow the same token-only rule"} {
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "removed as public/operator token source", "per-boot token", "binding token", "selected-fork ephemeral gateways MUST generate their own binding token", "fail closed"} {
 		if !strings.Contains(binding.AuthRule, want) {
 			t.Fatalf("auth rule missing %q:\n%s", want, binding.AuthRule)
 		}
@@ -2722,7 +2722,7 @@ func TestPlatformSpecLocalToolGatewayBindingPromoted(t *testing.T) {
 			t.Fatalf("binding consumers missing %q: %#v", want, binding.Consumers)
 		}
 	}
-	for _, want := range []string{"#1568 token-source migration", "#1568 broader selected-contract", "no longer uses process-global URL env", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
+	for _, want := range []string{"#1568 broader selected-contract", "no longer uses process-global URL env", "#979/#1012 are completed historical source-authority slices", "#1138/#1213", "#1567", "IPC/unix socket"} {
 		if !stringSliceContains(binding.SplitTail, want) {
 			t.Fatalf("binding split_tail missing %q: %#v", want, binding.SplitTail)
 		}
@@ -3070,6 +3070,9 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 		if !stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, want) {
 			t.Fatalf("secret env sources missing %q: %#v", want, authority.CredentialAndConfigPolicy.SecretEnvSources)
 		}
+	}
+	if stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, "SWARM_TOOL_GATEWAY_TOKEN") {
+		t.Fatalf("secret env sources still promote retired gateway token env: %#v", authority.CredentialAndConfigPolicy.SecretEnvSources)
 	}
 	for _, want := range []string{"backend selection", "provider model alias maps"} {
 		if !stringSliceContains(authority.CredentialAndConfigPolicy.RuntimeConfigCanonicalFor, want) {
@@ -10917,7 +10920,7 @@ func TestCreateServeToolGatewayBindingAlignsToMCPListenerWithoutMutatingURLEnv(t
 	}
 }
 
-func TestCreateServeToolGatewayBindingPreservesExplicitGatewayToken(t *testing.T) {
+func TestCreateServeToolGatewayBindingRejectsRetiredGatewayTokenEnv(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
@@ -10927,12 +10930,9 @@ func TestCreateServeToolGatewayBindingPreservesExplicitGatewayToken(t *testing.T
 	}
 	defer listener.Close()
 
-	binding, err := createServeToolGatewayBinding(listener.Addr())
-	if err != nil {
-		t.Fatalf("create gateway binding: %v", err)
-	}
-	if got := binding.Token; got != "operator-token" {
-		t.Fatalf("binding token = %q, want explicit operator token", got)
+	_, err = createServeToolGatewayBinding(listener.Addr())
+	if err == nil || !strings.Contains(err.Error(), "SWARM_TOOL_GATEWAY_TOKEN is retired") || !strings.Contains(err.Error(), "ToolGatewayBinding") {
+		t.Fatalf("create gateway binding error = %v, want retired token env rejection", err)
 	}
 }
 
