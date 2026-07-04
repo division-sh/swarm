@@ -111,7 +111,6 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 			target: &workspace.Target{Container: "swarm-agent-recovered-agent", Workdir: "/workspace"},
 		},
 		EnableToolGateway: true,
-		ToolGatewayToken:  "gateway-token",
 	}
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")

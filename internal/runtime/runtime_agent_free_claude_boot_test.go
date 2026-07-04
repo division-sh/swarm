@@ -117,7 +117,6 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 			target: &workspace.Target{Container: "swarm-agent-recovered-agent", Workdir: "/workspace"},
 		},
 		EnableToolGateway:  true,
-		ToolGatewayToken:   "gateway-token",
 		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:8081", "", "gateway-token"),
 	}})
 
@@ -132,6 +131,22 @@ func TestRuntimeStart_ActiveManagerAgentRequiresFullClaudeStartupBinding(t *test
 	err = rt.Start(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "claude runtime startup validation failed") || !strings.Contains(err.Error(), "tool gateway binding workspace endpoint") {
 		t.Fatalf("Start error = %v, want startup validation failure for missing workspace gateway binding", err)
+	}
+}
+
+func TestNewRuntimeToolGatewayRequiresBindingToken(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = "claude_cli"
+
+	_, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{}, Options: RuntimeOptions{
+		SelfCheck:          false,
+		WorkflowModule:     loadAgentFreeRuntimeWorkflowModule(t),
+		LLMRuntime:         noopLLMRuntime{},
+		EnableToolGateway:  true,
+		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", ""),
+	}})
+	if err == nil || !strings.Contains(err.Error(), "tool gateway binding token is required") {
+		t.Fatalf("NewRuntime error = %v, want missing binding token rejection", err)
 	}
 }
 

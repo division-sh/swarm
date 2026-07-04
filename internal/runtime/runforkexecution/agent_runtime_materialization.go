@@ -322,13 +322,14 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 	port := ln.Addr().(*net.TCPAddr).Port
 	hostURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	containerURL := fmt.Sprintf("http://host.docker.internal:%d", port)
-	gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
-	if gatewayToken == "" {
-		gatewayToken, err = toolgateway.GenerateAuthToken()
-		if err != nil {
-			_ = ln.Close()
-			return toolgateway.Binding{}, nil, fmt.Errorf("generate selected-fork tool gateway token: %w", err)
-		}
+	if strings.TrimSpace(os.Getenv(toolgateway.RetiredAuthTokenEnvName)) != "" {
+		_ = ln.Close()
+		return toolgateway.Binding{}, nil, toolgateway.RetiredAuthTokenEnvError()
+	}
+	gatewayToken, err := toolgateway.GenerateAuthToken()
+	if err != nil {
+		_ = ln.Close()
+		return toolgateway.Binding{}, nil, fmt.Errorf("generate selected-fork tool gateway token: %w", err)
 	}
 	binding := toolgateway.Binding{
 		Transport:         toolgateway.TransportHTTP,

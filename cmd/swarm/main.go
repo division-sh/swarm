@@ -697,7 +697,6 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			WorkflowModule:                   loaded.module,
 			WorkspaceLifecycle:               workspaces,
 			EnableToolGateway:                req.EnableToolGateway,
-			ToolGatewayToken:                 req.ToolGatewayBinding.AuthToken(),
 			ToolGatewayBinding:               req.ToolGatewayBinding,
 			BundleFingerprint:                bootIdentity.Fingerprint,
 			BundleSourceFact:                 bundleSourceFact,
@@ -3114,12 +3113,12 @@ func createServeToolGatewayBinding(mcpAddr net.Addr) (toolgateway.Binding, error
 	if err != nil {
 		return toolgateway.Binding{}, err
 	}
-	gatewayToken := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_TOKEN"))
-	if gatewayToken == "" {
-		gatewayToken, err = toolgateway.GenerateAuthToken()
-		if err != nil {
-			return toolgateway.Binding{}, fmt.Errorf("generate mcp gateway token: %w", err)
-		}
+	if strings.TrimSpace(os.Getenv(toolgateway.RetiredAuthTokenEnvName)) != "" {
+		return toolgateway.Binding{}, toolgateway.RetiredAuthTokenEnvError()
+	}
+	gatewayToken, err := toolgateway.GenerateAuthToken()
+	if err != nil {
+		return toolgateway.Binding{}, fmt.Errorf("generate mcp gateway token: %w", err)
 	}
 	binding := toolgateway.Binding{
 		Transport:         toolgateway.TransportHTTP,

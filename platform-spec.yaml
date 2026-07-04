@@ -3794,7 +3794,6 @@ engine:
         - CLAUDE_CODE_OAUTH_TOKEN
         - OPENAI_COMPATIBLE_API_KEY
         - OPENAI_API_KEY
-        - SWARM_TOOL_GATEWAY_TOKEN
         - SWARM_API_TOKEN
         - database password env/store sources
         runtime_config_canonical_for:
@@ -11462,10 +11461,10 @@ cli_specification:
         availability, Docker Compose setup, selected-contract/multi-bundle gateway materialization,
         or public one-secret quickstart polish.
       gateway_token_rule: >
-        `SWARM_TOOL_GATEWAY_TOKEN` remains a token-only source for the #1568 first slice:
-        when present and non-empty it supplies the local tool gateway binding auth token; when absent,
-        local serve/run MUST derive a per-boot token and store it on the typed binding. The token env var
-        MUST NOT own endpoint reachability. `SWARM_TOOL_GATEWAY_URL` and
+        `SWARM_TOOL_GATEWAY_TOKEN` is removed as a public/operator token source by #1639:
+        local serve/run MUST derive a per-boot token and store it on the typed binding. Runtime gateway auth,
+        startup probes, and MCP HTTP config generation MUST consume the binding token. The token env var
+        MUST NOT own endpoint reachability or token authority. `SWARM_TOOL_GATEWAY_URL` and
         `SWARM_TOOL_GATEWAY_CONTAINER_URL` are not source authority for local serve/run endpoint binding.
         Local foreground `swarm run` consumes the same serve startup owner and MUST NOT fork an independent
         gateway-token owner.
@@ -11473,7 +11472,6 @@ cli_specification:
       - 'runtime `RuntimeOptions.ToolGatewayBinding`'
       - runtime MCP gateway auth
       - '`llm.ValidateClaudeCLIRuntimeConfig`'
-      - Claude CLI docker exec environment
       - MCP HTTP binding for startup/runtime tool calls
       startup_probe_rule: >
         For agent-present `cli_test` managed agents, startup validation MUST execute the Claude
@@ -11533,11 +11531,13 @@ cli_specification:
         and local preflight may read these variables only to report retired/shadowed diagnostic evidence; matching
         non-empty URL env MUST NOT be rendered as accepted configuration.
       auth_rule: >
-        `SWARM_TOOL_GATEWAY_TOKEN` remains token-only source authority for this first slice. If it is empty,
-        serve boot MUST generate a per-boot token and place it on `ToolGatewayBinding`. Runtime gateway auth,
-        startup probes, MCP HTTP config generation, and Docker exec env injection MUST consume the binding token,
-        not a later ambient env read. Selected-fork ephemeral gateways follow the same token-only rule: explicit
-        `SWARM_TOOL_GATEWAY_TOKEN` may supply the binding token, and absent token generates a typed binding token.
+        `SWARM_TOOL_GATEWAY_TOKEN` is removed as public/operator token source authority by #1639. Serve boot
+        MUST generate a per-boot token and place it on `ToolGatewayBinding`; selected-fork ephemeral gateways
+        MUST generate their own binding token from the same typed binding owner. Runtime gateway auth, startup
+        probes, and MCP HTTP config generation MUST consume the binding token, not a later ambient env read.
+        Non-empty `SWARM_TOOL_GATEWAY_TOKEN` in production token-source paths MUST fail closed with replacement
+        guidance to unset it. The variable MUST NOT be used for Docker exec token propagation; supported Claude
+        CLI auth to the tool gateway is carried by MCP config headers derived from `ToolGatewayBinding`.
       multi_context_rule: >
         In DB-loaded multi-context serve, `claude_cli` tool-gateway and forkchat sandbox materialization are
         unsupported until a separately gated context-aware gateway router and forkchat runtime selector exist.
@@ -11562,7 +11562,7 @@ cli_specification:
       - local `claude_cli` preflight diagnostics as consumer-only stale-env reporter
       - non-dev serve retired URL-env admission
       split_tail:
-      - '#1568 token-source migration beyond token-only env remains split.'
+      - '#1639 closes raw `SWARM_TOOL_GATEWAY_TOKEN` source authority for local serve/run and selected-fork tool-gateway tokens.'
       - '#1568 broader selected-contract and multi-bundle gateway materialization remains split; selected-fork ephemeral gateway startup no longer uses process-global URL env as a propagation side channel, and DB-loaded multi-context claude_cli gateway/forkchat ambiguity now fails closed, but full context-aware MCP/forkchat routing remains open. #979/#1012 are completed historical source-authority slices and are not active trackers for this open gateway tail.'
       - '#1138/#1213 host workspace `claude_cli` execution remains split.'
       - '#1567 API connection discovery and connection-file authority remain split.'
