@@ -95,6 +95,7 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 	}
 	parsed := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
+		"package":            bundleCatalogPackageJSON(bundle.Package),
 		"workflow": map[string]any{
 			"name":    strings.TrimSpace(bundle.Semantics.Name),
 			"version": strings.TrimSpace(bundle.Semantics.Version),
@@ -110,6 +111,7 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 		"file_count":         len(files),
 		"data_file_count":    len(dataEntries),
 	}
+	addBundleCatalogPackageMetadata(metadata, bundle.Package)
 	if hash := strings.TrimSpace(opts.PlatformSpecSHA256); hash != "" {
 		metadata["platform_spec_sha256"] = hash
 	}
@@ -184,6 +186,58 @@ func bundleCatalogFilesJSON(files []bundleCatalogProjectedFile) []map[string]any
 			"policy":     file.Policy,
 			"size_bytes": file.SizeBytes,
 		})
+	}
+	return out
+}
+
+func bundleCatalogPackageJSON(pkg ProjectPackageDocument) map[string]any {
+	out := map[string]any{}
+	addStringField(out, "name", pkg.Name)
+	addStringField(out, "version", pkg.Version)
+	addStringField(out, "platform_version", pkg.PlatformVersion)
+	addPackageStringListField(out, "keywords", pkg.Keywords)
+	addStringField(out, "license", pkg.License)
+	addStringField(out, "repository", pkg.Repository)
+	if extra := packageExtraJSON(pkg.Extra); len(extra) > 0 {
+		out["extra"] = extra
+	}
+	return out
+}
+
+func addBundleCatalogPackageMetadata(metadata map[string]any, pkg ProjectPackageDocument) {
+	addStringField(metadata, "package_name", pkg.Name)
+	addStringField(metadata, "package_version", pkg.Version)
+	addStringField(metadata, "package_platform_version", pkg.PlatformVersion)
+	addPackageStringListField(metadata, "package_keywords", pkg.Keywords)
+	addStringField(metadata, "package_license", pkg.License)
+	addStringField(metadata, "package_repository", pkg.Repository)
+	if extra := packageExtraJSON(pkg.Extra); len(extra) > 0 {
+		metadata["package_extra"] = extra
+	}
+}
+
+func addPackageStringListField(values map[string]any, key string, raw []string) {
+	items := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	if len(items) == 0 {
+		return
+	}
+	values[key] = items
+}
+
+func packageExtraJSON(extra map[string]string) map[string]string {
+	if len(extra) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(extra))
+	for key, value := range extra {
+		if key = strings.TrimSpace(key); key != "" {
+			out[key] = value
+		}
 	}
 	return out
 }
