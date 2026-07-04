@@ -1,15 +1,15 @@
 package llm
 
 import (
+	"context"
 	"fmt"
-	"os"
 
 	"github.com/division-sh/swarm/internal/config"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 )
 
-func ValidateClaudeCLIRuntimeConfig(cfg *config.Config, binding toolgateway.Binding) error {
+func ValidateClaudeCLIRuntimeConfig(ctx context.Context, cfg *config.Config, binding toolgateway.Binding, credentials ProviderCredentialResolver) error {
 	if cfg == nil {
 		return nil
 	}
@@ -26,7 +26,7 @@ func ValidateClaudeCLIRuntimeConfig(cfg *config.Config, binding toolgateway.Bind
 	if err := binding.Validate(); err != nil {
 		return fmt.Errorf("claude cli tool gateway binding invalid: %w", err)
 	}
-	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
+	if _, err := credentials.Resolve(ctx, profile); err != nil {
 		return err
 	}
 	return nil

@@ -78,6 +78,7 @@ type RuntimeOptions struct {
 	LLMRuntime                       llm.Runtime
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
+	ProviderCredentials              runtimecredentials.Store
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -96,18 +97,19 @@ type RuntimeDeps struct {
 }
 
 type validatedRuntimeDeps struct {
-	Config                   *config.Config
-	Stores                   Stores
-	Options                  RuntimeOptions
-	Source                   semanticview.Source
-	PromptResolver           runtimecontracts.PromptResolver
-	Credentials              runtimecredentials.Store
-	ManagedCredentials       runtimemanagedcredentials.Store
-	Authority                runtimeauthority.Provider
-	EmitRegistry             *runtimetools.EmitRegistry
-	EventReceiptCapability   func(context.Context) (bool, error)
-	TrimmedBundleFingerprint string
-	BundleSourceFact         runtimecorrelation.BundleSourceFact
+	Config                     *config.Config
+	Stores                     Stores
+	Options                    RuntimeOptions
+	Source                     semanticview.Source
+	PromptResolver             runtimecontracts.PromptResolver
+	Credentials                runtimecredentials.Store
+	ManagedCredentials         runtimemanagedcredentials.Store
+	ProviderCredentialResolver llm.ProviderCredentialResolver
+	Authority                  runtimeauthority.Provider
+	EmitRegistry               *runtimetools.EmitRegistry
+	EventReceiptCapability     func(context.Context) (bool, error)
+	TrimmedBundleFingerprint   string
+	BundleSourceFact           runtimecorrelation.BundleSourceFact
 }
 
 const BootProgressTotalSteps = 22
@@ -278,6 +280,10 @@ func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
 }
 
+func providerCredentialResolverForRuntimeOptions(opts RuntimeOptions) llm.ProviderCredentialResolver {
+	return llm.NewProviderCredentialResolver(opts.ProviderCredentials)
+}
+
 func newRuntimePromptResolver(source semanticview.Source) (runtimecontracts.PromptResolver, error) {
 	if source == nil {
 		return nil, fmt.Errorf("semantic source is required")
@@ -325,12 +331,13 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}
+	providerCredentialResolver := providerCredentialResolverForRuntimeOptions(opts)
 	if opts.LLMRuntime == nil {
-		if err := validateSelectedBackendCredentialForDeclaredAgents(cfg, source); err != nil {
+		if err := validateSelectedBackendCredentialForDeclaredAgents(context.Background(), cfg, opts, source); err != nil {
 			return validatedRuntimeDeps{}, fmt.Errorf("llm backend credential validation failed: %w", err)
 		}
 	}
-	if err := validateClaudeStartupConfig(cfg, opts, source); err != nil {
+	if err := validateClaudeStartupConfig(context.Background(), cfg, opts, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}
 	promptResolver, err := newRuntimePromptResolver(source)
@@ -344,18 +351,19 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		credentials = runtimecredentials.NewEnvStore()
 	}
 	return validatedRuntimeDeps{
-		Config:                   cfg,
-		Stores:                   stores,
-		Options:                  opts,
-		Source:                   source,
-		PromptResolver:           promptResolver,
-		Credentials:              credentials,
-		Authority:                authorityProvider,
-		EmitRegistry:             emitRegistry,
-		EventReceiptCapability:   canonicalEventReceiptCapabilities(stores),
-		TrimmedBundleFingerprint: strings.TrimSpace(opts.BundleFingerprint),
-		BundleSourceFact:         opts.BundleSourceFact.Normalized(),
-		ManagedCredentials:       opts.ManagedCredentials,
+		Config:                     cfg,
+		Stores:                     stores,
+		Options:                    opts,
+		Source:                     source,
+		PromptResolver:             promptResolver,
+		Credentials:                credentials,
+		ManagedCredentials:         opts.ManagedCredentials,
+		ProviderCredentialResolver: providerCredentialResolver,
+		Authority:                  authorityProvider,
+		EmitRegistry:               emitRegistry,
+		EventReceiptCapability:     canonicalEventReceiptCapabilities(stores),
+		TrimmedBundleFingerprint:   strings.TrimSpace(opts.BundleFingerprint),
+		BundleSourceFact:           opts.BundleSourceFact.Normalized(),
 	}, nil
 }
 
@@ -514,6 +522,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			Events:        rt.Bus,
 			MCPTurns:      rt.MCPTurns,
 			ToolGateway:   opts.ToolGatewayBinding,
+			Credentials:   boot.ProviderCredentialResolver.Store,
 		}.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build runtime: %w", err)
@@ -987,12 +996,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	source := rt.Options.WorkflowModule.SemanticSource()
 	if rt.Options.LLMRuntime == nil {
-		if err := validateSelectedBackendCredentialForActiveAgents(rt.Config, source, rt.Manager); err != nil {
+		if err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
 			rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
 			return fmt.Errorf("llm backend credential validation failed: %w", err)
 		}
 	}
-	if err := validateClaudeStartupConfigForActiveAgents(rt.Config, rt.Options, source, rt.Manager); err != nil {
+	if err := validateClaudeStartupConfigForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
 		rt.emitBootProgress(15, "workspace_validation_and_system_containers", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime startup validation failed: %w", err)
 	}

@@ -21,7 +21,7 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_CapturesProviderInitVisi
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
@@ -62,6 +62,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
+			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-startup" },
 				unregister: func(string) {},
@@ -98,7 +99,7 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_UsesUUIDSessionID(t *tes
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
@@ -143,6 +144,7 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
+			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-startup" },
 				unregister: func(string) {},
@@ -180,7 +182,7 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_MissingWorkspaceCLIIsAct
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
 	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:test")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
@@ -209,6 +211,7 @@ exit 127
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
+			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
 				register:   func(context.Context, time.Duration, []string) string { return "ctx-token-missing-cli" },
 				unregister: func(string) {},

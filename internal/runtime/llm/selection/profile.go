@@ -308,14 +308,6 @@ func RejectRetiredModelEnv(lookup EnvLookup) error {
 	return nil
 }
 
-func CredentialValue(profile Profile, lookup EnvLookup) string {
-	if lookup == nil || strings.TrimSpace(profile.Credential.EnvVar) == "" {
-		return ""
-	}
-	value, _ := lookup(profile.Credential.EnvVar)
-	return strings.TrimSpace(value)
-}
-
 func ResolveBaseURL(profile Profile, raw string) (string, error) {
 	baseURL := strings.TrimSpace(raw)
 	if baseURL == "" {
@@ -339,16 +331,6 @@ func ResolveBaseURL(profile Profile, raw string) (string, error) {
 		return "", fmt.Errorf("%s must be an http(s) URL for backend %q", profile.BaseURL.ConfigKey, profile.ID)
 	}
 	return strings.TrimRight(baseURL, "/"), nil
-}
-
-func RequireCredential(profile Profile, lookup EnvLookup) error {
-	if !profile.Credential.Required {
-		return nil
-	}
-	if CredentialValue(profile, lookup) == "" {
-		return fmt.Errorf("%s is required for %s", profile.Credential.EnvVar, profile.Credential.Purpose)
-	}
-	return nil
 }
 
 func BuiltInModelAliases() ModelAliases {

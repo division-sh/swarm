@@ -103,11 +103,12 @@ func TestClaudeCLIRuntimeWorkspaceCommandRejectsHostWorkspaceBackend(t *testing.
 func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://stale.example.invalid:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "stale-token")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
 	runtime.cfg.LLM.ClaudeCLI.Command = "claude"
 	runtime.toolGateway = testToolGatewayBinding("http://127.0.0.1:8082", "http://host.docker.internal:8082", "gateway-token")
+	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "stored-oauth-token")
 
 	cmd, err := runtime.buildCommand(context.Background(), []string{"--print", "hello"}, &workspace.Target{
 		Backend:   workspace.BackendDocker,
@@ -124,13 +125,19 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	if strings.Contains(got, "SWARM_TOOL_GATEWAY_TOKEN=") {
 		t.Fatalf("docker args = %q, want no gateway token env propagated into cli_test container exec", got)
 	}
+	if !strings.Contains(got, "CLAUDE_CODE_OAUTH_TOKEN=stored-oauth-token") {
+		t.Fatalf("docker args = %q, want provider credential from swarm secrets", got)
+	}
 	if strings.Contains(got, "stale.example.invalid") || strings.Contains(got, "stale-token") {
 		t.Fatalf("docker args = %q, stale operator gateway env leaked into launch", got)
+	}
+	if strings.Contains(got, "stale-oauth-token") {
+		t.Fatalf("docker args = %q, stale provider env leaked into launch", got)
 	}
 }
 
 func TestClaudeCLIRuntimeRunWithInput_MissingWorkspaceCLIUsesActionableDiagnostic(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:test")
 
 	tempDir := t.TempDir()
@@ -150,6 +157,7 @@ exit 127
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.OutputFormat = "json"
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 	_, err := runtime.runWithInput(context.Background(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
 	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {

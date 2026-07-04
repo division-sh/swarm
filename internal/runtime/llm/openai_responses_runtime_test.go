@@ -16,7 +16,7 @@ import (
 )
 
 func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "stale-test-key")
 
 	var requests []openAIResponsesRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +82,7 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 		Conversations: conversations,
 		Budget:        budget,
 		LockOwner:     "worker-1",
+		Credentials:   testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key").Store,
 	}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -147,7 +148,7 @@ func TestOpenAIResponsesRuntimeConversationToolBudgetAndPersistence(t *testing.T
 }
 
 func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-key")
+	t.Setenv("OPENAI_API_KEY", "stale-test-key")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"resp_1","model":"gpt-5.4","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}]}`))
@@ -156,6 +157,7 @@ func TestOpenAIResponsesRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 
 	turns := &turnCapture{}
 	runtime := NewOpenAIResponsesRuntime(openAIResponsesTestConfig(server.URL), sessions.NewInMemoryRegistry(time.Second), "worker-1", turns, nil, nil, nil)
+	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_API_KEY", "test-key")
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: "regular"})
 	ctx = sessions.WithScope(ctx, sessions.RuntimeModeTask.String(), "", "task-1")
 	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -30,6 +32,20 @@ func testToolGatewayBinding(hostURL, workspaceURL, token string) toolgateway.Bin
 		LifecycleOwner:    toolgateway.LifecycleOwnerServeBoot,
 		Source:            toolgateway.SourceBoundMCPListener,
 	}
+}
+
+func testProviderCredentialStore(t *testing.T, key, value string) runtimecredentials.Store {
+	t.Helper()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if strings.TrimSpace(value) != "" {
+		if err := store.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("Set provider credential: %v", err)
+		}
+	}
+	return store
 }
 
 type claudeStartupWorkspaceStub struct {
@@ -77,8 +93,9 @@ func TestValidateClaudeStartupConfig_RequiresWorkspaceAndGateway(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-	err := validateClaudeStartupConfig(cfg, RuntimeOptions{
-		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
+	err := validateClaudeStartupConfig(context.Background(), cfg, RuntimeOptions{
+		ToolGatewayBinding:  testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
+		ProviderCredentials: testProviderCredentialStore(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 	}, claudeStartupAgentSource())
 	if err == nil || !strings.Contains(err.Error(), "workspace lifecycle") {
 		t.Fatalf("expected workspace lifecycle error, got %v", err)
@@ -94,7 +111,7 @@ func TestValidateClaudeStartupConfig_SkipsClaudeEnvForAgentFreeSource(t *testing
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
-	if err := validateClaudeStartupConfig(cfg, RuntimeOptions{}, claudeStartupAgentFreeSource()); err != nil {
+	if err := validateClaudeStartupConfig(context.Background(), cfg, RuntimeOptions{}, claudeStartupAgentFreeSource()); err != nil {
 		t.Fatalf("validateClaudeStartupConfig: %v", err)
 	}
 }
@@ -116,13 +133,13 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "", "gateway-token")
-	err := validateClaudeStartupConfigForActiveAgents(cfg, opts, claudeStartupAgentFreeSource(), manager)
+	err := validateClaudeStartupConfigForActiveAgents(context.Background(), cfg, opts, claudeStartupAgentFreeSource(), manager)
 	if err == nil || !strings.Contains(err.Error(), "tool gateway binding workspace endpoint") {
 		t.Fatalf("expected workspace gateway binding error, got %v", err)
 	}
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token")
-	err = validateClaudeStartupConfigForActiveAgents(cfg, opts, claudeStartupAgentFreeSource(), manager)
+	err = validateClaudeStartupConfigForActiveAgents(context.Background(), cfg, opts, claudeStartupAgentFreeSource(), manager)
 	if err == nil || !strings.Contains(err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Fatalf("expected oauth token error, got %v", err)
 	}

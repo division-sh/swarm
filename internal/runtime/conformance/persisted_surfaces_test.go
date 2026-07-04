@@ -24,6 +24,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimediaglog "github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -49,6 +50,18 @@ func (s staticWorkspaceResolver) ResolveWorkspace(context.Context, runtimeactors
 		return nil, s.err
 	}
 	return s.target, nil
+}
+
+func conformanceProviderCredentialResolver(t testing.TB, key, value string) runtimellm.ProviderCredentialResolver {
+	t.Helper()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), key, value); err != nil {
+		t.Fatalf("Set provider credential: %v", err)
+	}
+	return runtimellm.NewProviderCredentialResolver(store)
 }
 
 func acquireLiveConversationSession(t *testing.T, ctx context.Context, db *sql.DB, agentID string, runtimeMode runtimesessions.RuntimeMode, sessionScope runtimesessions.SessionScope, scopeKey string) string {
@@ -262,14 +275,12 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	defer func() {
 		http.DefaultTransport = previousTransport
 	}()
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
-	runtime := runtimellm.NewAnthropicAPIRuntime(&config.Config{}, registry, "worker-1", nil, pg, nil, bus)
+	runtime := runtimellm.NewAnthropicAPIRuntimeWithProviderCredentials(&config.Config{}, registry, "worker-1", nil, pg, nil, bus, conformanceProviderCredentialResolver(t, "ANTHROPIC_API_KEY", "test-key"))
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")
@@ -415,14 +426,14 @@ printf '{"result":"ok"}'
 	}
 	t.Setenv("SWARM_DOCKER_BIN", fakeDocker)
 	t.Setenv("SWARM_FAKE_DOCKER_STATE", dockerState)
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	registry := runtimesessions.NewPostgresRegistry(db, 30*time.Second)
 	bus, err := runtimebus.NewEventBus(pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	runtime := runtimellm.NewClaudeCLIRuntime(&config.Config{
+	runtime := runtimellm.NewClaudeCLIRuntimeWithOptions(&config.Config{
 		LLM: config.LLMConfig{
 			ClaudeCLI: config.ClaudeCLIConfig{
 				Command:      "claude",
@@ -434,7 +445,9 @@ printf '{"result":"ok"}'
 			Container: "swarm-agent-1",
 			Workdir:   "/workspace",
 		},
-	}, pg, bus)
+	}, pg, bus, runtimellm.ClaudeCLIRuntimeOptions{
+		ProviderCredentials: conformanceProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
+	})
 
 	newTurnContext := func(evt events.Event) context.Context {
 		base := runtimesessions.WithScope(context.Background(), runtimesessions.RuntimeModeSession.String(), runtimesessions.SessionScopeFlow.String(), "support/inst-1")

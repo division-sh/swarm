@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
@@ -25,6 +26,7 @@ type RuntimeFactory struct {
 	Events        EventPublisher
 	MCPTurns      MCPTurnContextStore
 	ToolGateway   toolgateway.Binding
+	Credentials   runtimecredentials.Store
 }
 
 func (f RuntimeFactory) Build() (Runtime, error) {
@@ -43,23 +45,25 @@ func (f RuntimeFactory) Build() (Runtime, error) {
 		return nil, err
 	}
 	providerAdmission := NewProviderAdmissionRegistry(f.Cfg)
+	providerCredentials := NewProviderCredentialResolver(f.Credentials)
 
 	var runtime Runtime
 	switch profile.ID {
 	case llmselection.BackendAnthropic:
-		runtime = NewAnthropicAPIRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+		runtime = NewAnthropicAPIRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events, providerCredentials)
 		runtime.(*AnthropicAPIRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendClaudeCLI:
 		runtime = NewClaudeCLIRuntimeWithOptions(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Budget, f.Workspaces, f.Conversations, f.Events, ClaudeCLIRuntimeOptions{
 			MCPTurnContextStore: f.MCPTurns,
 			ToolGateway:         f.ToolGateway,
+			ProviderCredentials: providerCredentials,
 		})
 		runtime.(*ClaudeCLIRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendOpenAICompatible:
-		runtime = NewOpenAICompatibleRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+		runtime = NewOpenAICompatibleRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events, providerCredentials)
 		runtime.(*OpenAICompatibleRuntime).providerAdmission = providerAdmission
 	case llmselection.BackendOpenAIResponses:
-		runtime = NewOpenAIResponsesRuntime(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events)
+		runtime = NewOpenAIResponsesRuntimeWithProviderCredentials(f.Cfg, f.Sessions, f.LockOwner, f.Turns, f.Conversations, f.Budget, f.Events, providerCredentials)
 		runtime.(*OpenAIResponsesRuntime).providerAdmission = providerAdmission
 	default:
 		return nil, fmt.Errorf("unsupported llm backend profile: %s", profile.ID)

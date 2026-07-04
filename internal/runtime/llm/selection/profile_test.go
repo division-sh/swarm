@@ -114,28 +114,6 @@ func TestRejectRetiredSelectors(t *testing.T) {
 	}
 }
 
-func TestCredentialAuthority(t *testing.T) {
-	profile, err := ResolveActiveBackend(BackendAnthropic)
-	if err != nil {
-		t.Fatalf("ResolveActiveBackend: %v", err)
-	}
-	lookup := func(key string) (string, bool) {
-		if key == profile.Credential.EnvVar {
-			return " token ", true
-		}
-		return "", false
-	}
-	if got := CredentialValue(profile, lookup); got != "token" {
-		t.Fatalf("CredentialValue = %q, want token", got)
-	}
-	if err := RequireCredential(profile, lookup); err != nil {
-		t.Fatalf("RequireCredential: %v", err)
-	}
-	if err := RequireCredential(profile, func(string) (string, bool) { return "", false }); err == nil {
-		t.Fatal("expected missing credential error")
-	}
-}
-
 func TestResolveModelNameUsesModel(t *testing.T) {
 	profile, err := ResolveActiveBackend(BackendAnthropic)
 	if err != nil {

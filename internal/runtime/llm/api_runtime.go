@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -33,10 +32,16 @@ type AnthropicAPIRuntime struct {
 	apiKey            string
 	events            EventPublisher
 	providerAdmission *ProviderAdmissionRegistry
+	credentials       ProviderCredentialResolver
 }
 
 func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *AnthropicAPIRuntime {
+	return NewAnthropicAPIRuntimeWithProviderCredentials(cfg, sessions, lockOwner, turns, conversations, budget, publisher, NewProviderCredentialResolver(nil))
+}
+
+func NewAnthropicAPIRuntimeWithProviderCredentials(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher, credentials ProviderCredentialResolver) *AnthropicAPIRuntime {
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	_ = profile
 	return &AnthropicAPIRuntime{
 		cfg:           cfg,
 		sessions:      sessions,
@@ -48,9 +53,9 @@ func NewAnthropicAPIRuntime(cfg *config.Config, sessions sessions.Registry, lock
 			Timeout: 120 * time.Second,
 		},
 		apiURL:            "https://api.anthropic.com/v1/messages",
-		apiKey:            llmselection.CredentialValue(profile, os.LookupEnv),
 		events:            publisher,
 		providerAdmission: NewProviderAdmissionRegistry(cfg),
+		credentials:       credentials,
 	}
 }
 
@@ -240,10 +245,11 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
 	if strings.TrimSpace(r.apiKey) == "" {
-		r.apiKey = llmselection.CredentialValue(profile, os.LookupEnv)
-		if strings.TrimSpace(r.apiKey) == "" {
-			return nil, llmselection.RequireCredential(profile, os.LookupEnv)
+		credential, err := r.credentials.Resolve(ctx, profile)
+		if err != nil {
+			return nil, err
 		}
+		r.apiKey = credential.Value
 	}
 
 	reqBody, err := r.buildRequest(ctx, s, message)
