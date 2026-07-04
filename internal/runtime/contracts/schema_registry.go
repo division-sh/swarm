@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
@@ -90,6 +91,9 @@ func EventSchemaRegistryFromBundle(bundle *WorkflowContractBundle) map[string]Ev
 		}
 		appendEventSchemas(out, bundle, flowID, view.Events, bundle.ResolvedTypeCatalogForFlow(flowID))
 	}
+	for eventType, schema := range bundle.GeneratedActivityEventSchemas() {
+		out[eventType] = schema
+	}
 	appendPlatformEventSchemas(out, bundle.Platform)
 	return out
 }
@@ -102,6 +106,9 @@ func EventSchemaForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType s
 	}
 	entry, key, types, ok := eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
 	if !ok {
+		if schema, generatedOK := bundle.GeneratedActivityEventSchemas()[eventidentity.Normalize(eventType)]; generatedOK {
+			return schema, eventidentity.Normalize(eventType), true
+		}
 		return EventSchema{}, "", false
 	}
 	return eventSchemaFromCatalogEntry(key, entry, types), key, true

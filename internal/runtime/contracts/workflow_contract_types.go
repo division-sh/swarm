@@ -121,6 +121,7 @@ type HandlerTransitionSemantic struct {
 	FlowID               string
 	EventType            string
 	Action               ActionSpec
+	Activity             ActivitySpec
 	SelectEntity         *SelectEntitySpec
 	SelectOrCreateEntity *SelectOrCreateEntitySpec
 	Guard                *GuardSpec
@@ -152,10 +153,46 @@ type HandlerRuleEntry struct {
 	AdvancesTo       string                   `yaml:"advances_to"`
 	Emit             EmitSpec                 `yaml:"emit"`
 	Action           ActionSpec               `yaml:"action"`
+	Activity         ActivitySpec             `yaml:"activity"`
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
 }
+
+type ActivityEffectClass string
+
+const (
+	ActivityEffectClassReadOnly           ActivityEffectClass = "read_only"
+	ActivityEffectClassIdempotentWrite    ActivityEffectClass = "idempotent_write"
+	ActivityEffectClassNonIdempotentWrite ActivityEffectClass = "non_idempotent_write"
+	ActivityEffectClassLongRunning        ActivityEffectClass = "long_running"
+)
+
+type ActivitySpec struct {
+	ID    string                     `yaml:"id,omitempty"`
+	Tool  string                     `yaml:"tool"`
+	Input map[string]ExpressionValue `yaml:"input"`
+}
+
+func (a ActivitySpec) Empty() bool {
+	return strings.TrimSpace(a.ID) == "" && strings.TrimSpace(a.Tool) == "" && len(a.Input) == 0
+}
+
+func NormalizeActivityEffectClass(raw string) ActivityEffectClass {
+	switch strings.TrimSpace(strings.ToLower(raw)) {
+	case string(ActivityEffectClassReadOnly):
+		return ActivityEffectClassReadOnly
+	case string(ActivityEffectClassIdempotentWrite):
+		return ActivityEffectClassIdempotentWrite
+	case string(ActivityEffectClassNonIdempotentWrite):
+		return ActivityEffectClassNonIdempotentWrite
+	case string(ActivityEffectClassLongRunning):
+		return ActivityEffectClassLongRunning
+	default:
+		return ""
+	}
+}
+
 type GuardSpec struct {
 	ID         string           `yaml:"id"`
 	Check      string           `yaml:"check"`
@@ -1226,6 +1263,7 @@ type SystemNodeContract struct {
 }
 type SystemNodeEventHandler struct {
 	Action               ActionSpec                `yaml:"action"`
+	Activity             ActivitySpec              `yaml:"activity"`
 	CreateEntity         bool                      `yaml:"create_entity"`
 	SelectEntity         *SelectEntitySpec         `yaml:"select_entity"`
 	SelectOrCreateEntity *SelectOrCreateEntitySpec `yaml:"select_or_create_entity"`
@@ -1378,6 +1416,7 @@ type ToolSchemaEntry struct {
 	Category           string                `yaml:"category"`
 	Description        string                `yaml:"description"`
 	HandlerType        string                `yaml:"handler_type"`
+	EffectClass        string                `yaml:"effect_class"`
 	Permission         string                `yaml:"permission"`
 	RequiredPermission string                `yaml:"required_permission"`
 	RateLimit          string                `yaml:"rate_limit"`

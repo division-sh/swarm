@@ -247,6 +247,74 @@ func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (a *ActivitySpec) UnmarshalYAML(node *yaml.Node) error {
+	if a == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*a = ActivitySpec{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("INVALID-ACTIVITY: activity must be a mapping with tool and input")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		switch key {
+		case "", "id", "tool", "input":
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: activity field %q not in platform spec", key)
+		}
+	}
+	var out ActivitySpec
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "id":
+			if err := value.Decode(&out.ID); err != nil {
+				return err
+			}
+		case "tool":
+			if err := value.Decode(&out.Tool); err != nil {
+				return err
+			}
+		case "input":
+			input, err := decodeActivityInputNode(value)
+			if err != nil {
+				return err
+			}
+			out.Input = input
+		}
+	}
+	out.ID = strings.TrimSpace(out.ID)
+	out.Tool = strings.TrimSpace(out.Tool)
+	*a = out
+	return nil
+}
+
+func decodeActivityInputNode(node *yaml.Node) (map[string]ExpressionValue, error) {
+	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		return nil, nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("INVALID-ACTIVITY: activity.input must be a mapping")
+	}
+	fields := make(map[string]ExpressionValue, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		target := strings.TrimSpace(node.Content[i].Value)
+		if target == "" {
+			continue
+		}
+		value, err := decodeEmitFieldValueNode(node.Content[i+1])
+		if err != nil {
+			return nil, fmt.Errorf("INVALID-ACTIVITY: activity.input.%s: %w", target, err)
+		}
+		fields[target] = value
+	}
+	return fields, nil
+}
+
 func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 	if node == nil || strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
 		return EmitTargetSpec{}, nil
@@ -679,6 +747,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var aux struct {
 		Action               yaml.Node                `yaml:"action"`
+		Activity             ActivitySpec             `yaml:"activity"`
 		CreateEntity         bool                     `yaml:"create_entity"`
 		SelectEntity         yaml.Node                `yaml:"select_entity"`
 		SelectOrCreateEntity yaml.Node                `yaml:"select_or_create_entity"`
@@ -715,6 +784,7 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*h = SystemNodeEventHandler{
+		Activity:         aux.Activity,
 		CreateEntity:     aux.CreateEntity,
 		EvidenceTarget:   strings.TrimSpace(aux.EvidenceTarget),
 		Description:      strings.TrimSpace(aux.Description),
@@ -1041,6 +1111,7 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 	}
 	allowed := map[string]struct{}{
 		"action":                  {},
+		"activity":                {},
 		"description":             {},
 		"_note":                   {},
 		"evidence_target":         {},

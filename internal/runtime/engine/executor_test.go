@@ -714,8 +714,8 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 		t.Fatalf("NewExecutor error: %v", err)
 	}
 	steps := exec.Steps()
-	if len(steps) != 20 {
-		t.Fatalf("step count = %d, want 20", len(steps))
+	if len(steps) != 21 {
+		t.Fatalf("step count = %d, want 21", len(steps))
 	}
 	if steps[0] != StepQuery || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
@@ -725,6 +725,9 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 	}
 	if steps[15] != StepProjection {
 		t.Fatalf("expected projection after data_writes at index 15, got order %v", steps)
+	}
+	if steps[19] != StepActivity {
+		t.Fatalf("expected activity after action at index 19, got order %v", steps)
 	}
 }
 
@@ -1596,6 +1599,155 @@ type orderedDispatcher struct{ order *[]string }
 func (d orderedDispatcher) DispatchPostCommit(context.Context, []EmitIntent) error {
 	*d.order = append(*d.order, "dispatch")
 	return nil
+}
+
+type orderedActivityWriter struct {
+	order   *[]string
+	intents []ActivityIntent
+	err     error
+}
+
+func (w *orderedActivityWriter) WriteActivityIntents(_ context.Context, intents []ActivityIntent) error {
+	*w.order = append(*w.order, "activity_intents")
+	w.intents = append(w.intents, intents...)
+	return w.err
+}
+
+type orderedActivityDispatcher struct {
+	order   *[]string
+	intents []ActivityIntent
+}
+
+func (d *orderedActivityDispatcher) DispatchActivities(_ context.Context, intents []ActivityIntent) error {
+	*d.order = append(*d.order, "activity_dispatch")
+	d.intents = append(d.intents, intents...)
+	return nil
+}
+
+func sourceWithActivityTool() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"source_scrape": {
+				HandlerType: "http",
+				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type:     "object",
+					Required: []string{"url"},
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"url": {Type: "string"},
+					},
+				},
+				OutputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"title": {Type: "string"},
+					},
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    "https://example.test/source?url={{input.url}}",
+				},
+			},
+		},
+	})
+}
+
+func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
+	order := []string{}
+	repo := &orderedStateRepo{order: &order}
+	writer := &orderedActivityWriter{order: &order}
+	dispatcher := &orderedActivityDispatcher{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:             sourceWithActivityTool(),
+		StateRepo:          repo,
+		TxRunner:           orderedRunner{order: &order},
+		Locker:             orderedLocker{order: &order},
+		Outbox:             orderedOutbox{order: &order},
+		Dispatcher:         orderedDispatcher{order: &order},
+		ActivityIntents:    writer,
+		ActivityDispatcher: dispatcher,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:        identity.NormalizeEntityID("entity-1"),
+		NodeID:          identity.NormalizeNodeID("scanner"),
+		FlowID:          identity.NormalizeFlowID("research"),
+		HandlerEventKey: "source.requested",
+		Event:           eventtest.RootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Activity: runtimecontracts.ActivitySpec{
+				Tool: "source_scrape",
+				Input: map[string]runtimecontracts.ExpressionValue{
+					"url": runtimecontracts.CELExpression("payload.url"),
+				},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got, want := order, []string{"lock", "tx", "save", "activity_intents", "activity_dispatch"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("order = %v, want %v", got, want)
+	}
+	if len(writer.intents) != 1 || len(dispatcher.intents) != 1 {
+		t.Fatalf("activity intents writer=%d dispatcher=%d, want 1/1", len(writer.intents), len(dispatcher.intents))
+	}
+	intent := writer.intents[0]
+	if got := intent.Input["url"]; got != "https://example.com" {
+		t.Fatalf("activity input url = %#v", got)
+	}
+	if intent.SuccessEvent != "research.scanner_source_requested_source_scrape.succeeded" {
+		t.Fatalf("success event = %q", intent.SuccessEvent)
+	}
+	if result.FailureClass != FailureNone {
+		t.Fatalf("FailureClass = %q", result.FailureClass)
+	}
+}
+
+func TestExecutor_ActivityDispatchDoesNotRunWhenIntentPersistenceFails(t *testing.T) {
+	order := []string{}
+	writer := &orderedActivityWriter{order: &order, err: errors.New("intent store failed")}
+	dispatcher := &orderedActivityDispatcher{order: &order}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:             sourceWithActivityTool(),
+		StateRepo:          &orderedStateRepo{order: &order},
+		TxRunner:           orderedRunner{order: &order},
+		Locker:             orderedLocker{order: &order},
+		Outbox:             orderedOutbox{order: &order},
+		Dispatcher:         orderedDispatcher{order: &order},
+		ActivityIntents:    writer,
+		ActivityDispatcher: dispatcher,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:        identity.NormalizeEntityID("entity-1"),
+		NodeID:          identity.NormalizeNodeID("scanner"),
+		FlowID:          identity.NormalizeFlowID("research"),
+		HandlerEventKey: "source.requested",
+		Event:           eventtest.RootIngress("evt-1", "source.requested", "", "", json.RawMessage(`{"url":"https://example.com"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Activity: runtimecontracts.ActivitySpec{
+				Tool: "source_scrape",
+				Input: map[string]runtimecontracts.ExpressionValue{
+					"url": runtimecontracts.CELExpression("payload.url"),
+				},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil || !strings.Contains(err.Error(), "intent store failed") {
+		t.Fatalf("Execute error = %v, want intent store failure", err)
+	}
+	for _, step := range order {
+		if step == "activity_dispatch" {
+			t.Fatalf("activity dispatched despite failed intent persistence; order=%v", order)
+		}
+	}
 }
 
 func TestExecutor_ExecuteUsesAtomicEnvelopeAndOrderedSteps(t *testing.T) {

@@ -83,6 +83,190 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 	}
 }
 
+func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectClass(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"source_scrape": {
+			HandlerType: "http",
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type:     "object",
+				Required: []string{"url"},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"url": {Type: "string"},
+				},
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{
+						Tool: "source_scrape",
+						Input: map[string]runtimecontracts.ExpressionValue{
+							"url": runtimecontracts.CELExpression("payload.url"),
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "must declare effect_class") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want missing effect_class", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"mcp_source_scrape": {
+			HandlerType: "mcp",
+			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object",
+			},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{Tool: "mcp_source_scrape"},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "handler_type \"mcp\" is not supported for activities") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want MCP activity fail-closed", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"source_scrape": {
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type:     "object",
+				Required: []string{"url"},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"url": {Type: "string"},
+				},
+			},
+			OutputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object",
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"title": {Type: "string"},
+				},
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{
+						Tool: "source_scrape",
+						Input: map[string]runtimecontracts.ExpressionValue{
+							"url": runtimecontracts.CELExpression("payload.url"),
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want nil", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClosed(t *testing.T) {
+	cases := []struct {
+		name        string
+		mutateTool  func(*runtimecontracts.ToolSchemaEntry)
+		errContains string
+	}{
+		{
+			name: "response mapping",
+			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
+				tool.ResponseMapping = map[string]any{"title": "{{response.body.title}}"}
+			},
+			errContains: "uses response_mapping",
+		},
+		{
+			name: "rate limit",
+			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
+				tool.RateLimit = "1/s"
+				tool.RateLimitMaxWait = "0s"
+			},
+			errContains: "uses rate_limit",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle := testRuntimeWorkflowValidationBundle()
+			tool := runtimecontracts.ToolSchemaEntry{
+				HandlerType: "http",
+				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type:     "object",
+					Required: []string{"url"},
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"url": {Type: "string"},
+					},
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"},
+			}
+			tc.mutateTool(&tool)
+			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{"source_scrape": tool}
+			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+				"scanner": {
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+						"source.requested": {
+							Activity: runtimecontracts.ActivitySpec{
+								Tool: "source_scrape",
+								Input: map[string]runtimecontracts.ExpressionValue{
+									"url": runtimecontracts.CELExpression("payload.url"),
+								},
+							},
+						},
+					},
+				},
+			}
+			_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+				CheckMCPReachable:              false,
+				StrictEmitSchemas:              false,
+				FatalToolImplementationWarning: false,
+				FatalBootWarnings:              false,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.errContains) {
+				t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", err, tc.errContains)
+			}
+		})
+	}
+}
+
 func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")

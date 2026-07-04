@@ -511,6 +511,8 @@ func coordinatorEngineDependencies(pc *PipelineCoordinator) runtimeengine.Runtim
 		Outbox:              outbox,
 		TimerApplier:        pipelineEngineTimerApplier{coordinator: pc},
 		Dispatcher:          dispatcher,
+		ActivityIntents:     pipelineActivityIntentWriter{coordinator: pc},
+		ActivityDispatcher:  pipelineActivityDispatcher{coordinator: pc},
 		GuardRegistry:       pipelineEngineGuardRegistry{registry: pc.GuardRegistry()},
 		GuardRunner:         pipelineEngineGuardRunner{coordinator: pc},
 		ActionRegistry:      pipelineEngineActionRegistry{registry: pc.ActionRegistry()},
