@@ -214,7 +214,7 @@ var diagnosticValidOperationalStates = map[string]struct{}{
 func newRunsCommand(opts rootCommandOptions) *cobra.Command {
 	runOpts := diagnosticRunListOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "runs",
+		Use:   "list",
 		Short: "List runs.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -293,8 +293,8 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "trace [run-id]",
 		Short: "Print or follow a run's execution trace.",
-		Example: `  swarm trace <run-id>
-  swarm trace -f <run-id>    # follow live`,
+		Example: `  swarm run trace <run-id>
+  swarm run trace -f <run-id>    # follow live`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
@@ -328,7 +328,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:                "investigate",
-		Short:              "Retired legacy namespace; use swarm runs/status/trace/health.",
+		Short:              "Retired legacy namespace; use swarm run list/status/trace and swarm health.",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -348,7 +348,7 @@ func newInvestigateCommand(opts rootCommandOptions) *cobra.Command {
 func newInvestigateRunsCommand(opts rootCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:                "runs",
-		Short:              "Retired legacy command; use swarm runs.",
+		Short:              "Retired legacy command; use swarm run list.",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -361,7 +361,7 @@ func newInvestigateRunsCommand(opts rootCommandOptions) *cobra.Command {
 func newInvestigateRunCommand(opts rootCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:                "run [run-id]",
-		Short:              "Retired legacy command; use swarm status.",
+		Short:              "Retired legacy command; use swarm run status.",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -374,7 +374,7 @@ func newInvestigateRunCommand(opts rootCommandOptions) *cobra.Command {
 func newInvestigateTraceCommand(opts rootCommandOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:                "trace [run-id]",
-		Short:              "Retired legacy command; use swarm trace.",
+		Short:              "Retired legacy command; use swarm run trace.",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

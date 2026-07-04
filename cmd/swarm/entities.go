@@ -116,13 +116,14 @@ func newEntitiesCommand(opts rootCommandOptions) *cobra.Command {
 func newEntityCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "entity",
-		Short: "View or aggregate one entity's state.",
+		Short: "List entities, or view and aggregate one entity's state.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(
+		newEntitiesListCommand(opts),
 		newEntityViewCommand(opts),
 		newEntityAggregateCommand(opts),
 	)

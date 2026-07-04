@@ -34,7 +34,7 @@ func TestConversationsListUsesConversationListV1RPCWithFilters(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"conversations", "list",
+		"conversation", "list",
 		"--agent-id", "agent-1",
 		"--run-id", "run-1",
 		"--limit", "25",
@@ -77,7 +77,7 @@ func TestConversationsListEmptyResultOmitsUnsetParams(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversations", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"conversation", "list"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -183,10 +183,10 @@ func TestConversationCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "list invalid limit low", args: []string{"conversations", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
-		{name: "list blank agent id", args: []string{"conversations", "list", "--agent-id", " "}, wantStderr: "--agent-id must not be empty"},
-		{name: "list invalid run id", args: []string{"conversations", "list", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
-		{name: "list blank cursor", args: []string{"conversations", "list", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
+		{name: "list invalid limit low", args: []string{"conversation", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
+		{name: "list blank agent id", args: []string{"conversation", "list", "--agent-id", " "}, wantStderr: "--agent-id must not be empty"},
+		{name: "list invalid run id", args: []string{"conversation", "list", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
+		{name: "list blank cursor", args: []string{"conversation", "list", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
 		{name: "view missing session", args: []string{"conversation", "view"}, wantStderr: "accepts 1 arg(s)"},
 		{name: "view blank session", args: []string{"conversation", "view", " "}, wantStderr: "session id is required"},
 		{name: "view invalid session", args: []string{"conversation", "view", "bad id!"}, wantStderr: "session id must match OpaqueId pattern"},
@@ -223,7 +223,7 @@ func TestConversationCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	defer server.Close()
 
 	for _, args := range [][]string{
-		{"conversations", "list"},
+		{"conversation", "list"},
 		{"conversation", "view", "sess-1"},
 		{"conversation", "turn", "sess-1", "1"},
 	} {
@@ -251,7 +251,7 @@ func TestConversationCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T)
 	}{
 		{
 			name: "list http auth exits four",
-			args: []string{"conversations", "list"},
+			args: []string{"conversation", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
@@ -260,7 +260,7 @@ func TestConversationCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T)
 		},
 		{
 			name: "list missing conversations exits three",
-			args: []string{"conversations", "list"},
+			args: []string{"conversation", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -271,7 +271,7 @@ func TestConversationCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T)
 		},
 		{
 			name: "list malformed summary exits three",
-			args: []string{"conversations", "list"},
+			args: []string{"conversation", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

@@ -188,13 +188,14 @@ func newAgentsCommand(opts rootCommandOptions) *cobra.Command {
 func newAgentCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
-		Short: "Inspect, direct, restart, or replay a single agent.",
+		Short: "List agents; inspect, direct, restart, or replay a single agent.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(
+		newAgentsListCommand(opts),
 		newAgentViewCommand(opts),
 		newAgentDiagnoseCommand(opts),
 		newAgentDeliveriesCommand(opts),

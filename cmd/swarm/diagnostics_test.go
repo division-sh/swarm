@@ -31,7 +31,7 @@ func TestRunsUseRunListV1RPC(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--status", "RUNNING", "--limit", "2", "--cursor", "cur-1", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "list", "--status", "RUNNING", "--limit", "2", "--cursor", "cur-1", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T11:00:00Z"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -130,13 +130,13 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	}{
 		{
 			name:       "diagnose default",
-			args:       []string{"status", "run-1"},
+			args:       []string{"run", "status", "run-1"},
 			wantMethod: "run.diagnose",
 			wantOutput: []string{"Run: run-1", "operational_state=stalled", "blocking_layer=delivery_lifecycle", "dead letters exist"},
 		},
 		{
 			name:       "header only",
-			args:       []string{"status", "run-1", "--no-diagnose"},
+			args:       []string{"run", "status", "run-1", "--no-diagnose"},
 			wantMethod: "run.get",
 			wantOutput: []string{"Run: run-1", "status=running", "trigger=scan.requested"},
 			notOutput:  "operational_state=",
@@ -192,7 +192,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 	}{
 		{
 			name:       "status prefers running",
-			args:       []string{"status"},
+			args:       []string{"run", "status"},
 			lists:      [][]any{{validDiagnosticRunHeaderWithStatus("running-run", "running")}},
 			owner:      "run.diagnose",
 			selected:   "running-run",
@@ -200,7 +200,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 		},
 		{
 			name:       "status falls back to paused",
-			args:       []string{"status", "--no-diagnose"},
+			args:       []string{"run", "status", "--no-diagnose"},
 			lists:      [][]any{{}, {validDiagnosticRunHeaderWithStatus("paused-run", "paused")}},
 			owner:      "run.get",
 			selected:   "paused-run",
@@ -208,7 +208,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 		},
 		{
 			name:       "trace uses terminal fallback",
-			args:       []string{"trace"},
+			args:       []string{"run", "trace"},
 			lists:      [][]any{{}, {}, {validDiagnosticRunHeaderWithStatus("terminal-run", "completed")}},
 			owner:      "run.trace",
 			selected:   "terminal-run",
@@ -380,7 +380,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"trace", "run-1",
+		"run", "trace", "run-1",
 		"--limit", "2",
 		"--cursor", "trace-cur",
 		"--since", "2026-05-13T10:00:00Z",
@@ -443,7 +443,7 @@ func TestTraceDeliveryDetailRendersRunTraceLifecycleFields(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-1", "--delivery-detail", "--limit", "1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "run-1", "--delivery-detail", "--limit", "1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -554,7 +554,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"trace", "run-1",
+		"run", "trace", "run-1",
 		"--delivery-summary",
 		"--limit", "1",
 		"--cursor", "start-cur",
@@ -646,7 +646,7 @@ func TestTraceDeliverySummaryUsesOmittedRunResolver(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--delivery-summary"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "--delivery-summary"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -712,7 +712,7 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--limit", "3", "--cursor", "trace-cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z", "--event-name", "scan.requested"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "--limit", "3", "--cursor", "trace-cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z", "--event-name", "scan.requested"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -735,12 +735,12 @@ func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 	}{
 		{
 			name:       "long follow",
-			args:       []string{"trace", "run-follow", "--follow", "--no-retry", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"},
+			args:       []string{"run", "trace", "run-follow", "--follow", "--no-retry", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"},
 			wantFilter: wantFullTraceFilterParams(),
 		},
 		{
 			name:       "shorthand follow",
-			args:       []string{"trace", "run-follow", "-f", "--no-retry", "--event-name", "scan.requested"},
+			args:       []string{"run", "trace", "run-follow", "-f", "--no-retry", "--event-name", "scan.requested"},
 			wantFilter: map[string]any{"event_name": []any{"scan.requested"}},
 		},
 	} {
@@ -787,7 +787,7 @@ func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--follow", "--no-retry", "--event-name", "scan.requested", "--subscriber-id", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "--follow", "--no-retry", "--event-name", "scan.requested", "--subscriber-id", "agent-1"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -804,7 +804,7 @@ func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
 func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	opts := defaultRootCommandOptions()
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "--help"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "--help"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -918,7 +918,7 @@ func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
 	}()
 	var stdout, stderr bytes.Buffer
 	wantFilter := wantFullTraceFilterParams()
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "--follow", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "trace", "--follow", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 130 {
 		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -1023,7 +1023,7 @@ func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
 	}()
 	var stdout, stderr bytes.Buffer
 	wantFilter := map[string]any{"delivery_status": []any{"delivered"}, "subscriber_type": []any{"agent"}}
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "run-retry", "--follow", "--delivery-status", "delivered", "--subscriber-type", "agent"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "trace", "run-retry", "--follow", "--delivery-status", "delivered", "--subscriber-type", "agent"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 130 {
 		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -1084,7 +1084,7 @@ func TestTraceFollowCtrlCDetachesWithoutRunStop(t *testing.T) {
 		cancel()
 	}()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"trace", "run-active", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "trace", "run-active", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 130 {
 		t.Fatalf("code = %d, want 130 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -1123,7 +1123,7 @@ func TestTraceFollowMalformedWebSocketFailuresExitThree(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"trace", "run-bad-ws", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "trace", "run-bad-ws", "--follow"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 3 {
 				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -1212,39 +1212,39 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "runs invalid limit", args: []string{"runs", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
-		{name: "runs invalid since", args: []string{"runs", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
-		{name: "trace extra arg", args: []string{"trace", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
-		{name: "trace invalid limit low", args: []string{"trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
-		{name: "trace invalid limit high", args: []string{"trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
-		{name: "trace invalid since", args: []string{"trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
-		{name: "trace invalid until", args: []string{"trace", "run-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp"},
-		{name: "trace since after until", args: []string{"trace", "run-1", "--since", "2026-05-13T10:05:00Z", "--until", "2026-05-13T10:00:00Z"}, wantStderr: "--until must be at or after --since"},
-		{name: "trace blank cursor", args: []string{"trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
-		{name: "trace no retry requires follow", args: []string{"trace", "run-1", "--no-retry"}, wantStderr: "--no-retry requires --follow"},
-		{name: "trace delivery detail and summary are mutually exclusive", args: []string{"trace", "run-1", "--delivery-detail", "--delivery-summary"}, wantStderr: "--delivery-detail and --delivery-summary are mutually exclusive"},
-		{name: "trace follow rejects limit", args: []string{"trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
-		{name: "trace follow rejects cursor", args: []string{"trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
-		{name: "trace follow rejects since", args: []string{"trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
-		{name: "trace follow rejects until", args: []string{"trace", "run-1", "--follow", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
-		{name: "trace follow rejects delivery detail", args: []string{"trace", "run-1", "--follow", "--delivery-detail"}, wantStderr: "--delivery-detail is not supported with --follow"},
-		{name: "trace follow rejects delivery summary", args: []string{"trace", "run-1", "--follow", "--delivery-summary"}, wantStderr: "--delivery-summary is not supported with --follow"},
-		{name: "trace shorthand follow rejects limit", args: []string{"trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
-		{name: "trace shorthand follow rejects cursor", args: []string{"trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
-		{name: "trace shorthand follow rejects since", args: []string{"trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
-		{name: "trace shorthand follow rejects until", args: []string{"trace", "run-1", "-f", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
-		{name: "trace follow direct replay since remains unpromoted", args: []string{"trace", "run-1", "--follow", "--replay-since", "2026-05-13T10:00:00Z"}, wantStderr: "unknown flag"},
-		{name: "trace blank event name", args: []string{"trace", "run-1", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
-		{name: "trace blank subscriber id", args: []string{"trace", "run-1", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
-		{name: "trace invalid entity id", args: []string{"trace", "run-1", "--entity-id", "bad id!"}, wantStderr: "--entity-id must match OpaqueId pattern"},
-		{name: "trace invalid delivery status", args: []string{"trace", "run-1", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
-		{name: "trace invalid subscriber type", args: []string{"trace", "run-1", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
-		{name: "trace follow blank event name", args: []string{"trace", "run-1", "--follow", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
-		{name: "trace follow invalid entity id", args: []string{"trace", "run-1", "--follow", "--entity-id", "bad id!"}, wantStderr: "--entity-id must match OpaqueId pattern"},
-		{name: "trace follow invalid delivery status", args: []string{"trace", "run-1", "--follow", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
-		{name: "trace follow blank subscriber id", args: []string{"trace", "run-1", "--follow", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
-		{name: "trace follow invalid subscriber type", args: []string{"trace", "run-1", "--follow", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
-		{name: "status extra arg", args: []string{"status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
+		{name: "runs invalid limit", args: []string{"run", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
+		{name: "runs invalid since", args: []string{"run", "list", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "trace extra arg", args: []string{"run", "trace", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
+		{name: "trace invalid limit low", args: []string{"run", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
+		{name: "trace invalid limit high", args: []string{"run", "trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
+		{name: "trace invalid since", args: []string{"run", "trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "trace invalid until", args: []string{"run", "trace", "run-1", "--until", "tomorrow"}, wantStderr: "--until must be an RFC3339 timestamp"},
+		{name: "trace since after until", args: []string{"run", "trace", "run-1", "--since", "2026-05-13T10:05:00Z", "--until", "2026-05-13T10:00:00Z"}, wantStderr: "--until must be at or after --since"},
+		{name: "trace blank cursor", args: []string{"run", "trace", "run-1", "--cursor", " "}, wantStderr: "--cursor must not be empty"},
+		{name: "trace no retry requires follow", args: []string{"run", "trace", "run-1", "--no-retry"}, wantStderr: "--no-retry requires --follow"},
+		{name: "trace delivery detail and summary are mutually exclusive", args: []string{"run", "trace", "run-1", "--delivery-detail", "--delivery-summary"}, wantStderr: "--delivery-detail and --delivery-summary are mutually exclusive"},
+		{name: "trace follow rejects limit", args: []string{"run", "trace", "run-1", "--follow", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
+		{name: "trace follow rejects cursor", args: []string{"run", "trace", "run-1", "--follow", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
+		{name: "trace follow rejects since", args: []string{"run", "trace", "run-1", "--follow", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace follow rejects until", args: []string{"run", "trace", "run-1", "--follow", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
+		{name: "trace follow rejects delivery detail", args: []string{"run", "trace", "run-1", "--follow", "--delivery-detail"}, wantStderr: "--delivery-detail is not supported with --follow"},
+		{name: "trace follow rejects delivery summary", args: []string{"run", "trace", "run-1", "--follow", "--delivery-summary"}, wantStderr: "--delivery-summary is not supported with --follow"},
+		{name: "trace shorthand follow rejects limit", args: []string{"run", "trace", "run-1", "-f", "--limit", "5"}, wantStderr: "--limit is not supported with --follow"},
+		{name: "trace shorthand follow rejects cursor", args: []string{"run", "trace", "run-1", "-f", "--cursor", "cur"}, wantStderr: "--cursor is not supported with --follow"},
+		{name: "trace shorthand follow rejects since", args: []string{"run", "trace", "run-1", "-f", "--since", "2026-05-13T10:00:00Z"}, wantStderr: "--since is not supported with --follow"},
+		{name: "trace shorthand follow rejects until", args: []string{"run", "trace", "run-1", "-f", "--until", "2026-05-13T10:05:00Z"}, wantStderr: "--until is not supported with --follow"},
+		{name: "trace follow direct replay since remains unpromoted", args: []string{"run", "trace", "run-1", "--follow", "--replay-since", "2026-05-13T10:00:00Z"}, wantStderr: "unknown flag"},
+		{name: "trace blank event name", args: []string{"run", "trace", "run-1", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
+		{name: "trace blank subscriber id", args: []string{"run", "trace", "run-1", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
+		{name: "trace invalid entity id", args: []string{"run", "trace", "run-1", "--entity-id", "bad id!"}, wantStderr: "--entity-id must match OpaqueId pattern"},
+		{name: "trace invalid delivery status", args: []string{"run", "trace", "run-1", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
+		{name: "trace invalid subscriber type", args: []string{"run", "trace", "run-1", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
+		{name: "trace follow blank event name", args: []string{"run", "trace", "run-1", "--follow", "--event-name", " "}, wantStderr: "--event-name must not be empty"},
+		{name: "trace follow invalid entity id", args: []string{"run", "trace", "run-1", "--follow", "--entity-id", "bad id!"}, wantStderr: "--entity-id must match OpaqueId pattern"},
+		{name: "trace follow invalid delivery status", args: []string{"run", "trace", "run-1", "--follow", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
+		{name: "trace follow blank subscriber id", args: []string{"run", "trace", "run-1", "--follow", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
+		{name: "trace follow invalid subscriber type", args: []string{"run", "trace", "run-1", "--follow", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
+		{name: "status extra arg", args: []string{"run", "status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls.Load()
@@ -1268,16 +1268,16 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 
 func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
-		{"runs"},
-		{"trace", "run-1"},
-		{"trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z"},
-		{"trace", "run-1", "--delivery-detail"},
-		{"trace", "run-1", "--delivery-summary"},
-		{"trace", "run-1", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
-		{"trace", "run-1", "--follow"},
-		{"trace", "run-1", "-f"},
-		{"trace", "run-1", "--follow", "--no-retry"},
-		{"trace", "run-1", "--follow", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
+		{"run", "list"},
+		{"run", "trace", "run-1"},
+		{"run", "trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z"},
+		{"run", "trace", "run-1", "--delivery-detail"},
+		{"run", "trace", "run-1", "--delivery-summary"},
+		{"run", "trace", "run-1", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
+		{"run", "trace", "run-1", "--follow"},
+		{"run", "trace", "run-1", "-f"},
+		{"run", "trace", "run-1", "--follow", "--no-retry"},
+		{"run", "trace", "run-1", "--follow", "--event-name", "scan.requested", "--entity-id", "entity-1", "--delivery-status", "delivered", "--subscriber-id", "agent-1", "--subscriber-type", "agent"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			t.Setenv("SWARM_API_TOKEN", "")
@@ -1305,9 +1305,9 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 
 func TestOmittedRunResolverFailsClosedWhenNoRunsExist(t *testing.T) {
 	for _, args := range [][]string{
-		{"status"},
-		{"status", "--no-diagnose"},
-		{"trace"},
+		{"run", "status"},
+		{"run", "status", "--no-diagnose"},
+		{"run", "trace"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -1349,7 +1349,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 	}{
 		{
 			name: "http auth failure",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
@@ -1359,7 +1359,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "json rpc run not found",
-			args: []string{"status", "missing"},
+			args: []string{"run", "status", "missing"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1384,7 +1384,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run list missing runs",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1395,7 +1395,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run get missing required run id",
-			args: []string{"status", "run-1", "--no-diagnose"},
+			args: []string{"run", "status", "run-1", "--no-diagnose"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1408,7 +1408,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run list invalid run status",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1421,7 +1421,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run get invalid run status",
-			args: []string{"status", "run-1", "--no-diagnose"},
+			args: []string{"run", "status", "run-1", "--no-diagnose"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1434,7 +1434,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing blocking layer",
-			args: []string{"status", "run-1"},
+			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1450,7 +1450,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose invalid operational state",
-			args: []string{"status", "run-1"},
+			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1467,7 +1467,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing blocking reason",
-			args: []string{"status", "run-1"},
+			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1483,7 +1483,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "run diagnose missing heuristics",
-			args: []string{"status", "run-1"},
+			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1516,7 +1516,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "trace missing trace",
-			args: []string{"trace", "run-1"},
+			args: []string{"run", "trace", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1527,7 +1527,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "trace invalid delivery timestamp",
-			args: []string{"trace", "run-1", "--delivery-detail"},
+			args: []string{"run", "trace", "run-1", "--delivery-detail"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1545,7 +1545,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "trace summary repeated cursor",
-			args: []string{"trace", "run-1", "--delivery-summary", "--cursor", "same-cur"},
+			args: []string{"run", "trace", "run-1", "--delivery-summary", "--cursor", "same-cur"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -1559,7 +1559,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "trace summary delivery row missing subscriber",
-			args: []string{"trace", "run-1", "--delivery-summary"},
+			args: []string{"run", "trace", "run-1", "--delivery-summary"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

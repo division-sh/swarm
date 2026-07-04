@@ -148,13 +148,14 @@ func newConversationsCommand(opts rootCommandOptions) *cobra.Command {
 func newConversationCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "conversation",
-		Short: "View one conversation and its turns.",
+		Short: "List conversations, or view one conversation and its turns.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(
+		newConversationsListCommand(opts),
 		newConversationViewCommand(opts),
 		newConversationTurnCommand(opts),
 	)

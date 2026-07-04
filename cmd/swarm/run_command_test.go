@@ -75,7 +75,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -141,7 +141,7 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -211,7 +211,7 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 
 func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--help"}, &stdout, &stderr, rootCommandOptions{})
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -244,7 +244,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -284,7 +284,7 @@ func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--run-id", "run-explicit", "--idempotency-key", "idem-start", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--run-id", "run-explicit", "--idempotency-key", "idem-start", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -305,7 +305,7 @@ func TestRunCommandBundleFingerprintMismatchFailsBeforeRunStart(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -346,7 +346,7 @@ func TestRunCommandBundleHashSerializesCanonicalParamAndMapsUnsupported(t *testi
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 6 {
 		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -387,7 +387,7 @@ func TestRunCommandStartApplicationErrorsExitSixAndDoNotFollow(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
 			if code != 6 {
 				t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -427,7 +427,7 @@ func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -467,7 +467,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 	var stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -531,7 +531,7 @@ func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--reattach", "run-terminal"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "run-terminal"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 7 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -569,7 +569,7 @@ func TestRunCommandReattachActiveCtrlCDetachesWithoutRunStop(t *testing.T) {
 	opts := testRunCommandOptions(server)
 	opts.runStatusPoll = time.Hour
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "--connect", server.URL, "--reattach", "run-active"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "run-active"}, &stdout, &stderr, opts)
 	if code != 130 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -613,7 +613,7 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 	opts := testRunCommandOptions(server)
 	opts.runStatusPoll = time.Hour
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 130 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -643,7 +643,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -683,7 +683,7 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -740,7 +740,7 @@ func TestRunCommandMalformedWebSocketFailuresExitThree(t *testing.T) {
 			opts := testRunCommandOptions(server)
 			opts.runStatusPoll = time.Hour
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
 			if code != 3 {
 				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -760,34 +760,34 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		wantCode   int
 		wantStderr string
 	}{
-		{name: "detach retired", token: "test-token", args: []string{"run", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run --detach"},
-		{name: "no follow requires connect", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
-		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
-		{name: "invalid bundle hash rejected", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
-		{name: "blank bundle hash rejected", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "  "}, wantCode: 2, wantStderr: "--bundle-hash must be non-empty"},
-		{name: "invalid bundle fingerprint rejected", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:BAD"}, wantCode: 2, wantStderr: "--bundle-fingerprint must be sha256:<64 lowercase hex>"},
-		{name: "bundle hash conflicts with legacy fingerprint", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash is mutually exclusive with --bundle-fingerprint"},
-		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-hash"},
-		{name: "reattach rejects bundle fingerprint", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-fingerprint"},
-		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
-		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
-		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
-		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
-		{name: "reattach rejects platform spec flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --platform-spec"},
-		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
-		{name: "blank data rejected", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be non-empty"},
-		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
-		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with default MCP listener 127.0.0.1:8082"},
-		{name: "mcp port unsupported", token: "test-token", args: []string{"run", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port is not supported"},
-		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
-		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
-		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
-		{name: "connect rejects data local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--data", "reference-data"}, wantCode: 2, wantStderr: "--data requires local foreground mode"},
-		{name: "connect rejects platform spec local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec requires local foreground mode"},
-		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
-		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
-		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
-		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "API token source is required"},
+		{name: "detach retired", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run --detach"},
+		{name: "no follow requires connect", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
+		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
+		{name: "invalid bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "blank bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "  "}, wantCode: 2, wantStderr: "--bundle-hash must be non-empty"},
+		{name: "invalid bundle fingerprint rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-fingerprint", "sha256:BAD"}, wantCode: 2, wantStderr: "--bundle-fingerprint must be sha256:<64 lowercase hex>"},
+		{name: "bundle hash conflicts with legacy fingerprint", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash is mutually exclusive with --bundle-fingerprint"},
+		{name: "reattach rejects bundle hash", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-hash", "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-hash"},
+		{name: "reattach rejects bundle fingerprint", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--bundle-fingerprint", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --bundle-fingerprint"},
+		{name: "reattach rejects config flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --config"},
+		{name: "reattach rejects backend flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --backend"},
+		{name: "reattach rejects local startup flags", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--contracts", "contracts"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --contracts"},
+		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
+		{name: "reattach rejects platform spec flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --platform-spec"},
+		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
+		{name: "blank data rejected", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be non-empty"},
+		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
+		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with default MCP listener 127.0.0.1:8082"},
+		{name: "mcp port unsupported", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port is not supported"},
+		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
+		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
+		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
+		{name: "connect rejects data local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--data", "reference-data"}, wantCode: 2, wantStderr: "--data requires local foreground mode"},
+		{name: "connect rejects platform spec local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec requires local foreground mode"},
+		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
+		{name: "connect rejects legacy path", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1/api/rpc", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect path must be empty or /v1/rpc"},
+		{name: "connect rejects unsupported scheme", token: "test-token", args: []string{"run", "start", "--connect", "ftp://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "--connect must use http or https"},
+		{name: "missing explicit token for non-loopback exits four", args: []string{"run", "start", "--connect", "http://192.0.2.10:1", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 4, wantStderr: "API token source is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.token == "" {
@@ -848,9 +848,9 @@ func TestRunCommandMapsRPCAndMalformedFailures(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			var code int
 			if tc.name == "malformed response exits three" {
-				code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+				code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 			} else {
-				code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--reattach", "run-1"}, &stdout, &stderr, testRunCommandOptions(server))
+				code = executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--reattach", "run-1"}, &stdout, &stderr, testRunCommandOptions(server))
 			}
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())

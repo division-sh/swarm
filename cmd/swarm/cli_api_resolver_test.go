@@ -438,15 +438,15 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 	root := newRootCommandWithOptions(context.Background(), t.TempDir(), ioDiscard{}, ioDiscard{}, defaultRootCommandOptions())
 	withFlags := []string{
-		"runs", "status", "trace", "health", "logs", "incidents",
-		"events list", "events follow", "event view", "event publish", "event replay",
+		"run list", "run status", "run trace", "health", "logs", "incidents",
+		"event list", "event follow", "event view", "event publish", "event replay",
 		"bundle list", "bundle show", "bundle agents", "bundle register", "bundle delete",
-		"agents list", "agent deliveries", "agent view", "agent diagnose", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
-		"conversations list", "conversation view", "conversation turn",
-		"entities list", "entity view", "entity aggregate",
+		"agent list", "agent deliveries", "agent view", "agent diagnose", "agent restart", "agent replay", "agent replay-backlog", "agent directive",
+		"conversation list", "conversation view", "conversation turn",
+		"entity list", "entity view", "entity aggregate",
 		"mailbox list", "mailbox view", "mailbox approve", "mailbox reject", "mailbox defer",
 		"control pause", "control continue", "control stop", "control nuke",
-		"fork", "forkchat new", "forkchat resume", "forkchat list", "forkchat view", "forkchat delete",
+		"run fork", "forkchat new", "forkchat resume", "forkchat list", "forkchat view", "forkchat delete",
 		"version",
 	}
 	for _, path := range withFlags {
@@ -464,7 +464,7 @@ func TestCLIAPIConnectionFlagsSurfaceAndIsolation(t *testing.T) {
 
 	withoutFlags := []string{
 		"", "verify", "completion", "run",
-		"events", "event", "bundle", "agents", "agent", "conversations", "conversation", "entities", "entity", "mailbox", "control", "forkchat",
+		"event", "bundle", "agent", "conversation", "entity", "mailbox", "control", "forkchat",
 		"investigate", "investigate health",
 	}
 	for _, path := range withoutFlags {
@@ -564,7 +564,7 @@ func TestAPIConnectionFlagsDriveRuntimeStateCommand(t *testing.T) {
 	opts := defaultRootCommandOptions()
 	opts.httpClient = server.Client()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL, "--api-token-file", tokenFile}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "list", "--api-server", server.URL, "--api-token-file", tokenFile}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
@@ -595,7 +595,7 @@ func TestAPIConnectionDefaultLoopbackTokenDrivesRuntimeStateCommand(t *testing.T
 	opts := defaultRootCommandOptions()
 	opts.httpClient = server.Client()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "list", "--api-server", server.URL}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
@@ -630,7 +630,7 @@ func TestAPIConnectionFlagsPreserveServerBasePathPrefix(t *testing.T) {
 	opts := defaultRootCommandOptions()
 	opts.httpClient = server.Client()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", "--api-server", server.URL + "/proxy", "--api-token-file", tokenFile}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "list", "--api-server", server.URL + "/proxy", "--api-token-file", tokenFile}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
@@ -663,7 +663,7 @@ func TestCLIAPIConfigDrivesRuntimeStateCommand(t *testing.T) {
 	opts := defaultRootCommandOptions()
 	opts.httpClient = server.Client()
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs"}, &stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "list"}, &stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%q stdout=%q", code, stderr.String(), stdout.String())
 	}
@@ -947,22 +947,22 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 	}{
 		{
 			name: "flag direct RPC endpoint",
-			args: []string{"runs", "--api-server", "{server}/v1/rpc", "--api-token-file", "{token}"},
+			args: []string{"run", "list", "--api-server", "{server}/v1/rpc", "--api-token-file", "{token}"},
 			want: "not a direct /v1/rpc endpoint",
 		},
 		{
 			name: "flag prefixed RPC endpoint",
-			args: []string{"runs", "--api-server", "{server}/proxy/v1/rpc", "--api-token-file", "{token}"},
+			args: []string{"run", "list", "--api-server", "{server}/proxy/v1/rpc", "--api-token-file", "{token}"},
 			want: "not a direct /v1/rpc endpoint",
 		},
 		{
 			name: "flag prefixed websocket endpoint",
-			args: []string{"runs", "--api-server", "{server}/proxy/v1/ws", "--api-token-file", "{token}"},
+			args: []string{"run", "list", "--api-server", "{server}/proxy/v1/ws", "--api-token-file", "{token}"},
 			want: "not a direct /v1/ws endpoint",
 		},
 		{
 			name: "environment direct websocket endpoint is removed",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			setup: func(t *testing.T, serverURL string, _ string) {
 				t.Setenv("SWARM_API_SERVER", serverURL+"/v1/ws")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
@@ -971,7 +971,7 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 		},
 		{
 			name: "environment prefixed RPC endpoint is removed",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			setup: func(t *testing.T, serverURL string, _ string) {
 				t.Setenv("SWARM_API_SERVER", serverURL+"/proxy/v1/rpc")
 				t.Setenv("SWARM_API_TOKEN", "env-token")
@@ -980,7 +980,7 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 		},
 		{
 			name: "config direct RPC endpoint",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			setup: func(t *testing.T, serverURL string, tokenFile string) {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 					"api_server":     serverURL + "/v1/rpc",
@@ -991,7 +991,7 @@ func TestEndpointShapedAPIServerRejectedBeforeRequest(t *testing.T) {
 		},
 		{
 			name: "config prefixed RPC endpoint",
-			args: []string{"runs"},
+			args: []string{"run", "list"},
 			setup: func(t *testing.T, serverURL string, tokenFile string) {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 					"api_server":     serverURL + "/proxy/v1/rpc",
@@ -1045,8 +1045,8 @@ func TestAPIConnectionFlagsRejectedOnNonAPISurfaces(t *testing.T) {
 		{args: []string{"--api-server", "http://127.0.0.1:9", "runs"}, wantStderr: "unknown flag: --api-server"},
 		{args: []string{"serve", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
 		{args: []string{"verify", "--api-server", "http://127.0.0.1:9"}},
-		{args: []string{"run", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
-		{args: []string{"events", "--api-server", "http://127.0.0.1:9", "list"}, wantStderr: "unknown flag: --api-server"},
+		{args: []string{"run", "start", "--api-server", "http://127.0.0.1:9"}, wantStderr: "unknown flag: --api-server"},
+		{args: []string{"event", "--api-server", "http://127.0.0.1:9", "list"}, wantStderr: "unknown flag: --api-server"},
 	} {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, defaultRootCommandOptions())

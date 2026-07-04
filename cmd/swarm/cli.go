@@ -68,13 +68,13 @@ func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.
 
 The typical path: check your setup with 'swarm doctor', validate contracts
 with 'swarm verify', start the local runtime with 'swarm serve --dev', then
-start work with 'swarm run' or 'swarm event publish' and watch it with
-'swarm trace', 'swarm events', and 'swarm mailbox'.`,
+start work with 'swarm run start' or 'swarm event publish' and watch it
+with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		Example: `  swarm doctor                                      # check local prerequisites
   swarm verify --contracts ./contracts              # validate contracts before boot
   swarm serve --dev                                 # start a local development runtime
-  swarm run --event <event-name> --payload payload.json
-  swarm trace <run-id>                              # see what a run did`,
+  swarm run start --event <event-name> --payload payload.json
+  swarm run trace <run-id>                          # see what a run did`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -116,24 +116,16 @@ start work with 'swarm run' or 'swarm event publish' and watch it with
 		newConnectionsCommand(ctx, repo),
 	)
 	addToGroup(commandGroupOperate,
-		newRunCommand(repo, opts),
+		newRunGroupCommand(repo, opts),
 		newControlCommand(opts),
 		newEventCommand(opts),
 		newMailboxCommand(opts),
 		newAgentCommand(opts),
-		newForkCommand(opts),
 		newForkChatCommand(opts),
 	)
 	addToGroup(commandGroupObserve,
-		newRunsCommand(opts),
-		newStatusCommand(opts),
-		newTraceCommand(opts),
-		newEventsCommand(opts),
-		newEntitiesCommand(opts),
 		newEntityCommand(opts),
-		newConversationsCommand(opts),
 		newConversationCommand(opts),
-		newAgentsCommand(opts),
 		newLogsCommand(opts),
 		newHealthCommand(opts),
 		newIncidentsCommand(opts),
@@ -141,20 +133,54 @@ start work with 'swarm run' or 'swarm event publish' and watch it with
 	addToGroup(commandGroupUtility,
 		newCompletionCommand(),
 	)
-	// Retired hidden stub; intentionally ungrouped so it never renders in help.
+	// Retired hidden stubs; intentionally ungrouped so they never render in help.
 	cmd.AddCommand(newInvestigateCommand(opts))
+	cmd.AddCommand(newRetiredTopologySpellingCommands()...)
 	cmd.SetHelpCommandGroupID(commandGroupUtility)
 	return cmd
 }
 
 // Help groups, ordered as the newcomer journey: set up, author, run, observe.
 const (
-	commandGroupStart   = "getting-started"
-	commandGroupAuthor  = "author"
-	commandGroupOperate = "operate"
-	commandGroupObserve = "observe"
+	commandGroupStart   = "getting_started"
+	commandGroupAuthor  = "author_validate"
+	commandGroupOperate = "run_operate"
+	commandGroupObserve = "observe_debug"
 	commandGroupUtility = "utilities"
 )
+
+// newRunGroupCommand is the CLI v2.2 run noun-group: bare `swarm run` prints
+// group help; the start form moved to `swarm run start`
+// (cli_specification.topology_revision_v2_2.target_rows.run_group).
+func newRunGroupCommand(repo string, opts rootCommandOptions) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "run",
+		Short: "Start, inspect, trace, and branch workflow runs.",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			fmt.Fprintln(cmd.ErrOrStderr(), runStartRetiredMessage)
+			return commandExitError{code: 2}
+		},
+	}
+	cmd.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		if c.Name() == "run" {
+			fmt.Fprintln(c.ErrOrStderr(), runStartRetiredMessage)
+			return commandExitError{code: 2}
+		}
+		return err
+	})
+	cmd.AddCommand(
+		newRunCommand(repo, opts),
+		newRunsCommand(opts),
+		newStatusCommand(opts),
+		newTraceCommand(opts),
+		newForkCommand(opts),
+	)
+	return cmd
+}
 
 type trackedRootStringFlag struct {
 	value   *string

@@ -92,10 +92,10 @@ func cliLoggingFlagAfterSupportedLeafCommand(prefix []string) bool {
 	leafCommands := [][]string{
 		{"version"},
 		{"verify"},
-		{"runs"},
+		{"run", "list"},
 		{"health"},
-		{"status"},
-		{"conversations", "list"},
+		{"run", "status"},
+		{"conversation", "list"},
 		{"conversation", "view"},
 		{"conversation", "turn"},
 	}

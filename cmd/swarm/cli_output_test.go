@@ -120,7 +120,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"runs", tc.mode}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "list", tc.mode}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 0 {
 				t.Fatalf("runs %s code = %d stdout=%s stderr=%s", tc.mode, code, stdout.String(), stderr.String())
 			}
@@ -177,7 +177,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 			assertion func(*testing.T, string)
 		}{
 			{
-				args:   []string{"status", "run-1", "--json"},
+				args:   []string{"run", "status", "run-1", "--json"},
 				method: "run.diagnose",
 				assertion: func(t *testing.T, raw string) {
 					result := decodeOutputJSON[diagnosticRunDiagnosisResult](t, raw)
@@ -187,12 +187,12 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 				},
 			},
 			{
-				args:   []string{"status", "run-1", "--quiet"},
+				args:   []string{"run", "status", "run-1", "--quiet"},
 				method: "run.diagnose",
 				quiet:  "run-1 stalled\n",
 			},
 			{
-				args:   []string{"status", "run-1", "--no-diagnose", "--json"},
+				args:   []string{"run", "status", "run-1", "--no-diagnose", "--json"},
 				method: "run.get",
 				assertion: func(t *testing.T, raw string) {
 					result := decodeOutputJSON[diagnosticRunGetResult](t, raw)
@@ -202,7 +202,7 @@ func TestCLIOutputModesForDiagnosticConsumers(t *testing.T) {
 				},
 			},
 			{
-				args:   []string{"status", "run-1", "--no-diagnose", "--quiet"},
+				args:   []string{"run", "status", "run-1", "--no-diagnose", "--quiet"},
 				method: "run.get",
 				quiet:  "run-1 running\n",
 			},
@@ -249,7 +249,7 @@ func TestCLIOutputModesForConversationConsumers(t *testing.T) {
 	}{
 		{
 			name:      "conversations list",
-			args:      []string{"conversations", "list"},
+			args:      []string{"conversation", "list"},
 			method:    conversationListMethod,
 			result:    map[string]any{"conversations": []map[string]any{validConversationSummary("sess-1")}},
 			wantQuiet: "sess-1\n",
@@ -386,19 +386,19 @@ func TestCLIOutputNoColorForSharedRendererConsumers(t *testing.T) {
 		},
 		{
 			name:   "runs",
-			args:   func(*testing.T) []string { return []string{"runs"} },
+			args:   func(*testing.T) []string { return []string{"run", "list"} },
 			method: "run.list",
 			result: map[string]any{"runs": []any{validDiagnosticRunHeader("run-1"), validDiagnosticRunHeader("run-2")}},
 		},
 		{
 			name:   "status",
-			args:   func(*testing.T) []string { return []string{"status", "run-1"} },
+			args:   func(*testing.T) []string { return []string{"run", "status", "run-1"} },
 			method: "run.diagnose",
 			result: validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"}),
 		},
 		{
 			name:   "conversations list",
-			args:   func(*testing.T) []string { return []string{"conversations", "list"} },
+			args:   func(*testing.T) []string { return []string{"conversation", "list"} },
 			method: conversationListMethod,
 			result: map[string]any{"conversations": []map[string]any{validConversationSummary("sess-1")}},
 		},
@@ -517,9 +517,9 @@ func TestCLIOutputModeCollisionFailsBeforeSideEffects(t *testing.T) {
 		{"version", "--json", "--quiet", "--no-color"},
 		{"version", "--server", "--json", "--quiet"},
 		{"health", "--json", "--quiet"},
-		{"runs", "--json", "--quiet"},
-		{"status", "run-1", "--json", "--quiet"},
-		{"conversations", "list", "--json", "--quiet"},
+		{"run", "list", "--json", "--quiet"},
+		{"run", "status", "run-1", "--json", "--quiet"},
+		{"conversation", "list", "--json", "--quiet"},
 		{"conversation", "view", "sess-1", "--json", "--quiet"},
 		{"conversation", "turn", "sess-1", "1", "--json", "--quiet"},
 	} {

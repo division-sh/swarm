@@ -35,7 +35,7 @@ func TestAgentsListUsesV1RPCWithFilters(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agents", "list", "--flow", "flows/research", "--role", "researcher"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "list", "--flow", "flows/research", "--role", "researcher"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -68,7 +68,7 @@ func TestAgentsListEmptyResult(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agents", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "list"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -150,8 +150,8 @@ func TestAgentReadCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "agents list extra arg", args: []string{"agents", "list", "extra"}, wantStderr: "unknown command"},
-		{name: "agents list unsupported flag", args: []string{"agents", "list", "--unknown"}, wantStderr: "unknown flag"},
+		{name: "agents list extra arg", args: []string{"agent", "list", "extra"}, wantStderr: "unknown command"},
+		{name: "agents list unsupported flag", args: []string{"agent", "list", "--unknown"}, wantStderr: "unknown flag"},
 		{name: "agent view missing id", args: []string{"agent", "view"}, wantStderr: "accepts 1 arg(s)"},
 		{name: "agent view blank id", args: []string{"agent", "view", "  "}, wantStderr: "agent id is required"},
 		{name: "agent view extra arg", args: []string{"agent", "view", "agent-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
@@ -184,7 +184,7 @@ func TestAgentReadCommandsFailClosedWithoutToken(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agents", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "list"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -206,7 +206,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 	}{
 		{
 			name: "list http auth failure",
-			args: []string{"agents", "list"},
+			args: []string{"agent", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
@@ -215,7 +215,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 		{
 			name: "list missing agents",
-			args: []string{"agents", "list"},
+			args: []string{"agent", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -226,7 +226,7 @@ func TestAgentReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 		},
 		{
 			name: "list malformed agent",
-			args: []string{"agents", "list"},
+			args: []string{"agent", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

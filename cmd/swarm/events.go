@@ -192,13 +192,15 @@ func newEventsCommand(opts rootCommandOptions) *cobra.Command {
 func newEventCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "event",
-		Short: "Publish, view, or replay a single event.",
+		Short: "Publish, list, follow, view, or replay events.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return cmd.Help()
 		},
 	}
 	cmd.AddCommand(
+		newEventsListCommand(opts),
+		newEventsFollowCommand(opts),
 		newEventViewCommand(opts),
 		newEventPublishCommand(opts),
 		newEventReplayCommand(opts),

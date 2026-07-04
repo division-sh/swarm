@@ -47,13 +47,13 @@ The tradeoff: a Swarm flow cannot be re-wired by an LLM at runtime. That rigidit
 swarm verify --contracts ./my-flow
 
 # start a run from a triggering event, stream its trace as it executes
-swarm run --contracts ./my-flow --event order.created --payload ./payload.json
+swarm run start --contracts ./my-flow --event order.created --payload ./payload.json
 
 # follow the full causal trace of any run, live or historical
-swarm trace <run-id> -f
+swarm run trace <run-id> -f
 
 # re-execute any run from any point in its history
-swarm fork <source-run-id> --at-event <event-id>
+swarm run fork <source-run-id> --at-event <event-id>
 ```
 
 ---
@@ -219,7 +219,7 @@ relative paths for workspace files, and absolute paths follow the host
 deployment namespace and OS permissions. It is not command-limited or
 Docker-equivalent isolation, and Claude/provider host execution remains
 unsupported.
-Plain local `swarm run --contracts ...` uses SQLite at `.swarm/stores/dev.db` unless
+Plain local `swarm run start --contracts ...` uses SQLite at `.swarm/stores/dev.db` unless
 you explicitly opt into Postgres with `store.backend: postgres` in runtime
 config. Build or pull the configured workspace image (`swarm-workspace:latest`
 by default), or configure a compatible image before commands that start the
