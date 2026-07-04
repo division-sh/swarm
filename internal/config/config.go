@@ -33,13 +33,16 @@ type RuntimeConfig struct {
 }
 
 type DatabaseConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	Name     string `yaml:"name"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	SSLMode  string `yaml:"sslmode"`
-	PoolSize int    `yaml:"pool_size"`
+	Host              string `yaml:"host"`
+	Port              int    `yaml:"port"`
+	Name              string `yaml:"name"`
+	User              string `yaml:"user"`
+	Password          string `yaml:"password"`
+	PasswordSecretKey string `yaml:"password_secret_key"`
+	PasswordFile      string `yaml:"password_file"`
+	PasswordEnv       string `yaml:"password_env"`
+	SSLMode           string `yaml:"sslmode"`
+	PoolSize          int    `yaml:"pool_size"`
 }
 
 type StoreConfig struct {
@@ -184,6 +187,9 @@ func (c *Config) validate(backendOverride string) error {
 	if err := c.ValidateOperationalControls(); err != nil {
 		return err
 	}
+	if err := c.validateDatabasePasswordSource(); err != nil {
+		return err
+	}
 	if err := c.validateRetiredLLMModelConfig(); err != nil {
 		return err
 	}
@@ -236,6 +242,57 @@ func (c *Config) validate(backendOverride string) error {
 		return errors.New("llm.session.rotate_on_parse_failures must be > 0")
 	}
 	return nil
+}
+
+func (c *Config) validateDatabasePasswordSource() error {
+	if c == nil {
+		return nil
+	}
+	if err := ValidateDatabasePasswordDeclaration(c.Database); err != nil {
+		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(c.Store.Backend), "postgres") {
+		return ValidatePostgresDatabasePasswordSource(c.Database)
+	}
+	return nil
+}
+
+func ValidateDatabasePasswordDeclaration(db DatabaseConfig) error {
+	if strings.TrimSpace(db.Password) != "" {
+		return errors.New("database.password is unsupported plaintext secret material; declare exactly one of database.password_secret_key, database.password_file, or database.password_env. SWARM_DB_PASSWORD and PGPASSWORD are not read unless explicitly named by database.password_env")
+	}
+	if count := DatabasePasswordSourceCount(db); count > 1 {
+		return fmt.Errorf("ambiguous database password source: configure exactly one of database.password_secret_key, database.password_file, or database.password_env, got %s", strings.Join(DatabasePasswordSourceFields(db), ", "))
+	}
+	return nil
+}
+
+func ValidatePostgresDatabasePasswordSource(db DatabaseConfig) error {
+	if err := ValidateDatabasePasswordDeclaration(db); err != nil {
+		return err
+	}
+	if DatabasePasswordSourceCount(db) == 0 {
+		return errors.New("postgres store requires exactly one database password source: database.password_secret_key, database.password_file, or database.password_env. database.password is unsupported; SWARM_DB_PASSWORD and PGPASSWORD are not read unless explicitly named by database.password_env")
+	}
+	return nil
+}
+
+func DatabasePasswordSourceCount(db DatabaseConfig) int {
+	return len(DatabasePasswordSourceFields(db))
+}
+
+func DatabasePasswordSourceFields(db DatabaseConfig) []string {
+	fields := make([]string, 0, 3)
+	if strings.TrimSpace(db.PasswordSecretKey) != "" {
+		fields = append(fields, "database.password_secret_key")
+	}
+	if strings.TrimSpace(db.PasswordFile) != "" {
+		fields = append(fields, "database.password_file")
+	}
+	if strings.TrimSpace(db.PasswordEnv) != "" {
+		fields = append(fields, "database.password_env")
+	}
+	return fields
 }
 
 func (c *Config) validateRetiredLLMModelConfig() error {

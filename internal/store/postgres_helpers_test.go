@@ -63,11 +63,10 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 		Port:     port,
 		Name:     dbName,
 		User:     "postgres",
-		Password: "postgres",
 		SSLMode:  "disable",
 		PoolSize: 5,
 	}
-	gotDSN := DSNFromConfig(cfg)
+	gotDSN := DSNFromConfig(cfg, "postgres")
 	if !strings.Contains(gotDSN, "host=127.0.0.1") || !strings.Contains(gotDSN, "dbname="+dbName) {
 		t.Fatalf("unexpected dsn: %q", gotDSN)
 	}
