@@ -4725,7 +4725,7 @@ func startServedEventPublishFollowUpRuntime(t *testing.T, opts serveOptions) (st
 			if code != 0 {
 				t.Errorf("runServeRuntime exit code = %d\noutput:\n%s", code, out.String())
 			}
-		case <-time.After(5 * time.Second):
+		case <-time.After(servedProofPollDeadline):
 			t.Errorf("timed out stopping runServeRuntime\noutput:\n%s", out.String())
 		}
 		stopped = true
@@ -4880,6 +4880,10 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 
 const (
 	servedEventPublishLifecycleProbeWaitTimeout = 45 * time.Second
+	// servedProofPollDeadline bounds poll-until-state helpers in served-path
+	// proofs. Success exits early; the margin absorbs full-suite load where the
+	// old 5s deadline flaked (Postgres-served runs green in ~4s isolated).
+	servedProofPollDeadline = 30 * time.Second
 )
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
@@ -5301,7 +5305,7 @@ func requestServedJSONRPC(t *testing.T, endpoint, method string, params map[stri
 func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 	t.Helper()
 	var last string
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var result struct {
 			Run struct {
@@ -5329,7 +5333,7 @@ func requireServedRunDiagnoseOperationalState(t *testing.T, endpoint, runID, wan
 		} `json:"run"`
 	}
 	var last servedRunDiagnose
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var result servedRunDiagnose
 		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
@@ -5346,7 +5350,7 @@ func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) 
 	t.Helper()
 	var lastStdout, lastStderr string
 	var lastCode int
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		lastStdout, lastStderr, lastCode = runServedCLICommand(t, endpoint, []string{"run", "status", runID, "--no-diagnose"})
 		if lastCode == 0 && strings.Contains(lastStdout, want) {
@@ -5372,7 +5376,7 @@ func requireServedEventReadback(t *testing.T, endpoint, eventID, runID, entityID
 	}
 
 	var last servedEventReadback
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var event servedEventReadback
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
@@ -5404,7 +5408,7 @@ func requireServedTraceReadback(t *testing.T, endpoint, runID, eventID, eventNam
 	}
 
 	var last servedTraceReadback
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var trace servedTraceReadback
 		requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{
@@ -5755,7 +5759,7 @@ func servedEventPublishAPIIdempotencyCount(t *testing.T, db *sql.DB, backend, me
 
 func waitServedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, status string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
 		got = servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status)
@@ -5863,7 +5867,7 @@ func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, bac
 
 func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
 		got = servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome)
@@ -5942,7 +5946,7 @@ func waitServedEventPublishEventID(t *testing.T, db *sql.DB, backend, runID, eve
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var eventID string
 		err := db.QueryRowContext(context.Background(), query, args...).Scan(&eventID)
