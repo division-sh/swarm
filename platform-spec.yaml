@@ -3088,21 +3088,37 @@ engine:
       - SWARM_DB_PORT
       - SWARM_DB_NAME
       - SWARM_DB_USER
-      - SWARM_DB_PASSWORD
       - SWARM_DB_SSLMODE
       - SWARM_DB_POOL_SIZE
       - PGHOST
       - PGPORT
       - PGDATABASE
       - PGUSER
-      - PGPASSWORD
       config_prefix: database.*
       rule: >
-        Existing SWARM_DB_* / PG* variables and database.* config keys are Postgres connection details after the canonical
+        Existing non-secret SWARM_DB_* / PG* variables and database.* config keys are Postgres connection details after the canonical
         selector resolves to postgres. They are not generic backend selectors and must not imply backend selection by
         presence alone. Non-secret connection details are owned by typed runtime config, with environment variables retained
-        only as deprecated transition fallback or deliberate external Postgres compatibility. SWARM_DB_PASSWORD and PGPASSWORD
-        are STORE-class secret material under #1600 and are not closed by the non-secret source-order child.
+        only as deprecated transition fallback or deliberate external Postgres compatibility.
+    postgres_password_source_authority:
+      owner: typed database password resolver consumed before Postgres DSN construction
+      config_fields:
+      - database.password_secret_key
+      - database.password_file
+      - database.password_env
+      invalid_fields:
+      - database.password
+      invalid_implicit_env:
+      - SWARM_DB_PASSWORD
+      - PGPASSWORD
+      rule: >
+        Postgres DB password material is STORE-class secret material under #1600/#1645. For store.backend=postgres,
+        runtime startup MUST declare exactly one explicit password source: database.password_secret_key for the local
+        Swarm credential file / swarm secrets owner, database.password_file for a mounted secret file, or database.password_env
+        for a deliberately named orchestrator/CI env variable. The runtime MUST NOT read SWARM_DB_PASSWORD, PGPASSWORD, or
+        a literal "postgres" password as hardcoded fallback. Operators may use legacy env names only by explicitly naming
+        them through database.password_env. Plaintext database.password is unsupported and MUST fail closed with migration
+        guidance. DSN construction MUST receive already-resolved password material and MUST NOT resolve password sources.
     runtime_backend_rule:
     - Unsupported backend ids fail closed with supported backend guidance.
     - >

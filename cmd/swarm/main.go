@@ -2409,7 +2409,6 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			Port:     envInt("SWARM_DB_PORT", envInt("PGPORT", 5432)),
 			Name:     envOrDefault("SWARM_DB_NAME", envOrDefault("PGDATABASE", "swarm")),
 			User:     envOrDefault("SWARM_DB_USER", envOrDefault("PGUSER", "postgres")),
-			Password: envOrDefault("SWARM_DB_PASSWORD", envOrDefault("PGPASSWORD", "postgres")),
 			SSLMode:  envOrDefault("SWARM_DB_SSLMODE", "disable"),
 			PoolSize: envInt("SWARM_DB_POOL_SIZE", 5),
 		},
@@ -2541,7 +2540,10 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 	}
 	switch selection.Backend {
 	case storebackend.BackendPostgres:
-		dsn := store.DSNFromConfig(cfg.Database)
+		dsn, err := postgresDSNFromConfig(ctx, cfg.Database)
+		if err != nil {
+			return storeBundle{}, err
+		}
 		pg, err := store.NewPostgresStore(dsn)
 		if err != nil {
 			return storeBundle{}, err
@@ -2601,6 +2603,22 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
+}
+
+func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (string, error) {
+	var credentialStore runtimecredentials.Store
+	if strings.TrimSpace(cfg.PasswordSecretKey) != "" {
+		fileStore, err := credentialFileStore()
+		if err != nil {
+			return "", err
+		}
+		credentialStore = fileStore
+	}
+	password, err := store.ResolveDatabasePassword(ctx, cfg, credentialStore)
+	if err != nil {
+		return "", err
+	}
+	return store.DSNFromConfig(cfg, password), nil
 }
 
 func enforceServeBundleMatchAdmission(ctx context.Context, availability selectedRunBundleAvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {

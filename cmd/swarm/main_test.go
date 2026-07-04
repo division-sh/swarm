@@ -8673,6 +8673,35 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 			t.Setenv(item.env, value)
 		}
 	}
+	exeDir := t.TempDir()
+	originalExecutablePath := runtimeConfigExecutablePath
+	runtimeConfigExecutablePath = func() (string, error) {
+		return filepath.Join(exeDir, "swarm"), nil
+	}
+	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
+	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), fmt.Sprintf(`store:
+  backend: postgres
+database:
+  host: %s
+  port: %s
+  name: %s
+  user: %s
+  password_env: PGPASSWORD
+  sslmode: %s
+  pool_size: 5
+llm:
+  backend: claude_cli
+  session:
+    lock_ttl: 10s
+    rotate_after_turns: 40
+    rotate_on_parse_failures: 3
+  claude_cli:
+    command: true
+    timeout: 2s
+    output_format: json
+    retries: 1
+    no_session_persistence: false
+`, values["host"], values["port"], values["dbname"], values["user"], values["sslmode"]))
 }
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {

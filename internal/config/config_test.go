@@ -19,7 +19,6 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  port: 5432",
 		"  name: swarm_test",
 		"  user: postgres",
-		"  password: postgres",
 		"  sslmode: disable",
 		"  pool_size: 5",
 		"workspace:",
@@ -87,6 +86,60 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	}
 	if ext.Sharding.Stages["default"].TargetItemsPerShard != 10 {
 		t.Fatalf("expected default sharding.stages.default.target_items_per_shard=10, got %d", ext.Sharding.Stages["default"].TargetItemsPerShard)
+	}
+}
+
+func TestValidate_RejectsPlaintextDatabasePassword(t *testing.T) {
+	c := validDatabasePasswordConfig()
+	c.Database.Password = "postgres"
+
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "database.password is unsupported plaintext secret material") {
+		t.Fatalf("Validate error = %v, want plaintext database password rejection", err)
+	}
+}
+
+func TestValidate_RejectsMultipleDatabasePasswordSources(t *testing.T) {
+	c := validDatabasePasswordConfig()
+	c.Database.PasswordSecretKey = "postgres_password"
+	c.Database.PasswordFile = "/run/secrets/db-password"
+
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "ambiguous database password source") {
+		t.Fatalf("Validate error = %v, want ambiguous database password source rejection", err)
+	}
+}
+
+func TestValidate_PostgresRequiresDatabasePasswordSource(t *testing.T) {
+	c := validDatabasePasswordConfig()
+	c.Store.Backend = "postgres"
+
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "postgres store requires exactly one database password source") {
+		t.Fatalf("Validate error = %v, want missing postgres password source rejection", err)
+	}
+
+	c.Database.PasswordFile = "/run/secrets/db-password"
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate with password_file: %v", err)
+	}
+}
+
+func validDatabasePasswordConfig() *Config {
+	return &Config{
+		LLM: LLMConfig{
+			Backend: "claude_cli",
+			Session: LLMSessionConfig{
+				LockTTL:               time.Second,
+				RotateAfterTurns:      1,
+				RotateOnParseFailures: 1,
+			},
+			ClaudeCLI: ClaudeCLIConfig{
+				Command:              "true",
+				OutputFormat:         "json",
+				NoSessionPersistence: false,
+			},
+		},
 	}
 }
 

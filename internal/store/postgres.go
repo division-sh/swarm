@@ -29,7 +29,7 @@ type PostgresStore struct {
 
 type EventPayloadValidator func(eventType string, payload []byte) error
 
-func DSNFromConfig(cfg config.DatabaseConfig) string {
+func DSNFromConfig(cfg config.DatabaseConfig, password string) string {
 	sslMode := cfg.SSLMode
 	if sslMode == "" {
 		sslMode = "disable"
@@ -43,8 +43,8 @@ func DSNFromConfig(cfg config.DatabaseConfig) string {
 	if cfg.User != "" {
 		parts = append(parts, fmt.Sprintf("user=%s", cfg.User))
 	}
-	if cfg.Password != "" {
-		parts = append(parts, fmt.Sprintf("password=%s", cfg.Password))
+	if password != "" {
+		parts = append(parts, fmt.Sprintf("password=%s", password))
 	}
 	return strings.Join(parts, " ")
 }

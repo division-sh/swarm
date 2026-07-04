@@ -265,6 +265,55 @@ func TestExplicitRuntimeConfigDatabaseBeatsDatabaseEnv(t *testing.T) {
 	}
 }
 
+func TestPostgresDSNFromConfigRejectsImplicitPasswordEnv(t *testing.T) {
+	t.Setenv("SWARM_DB_PASSWORD", "env-password")
+	t.Setenv("PGPASSWORD", "pg-env-password")
+
+	_, err := postgresDSNFromConfig(context.Background(), config.DatabaseConfig{
+		Host:    "127.0.0.1",
+		Port:    5432,
+		Name:    "swarm",
+		User:    "postgres",
+		SSLMode: "disable",
+	})
+	if err == nil || !strings.Contains(err.Error(), "postgres store requires exactly one database password source") {
+		t.Fatalf("postgresDSNFromConfig error = %v, want implicit env fail-closed guidance", err)
+	}
+}
+
+func TestPostgresDSNFromConfigSecretKeyUsesFileStoreNotEnvOverlay(t *testing.T) {
+	ctx := context.Background()
+	credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialsPath)
+	t.Setenv("POSTGRES_PASSWORD", "env-shadow")
+
+	fileStore, err := credentialFileStore()
+	if err != nil {
+		t.Fatalf("credentialFileStore: %v", err)
+	}
+	if err := fileStore.Set(ctx, "postgres_password", "file-secret"); err != nil {
+		t.Fatalf("seed credential file: %v", err)
+	}
+
+	dsn, err := postgresDSNFromConfig(ctx, config.DatabaseConfig{
+		Host:              "127.0.0.1",
+		Port:              5432,
+		Name:              "swarm",
+		User:              "postgres",
+		PasswordSecretKey: "postgres_password",
+		SSLMode:           "disable",
+	})
+	if err != nil {
+		t.Fatalf("postgresDSNFromConfig: %v", err)
+	}
+	if !strings.Contains(dsn, "password=file-secret") {
+		t.Fatalf("dsn = %q, want file-backed password", dsn)
+	}
+	if strings.Contains(dsn, "env-shadow") {
+		t.Fatalf("dsn = %q, password_secret_key must not use env overlay", dsn)
+	}
+}
+
 func TestRuntimeConfigExampleDoesNotPromoteDatabasePassword(t *testing.T) {
 	runtimeConfig, err := os.ReadFile(filepath.Join(repoRoot(), "runtime-config.example.yaml"))
 	if err != nil {
@@ -513,6 +562,12 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 			"  backend: "+backend,
 			"  sqlite:",
 			"    path: "+sqlitePath,
+		)
+	}
+	if strings.TrimSpace(backend) == storebackend.BackendPostgres.String() {
+		lines = append(lines,
+			"database:",
+			"  password_env: PGPASSWORD",
 		)
 	}
 	lines = append(lines,

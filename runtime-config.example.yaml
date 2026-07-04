@@ -13,6 +13,18 @@ store:
   sqlite:
     path: .swarm/stores/dev.db
 
+# For an explicit Postgres store, declare exactly one DB password source.
+# Prefer `swarm secrets set postgres_password` or a mounted secret file.
+# Example:
+# store:
+#   backend: postgres
+# database:
+#   host: 127.0.0.1
+#   port: 5432
+#   name: swarm
+#   user: postgres
+#   password_secret_key: postgres_password
+
 workspace:
   backend: docker
   # Omit data_source for the default project data directory. Swarm can create

@@ -500,6 +500,8 @@ func TestDoctorTargetConsumesRuntimeConfigPostgresStore(t *testing.T) {
 	configPath := writeDoctorTargetRuntimeConfig(t, `
 store:
   backend: postgres
+database:
+  password_file: /run/secrets/db-password
 `)
 
 	var stdout, stderr bytes.Buffer
