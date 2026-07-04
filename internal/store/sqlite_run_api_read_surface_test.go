@@ -193,6 +193,119 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	}
 }
 
+func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	sqliteStore.nowFn = func() time.Time { return now }
+
+	blockedRunID := uuid.NewString()
+	readyRunID := uuid.NewString()
+	activeEventID := uuid.NewString()
+	unsettledEventID := uuid.NewString()
+	runtimeLogEventID := uuid.NewString()
+	readyEventID := uuid.NewString()
+
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES
+			(?, 'running', ?),
+			(?, 'running', ?)
+	`, blockedRunID, now.Add(-time.Minute), readyRunID, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed sqlite runs: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES
+			(?, ?, 'quiescence.active_delivery', 'global', '{}', 'test', 'platform', ?),
+			(?, ?, 'quiescence.missing_pipeline_receipt', 'global', '{}', 'test', 'platform', ?),
+			(?, ?, ?, 'global', '{}', 'test', 'platform', ?),
+			(?, ?, 'quiescence.ready', 'global', '{}', 'test', 'platform', ?)
+	`, blockedRunID, activeEventID, now.Add(-50*time.Second),
+		blockedRunID, unsettledEventID, now.Add(-40*time.Second),
+		blockedRunID, runtimeLogEventID, runtimeLogEventName, now.Add(-30*time.Second),
+		readyRunID, readyEventID, now.Add(-20*time.Second)); err != nil {
+		t.Fatalf("seed sqlite events: %v", err)
+	}
+	if err := sqliteStore.UpsertPipelineReceipt(ctx, activeEventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
+	}
+	if err := sqliteStore.UpsertPipelineReceipt(ctx, readyEventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES
+			(?, ?, ?, 'agent', 'agent-active', 'pending', 0, 'matched_agent_subscription', ?),
+			(?, ?, ?, ?, ?, 'pending', 0, 'replay_scope_marker', ?),
+			(?, ?, ?, 'agent', 'agent-done', 'delivered', 0, 'handled', ?)
+	`, uuid.NewString(), blockedRunID, activeEventID, now,
+		uuid.NewString(), blockedRunID, activeEventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, now,
+		uuid.NewString(), readyRunID, readyEventID, now); err != nil {
+		t.Fatalf("seed sqlite deliveries: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_id, run_id, timer_name, fire_event, fire_payload,
+			fire_at, owner_agent, task_type, status, created_at
+		)
+		VALUES
+			(?, ?, 'due', 'quiescence.timeout', '{}', ?, 'timer-agent', 'timer', 'active', ?),
+			(?, ?, 'settled', 'quiescence.timeout', '{}', ?, 'timer-agent', 'timer', 'fired', ?)
+	`, uuid.NewString(), blockedRunID, now.Add(-time.Minute), now,
+		uuid.NewString(), readyRunID, now.Add(-time.Minute), now); err != nil {
+		t.Fatalf("seed sqlite timers: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agents (
+			agent_id, role, model, llm_backend, conversation_mode,
+			config, subscriptions, emit_events, tools, permissions, runtime_descriptor, status, created_at
+		)
+		VALUES (
+			'quiescence-agent', 'worker', 'regular', 'mock', 'session',
+			'{}', '[]', '[]', '[]', '{}', '{}', 'active', ?
+		)
+	`, now); err != nil {
+		t.Fatalf("seed sqlite agent: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state,
+			lease_holder, lease_expires_at, status, created_at, updated_at
+		)
+		VALUES
+			(?, ?, 'quiescence-agent', 'global', 'global', 'session', '{}',
+				'worker-1', ?, 'active', ?, ?),
+			(?, ?, 'quiescence-agent', 'global-ready', 'global', 'session', '{}',
+				'worker-1', ?, 'active', ?, ?)
+	`, uuid.NewString(), blockedRunID, now.Add(time.Minute), now, now,
+		uuid.NewString(), readyRunID, now.Add(-time.Minute), now, now); err != nil {
+		t.Fatalf("seed sqlite sessions: %v", err)
+	}
+
+	blocked, err := sqliteStore.LoadRunDebugReport(ctx, blockedRunID, RunDebugQueryOptions{})
+	if err != nil {
+		t.Fatalf("LoadRunDebugReport blocked: %v", err)
+	}
+	assertRunTestQuiescence(t, blocked.TestQuiescence, RunTestQuiescence{
+		Ready:                   false,
+		ActiveDeliveries:        1,
+		UnsettledPipelineEvents: 1,
+		DueTimers:               1,
+		ActiveSessionLeases:     1,
+	})
+
+	ready, err := sqliteStore.LoadRunDebugReport(ctx, readyRunID, RunDebugQueryOptions{})
+	if err != nil {
+		t.Fatalf("LoadRunDebugReport ready: %v", err)
+	}
+	assertRunTestQuiescence(t, ready.TestQuiescence, RunTestQuiescence{Ready: true})
+}
+
 func TestSQLiteRunAPIReadSurface_LoadRunHeaderNotFound(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	_, err := sqliteStore.LoadRunHeader(context.Background(), uuid.NewString())

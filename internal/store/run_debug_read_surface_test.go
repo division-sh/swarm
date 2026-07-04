@@ -33,6 +33,13 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, age
 	}
 }
 
+func assertRunTestQuiescence(t *testing.T, got RunTestQuiescence, want RunTestQuiescence) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("TestQuiescence = %#v, want %#v", got, want)
+	}
+}
+
 func TestRunDebugReadSurface_ListRunDebugRuns_UsesCanonicalRunScope(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
@@ -286,6 +293,107 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	if report.FailedDeliveries[0].DeliveryID == successDeliveryID {
 		t.Fatalf("successful delivered/node_processed delivery appeared in FailedDeliveries: %#v", report.FailedDeliveries)
 	}
+}
+
+func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	blockedRunID := uuid.NewString()
+	readyRunID := uuid.NewString()
+	activeEventID := uuid.NewString()
+	unsettledEventID := uuid.NewString()
+	runtimeLogEventID := uuid.NewString()
+	readyEventID := uuid.NewString()
+	now := time.Now().UTC()
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES
+			($1::uuid, 'running', $3),
+			($2::uuid, 'running', $3)
+	`, blockedRunID, readyRunID, now.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed runs: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'quiescence.active_delivery', 'global', '{}'::jsonb, 'test', 'platform', $6),
+			($1::uuid, $3::uuid, 'quiescence.missing_pipeline_receipt', 'global', '{}'::jsonb, 'test', 'platform', $7),
+			($1::uuid, $4::uuid, '`+runtimeLogEventName+`', 'global', '{}'::jsonb, 'test', 'platform', $8),
+			($9::uuid, $5::uuid, 'quiescence.ready', 'global', '{}'::jsonb, 'test', 'platform', $10)
+	`, blockedRunID, activeEventID, unsettledEventID, runtimeLogEventID, readyEventID,
+		now.Add(-50*time.Second), now.Add(-40*time.Second), now.Add(-30*time.Second), readyRunID, now.Add(-20*time.Second)); err != nil {
+		t.Fatalf("seed events: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
+	}
+	if err := pg.UpsertPipelineReceipt(ctx, readyEventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, created_at
+		)
+		VALUES
+			($1::uuid, $2::uuid, 'agent', 'agent-active', 'pending', 0, 'matched_agent_subscription', now()),
+			($1::uuid, $2::uuid, $3, $4, 'pending', 0, 'replay_scope_marker', now()),
+			($5::uuid, $6::uuid, 'agent', 'agent-done', 'delivered', 0, 'handled', now())
+	`, blockedRunID, activeEventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID, readyRunID, readyEventID); err != nil {
+		t.Fatalf("seed deliveries: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO timers (
+			timer_id, run_id, timer_name, fire_event, fire_payload,
+			fire_at, owner_agent, task_type, status, created_at
+		)
+		VALUES
+			(gen_random_uuid(), $1::uuid, 'due', 'quiescence.timeout', '{}'::jsonb, now() - interval '1 minute', 'timer-agent', 'timer', 'active', now()),
+			(gen_random_uuid(), $2::uuid, 'settled', 'quiescence.timeout', '{}'::jsonb, now() - interval '1 minute', 'timer-agent', 'timer', 'fired', now())
+	`, blockedRunID, readyRunID); err != nil {
+		t.Fatalf("seed timers: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agents (agent_id, role, model, llm_backend, conversation_mode, created_at)
+		VALUES ('quiescence-agent', 'worker', 'standard', 'mock', 'session', now())
+	`); err != nil {
+		t.Fatalf("seed agent: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, scope_key, scope, runtime_mode, runtime_state,
+			lease_holder, lease_expires_at, status, created_at, updated_at
+		)
+		VALUES
+			(gen_random_uuid(), $1::uuid, 'quiescence-agent', 'global', 'global', 'session', '{}'::jsonb,
+				'worker-1', now() + interval '1 minute', 'active', now(), now()),
+			(gen_random_uuid(), $2::uuid, 'quiescence-agent', 'global-ready', 'global', 'session', '{}'::jsonb,
+				'worker-1', now() - interval '1 minute', 'active', now(), now())
+	`, blockedRunID, readyRunID); err != nil {
+		t.Fatalf("seed sessions: %v", err)
+	}
+
+	blocked, err := pg.LoadRunDebugReport(ctx, blockedRunID, RunDebugQueryOptions{})
+	if err != nil {
+		t.Fatalf("LoadRunDebugReport blocked: %v", err)
+	}
+	assertRunTestQuiescence(t, blocked.TestQuiescence, RunTestQuiescence{
+		Ready:                   false,
+		ActiveDeliveries:        1,
+		UnsettledPipelineEvents: 1,
+		DueTimers:               1,
+		ActiveSessionLeases:     1,
+	})
+
+	ready, err := pg.LoadRunDebugReport(ctx, readyRunID, RunDebugQueryOptions{})
+	if err != nil {
+		t.Fatalf("LoadRunDebugReport ready: %v", err)
+	}
+	assertRunTestQuiescence(t, ready.TestQuiescence, RunTestQuiescence{Ready: true})
 }
 
 func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(t *testing.T) {
