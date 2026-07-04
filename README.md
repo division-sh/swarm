@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache_2.0-blue.svg" alt="License: Apache 2.0"></a>
-  <a href="platform-spec.yaml"><img src="https://img.shields.io/badge/platform--spec-v1.6.0-15803D.svg" alt="Platform spec v1.6.0"></a>
+  <a href="platform-spec.yaml"><img src="https://img.shields.io/badge/platform--spec-v0.7.0-15803D.svg" alt="Platform spec v0.7.0"></a>
   <a href="https://goreportcard.com/report/github.com/division-sh/swarm"><img src="https://goreportcard.com/badge/github.com/division-sh/swarm" alt="Go Report Card"></a>
   <a href="https://github.com/division-sh/swarm/discussions"><img src="https://img.shields.io/github/discussions/division-sh/swarm" alt="GitHub Discussions"></a>
   <a href="https://docs.division.sh"><img src="https://img.shields.io/badge/docs-docs.division.sh-15803D.svg" alt="Docs"></a>
@@ -182,7 +182,7 @@ The static analyzer's refusal to boot on a half-finished contract is a feature i
 
 **Pre-1.0. Breaking changes expected.**
 
-- Platform specification: **v1.6.0**, complete. See [`platform-spec.yaml`](platform-spec.yaml).
+- Platform specification: **v0.7.0**, complete. See [`platform-spec.yaml`](platform-spec.yaml).
 - Engine: Go. Handler-first execution for the proven-safe subset; full handler-first execution in progress.
 - Conformance suite: **12 tiers, 200+ distinct test contract bundles** spanning primitives, accumulation, atomic event-loop semantics, composition, boot verification, runtime fork, and policy patterns. The suite runs against an internal scripted harness, so it doesn't cost LLM tokens to exercise the engine. A user-selectable scripted backend is on the roadmap.
 - Used internally to power autonomous multi-agent workflows. External use at your own risk.

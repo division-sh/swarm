@@ -27,7 +27,7 @@ func writeCreateEntityExactOnceFixture(t *testing.T) string {
 	writeFixtureFile(t, root, "package.yaml", `
 name: exact-once-catalog
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation

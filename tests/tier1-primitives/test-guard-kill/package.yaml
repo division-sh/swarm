@@ -1,5 +1,5 @@
 name: test-guard-kill
 version: 1.0.0
 description: Guard fails with on_fail kill — entity moves to killed terminal state.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

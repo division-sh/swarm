@@ -1,5 +1,5 @@
 name: test-data-accumulation-literal
 version: 1.0.0
 description: data_accumulation with value literal writes fixed value to entity field.
-platform_version: '>=1.1.0'
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

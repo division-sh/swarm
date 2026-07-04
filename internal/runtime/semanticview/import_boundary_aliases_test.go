@@ -143,7 +143,7 @@ func writeImportBoundaryAliasFixture(t *testing.T, opts importBoundaryAliasFixtu
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: import-boundary-alias
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 `+flows)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-boundary-alias\n")

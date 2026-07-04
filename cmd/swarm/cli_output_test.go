@@ -683,7 +683,7 @@ func outputModeVerifyFixture(t *testing.T) string {
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: output-mode-verify
 version: "1.0.0"
-platform: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child

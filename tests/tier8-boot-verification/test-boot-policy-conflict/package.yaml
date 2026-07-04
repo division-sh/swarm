@@ -3,7 +3,7 @@ version: 1.0.0
 description: >
   Boot verification: same policy key defined in root policy.yaml and
   flow policy.yaml with different values. Platform must warn POLICY-CONFLICT.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: sub-flow
     flow: sub-flow

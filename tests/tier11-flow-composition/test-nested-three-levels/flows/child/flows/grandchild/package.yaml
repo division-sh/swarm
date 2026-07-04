@@ -1,5 +1,5 @@
 name: grandchild
 version: 1.0.0
 description: Deepest level grandchild flow.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

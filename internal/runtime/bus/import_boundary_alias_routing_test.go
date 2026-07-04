@@ -233,7 +233,7 @@ func writeBusImportBoundaryAliasFixtureWithParentSubscription(t *testing.T, pare
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: bus-import-boundary-alias
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker
@@ -298,7 +298,7 @@ func writeBusImportBoundaryAliasTemplateFixture(t *testing.T) string {
 	writeBusImportBoundaryFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: bus-import-boundary-alias
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker

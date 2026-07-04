@@ -808,6 +808,19 @@ func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
 		t.Fatalf("upserts after invalid registration = %d, want 0", len(catalog.upserts))
 	}
 
+	incompatible := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"incompatible","method":"bundle.register","params":{"content_yaml":%q}}`, testBundleRegistrationEnvelopeWithPlatformVersion(">=0.8.0")))
+	if incompatible.Error == nil || incompatible.Error.Code != codeInvalidParams {
+		t.Fatalf("bundle.register incompatible platform_version error = %#v, want invalid params", incompatible.Error)
+	}
+	incompatibleData := asMap(t, incompatible.Error.Data)
+	incompatibleDetails := asMap(t, incompatibleData["details"])
+	if incompatibleDetails["reason"] != "bundle registration envelope declares incompatible platform_version" {
+		t.Fatalf("bundle.register incompatible error data = %#v", incompatibleData)
+	}
+	if !strings.Contains(fmt.Sprint(incompatibleDetails["error"]), `platform_version range ">=0.8.0" does not include running platform "0.7.0"`) {
+		t.Fatalf("bundle.register incompatible error data = %#v, want compatibility detail", incompatibleData)
+	}
+
 	catalog.conflict = true
 	conflict := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"conflict","method":"bundle.register","params":{"content_yaml":%q}}`, testBundleRegistrationEnvelope()))
 	if conflict.Error == nil {
@@ -858,12 +871,17 @@ files:
 }
 
 func testBundleRegistrationEnvelope() string {
+	return testBundleRegistrationEnvelopeWithPlatformVersion(">=0.7.0 <0.8.0")
+}
+
+func testBundleRegistrationEnvelopeWithPlatformVersion(platformVersion string) string {
 	return `api_version: swarm.bundle.register.v1
 files:
   - path: package.yaml
     text: |
       name: registered
       version: "1.0.0"
+      platform_version: "` + platformVersion + `"
       flows: []
   - path: agents.yaml
     text: |
@@ -884,6 +902,7 @@ files:
     text: |
       name: registered-data
       version: "1.0.0"
+      platform_version: ">=0.7.0 <0.8.0"
       flows:
         - id: alpha
           flow: alpha
@@ -901,6 +920,7 @@ func writeBundleRegistrationLocalContractsFixture(t *testing.T, root string) {
 	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: registered-local-directory
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 packages:
   - path: packages/foo
 flows:
@@ -916,6 +936,7 @@ states:
 	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "flows", "alpha", "package.yaml"), `
 name: nested-flow-package
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: gamma
     flow: gamma
@@ -929,6 +950,7 @@ states:
 	writeBundleRegistrationLocalFixtureFile(t, filepath.Join(root, "packages", "foo", "package.yaml"), `
 name: child-package
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: beta
     flow: beta

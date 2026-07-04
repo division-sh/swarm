@@ -105,7 +105,7 @@ func writeDescribeDefaultedTemplatePolicyContracts(t testing.TB) string {
 	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
 name: defaulted-template-policy
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -146,7 +146,7 @@ func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {
 	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
 name: root-primary-entity
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")

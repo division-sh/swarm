@@ -219,7 +219,7 @@ func loadFlowDataToolSourceWithAccess(t *testing.T, access []string) (semanticvi
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: flow-data-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: support
     flow: support

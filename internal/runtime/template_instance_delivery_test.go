@@ -823,7 +823,7 @@ func templateInstanceConnectLifecycleRollbackFixtureFiles() map[string]string {
 	return map[string]string{
 		"package.yaml": `name: test
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: producer
     flow: producer

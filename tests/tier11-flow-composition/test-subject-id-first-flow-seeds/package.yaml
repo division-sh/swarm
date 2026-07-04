@@ -3,7 +3,7 @@ version: 1.0.0
 description: >
   First flow in a chain uses create_entity. The child entity is correlated
   by explicit payload data while source_event_id preserves causal lineage.
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 - id: intake
   flow: intake

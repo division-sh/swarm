@@ -4,5 +4,5 @@ description: >
   Boot verification: agent declares emit_events that do not match
   the schema's required_agents emits. Should produce an
   EMIT-MISMATCH error.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

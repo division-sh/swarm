@@ -187,7 +187,7 @@ func writeEngineImportBoundaryWildcardFixture(t *testing.T, observeGrant string)
 	writeEngineFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: engine-import-boundary-wildcard
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker

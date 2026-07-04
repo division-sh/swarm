@@ -147,7 +147,7 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 		t.Fatalf("write payload: %v", err)
 	}
 	envelopePath := filepath.Join(t.TempDir(), "bundle-register.yaml")
-	if err := os.WriteFile(envelopePath, []byte("api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\n\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(envelopePath, []byte("api_version: swarm.bundle.register.v1\nfiles:\n  - path: package.yaml\n    text: \"name: demo\\nversion: \\\"1.0.0\\\"\\nplatform_version: \\\">=0.7.0 <0.8.0\\\"\\nflows: []\\n\"\n"), 0o600); err != nil {
 		t.Fatalf("write bundle register envelope: %v", err)
 	}
 	contractsDir := writeBundleRegisterContractsFixture(t)

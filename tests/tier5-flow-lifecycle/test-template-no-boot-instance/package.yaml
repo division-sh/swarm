@@ -3,7 +3,7 @@ version: 1.0.0
 description: >
   A flow declared as mode: template should NOT create an instance at boot.
   Zero instances until create_flow_instance is called.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker

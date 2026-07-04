@@ -336,7 +336,7 @@ func loadSessionScopeConformanceSource(t *testing.T, tc sessionScopeConformanceC
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: session-scope-conformance
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:`+flows+`
 `)
 	writeSessionScopeFixtureFile(t, filepath.Join(root, "entities.yaml"), `

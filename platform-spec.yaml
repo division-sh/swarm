@@ -1,6 +1,6 @@
 platform:
   name: swarm-orchestrator
-  version: 1.6.0
+  version: 0.7.0
 spec_authority:
   merge_bearing_owner: platform-spec.yaml
   rule: |
@@ -965,7 +965,7 @@ contract_formats:
 
       version: 1.0.0
 
-      platform_version: ">=1.1.0"
+      platform_version: ">=0.7.0 <0.8.0"
 
       flows: []'
     schema_yaml: "initial_state: waiting\nterminal_states: [done]\nstates: [waiting, done]\npins:\n  inputs:\n    events:\
@@ -6833,6 +6833,11 @@ versioning:
   description: Platform and products version independently.
   platform_versioning:
     scheme: semver (major.minor.patch)
+    author_facing_version: platform.version is the single Swarm compatibility version that products target in
+      package.yaml platform_version. Release binary tags MUST match the embedded platform.version; binary build
+      metadata and commits are diagnostic only.
+    active_train_policy: Semantic PRs land on the active platform train without repeatedly editing platform.version.
+      Release validation confirms the train version and tags the binary as v<platform.version>.
     major: Breaking changes to flow model, handler fields, boot validation, or contract formats
     minor: New execution primitives, new handler fields (backward compatible), new compliance checks
     patch: Bug fixes, documentation, clarifications
@@ -6842,11 +6847,14 @@ versioning:
     minor: New agents, new events, new tools, threshold adjustments
     patch: Prompt improvements, policy tuning, bug fixes
   compatibility:
-    declaration: Products declare platform_version in package.yaml using semver range (e.g., >=1.0.0)
-    enforcement: Platform checks product platform_version at boot. Rejects if platform version is outside range.
+    declaration: Products declare platform_version in package.yaml using Masterminds semver/v3 constraint syntax
+      (for example, ">=0.7.0 <0.8.0", ">=0.7.0", "^0.7.0", or exact "0.7.0").
+    enforcement: Platform checks every loaded product package.yaml platform_version at package admission. Rejects if
+      the embedded platform.version is missing, malformed, outside the declared range, or if the declared range is
+      missing/malformed.
     forward_compatible: Platform minor/patch releases do not break existing products
-    example: 'Product v3.0.0 declares platform_version: ">=1.0.0". Works on platform 1.0.0, 1.1.0, 1.9.0. May not work on
-      2.0.0.'
+    example: 'Product v3.0.0 declares platform_version: ">=0.7.0 <0.8.0". Works on platform 0.7.x after re-verification.
+      A later train such as 0.8.0 requires an updated compatibility range.'
 platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
     the normal runtime boot schema, including canonical entity_state. They do not include product-specific typed entity

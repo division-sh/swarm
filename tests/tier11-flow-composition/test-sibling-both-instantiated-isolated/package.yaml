@@ -4,7 +4,7 @@ description: >
   Both sibling flows are instantiated via a shared input event. Flow-a then
   advances further via an internal event. Flow-b must remain in its initial
   post-create state, proving flow-local state isolation.
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 - id: flow-a
   flow: flow-a

@@ -1,5 +1,5 @@
 name: test-timer-start-on
 version: 1.0.0
 description: Timer started by start_on event field, not at boot. Fires and emits timeout event.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

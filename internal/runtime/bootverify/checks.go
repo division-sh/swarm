@@ -7,7 +7,6 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -246,6 +245,7 @@ var bootCheckRegistry = []Check{
 	{ID: "workspace_class_exists", Severity: "error", Run: checkWorkspaceClassExists},
 	{ID: "credential_key_exists", Severity: "warning", Run: checkCredentialKeyExists},
 	{ID: "agent_permission_validation", Severity: "error", Run: checkAgentPermissionValidation},
+	{ID: "platform_version_compatibility", Severity: SeverityHardInvalidity, Run: checkPlatformVersionCompatibility},
 	{ID: "transition_reference_validation", Severity: "error", Run: checkTransitionReferenceValidation},
 	{ID: "condition_expression_validation", Severity: "error", Run: checkConditionExpressionValidation},
 	{ID: "data_accumulation_expression_validation", Severity: "error", Run: checkDataAccumulationExpressionValidation},
@@ -349,7 +349,10 @@ func checkMCPServerReachable(c *checkerContext) []Finding         { return c.mcp
 func checkAgentPermissionValidation(c *checkerContext) []Finding {
 	return uniqueFindings(append(c.permissions(), c.permissionWarnings()...))
 }
-func checkPlatformMetadataValidation(c *checkerContext) []Finding  { return c.platformMetadata() }
+func checkPlatformMetadataValidation(c *checkerContext) []Finding { return c.platformMetadata() }
+func checkPlatformVersionCompatibility(c *checkerContext) []Finding {
+	return c.platformVersionCompatibility()
+}
 func checkDeprecatedContractAlias(c *checkerContext) []Finding     { return c.deprecatedAliases() }
 func checkPromptSchemaGuardStructural(c *checkerContext) []Finding { return c.promptSchemaGuard() }
 func checkCrossSurfaceNamedTypeUse(c *checkerContext) []Finding {
@@ -442,34 +445,6 @@ func (c *checkerContext) platformMetadata() []Finding {
 		})
 	}
 	return c.platformMetaFindings
-}
-
-func platformVersionAtLeast(raw string, major, minor, patch int) bool {
-	raw = strings.TrimSpace(raw)
-	for _, prefix := range []string{">=", ">", "=", "~", "^"} {
-		raw = strings.TrimPrefix(raw, prefix)
-	}
-	raw = strings.TrimSpace(strings.TrimPrefix(raw, "v"))
-	if raw == "" {
-		return false
-	}
-	parts := strings.Split(raw, ".")
-	parse := func(index int) int {
-		if index >= len(parts) {
-			return 0
-		}
-		value, _ := strconv.Atoi(strings.TrimSpace(parts[index]))
-		return value
-	}
-	gotMajor, gotMinor, gotPatch := parse(0), parse(1), parse(2)
-	switch {
-	case gotMajor != major:
-		return gotMajor > major
-	case gotMinor != minor:
-		return gotMinor > minor
-	default:
-		return gotPatch >= patch
-	}
 }
 
 func (c *checkerContext) deprecatedAliases() []Finding {

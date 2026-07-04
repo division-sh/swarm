@@ -230,7 +230,7 @@ root-listener:
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: bus-import-boundary-wildcard
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker

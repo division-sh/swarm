@@ -244,7 +244,7 @@ func writeFieldReconciliationBundle(t *testing.T, root, schemaExtra, nodes strin
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: field-reconciliation
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: field-reconciliation\n"+schemaExtra)
@@ -433,7 +433,7 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOw
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: wildcard-owner-test
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: flow-a
     flow: flow-a

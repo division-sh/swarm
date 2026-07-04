@@ -242,7 +242,7 @@ func runCompletionSystemNodeBundle(t *testing.T) *runtimecontracts.WorkflowContr
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: review
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: discovery
     flow: discovery

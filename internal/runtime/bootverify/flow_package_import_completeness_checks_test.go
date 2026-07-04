@@ -381,7 +381,7 @@ func writeFlowPackageAliasValidationFixture(t *testing.T, opts flowPackageAliasV
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: flow-package-alias-validation
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
 `+flows)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-package-alias-validation\n")

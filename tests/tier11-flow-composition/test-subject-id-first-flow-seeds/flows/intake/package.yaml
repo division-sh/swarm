@@ -1,5 +1,5 @@
 name: intake
 version: 1.0.0
 description: First flow to create an entity from explicit payload correlation.
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []

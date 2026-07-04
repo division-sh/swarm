@@ -1821,7 +1821,7 @@ func routedRootInputProjectEventFixtureFiles() map[string]string {
 	return map[string]string{
 		"package.yaml": `name: test-root-input-project-event
 version: 1.0.0
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: validation
     flow: validation

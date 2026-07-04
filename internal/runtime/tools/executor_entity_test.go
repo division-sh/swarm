@@ -1681,7 +1681,7 @@ func TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows(t *testing
 	writeEntityToolFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: root-read-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: child
     flow: child
@@ -2753,7 +2753,7 @@ func loadWave1EntityToolBundle(t *testing.T, actor models.AgentConfig, flowID, e
 	writeEntityToolFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
 name: entity-tool-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: %s
     flow: %s
@@ -2903,7 +2903,7 @@ func loadWave1EntityToolMultiFlowBundle(t *testing.T, flows map[string]entityToo
 	var packageYAML strings.Builder
 	packageYAML.WriteString("name: entity-tool-bundle\n")
 	packageYAML.WriteString("version: \"1.0.0\"\n")
-	packageYAML.WriteString("platform_version: \">=1.0.0\"\n")
+	packageYAML.WriteString("platform_version: \">=0.7.0 <0.8.0\"\n")
 	packageYAML.WriteString("flows:\n")
 	for _, flowID := range flowIDs {
 		packageYAML.WriteString("  - id: ")

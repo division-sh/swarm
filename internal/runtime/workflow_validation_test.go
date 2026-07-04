@@ -83,6 +83,36 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 	}
 }
 
+func TestEnsureWorkflowBootWiringFailsClosedForIncompatiblePlatformVersion(t *testing.T) {
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Platform.Platform.Version = "0.7.0"
+	bundle.PackageTree = []runtimecontracts.LoadedProjectPackage{{
+		Key: ".",
+		Manifest: runtimecontracts.ProjectPackageDocument{
+			Name:            "runtime-incompatible-platform",
+			PlatformVersion: ">=0.8.0",
+		},
+	}}
+
+	err := ensureWorkflowBootWiring(RuntimeOptions{
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
+	})
+	if err == nil {
+		t.Fatal("ensureWorkflowBootWiring error = nil, want platform_version compatibility failure")
+	}
+	for _, want := range []string{
+		"platform_version_compatibility",
+		`platform_version range ">=0.8.0" does not include running platform "0.7.0"`,
+		"remediation: update package.yaml platform_version after re-verifying",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("ensureWorkflowBootWiring error = %v, want substring %q", err, want)
+		}
+	}
+}
+
 func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")

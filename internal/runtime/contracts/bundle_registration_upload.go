@@ -48,6 +48,9 @@ func BuildBundleRegistrationDirectoryUpload(repoRoot, contractsRoot, platformSpe
 	if err != nil {
 		return BundleRegistrationUpload{}, err
 	}
+	if err := ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
+		return BundleRegistrationUpload{}, err
+	}
 	entries, err := bundleHashEntries(bundle)
 	if err != nil {
 		return BundleRegistrationUpload{}, err

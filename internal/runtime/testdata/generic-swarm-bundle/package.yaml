@@ -1,6 +1,6 @@
 name: test-platform
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 description: Generic Swarm bundle for contract-driven runtime tests.
 flows:
   - id: intake

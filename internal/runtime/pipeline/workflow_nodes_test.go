@@ -338,7 +338,7 @@ func writePipelineImportBoundaryAliasFixture(t *testing.T, parentSubscription st
 	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: pipeline-import-boundary-alias
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker
@@ -423,7 +423,7 @@ func writePipelineImportBoundaryWildcardFixture(t *testing.T, observeGrant strin
 	writePipelineFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: pipeline-import-boundary-wildcard
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: worker
     flow: worker

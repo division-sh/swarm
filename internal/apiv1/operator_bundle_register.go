@@ -244,6 +244,9 @@ func buildBundleRegistrationProjection(params bundleRegistrationParams, runtimeC
 	if err != nil {
 		return runtimecontracts.BundleCatalogProjection{}, NewInvalidParamsError(map[string]any{"field": "content_yaml", "reason": "bundle registration envelope does not materialize a valid workflow contract bundle", "error": err.Error()})
 	}
+	if err := runtimecontracts.ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
+		return runtimecontracts.BundleCatalogProjection{}, NewInvalidParamsError(map[string]any{"field": "content_yaml", "reason": "bundle registration envelope declares incompatible platform_version", "error": err.Error()})
+	}
 	projection, err := runtimecontracts.BuildBundleCatalogProjectionWithOptions(bundle, runtimecontracts.BundleCatalogProjectionOptions{
 		Source:             "bundle.register",
 		PlatformSpecSHA256: platformHash,

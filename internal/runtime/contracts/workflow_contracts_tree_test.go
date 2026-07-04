@@ -219,7 +219,7 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: cross-flow-localization
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -318,7 +318,7 @@ func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: cross-flow-on-success
 version: "1.0.0"
-platform_version: ">=1.6.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows:
   - id: scoring
     flow: scoring
@@ -440,7 +440,7 @@ func currentWorkflowContractsDirForTest(t *testing.T) string {
 	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: contract-test-bundle
 version: "1.0.0"
-platform_version: ">=1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `

@@ -3,5 +3,5 @@ version: 1.0.0
 description: >
   Boot verification: circular event chain where handler A emits event B
   and handler B emits event A. Platform must catch EVENT-CYCLE error.
-platform_version: ">=1.1.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
