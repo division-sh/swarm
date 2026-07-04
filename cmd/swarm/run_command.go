@@ -198,7 +198,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 
 func (o runCommandOptions) validate() error {
 	if o.detach {
-		return fmt.Errorf("ERROR: `swarm run --detach` is not supported in CLI v2. Use `swarm serve` plus `swarm run --connect <url> --event <name> --payload <file> --no-follow`.")
+		return fmt.Errorf("ERROR: `--detach` is not supported in CLI v2. Use `swarm serve` plus `swarm run start --connect <url> --event <name> --payload <file> --no-follow`.")
 	}
 	if o.apiPort < 0 || o.apiPort > 65535 || (o.changedFlags["api-port"] && o.apiPort == 0) {
 		return fmt.Errorf("--api-port must be between 1 and 65535")
@@ -805,10 +805,10 @@ func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {
 	}
 	connect := strings.TrimSpace(connectURL)
 	if connect != "" {
-		fmt.Fprintf(out, "reattach: swarm run --connect %s --reattach %s\n", connect, runID)
+		fmt.Fprintf(out, "reattach: swarm run start --connect %s --reattach %s\n", connect, runID)
 		return
 	}
-	fmt.Fprintf(out, "reattach: swarm run --reattach %s\n", runID)
+	fmt.Fprintf(out, "reattach: swarm run start --reattach %s\n", runID)
 }
 
 func writeRunCommandReattached(out io.Writer, run diagnosticRunHeader) {

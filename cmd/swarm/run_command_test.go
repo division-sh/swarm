@@ -252,7 +252,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
-	for _, want := range []string{"run started: run_id=run-no-follow", "reattach: swarm run --connect " + server.URL + " --reattach run-no-follow"} {
+	for _, want := range []string{"run started: run_id=run-no-follow", "reattach: swarm run start --connect " + server.URL + " --reattach run-no-follow"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -760,7 +760,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		wantCode   int
 		wantStderr string
 	}{
-		{name: "detach retired", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run --detach"},
+		{name: "detach retired", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "swarm run start --connect"},
 		{name: "no follow requires connect", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
 		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
 		{name: "invalid bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "--bundle-hash must be bundle-v1:sha256:<64 lowercase hex>"},

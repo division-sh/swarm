@@ -345,3 +345,59 @@ func TestRetiredSpellingsWithConnectionFlagsStillPointToReplacement(t *testing.T
 		}
 	}
 }
+
+// Retired topology spellings must not survive anywhere topology is expressed
+// as unstructured text: Go sources (guidance strings, bind metadata,
+// comments), platform-spec present-truth prose, README, and CI workflows.
+// Structured surfaces are covered by the tests above; this scan closes the
+// unstructured-string class that three review cycles on #1686 kept finding.
+// Lines carrying an explicit retirement/historical marker are exempt — a
+// retirement message may name the spelling it retires, and historical
+// ledgers may record superseded decisions.
+func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
+	retiredWords := regexp.MustCompile("swarm (runs|agents|events|entities|conversations)([^a-z]|$)" +
+		"|swarm (status|trace)([^a-z]|$)" +
+		"|swarm fork([^a-z]|$)") // forkchat excluded by the non-letter guard
+	// The bare-run start form is scanned only in user-visible surfaces; spec
+	// prose references run-start flags in contexts where the flag, not the
+	// spelling, is the subject.
+	bareRunStart := regexp.MustCompile("swarm run --")
+	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|#[0-9]{3}|--dry-run\\|" +
+		"|^\\s*action: '|^\\s*current: swarm ")
+
+	root := driftTestRepoRoot(t)
+	var targets []string
+	goFiles, err := filepath.Glob(filepath.Join(root, "cmd", "swarm", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range goFiles {
+		if !strings.HasSuffix(f, "_test.go") { // tests exercise retired spellings on purpose
+			targets = append(targets, f)
+		}
+	}
+	targets = append(targets, filepath.Join(root, "platform-spec.yaml"), filepath.Join(root, "README.md"))
+	workflows, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets = append(targets, workflows...)
+
+	for _, path := range targets {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		isSpec := strings.HasSuffix(path, "platform-spec.yaml")
+		for i, line := range strings.Split(string(raw), "\n") {
+			if !retiredWords.MatchString(line) && (isSpec || !bareRunStart.MatchString(line)) {
+				continue
+			}
+			if historicalMarker.MatchString(line) {
+				continue
+			}
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s:%d: retired topology spelling in unstructured text (update to the v2.2 spelling, or mark the line historical): %s", rel, i+1, strings.TrimSpace(line))
+		}
+	}
+}
