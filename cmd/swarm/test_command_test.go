@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -156,6 +157,54 @@ steps:
 	}
 }
 
+func TestSwarmTestRejectsSymlinkFixtureEscapeBeforePublish(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	writeWorkflowValidationFixtureFile(t, outside, `
+amount: 7
+who: outside
+`)
+	fixtureDir := filepath.Join(contractsPath, "tests", "fixtures")
+	if err := os.MkdirAll(fixtureDir, 0o755); err != nil {
+		t.Fatalf("mkdir fixture dir: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(fixtureDir, "outside.yaml")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "symlink-escape.yaml"), `
+name: symlink escape
+steps:
+  - publish: thing.created
+    payload:
+      from: fixtures/outside.yaml
+`)
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		filepath.Join(contractsPath, "tests", "symlink-escape.yaml"),
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != scenarioTestExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
+	}
+	if called {
+		t.Fatal("event.publish API was called for symlink-escaped fixture")
+	}
+	if !strings.Contains(stderr.String(), "escapes contract package root") {
+		t.Fatalf("stderr = %q, want contract-root escape failure", stderr.String())
+	}
+}
+
 func TestSwarmTestMailboxApproveFindsExactlyOneThenMutates(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
@@ -231,6 +280,55 @@ steps:
 	})
 }
 
+func TestSwarmTestMailboxRejectMissingReasonFailsBeforeMailboxLookup(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"), `
+name: mailbox reject missing reason
+steps:
+  - publish: thing.created
+    payload: {amount: 7, who: operator}
+  - mailbox.reject:
+      match:
+        type: review_request
+`)
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case eventPublishMethod:
+			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+		case "run.trace":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []any{}})
+		default:
+			t.Fatalf("unexpected method before reject validation = %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"),
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+		"--timeout", "2s",
+		"--poll-interval", "10ms",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != scenarioTestExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
+	}
+	assertScenarioTestMethods(t, calls, []string{eventPublishMethod, "run.trace"})
+	if !strings.Contains(stderr.String(), "mailbox.reject reason is required") {
+		t.Fatalf("stderr = %q, want reject reason validation failure", stderr.String())
+	}
+}
+
 func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -264,6 +362,24 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
 		t.Fatalf("stdout missing success:\n%s", stdout.String())
+	}
+}
+
+func TestScenarioEventExpectationsDeduplicateRunTraceDeliveryRows(t *testing.T) {
+	rows := []diagnosticRunTraceRow{
+		{EventID: "event-1", EventName: "thing.created", DeliveryID: "delivery-1"},
+		{EventID: "event-1", EventName: "thing.created", DeliveryID: "delivery-2"},
+		{EventID: "event-2", EventName: "thing.done", DeliveryID: "delivery-3"},
+	}
+	names := uniqueScenarioTraceEventNames(rows)
+	if got := strings.Join(names, ","); got != "thing.created,thing.done" {
+		t.Fatalf("unique names = %q", got)
+	}
+	if err := assertScenarioEventExpectations(names, scenarioEventExpect{
+		Exact:   []string{"thing.created", "thing.done"},
+		Ordered: []string{"thing.created", "thing.done"},
+	}); err != nil {
+		t.Fatalf("event expectations over deduplicated trace rows failed: %v", err)
 	}
 }
 
