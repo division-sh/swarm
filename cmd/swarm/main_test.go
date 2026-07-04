@@ -2869,8 +2869,11 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 							ProviderContractRuntimeMode string   `yaml:"provider_contract_runtime_mode"`
 							LegacyBackendIDs            []string `yaml:"legacy_backend_ids"`
 							CredentialSource            struct {
-								EnvVar   string `yaml:"env_var"`
-								Required bool   `yaml:"required"`
+								SecretKey      string `yaml:"secret_key"`
+								Owner          string `yaml:"owner"`
+								LegacyEnvVar   string `yaml:"legacy_env_var"`
+								Required       bool   `yaml:"required"`
+								ResolutionRule string `yaml:"resolution_rule"`
 							} `yaml:"credential_source"`
 							EndpointSource struct {
 								ConfigKey      string `yaml:"config_key"`
@@ -2887,8 +2890,11 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 							ProviderContractRuntimeMode string `yaml:"provider_contract_runtime_mode"`
 							Protocol                    string `yaml:"protocol"`
 							CredentialSource            struct {
-								EnvVar   string `yaml:"env_var"`
-								Required bool   `yaml:"required"`
+								SecretKey      string `yaml:"secret_key"`
+								Owner          string `yaml:"owner"`
+								LegacyEnvVar   string `yaml:"legacy_env_var"`
+								Required       bool   `yaml:"required"`
+								ResolutionRule string `yaml:"resolution_rule"`
 							} `yaml:"credential_source"`
 							EndpointSource struct {
 								ConfigKey      string `yaml:"config_key"`
@@ -2922,8 +2928,11 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 						} `yaml:"protocol_family"`
 						CredentialAndEndpointPolicy struct {
 							CredentialSource struct {
-								EnvVar   string `yaml:"env_var"`
-								Required bool   `yaml:"required"`
+								SecretKey      string `yaml:"secret_key"`
+								Owner          string `yaml:"owner"`
+								LegacyEnvVar   string `yaml:"legacy_env_var"`
+								Required       bool   `yaml:"required"`
+								ResolutionRule string `yaml:"resolution_rule"`
 							} `yaml:"credential_source"`
 							EndpointSource struct {
 								ConfigKey      string `yaml:"config_key"`
@@ -2957,9 +2966,11 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 						AuditRule                  string                       `yaml:"audit_rule"`
 					} `yaml:"model_alias_authority"`
 					CredentialAndConfigPolicy struct {
-						SecretEnvSources              []string `yaml:"secret_env_sources"`
-						RuntimeConfigCanonicalFor     []string `yaml:"runtime_config_canonical_for"`
-						InfraConnectionOverridePolicy string   `yaml:"infra_connection_override_policy"`
+						ProviderSecretKeys                 []string `yaml:"provider_secret_keys"`
+						DeprecatedProviderEnvShadowSources []string `yaml:"deprecated_provider_env_shadow_sources"`
+						SecretEnvSources                   []string `yaml:"secret_env_sources"`
+						RuntimeConfigCanonicalFor          []string `yaml:"runtime_config_canonical_for"`
+						InfraConnectionOverridePolicy      string   `yaml:"infra_connection_override_policy"`
 					} `yaml:"credential_and_config_policy"`
 					PersistenceRules []string `yaml:"persistence_rules"`
 					SplitBoundaries  []string `yaml:"split_boundaries"`
@@ -3021,11 +3032,22 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 	if got := profiles["openai_compatible"]; got.Provider != "openai_compatible" || got.ProviderContractRuntimeMode != "openai_compatible" || got.EndpointSource.EnvVar != "" || !strings.Contains(got.EndpointSource.Rule, "SWARM_OPENAI_COMPATIBLE_BASE_URL is retired") {
 		t.Fatalf("openai_compatible profile = %#v", got)
 	}
+	for backend, wantKey := range map[string]string{
+		"anthropic":         "ANTHROPIC_API_KEY",
+		"claude_cli":        "CLAUDE_CODE_OAUTH_TOKEN",
+		"openai_compatible": "OPENAI_COMPATIBLE_API_KEY",
+		"openai_responses":  "OPENAI_API_KEY",
+	} {
+		source := profiles[backend].CredentialSource
+		if source.SecretKey != wantKey || source.Owner != "swarm secrets" || source.LegacyEnvVar != wantKey || !source.Required || !strings.Contains(source.ResolutionRule, "process env is deprecated diagnostic shadow") {
+			t.Fatalf("%s credential source = %#v, want swarm secrets source key %s with deprecated env shadow only", backend, source, wantKey)
+		}
+	}
 	openAIResponses := profiles["openai_responses"]
 	if openAIResponses.Provider != "openai" || openAIResponses.ProviderContractRuntimeMode != "openai_responses" || openAIResponses.Transport != "api" {
 		t.Fatalf("openai_responses profile = %#v", openAIResponses)
 	}
-	if openAIResponses.CredentialSource.EnvVar != "OPENAI_API_KEY" || !openAIResponses.CredentialSource.Required {
+	if openAIResponses.CredentialSource.SecretKey != "OPENAI_API_KEY" || openAIResponses.CredentialSource.Owner != "swarm secrets" || openAIResponses.CredentialSource.LegacyEnvVar != "OPENAI_API_KEY" || !openAIResponses.CredentialSource.Required || !strings.Contains(openAIResponses.CredentialSource.ResolutionRule, "must not beat a stored secret") {
 		t.Fatalf("openai_responses credential source = %#v", openAIResponses.CredentialSource)
 	}
 	if openAIResponses.EndpointSource.ConfigKey != "llm.openai_responses.base_url" || openAIResponses.EndpointSource.EnvVar != "" || openAIResponses.EndpointSource.Required || openAIResponses.EndpointSource.BuiltInDefault != "https://api.openai.com/v1" {
@@ -3069,7 +3091,7 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 			t.Fatalf("native responses protocol scope missing %q: %#v", want, protocol)
 		}
 	}
-	if responses.CredentialAndEndpointPolicy.CredentialSource.EnvVar != "OPENAI_API_KEY" || !responses.CredentialAndEndpointPolicy.CredentialSource.Required {
+	if responses.CredentialAndEndpointPolicy.CredentialSource.SecretKey != "OPENAI_API_KEY" || responses.CredentialAndEndpointPolicy.CredentialSource.Owner != "swarm secrets" || responses.CredentialAndEndpointPolicy.CredentialSource.LegacyEnvVar != "OPENAI_API_KEY" || !responses.CredentialAndEndpointPolicy.CredentialSource.Required {
 		t.Fatalf("native responses credential policy = %#v", responses.CredentialAndEndpointPolicy.CredentialSource)
 	}
 	if responses.CredentialAndEndpointPolicy.EndpointSource.ConfigKey != "llm.openai_responses.base_url" || responses.CredentialAndEndpointPolicy.EndpointSource.EnvVar != "" || responses.CredentialAndEndpointPolicy.EndpointSource.BuiltInDefault != "https://api.openai.com/v1" {
@@ -3127,8 +3149,14 @@ func TestPlatformSpecLLMProviderModelSelectionSourceAuthorityPromoted(t *testing
 		}
 	}
 	for _, want := range []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_COMPATIBLE_API_KEY", "OPENAI_API_KEY"} {
-		if !stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, want) {
-			t.Fatalf("secret env sources missing %q: %#v", want, authority.CredentialAndConfigPolicy.SecretEnvSources)
+		if !stringSliceContains(authority.CredentialAndConfigPolicy.ProviderSecretKeys, want) {
+			t.Fatalf("provider secret keys missing %q: %#v", want, authority.CredentialAndConfigPolicy.ProviderSecretKeys)
+		}
+		if !stringSliceContains(authority.CredentialAndConfigPolicy.DeprecatedProviderEnvShadowSources, want) {
+			t.Fatalf("deprecated provider env shadow sources missing %q: %#v", want, authority.CredentialAndConfigPolicy.DeprecatedProviderEnvShadowSources)
+		}
+		if stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, want) {
+			t.Fatalf("provider key %q still promoted as secret env source: %#v", want, authority.CredentialAndConfigPolicy.SecretEnvSources)
 		}
 	}
 	if stringSliceContains(authority.CredentialAndConfigPolicy.SecretEnvSources, "SWARM_TOOL_GATEWAY_TOKEN") {

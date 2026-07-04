@@ -65,7 +65,7 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
 	captureDir := filepath.Join(tempDir, "captures")
@@ -97,7 +97,8 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 		nil,
 		nil,
 		ClaudeCLIRuntimeOptions{
-			ToolGateway: testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
+			ToolGateway:         testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token"),
+			ProviderCredentials: testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token"),
 			MCPTurnContextStore: mcpTurnContextStoreStub{
 				register: func(_ context.Context, _ time.Duration, got []string) string {
 					allowedTools = append([]string(nil), got...)

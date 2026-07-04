@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -125,10 +126,27 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.add(localPreflightWorkspacePrerequisite, "agent_free_source", localPreflightSeverityInfo, localPreflightStatusSkipped, "selected contract source declares no agents; claude_cli workspace proof is not required", "")
 		return report.finalize()
 	}
-	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
-		report.add(localPreflightBackendPrerequisite, "missing_backend_credential", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), fmt.Sprintf("set %s for claude_cli backend authentication", strings.TrimSpace(profile.Credential.EnvVar)))
+	providerCredentialStore, err := buildProviderCredentialStore()
+	if err != nil {
+		report.add(localPreflightBackendPrerequisite, "provider_credential_store_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the local credential store used by swarm secrets")
+		return report.finalize()
+	}
+	resolver := runtimellm.NewProviderCredentialResolver(providerCredentialStore)
+	credential, err := resolver.Inspect(ctx, profile)
+	if err != nil {
+		report.add(localPreflightBackendPrerequisite, "backend_credential_check_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the local credential store used by swarm secrets")
+	} else if strings.TrimSpace(credential.Value) == "" {
+		_, err := resolver.Resolve(ctx, profile)
+		if err == nil {
+			err = fmt.Errorf("%s is required for %s", runtimellm.ProviderCredentialKey(profile), profile.Credential.Purpose)
+		}
+		report.add(localPreflightBackendPrerequisite, "missing_backend_credential", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), fmt.Sprintf("store %s with `swarm secrets set %s`", runtimellm.ProviderCredentialKey(profile), runtimellm.ProviderCredentialKey(profile)))
 	} else {
-		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, fmt.Sprintf("%s is present", strings.TrimSpace(profile.Credential.EnvVar)), "")
+		message := fmt.Sprintf("%s is present in swarm secrets", runtimellm.ProviderCredentialKey(profile))
+		if credential.EnvShadowed {
+			message += "; process env value is ignored"
+		}
+		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, message, "")
 	}
 	report.checkWorkspace(ctx, source, contractsRoot, req.MountSources, req.WorkspaceBackend, req.Config.LLM.ClaudeCLI.Command)
 	return report.finalize()

@@ -14,6 +14,7 @@ import (
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -176,17 +177,29 @@ func TestTier8BootCatalogFixtures_AreExplicitlyClassified(t *testing.T) {
 
 func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) (*runtime.Runtime, error) {
 	t.Helper()
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
 	strictCatalogFixtureStartupPolicy().apply(t)
 	module, err := newFixtureWorkflowModule(bundle)
 	if err != nil {
 		return nil, err
 	}
 	return runtime.NewRuntime(context.Background(), runtime.RuntimeDeps{Config: testRuntimeConfig(), Stores: runtime.Stores{}, Options: runtime.RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
+		SelfCheck:           false,
+		WorkflowModule:      module,
+		ProviderCredentials: tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key"),
 	}})
 
+}
+
+func tier8ProviderCredentialStore(t testing.TB, key, value string) runtimecredentials.Store {
+	t.Helper()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "provider-credentials.json"))
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	if err := store.Set(context.Background(), key, value); err != nil {
+		t.Fatalf("Set provider credential: %v", err)
+	}
+	return store
 }
 
 func assertTier8RuntimeBootMatchesAuthoritativeStartupTruth(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, expected tier8ExpectedDocument) {

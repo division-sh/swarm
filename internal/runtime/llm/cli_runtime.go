@@ -18,19 +18,20 @@ import (
 )
 
 type ClaudeCLIRuntime struct {
-	cfg               *config.Config
-	sessions          sessions.Registry
-	turns             TurnPersistence
-	conversations     ConversationPersistence
-	budget            BudgetGuard
-	lockOwner         string
-	workspaces        workspace.Resolver
-	monitor           MonitorSink
-	events            EventPublisher
-	mcpTurns          MCPTurnContextStore
-	toolGateway       toolgateway.Binding
-	execWorkspaceFn   func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
-	providerAdmission *ProviderAdmissionRegistry
+	cfg                 *config.Config
+	sessions            sessions.Registry
+	turns               TurnPersistence
+	conversations       ConversationPersistence
+	budget              BudgetGuard
+	lockOwner           string
+	workspaces          workspace.Resolver
+	monitor             MonitorSink
+	events              EventPublisher
+	mcpTurns            MCPTurnContextStore
+	toolGateway         toolgateway.Binding
+	providerCredentials ProviderCredentialResolver
+	execWorkspaceFn     func(ctx context.Context, target *workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
+	providerAdmission   *ProviderAdmissionRegistry
 }
 
 var ErrClaudeAuthRequired = errors.New("claude auth required")
@@ -46,6 +47,7 @@ type ClaudeCLIRuntimeOptions struct {
 	MonitorSink         MonitorSink
 	MCPTurnContextStore MCPTurnContextStore
 	ToolGateway         toolgateway.Binding
+	ProviderCredentials ProviderCredentialResolver
 }
 
 func NewClaudeCLIRuntime(
@@ -76,19 +78,24 @@ func NewClaudeCLIRuntimeWithOptions(
 	if monitor == nil {
 		monitor = NewFileMonitorSink(DefaultMonitorDir())
 	}
+	providerCredentials := opts.ProviderCredentials
+	if providerCredentials.EnvLookup == nil {
+		providerCredentials = NewProviderCredentialResolver(providerCredentials.Store)
+	}
 	return &ClaudeCLIRuntime{
-		cfg:               cfg,
-		sessions:          sessions,
-		turns:             turns,
-		conversations:     conversations,
-		budget:            budget,
-		lockOwner:         lockOwner,
-		workspaces:        workspaces,
-		monitor:           monitor,
-		events:            publisher,
-		mcpTurns:          opts.MCPTurnContextStore,
-		toolGateway:       opts.ToolGateway,
-		providerAdmission: NewProviderAdmissionRegistry(cfg),
+		cfg:                 cfg,
+		sessions:            sessions,
+		turns:               turns,
+		conversations:       conversations,
+		budget:              budget,
+		lockOwner:           lockOwner,
+		workspaces:          workspaces,
+		monitor:             monitor,
+		events:              publisher,
+		mcpTurns:            opts.MCPTurnContextStore,
+		toolGateway:         opts.ToolGateway,
+		providerCredentials: providerCredentials,
+		providerAdmission:   NewProviderAdmissionRegistry(cfg),
 	}
 }
 

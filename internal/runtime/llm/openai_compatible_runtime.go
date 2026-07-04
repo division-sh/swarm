@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -32,9 +31,14 @@ type OpenAICompatibleRuntime struct {
 	apiKey            string
 	events            EventPublisher
 	providerAdmission *ProviderAdmissionRegistry
+	credentials       ProviderCredentialResolver
 }
 
 func NewOpenAICompatibleRuntime(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher) *OpenAICompatibleRuntime {
+	return NewOpenAICompatibleRuntimeWithProviderCredentials(cfg, sessions, lockOwner, turns, conversations, budget, publisher, NewProviderCredentialResolver(nil))
+}
+
+func NewOpenAICompatibleRuntimeWithProviderCredentials(cfg *config.Config, sessions sessions.Registry, lockOwner string, turns TurnPersistence, conversations ConversationPersistence, budget BudgetGuard, publisher EventPublisher, credentials ProviderCredentialResolver) *OpenAICompatibleRuntime {
 	if cfg == nil {
 		cfg = &config.Config{}
 	}
@@ -51,9 +55,9 @@ func NewOpenAICompatibleRuntime(cfg *config.Config, sessions sessions.Registry, 
 			Timeout: 120 * time.Second,
 		},
 		baseURL:           baseURL,
-		apiKey:            llmselection.CredentialValue(profile, os.LookupEnv),
 		events:            publisher,
 		providerAdmission: NewProviderAdmissionRegistry(cfg),
+		credentials:       credentials,
 	}
 }
 
@@ -239,10 +243,11 @@ func (r *OpenAICompatibleRuntime) ContinueSession(ctx context.Context, s *Sessio
 
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
 	if strings.TrimSpace(r.apiKey) == "" {
-		r.apiKey = llmselection.CredentialValue(profile, os.LookupEnv)
-		if strings.TrimSpace(r.apiKey) == "" {
-			return nil, llmselection.RequireCredential(profile, os.LookupEnv)
+		credential, err := r.credentials.Resolve(ctx, profile)
+		if err != nil {
+			return nil, err
 		}
+		r.apiKey = credential.Value
 	}
 	if strings.TrimSpace(r.baseURL) == "" {
 		baseURL, err := llmselection.ResolveBaseURL(profile, r.cfg.LLM.OpenAICompatible.BaseURL)

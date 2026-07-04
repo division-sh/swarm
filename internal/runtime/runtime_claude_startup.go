@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -23,7 +22,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {
+func validateClaudeStartupConfig(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {
 	enabled, err := isClaudeCLIBackend(cfg)
 	if err != nil {
 		return err
@@ -38,10 +37,10 @@ func validateClaudeStartupConfig(cfg *config.Config, opts RuntimeOptions, source
 	if !hasAgents {
 		return nil
 	}
-	return validateClaudeStartupRequirements(cfg, opts)
+	return validateClaudeStartupRequirements(ctx, cfg, opts)
 }
 
-func validateClaudeStartupConfigForActiveAgents(cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
+func validateClaudeStartupConfigForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
 	enabled, err := isClaudeCLIBackend(cfg)
 	if err != nil {
 		return err
@@ -56,10 +55,10 @@ func validateClaudeStartupConfigForActiveAgents(cfg *config.Config, opts Runtime
 	if !hasAgents {
 		return nil
 	}
-	return validateClaudeStartupRequirements(cfg, opts)
+	return validateClaudeStartupRequirements(ctx, cfg, opts)
 }
 
-func validateSelectedBackendCredentialForDeclaredAgents(cfg *config.Config, source semanticview.Source) error {
+func validateSelectedBackendCredentialForDeclaredAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {
 	hasAgents, err := workflowSourceDeclaresAgents(source)
 	if err != nil {
 		return err
@@ -67,7 +66,7 @@ func validateSelectedBackendCredentialForDeclaredAgents(cfg *config.Config, sour
 	if !hasAgents {
 		return nil
 	}
-	return validateSelectedBackendCredential(cfg)
+	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
 func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, source semanticview.Source) error {
@@ -92,7 +91,7 @@ func validateSelectedBackendModelAliasesForDeclaredAgents(cfg *config.Config, so
 	return nil
 }
 
-func validateSelectedBackendCredentialForActiveAgents(cfg *config.Config, source semanticview.Source, manager *runtimemanager.AgentManager) error {
+func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
 	if err != nil {
 		return err
@@ -100,10 +99,10 @@ func validateSelectedBackendCredentialForActiveAgents(cfg *config.Config, source
 	if !hasAgents {
 		return nil
 	}
-	return validateSelectedBackendCredential(cfg)
+	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
-func validateSelectedBackendCredential(cfg *config.Config) error {
+func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver) error {
 	if cfg == nil {
 		return nil
 	}
@@ -111,11 +110,12 @@ func validateSelectedBackendCredential(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	return llmselection.RequireCredential(profile, os.LookupEnv)
+	_, err = credentials.Resolve(ctx, profile)
+	return err
 }
 
-func validateClaudeStartupRequirements(cfg *config.Config, opts RuntimeOptions) error {
-	if err := llm.ValidateClaudeCLIRuntimeConfig(cfg, opts.ToolGatewayBinding); err != nil {
+func validateClaudeStartupRequirements(ctx context.Context, cfg *config.Config, opts RuntimeOptions) error {
+	if err := llm.ValidateClaudeCLIRuntimeConfig(ctx, cfg, opts.ToolGatewayBinding, providerCredentialResolverForRuntimeOptions(opts)); err != nil {
 		return err
 	}
 	if opts.WorkspaceLifecycle == nil {

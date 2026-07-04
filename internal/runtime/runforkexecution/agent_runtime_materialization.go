@@ -34,19 +34,20 @@ import (
 const selectedContractAgentRuntimeDefaultQuiescenceTimeout = 2 * time.Minute
 
 type SelectedContractAgentRuntimeOptions struct {
-	Config             *config.Config
-	EntityStore        runtimetools.EntityPersistence
-	HumanTaskStore     runtimetools.HumanTaskPersistence
-	SessionRegistry    runtimesessions.Registry
-	ConversationStore  runtimellm.ConversationPersistence
-	TurnStore          runtimellm.TurnPersistence
-	ScheduleStore      runtimepipeline.SchedulePersistence
-	MailboxStore       runtimetools.MailboxPersistence
-	Workspace          workspace.Lifecycle
-	Credentials        runtimecredentials.Store
-	ManagedCredentials runtimemanagedcredentials.Store
-	LLMRuntime         runtimellm.Runtime
-	MCPClient          *runtimemcp.Client
+	Config              *config.Config
+	EntityStore         runtimetools.EntityPersistence
+	HumanTaskStore      runtimetools.HumanTaskPersistence
+	SessionRegistry     runtimesessions.Registry
+	ConversationStore   runtimellm.ConversationPersistence
+	TurnStore           runtimellm.TurnPersistence
+	ScheduleStore       runtimepipeline.SchedulePersistence
+	MailboxStore        runtimetools.MailboxPersistence
+	Workspace           workspace.Lifecycle
+	Credentials         runtimecredentials.Store
+	ManagedCredentials  runtimemanagedcredentials.Store
+	ProviderCredentials runtimecredentials.Store
+	LLMRuntime          runtimellm.Runtime
+	MCPClient           *runtimemcp.Client
 
 	AgentFactory        runtimemanager.AgentFactory
 	AgentManagerOptions runtimemanager.AgentManagerOptions
@@ -289,6 +290,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			Events:        bus,
 			MCPTurns:      mcpTurns,
 			ToolGateway:   binding,
+			Credentials:   options.ProviderCredentials,
 		}.Build()
 		if err != nil {
 			if cleanup != nil {

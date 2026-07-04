@@ -43,10 +43,6 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	if _, err := requireClaudeExecutionTarget(target); err != nil {
 		return nil, err
 	}
-	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-	if err := llmselection.RequireCredential(profile, os.LookupEnv); err != nil {
-		return nil, fmt.Errorf("%w: %s is missing", ErrClaudeAuthRequired, profile.Credential.EnvVar)
-	}
 	release, err := r.admitProviderDispatch(ctx)
 	if err != nil {
 		return nil, err
@@ -58,6 +54,9 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 
 	cmd, err := r.buildCommand(runCtx, args, target)
 	if err != nil {
+		if IsMissingProviderCredential(err) {
+			return nil, fmt.Errorf("%w: %w", ErrClaudeAuthRequired, err)
+		}
 		return nil, err
 	}
 	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
@@ -306,8 +305,12 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 			dockerArgs = append(dockerArgs, "-e", "SWARM_TOOL_GATEWAY_URL="+gatewayURL)
 		}
 		profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
-		if oauthToken := llmselection.CredentialValue(profile, os.LookupEnv); oauthToken != "" {
-			dockerArgs = append(dockerArgs, "-e", profile.Credential.EnvVar+"="+oauthToken)
+		credential, err := r.providerCredentials.Resolve(ctx, profile)
+		if err != nil {
+			return nil, err
+		}
+		if oauthToken := strings.TrimSpace(credential.Value); oauthToken != "" {
+			dockerArgs = append(dockerArgs, "-e", ProviderCredentialKey(profile)+"="+oauthToken)
 		}
 		if strings.TrimSpace(execTarget.Workdir) != "" {
 			dockerArgs = append(dockerArgs, "-w", execTarget.Workdir)

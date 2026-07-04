@@ -3598,8 +3598,9 @@ engine:
         - SWARM_LLM_RUNTIME_MODE
         rules:
         - Runtime config is canonical for non-secret LLM behavior.
-        - Environment variables never select the backend profile. Environment variables remain valid only for provider
-          secrets and pragmatic infra/connection overrides explicitly owned by their configuration sections.
+        - Environment variables never select the backend profile. Provider secrets resolve from swarm secrets; provider env
+          names remain only deprecated shadow diagnostics. Pragmatic infra/connection env overrides are allowed only when
+          explicitly owned by their configuration sections.
         - Commands that need runtime/operator config discover explicit --config first, config.yaml beside the running binary
           when present second, and built-in/default config last.
         - The platform must not infer backend profile from credential, endpoint, model, or tool-gateway env presence.
@@ -3613,8 +3614,11 @@ engine:
             legacy_backend_ids:
             - api
             credential_source:
-              env_var: ANTHROPIC_API_KEY
+              secret_key: ANTHROPIC_API_KEY
+              owner: swarm secrets
+              legacy_env_var: ANTHROPIC_API_KEY
               required: true
+              resolution_rule: "Resolve from the provider credential store backed by swarm secrets; process env is deprecated diagnostic shadow input only and must not beat a stored secret."
           claude_cli:
             provider: claude
             transport: cli
@@ -3622,8 +3626,11 @@ engine:
             legacy_backend_ids:
             - cli_test
             credential_source:
-              env_var: CLAUDE_CODE_OAUTH_TOKEN
+              secret_key: CLAUDE_CODE_OAUTH_TOKEN
+              owner: swarm secrets
+              legacy_env_var: CLAUDE_CODE_OAUTH_TOKEN
               required: true
+              resolution_rule: "Resolve from the provider credential store backed by swarm secrets; process env is deprecated diagnostic shadow input only and must not beat a stored secret. Subprocess/container env injection is allowed only as final-boundary Claude CLI plumbing using the resolved secret value."
           openai_compatible:
             provider: openai_compatible
             transport: api
@@ -3631,8 +3638,11 @@ engine:
             protocol: Chat Completions-compatible HTTP JSON at /v1/chat/completions relative to the configured base URL.
             legacy_backend_ids: []
             credential_source:
-              env_var: OPENAI_COMPATIBLE_API_KEY
+              secret_key: OPENAI_COMPATIBLE_API_KEY
+              owner: swarm secrets
+              legacy_env_var: OPENAI_COMPATIBLE_API_KEY
               required: true
+              resolution_rule: "Resolve from the provider credential store backed by swarm secrets; process env is deprecated diagnostic shadow input only and must not beat a stored secret."
             endpoint_source:
               config_key: llm.openai_compatible.base_url
               env_var: null
@@ -3648,8 +3658,11 @@ engine:
             protocol: Native OpenAI Responses API resource path /responses relative to the configured base URL.
             legacy_backend_ids: []
             credential_source:
-              env_var: OPENAI_API_KEY
+              secret_key: OPENAI_API_KEY
+              owner: swarm secrets
+              legacy_env_var: OPENAI_API_KEY
               required: true
+              resolution_rule: "Resolve from the provider credential store backed by swarm secrets; process env is deprecated diagnostic shadow input only and must not beat a stored secret."
             endpoint_source:
               config_key: llm.openai_responses.base_url
               env_var: null
@@ -3709,17 +3722,20 @@ engine:
             unless a later gate promotes it explicitly.
         credential_and_endpoint_policy:
           credential_source:
-            env_var: OPENAI_API_KEY
+            secret_key: OPENAI_API_KEY
+            owner: swarm secrets
+            legacy_env_var: OPENAI_API_KEY
             required: true
+            resolution_rule: "Resolve from the provider credential store backed by swarm secrets; process env is deprecated diagnostic shadow input only and must not beat a stored secret."
           endpoint_source:
             config_key: llm.openai_responses.base_url
             env_var: null
             required: false
             built_in_default: https://api.openai.com/v1
           rules:
-            - Environment variables provide the OpenAI API secret only; they do not select the backend or endpoint.
+            - Swarm secrets provide the OpenAI API secret; environment variables do not select the backend or endpoint and are not the provider credential owner.
             - Runtime config is canonical for endpoint/base URL overrides used by deterministic tests or deployments.
-            - "Credential validation happens after openai_responses is selected and must fail closed before HTTP if OPENAI_API_KEY is missing."
+            - "Credential validation happens after openai_responses is selected and must fail closed before HTTP if OPENAI_API_KEY is missing from swarm secrets."
         model_alias_defaults:
           cheap: gpt-5.4-nano
           regular: gpt-5.4
@@ -3789,11 +3805,17 @@ engine:
         audit_rule: Runtime audit writes authored model alias plus resolved backend profile, provider identity, and concrete
           model at write time. Readers consume recorded values and MUST NOT reconstruct from current config.
       credential_and_config_policy:
-        secret_env_sources:
+        provider_secret_keys:
         - ANTHROPIC_API_KEY
         - CLAUDE_CODE_OAUTH_TOKEN
         - OPENAI_COMPATIBLE_API_KEY
         - OPENAI_API_KEY
+        deprecated_provider_env_shadow_sources:
+        - ANTHROPIC_API_KEY
+        - CLAUDE_CODE_OAUTH_TOKEN
+        - OPENAI_COMPATIBLE_API_KEY
+        - OPENAI_API_KEY
+        secret_env_sources:
         - SWARM_API_TOKEN
         - database password env/store sources
         runtime_config_canonical_for:

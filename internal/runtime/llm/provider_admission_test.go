@@ -229,8 +229,6 @@ func TestProviderAdmissionModelPolicyOverridesProfilePolicy(t *testing.T) {
 }
 
 func TestAnthropicProviderAdmissionAppliesToRetries(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "test-key")
-
 	var requests atomic.Int32
 	var firstRequest, secondRequest atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -297,7 +295,6 @@ func TestAnthropicProviderAdmissionAppliesToRetries(t *testing.T) {
 }
 
 func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T) {
-	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "test-key")
 	cfg := openAICompatibleTestConfig("")
 	cfg.LLM.ProviderLimits = map[string]config.LLMProviderLimitPolicy{
 		llmselection.BackendOpenAICompatible: {
@@ -344,7 +341,6 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 }
 
 func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T) {
-	t.Setenv("OPENAI_API_KEY", "test-key")
 	cfg := openAIResponsesTestConfig("")
 	cfg.LLM.ProviderLimits = map[string]config.LLMProviderLimitPolicy{
 		llmselection.BackendOpenAIResponses: {
@@ -391,7 +387,7 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 }
 
 func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
 			ClaudeCLI: config.ClaudeCLIConfig{
@@ -407,6 +403,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 		},
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
+	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 printf '%s\n' '{"result":"done"}'
@@ -430,7 +427,7 @@ printf '%s\n' '{"result":"done"}'
 }
 
 func TestClaudeCLIPromptFallbackConsumesAdmissionPerSubprocessAttempt(t *testing.T) {
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
 			ClaudeCLI: config.ClaudeCLIConfig{
@@ -446,6 +443,7 @@ func TestClaudeCLIPromptFallbackConsumesAdmissionPerSubprocessAttempt(t *testing
 		},
 	}
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(time.Second), "worker-1", nil, nil, nil, nil, nil)
+	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "agent-1", Model: llmselection.ModelAliasRegular})
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 if [ "$count" = "1" ]; then

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -21,21 +22,23 @@ import (
 )
 
 type runtimeProjectSupervisor struct {
-	repoRoot         string
-	platformSpecPath string
-	cfg              *config.Config
-	stores           storeBundle
-	ready            *atomic.Bool
-	dev              bool
-	mountSources     workspaceMountSources
-	workspaceBackend workspaceBackendSelection
-	startRuntime     func(context.Context, *runtime.Runtime) error
-	shutdownRuntime  func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
-	loadWorkflow     func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
-	validateSource   func(context.Context, semanticview.Source) error
-	initStateStores  func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
-	newWorkspaces    func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, error)
-	createRuntime    func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
+	repoRoot            string
+	platformSpecPath    string
+	cfg                 *config.Config
+	stores              storeBundle
+	ready               *atomic.Bool
+	dev                 bool
+	mountSources        workspaceMountSources
+	workspaceBackend    workspaceBackendSelection
+	credentials         runtimecredentials.Store
+	providerCredentials runtimecredentials.Store
+	startRuntime        func(context.Context, *runtime.Runtime) error
+	shutdownRuntime     func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
+	loadWorkflow        func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
+	validateSource      func(context.Context, semanticview.Source) error
+	initStateStores     func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
+	newWorkspaces       func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, error)
+	createRuntime       func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 
 	mu                              sync.RWMutex
 	currentRoot                     string
@@ -53,6 +56,8 @@ func newRuntimeProjectSupervisor(
 	ready *atomic.Bool,
 	mountSources workspaceMountSources,
 	workspaceBackend workspaceBackendSelection,
+	credentials runtimecredentials.Store,
+	providerCredentials runtimecredentials.Store,
 	initialRoot string,
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
@@ -64,14 +69,16 @@ func newRuntimeProjectSupervisor(
 		dev = devMode[0]
 	}
 	return &runtimeProjectSupervisor{
-		repoRoot:         strings.TrimSpace(repoRoot),
-		platformSpecPath: strings.TrimSpace(platformSpecPath),
-		cfg:              cfg,
-		stores:           stores,
-		ready:            ready,
-		dev:              dev,
-		mountSources:     mountSources,
-		workspaceBackend: workspaceBackend,
+		repoRoot:            strings.TrimSpace(repoRoot),
+		platformSpecPath:    strings.TrimSpace(platformSpecPath),
+		cfg:                 cfg,
+		stores:              stores,
+		ready:               ready,
+		dev:                 dev,
+		mountSources:        mountSources,
+		workspaceBackend:    workspaceBackend,
+		credentials:         credentials,
+		providerCredentials: providerCredentials,
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
@@ -202,11 +209,13 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		Config: s.cfg,
 		Stores: s.stores.runtimeStores(),
 		Options: runtime.RuntimeOptions{
-			SelfCheck:          false,
-			WorkflowModule:     module,
-			WorkspaceLifecycle: workspaces,
-			BundleFingerprint:  bundleIdentity.Fingerprint,
-			BundleSourceFact:   bundleSourceFact,
+			SelfCheck:           false,
+			WorkflowModule:      module,
+			WorkspaceLifecycle:  workspaces,
+			BundleFingerprint:   bundleIdentity.Fingerprint,
+			BundleSourceFact:    bundleSourceFact,
+			Credentials:         s.credentials,
+			ProviderCredentials: s.providerCredentials,
 		},
 	})
 	if err != nil {

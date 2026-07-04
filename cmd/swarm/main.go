@@ -212,17 +212,18 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				SourceLoader:                   runForkSourceLoader,
 				ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
 				AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-					Config:             req.Config,
-					EntityStore:        stores.ToolEntityStore,
-					HumanTaskStore:     stores.HumanTaskStore,
-					SessionRegistry:    stores.SessionRegistry,
-					ConversationStore:  stores.ConversationStore,
-					TurnStore:          stores.TurnStore,
-					ScheduleStore:      stores.ScheduleStore,
-					MailboxStore:       stores.MailboxStore,
-					Workspace:          req.Workspaces,
-					Credentials:        req.Credentials,
-					ManagedCredentials: req.ManagedCredentials,
+					Config:              req.Config,
+					EntityStore:         stores.ToolEntityStore,
+					HumanTaskStore:      stores.HumanTaskStore,
+					SessionRegistry:     stores.SessionRegistry,
+					ConversationStore:   stores.ConversationStore,
+					TurnStore:           stores.TurnStore,
+					ScheduleStore:       stores.ScheduleStore,
+					MailboxStore:        stores.MailboxStore,
+					Workspace:           req.Workspaces,
+					Credentials:         req.Credentials,
+					ManagedCredentials:  req.ManagedCredentials,
+					ProviderCredentials: req.ProviderCredentials,
 				},
 			},
 			RuntimeContexts:  apiRuntimeContexts,
@@ -392,6 +393,7 @@ type serveRuntimeBundleContextRequest struct {
 	WorkspaceBackend       workspaceBackendSelection
 	Credentials            runtimecredentials.Store
 	ManagedCredentials     runtimemanagedcredentials.Store
+	ProviderCredentials    runtimecredentials.Store
 	BootStartedAt          time.Time
 	BootProgress           func(runtime.BootProgressEvent)
 	EnableToolGateway      bool
@@ -720,6 +722,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			BundleSourceFact:                 bundleSourceFact,
 			Credentials:                      req.Credentials,
 			ManagedCredentials:               req.ManagedCredentials,
+			ProviderCredentials:              req.ProviderCredentials,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -745,7 +748,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}, nil
 }
 
-func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding) (runtimellm.Runtime, error) {
+func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store) (runtimellm.Runtime, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("runtime config is required")
 	}
@@ -755,6 +758,7 @@ func buildForkChatSandboxLLMRuntime(cfg *config.Config, workspaces workspace.Res
 		LockOwner:   "forkchat-sandbox",
 		Workspaces:  workspaces,
 		ToolGateway: binding,
+		Credentials: providerCredentials,
 	}.Build()
 }
 
@@ -975,6 +979,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		slog.Error("configure managed credentials", "error", err)
 		return 1
 	}
+	providerCredentialStore, err := buildProviderCredentialStore()
+	if err != nil {
+		slog.Error("configure provider credentials", "error", err)
+		return 1
+	}
 
 	apiListener, err := listenServeHTTPListener("api", opts.APIListenAddr)
 	if err != nil {
@@ -1017,6 +1026,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			WorkspaceBackend:       workspaceBackend,
 			Credentials:            credentialStore,
 			ManagedCredentials:     managedCredentialStore,
+			ProviderCredentials:    providerCredentialStore,
 			BootStartedAt:          bootStartedAt,
 			BootProgress:           reporter.runtimeSink(),
 			EnableToolGateway:      i == 0,
@@ -1042,14 +1052,14 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
 
-	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntime(cfg, workspaces, toolGatewayBinding, providerCredentialStore)
 	if err != nil {
 		log.Printf("init forkchat sandbox runtime: %v", err)
 		return 1
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackend, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackend, credentialStore, providerCredentialStore, contractsRoot, bundle, source, rt, opts.Dev)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is split to RuntimeContextManager Load/Unload work")
 	}
@@ -1078,6 +1088,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		Workspaces:              workspaces,
 		Credentials:             credentialStore,
 		ManagedCredentials:      managedCredentialStore,
+		ProviderCredentials:     providerCredentialStore,
 	})
 	if err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
@@ -1643,6 +1654,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
+		providerCredentialStore, err := buildProviderCredentialStore()
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: configure provider credentials: %v\n", err)
+			}
+			return 1
+		}
 		selectedProject := resolveLocalRuntimeStateProject(repo, cliContractPlatformSpecPaths{ContractsPath: contractsRoot})
 		mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, "", cfg, selectedProject, true)
 		if err != nil {
@@ -1674,17 +1692,18 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			},
 			ContractSelection: runtimerunforkadmission.SelectedContractSelection(source, contractsRoot),
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config:             cfg,
-				EntityStore:        stores.ToolEntityStore,
-				HumanTaskStore:     stores.HumanTaskStore,
-				SessionRegistry:    stores.SessionRegistry,
-				ConversationStore:  stores.ConversationStore,
-				TurnStore:          stores.TurnStore,
-				ScheduleStore:      stores.ScheduleStore,
-				MailboxStore:       stores.MailboxStore,
-				Workspace:          workspaces,
-				Credentials:        credentialStore,
-				ManagedCredentials: managedCredentialStore,
+				Config:              cfg,
+				EntityStore:         stores.ToolEntityStore,
+				HumanTaskStore:      stores.HumanTaskStore,
+				SessionRegistry:     stores.SessionRegistry,
+				ConversationStore:   stores.ConversationStore,
+				TurnStore:           stores.TurnStore,
+				ScheduleStore:       stores.ScheduleStore,
+				MailboxStore:        stores.MailboxStore,
+				Workspace:           workspaces,
+				Credentials:         credentialStore,
+				ManagedCredentials:  managedCredentialStore,
+				ProviderCredentials: providerCredentialStore,
 			},
 		})
 		if err != nil {
@@ -3274,7 +3293,7 @@ func isLocalListenerHost(host string) bool {
 	return host == "" || host == "::" || host == "0.0.0.0" || host == "127.0.0.1" || host == "::1" || strings.EqualFold(host, "localhost")
 }
 
-func buildCredentialStore() (runtimecredentials.Store, error) {
+func credentialFileStore() (*runtimecredentials.FileStore, error) {
 	path := strings.TrimSpace(os.Getenv("SWARM_CREDENTIALS_FILE"))
 	if path == "" {
 		var err error
@@ -3283,7 +3302,11 @@ func buildCredentialStore() (runtimecredentials.Store, error) {
 			return nil, err
 		}
 	}
-	fileStore, err := runtimecredentials.NewFileStore(path)
+	return runtimecredentials.NewFileStore(path)
+}
+
+func buildCredentialStore() (runtimecredentials.Store, error) {
+	fileStore, err := credentialFileStore()
 	if err != nil {
 		return nil, err
 	}
@@ -3292,6 +3315,10 @@ func buildCredentialStore() (runtimecredentials.Store, error) {
 
 func buildManagedCredentialStore() (runtimemanagedcredentials.Store, error) {
 	return runtimemanagedcredentials.NewDefaultFileStore()
+}
+
+func buildProviderCredentialStore() (runtimecredentials.Store, error) {
+	return credentialFileStore()
 }
 
 func configuredWorkspaceLifecycle(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.DockerManager, error) {

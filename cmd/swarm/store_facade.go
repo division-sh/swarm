@@ -74,6 +74,7 @@ type selectedAPICapabilityRequest struct {
 	Workspaces              serveWorkspaceLifecycle
 	Credentials             runtimecredentials.Store
 	ManagedCredentials      runtimemanagedcredentials.Store
+	ProviderCredentials     runtimecredentials.Store
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)
