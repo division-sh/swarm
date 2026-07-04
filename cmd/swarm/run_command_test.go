@@ -99,6 +99,59 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 }
 
+func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	tokenFile := writeCLIAPITokenFile(t, "serve-token")
+	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
+		"serve_api_token_file": tokenFile,
+	}))
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
+	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
+		expectedToken: "serve-token",
+		strictAuth:    true,
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-token-file", "status": "running"}
+			case "run.get":
+				run := validDiagnosticRunHeader("run-token-file")
+				run["status"] = "completed"
+				run["ended_at"] = "2026-05-13T10:01:00Z"
+				return map[string]any{"run": run}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+		wsRows: []map[string]any{validRunCommandTraceRow("evt-token-file")},
+	})
+	defer server.Close()
+
+	opts := testRunCommandOptions(server)
+	var serveCalled atomic.Int32
+	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
+		serveCalled.Add(1)
+		if !serveOpts.LocalRun {
+			t.Errorf("local run serve opts LocalRun = false, want true")
+		}
+		<-ctx.Done()
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if serveCalled.Load() != 1 {
+		t.Fatalf("serve called = %d, want 1", serveCalled.Load())
+	}
+	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
+	assertRunCommandTraceSubscription(t, wsRequests, "run-token-file", true)
+}
+
 func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
@@ -774,6 +827,7 @@ type runCommandServerOptions struct {
 	wsSubscriptionResult map[string]any
 	wsCloseAfterRows     bool
 	expectedToken        string
+	strictAuth           bool
 }
 
 func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.Server, *[]jsonRPCRequest, *[]jsonRPCRequest) {
@@ -790,6 +844,10 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 		switch r.URL.Path {
 		case "/v1/rpc":
 			if got := r.Header.Get("Authorization"); got != "Bearer "+expectedToken {
+				if opts.strictAuth {
+					http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+					return
+				}
 				t.Errorf("Authorization = %q, want bearer token", got)
 			}
 			var req jsonRPCRequest
@@ -806,6 +864,10 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 			writeJSONRPCResult(t, w, req.ID, opts.rpcResponder(req, callIndex))
 		case "/v1/ws":
 			if got := r.Header.Get("Authorization"); got != "Bearer "+expectedToken {
+				if opts.strictAuth {
+					http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+					return
+				}
 				t.Errorf("WS Authorization = %q, want bearer token", got)
 			}
 			conn, err := upgrader.Upgrade(w, r, nil)
