@@ -147,6 +147,15 @@ func TestDeterministicWorkLadderStage0RejectsNarrowOrRuntimeClosure(t *testing.T
 			want: "inventory_id 1 metric_evidence.status = \"rough_estimate\" is not allowed",
 		},
 		{
+			name: "self-authorized metric status",
+			mutate: func(artifact *deterministicWorkLadderStage0) {
+				artifact.MeasurementPolicy.AllowedStatuses = append(artifact.MeasurementPolicy.AllowedStatuses, "estimated")
+				row := deterministicWorkLadderRowByID(t, artifact, 1)
+				row.MetricEvidence.Status = "estimated"
+			},
+			want: "measurement_policy allowed_statuses must exactly equal measured, unavailable, not_applicable",
+		},
+		{
 			name: "duplicate loses canonical row",
 			mutate: func(artifact *deterministicWorkLadderStage0) {
 				row := deterministicWorkLadderRowByID(t, artifact, 11)
@@ -160,6 +169,14 @@ func TestDeterministicWorkLadderStage0RejectsNarrowOrRuntimeClosure(t *testing.T
 				artifact.Policy.OrderingBasis = "intuition"
 			},
 			want: "policy ordering_basis = \"intuition\", want evidence_matrix",
+		},
+		{
+			name: "pure function row under helper-first decision",
+			mutate: func(artifact *deterministicWorkLadderStage0) {
+				row := deterministicWorkLadderRowByID(t, artifact, 13)
+				row.Classification = "pure_function_compute_module"
+			},
+			want: "pure function rows = 1, want 0 while next_after_stage1 is declarative_readability_helpers_before_pure_function",
 		},
 	}
 
@@ -284,7 +301,14 @@ func validateDeterministicWorkLadderWatchlist(watchlist deterministicWorkLadderW
 func validateDeterministicWorkLadderEvidence(artifact deterministicWorkLadderStage0) []string {
 	var problems []string
 	allowedClassifications := stringSet(artifact.ClassificationValues)
-	allowedMetricStatuses := stringSet(artifact.MeasurementPolicy.AllowedStatuses)
+	allowedMetricStatuses := map[string]bool{
+		"measured":       true,
+		"unavailable":    true,
+		"not_applicable": true,
+	}
+	if !sameStringSet(artifact.MeasurementPolicy.AllowedStatuses, allowedMetricStatuses) {
+		problems = append(problems, "measurement_policy allowed_statuses must exactly equal measured, unavailable, not_applicable")
+	}
 	if artifact.MeasurementPolicy.RoughEstimatesAllowed {
 		problems = append(problems, "measurement_policy rough_estimates_allowed = true, want false")
 	}
@@ -356,8 +380,8 @@ func validateDeterministicWorkLadderEvidence(artifact deterministicWorkLadderSta
 	if durableRows < 2 {
 		problems = append(problems, fmt.Sprintf("durable activity evidence rows = %d, want at least 2", durableRows))
 	}
-	if pureFunctionRows != 0 && artifact.Policy.NextAfterStage1 == "declarative_readability_helpers_before_pure_function" && !strings.Contains(artifact.Policy.OrderingDecision, "contrary evidence") {
-		problems = append(problems, "pure function rows present but ordering decision does not explain why helpers still come first")
+	if pureFunctionRows != 0 && artifact.Policy.NextAfterStage1 == "declarative_readability_helpers_before_pure_function" {
+		problems = append(problems, fmt.Sprintf("pure function rows = %d, want 0 while next_after_stage1 is declarative_readability_helpers_before_pure_function", pureFunctionRows))
 	}
 
 	return problems
@@ -463,4 +487,16 @@ func stringSet(values []string) map[string]bool {
 		out[value] = true
 	}
 	return out
+}
+
+func sameStringSet(values []string, want map[string]bool) bool {
+	if len(values) != len(want) {
+		return false
+	}
+	for _, value := range values {
+		if !want[value] {
+			return false
+		}
+	}
+	return true
 }
