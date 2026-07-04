@@ -156,12 +156,13 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
 			switch key {
-			case "", "event", "fields", "target", "broadcast":
+			case "", "event", "from", "fields", "target", "broadcast":
 			default:
 				return fmt.Errorf("UNDEFINED-FIELD: emit field %q not in platform spec", key)
 			}
 		}
 		var event string
+		var from string
 		fields := map[string]ExpressionValue{}
 		var target EmitTargetSpec
 		var broadcast bool
@@ -171,6 +172,13 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 			switch key {
 			case "event":
 				if err := value.Decode(&event); err != nil {
+					return err
+				}
+			case "from":
+				if err := value.Decode(&from); err != nil {
+					return err
+				}
+				if err := validateEmitFromSource(from); err != nil {
 					return err
 				}
 			case "fields":
@@ -193,6 +201,7 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 		}
 		*e = EmitSpec{
 			Event:     strings.TrimSpace(event),
+			From:      strings.TrimSpace(from),
 			Fields:    fields,
 			Target:    target.Normalized(),
 			Broadcast: broadcast,
@@ -275,7 +284,7 @@ func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 					return EmitTargetSpec{}, err
 				}
 			case "match":
-				match, err := decodeEmitFieldsNode(value)
+				match, err := decodeExpressionValueMapNode(value, "emit.target.match")
 				if err != nil {
 					return EmitTargetSpec{}, fmt.Errorf("INVALID-EMIT: emit.target.match must be a mapping: %w", err)
 				}
@@ -306,6 +315,10 @@ func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 }
 
 func decodeEmitFieldsNode(node *yaml.Node) (map[string]ExpressionValue, error) {
+	return decodeExpressionValueMapNode(node, "emit.fields")
+}
+
+func decodeExpressionValueMapNode(node *yaml.Node, label string) (map[string]ExpressionValue, error) {
 	if node == nil {
 		return nil, nil
 	}
@@ -313,7 +326,7 @@ func decodeEmitFieldsNode(node *yaml.Node) (map[string]ExpressionValue, error) {
 		return nil, nil
 	}
 	if node.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("INVALID-EMIT: emit.fields must be a mapping")
+		return nil, fmt.Errorf("INVALID-EMIT: %s must be a mapping", label)
 	}
 	fields := make(map[string]ExpressionValue, len(node.Content)/2)
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -323,7 +336,7 @@ func decodeEmitFieldsNode(node *yaml.Node) (map[string]ExpressionValue, error) {
 		}
 		value, err := decodeEmitFieldValueNode(node.Content[i+1])
 		if err != nil {
-			return nil, fmt.Errorf("INVALID-EMIT: emit.fields.%s: %w", target, err)
+			return nil, fmt.Errorf("INVALID-EMIT: %s.%s: %w", label, target, err)
 		}
 		fields[target] = value
 	}

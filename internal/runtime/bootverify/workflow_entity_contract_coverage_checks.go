@@ -509,7 +509,7 @@ func wave1EntityReaderCoverageByFlow(source semanticview.Source) map[string]map[
 		}
 		for eventType, handler := range source.NodeEventHandlers(nodeID) {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerEntityExpressions(handler) {
+			for _, expr := range handlerEntityExpressionsForSource(source, flowID, nodeID, eventType, handler) {
 				for _, ref := range wave1ResolvedExpressionRefs(source, flowID, nodeID, eventType, expr) {
 					ownerFlowID := strings.TrimSpace(ref.OwnerFlowID)
 					if out[ownerFlowID] == nil {

@@ -1059,8 +1059,14 @@ func bootverifyEmitSitesReferenceEntity(handler runtimecontracts.SystemNodeEvent
 }
 
 func bootverifyEmitReferencesEntity(spec runtimecontracts.EmitSpec) bool {
+	if strings.TrimSpace(spec.From) == runtimecontracts.EmitFromEntity {
+		return true
+	}
 	for _, value := range spec.Fields {
 		if value.Kind == runtimecontracts.ExpressionKindCEL && workflowexpr.ExpressionReferencesEntity(value.CEL) {
+			return true
+		}
+		if value.Kind == runtimecontracts.ExpressionKindCEL && strings.TrimSpace(value.CEL) == runtimecontracts.EmitFromEntity {
 			return true
 		}
 	}

@@ -113,6 +113,25 @@ func TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite(t *testing.T) {
 	}
 }
 
+func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
+	source := loadAuthoredEmitSiteLoweringFixture(t)
+
+	sites := AuthoredEmitSites(source)
+	matches := authoredEmitSitesByFlowNodeEvent(sites, "", "dispatcher", "market_research.scan_assigned")
+	if len(matches) != 1 {
+		t.Fatalf("expected one lowered authored emit site, got %d: %#v", len(matches), authoredEmitSiteSummaries(sites))
+	}
+	if matches[0].Spec.From != "" {
+		t.Fatalf("semantic view retained authored emit.from = %q", matches[0].Spec.From)
+	}
+	if expr := matches[0].Spec.Fields["scan_id"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "entity.scan_id" {
+		t.Fatalf("scan_id field = %#v, want CEL entity.scan_id", expr)
+	}
+	if expr := matches[0].Spec.Fields["geography"]; expr.Kind != runtimecontracts.ExpressionKindCEL || expr.CEL != "payload.geography" {
+		t.Fatalf("geography field = %#v, want CEL payload.geography", expr)
+	}
+}
+
 func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
 		rootNodeID:      "root-node",
@@ -284,6 +303,69 @@ flows: []
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.nestedPackageNodeID, "support.start", opts.nestedPackageEmit, "", false))
 	}
 
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return Wrap(bundle)
+}
+
+func loadAuthoredEmitSiteLoweringFixture(t *testing.T) Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := t.TempDir()
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: authored-emit-site-lowering
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows: []
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+initial_state: pending
+states: [pending, done]
+terminal_states: [done]
+pins:
+  inputs:
+    events: [scan.corpus_dispatch]
+  outputs:
+    events: [market_research.scan_assigned]
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), `
+scan.corpus_dispatch:
+  geography:
+    type: string
+  required: [geography]
+market_research.scan_assigned:
+  scan_id:
+    type: string
+  geography:
+    type: string
+  required: [scan_id, geography]
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+scan:
+  scan_id:
+    type: text
+`)
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+dispatcher:
+  id: dispatcher
+  execution_type: system_node
+  event_handlers:
+    scan.corpus_dispatch:
+      emit:
+        event: market_research.scan_assigned
+        from: entity
+        fields:
+          geography: payload
+`)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

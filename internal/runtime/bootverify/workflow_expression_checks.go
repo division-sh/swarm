@@ -8,6 +8,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -74,7 +75,8 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 		nodeID = strings.TrimSpace(nodeID)
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerEntityExpressions(handler) {
+			flowID := nodeFlowID(c.source, nodeID)
+			for _, expr := range handlerEntityExpressionsForSource(c.source, flowID, nodeID, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
 					continue
 				}
@@ -101,7 +103,8 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 		nodeID = strings.TrimSpace(nodeID)
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerEntityExpressions(handler) {
+			flowID := nodeFlowID(c.source, nodeID)
+			for _, expr := range handlerEntityExpressionsForSource(c.source, flowID, nodeID, eventType, handler) {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleEmitFields &&
 					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
 					continue
@@ -135,7 +138,7 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 		}
 		for eventType, handler := range node.EventHandlers {
 			eventType = strings.TrimSpace(eventType)
-			for _, expr := range handlerEntityExpressions(handler) {
+			for _, expr := range handlerEntityExpressionsForSource(c.source, flowID, nodeID, eventType, handler) {
 				for _, ref := range runtimepipeline.WorkflowEntityReferences(expr.Expression) {
 					ref = strings.TrimSpace(ref)
 					if ref == "" {
@@ -441,64 +444,6 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			out = append(out, expressionReference{Kind: "count condition", Expression: condition, Phase: runtimepipeline.WorkflowEntityFieldLifecycleCount})
 		}
 	}
-	appendEmitExpressions := func(kindPrefix string, spec runtimecontracts.EmitSpec, allowBareItem bool) {
-		for key, value := range spec.Fields {
-			expr := strings.TrimSpace(value.CEL)
-			if expr == "" && value.Kind == runtimecontracts.ExpressionKindRef {
-				expr = strings.TrimSpace(value.Ref)
-			}
-			if expr != "" {
-				out = append(out, expressionReference{
-					Kind:          kindPrefix + " emit field " + strings.TrimSpace(key),
-					Expression:    expr,
-					Phase:         runtimepipeline.WorkflowEntityFieldLifecycleEmitFields,
-					AllowBareItem: allowBareItem,
-				})
-			}
-		}
-	}
-	appendEmitExpressions("handler", handler.Emit, false)
-	if handler.Guard != nil {
-		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
-			appendEmitExpressions("guard escalation", failureSpec.EscalationEmitSpec(), false)
-			if len(out) > 0 {
-				for i := range out {
-					if strings.HasPrefix(out[i].Kind, "guard escalation emit field ") {
-						out[i].Phase = runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation
-					}
-				}
-			}
-		}
-	}
-	if handler.FanOut != nil {
-		appendEmitExpressions("fan_out", handler.FanOut.Emit, true)
-	}
-	for _, rule := range handler.Rules {
-		appendEmitExpressions("rule", rule.Emit, false)
-		if rule.FanOut != nil {
-			appendEmitExpressions("rule fan_out", rule.FanOut.Emit, true)
-		}
-	}
-	for _, rule := range handler.OnComplete {
-		appendEmitExpressions("on_complete", rule.Emit, false)
-		if rule.FanOut != nil {
-			appendEmitExpressions("on_complete fan_out", rule.FanOut.Emit, true)
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			appendEmitExpressions("accumulate.on_complete", rule.Emit, false)
-			if rule.FanOut != nil {
-				appendEmitExpressions("accumulate.on_complete fan_out", rule.FanOut.Emit, true)
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			appendEmitExpressions("accumulate.on_timeout", handler.Accumulate.OnTimeout.Emit, false)
-			if handler.Accumulate.OnTimeout.FanOut != nil {
-				appendEmitExpressions("accumulate.on_timeout fan_out", handler.Accumulate.OnTimeout.FanOut.Emit, true)
-			}
-		}
-	}
 	if handler.Query != nil {
 		appendQueryExpressions(&out, *handler.Query)
 	}
@@ -518,6 +463,60 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 		}
 		if branch.Else != nil {
 			appendRuleExpressions("branch.else", *branch.Else)
+		}
+	}
+	return out
+}
+
+func handlerEntityExpressionsForSource(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+	out := handlerEntityExpressions(handler)
+	out = append(out, handlerEmitExpressionsForSource(source, flowID, nodeID, eventType, handler)...)
+	return out
+}
+
+func handlerEmitExpressionsForSource(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+	out := make([]expressionReference, 0, 8)
+	appendSpec := func(kindPrefix, siteKey string, spec runtimecontracts.EmitSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, allowBareItem bool) {
+		if spec.Empty() {
+			return
+		}
+		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
+			lowered, err := bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
+				NodeID:           nodeID,
+				FlowID:           flowID,
+				TriggerEventType: eventType,
+				Site:             siteKey,
+			}, spec)
+			if err != nil {
+				return
+			}
+			spec = lowered
+		}
+		for key, value := range spec.Fields {
+			expr := strings.TrimSpace(value.CEL)
+			if expr == "" && value.Kind == runtimecontracts.ExpressionKindRef {
+				expr = strings.TrimSpace(value.Ref)
+			}
+			if expr == "" {
+				continue
+			}
+			out = append(out, expressionReference{
+				Kind:          kindPrefix + " emit field " + strings.TrimSpace(key),
+				Expression:    expr,
+				Phase:         phase,
+				AllowBareItem: allowBareItem,
+			})
+		}
+	}
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+		allowBareItem := strings.Contains(site.Source, "fan_out.emit")
+		appendSpec(site.Source, site.SiteKey, site.Spec, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields, allowBareItem)
+	}
+	if handler.Guard != nil {
+		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
+			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
+				appendSpec("guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation, false)
+			}
 		}
 	}
 	return out

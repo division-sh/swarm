@@ -3372,6 +3372,91 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayload(t *testing.T) {
 	}
 }
 
+func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"scan_id", "geography"}
+	bundle.Events["market_research.scan_assigned"] = entry
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		From:  "entity",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"geography": runtimecontracts.CELExpression("payload"),
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "handler.emit") {
+		t.Fatalf("unexpected payload completeness error after emit.from lowering, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "emit_field_expression_validation", "payload") {
+		t.Fatalf("bare namespace micro-sugar was validated before lowering, got %#v", report.Errors())
+	}
+}
+
+func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"scan_id", "geography"}
+	bundle.Events["market_research.scan_assigned"] = entry
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		From:  "entity",
+	}
+	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
+		ID:        "full",
+		Condition: "else",
+		Emit: runtimecontracts.EmitSpec{
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"geography": runtimecontracts.CELExpression("payload"),
+			},
+		},
+	}}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[full].emit_template") {
+		t.Fatalf("unexpected template payload completeness error after emit.from lowering, got %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "emit_field_expression_validation", "payload") {
+		t.Fatalf("template bare namespace micro-sugar was validated before lowering, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsEmitFromLoweringErrorsAsPayloadCompletenessFailures(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Required = []string{"scan_id", "missing_required"}
+	entry.Payload.Properties["missing_required"] = runtimecontracts.EventFieldSpec{Type: "string"}
+	bundle.Events["market_research.scan_assigned"] = entry
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		From:  "entity",
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "emit.from entity cannot fill required emitted payload field missing_required") {
+		t.Fatalf("expected emit.from missing source field error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(t *testing.T) {
 	t.Parallel()
 

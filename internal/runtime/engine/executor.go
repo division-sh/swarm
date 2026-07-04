@@ -1012,7 +1012,10 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 			continue
 		}
 		eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
-		emitSpec := spec.Emit
+		emitSpec, err := e.lowerEmitSpecForFrame(frame, "handler.fan_out.emit", spec.Emit)
+		if err != nil {
+			return false, err
+		}
 		emitSpec.Event = eventType
 		frame.state.SetFanOut("item", item)
 		payload := map[string]any{}
@@ -1385,7 +1388,10 @@ func lookupProjectionPath(raw map[string]any, path string) (any, bool) {
 }
 
 func (e *Executor) stepTransform(frame *executionFrame) error {
-	activeEmits := selectedDeclarativeEmitSpecs(frame.req.Handler, frame.rule)
+	activeEmits, err := e.selectedDeclarativeEmitSpecs(frame)
+	if err != nil {
+		return err
+	}
 	if len(activeEmits) != 1 {
 		return nil
 	}
@@ -1407,7 +1413,10 @@ func (e *Executor) stepTransform(frame *executionFrame) error {
 }
 
 func (e *Executor) stepEmits(frame *executionFrame) error {
-	activeEmits := selectedDeclarativeEmitSpecs(frame.req.Handler, frame.rule)
+	activeEmits, err := e.selectedDeclarativeEmitSpecs(frame)
+	if err != nil {
+		return err
+	}
 	if len(activeEmits) == 0 {
 		return nil
 	}
@@ -2058,6 +2067,41 @@ type activeDeclarativeEmitSpec struct {
 	Spec   runtimecontracts.EmitSpec
 }
 
+func (e *Executor) selectedDeclarativeEmitSpecs(frame *executionFrame) ([]activeDeclarativeEmitSpec, error) {
+	active := selectedDeclarativeEmitSpecs(frame.req.Handler, frame.rule)
+	for i := range active {
+		lowered, err := e.lowerEmitSpecForFrame(frame, active[i].Source, active[i].Spec)
+		if err != nil {
+			return nil, err
+		}
+		active[i].Spec = lowered
+	}
+	return active, nil
+}
+
+func (e *Executor) lowerEmitSpecForFrame(frame *executionFrame, site string, spec runtimecontracts.EmitSpec) (runtimecontracts.EmitSpec, error) {
+	if !runtimecontracts.EmitSpecNeedsFieldLowering(spec) {
+		return spec, nil
+	}
+	if e == nil || e.deps.Source == nil || frame == nil {
+		return runtimecontracts.EmitSpec{}, fmt.Errorf("%s uses emit field lowering sugar but runtime has no contract source for canonical lowering", strings.TrimSpace(site))
+	}
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return runtimecontracts.EmitSpec{}, fmt.Errorf("%s uses emit field lowering sugar but runtime source is not a workflow contract bundle", strings.TrimSpace(site))
+	}
+	triggerEvent := strings.TrimSpace(frame.req.HandlerEventKey)
+	if triggerEvent == "" {
+		triggerEvent = strings.TrimSpace(string(frame.req.Event.Type()))
+	}
+	return bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
+		NodeID:           frame.req.NodeID.String(),
+		FlowID:           frame.req.FlowID.String(),
+		TriggerEventType: triggerEvent,
+		Site:             site,
+	}, spec)
+}
+
 func selectedDeclarativeEmitSpecs(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry) []activeDeclarativeEmitSpec {
 	out := make([]activeDeclarativeEmitSpec, 0, 2)
 	if rule != nil {
@@ -2398,7 +2442,10 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 		eventType := parsed.EventType
 		frame.result.Status = OutcomeEscalated
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "escalate:"+eventType)
-		emitSpec := failureSpec.EscalationEmitSpec()
+		emitSpec, err := e.lowerEmitSpecForFrame(frame, "guard.on_fail.escalate", failureSpec.EscalationEmitSpec())
+		if err != nil {
+			return err
+		}
 		emitSpec.Event = eventType
 		payload := map[string]any{}
 		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{})

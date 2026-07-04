@@ -288,9 +288,13 @@ contract_formats:
       rule: |
         Event payloads are producer-complete only. Every declared
         payload field must be populated by the active emit site's
-        `emit.fields`. No payload defaults. No implicit passthrough.
-        No nested `payload:` block. Missing declared fields and
-        undeclared emitted fields are contract violations.
+        canonical explicit `emit.fields` map. `emit.from` and same-named
+        bare namespace `emit.fields` values are only authoring sugar for
+        system-node emitted payload maps; they lower to the same explicit map
+        before validation, generated/semantic views, and runtime execution. No
+        payload defaults. No implicit passthrough. No nested `payload:` block.
+        Missing declared fields and undeclared emitted fields are contract
+        violations.
       envelope_split: |
         Envelope fields are runtime-owned and are not author-declared
         in event schemas. Consumers access them through event.*,
@@ -1229,8 +1233,10 @@ event_payload_migration:
       Author-declared payload fields are accessed through payload.*.
     strict_payload_completeness: |
       Event payloads are producer-complete only. Every declared payload
-      field must be populated by the emitting surface's emit.fields. No
-      payload defaults, no implicit passthrough, no undeclared extras.
+      field must be populated by the emitting surface's canonical explicit
+      emit.fields. `emit.from` lowering may fill required declared fields before
+      completeness checks, but it is not runtime passthrough. No payload
+      defaults, no implicit passthrough, no undeclared extras.
     retired:
     - nested payload wrappers
     - jsonb payload fields
@@ -1796,6 +1802,27 @@ handler_specification:
         ordinary rules emit sites, on_complete, accumulate.on_timeout, or fan_out emit, boot fails with ambiguity. Payload
         ownership must move to the active emit site. The only approved additive rules success surface is explicit
         on_success.emit, which is not a handler-level emit overload.
+      emit_field_lowering:
+        syntax: "`emit.from` is an optional sibling of `emit.event`, `emit.fields`, `emit.target`, and `emit.broadcast`.
+          It is valid only on emitted-event payload `EmitSpec` surfaces."
+        allowed_sources: "`entity` and `payload` only. The value names exactly one source namespace; lists, fallbacks,
+          wildcards, multi-source selection, and heuristic matching are invalid."
+        lowering: "`emit.from: <source>` fills required declared payload fields for the emitted event when the same-named
+          field exists in the source and the target field is not explicitly present in `emit.fields`. Optional payload fields
+          are never auto-filled; authors opt into optionals through explicit `emit.fields` entries."
+        field_value_micro_sugar: "Inside emitted payload `emit.fields` only, a bare namespace value means same-named source
+          field: `interest_score: payload` lowers to `interest_score: payload.interest_score`; `bucket: entity` lowers to
+          `bucket: entity.bucket`. Explicit dotted CEL values remain the canonical authoring form for renames and computed
+          selections."
+        canonical_output: The generated/semantic view and every validator/runtime consumer see the lowered canonical explicit
+          `emit.fields` map with `emit.from` removed. Runtime evaluates only that explicit map; it never performs implicit
+          entity or trigger-payload passthrough.
+        fail_closed: Missing source namespace, invalid source namespace, missing source field, missing emitted event payload
+          schema, missing required emitted payload field after lowering, undeclared target payload field, and envelope-owned
+          payload keys are hard invalidity.
+        excluded_surfaces: This sugar is not valid for `config_from`, `emit.target.match`, action mailbox payloads,
+          artifact-repo payload/provenance maps, connect maps, or data-handoff maps. Those remain separate mapping surfaces
+          and must not inherit `emit.from` or bare namespace field-value lowering.
       on_success:
         field: on_success
         type: object
@@ -1830,11 +1857,14 @@ handler_specification:
         description: string — human-readable note
       emit_template_specialization:
         syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
-          `emit.fields`. Each rule then declares `emit.fields` without `emit.event` to add branch-specific fields. `emit`
-          remains one object shape everywhere, `{event?, fields?, target?, broadcast?}`.
-        field_values: All `emit.fields` values use the normal CEL expression string grammar. String constants are CEL string
-          literals, for example YAML value `'"high"'`. The platform does not support `emit_fields`, flattened rule emit
-          payload maps, `literal`, `value`, or any second field-value dialect for this specialization.
+          `emit.from` / `emit.fields`. Each rule then declares `emit.fields` and may declare the same `emit.from` without
+          `emit.event` to add branch-specific fields. `emit` remains one object shape everywhere, `{event?, from?, fields?,
+          target?, broadcast?}`.
+        field_values: All `emit.fields` values use the normal CEL expression string grammar after emitted-payload lowering.
+          String constants are CEL string literals, for example YAML value `'"high"'`. The same-named bare namespace
+          micro-sugar described in `emit_field_lowering` is the only additional emitted-payload field-value shorthand.
+          The platform does not support `emit_fields`, flattened rule emit payload maps, `literal`, `value`, or any second
+          field-value dialect for this specialization.
         matching: Rules keep ordered first-match semantics. Threshold-style overlapping rules are valid when ordered from
           most specific to least specific; the platform does not fail closed merely because multiple conditions could be true.
         required_else: Every rules emit template specialization must include an `else` rule so every successful rules-handler
@@ -1843,10 +1873,10 @@ handler_specification:
           one effective emit. Runtime evaluates that merged effective emit's fields, then emits its inherited `emit.event`.
         fill_only: Rule specialization fields are fill-only. A rule field that redefines a handler template field is invalid
           and boot fails closed.
-        unsupported_combinations: Rule-level specialization may not set `emit.event`, `emit.target`, or `emit.broadcast`;
-          those are not template refinements in this slice. Handler-level `on_success.emit` remains the separate additive
-          two-event surface and is not part of template specialization. on_complete, accumulate.on_timeout, fan_out, and
-          action-originated emits are out of this specialization slice.
+        unsupported_combinations: Rule-level specialization may not set `emit.event`, `emit.target`, or `emit.broadcast`.
+          If both handler template and rule specialization declare `emit.from`, the values must match. Handler-level
+          `on_success.emit` remains the separate additive two-event surface and is not part of template specialization.
+          on_complete, accumulate.on_timeout, fan_out, and action-originated emits are out of this specialization slice.
         proof_consumers: Bootverify, semantic view, produces derivation, route authority, runtime execution, and pipeline/outbox
           proof consume the same merged effective emit, not the raw handler template and raw rule specialization as separate
           events.
@@ -2816,10 +2846,12 @@ engine:
       agents: Not constrained. Multiple agents may subscribe to the same event freely.
       enforcement: Boot validation rejects duplicate node handlers for the same event.
     emit_payload_default: 'For supported declarative system-node emit sites, the platform constructs the business payload by:
-      1. Start from an empty payload. 2. Evaluate emit.fields, if present, into the payload. 3. Attach runtime-owned envelope
-      context on the emitted event carrier rather than copying it into payload. There is no implicit entity or trigger-payload
-      passthrough on this surface. Runtime rejects authored envelope-owned keys in emit.fields fail-closed. Runtime also validates
-      the resulting payload fail-closed: undeclared producer-authored payload fields are rejected, not silently trimmed.'
+      1. Lower emitted-payload authoring sugar (`emit.from` and bare namespace same-named `emit.fields` values) to a canonical
+      explicit emit.fields map. 2. Start from an empty payload. 3. Evaluate the canonical emit.fields, if present, into the
+      payload. 4. Attach runtime-owned envelope context on the emitted event carrier rather than copying it into payload.
+      There is no implicit entity or trigger-payload passthrough on this surface. Runtime rejects authored envelope-owned keys
+      in emit.fields fail-closed. Runtime also validates the resulting payload fail-closed: undeclared producer-authored payload
+      fields are rejected, not silently trimmed.'
     dual_path_events: An event can be both an input pin (arriving from outside the flow) and internally generated (emitted
       by a handler within the flow). The system node handler processes it identically regardless of source. No priority or
       deduplication between paths — if the same event fires from both, it runs twice (idempotency_key in the events table
@@ -9840,13 +9872,15 @@ observation_model:
       description: Rules for constructing emitted event payloads on supported system-node runtime emit surfaces.
       declarative_system_node_emit_surface:
         construction_order:
-        - 1. Start from an empty business payload
-        - 2. Evaluate emit.fields for the active emit site, if present
-        - 3. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload
+        - 1. Lower emitted-payload `emit.from` and bare namespace field-value sugar to the canonical explicit emit.fields map
+        - 2. Start from an empty business payload
+        - 3. Evaluate canonical emit.fields for the active emit site, if present
+        - 4. Attach runtime-owned envelope context to the emitted event carrier; envelope fields are not copied into payload
         ownership_rule: Runtime-owned envelope fields belong to the event carrier, not to emit.fields or payload.*
-        note: This surface has no implicit entity passthrough or trigger-payload passthrough. If an emitted event needs a field
-          beyond the runtime-owned envelope context, the producer must declare it explicitly in emit.fields at the active emit
-          site. Consumers read envelope fields through event.*.
+        note: This surface has no implicit entity passthrough or trigger-payload passthrough. `emit.from` is compile-time
+          lowering to explicit fields, not a runtime copy source. If an emitted event needs a field beyond the runtime-owned
+          envelope context, the producer must declare it explicitly in canonical emit.fields at the active emit site. Consumers
+          read envelope fields through event.*.
         runtime_validation:
           description: Runtime validates the emitted payload fail-closed on this surface.
           validation_view: Validate the producer-authored payload carrier against the target event schema after canonical
@@ -10414,14 +10448,22 @@ static_analyzer:
       - agent write proof via save_entity_field
     proof_carriers:
       explicit_emit_fields:
-        valid_for: producer-authored payload keys explicitly declared in emit.fields at the active emit site
+        valid_for: producer-authored payload keys in the canonical explicit emit.fields map at the active emit site
+      lowered_emit_from:
+        valid_for: required declared emitted payload fields filled by `emit.from` before validation when the same-named source
+          field exists in exactly one allowed source namespace (`entity` or `payload`)
+      lowered_bare_namespace_field_values:
+        valid_for: explicit emitted payload field entries whose value is the bare allowed namespace (`entity` or `payload`),
+          lowered to the same-named dotted source reference before expression validation
       non_payload_envelope_context:
         valid_for: runtime-owned envelope fields accessed through event.* rather than payload completeness proof
     no_emit_fields_rule:
-      description: When emit.fields is absent, no producer-authored payload fields are statically provable in this slice.
-    rule: For each required emitted-event payload field, emit hard-invalidity unless the field is explicitly covered by emit.fields
-      at the active emit site. Envelope-owned fields do not clear this proof because they are not payload carriers. The finding
-      message must say the field is not statically provable in the emitted payload.
+      description: When both canonical emit.fields and valid lowered emit.from coverage are absent, no producer-authored payload
+        fields are statically provable in this slice.
+    rule: For each required emitted-event payload field, emit hard-invalidity unless the field is covered by the canonical
+      explicit emit.fields map after emitted-payload lowering at the active emit site. Envelope-owned fields do not clear this
+      proof because they are not payload carriers. The finding message must say the field is not statically provable in the
+      emitted payload.
   slice_3_input_pin_producer_path_satisfaction:
     id: input_pin_wiring
     domain: semantic_drift
@@ -10947,7 +10989,7 @@ static_analyzer:
       - handler guards
       - handler conditions
       - on_complete and rules conditions
-      - emit.fields expressions
+      - canonical emit.fields expressions after emitted-payload lowering
       - data_accumulation expressions
       - query/filter expressions on entity paths
       excludes:

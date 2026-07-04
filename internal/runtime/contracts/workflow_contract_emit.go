@@ -162,6 +162,12 @@ func EffectiveRuleEmitTemplateSpec(handler SystemNodeEventHandler, rule HandlerR
 		return EmitSpec{}, false
 	}
 	spec := cloneEmitSpec(handler.Emit)
+	if strings.TrimSpace(rule.Emit.From) != "" {
+		if strings.TrimSpace(spec.From) != "" && strings.TrimSpace(spec.From) != strings.TrimSpace(rule.Emit.From) {
+			return EmitSpec{}, false
+		}
+		spec.From = strings.TrimSpace(rule.Emit.From)
+	}
 	if spec.Fields == nil {
 		spec.Fields = map[string]ExpressionValue{}
 	}
@@ -345,6 +351,9 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 		}
 		if !rule.Emit.Target.Empty() || rule.Emit.Broadcast {
 			return fmt.Errorf("UNSUPPORTED-EMIT: rules[%d].emit may only contribute fields in handler emit template specialization", idx)
+		}
+		if strings.TrimSpace(rule.Emit.From) != "" && strings.TrimSpace(handler.Emit.From) != "" && strings.TrimSpace(rule.Emit.From) != strings.TrimSpace(handler.Emit.From) {
+			return fmt.Errorf("INVALID-EMIT: rules[%d].emit.from conflicts with handler emit template from", idx)
 		}
 		if !rule.Emit.HasFields() {
 			return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires rules[%d].emit.fields", idx)

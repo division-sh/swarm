@@ -37,7 +37,16 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 		for triggerEventType, handler := range c.source.NodeEventHandlers(nodeID) {
 			triggerEventType = strings.TrimSpace(triggerEventType)
 			triggerProof := semanticview.ResolveFlowEventProof(c.source, flowID, triggerEventType)
-			for _, emitSite := range payloadCompletenessEmitSites(handler) {
+			for _, emitSite := range payloadCompletenessEmitSites(c.source, nodeID, flowID, triggerEventType, handler) {
+				if emitSite.Err != nil {
+					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
+						CheckID:  "semantic_drift_payload_completeness",
+						Severity: "error",
+						Message:  fmt.Sprintf("node %s handler %s at %s %v", nodeID, triggerEventType, emitSite.Label, emitSite.Err),
+						Location: nodeID,
+					})
+					continue
+				}
 				emitted := strings.TrimSpace(emitSite.EventType)
 				if emitted == "" {
 					continue
@@ -58,6 +67,15 @@ func (c *checkerContext) payloadCompleteness() []Finding {
 				}
 				if !emittedProof.HasSchema {
 					continue
+				}
+				declared := payloadCompletenessDeclaredFields(emittedProof.Entry)
+				for _, field := range payloadCompletenessUndeclaredFields(emitSite.Fields, declared) {
+					c.payloadCompletenessFindings = append(c.payloadCompletenessFindings, Finding{
+						CheckID:  "semantic_drift_payload_completeness",
+						Severity: "error",
+						Message:  fmt.Sprintf("event %s emitted by node %s handler %s at %s authors undeclared payload field %s in emit.fields", emittedDisplayName, nodeID, triggerEventType, emitSite.Label, field),
+						Location: nodeID,
+					})
 				}
 				required := payloadCompletenessRequiredFields(emittedProof.Entry)
 				if len(required) == 0 {
@@ -103,15 +121,34 @@ type payloadCompletenessEmitSite struct {
 	EventType string
 	Label     string
 	Fields    map[string]struct{}
+	Err       error
 }
 
 func payloadCompletenessRequiredFields(entry runtimecontracts.EventCatalogEntry) []string {
-	return uniquePayloadCompletenessStrings(entry.Required...)
+	required := append([]string{}, entry.Required...)
+	required = append(required, entry.Payload.Required...)
+	return uniquePayloadCompletenessStrings(required...)
 }
 
-func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
+func payloadCompletenessEmitSites(source semanticview.Source, nodeID, flowID, triggerEventType string, handler runtimecontracts.SystemNodeEventHandler) []payloadCompletenessEmitSite {
 	var out []payloadCompletenessEmitSite
 	add := func(label string, spec runtimecontracts.EmitSpec) {
+		if bundle, ok := semanticview.Bundle(source); ok && bundle != nil {
+			lowered, err := bundle.LowerEmitSpecFields(runtimecontracts.EmitFieldLoweringContext{
+				NodeID:           nodeID,
+				FlowID:           flowID,
+				TriggerEventType: triggerEventType,
+				Site:             label,
+			}, spec)
+			if err != nil {
+				out = append(out, payloadCompletenessEmitSite{
+					Label: strings.TrimSpace(label),
+					Err:   err,
+				})
+				return
+			}
+			spec = lowered
+		}
 		eventType := spec.EventType()
 		if eventType == "" {
 			return
@@ -130,49 +167,8 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 			Fields:    targets,
 		})
 	}
-	templateSites := runtimecontracts.HandlerRuleEmitTemplateSites(handler)
-	if len(templateSites) == 0 {
-		add("handler.emit", handler.Emit)
-	} else {
-		for _, site := range templateSites {
-			label := site.SiteKey
-			if strings.TrimSpace(site.RuleID) != "" {
-				label = "rules[" + strings.TrimSpace(site.RuleID) + "].emit_template"
-			}
-			add(label, site.Spec)
-		}
-	}
-	add("handler.on_success.emit", handler.OnSuccess.Emit)
-	if handler.FanOut != nil {
-		add("handler.fan_out.emit", handler.FanOut.Emit)
-	}
-	if len(templateSites) == 0 {
-		for i, rule := range handler.Rules {
-			add(payloadCompletenessRuleLabel("rules", i, rule.ID, "emit"), rule.Emit)
-			if rule.FanOut != nil {
-				add(payloadCompletenessRuleLabel("rules", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
-			}
-		}
-	}
-	for i, rule := range handler.OnComplete {
-		add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "emit"), rule.Emit)
-		if rule.FanOut != nil {
-			add(payloadCompletenessRuleLabel("on_complete", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
-		}
-	}
-	if handler.Accumulate != nil {
-		for i, rule := range handler.Accumulate.OnComplete {
-			add(payloadCompletenessRuleLabel("accumulate.on_complete", i, rule.ID, "emit"), rule.Emit)
-			if rule.FanOut != nil {
-				add(payloadCompletenessRuleLabel("accumulate.on_complete", i, rule.ID, "fan_out.emit"), rule.FanOut.Emit)
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil {
-			add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "emit"), handler.Accumulate.OnTimeout.Emit)
-			if handler.Accumulate.OnTimeout.FanOut != nil {
-				add(payloadCompletenessRuleLabel("accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID, "fan_out.emit"), handler.Accumulate.OnTimeout.FanOut.Emit)
-			}
-		}
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec)
 	}
 	if handler.Guard != nil {
 		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
@@ -181,6 +177,41 @@ func payloadCompletenessEmitSites(handler runtimecontracts.SystemNodeEventHandle
 			}
 		}
 	}
+	return out
+}
+
+func payloadCompletenessDeclaredFields(entry runtimecontracts.EventCatalogEntry) map[string]struct{} {
+	out := map[string]struct{}{}
+	for field := range entry.Payload.Properties {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out[field] = struct{}{}
+		}
+	}
+	for _, field := range append(entry.Required, entry.Payload.Required...) {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			out[field] = struct{}{}
+		}
+	}
+	return out
+}
+
+func payloadCompletenessUndeclaredFields(fields, declared map[string]struct{}) []string {
+	if len(fields) == 0 || len(declared) == 0 {
+		return nil
+	}
+	out := make([]string, 0)
+	for field := range fields {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if _, ok := declared[field]; !ok {
+			out = append(out, field)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -209,16 +240,6 @@ func isRuntimeOwnedCanonicalContextField(field string) bool {
 	}
 }
 
-func payloadCompletenessRuleLabel(scope string, index int, id, suffix string) string {
-	scope = strings.TrimSpace(scope)
-	id = strings.TrimSpace(id)
-	suffix = strings.TrimSpace(suffix)
-	if id != "" {
-		return fmt.Sprintf("%s[%s].%s", scope, id, suffix)
-	}
-	return fmt.Sprintf("%s[%d].%s", scope, index, suffix)
-}
-
 func payloadCompletenessTriggerSchemaState(entry runtimecontracts.EventCatalogEntry, hasSchema bool, field string) string {
 	if !hasSchema {
 		return "no schema"
@@ -228,7 +249,7 @@ func payloadCompletenessTriggerSchemaState(entry runtimecontracts.EventCatalogEn
 		return "no"
 	}
 	required := map[string]struct{}{}
-	for _, item := range entry.Required {
+	for _, item := range append(entry.Required, entry.Payload.Required...) {
 		item = strings.TrimSpace(item)
 		if item != "" {
 			required[item] = struct{}{}
@@ -252,6 +273,48 @@ func payloadCompletenessEntitySchemaState(entityFields map[string]struct{}, fiel
 		return "yes"
 	}
 	return "no"
+}
+
+func payloadCompletenessDeclarativeSiteLabel(site runtimecontracts.HandlerDeclarativeEmitSite) string {
+	switch strings.TrimSpace(site.Source) {
+	case "handler.rules.emit":
+		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "emit")
+	case "handler.rules.fan_out.emit":
+		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "fan_out.emit")
+	case "handler.rules.emit_template":
+		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "emit_template")
+	case "handler.on_complete.emit":
+		return payloadCompletenessRuleLabel("on_complete", site.RuleIndex, site.RuleID, "emit")
+	case "handler.on_complete.fan_out.emit":
+		return payloadCompletenessRuleLabel("on_complete", site.RuleIndex, site.RuleID, "fan_out.emit")
+	case "handler.accumulate.on_complete.emit":
+		return payloadCompletenessRuleLabel("accumulate.on_complete", site.RuleIndex, site.RuleID, "emit")
+	case "handler.accumulate.on_complete.fan_out.emit":
+		return payloadCompletenessRuleLabel("accumulate.on_complete", site.RuleIndex, site.RuleID, "fan_out.emit")
+	case "handler.accumulate.on_timeout.emit":
+		return payloadCompletenessRuleLabel("accumulate.on_timeout", site.RuleIndex, site.RuleID, "emit")
+	case "handler.accumulate.on_timeout.fan_out.emit":
+		return payloadCompletenessRuleLabel("accumulate.on_timeout", site.RuleIndex, site.RuleID, "fan_out.emit")
+	case "handler.branch.then.emit":
+		return payloadCompletenessRuleLabel("branch", site.RuleIndex, site.RuleID, "then.emit")
+	case "handler.branch.else.emit":
+		return payloadCompletenessRuleLabel("branch", site.RuleIndex, site.RuleID, "else.emit")
+	default:
+		if label := strings.TrimSpace(site.SiteKey); label != "" {
+			return label
+		}
+		return strings.TrimSpace(site.Source)
+	}
+}
+
+func payloadCompletenessRuleLabel(scope string, index int, id, suffix string) string {
+	scope = strings.TrimSpace(scope)
+	id = strings.TrimSpace(id)
+	suffix = strings.TrimSpace(suffix)
+	if id != "" {
+		return fmt.Sprintf("%s[%s].%s", scope, id, suffix)
+	}
+	return fmt.Sprintf("%s[%d].%s", scope, index, suffix)
 }
 
 func payloadCompletenessMessage(nodeID, triggerEventType, emittedEventType, field, emitSiteLabel string, emitFieldTargets map[string]struct{}, triggerEntry runtimecontracts.EventCatalogEntry, hasTriggerSchema bool, entityFields map[string]struct{}) string {

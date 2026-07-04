@@ -2224,6 +2224,94 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 	}
 }
 
+func TestExecutor_EmitFromLoweringQueuesCanonicalPayload(t *testing.T) {
+	outbox := &recordingEmitOutbox{}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        emitFromExecutorSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        outbox,
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, stubEvaluator{})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:   "entity-1",
+		NodeID:     "bucket-node",
+		ChainDepth: 1,
+		Event: eventtest.RootIngress(
+			"evt-1",
+			"account.scored",
+			"",
+			"",
+			mustEncodeJSON(t, map[string]any{"interest_score": 0.91, "computed_tier": "gold"}),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Time{},
+		),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Emit: runtimecontracts.EmitSpec{
+				Event: "account.bucketed",
+				From:  "entity",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"interest_score": runtimecontracts.CELExpression("payload"),
+					"tier":           runtimecontracts.CELExpression("payload.computed_tier"),
+				},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{
+			"account_id": "acct-1",
+			"bucket":     "vip",
+		}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("EmitIntents len = %d, want 1", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type()); got != "account.bucketed" {
+		t.Fatalf("emit event = %q, want account.bucketed", got)
+	}
+	payload := eventPayloadMap(t, result.EmitIntents[0].Event)
+	if got := payload["account_id"]; got != "acct-1" {
+		t.Fatalf("account_id = %#v, want acct-1", got)
+	}
+	if got := payload["bucket"]; got != "vip" {
+		t.Fatalf("bucket = %#v, want vip", got)
+	}
+	if got := payload["interest_score"]; got != 0.91 {
+		t.Fatalf("interest_score = %#v, want 0.91", got)
+	}
+	if got := payload["tier"]; got != "gold" {
+		t.Fatalf("tier = %#v, want gold", got)
+	}
+	if got := payload["shaped_for"]; got != "account.bucketed" {
+		t.Fatalf("shaped_for = %#v, want account.bucketed", got)
+	}
+	if got := len(outbox.intents); got != 1 {
+		t.Fatalf("outbox intents len = %d, want 1", got)
+	}
+}
+
+func TestExecutor_EmitFromLoweringRequiresCanonicalBundleAtRuntime(t *testing.T) {
+	exec := &Executor{}
+	_, err := exec.lowerEmitSpecForFrame(&executionFrame{}, "handler.emit", runtimecontracts.EmitSpec{
+		Event: "account.bucketed",
+		From:  "entity",
+	})
+	if err == nil || !strings.Contains(err.Error(), "runtime has no contract source for canonical lowering") {
+		t.Fatalf("lowerEmitSpecForFrame error = %v, want missing contract source failure", err)
+	}
+}
+
 func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T) {
 	outbox := &recordingEmitOutbox{}
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -2289,6 +2377,41 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	if got := successPayload["audit"]; got != "ok" {
 		t.Fatalf("success payload audit = %#v, want ok", got)
 	}
+}
+
+func emitFromExecutorSource() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"account": {
+				Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"account_id": {Type: "string"},
+					"bucket":     {Type: "string"},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"account.scored": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"interest_score": {Type: "number"},
+						"computed_tier":  {Type: "string"},
+					},
+					Required: []string{"interest_score"},
+				},
+			},
+			"account.bucketed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"account_id":     {Type: "string"},
+						"bucket":         {Type: "string"},
+						"interest_score": {Type: "number"},
+						"tier":           {Type: "string"},
+					},
+				},
+				Required: []string{"account_id", "bucket", "interest_score"},
+			},
+		},
+	})
 }
 
 func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
