@@ -132,7 +132,7 @@ func TestIdempotencyKeyFlagStillParses(t *testing.T) {
 }
 
 func TestRootHelpHidesIdempotencyAndRetiredCommands(t *testing.T) {
-	for _, cmdArgs := range [][]string{{"--help"}, {"fork", "--help"}} {
+	for _, cmdArgs := range [][]string{{"--help"}, {"run", "fork", "--help"}} {
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommand(context.Background(), t.TempDir(), cmdArgs, &stdout, &stderr)
 		if code != 0 {

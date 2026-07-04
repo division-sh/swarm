@@ -37,7 +37,7 @@ func TestEventsListUsesEventListV1RPC(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"events", "list",
+		"event", "list",
 		"--run-id", "run-1",
 		"--entity-id", "entity-1",
 		"--event-name", "scan.requested",
@@ -247,7 +247,7 @@ func TestEventsFollowUsesEventSubscribeV1WS(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"events", "follow",
+		"event", "follow",
 		"--run-id", "run-1",
 		"--event-name", "scan.requested",
 		"--delivery-status", "delivered",
@@ -302,16 +302,16 @@ func TestEventsRejectInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "list invalid limit", args: []string{"events", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 1000"},
-		{name: "list invalid since", args: []string{"events", "list", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp"},
-		{name: "list invalid delivery status", args: []string{"events", "list", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
+		{name: "list invalid limit", args: []string{"event", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 1000"},
+		{name: "list invalid since", args: []string{"event", "list", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp"},
+		{name: "list invalid delivery status", args: []string{"event", "list", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 		{name: "view blank event id", args: []string{"event", "view", "  "}, wantStderr: "event id is required"},
 		{name: "replay missing event id", args: []string{"event", "replay"}, wantStderr: "accepts 1 arg(s)"},
 		{name: "replay blank event id", args: []string{"event", "replay", "  "}, wantStderr: "event id is required"},
 		{name: "replay blank subscriber", args: []string{"event", "replay", "event-1", "--subscriber", "  "}, wantStderr: "--subscriber must be a non-empty agent id"},
 		{name: "replay extra arg", args: []string{"event", "replay", "event-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
-		{name: "follow rejects list limit", args: []string{"events", "follow", "--limit", "1"}, wantStderr: "unknown flag"},
-		{name: "follow invalid replay since", args: []string{"events", "follow", "--replay-since", "not-time"}, wantStderr: "--replay-since must be an RFC3339 timestamp"},
+		{name: "follow rejects list limit", args: []string{"event", "follow", "--limit", "1"}, wantStderr: "unknown flag"},
+		{name: "follow invalid replay since", args: []string{"event", "follow", "--replay-since", "not-time"}, wantStderr: "--replay-since must be an RFC3339 timestamp"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -340,10 +340,10 @@ func TestEventsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	defer server.Close()
 
 	for _, args := range [][]string{
-		{"events", "list"},
+		{"event", "list"},
 		{"event", "view", "event-1"},
 		{"event", "replay", "event-1"},
-		{"events", "follow"},
+		{"event", "follow"},
 	} {
 		calls.Store(0)
 		var stdout, stderr bytes.Buffer
@@ -422,7 +422,7 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 		},
 		{
 			name: "http auth exits four",
-			args: []string{"events", "list"},
+			args: []string{"event", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
@@ -449,7 +449,7 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 		},
 		{
 			name: "unknown rpc error exits three",
-			args: []string{"events", "list"},
+			args: []string{"event", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -538,7 +538,7 @@ func TestEventsMapFailureExitCodes(t *testing.T) {
 		},
 		{
 			name: "malformed list exits three",
-			args: []string{"events", "list"},
+			args: []string{"event", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -696,7 +696,7 @@ func TestEventsFollowMalformedWSFailsClosed(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"events", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != 3 {
 				t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
@@ -727,7 +727,7 @@ func TestEventsFollowMapsHandshakeAuthToAuthExit(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"events", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"event", "follow"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}

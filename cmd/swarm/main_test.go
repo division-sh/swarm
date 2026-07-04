@@ -1472,7 +1472,7 @@ func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
 		{name: "completion", args: []string{"completion", "bash"}, want: "swarm"},
 		{name: "serve help", args: []string{"serve", "--help"}, want: "Start the Swarm runtime"},
 		{name: "verify help", args: []string{"verify", "--help"}, want: "Validate contract files before boot"},
-		{name: "run help", args: []string{"run", "--help"}, want: "Start a workflow run on a running runtime"},
+		{name: "run help", args: []string{"run", "start", "--help"}, want: "Start a workflow run on a running runtime"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -3861,7 +3861,7 @@ task.completed:
 	cliOpts := defaultRootCommandOptions()
 	cliOpts.apiRPCEndpointOverride = "http://" + apiAddr + "/v1/rpc"
 	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{
-		"fork", sourceRunID,
+		"run", "fork", sourceRunID,
 		"--bundle-hash", targetProjection.BundleHash,
 		"--at-event", sourceEventID,
 		"--idempotency-key", "db-loaded-cross-bundle-serve-fork",
@@ -4941,7 +4941,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "thing.reviewed", "entity-writer")
 
 	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
-		"trace", runID,
+		"run", "trace", runID,
 		"--event-name", "thing.reviewed",
 		"--entity-id", entityID,
 		"--limit", "10",
@@ -4955,7 +4955,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 		}
 	}
 	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
-	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entities", "list", "--run-id", runID, "--limit", "10"})
+	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
 	}
@@ -5348,7 +5348,7 @@ func requireServedStatusCLIReadback(t *testing.T, endpoint, runID, want string) 
 	var lastCode int
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		lastStdout, lastStderr, lastCode = runServedCLICommand(t, endpoint, []string{"status", runID, "--no-diagnose"})
+		lastStdout, lastStderr, lastCode = runServedCLICommand(t, endpoint, []string{"run", "status", runID, "--no-diagnose"})
 		if lastCode == 0 && strings.Contains(lastStdout, want) {
 			return
 		}

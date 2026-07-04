@@ -69,19 +69,19 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 		},
 		{
 			name:   "runs",
-			args:   func(*testing.T) []string { return []string{"runs"} },
+			args:   func(*testing.T) []string { return []string{"run", "list"} },
 			method: "run.list",
 			result: map[string]any{"runs": []any{validDiagnosticRunHeader("run-1"), validDiagnosticRunHeader("run-2")}},
 		},
 		{
 			name:   "status",
-			args:   func(*testing.T) []string { return []string{"status", "run-1"} },
+			args:   func(*testing.T) []string { return []string{"run", "status", "run-1"} },
 			method: "run.diagnose",
 			result: validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"}),
 		},
 		{
 			name:   "conversations list",
-			args:   func(*testing.T) []string { return []string{"conversations", "list"} },
+			args:   func(*testing.T) []string { return []string{"conversation", "list"} },
 			method: conversationListMethod,
 			result: map[string]any{"conversations": []map[string]any{validConversationSummary("sess-1")}},
 		},
@@ -172,9 +172,9 @@ func TestCLILoggingInvalidLevelFailsBeforeSideEffects(t *testing.T) {
 	for _, args := range [][]string{
 		{"version", "--server", "--log-level", "fatal"},
 		{"health", "--log-level", "fatal"},
-		{"runs", "--log-level", "WARN"},
-		{"status", "run-1", "--log-level", ""},
-		{"conversations", "list", "--log-level", "debug "},
+		{"run", "list", "--log-level", "WARN"},
+		{"run", "status", "run-1", "--log-level", ""},
+		{"conversation", "list", "--log-level", "debug "},
 		{"conversation", "view", "sess-1", "--log-level", "fatal"},
 		{"conversation", "turn", "sess-1", "2", "--log-level", "fatal"},
 	} {
@@ -256,8 +256,8 @@ func TestCLILoggingUnsupportedSurfacesFailClosedBeforeSideEffects(t *testing.T) 
 		{name: "serve", args: []string{"serve", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "logs", args: []string{"logs", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "incidents", args: []string{"incidents", "--log-level", "debug"}, wantStderr: "unknown flag"},
-		{name: "trace", args: []string{"trace", "--log-level", "debug"}, wantStderr: "unknown flag"},
-		{name: "run", args: []string{"run", "--log-level", "debug"}, wantStderr: "unknown flag"},
+		{name: "trace", args: []string{"run", "trace", "--log-level", "debug"}, wantStderr: "unknown flag"},
+		{name: "run", args: []string{"run", "start", "--log-level", "debug"}, wantStderr: "unknown flag"},
 		{name: "retired investigate", args: []string{"investigate", "runs", "--log-level", "debug"}, wantStderr: "retired in CLI v2"},
 		{name: "forkchat parent", args: []string{"forkchat", "--log-level", "debug"}, wantStderr: "unknown flag"},
 	} {

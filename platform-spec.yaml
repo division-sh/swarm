@@ -8023,7 +8023,7 @@ run_model:
       no active run (warm start), or (3) the runtime fork owner creates a forked run. The platform inserts a row
       in the runs table with status=running and returns the run_id. Public run forking is governed by
       multi_bundle_persistence.api_surface.run_fork and the intended CLI command
-      `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.'
+      `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.'
     propagation: 'run_id propagates through the causal chain. When a handler or agent emits an event, the child
       event inherits run_id from the parent. This is set at event creation time in the bus publish path — no
       handler or agent code needs to pass run_id explicitly.'
@@ -8068,7 +8068,7 @@ run_model:
     description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
       loading new contracts, and resuming execution. The system automatically determines which events need
       to be re-delivered. The original run is frozen. The forked run gets independent execution.'
-    command: 'public CLI: `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -8388,7 +8388,7 @@ run_model:
       recovery.'
     selected_contract_supported_execution: 'The historical selected-contract timestamp-fork execution harness was
       swarm fork --contracts; that legacy harness flag remains rejected unless a later source-authority PR promotes it.
-      The intended public command is now the top-level `swarm fork <source-run-id> ...` command defined by
+      The intended public command is now `swarm run fork <source-run-id> ...` (CLI v2.2 spelling) defined by
       multi_bundle_persistence.cli_surface.run_fork and blocked on #989 API/runtime/CLI implementation. The runtime
       behavior is owned by runtime.run_fork.selected_contract_execution, not by CLI, route helpers,
       delivery-row helpers, or source-row replay. The owner consumes store.run_fork.selected_contract_binding,
@@ -9492,11 +9492,11 @@ multi_bundle_persistence:
     modified_commands_planned:
       - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
-      - swarm agents list --run-id <run-id>
+      - swarm agent list --run-id <run-id>
       - swarm event publish <event-name> --bundle-hash <bundle_hash>
-      - swarm run --bundle-hash <bundle_hash>
+      - swarm run start --bundle-hash <bundle_hash>
     run_fork:
-      command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       public_status: implemented_public_command
       api_owner: /v1/rpc run.fork
       rules:
@@ -9574,7 +9574,7 @@ multi_bundle_persistence:
     run_fork_cli_consumer:
       tracker: '#1023'
       implementation_status: implemented_by_1023_first_slice
-      reason: swarm fork consumes /v1/rpc run.fork only; same-bundle DB-loaded source loading is supported by #1024, and cross-bundle target selection for already loaded/boot-pinned BundleContexts is supported by #976.
+      reason: swarm run fork consumes /v1/rpc run.fork only; same-bundle DB-loaded source loading is supported by #1024, and cross-bundle target selection for already loaded/boot-pinned BundleContexts is supported by #976.
     multi_bundle_cli_inventory:
       tracker: '#1023'
       implementation_status: inventory_prepared_envelope_directory_register_and_bundle_delete_implemented
@@ -11771,12 +11771,12 @@ cli_specification:
           api_specification.method_catalog.run.trace and
           cli_specification.command_catalog.trace.promoted_trace_filter_contract. The promoted API owner accepts
           `limit`, `cursor`, `since`, and `until`; `since` and `until` filter by the canonical RunTraceRow materialization watermark
-          used by the run-debug trace owner. Trace-specific `swarm trace --follow` subscription recovery and
+          used by the run-debug trace owner. Trace-specific `swarm run trace --follow` subscription recovery and
           `--no-retry` are promoted in
           cli_specification.command_catalog.trace.promoted_trace_follow_recovery_contract by #928. Review-artifact
           `-f` shorthand is promoted in the trace command row as a CLI-only alias for `--follow`. Typed
           RunTraceFilter fields for event-name, subscriber identity, entity-id, and delivery-status are promoted on
-          `/v1/rpc run.trace` and `/v1/ws run.subscribe_trace` and consumed by `swarm trace` snapshot and follow
+          `/v1/rpc run.trace` and `/v1/ws run.subscribe_trace` and consumed by `swarm run trace` snapshot and follow
           modes. Snapshot `until` is promoted on `/v1/rpc run.trace` only as an inclusive upper bound. Review-artifact
           `--include-payload`, shared `swarm run` recovery, and multi-run `--all` remain explicitly unpromoted split
           tails until later gated children promote their own canonical owners.
@@ -12652,27 +12652,27 @@ cli_specification:
         read_only_inspection:
           status: implemented_#1614
           commands:
-          - swarm runs
-          - swarm status
-          - swarm trace
+          - swarm run list
+          - swarm run status
+          - swarm run trace
           - swarm logs
           - swarm health
           - swarm incidents
           - swarm version --server
-          - swarm events list
-          - swarm events follow
+          - swarm event list
+          - swarm event follow
           - swarm event view
           - swarm bundle list
           - swarm bundle show
           - swarm bundle agents
-          - swarm agents list
+          - swarm agent list
           - swarm agent deliveries
           - swarm agent diagnose
           - swarm agent view
-          - swarm conversations list
+          - swarm conversation list
           - swarm conversation view
           - swarm conversation turn
-          - swarm entities list
+          - swarm entity list
           - swarm entity view
           - swarm entity aggregate
           - swarm mailbox list
@@ -12697,7 +12697,7 @@ cli_specification:
           - swarm mailbox approve
           - swarm mailbox reject
           - swarm mailbox defer
-          - swarm fork
+          - swarm run fork
           - swarm forkchat new
           - swarm forkchat resume
           - swarm forkchat delete
@@ -12718,7 +12718,7 @@ cli_specification:
           status: implemented
           commands:
           - swarm serve --dev
-          - swarm run
+          - swarm run start
           fallthrough: >
             `serve --dev` registers a project-scoped TCP context after a pre-bind project claim and after the final API
             target/runtime_instance_id are known. Default foreground `swarm run` consumes the same local runtime state
@@ -12902,9 +12902,9 @@ cli_specification:
         than teaching `.env` as normal Swarm setup.
       applies_to:
       - '`swarm serve` startup.'
-      - 'local foreground `swarm run` startup.'
+      - 'local foreground `swarm run start` startup.'
       - '`swarm verify` local contract validation.'
-      - '`swarm fork` runtime-owner harness.'
+      - '`swarm run fork` runtime-owner harness.'
       - 'default `swarm doctor` diagnostics.'
       - '`swarm describe` local authoring view rendering.'
       - '`swarm secrets set`, `swarm secrets list`, `swarm secrets check`, and `swarm secrets rm`.'
@@ -13984,10 +13984,20 @@ cli_specification:
           child promotes them.
       remaining_tail: '#750 has no remaining promoted serve/dev lifecycle tail after #830. `platform.shutdown` event persistence
         and persisted delivery/receipt interruption reasons remain unpromoted unless a later child makes them authoritative.'
-    run:
-      command: swarm run [flags]
+    run_group:
+      command: swarm run
+      tier: must_have
+      implementation_status: implemented
       group: run_operate
-      topology_v2_2: superseded at Phase 2 — bare `swarm run [flags]` start form moves to `swarm run start`; see cli_specification.topology_revision_v2_2
+      owner: cobra noun-group help
+      behavior: >
+        Bare `swarm run` prints the run noun-group help and exits 0; it does not start a run and
+        makes no API calls. Start-intent invocations (positional args or start flags on bare
+        `swarm run`) fail closed with exit 2 and the promoted pointer message from
+        topology_revision_v2_2.superseded_spellings.run_bare_start.
+    run:
+      command: swarm run start [flags]
+      group: run_operate
       tier: must_have
       implementation_status: implemented
       tracker: '#743'
@@ -14020,7 +14030,7 @@ cli_specification:
         --mcp-port: 'Unsupported in #743; `swarm run` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
       modes:
         foreground_local_start:
-          invocation: swarm run --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>] --platform-spec <path>
+          invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>] --platform-spec <path>
           behavior: >
             Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, subscribe
             with run.subscribe_trace, render composed trace rows and final summary until terminal. Local runtime config and
@@ -14031,19 +14041,19 @@ cli_specification:
             MUST fail closed with `--connect` or `--reattach`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
         foreground_connected_start:
-          invocation: swarm run --connect <url> --event <name> --payload <file>
+          invocation: swarm run start --connect <url> --event <name> --payload <file>
           behavior: 'Use an existing API server, call health.check, call run.start, subscribe with run.subscribe_trace, and render until terminal.'
           ctrl_c: 'First Ctrl-C calls run.stop against the connected server and exits 130; it MUST NOT stop the server.'
         connected_no_follow:
-          invocation: swarm run --connect <url> --event <name> --payload <file> --no-follow
+          invocation: swarm run start --connect <url> --event <name> --payload <file> --no-follow
           behavior: 'Call health.check and run.start, print run_id plus follow/inspect guidance, exit 0, and do not open /v1/ws.'
           validation: '`--no-follow` requires `--connect` and is mutually exclusive with `--reattach`.'
         reattach_active:
-          invocation: swarm run --reattach <run-id> [--connect <url>]
+          invocation: swarm run start --reattach <run-id> [--connect <url>]
           behavior: 'Call run.get, then subscribe with run.subscribe_trace when the run is active.'
           ctrl_c: 'Detach only, exit 130, and MUST NOT call run.stop.'
         reattach_terminal:
-          invocation: swarm run --reattach <run-id> [--connect <url>]
+          invocation: swarm run start --reattach <run-id> [--connect <url>]
           behavior: 'Call run.get, render terminal summary, and exit according to terminal status without opening /v1/ws.'
       exit_codes:
         success: 0
@@ -14062,7 +14072,7 @@ cli_specification:
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or legacy token fallback
       - tests for every mode, invalid bundle_hash / bundle fingerprint / combined bundle identity flags, invalid flag combination, Ctrl-C behavior, exit mapping, malformed RPC/WS response, and no-call invalid paths
       split_siblings:
-      - swarm trace --follow
+      - swarm run trace --follow
       - swarm control pause|continue|stop
       - broader run-control/fork command surfaces
       - '#750 serve-owner MCP bind ownership for future explicit --mcp-port support'
@@ -14073,26 +14083,23 @@ cli_specification:
       implementation_status: implemented
       behavior: local contract-file validation carve-out
     runs:
-      command: swarm runs [filters]
-      group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm run list`; see cli_specification.topology_revision_v2_2
+      command: swarm run list [filters]
+      group: run_operate
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc run.list
       behavior: List runs through the canonical run.list read owner; no direct DB/store/runtime-state reads.
     status:
-      command: swarm status [<run-id>]
-      group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm run status`; see cli_specification.topology_revision_v2_2
+      command: swarm run status [<run-id>]
+      group: run_operate
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc run.diagnose by default; /v1/rpc run.get for header-only mode if exposed
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm trace [<run-id>] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
-      group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm run trace`; see cli_specification.topology_revision_v2_2
+      command: swarm run trace [<run-id>] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      group: run_operate
       tier: must_have
       implementation_status: implemented
       owners: /v1/rpc run.trace for snapshot; /v1/ws run.subscribe_trace for --follow/-f
@@ -14128,9 +14135,9 @@ cli_specification:
           naturally produce an empty exclusive/inclusive window.
         current_cli_consumer_status: implemented_by_918_and_855
         cli_consumer_behavior: >
-          Snapshot `swarm trace` consumes `--since`, `--until`, `--limit`, `--cursor`, `--event-name`, `--entity-id`,
+          Snapshot `swarm run trace` consumes `--since`, `--until`, `--limit`, `--cursor`, `--event-name`, `--entity-id`,
           `--delivery-status`, `--subscriber-id`, and `--subscriber-type` by sending the exact promoted params to
-          `/v1/rpc run.trace`. Follow `swarm trace --follow` / `swarm trace -f` consumes the same typed filter flags
+          `/v1/rpc run.trace`. Follow `swarm run trace --follow` / `swarm run trace -f` consumes the same typed filter flags
           by sending `filter` to `/v1/ws run.subscribe_trace`; fixed-window snapshot controls `--since`, `--until`,
           `--limit`, and `--cursor` remain invalid with follow and must fail before any API or WebSocket request.
           Snapshot `--delivery-detail` is a CLI-only rendering modifier over the same `/v1/rpc run.trace` response:
@@ -14167,11 +14174,11 @@ cli_specification:
             any API or WebSocket call, and does not introduce distinct runtime semantics, output behavior, or
             `swarm run` follow behavior. It may carry the promoted RunTraceFilter param when typed filter flags are present.
         scope: >
-          Applies only to `swarm trace --follow` / `swarm trace -f`. `swarm run` foreground follow, connected follow, and reattach keep their
+          Applies only to `swarm run trace --follow` / `swarm run trace -f`. `swarm run start` foreground follow, connected follow, and reattach keep their
           existing lifecycle policy and may continue to use the shared one-shot `subscribeRunTrace` helper without inheriting
           this trace-specific reconnect policy.
         retry_policy: >
-          By default, `swarm trace --follow` may reconnect after at most three retryable subscription interruptions after the
+          By default, `swarm run trace --follow` may reconnect after at most three retryable subscription interruptions after the
           initial subscription attempt. The retry backoff is bounded exponential delay of 250ms, 500ms, then 1s. If a clean
           subscription close exhausts the reconnect budget, the command exits successfully after rendering all received rows.
           If a retryable transport error exhausts the budget, the command exits with the CLI runtime/transport error code.
@@ -14470,9 +14477,8 @@ cli_specification:
       - no raw Docker, SQL, store cleanup, runtime manager reset, or internal destructive-reset helper calls
       - no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, Builder/operator token fallback
     agents_list:
-      command: swarm agents list
-      group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm agent list`; see cli_specification.topology_revision_v2_2
+      command: swarm agent list
+      group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.list
@@ -14706,9 +14712,8 @@ cli_specification:
       - AGENT_NOT_FOUND, RUN_NOT_FOUND, AGENT_NOT_RUNNING, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT, HTTP failures, and malformed success responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, dashboard/Builder REST, conversation owners, restart, or replay method usage
     events_list:
-      command: swarm events list
-      group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm event list`; see cli_specification.topology_revision_v2_2
+      command: swarm event list
+      group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc event.list
@@ -14741,9 +14746,8 @@ cli_specification:
       - malformed event list results and HTTP/RPC failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.publish, event.replay, agent.replay, or agent.replay_backlog usage
     events_follow:
-      command: swarm events follow
-      group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm event follow`; see cli_specification.topology_revision_v2_2
+      command: swarm event follow
+      group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/ws event.subscribe
@@ -14938,9 +14942,8 @@ cli_specification:
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads or writes and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.start, event.replay, agent.replay, or agent.replay_backlog usage
       relation_to_run_start: '`run.start` remains usable for #743 until a separate migration changes the CLI internals to event.publish.'
     conversations_list:
-      command: swarm conversations list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
+      command: swarm conversation list [--agent-id <agent-id>] [--run-id <run-id>] [--limit <n>] [--cursor <cursor>]
       group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm conversation list`; see cli_specification.topology_revision_v2_2
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc conversation.list
@@ -15063,16 +15066,15 @@ cli_specification:
       - no direct DB/store/runtime/hash-owner bundle reads or writes from CLI
       - unpromoted bundle.get alias and archive register packaging remain absent/unknown until later CLI gates
     run_fork:
-      command: swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       group: run_operate
-      topology_v2_2: superseded at Phase 2 — CLI spelling moves to `swarm run fork` (CLI command row only; runtime/API run.fork untouched); see cli_specification.topology_revision_v2_2
       tier: should_have
       implementation_status: implemented_public_cli_consumer
       blocker_state: 'Implemented by #1023 over /v1/rpc run.fork after #989 promoted the API/runtime/spec owner; DB-loaded same-bundle source loading is supported by #1024 and boot-pinned Option A cross-bundle target selection is supported by #976.'
       owner: multi_bundle_persistence.cli_surface.run_fork
       api_owner: /v1/rpc run.fork
       behavior: >
-        Public run-fork CLI. Top-level `swarm fork` is the public command. The bundle selector flag is
+        Public run-fork CLI. `swarm run fork` is the public command (CLI v2.2); top-level `swarm fork` is a retired spelling that fails closed. The bundle selector flag is
         `--bundle-hash`; draft `--bundle` is superseded by #1001. `--at-event` is an explicit fork-event selector only.
         The CLI validates source_run_id and fork_event_id as currently UUID-shaped runtime IDs before calling the
         handler, calls /v1/rpc run.fork exactly once, and renders only server-owned fork results.
@@ -15087,7 +15089,7 @@ cli_specification:
       - --activate
       - --contracts
       proof_expectations:
-      - top-level swarm fork is no longer classified as a retired namespace
+      - '`swarm run fork` is the public spelling; top-level `swarm fork` fails closed as a retired v2.2 spelling'
       - no `swarm control run fork` command shape is promoted
       - no draft `--bundle` flag is promoted
       - no direct DB/store/runtime/fork harness access from CLI
@@ -15176,9 +15178,8 @@ cli_specification:
       - 'go run ./cmd/swarm-openrpc-gen --check'
       - focused cmd/swarm forkchat tests and existing conversation.fork API/store regression tests
     entities_list:
-      command: swarm entities list
+      command: swarm entity list
       group: observe_debug
-      topology_v2_2: superseded at Phase 2 — moves to `swarm entity list`; see cli_specification.topology_revision_v2_2
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc entity.list
@@ -15404,9 +15405,9 @@ cli_specification:
       status: retired_legacy_v1_topology
       current_code_state: fully_fail_closed_after_806; bare namespace and runs/run/trace/health subcommands exit 2 with migration guidance before API calls
       v2_replacements:
-        swarm investigate runs: swarm runs
-        swarm investigate run: swarm status
-        swarm investigate trace: swarm trace
+        swarm investigate runs: swarm run list
+        swarm investigate run: swarm run status
+        swarm investigate trace: swarm run trace
         swarm investigate health: swarm health
       rule: '`swarm investigate` is not CLI v2 topology and MUST NOT be extended for new commands.'
     control_mailbox:
@@ -15420,7 +15421,25 @@ cli_specification:
       command: swarm fork --dry-run|--materialize-only|--activate|--contracts
       status: retired_legacy_harness_forms
       exit_code: 2
-      message: "ERROR: legacy `swarm fork` harness flags are not supported operator commands. The public command is `swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` over /v1/rpc run.fork."
+      message: "ERROR: legacy fork harness flags are not supported operator commands. The public command is `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` over /v1/rpc run.fork."
+    topology_v2_2_retired_spellings:
+      status: retired_topology_v2_2
+      implemented_by: '#1677'
+      exit_code: 2
+      rule: >
+        Retired CLI v2.2 spellings fail closed with the exact messages below, make zero API
+        calls, and are hidden from help/completion. Dispositions were promoted by #1654 in
+        topology_revision_v2_2.superseded_spellings; no aliases exist.
+      spellings:
+        runs: 'ERROR: `swarm runs` was renamed. Use `swarm run list`.'
+        status: 'ERROR: `swarm status` was renamed. Use `swarm run status`.'
+        trace: 'ERROR: `swarm trace` was renamed. Use `swarm run trace`.'
+        fork: 'ERROR: `swarm fork` was renamed. Use `swarm run fork`.'
+        agents: 'ERROR: `swarm agents` was renamed. Use `swarm agent list`.'
+        events: 'ERROR: `swarm events` was renamed. Use `swarm event list` or `swarm event follow`.'
+        entities: 'ERROR: `swarm entities` was renamed. Use `swarm entity list`.'
+        conversations: 'ERROR: `swarm conversations` was renamed. Use `swarm conversation list`.'
+        run_bare_start: 'ERROR: `swarm run` no longer starts a run. Use `swarm run start ...`. Bare `swarm run` prints the run command group.'
     unpromoted_review_only_legacy_spellings:
       status: unpromoted_candidate_backlog
       commands:
@@ -15466,9 +15485,9 @@ cli_specification:
         remain unpromoted unless a later runtime lifecycle child makes them authoritative; not a direct blocker for #743 API owners.'
   parent_tail:
     topology_v2_2_note: >
-      The implemented_v2_compliant spellings above describe the live pre-v2.2 topology. The
-      promoted v2.2 target topology lives in cli_specification.topology_revision_v2_2; Phase 2
-      re-ledgers this list when it implements the revision.
+      The implemented_v2_compliant spellings above describe the live CLI v2.2 topology,
+      implemented by #1677 from the decisions recorded in
+      cli_specification.topology_revision_v2_2.
     implemented_v2_compliant:
     - swarm
     - swarm help
@@ -15476,11 +15495,12 @@ cli_specification:
     - swarm version
     - swarm version --server
     - swarm serve (partial)
-    - swarm run
+    - swarm run (noun-group help)
+    - swarm run start
     - swarm verify
-    - swarm runs
-    - swarm status
-    - swarm trace
+    - swarm run list
+    - swarm run status
+    - swarm run trace
     - swarm health
     - swarm mailbox list
     - swarm mailbox view
@@ -15491,28 +15511,37 @@ cli_specification:
     - swarm control continue
     - swarm control stop
     - swarm control nuke
-    - swarm agents list
+    - swarm agent list
     - swarm agent view
     - swarm agent restart
     - swarm agent directive
     - swarm agent replay
     - swarm agent replay-backlog
-    - swarm events list
-    - swarm events follow
+    - swarm event list
+    - swarm event follow
     - swarm event view
     - swarm event replay
     - swarm event publish
     - swarm logs
     - swarm incidents
-    - swarm entities list
+    - swarm entity list
     - swarm entity view
     - swarm entity aggregate
-    - swarm conversations list
+    - swarm conversation list
     - swarm conversation view
     - swarm conversation turn
     - swarm forkchat new|resume|list|view|delete
     implemented_legacy_or_wrong_namespace: []
     retired_or_fail_closed:
+    - swarm runs (v2.2; use swarm run list)
+    - swarm status (v2.2; use swarm run status)
+    - swarm trace (v2.2; use swarm run trace)
+    - swarm fork (v2.2; use swarm run fork)
+    - swarm agents (v2.2; use swarm agent list)
+    - swarm events (v2.2; use swarm event list|follow)
+    - swarm entities (v2.2; use swarm entity list)
+    - swarm conversations (v2.2; use swarm conversation list)
+    - bare swarm run start form (v2.2; use swarm run start)
     - swarm investigate
     - swarm investigate runs
     - swarm investigate health
@@ -15526,16 +15555,16 @@ cli_specification:
 
   topology_revision_v2_2:
     id: cli.topology_revision_v2_2
-    status: source_authority_only
+    status: implemented_historical_record
     promoted_by: '#1654'
-    implementation_consumer: '#1649 Phase 2 implementation child'
+    implemented_by: '#1677'
     authority_rule: >
-      This block is the merge-bearing CLI v2.2 topology target. The implemented command_catalog
-      rows above remain the accurate description of live cobra behavior until the Phase 2
-      implementation child lands. Target rows below are source_authority_only by definition and
-      MUST NOT be cited as implemented behavior. Phase 2 MUST implement target rows, retire
-      superseded spellings per disposition, re-ledger parent_tail, and land the conformance
-      drift test in one implementation slice.
+      Historical decision record for the CLI v2.2 topology revision (D1-D7). The revision is
+      implemented: command_catalog rows above carry the v2.2 spellings as live behavior, retired
+      spellings fail closed per topology_v2_2_retired_spellings, and the cobra/catalog
+      conformance drift test enforces the binding. This block preserves the decision trail and
+      MUST NOT be reused as a live migration target; future topology changes require a new
+      tracked revision.
     old_spelling_policy:
       default_disposition: fail_closed_retirement
       rule: >
@@ -15630,63 +15659,63 @@ cli_specification:
       run_bare_start:
         current: swarm run [flags]
         replacement: swarm run start [flags]
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm run` no longer starts a run. Use `swarm run start ...`. Bare `swarm run` prints the run command group.'
       runs:
         current: swarm runs
         replacement: swarm run list
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm runs` was renamed. Use `swarm run list`.'
       status:
         current: swarm status
         replacement: swarm run status
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm status` was renamed. Use `swarm run status`.'
       trace:
         current: swarm trace
         replacement: swarm run trace
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm trace` was renamed. Use `swarm run trace`.'
       fork:
         current: swarm fork
         replacement: swarm run fork
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm fork` was renamed. Use `swarm run fork`.'
       agents:
         current: swarm agents [list]
         replacement: swarm agent list
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm agents` was renamed. Use `swarm agent list`.'
       events:
         current: swarm events list|follow
         replacement: swarm event list|follow
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm events` was renamed. Use `swarm event list` or `swarm event follow`.'
       entities:
         current: swarm entities list
         replacement: swarm entity list
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm entities` was renamed. Use `swarm entity list`.'
       conversations:
         current: swarm conversations list
         replacement: swarm conversation list
-        current_status: implemented_until_phase_2
+        current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm conversations` was renamed. Use `swarm conversation list`.'

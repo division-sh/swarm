@@ -84,10 +84,10 @@ type runTraceSubscription struct {
 func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := runCommandOptions{apiOptions: rootOpts}
 	cmd := &cobra.Command{
-		Use:   "run",
+		Use:   "start",
 		Short: "Start a workflow run on a running runtime, or reattach to one.",
-		Example: `  swarm run --event <event-name> --payload payload.json
-  swarm run --reattach <run-id>`,
+		Example: `  swarm run start --event <event-name> --payload payload.json
+  swarm run start --reattach <run-id>`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := opts

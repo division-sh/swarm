@@ -12,7 +12,7 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
@@ -43,7 +43,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "fork <source-run-id>",
 		Short:   "Branch a run to replay it with changed contracts or policy.",
-		Example: `  swarm fork <source-run-id> --at-event <event-id>`,
+		Example: `  swarm run fork <source-run-id> --at-event <event-id>`,
 		Long:    runForkCommandShape + "\n\nBranch a run to replay it with changed contracts or policy.",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

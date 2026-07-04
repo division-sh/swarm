@@ -38,7 +38,7 @@ func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"entities", "list",
+		"entity", "list",
 		"--run-id", "run-1",
 		"--flow", "flows/review",
 		"--type", "vertical",
@@ -85,7 +85,7 @@ func TestEntitiesListEmptyResultOmitsUnsetParams(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entities", "list"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"entity", "list"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -141,7 +141,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entities", "list", "--run-id", runID, "--type", "vertical", "--limit", "10"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"entity", "list", "--run-id", runID, "--type", "vertical", "--limit", "10"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("entities list code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -286,9 +286,9 @@ func TestEntityCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "list invalid limit low", args: []string{"entities", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
-		{name: "list invalid run id", args: []string{"entities", "list", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
-		{name: "list blank flow", args: []string{"entities", "list", "--flow", " "}, wantStderr: "--flow must not be empty"},
+		{name: "list invalid limit low", args: []string{"entity", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
+		{name: "list invalid run id", args: []string{"entity", "list", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
+		{name: "list blank flow", args: []string{"entity", "list", "--flow", " "}, wantStderr: "--flow must not be empty"},
 		{name: "view missing id", args: []string{"entity", "view"}, wantStderr: "accepts 1 arg(s)"},
 		{name: "view blank id", args: []string{"entity", "view", " "}, wantStderr: "entity id is required"},
 		{name: "view invalid id", args: []string{"entity", "view", "bad id!"}, wantStderr: "entity id must match OpaqueId pattern"},
@@ -324,7 +324,7 @@ func TestEntityCommandsFailClosedWithoutTokenBeforeRequest(t *testing.T) {
 	defer server.Close()
 
 	for _, args := range [][]string{
-		{"entities", "list"},
+		{"entity", "list"},
 		{"entity", "view", "entity-1"},
 		{"entity", "aggregate"},
 	} {
@@ -352,7 +352,7 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 	}{
 		{
 			name: "list http auth exits four",
-			args: []string{"entities", "list"},
+			args: []string{"entity", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
@@ -361,7 +361,7 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "list missing entities exits three",
-			args: []string{"entities", "list"},
+			args: []string{"entity", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
@@ -372,7 +372,7 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 		},
 		{
 			name: "list malformed entity exits three",
-			args: []string{"entities", "list"},
+			args: []string{"entity", "list"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)

@@ -34,7 +34,7 @@ func TestForkCommandUsesRunForkRPCAndRenders(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
-		"fork", sourceRunID,
+		"run", "fork", sourceRunID,
 		"--bundle-hash", bundleHash,
 		"--at-event", forkEventID,
 		"--idempotency-key", "idem-fork-1",
@@ -72,7 +72,7 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	defer server.Close()
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"fork", sourceRunID, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID, "--json"}, &stdout, &stderr, testRootCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -84,7 +84,7 @@ func TestForkCommandJSONPreservesAPIShape(t *testing.T) {
 	if decoded["source_run_id"] != sourceRunID || decoded["fork_run_id"] != "33333333-3333-3333-3333-333333333333" {
 		t.Fatalf("json run fork result = %#v", decoded)
 	}
-	for _, wrapper := range []string{"fork", "run"} {
+	for _, wrapper := range []string{"run", "fork", "run"} {
 		if _, ok := decoded[wrapper]; ok {
 			t.Fatalf("json output contains CLI wrapper %q: %#v", wrapper, decoded)
 		}
@@ -105,21 +105,21 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing source", args: []string{"fork"}, wantStderr: "accepts 1 arg(s)"},
-		{name: "blank source", args: []string{"fork", " "}, wantStderr: "source run id is required"},
-		{name: "invalid source", args: []string{"fork", "bad id!"}, wantStderr: "source run id must be a UUID"},
-		{name: "opaque non uuid source", args: []string{"fork", "run_opaque-1"}, wantStderr: "source run id must be a UUID"},
-		{name: "invalid bundle hash", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v1:sha256:<64 lowercase hex>"},
-		{name: "blank bundle hash", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", ""}, wantStderr: "--bundle-hash must be non-empty"},
-		{name: "invalid at event", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--at-event", "bad id!"}, wantStderr: "--at-event must be a UUID"},
-		{name: "opaque non uuid at event", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--at-event", "event_opaque-1"}, wantStderr: "--at-event must be a UUID"},
-		{name: "blank at event", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},
-		{name: "blank idempotency", args: []string{"fork", "11111111-1111-1111-1111-111111111111", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
-		{name: "legacy dry run flag", args: []string{"fork", "run-1", "--dry-run"}, wantStderr: "unknown flag"},
-		{name: "legacy materialize flag", args: []string{"fork", "run-1", "--materialize-only"}, wantStderr: "unknown flag"},
-		{name: "legacy activate flag", args: []string{"fork", "run-1", "--activate"}, wantStderr: "unknown flag"},
-		{name: "legacy contracts flag", args: []string{"fork", "run-1", "--contracts", "."}, wantStderr: "unknown flag"},
-		{name: "draft bundle flag", args: []string{"fork", "run-1", "--bundle", validBundleHash("a")}, wantStderr: "unknown flag"},
+		{name: "missing source", args: []string{"run", "fork"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "blank source", args: []string{"run", "fork", " "}, wantStderr: "source run id is required"},
+		{name: "invalid source", args: []string{"run", "fork", "bad id!"}, wantStderr: "source run id must be a UUID"},
+		{name: "opaque non uuid source", args: []string{"run", "fork", "run_opaque-1"}, wantStderr: "source run id must be a UUID"},
+		{name: "invalid bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", "sha256:abc"}, wantStderr: "--bundle-hash must match bundle-v1:sha256:<64 lowercase hex>"},
+		{name: "blank bundle hash", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--bundle-hash", ""}, wantStderr: "--bundle-hash must be non-empty"},
+		{name: "invalid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "bad id!"}, wantStderr: "--at-event must be a UUID"},
+		{name: "opaque non uuid at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", "event_opaque-1"}, wantStderr: "--at-event must be a UUID"},
+		{name: "blank at event", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--at-event", ""}, wantStderr: "--at-event must be non-empty"},
+		{name: "blank idempotency", args: []string{"run", "fork", "11111111-1111-1111-1111-111111111111", "--idempotency-key", ""}, wantStderr: "--idempotency-key must be non-empty"},
+		{name: "legacy dry run flag", args: []string{"run", "fork", "run-1", "--dry-run"}, wantStderr: "unknown flag"},
+		{name: "legacy materialize flag", args: []string{"run", "fork", "run-1", "--materialize-only"}, wantStderr: "unknown flag"},
+		{name: "legacy activate flag", args: []string{"run", "fork", "run-1", "--activate"}, wantStderr: "unknown flag"},
+		{name: "legacy contracts flag", args: []string{"run", "fork", "run-1", "--contracts", "."}, wantStderr: "unknown flag"},
+		{name: "draft bundle flag", args: []string{"run", "fork", "run-1", "--bundle", validBundleHash("a")}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)
@@ -206,7 +206,7 @@ func TestForkCommandFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 			defer server.Close()
 
 			var stdout, stderr bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"fork", sourceRunID}, &stdout, &stderr, testRootCommandOptions(server))
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "fork", sourceRunID}, &stdout, &stderr, testRootCommandOptions(server))
 			if code != tc.wantCode {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, tc.wantCode, stdout.String(), stderr.String())
 			}

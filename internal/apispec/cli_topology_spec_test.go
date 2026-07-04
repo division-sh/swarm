@@ -72,11 +72,12 @@ func TestCLICommandCatalogRowsDeclareContractBearingGroups(t *testing.T) {
 	}
 }
 
-func TestCLITopologyRevisionV22IsSourceAuthorityOnly(t *testing.T) {
+func TestCLITopologyRevisionV22IsImplementedHistoricalRecord(t *testing.T) {
 	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
-	assertScalarValue(t, mustMappingValue(t, revision, "status"), "source_authority_only")
+	assertScalarValue(t, mustMappingValue(t, revision, "status"), "implemented_historical_record")
 	assertScalarValue(t, mustMappingValue(t, revision, "promoted_by"), "#1654")
-	assertScalarContains(t, mustMappingValue(t, revision, "authority_rule"), "MUST NOT be cited as implemented behavior")
+	assertScalarValue(t, mustMappingValue(t, revision, "implemented_by"), "#1677")
+	assertScalarContains(t, mustMappingValue(t, revision, "authority_rule"), "Historical decision record")
 
 	policy := mustMappingValue(t, revision, "old_spelling_policy")
 	assertScalarValue(t, mustMappingValue(t, policy, "default_disposition"), "fail_closed_retirement")
@@ -149,7 +150,7 @@ func TestCLITopologySupersededSpellingsHaveCompleteDispositions(t *testing.T) {
 		count++
 		assertScalarValue(t, mustMappingValue(t, row, "disposition"), "fail_closed_pointer")
 		assertScalarValue(t, mustMappingValue(t, row, "exit_code"), "2")
-		assertScalarValue(t, mustMappingValue(t, row, "current_status"), "implemented_until_phase_2")
+		assertScalarValue(t, mustMappingValue(t, row, "current_status"), "retired")
 		current := mustMappingValue(t, row, "current")
 		replacement := mustMappingValue(t, row, "replacement")
 		message := mustMappingValue(t, row, "message")
@@ -170,32 +171,62 @@ func TestCLITopologySupersededSpellingsHaveCompleteDispositions(t *testing.T) {
 	}
 }
 
-func TestCLITopologySupersededCatalogRowsCarryPointers(t *testing.T) {
-	catalog := mustMappingValue(t, cliSpecification(t), "command_catalog")
-	superseded := []string{
-		"run", "runs", "status", "trace", "run_fork",
-		"agents_list", "events_list", "events_follow", "entities_list", "conversations_list",
+func TestCLITopologyCatalogRowsImplementTargetSpellings(t *testing.T) {
+	spec := cliSpecification(t)
+	catalog := mustMappingValue(t, spec, "command_catalog")
+	// After #1677 the catalog rows carry the v2.2 spellings as live behavior:
+	// each row's command must match its historical target-row command, and the
+	// Phase-2 supersession pointers must be gone.
+	rowToTarget := map[string]string{
+		"run":                "run_start",
+		"run_group":          "run_group",
+		"runs":               "run_list",
+		"status":             "run_status",
+		"run_fork":           "run_fork",
+		"agents_list":        "agent_list",
+		"events_list":        "event_list",
+		"events_follow":      "event_follow",
+		"entities_list":      "entity_list",
+		"conversations_list": "conversation_list",
 	}
-	for _, row := range superseded {
+	targets := mustMappingValue(t, mustMappingValue(t, spec, "topology_revision_v2_2"), "target_rows")
+	for row, targetName := range rowToTarget {
 		value := mustMappingValue(t, catalog, row)
-		pointer := mappingValue(value, "topology_v2_2")
-		if pointer == nil {
-			t.Errorf("command_catalog.%s: missing topology_v2_2 supersession pointer", row)
-			continue
+		if pointer := mappingValue(value, "topology_v2_2"); pointer != nil {
+			t.Errorf("command_catalog.%s: stale topology_v2_2 supersession pointer after implementation", row)
 		}
-		assertScalarContains(t, pointer, "topology_revision_v2_2")
-		// superseded rows must still describe live behavior until Phase 2
 		if status := mappingValue(value, "implementation_status"); status == nil || !strings.HasPrefix(status.Value, "implemented") {
-			t.Errorf("command_catalog.%s: superseded row must keep accurate implemented status until Phase 2; got %v", row, status)
+			t.Errorf("command_catalog.%s: implemented row missing implemented status; got %v", row, status)
 		}
+		rowCommand := mustMappingValue(t, value, "command").Value
+		targetCommand := mustMappingValue(t, mustMappingValue(t, targets, targetName), "command").Value
+		targetHead := targetCommand
+		if idx := strings.Index(targetHead, " ["); idx > 0 {
+			targetHead = targetHead[:idx]
+		}
+		if !strings.HasPrefix(rowCommand, targetHead) {
+			t.Errorf("command_catalog.%s: command %q does not implement target %q", row, rowCommand, targetCommand)
+		}
+	}
+	// trace row: command carries the full filter shape; check the spelling head only.
+	trace := mustMappingValue(t, catalog, "trace")
+	if !strings.HasPrefix(mustMappingValue(t, trace, "command").Value, "swarm run trace") {
+		t.Errorf("command_catalog.trace: command does not carry the v2.2 spelling")
+	}
+	retired := mustMappingValue(t, mustMappingValue(t, spec, "retired_namespaces"), "topology_v2_2_retired_spellings")
+	assertScalarValue(t, mustMappingValue(t, retired, "implemented_by"), "#1677")
+	assertScalarValue(t, mustMappingValue(t, retired, "exit_code"), "2")
+	spellings := mustMappingValue(t, retired, "spellings")
+	if len(spellings.Content)/2 != 9 {
+		t.Errorf("retired spellings = %d, want 9", len(spellings.Content)/2)
 	}
 }
 
 func TestCLIParentTailCarriesTopologyAccuracyNote(t *testing.T) {
 	parentTail := mustMappingValue(t, cliSpecification(t), "parent_tail")
 	note := mustMappingValue(t, parentTail, "topology_v2_2_note")
-	assertScalarContains(t, note, "pre-v2.2 topology")
-	assertScalarContains(t, note, "topology_revision_v2_2")
+	assertScalarContains(t, note, "live CLI v2.2 topology")
+	assertScalarContains(t, note, "#1677")
 }
 
 // Guard: the ten annotated rows and nine spellings must stay in sync — every
