@@ -16,13 +16,21 @@ type PlatformVersionCompatibilityViolation struct {
 }
 
 func BundlePlatformVersionCompatibilityViolations(bundle *WorkflowContractBundle) []PlatformVersionCompatibilityViolation {
+	runningVersion := ""
+	if bundle != nil {
+		runningVersion = strings.TrimSpace(bundle.Platform.Platform.Version)
+	}
+	return BundlePlatformVersionCompatibilityViolationsForPlatformVersion(bundle, runningVersion)
+}
+
+func BundlePlatformVersionCompatibilityViolationsForPlatformVersion(bundle *WorkflowContractBundle, runningVersion string) []PlatformVersionCompatibilityViolation {
 	if bundle == nil {
 		return []PlatformVersionCompatibilityViolation{{
 			PackageKey: ".",
 			Err:        fmt.Errorf("workflow contract bundle is required"),
 		}}
 	}
-	runningVersion := strings.TrimSpace(bundle.Platform.Platform.Version)
+	runningVersion = strings.TrimSpace(runningVersion)
 	violations := make([]PlatformVersionCompatibilityViolation, 0)
 	for _, pkg := range bundle.PackageTree {
 		packageKey := strings.TrimSpace(pkg.Key)
@@ -45,6 +53,15 @@ func BundlePlatformVersionCompatibilityViolations(bundle *WorkflowContractBundle
 
 func ValidateBundlePlatformVersionCompatibility(bundle *WorkflowContractBundle) error {
 	violations := BundlePlatformVersionCompatibilityViolations(bundle)
+	return platformVersionCompatibilityError(violations)
+}
+
+func ValidateBundlePlatformVersionCompatibilityForPlatformVersion(bundle *WorkflowContractBundle, runningVersion string) error {
+	violations := BundlePlatformVersionCompatibilityViolationsForPlatformVersion(bundle, runningVersion)
+	return platformVersionCompatibilityError(violations)
+}
+
+func platformVersionCompatibilityError(violations []PlatformVersionCompatibilityViolation) error {
 	if len(violations) == 0 {
 		return nil
 	}

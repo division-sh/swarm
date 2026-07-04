@@ -81,8 +81,9 @@ type BundleCatalogSelectedContractSourceStore interface {
 }
 
 type BundleCatalogSelectedContractSourceLoader struct {
-	RepoRoot string
-	Store    BundleCatalogSelectedContractSourceStore
+	RepoRoot         string
+	PlatformSpecPath string
+	Store            BundleCatalogSelectedContractSourceStore
 }
 
 func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection store.RunForkContractSelection) (LoadedSelectedContractSource, error) {
@@ -199,9 +200,10 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		return LoadedSelectedContractSource{}, err
 	}
 	runtimeSource, err := runtimecontracts.LoadBundleCatalogRuntimeSource(strings.TrimSpace(l.RepoRoot), runtimecontracts.BundleCatalogRuntimeLoadRequest{
-		BundleHash:  bundleHash,
-		ContentYAML: record.ContentYAML,
-		DataBlob:    record.DataBlob,
+		BundleHash:              bundleHash,
+		ContentYAML:             record.ContentYAML,
+		DataBlob:                record.DataBlob,
+		RunningPlatformSpecPath: strings.TrimSpace(l.PlatformSpecPath),
 	})
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)

@@ -185,8 +185,9 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 		})
 		if req.LoadedBundle.dbLoaded {
 			runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
-				RepoRoot: req.RepoRoot,
-				Store:    pg,
+				RepoRoot:         req.RepoRoot,
+				PlatformSpecPath: req.RunningPlatformSpecPath,
+				Store:            pg,
 			}
 		}
 		apiRuntimeContexts, err := serveRuntimeContextManager(pg, req.RuntimeContexts)
@@ -361,6 +362,7 @@ type serveRuntimeBundle struct {
 	source           semanticview.Source
 	contractsRoot    string
 	platformSpecPath string
+	runningSpecPath  string
 	bootIdentity     runtimecontracts.BundleIdentity
 	bundleSourceFact runtimecorrelation.BundleSourceFact
 	dbLoaded         bool
@@ -516,8 +518,12 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 	}
 	if len(hashes) > 0 {
 		out := make([]serveRuntimeBundle, 0, len(hashes))
+		runningPlatformSpecPath, err := embeddedPlatformSpecPath()
+		if err != nil {
+			return nil, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
+		}
 		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash)
+			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash, runningPlatformSpecPath)
 			if err != nil {
 				for _, prior := range out {
 					if prior.cleanup != nil {
@@ -546,7 +552,11 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 		return serveRuntimeBundle{}, fmt.Errorf("loadServeRuntimeBundle supports one bundle_hash; use loadServeRuntimeBundles for multi-context boot")
 	}
 	if len(hashes) == 1 {
-		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0])
+		runningPlatformSpecPath, err := embeddedPlatformSpecPath()
+		if err != nil {
+			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
+		}
+		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0], runningPlatformSpecPath)
 	}
 	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {
@@ -566,11 +576,12 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 		source:           semanticview.Wrap(bundle),
 		contractsRoot:    contractsRoot,
 		platformSpecPath: resolvedPaths.PlatformSpecPath,
+		runningSpecPath:  resolvedPaths.PlatformSpecPath,
 		bootIdentity:     bootIdentity,
 	}, nil
 }
 
-func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash string) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash, runningPlatformSpecPath string) (serveRuntimeBundle, error) {
 	catalog := stores.facade().bundleRuntimeCatalogStore()
 	if catalog == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected bundle catalog store")
@@ -586,9 +597,10 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 		return serveRuntimeBundle{}, err
 	}
 	runtimeSource, err := runtimecontracts.LoadBundleCatalogRuntimeSource(repo, runtimecontracts.BundleCatalogRuntimeLoadRequest{
-		BundleHash:  record.BundleHash,
-		ContentYAML: record.ContentYAML,
-		DataBlob:    record.DataBlob,
+		BundleHash:              record.BundleHash,
+		ContentYAML:             record.ContentYAML,
+		DataBlob:                record.DataBlob,
+		RunningPlatformSpecPath: strings.TrimSpace(runningPlatformSpecPath),
 	})
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -618,6 +630,7 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 		source:           source,
 		contractsRoot:    runtimeSource.ContractsRoot,
 		platformSpecPath: runtimeSource.PlatformSpecPath,
+		runningSpecPath:  strings.TrimSpace(runningPlatformSpecPath),
 		bootIdentity:     bootIdentity,
 		bundleSourceFact: fact,
 		dbLoaded:         true,
@@ -1043,15 +1056,16 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
-		RepoRoot:         repo,
-		PlatformSpecPath: resolvedPlatformSpecPath,
-		LoadedBundle:     loadedBundle,
-		RuntimeContexts:  runtimeContexts,
-		Source:           source,
-		ContractsRoot:    contractsRoot,
-		Config:           cfg,
-		Workspaces:       workspaces,
-		Credentials:      credentialStore,
+		RepoRoot:                repo,
+		PlatformSpecPath:        resolvedPlatformSpecPath,
+		RunningPlatformSpecPath: strings.TrimSpace(loadedBundle.runningSpecPath),
+		LoadedBundle:            loadedBundle,
+		RuntimeContexts:         runtimeContexts,
+		Source:                  source,
+		ContractsRoot:           contractsRoot,
+		Config:                  cfg,
+		Workspaces:              workspaces,
+		Credentials:             credentialStore,
 	})
 	if err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())

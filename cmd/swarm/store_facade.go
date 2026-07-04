@@ -62,15 +62,16 @@ type selectedAPICapabilities struct {
 }
 
 type selectedAPICapabilityRequest struct {
-	RepoRoot         string
-	PlatformSpecPath string
-	LoadedBundle     serveRuntimeBundle
-	RuntimeContexts  []serveRuntimeBundleContext
-	Source           semanticview.Source
-	ContractsRoot    string
-	Config           *config.Config
-	Workspaces       serveWorkspaceLifecycle
-	Credentials      runtimecredentials.Store
+	RepoRoot                string
+	PlatformSpecPath        string
+	RunningPlatformSpecPath string
+	LoadedBundle            serveRuntimeBundle
+	RuntimeContexts         []serveRuntimeBundleContext
+	Source                  semanticview.Source
+	ContractsRoot           string
+	Config                  *config.Config
+	Workspaces              serveWorkspaceLifecycle
+	Credentials             runtimecredentials.Store
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)
