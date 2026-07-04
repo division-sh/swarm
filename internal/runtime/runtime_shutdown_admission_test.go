@@ -158,7 +158,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 		t.Fatal("ReplayAgentBacklog touched manager persistence even though runtime shutdown admission was closed")
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/github", strings.NewReader(`{"id":"evt-1","type":"push"}`))
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
 	rt.InboundGateway.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {

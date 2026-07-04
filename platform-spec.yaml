@@ -5414,6 +5414,51 @@ tool_model:
       Access tokens, refresh tokens, client secrets, authorization codes, PKCE verifier/state, and provider errors containing
       those values MUST NOT be returned through logs, events, dead letters, tool results, metadata, or CLI/API/status
       surfaces. Supported readback surfaces return only redacted metadata and failure evidence.
+  provider_trigger_adapters:
+    description: >
+      Source authority for first-class provider webhook triggers on top of the existing `inbound.webhook` gateway. It does
+      not replace the generic gateway; it makes provider-specific callback binding, signing, delivery identity, event
+      mapping, dedupe, and redacted readback semantics explicit for configured providers.
+    scope:
+    - manual/declarative webhook registration for configured provider triggers
+    - served `/webhooks/{entity}/{provider}` route mounted on the supported API listener
+    - selected runtime store wiring through `runtime.Stores.InboundStore`
+    - provider-specific signature policy and signing-secret lookup
+    - provider delivery-id extraction and dedupe-key authority
+    - provider event-type extraction and canonical Swarm event mapping
+    - redacted per-request delivery readback in webhook responses and persisted `platform.inbound_recorded` markers
+    non_goals:
+    - creating a second generic webhook gateway
+    - managed OAuth/token lifecycle, which belongs to `managed_credential_store`
+    - provider API subscription setup/teardown unless a later child explicitly selects it
+    - Slack URL-verification challenge handling or broad provider-catalog expansion in the first slice
+    - DB connectors, AWS SigV4/AssumeRole, non-HTTP, or native connector auth
+    existing_gateway_owner: >
+      `internal/runtime/inbound.go` remains the generic HTTP ingress executor for `/webhooks/{entity}/{provider}`. It
+      consumes `runtime_ingress.queueable_ingress.inbound.webhook`, persists the inbound dedupe marker before publish, and
+      publishes the normalized root ingress event returned by the provider adapter.
+    secret_binding: >
+      The first-slice signing-secret binding is `flow_instances.config.secrets.webhook_signing.<provider>`, where
+      `<provider>` is the normalized provider token. Secret values are never returned by webhook responses or readback
+      surfaces. Production deployments may replace the backing config storage with an external vault reference while
+      preserving the same semantic binding.
+    first_provider:
+      provider: github
+      signature: >
+        GitHub webhook deliveries require a configured signing secret and a valid `X-Hub-Signature-256` HMAC-SHA256
+        signature over the raw request body. Missing signing secret, missing signature, or invalid signature fails before
+        dedupe marker persistence and before event publish.
+      delivery_id: >
+        `X-GitHub-Delivery` is the authoritative provider delivery id and the dedupe key input for configured GitHub
+        triggers. Missing delivery id fails before dedupe marker persistence.
+      event_type: >
+        `X-GitHub-Event` is the authoritative provider event type. The canonical emitted event name is
+        `inbound.github.<normalized_event_type>` and the payload includes provider, provider_event_id, event_type,
+        original payload, redacted headers, and received_at.
+    raw_webhook_mode: >
+      Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
+      does not prove provider-trigger adapter closure. Configured providers MUST consume their adapter owner rather than
+      generic signature, delivery-id, event-type, or `inbound.{provider}` mapping fallbacks.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.

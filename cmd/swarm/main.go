@@ -65,7 +65,7 @@ const (
 	defaultPlatformSpecPath = platform.DefaultPlatformSpecPath
 	defaultAPIListenAddr    = "127.0.0.1:8081"
 	defaultMCPListenAddr    = "127.0.0.1:8082"
-	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws"
+	serveAPIRoutes          = "/healthz /readyz /v1/rpc /v1/ws /webhooks/"
 	serveMCPRoutes          = "/mcp /tools/"
 	serveReadinessRoutes    = "/healthz /readyz"
 	serveExitDataIntegrity  = 78
@@ -136,6 +136,7 @@ type storeBundle struct {
 	ToolEntityStore              runtimetools.EntityPersistence
 	HumanTaskStore               runtimetools.HumanTaskPersistence
 	BudgetSpendStore             budgetspend.Store
+	InboundStore                 runtime.InboundPersistence
 	MailboxAPIStore              apiv1.MailboxAPIStore
 	ObservabilityStore           apiv1.ObservabilityReadStore
 	AgentUsageStore              apiv1.AgentUsageReadStore
@@ -287,6 +288,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, cfg *config.Config) st
 		ToolEntityStore:             pg,
 		HumanTaskStore:              pg,
 		BudgetSpendStore:            pg,
+		InboundStore:                pg,
 		MailboxAPIStore:             pg,
 		ObservabilityStore:          pg,
 		AgentUsageStore:             pg,
@@ -1146,7 +1148,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("init v1 api: %v", err)
 		return 1
 	}
-	apiServer := newAPIServer(&ready, apiV1Handler)
+	var inboundHandler http.Handler
+	if rt.InboundGateway != nil {
+		inboundHandler = runtimeProjectInboundHandler{supervisor: supervisor}
+	}
+	apiServer := newAPIServer(&ready, apiV1Handler, inboundHandler)
 	mcpServer := newMCPServer(rt.ToolGateway)
 	if err := projectContextRegistration.WriteFinal(runtimeInstanceID, apiListener.Addr(), apiAuth, resolvedPaths, storeSelection, mountSources); err != nil {
 		reporter.emit(20, "context_registry", "FAILED", err.Error())
@@ -2577,6 +2583,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			ToolEntityStore:             sqliteStore,
 			HumanTaskStore:              sqliteStore,
 			BudgetSpendStore:            sqliteStore,
+			InboundStore:                sqliteStore,
 			MailboxAPIStore:             sqliteStore,
 			ObservabilityStore:          sqliteStore,
 			AgentUsageStore:             sqliteStore,
@@ -2975,7 +2982,7 @@ func systemWorkspaceContainers(lifecycle workspace.Lifecycle) []string {
 	return lister.SystemWorkspaceContainers()
 }
 
-func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler) *http.Server {
+func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler, inboundHandler http.Handler) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -2992,6 +2999,15 @@ func newAPIServer(ready *atomic.Bool, apiV1Handler http.Handler) *http.Server {
 	if apiV1Handler != nil {
 		mux.Handle("/v1/rpc", apiV1Handler)
 		mux.Handle("/v1/ws", apiV1Handler)
+	}
+	if inboundHandler != nil {
+		mux.Handle("/webhooks/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ready != nil && !ready.Load() {
+				http.Error(w, "booting", http.StatusServiceUnavailable)
+				return
+			}
+			inboundHandler.ServeHTTP(w, r)
+		}))
 	}
 	return &http.Server{
 		Handler:           mux,
