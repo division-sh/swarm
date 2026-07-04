@@ -264,6 +264,7 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*t = ToolSchemaEntry(aux)
 	t.HandlerType = strings.TrimSpace(t.HandlerType)
+	t.EffectClass = strings.TrimSpace(t.EffectClass)
 	t.Permission = strings.TrimSpace(t.Permission)
 	t.RequiredPermission = strings.TrimSpace(t.RequiredPermission)
 	t.Credentials = normalizeStrings(t.Credentials)

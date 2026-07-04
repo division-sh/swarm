@@ -98,6 +98,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if len(result.GeneratedToolSchemaClosureErrors) > 0 {
 		return result, fmt.Errorf("generated tool schema closure validation failed:\n%s", formatValidationErrors(result.GeneratedToolSchemaClosureErrors))
 	}
+	activityErrors := validateDurableActivitySurface(source)
+	if len(activityErrors) > 0 {
+		return result, fmt.Errorf("durable activity validation failed:\n%s", formatValidationErrors(activityErrors))
+	}
 
 	return result, nil
 }

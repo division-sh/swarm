@@ -360,6 +360,8 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if collectLocally {
 		deps := coordinatorEngineDependencies(e.coordinator)
 		deps.Outbox = noOpEngineOutbox{}
+		deps.ActivityIntents = noOpActivityIntentWriter{}
+		deps.ActivityDispatcher = noOpActivityDispatcher{}
 		tmpExec, err := runtimeengine.NewExecutor(deps, newCoordinatorEngineEvaluator(e.coordinator))
 		if err != nil {
 			return nil, err

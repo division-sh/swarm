@@ -215,14 +215,18 @@ func (b *WorkflowContractBundle) EventEntries() map[string]EventCatalogEntry {
 	if b == nil {
 		return nil
 	}
-	return cloneEventCatalogEntryMap(b.Events)
+	out := cloneEventCatalogEntryMap(b.Events)
+	for eventType, entry := range b.GeneratedActivityEventEntries() {
+		out[eventType] = entry
+	}
+	return out
 }
 func (b *WorkflowContractBundle) EventEntry(eventType string) (EventCatalogEntry, bool) {
 	eventType = strings.TrimSpace(eventType)
 	if b == nil || eventType == "" {
 		return EventCatalogEntry{}, false
 	}
-	entry, ok := b.Events[eventType]
+	entry, ok := b.EventEntries()[eventType]
 	return entry, ok
 }
 func (b *WorkflowContractBundle) HasEvent(eventType string) bool {
@@ -272,13 +276,21 @@ func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogE
 		return nil
 	}
 	if b.FlowTree.Root == nil {
-		return cloneEventCatalogEntryMap(b.Events)
+		out := cloneEventCatalogEntryMap(b.Events)
+		for eventType, entry := range b.GeneratedActivityEventEntries() {
+			out[eventType] = entry
+		}
+		return out
 	}
-	return flowmodel.ResolveEntries(
+	out := flowmodel.ResolveEntries(
 		b.FlowTree,
 		flowViewChildren,
 		func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
 	)
+	for eventType, entry := range b.GeneratedActivityEventEntries() {
+		out[eventType] = entry
+	}
+	return out
 }
 func (b *WorkflowContractBundle) ResolveFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool) {
 	if b == nil {
@@ -703,13 +715,13 @@ func (b *WorkflowContractBundle) NodeEffectiveProduces(nodeID string) []string {
 		return nil
 	}
 	if effective, ok := b.Semantics.EffectiveNodes[nodeID]; ok {
-		return append([]string{}, effective.Produces...)
+		return uniqueOrderedStrings(append(append([]string{}, effective.Produces...), b.generatedActivityEventsForNode(nodeID)...))
 	}
 	entry, ok := b.nodeContract(nodeID)
 	if !ok {
 		return nil
 	}
-	return EffectiveSystemNodeProduces(entry)
+	return uniqueOrderedStrings(append(EffectiveSystemNodeProduces(entry), b.generatedActivityEventsForNode(nodeID)...))
 }
 
 func (b *WorkflowContractBundle) NodeEffectiveExecutionType(nodeID string) string {

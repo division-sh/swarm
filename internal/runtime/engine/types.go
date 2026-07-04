@@ -294,6 +294,46 @@ type TimerIntent struct {
 	TriggerEvent string
 }
 
+type ActivityIntent struct {
+	ActivityID       string
+	Tool             string
+	Input            map[string]any
+	EffectClass      runtimecontracts.ActivityEffectClass
+	SuccessEvent     string
+	FailureEvent     string
+	RetryMaxAttempts int
+	RetryBackoff     string
+	ForkPolicy       runtimecontracts.ActivityForkPolicy
+	EntityID         identity.EntityID
+	NodeID           identity.NodeID
+	FlowID           identity.FlowID
+	HandlerEventKey  string
+	SourceEventID    string
+	SourceRunID      string
+	SourceTaskID     string
+	ParentEventID    string
+	ChainDepth       int
+	Attempt          int
+}
+
+func (i ActivityIntent) Normalized() ActivityIntent {
+	i.ActivityID = strings.TrimSpace(i.ActivityID)
+	i.Tool = strings.TrimSpace(i.Tool)
+	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)
+	i.FailureEvent = strings.TrimSpace(i.FailureEvent)
+	i.RetryBackoff = strings.TrimSpace(i.RetryBackoff)
+	i.HandlerEventKey = strings.TrimSpace(i.HandlerEventKey)
+	i.SourceEventID = strings.TrimSpace(i.SourceEventID)
+	i.ParentEventID = strings.TrimSpace(i.ParentEventID)
+	if i.Attempt <= 0 {
+		i.Attempt = 1
+	}
+	if i.Input == nil {
+		i.Input = map[string]any{}
+	}
+	return i
+}
+
 type StateMutation struct {
 	NextState string
 	StateCarrier
@@ -381,6 +421,7 @@ type ExecutionResult struct {
 	StateMutation                    StateMutation
 	TimerIntents                     []TimerIntent
 	EmitIntents                      []EmitIntent
+	ActivityIntents                  []ActivityIntent
 	DeadLetterIntents                []EmitIntent
 	ChainDepth                       int
 	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics

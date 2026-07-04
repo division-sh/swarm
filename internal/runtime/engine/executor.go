@@ -46,6 +46,7 @@ const (
 	StepTransform  Step = "transform"
 	StepEmits      Step = "emits"
 	StepAction     Step = "action"
+	StepActivity   Step = "activity"
 	StepClear      Step = "clear"
 )
 
@@ -69,6 +70,7 @@ var OrderedSteps = []Step{
 	StepTransform,
 	StepEmits,
 	StepAction,
+	StepActivity,
 	StepClear,
 }
 
@@ -163,6 +165,9 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := validateUnsupportedRuleActions(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
+	if err := validateHandlerActivityRuntime(req.Handler); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
 		return fmt.Errorf("%w: handler declares both create_entity and accumulate", ErrInvalidConfig)
 	}
@@ -206,6 +211,63 @@ func validateUnsupportedRuleActions(handler runtimecontracts.SystemNodeEventHand
 			if err := validateRule(handlerRuleContext("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID), *handler.Accumulate.OnTimeout); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHandler) error {
+	hasTopLevelActivity := !handler.Activity.Empty()
+	hasRuleActivity := false
+	for _, rule := range handler.Rules {
+		if !rule.Activity.Empty() {
+			hasRuleActivity = true
+			break
+		}
+	}
+	if hasTopLevelActivity {
+		if len(handler.Rules) > 0 {
+			return fmt.Errorf("handler-level activity is only allowed on handlers without rules")
+		}
+		if strings.TrimSpace(handler.Action.ID) != "" {
+			return fmt.Errorf("activity and action are mutually exclusive")
+		}
+		if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
+			return fmt.Errorf("activity and authored emit/on_success emit are mutually exclusive in Stage 1")
+		}
+	}
+	if hasRuleActivity {
+		if hasTopLevelActivity {
+			return fmt.Errorf("handler-level activity cannot be combined with rule activities")
+		}
+		if !handler.Emit.Empty() || !handler.OnSuccess.Empty() {
+			return fmt.Errorf("rule activity and handler emit/on_success emit are mutually exclusive in Stage 1")
+		}
+		for idx, rule := range handler.Rules {
+			if rule.Activity.Empty() {
+				continue
+			}
+			if strings.TrimSpace(rule.Action.ID) != "" {
+				return fmt.Errorf("handler.rules[%d] activity and action are mutually exclusive", idx)
+			}
+			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
+				return fmt.Errorf("handler.rules[%d] activity and authored emit/fan_out emit are mutually exclusive in Stage 1", idx)
+			}
+		}
+	}
+	for idx, rule := range handler.OnComplete {
+		if !rule.Activity.Empty() {
+			return fmt.Errorf("handler.on_complete[%d].activity is not supported in Stage 1", idx)
+		}
+	}
+	if handler.Accumulate != nil {
+		for idx, rule := range handler.Accumulate.OnComplete {
+			if !rule.Activity.Empty() {
+				return fmt.Errorf("handler.accumulate.on_complete[%d].activity is not supported in Stage 1", idx)
+			}
+		}
+		if handler.Accumulate.OnTimeout != nil && !handler.Accumulate.OnTimeout.Activity.Empty() {
+			return fmt.Errorf("handler.accumulate.on_timeout.activity is not supported in Stage 1")
 		}
 	}
 	return nil
@@ -468,8 +530,9 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	req.EntityID = entityID
 
 	var (
-		result  ExecutionResult
-		intents []EmitIntent
+		result          ExecutionResult
+		intents         []EmitIntent
+		activityIntents []ActivityIntent
 	)
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
 		loaded, err := e.loadState(lockCtx, req)
@@ -496,6 +559,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			}
 			result = frame.result
 			intents = append([]EmitIntent(nil), frame.result.EmitIntents...)
+			activityIntents = append([]ActivityIntent(nil), frame.result.ActivityIntents...)
 			return nil
 		})
 	})
@@ -517,6 +581,17 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	}
 	if len(intents) > 0 {
 		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
+			result.FailureClass = ClassifyFailure(err)
+			return result, err
+		}
+	}
+	if len(activityIntents) > 0 {
+		if e.deps.ActivityDispatcher == nil {
+			err := fmt.Errorf("%w: activity dispatcher is required when handler declares activity", ErrInvalidConfig)
+			result.FailureClass = ClassifyFailure(err)
+			return result, err
+		}
+		if err := e.deps.ActivityDispatcher.DispatchActivities(ctx, activityIntents); err != nil {
 			result.FailureClass = ClassifyFailure(err)
 			return result, err
 		}
@@ -639,6 +714,8 @@ func (e *Executor) runStep(frame *executionFrame, step Step) (bool, error) {
 		return false, e.stepEmits(frame)
 	case StepAction:
 		return false, e.stepAction(frame)
+	case StepActivity:
+		return false, e.stepActivity(frame)
 	case StepClear:
 		return false, e.stepClear(frame)
 	default:
@@ -1488,6 +1565,80 @@ func (e *Executor) stepAction(frame *executionFrame) error {
 	return nil
 }
 
+func (e *Executor) stepActivity(frame *executionFrame) error {
+	activitySpec := selectedActivitySpec(frame.req.Handler, frame.rule, frame.ruleSource)
+	if activitySpec.Empty() {
+		return nil
+	}
+	if e.deps.Source == nil {
+		return fmt.Errorf("%w: activity semantic source is required", ErrInvalidConfig)
+	}
+	toolID := strings.TrimSpace(activitySpec.Tool)
+	tool, ok := e.deps.Source.ToolEntries()[toolID]
+	if !ok {
+		return fmt.Errorf("%w: activity tool %q is not declared", ErrInvalidConfig, toolID)
+	}
+	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
+	if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
+		return fmt.Errorf("%w: activity tool %q effect_class %q is not executable in Stage 1", ErrInvalidConfig, toolID, tool.EffectClass)
+	}
+	input := make(map[string]any, len(activitySpec.Input))
+	base := e.currentContext(frame)
+	for field, expr := range activitySpec.Input {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		value, ok, err := evalExpressionValue(base, frame.state, expr, workflowexpr.ValueExpressionOptions{})
+		if err != nil {
+			return fmt.Errorf("activity.input.%s: %w", field, err)
+		}
+		if !ok {
+			continue
+		}
+		input[field] = value
+	}
+	ruleID := ""
+	ruleIndex := -1
+	if frame.rule != nil {
+		ruleID = strings.TrimSpace(frame.rule.ID)
+		ruleIndex = selectedRuleIndex(frame.req.Handler, frame.rule)
+	}
+	site := runtimecontracts.ActivitySite{
+		FlowID:          frame.req.FlowID.String(),
+		NodeID:          frame.req.NodeID.String(),
+		HandlerEventKey: frame.req.HandlerEventKey,
+		RuleID:          ruleID,
+		RuleIndex:       ruleIndex,
+		Spec:            activitySpec,
+	}
+	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
+	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
+	intent := ActivityIntent{
+		ActivityID:       resultEvents.ActivityID,
+		Tool:             toolID,
+		Input:            input,
+		EffectClass:      effectClass,
+		SuccessEvent:     resultEvents.SuccessEvent,
+		FailureEvent:     resultEvents.FailureEvent,
+		RetryMaxAttempts: defaults.MaxAttempts,
+		RetryBackoff:     defaults.Backoff,
+		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
+		EntityID:         frame.req.EntityID,
+		NodeID:           frame.req.NodeID,
+		FlowID:           frame.req.FlowID,
+		HandlerEventKey:  frame.req.HandlerEventKey,
+		SourceEventID:    frame.req.Event.ID(),
+		SourceRunID:      frame.req.Event.RunID(),
+		SourceTaskID:     frame.req.Event.TaskID(),
+		ParentEventID:    frame.req.Event.ParentEventID(),
+		ChainDepth:       frame.req.ChainDepth,
+		Attempt:          1,
+	}.Normalized()
+	frame.result.ActivityIntents = append(frame.result.ActivityIntents, intent)
+	return nil
+}
+
 func (e *Executor) mergePersistedActionState(frame *executionFrame, baseline StateSnapshot) error {
 	if e == nil || e.deps.StateRepo == nil || frame == nil || frame.req.EntityID.IsZero() {
 		return nil
@@ -1608,6 +1759,14 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
 	}
 	if e.deps.TimerApplier != nil && len(frame.result.TimerIntents) > 0 {
 		if err := e.deps.TimerApplier.ApplyTimerIntents(ctx, frame.req.EntityID, frame.result.TimerIntents); err != nil {
+			return err
+		}
+	}
+	if len(frame.result.ActivityIntents) > 0 {
+		if e.deps.ActivityIntents == nil {
+			return fmt.Errorf("%w: activity intent writer is required when handler declares activity", ErrInvalidConfig)
+		}
+		if err := e.deps.ActivityIntents.WriteActivityIntents(ctx, frame.result.ActivityIntents); err != nil {
 			return err
 		}
 	}
@@ -2097,6 +2256,29 @@ func selectedActionSpec(handler runtimecontracts.SystemNodeEventHandler, rule *r
 		return rule.Action
 	}
 	return handler.Action
+}
+
+func selectedActivitySpec(handler runtimecontracts.SystemNodeEventHandler, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource) runtimecontracts.ActivitySpec {
+	if source == handlerRuleSourceRules && rule != nil && !rule.Activity.Empty() {
+		return rule.Activity
+	}
+	return handler.Activity
+}
+
+func selectedRuleIndex(handler runtimecontracts.SystemNodeEventHandler, selected *runtimecontracts.HandlerRuleEntry) int {
+	if selected == nil {
+		return -1
+	}
+	selectedID := strings.TrimSpace(selected.ID)
+	for idx, rule := range handler.Rules {
+		if selectedID != "" && strings.TrimSpace(rule.ID) == selectedID {
+			return idx
+		}
+		if reflect.DeepEqual(rule, *selected) {
+			return idx
+		}
+	}
+	return -1
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {

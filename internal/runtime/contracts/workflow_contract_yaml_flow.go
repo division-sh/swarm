@@ -35,6 +35,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		"advances_to":       {},
 		"emit":              {},
 		"action":            {},
+		"activity":          {},
 		"data_accumulation": {},
 		"compute":           {},
 		"fan_out":           {},

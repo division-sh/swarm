@@ -38,6 +38,18 @@ func (noOpEngineDispatcher) DispatchPostCommit(context.Context, []runtimeengine.
 	return nil
 }
 
+type noOpActivityIntentWriter struct{}
+
+func (noOpActivityIntentWriter) WriteActivityIntents(context.Context, []runtimeengine.ActivityIntent) error {
+	return nil
+}
+
+type noOpActivityDispatcher struct{}
+
+func (noOpActivityDispatcher) DispatchActivities(context.Context, []runtimeengine.ActivityIntent) error {
+	return nil
+}
+
 type pipelineFlowScopeKey struct{}
 type workflowNodeDeliveryRouteKey struct{}
 
