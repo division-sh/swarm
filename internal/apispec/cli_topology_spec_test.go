@@ -81,6 +81,10 @@ func TestCLITopologyRevisionV22IsSourceAuthorityOnly(t *testing.T) {
 	policy := mustMappingValue(t, revision, "old_spelling_policy")
 	assertScalarValue(t, mustMappingValue(t, policy, "default_disposition"), "fail_closed_retirement")
 
+	groupField := mustMappingValue(t, revision, "group_field")
+	assertScalarContains(t, mustMappingValue(t, groupField, "identifier_alignment"), "no translation table")
+	assertScalarContains(t, mustMappingValue(t, groupField, "identifier_alignment"), "rename the cobra GroupID constants")
+
 	binding := mustMappingValue(t, revision, "conformance_binding")
 	assertScalarValue(t, mustMappingValue(t, binding, "decision"), "read_only_drift_test")
 	assertScalarContains(t, mustMappingValue(t, binding, "rule"), "swarm describe")

@@ -14924,8 +14924,15 @@ cli_specification:
         `group` is a required command_catalog row field naming the operator help journey group.
         Exempt rows: root (renders the groups), retired hidden stubs (investigate,
         control_mailbox, fork_legacy_harness_forms). Current row values describe the live #1657
-        cobra grouping; target-row values describe the v2.2 grouping. Phase 2 MUST bind cobra
-        GroupID assignments to row group values through the conformance drift test.
+        cobra group MEMBERSHIP; target-row values describe the v2.2 grouping. Phase 2 MUST bind
+        cobra GroupID assignments to row group values through the conformance drift test.
+      identifier_alignment: >
+        The snake_case allowed_values above are the canonical group identifiers. The live cobra
+        GroupID strings from #1657 (getting-started, author, operate, observe, utilities) are
+        non-canonical internal spellings: row group values assert live group membership, not the
+        current internal ID spelling. Phase 2 MUST rename the cobra GroupID constants to the
+        canonical values when landing the conformance drift test, and the drift test MUST
+        compare identifiers directly with no translation table.
     conformance_binding:
       decision: read_only_drift_test
       rule: >
