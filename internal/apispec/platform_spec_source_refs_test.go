@@ -153,6 +153,28 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 			t.Fatalf("deterministic scenario runner expectations.%s missing", key)
 		}
 	}
+	entities := mustMappingValue(t, expectations, "entities")
+	for _, key := range []string{"current_state", "fields", "gates", "count_interaction"} {
+		if !hasMappingKey(entities, key) {
+			t.Fatalf("deterministic scenario runner expectations.entities.%s missing", key)
+		}
+	}
+	for _, item := range []struct {
+		key  string
+		want []string
+	}{
+		{key: "current_state", want: []string{"scenario literal model", "CEL", "entity.list", "entity.get", "current_state"}},
+		{key: "fields", want: []string{"EntityFull.fields", "scenario literal model", "CEL", "exactly"}},
+		{key: "gates", want: []string{"EntityFull.gates", "scenario literal model", "CEL", "booleans"}},
+		{key: "count_interaction", want: []string{"count-only", "MUST NOT be combined"}},
+	} {
+		text := scalarValue(mappingValue(entities, item.key))
+		for _, want := range item.want {
+			if !strings.Contains(text, want) {
+				t.Fatalf("deterministic scenario runner expectations.entities.%s missing %q:\n%s", item.key, want, text)
+			}
+		}
+	}
 
 	catalogConvergence := mustMappingValue(t, runner, "catalog_convergence")
 	if got := scalarValue(mappingValue(catalogConvergence, "decision")); got != "split_follow_up" {

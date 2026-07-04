@@ -11209,6 +11209,34 @@ test_specification:
           plus field predicates, or by a mailbox/event-derived id. Zero or
           multiple matches fail closed unless the assertion explicitly expects a
           count.
+        current_state: >
+          A row with `current_state` is a detail assertion, not a count
+          assertion. Expected values consume the scenario literal model, so
+          `${...}` values are evaluated as CEL before comparison. The runner
+          first resolves matching entity summaries through the canonical
+          `entity.list` owner in the current run. The match must resolve to
+          exactly one entity, then the runner reads that entity through
+          `entity.get` and compares `EntityFull.entity.current_state` exactly.
+        fields: >
+          A row with `fields` is a detail assertion over
+          `EntityFull.fields`. Expected field values consume the scenario
+          literal model, so nested `${...}` values are evaluated as CEL before
+          comparison. The expected YAML object is compared exactly to the
+          canonical `entity.get` field map after JSON-compatible scalar
+          normalization; missing, extra, or differently-valued fields fail the
+          scenario.
+        gates: >
+          A row with `gates` is a detail assertion over `EntityFull.gates`.
+          Gate expectations consume the scenario literal model, so nested
+          `${...}` values are evaluated as CEL and must resolve to booleans.
+          The resulting boolean map compares exactly to the canonical
+          `entity.get` gate map. Missing, extra, non-boolean, or
+          differently-valued gates fail the scenario.
+        count_interaction: >
+          `count` is a count-only assertion and MUST NOT be combined with
+          `current_state`, `fields`, or `gates`. A type-only entity row is not a
+          valid assertion. This prevents the runner from preserving two
+          different interpretations of the same `expect.entities` row.
       mailbox:
         rule: >
           Mailbox assertions consume mailbox read owners and are scoped to the
@@ -12955,7 +12983,8 @@ cli_specification:
         mailbox.list and then call the matching mailbox decision RPC. The command waits for test quiescence by repeatedly
         reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt
         work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic
-        completion rule. Expectations consume run.trace, event.list dead-letter readback, and paginated entity.list. The
+        completion rule. Expectations consume run.trace, event.list dead-letter readback, paginated entity.list, and
+        entity.get for detail assertions. The
         command does not activate mock/local providers, implement ProviderContract, test live agent sessions/tool calls/audit/
         spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables
         directly.
@@ -12988,6 +13017,8 @@ cli_specification:
       - scenario discovery rejects files outside contracts/tests and contracts/flows/<flow>/tests
       - fixture from paths cannot escape the contract root, set overrides are applied before schema validation, and invalid
         fixture/schema variants fail before mutation
+      - entity current_state, fields, and gates expectations resolve entities through paginated entity.list, fail closed on
+        zero/multiple detail matches, and read canonical detail through entity.get
       - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
     workspace_build:
       command: swarm workspace build --backend claude_cli [--image <tag>]
