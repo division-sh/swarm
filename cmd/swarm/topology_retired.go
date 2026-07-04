@@ -52,3 +52,20 @@ func newRetiredTopologySpellingCommands() []*cobra.Command {
 // runStartRetiredMessage is the promoted disposition for the bare `swarm run`
 // start form (superseded_spellings.run_bare_start).
 const runStartRetiredMessage = "ERROR: `swarm run` no longer starts a run. Use `swarm run start ...`. Bare `swarm run` prints the run command group."
+
+// cliTopologyRetiredOrGroupPrefix reports whether pre-dispatch flag-placement
+// validation should defer to cobra dispatch so retired v2.2 spellings and the
+// bare run noun-group fail closed with their promoted pointer messages
+// instead of a generic flag-placement error.
+func cliTopologyRetiredOrGroupPrefix(prefix []string) bool {
+	if len(prefix) == 0 {
+		return false
+	}
+	switch prefix[0] {
+	case "runs", "status", "trace", "fork", "agents", "events", "entities", "conversations":
+		return true
+	case "run":
+		return len(prefix) == 1 // bare noun-group; deeper paths use leaf eligibility
+	}
+	return false
+}

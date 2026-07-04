@@ -68,7 +68,7 @@ func applyCLILoggingFlagSetArgs(args []string, opts *cliLoggingOptions) error {
 
 func validateCLILoggingFlagPlacement(args []string) error {
 	index, flag := firstCLILoggingFlagIndex(args)
-	if index < 0 || cliLoggingFlagAfterSupportedLeafCommand(args[:index]) || cliLoggingFlagUnderRetiredNamespace(args[:index]) {
+	if index < 0 || cliLoggingFlagAfterSupportedLeafCommand(args[:index]) || cliLoggingFlagUnderRetiredNamespace(args[:index]) || cliTopologyRetiredOrGroupPrefix(args[:index]) {
 		return nil
 	}
 	return fmt.Errorf("unknown flag: %s", flag)

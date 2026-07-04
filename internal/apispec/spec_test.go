@@ -358,7 +358,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	cliSurface := mustMappingValue(t, multi, "cli_surface")
 	runFork := mustMappingValue(t, cliSurface, "run_fork")
-	const runForkCommand = "swarm fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
+	const runForkCommand = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]"
 	assertScalarValue(t, mustMappingValue(t, runFork, "command"), runForkCommand)
 	if strings.Contains(runForkCommand, "--bundle ") {
 		t.Fatal("run fork command promoted legacy --bundle spelling")
@@ -463,18 +463,33 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "command"), runForkCommand)
 	assertScalarValue(t, mustMappingValue(t, runForkCatalog, "implementation_status"), "implemented_public_cli_consumer")
 	retired := mustMappingValue(t, cli, "retired_namespaces")
+	// CLI v2.2 (#1654/#1677) supersedes the #1012 "fork is not retired"
+	// decision: the top-level spelling is retired fail-closed while the public
+	// command moved to `swarm run fork`. The retirement lives in the v2.2
+	// spellings block, not as a bespoke namespace key.
 	if mappingValue(retired, "fork") != nil {
-		t.Fatal("bare top-level swarm fork must not remain classified as a retired namespace")
+		t.Fatal("fork retirement must live in topology_v2_2_retired_spellings, not a bespoke namespace key")
+	}
+	v22Spellings := mustMappingValue(t, mustMappingValue(t, retired, "topology_v2_2_retired_spellings"), "spellings")
+	if mappingValue(v22Spellings, "fork") == nil {
+		t.Fatal("top-level swarm fork must be retired in topology_v2_2_retired_spellings")
 	}
 	legacyHarness := mustMappingValue(t, retired, "fork_legacy_harness_forms")
 	assertScalarContains(t, mustMappingValue(t, legacyHarness, "command"), "--contracts")
 
 	parentTail := mustMappingValue(t, cli, "parent_tail")
 	retiredOrFailClosed := mustMappingValue(t, parentTail, "retired_or_fail_closed")
+	forkRetirementLedgered := false
 	for _, item := range retiredOrFailClosed.Content {
 		if scalarValue(item) == "swarm fork" {
-			t.Fatal("bare top-level swarm fork must not remain in retired_or_fail_closed")
+			t.Fatal("fork retirement ledger entry must carry the v2.2 disposition annotation, not the bare spelling")
 		}
+		if strings.HasPrefix(scalarValue(item), "swarm fork (v2.2") {
+			forkRetirementLedgered = true
+		}
+	}
+	if !forkRetirementLedgered {
+		t.Fatal("parent_tail.retired_or_fail_closed must ledger the v2.2 swarm fork retirement")
 	}
 	remaining := mustMappingValue(t, parentTail, "remaining_should_have_not_implemented")
 	if sequenceContainsScalar(remaining, runForkCommand) {
@@ -510,9 +525,6 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 		content := string(raw)
 		if strings.Contains(content, "swarm control run fork") {
 			t.Fatalf("%s still promotes stale swarm control run fork authority", relPath)
-		}
-		if strings.Contains(content, "retires top-level `swarm fork`") || strings.Contains(content, "top-level `swarm fork` is retired") {
-			t.Fatalf("%s still says top-level swarm fork is retired", relPath)
 		}
 		if strings.Contains(content, "retired by the Cobra command tree") {
 			t.Fatalf("%s still carries stale retired-by-Cobra swarm fork authority", relPath)
