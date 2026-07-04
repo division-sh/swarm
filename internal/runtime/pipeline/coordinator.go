@@ -208,6 +208,9 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	emitted := make([]events.Event, 0, 4)
 	ictx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
 	handled, err := pc.handleEventResult(ictx, evt)
+	if evt.Type() == activityRequestEventType && err != nil {
+		return false, emitted, err
+	}
 	if err != nil {
 		if consume {
 			return false, emitted, nil
@@ -239,7 +242,7 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 }
 
 func (pc *PipelineCoordinator) subscribe() <-chan events.Event {
-	subscriptions := workflowSubscriptions(pc.WorkflowNodes())
+	subscriptions := workflowRuntimeSubscriptions(pc.WorkflowNodes())
 	if internalBus, ok := any(pc.bus).(interface {
 		SubscribeInternal(string, ...events.EventType) <-chan events.Event
 	}); ok {
@@ -254,6 +257,9 @@ func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event
 }
 
 func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, error) {
+	if evt.Type() == activityRequestEventType {
+		return pc.handleActivityRequestEvent(ctx, evt)
+	}
 	return pc.dispatchWorkflowNodeEventResult(ctx, evt)
 }
 
