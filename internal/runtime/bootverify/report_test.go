@@ -3372,6 +3372,32 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayload(t *testing.T) {
 	}
 }
 
+func TestRun_RejectsEmitFieldsForEmptyPayloadSchema(t *testing.T) {
+	bundle := bootverifyPayloadCompletenessBundle()
+	entry := bundle.Events["market_research.scan_assigned"]
+	entry.Payload = runtimecontracts.EventPayloadSpec{}
+	entry.Required = nil
+	bundle.Events["market_research.scan_assigned"] = entry
+
+	node := bundle.Nodes["dispatcher"]
+	handler := node.EventHandlers["scan.corpus_dispatch"]
+	handler.Emit = runtimecontracts.EmitSpec{
+		Event: "market_research.scan_assigned",
+		Fields: map[string]runtimecontracts.ExpressionValue{
+			"scan_id": runtimecontracts.RefExpression("payload.scan_id"),
+		},
+	}
+	node.EventHandlers["scan.corpus_dispatch"] = handler
+	bundle.Nodes["dispatcher"] = node
+	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_payload_completeness", "authors undeclared payload field scan_id in emit.fields") {
+		t.Fatalf("expected undeclared emit field error for empty payload schema, got %#v", report.Errors())
+	}
+}
+
 func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]

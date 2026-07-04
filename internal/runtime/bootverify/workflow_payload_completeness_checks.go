@@ -198,7 +198,7 @@ func payloadCompletenessDeclaredFields(entry runtimecontracts.EventCatalogEntry)
 }
 
 func payloadCompletenessUndeclaredFields(fields, declared map[string]struct{}) []string {
-	if len(fields) == 0 || len(declared) == 0 {
+	if len(fields) == 0 {
 		return nil
 	}
 	out := make([]string, 0)
