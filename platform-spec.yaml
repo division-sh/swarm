@@ -11913,7 +11913,7 @@ cli_specification:
       event_read_stream_filters:
         classification: required_current_contract
         reason: >
-          Platform spec carries exact `swarm events list`, `swarm events follow`, and `swarm event view`
+          Platform spec carries exact `swarm event list`, `swarm event follow`, and `swarm event view`
           API-owner/filter rules from #849/#858.
       investigate_fail_closed_stubs:
         classification: legacy_migration_behavior
@@ -12420,7 +12420,7 @@ cli_specification:
             implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #886 does not add
             command-local output-mode flags or semantics.
           entities: >
-            `swarm entities list`, `swarm entity view`, and `swarm entity aggregate` are implemented for
+            `swarm entity list`, `swarm entity view`, and `swarm entity aggregate` are implemented for
             default-text read-only entity discovery in #892 and are no longer absent command rows. JSON/quiet/shared-renderer
             behavior remains governed by the output_contract and may be implemented by the separate #794/#848/#735
             output-mode/shared-renderer tail; #892 does not add command-local output-mode flags or semantics.
@@ -14201,7 +14201,7 @@ cli_specification:
           that the initial follow request used. The CLI does not deduplicate rows; recovery is at-least-once and the server/API
           owner remains responsible for trace ordering and retention semantics.
         no_retry_flag: >
-          `--no-retry` disables this recovery loop for `swarm trace --follow` / `swarm trace -f` only. With `--no-retry`, the command performs
+          `--no-retry` disables this recovery loop for `swarm run trace --follow` / `swarm run trace -f` only. With `--no-retry`, the command performs
           exactly one `run.subscribe_trace` request, may include the promoted RunTraceFilter, never sends `replay_since`, exits
           0 on a clean close, and fails closed on the first subscription or notification error.
         invalid_combinations:
@@ -15416,7 +15416,7 @@ cli_specification:
       v2_replacement: swarm mailbox approve|reject|defer
     status_v1_retirement_message:
       status: superseded
-      rule: 'The old v1 retirement of top-level `swarm status` is no longer authoritative; v2 restores top-level `swarm status`.'
+      rule: 'The old v1 retirement of top-level `swarm status` is no longer authoritative; v2 restored top-level `swarm status`, and CLI v2.2 subsequently moved it to `swarm run status` per cli_specification.retired_namespaces.topology_v2_2_retired_spellings.'
     fork_legacy_harness_forms:
       command: swarm fork --dry-run|--materialize-only|--activate|--contracts
       status: retired_legacy_harness_forms
@@ -15858,7 +15858,7 @@ api_specification:
     cli_consumption_rule: "CLI v2 runtime-state commands consume this API. The CLI MUST NOT reach directly into internal packages\
       \ for runtime reads or actions. One narrow exception: `swarm verify` \u2014 which operates on contract files on disk\
       \ and does not require a running runtime \u2014 may continue to call into the verification packages directly. All other\
-      \ CLI commands route through the API, including `swarm runs`, `swarm status`, `swarm trace`, `swarm health`, `swarm run`,\
+      \ CLI commands route through the API, including `swarm run list`, `swarm run status`, `swarm run trace`, `swarm health`, `swarm run start`,\
       \ `swarm mailbox`, `swarm control`, and later resource-noun surfaces.\n\nSame rule applies to the dashboard (when one\
       \ ships) and any future external SDK or third-party tooling. Retired `swarm investigate *` commands are legacy consumers\
       \ only and are not a source for new CLI topology.\n"
@@ -19541,7 +19541,7 @@ api_specification:
       \ boolean, description?: string,\n    schema: <JSON Schema or $ref> }\n\ntier values:\n  must_have   \u2014 closure-gate\
       \ set. The minimal API surface required to:\n                (a) close Empire #57 (mailbox approval API gap blocking\n\
       \                    every end-to-end run), and\n                (b) back the promoted CLI v2 read commands\n\
-      \                    (`swarm runs`, `swarm status`, `swarm trace`, `swarm health`)\n\
+      \                    (`swarm run list`, `swarm run status`, `swarm run trace`, `swarm health`; pre-v2.2 spellings at promotion time)\n\
       \                    and the promoted `swarm run` follow/cancellation paths.\n\
       \                Implementable as one PR; 14 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
       \ slices. Spec is\n                authoritative now (so consumers can plan against it),\n                but implementation\
@@ -20044,7 +20044,7 @@ api_specification:
       - IDEMPOTENCY_CONFLICT
     run.fork:
       tier: should_have
-      description: "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The swarm fork CLI consumes this method and must not call runtime/store helpers directly.\n"
+      description: "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from legacy bundle_fingerprint, bundle_ref, null-collapse, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n"
       scope:
         required:
         - write:runs
@@ -21927,8 +21927,8 @@ api_specification:
         nuke` for destructive reset through `/v1/rpc runtime.nuke`. No
         compatibility wrapper or alternate helper owner remains for those
         behaviors.
-      cli_v2_read_commands: "Promoted CLI v2 read commands map to v1 methods:\n  swarm runs     \u2192 run.list\n  swarm\
-        \ status   \u2192 run.diagnose (default), run.get for header-only mode if exposed\n  swarm trace    \u2192 run.trace,\
+      cli_v2_read_commands: "Promoted CLI v2 read commands map to v1 methods (v2.2 spellings):\n  swarm run list     \u2192 run.list\n  swarm\
+        \ run status   \u2192 run.diagnose (default), run.get for header-only mode if exposed\n  swarm run trace    \u2192 run.trace,\
         \ run.subscribe_trace (--follow)\n  swarm health   \u2192 health.check\nRetired `swarm investigate *` commands are\
         \ legacy consumers only. They are not authoritative CLI v2 topology and must either migrate to the promoted commands\
         \ or fail closed when the legacy namespace is removed.\n"
@@ -21957,7 +21957,7 @@ api_specification:
     - "Idempotency replay-store implementation: (method, actor, idempotency_key) \u2192 response; 24h TTL; IDEMPOTENCY_CONFLICT\
       \ response on body mismatch."
     - run.stop is must-have because promoted CLI v2 `swarm run` foreground modes require Ctrl-C cancellation after run creation.
-    - run.subscribe_trace is must-have because promoted CLI v2 `swarm run` foreground follow and `swarm trace --follow` depend
+    - run.subscribe_trace is must-have because promoted CLI v2 `swarm run start` foreground follow and `swarm run trace --follow` depend
       on it. Remaining subscription methods are sequenced by their own slices, but every subscription wire format must match
       the geth-style rpc.subscription shape.
     - health.check returns the BundleIdentity block including fingerprint.
@@ -21972,7 +21972,7 @@ api_specification:
       last_progress_at). The self-emitted platform.run_stalled alert is not progress evidence. Mailbox item creation,
       incident records, dashboard alert UI, and CLI alert rendering are not owned by this slice.
     cli:
-    - '`swarm runs`, `swarm status`, `swarm trace`, and `swarm health` consume /v1/rpc or /v1/ws methods, with no direct internal-package
+    - '`swarm run list`, `swarm run status`, `swarm run trace`, and `swarm health` consume /v1/rpc or /v1/ws methods, with no direct internal-package
       access (except the `swarm verify` carve-out). Retired `swarm investigate *` commands are non-authoritative legacy consumers.'
     - Private Makefile/script runtime helpers are retired; public CLI reset, run, health, and directive consumers use the promoted v1 API owners directly.
     deprecation:
