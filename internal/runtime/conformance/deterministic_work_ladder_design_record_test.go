@@ -183,6 +183,13 @@ func TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims(t *testi
 			want: "repair effect_class_fork_policy_defaults decision = \"orchestration_decides_later\", want default_fork_policy_must_be_specified_with_effect_classes",
 		},
 		{
+			name: "duplicate repair id",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				record.Repairs = append(record.Repairs, *deterministicWorkLadderDesignRepairByID(t, record, "compute_name_collision"))
+			},
+			want: "repairs duplicate id compute_name_collision",
+		},
+		{
 			name: "open ended languages",
 			mutate: func(record *deterministicWorkLadderDesignRecord) {
 				record.LaunchLanguage.OpenEndedMultiLanguageScope = true
@@ -370,6 +377,14 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 	var problems []string
 	byID := map[string]deterministicWorkLadderDesignRepair{}
 	for _, repair := range repairs {
+		if strings.TrimSpace(repair.ID) == "" {
+			problems = append(problems, "repairs contains entry with empty id")
+			continue
+		}
+		if _, exists := byID[repair.ID]; exists {
+			problems = append(problems, fmt.Sprintf("repairs duplicate id %s", repair.ID))
+			continue
+		}
 		byID[repair.ID] = repair
 	}
 
