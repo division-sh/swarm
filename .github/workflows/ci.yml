@@ -38,7 +38,7 @@ jobs:
         run: |
           payload=$(mktemp)
           printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > "$payload"
-          ./swarm run \
+          ./swarm run start \
             --contracts tests/tier1-primitives/test-emits-single \
             --event item.received \
             --payload "$payload" \
