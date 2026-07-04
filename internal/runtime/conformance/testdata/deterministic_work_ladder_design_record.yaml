@@ -1,0 +1,220 @@
+version: 1
+kind: deterministic_work_ladder_design_record
+issue: 1665
+parent_issue: 1663
+stage0_issue: 1664
+discussion: 1460
+authority:
+  status: non_authoritative_design_record
+  runtime_semantic_owner: platform-spec.yaml
+  platform_spec_changes_allowed: false
+  runtime_behavior_changes_allowed: false
+  claims_implemented_semantics: false
+  promotion_rule: >
+    This artifact is design evidence and watchpoint state only. New runtime,
+    verifier, CLI, test, or platform semantics become merge-bearing only when
+    promoted into platform-spec.yaml in the same PR that makes those semantics
+    true on master.
+  prohibited_uses:
+    - runtime_source_authority
+    - platform_spec_authority
+    - implementation_permission_without_child_gate
+    - compatibility_seam_or_legacy_behavior_approval
+source_refs:
+  issue: https://github.com/division-sh/swarm/issues/1665
+  pre_audit_comment: https://github.com/division-sh/swarm/issues/1665#issuecomment-4882658819
+  gate_comment: https://github.com/division-sh/swarm/issues/1665#issuecomment-4882704109
+  parent_tracker: https://github.com/division-sh/swarm/issues/1663
+  stage0_artifact: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
+  locked_design_discussion: https://github.com/division-sh/swarm/discussions/1460
+  discussion_amendment: https://github.com/division-sh/swarm/discussions/1460#discussioncomment-17533294
+  adjacent_context:
+    - https://github.com/division-sh/swarm/issues/1652
+    - https://github.com/division-sh/swarm/issues/1654
+    - platform-spec.yaml#spec_authority.review_artifact_boundary
+    - platform-spec.yaml#vocabulary.agent_role.types.system_node
+    - platform-spec.yaml#handler_specification.dependency_graph
+    - platform-spec.yaml#handler_specification.handler_fields.compute
+    - platform-spec.yaml#handler_specification.handler_fields.action
+watchlist:
+  id: runtime_operations.deterministic_work_ladder
+  owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
+  role: adr_design_record
+  parent_non_closure: true
+  parent_issue: 1663
+locked_boundary:
+  generic_logic_node: rejected
+  system_node_rename: rejected
+  system_node_vocabulary_owner: platform-spec.yaml#vocabulary.agent_role.types.system_node
+  external_io_policy: durable_activities_only
+  code_contract_relation: code_subordinate_to_contract
+  platform_spec_policy: no_speculative_v2_semantics
+  expression_language_policy: no_middle_language_no_richer_cel
+  contract_visibility_rule: >
+    Removing authored code must still leave the contract/build outputs able to
+    enumerate possible states, emitted events, entity writes, and external
+    effects.
+repairs:
+  - id: activity_result_event_materialization
+    owner_issue: 1666
+    decision: generated_materialized_contract_outputs
+    hidden_runtime_surface_allowed: false
+    required_surfaces:
+      - bundle
+      - catalog
+      - verify
+    note: >
+      Activity result events are generated from activity declarations and tool
+      output schema. They are visible contract-derived outputs, not hidden
+      runtime-only events.
+  - id: compute_name_collision
+    owner_issue: 1669
+    selected_name: compute_module
+    existing_compute_owner: platform-spec.yaml#handler_specification.handler_fields.compute
+    existing_compute_preserved: true
+    forbidden_overloads:
+      - compute
+      - handler_fields.compute
+    note: >
+      Existing compute remains the declarative operation grammar for weighted
+      average, pick_or_average, sum, min, max, and count. Future pure-code work
+      must not reuse that field as a module/executable-code carrier.
+  - id: activity_graph_placement
+    owner_issue: 1666
+    decision: dependency_graph_delta_required
+    prose_only_placement_allowed: false
+  - id: tool_effect_class_authority
+    owner_issue: 1666
+    decision: ship_with_first_consumer
+    mcp_self_classification_authoritative: false
+    default_without_authored_classification: deny
+  - id: activity_minimal_authoring_form
+    owner_issue: 1666
+    decision: tool_input_minimal_form_with_platform_defaults
+    required_surfaces:
+      - spec
+      - pilot
+    note: >
+      Stage 1 must preserve the locked-design friction budget: the minimal
+      activity form remains authored as tool plus input, with generated
+      result-event naming and retry, timeout, and idempotency defaults derived
+      from the tool output schema plus the authored effect class. This record
+      is not an implementation claim.
+  - id: effect_class_fork_policy_defaults
+    owner_issue: 1666
+    decision: default_fork_policy_must_be_specified_with_effect_classes
+    required_surfaces:
+      - spec
+      - verify
+      - trace
+    note: >
+      Effect-class fork/replay defaults are part of the effect-class authority
+      slice. #1671 and #1672 consume those defaults later; they must not invent
+      fork policy ad hoc from orchestration or trace code.
+  - id: artifact_repo_commit_disposition
+    owner_issue: 1667
+    decision: split_explicit_disposition
+    current_action_survives_until_disposition: true
+  - id: stage_order_after_activity
+    owner_issue: 1668
+    decision: declarative_helpers_before_compute_module
+    evidence_owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
+launch_language:
+  owner_issue: 1670
+  selected: python
+  status: decided_and_revisable
+  open_ended_multi_language_scope: false
+  implementation_note: >
+    Additional languages may be added later behind the same generated-bindings
+    interface, but launch scope is Python so build/tooling work does not expand
+    into a multi-language platform before the first supported surface exists.
+child_consumers:
+  - issue: 1666
+    role: durable_activities
+    consumes:
+      - activity_result_event_materialization
+      - activity_graph_placement
+      - tool_effect_class_authority
+      - activity_minimal_authoring_form
+      - effect_class_fork_policy_defaults
+      - locked_boundary.external_io_policy
+  - issue: 1667
+    role: artifact_repo_commit_disposition
+    consumes:
+      - artifact_repo_commit_disposition
+  - issue: 1668
+    role: declarative_helpers
+    consumes:
+      - stage_order_after_activity
+      - locked_boundary.expression_language_policy
+  - issue: 1669
+    role: compute_module_runtime
+    consumes:
+      - compute_name_collision
+      - locked_boundary.code_contract_relation
+  - issue: 1670
+    role: build_cli_topology
+    consumes:
+      - launch_language
+      - source_refs.adjacent_context.1654
+  - issue: 1671
+    role: orchestration_functions
+    consumes:
+      - locked_boundary.external_io_policy
+      - repairs.tool_effect_class_authority
+      - repairs.effect_class_fork_policy_defaults
+      - stage0_orchestration_gate
+  - issue: 1672
+    role: trace_test_conformance
+    consumes:
+      - source_refs.adjacent_context.1652
+      - repairs.effect_class_fork_policy_defaults
+      - authority.promotion_rule
+invalidated_claims:
+  - generic_logic_node_is_accepted_direction
+  - system_node_should_be_renamed_to_routing_node
+  - tool_call_action_is_the_whole_deterministic_io_solution
+  - activity_result_events_can_be_hidden_runtime_only_surface
+  - handler_fields_compute_can_be_overloaded_for_modules
+  - minimal_activity_form_can_be_deferred_from_stage1
+  - fork_policy_defaults_can_be_invented_by_later_consumers
+  - launch_language_scope_is_open_ended_multi_language
+  - design_discussion_or_private_docs_are_runtime_authority
+  - speculative_platform_spec_notes_are_allowed_without_implementation
+manifestation_coverage:
+  - id: stale_logic_node_language
+    status: closed_by_design_record
+    proof: locked_boundary.generic_logic_node
+  - id: system_node_rename_language
+    status: closed_by_design_record
+    proof: locked_boundary.system_node_rename
+  - id: hidden_result_event_risk
+    status: closed_by_design_record
+    proof: repairs.activity_result_event_materialization
+  - id: compute_name_collision
+    status: closed_by_design_record
+    proof: repairs.compute_name_collision
+  - id: prose_only_activity_placement
+    status: closed_by_design_record
+    proof: repairs.activity_graph_placement
+  - id: mcp_effect_class_self_classification
+    status: closed_by_design_record
+    proof: repairs.tool_effect_class_authority
+  - id: minimal_activity_form_ergonomics_gap
+    status: closed_by_design_record
+    proof: repairs.activity_minimal_authoring_form
+  - id: fork_policy_definition_gap
+    status: closed_by_design_record
+    proof: repairs.effect_class_fork_policy_defaults
+  - id: artifact_repo_commit_silence
+    status: split_to_child_issue
+    proof: repairs.artifact_repo_commit_disposition
+  - id: python_launch_language_decision
+    status: closed_by_design_record
+    proof: launch_language
+  - id: stale_discussion_authority
+    status: closed_by_design_record
+    proof: source_refs.discussion_amendment
+  - id: speculative_platform_spec_authority
+    status: closed_by_design_record
+    proof: authority
