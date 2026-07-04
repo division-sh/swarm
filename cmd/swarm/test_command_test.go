@@ -44,11 +44,9 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 				t.Fatalf("event.publish payload = %#v", req.Params["payload"])
 			}
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		case "run.trace":
-			if _, ok := req.Params["filter"]; ok {
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []any{}})
-				return
-			}
 			row := validRunCommandTraceRow("event-1")
 			row["event_name"] = "thing.created"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{row}})
@@ -77,8 +75,8 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		eventPublishMethod,
-		"run.trace",
-		"run.trace",
+		"run.diagnose",
+		"run.diagnose",
 		"run.trace",
 		eventObservationMethodList,
 		entityListMethod,
@@ -230,8 +228,8 @@ steps:
 		switch req.Method {
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
-		case "run.trace":
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []any{}})
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		case "mailbox.list":
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"items": []map[string]any{mailboxItemResult("mailbox-1", "pending", "normal")}})
 		case "mailbox.approve":
@@ -272,11 +270,11 @@ steps:
 	}
 	assertScenarioTestMethods(t, calls, []string{
 		eventPublishMethod,
-		"run.trace",
+		"run.diagnose",
 		"mailbox.list",
 		"mailbox.approve",
-		"run.trace",
-		"run.trace",
+		"run.diagnose",
+		"run.diagnose",
 	})
 }
 
@@ -303,8 +301,8 @@ steps:
 		switch req.Method {
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
-		case "run.trace":
-			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []any{}})
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
 		default:
 			t.Fatalf("unexpected method before reject validation = %s", req.Method)
 		}
@@ -323,7 +321,7 @@ steps:
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
-	assertScenarioTestMethods(t, calls, []string{eventPublishMethod, "run.trace"})
+	assertScenarioTestMethods(t, calls, []string{eventPublishMethod, "run.diagnose"})
 	if !strings.Contains(stderr.String(), "mailbox.reject reason is required") {
 		t.Fatalf("stderr = %q, want reject reason validation failure", stderr.String())
 	}
@@ -383,6 +381,79 @@ func TestScenarioEventExpectationsDeduplicateRunTraceDeliveryRows(t *testing.T) 
 	}
 }
 
+func TestScenarioEvaluatorSeedIsContractRelativeAndRecorded(t *testing.T) {
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	fileA := scenarioTestFile{Path: filepath.Join(rootA, "tests", "same.yaml")}
+	fileB := scenarioTestFile{Path: filepath.Join(rootB, "tests", "same.yaml")}
+	doc := scenarioDocument{Name: "portable", Seed: "recorded-seed"}
+	seedA, err := (scenarioRunner{contractsDir: rootA}).scenarioEvaluatorSeed(fileA, doc)
+	if err != nil {
+		t.Fatalf("seed A: %v", err)
+	}
+	seedB, err := (scenarioRunner{contractsDir: rootB}).scenarioEvaluatorSeed(fileB, doc)
+	if err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	if seedA != seedB {
+		t.Fatalf("seed differs across absolute roots:\nA=%q\nB=%q", seedA, seedB)
+	}
+	evalA, err := newScenarioExpressionEvaluator(seedA, nil)
+	if err != nil {
+		t.Fatalf("evaluator A: %v", err)
+	}
+	evalB, err := newScenarioExpressionEvaluator(seedB, nil)
+	if err != nil {
+		t.Fatalf("evaluator B: %v", err)
+	}
+	idA, err := evalA.evalExpression(`scenario.uuid("publish")`)
+	if err != nil {
+		t.Fatalf("uuid A: %v", err)
+	}
+	idB, err := evalB.evalExpression(`scenario.uuid("publish")`)
+	if err != nil {
+		t.Fatalf("uuid B: %v", err)
+	}
+	if idA != idB {
+		t.Fatalf("uuid differs across absolute roots: %v vs %v", idA, idB)
+	}
+}
+
+func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		entity := validEntitySummary("entity-1")
+		entity["entity_type"] = "widget"
+		switch len(calls) {
+		case 1:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}, "next_cursor": "page-2"})
+		case 2:
+			entity["entity_id"] = "entity-2"
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
+		default:
+			t.Fatalf("unexpected extra request %#v", req)
+		}
+	}))
+	defer server.Close()
+	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	if err != nil {
+		t.Fatalf("client: %v", err)
+	}
+	runner := scenarioRunner{client: client}
+	if err := runner.assertEntityExpectation(context.Background(), "run-1", scenarioEntityExpect{EntityType: "widget", Count: intPtr(2)}); err != nil {
+		t.Fatalf("entity expectation: %v", err)
+	}
+	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityListMethod})
+	if calls[1].Params["cursor"] != "page-2" {
+		t.Fatalf("second entity.list cursor = %#v", calls[1].Params)
+	}
+}
+
 func writeScenarioRunnerFixture(t *testing.T) string {
 	t.Helper()
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
@@ -421,6 +492,32 @@ expect:
       count: 1
 `)
 	return contractsPath
+}
+
+func scenarioRunDiagnoseTestResult(runID string, ready bool) map[string]any {
+	activeDeliveries := 0
+	if !ready {
+		activeDeliveries = 1
+	}
+	return map[string]any{
+		"run":               validDiagnosticRunHeader(runID),
+		"operational_state": "running",
+		"blocking_layer":    "",
+		"blocking_reason":   "",
+		"heuristics":        []string{},
+		"failed_deliveries": []any{},
+		"test_quiescence": map[string]any{
+			"ready":                     ready,
+			"active_deliveries":         activeDeliveries,
+			"unsettled_pipeline_events": 0,
+			"due_timers":                0,
+			"active_session_leases":     0,
+		},
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func assertScenarioTestMethods(t *testing.T, calls []jsonRPCRequest, want []string) {

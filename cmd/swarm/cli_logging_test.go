@@ -77,13 +77,7 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 			name:   "status",
 			args:   func(*testing.T) []string { return []string{"status", "run-1"} },
 			method: "run.diagnose",
-			result: map[string]any{
-				"run":               validDiagnosticRunHeader("run-1"),
-				"operational_state": "stalled",
-				"blocking_layer":    "delivery_lifecycle",
-				"blocking_reason":   "no_active_deliveries",
-				"heuristics":        []any{"dead letters exist for this run"},
-			},
+			result: validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"}),
 		},
 		{
 			name:   "conversations list",

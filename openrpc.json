@@ -5362,7 +5362,7 @@
     },
     {
       "name": "run.diagnose",
-      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
+      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\nRunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
       "params": [
         {
           "name": "run_id",
@@ -10544,7 +10544,7 @@
       },
       "RunDiagnosis": {
         "additionalProperties": false,
-        "description": "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source of truth: ProjectRunOperationalStatus for operational_state/blocking fields and RunDebugReport.FailedDeliveries for event_deliveries/dead_letters failure evidence.\n",
+        "description": "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source of truth: ProjectRunOperationalStatus for operational_state/blocking fields, RunDebugReport.FailedDeliveries for event_deliveries/dead_letters failure evidence, and RunDebugReport.TestQuiescence for deterministic test assertion-barrier readiness.\n",
         "properties": {
           "blocking_layer": {
             "$ref": "#/components/schemas/BlockingLayer"
@@ -10572,6 +10572,9 @@
           },
           "run": {
             "$ref": "#/components/schemas/RunHeader"
+          },
+          "test_quiescence": {
+            "$ref": "#/components/schemas/RunTestQuiescence"
           }
         },
         "required": [
@@ -10580,7 +10583,8 @@
           "blocking_layer",
           "blocking_reason",
           "heuristics",
-          "failed_deliveries"
+          "failed_deliveries",
+          "test_quiescence"
         ],
         "type": "object"
       },
@@ -10682,6 +10686,44 @@
           "forked"
         ],
         "type": "string"
+      },
+      "RunTestQuiescence": {
+        "additionalProperties": false,
+        "description": "Canonical public test-quiescence projection for deterministic scenario assertions. Source of truth: persisted run completion inputs consumed by run_model.lifecycle.completion, exposed through run.diagnose so test runners do not infer readiness from partial trace rows or sleeps. `ready` is true exactly when all count fields are zero.\n",
+        "properties": {
+          "active_deliveries": {
+            "description": "Active delivery rows for the run, excluding committed replay-scope marker rows.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "active_session_leases": {
+            "description": "Active agent/session leases for the run whose lease has not expired.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "due_timers": {
+            "description": "Active timer rows for the run whose fire_at is currently due.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ready": {
+            "description": "True exactly when active_deliveries, unsettled_pipeline_events, due_timers, and active_session_leases are all zero.",
+            "type": "boolean"
+          },
+          "unsettled_pipeline_events": {
+            "description": "Same-run non-runtime-log events whose platform/pipeline receipt is absent or not successful.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ready",
+          "active_deliveries",
+          "unsettled_pipeline_events",
+          "due_timers",
+          "active_session_leases"
+        ],
+        "type": "object"
       },
       "RunTraceFilter": {
         "additionalProperties": false,

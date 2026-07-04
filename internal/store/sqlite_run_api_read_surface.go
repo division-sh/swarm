@@ -162,6 +162,11 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 		return RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
+	testQuiescence, err := s.sqliteRunTestQuiescence(ctx, header.RunID)
+	if err != nil {
+		return RunDebugReport{}, err
+	}
+	report.TestQuiescence = testQuiescence
 	events, err := s.sqliteRunDebugEvents(ctx, header.RunID, opts.EventLimit)
 	if err != nil {
 		return RunDebugReport{}, err
@@ -179,6 +184,85 @@ func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID strin
 	report.RuntimeLogSummary = logSummary
 	report.WarnErrorLogCount = warnErrorCount
 	return report, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
+	var out RunTestQuiescence
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = ?
+		  AND NOT (COALESCE(subscriber_type, '') = ? AND COALESCE(subscriber_id, '') = ?)
+		  AND (
+			status IN ('pending', 'in_progress')
+			OR (status = 'failed' AND COALESCE(retry_count, 0) < 2)
+		  )
+	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&out.ActiveDeliveries); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence active deliveries: %w", err)
+	}
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events e
+		LEFT JOIN event_receipts r
+			ON r.event_id = e.event_id
+			AND r.subscriber_type = 'platform'
+			AND r.subscriber_id = 'pipeline'
+		WHERE e.run_id = ?
+		  AND e.event_name <> ?
+		  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
+	`, runID, runtimeLogEventName).Scan(&out.UnsettledPipelineEvents); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
+	}
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE run_id = ?
+		  AND status = 'active'
+		  AND fire_at <= ?
+	`, runID, s.now()).Scan(&out.DueTimers); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence due timers: %w", err)
+	}
+	activeSessionLeases, err := s.sqliteRunActiveSessionLeaseCount(ctx, runID)
+	if err != nil {
+		return RunTestQuiescence{}, err
+	}
+	out.ActiveSessionLeases = activeSessionLeases
+	out.Ready = runTestQuiescenceReady(out)
+	return out, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteRunActiveSessionLeaseCount(ctx context.Context, runID string) (int, error) {
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT lease_expires_at
+		FROM agent_sessions
+		WHERE run_id = ?
+		  AND status = 'active'
+		  AND lease_holder IS NOT NULL
+		  AND lease_expires_at IS NOT NULL
+	`, runID)
+	if err != nil {
+		return 0, fmt.Errorf("load sqlite run test quiescence active session leases: %w", err)
+	}
+	defer rows.Close()
+	count := 0
+	now := s.now()
+	for rows.Next() {
+		var raw any
+		if err := rows.Scan(&raw); err != nil {
+			return 0, fmt.Errorf("scan sqlite run test quiescence session lease expiry: %w", err)
+		}
+		expiresAt, ok, err := sqliteTimeValue(raw)
+		if err != nil {
+			return 0, err
+		}
+		if ok && expiresAt.After(now) {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read sqlite run test quiescence session lease expiries: %w", err)
+	}
+	return count, nil
 }
 
 func sqliteRunHeaderSelectSQL() string {

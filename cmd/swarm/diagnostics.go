@@ -76,6 +76,15 @@ type diagnosticRunDiagnosisResult struct {
 	BlockingReason   *string                        `json:"blocking_reason"`
 	Heuristics       []string                       `json:"heuristics"`
 	FailedDeliveries []diagnosticRunFailureDelivery `json:"failed_deliveries"`
+	TestQuiescence   *diagnosticRunTestQuiescence   `json:"test_quiescence"`
+}
+
+type diagnosticRunTestQuiescence struct {
+	Ready                   *bool `json:"ready"`
+	ActiveDeliveries        *int  `json:"active_deliveries"`
+	UnsettledPipelineEvents *int  `json:"unsettled_pipeline_events"`
+	DueTimers               *int  `json:"due_timers"`
+	ActiveSessionLeases     *int  `json:"active_session_leases"`
 }
 
 type diagnosticRunTraceResult struct {
@@ -1186,9 +1195,39 @@ func validateDiagnosticRunDiagnosis(result diagnosticRunDiagnosisResult) error {
 	if result.Heuristics == nil {
 		return fmt.Errorf("malformed run.diagnose result: heuristics is required")
 	}
+	if result.TestQuiescence == nil {
+		return fmt.Errorf("malformed run.diagnose result: test_quiescence is required")
+	}
+	if err := validateDiagnosticRunTestQuiescence(*result.TestQuiescence); err != nil {
+		return err
+	}
 	for i, delivery := range result.FailedDeliveries {
 		if err := validateDiagnosticRunFailureDelivery(fmt.Sprintf("failed_deliveries[%d]", i), delivery); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func validateDiagnosticRunTestQuiescence(result diagnosticRunTestQuiescence) error {
+	fields := []struct {
+		name  string
+		value *int
+	}{
+		{name: "active_deliveries", value: result.ActiveDeliveries},
+		{name: "unsettled_pipeline_events", value: result.UnsettledPipelineEvents},
+		{name: "due_timers", value: result.DueTimers},
+		{name: "active_session_leases", value: result.ActiveSessionLeases},
+	}
+	if result.Ready == nil {
+		return fmt.Errorf("malformed run.diagnose result: test_quiescence.ready is required")
+	}
+	for _, field := range fields {
+		if field.value == nil {
+			return fmt.Errorf("malformed run.diagnose result: test_quiescence.%s is required", field.name)
+		}
+		if *field.value < 0 {
+			return fmt.Errorf("malformed run.diagnose result: test_quiescence.%s must be non-negative", field.name)
 		}
 	}
 	return nil
@@ -1405,6 +1444,15 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 		stringPointerValue(result.BlockingLayer),
 		stringPointerValue(result.BlockingReason),
 	)
+	if result.TestQuiescence != nil {
+		fmt.Fprintf(out, "test_quiescence_ready=%t active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d\n",
+			boolPointerValue(result.TestQuiescence.Ready),
+			intPointerValue(result.TestQuiescence.ActiveDeliveries),
+			intPointerValue(result.TestQuiescence.UnsettledPipelineEvents),
+			intPointerValue(result.TestQuiescence.DueTimers),
+			intPointerValue(result.TestQuiescence.ActiveSessionLeases),
+		)
+	}
 	if len(result.Heuristics) == 0 {
 		fmt.Fprintln(out, "heuristics=none")
 	} else {

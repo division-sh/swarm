@@ -10888,7 +10888,7 @@ test_specification:
         run_readback: platform-spec.yaml#api_specification.method_catalog.run.get/trace/diagnose
         entity_readback: platform-spec.yaml#api_specification.method_catalog.entity.*
         dead_letter_readback: event/delivery/dead-letter read owners consumed by run.trace and run.diagnose
-        test_quiescence_inputs: platform-spec.yaml#run_model.lifecycle.completion and ProjectRunOperationalStatus
+        test_quiescence_inputs: platform-spec.yaml#api_specification.method_catalog.run.diagnose result.test_quiescence backed by run_model.lifecycle.completion inputs and ProjectRunOperationalStatus
         contract_validation: engine.boot_verification.checks plus existing event payload/schema validation owners
     non_goals:
     - No runtime/backend/provider implementation is promoted by this section.
@@ -10910,6 +10910,8 @@ test_specification:
         format and omitted version continues to mean v1.
       top_level_fields:
         name: Optional human-readable scenario name.
+        seed: Optional recorded deterministic seed string for generated helper values. When omitted, the empty seed is
+          recorded by implication for v1.
         vars: Optional map of literal values or CEL expressions evaluated once before the first step.
         steps: Required non-empty list of scenario actions.
         expect: Optional final assertion block evaluated after the final step reaches test quiescence.
@@ -10930,7 +10932,8 @@ test_specification:
           are derived from scenario identity, case name, helper arguments, and
           the recorded scenario seed; they are not random wall-clock values.
         initial_helpers:
-          scenario.uuid: Deterministic UUID derived from the scenario seed and a caller-provided label.
+          scenario.uuid: Deterministic UUID derived from the contract-relative scenario identity, scenario name, recorded
+            scenario seed, and caller-provided label.
           scenario.sha40: Deterministic 40-character lowercase hex digest of its normalized string argument.
         forbidden_helpers:
         - wall-clock now
@@ -11017,9 +11020,10 @@ test_specification:
         not a replacement run status.
       rule: >
         After each mutating step and before final assertions, the runner waits
-        until the current run has no pending or in_progress deliveries, no
-        immediate queued/outbox work owned by committed post-commit callbacks,
-        no currently due timer work, and no active platform callback that can
+        by reading `/v1/rpc run.diagnose` result.test_quiescence until the
+        current run has no active deliveries, no unsettled same-run pipeline
+        receipt work owned by committed post-commit callbacks, no currently due
+        timer work, and no active session lease/callback evidence that can
         synchronously enqueue more work for the same run.
       timers: >
         Non-due active timers do not prevent test quiescence. Due timers do.
@@ -12790,11 +12794,12 @@ cli_specification:
         event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps
         call /v1/rpc event.publish; mailbox approve/reject/defer steps locate exactly one pending mailbox item through
         mailbox.list and then call the matching mailbox decision RPC. The command waits for test quiescence by repeatedly
-        reading canonical run.trace delivery state until pending and in_progress deliveries are absent; --timeout is a safety
-        failure bound, not the semantic completion rule. Expectations consume run.trace, event.list dead-letter readback, and
-        entity.list. The command does not activate mock/local providers, implement ProviderContract, test live agent sessions/
-        tool calls/audit/spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/
-        mailbox tables directly.
+        reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt
+        work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic
+        completion rule. Expectations consume run.trace, event.list dead-letter readback, and paginated entity.list. The
+        command does not activate mock/local providers, implement ProviderContract, test live agent sessions/tool calls/audit/
+        spend semantics, execute inline code, copy cataloge2e private formats, or mutate EventBus/store/mailbox tables
+        directly.
       flags:
       - name: --contracts <path>
         behavior: Contract package root used for bundle loading and scenario discovery. Omitted uses config contracts_path,
@@ -15952,10 +15957,44 @@ api_specification:
             description: Event-scoped terminal dead-letter records linked to this failed or dead-letter delivery when present.
             items:
               $ref: '#/components/schemas/DeadLetterRecord'
+      RunTestQuiescence:
+        description: "Canonical public test-quiescence projection for deterministic scenario assertions. Source of truth:\
+          \ persisted run completion inputs consumed by run_model.lifecycle.completion, exposed through run.diagnose so\
+          \ test runners do not infer readiness from partial trace rows or sleeps. `ready` is true exactly when all count\
+          \ fields are zero.\n"
+        type: object
+        additionalProperties: false
+        required:
+        - ready
+        - active_deliveries
+        - unsettled_pipeline_events
+        - due_timers
+        - active_session_leases
+        properties:
+          ready:
+            type: boolean
+            description: True exactly when active_deliveries, unsettled_pipeline_events, due_timers, and active_session_leases are all zero.
+          active_deliveries:
+            type: integer
+            minimum: 0
+            description: Active delivery rows for the run, excluding committed replay-scope marker rows.
+          unsettled_pipeline_events:
+            type: integer
+            minimum: 0
+            description: Same-run non-runtime-log events whose platform/pipeline receipt is absent or not successful.
+          due_timers:
+            type: integer
+            minimum: 0
+            description: Active timer rows for the run whose fire_at is currently due.
+          active_session_leases:
+            type: integer
+            minimum: 0
+            description: Active agent/session leases for the run whose lease has not expired.
       RunDiagnosis:
         description: "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source\
-          \ of truth: ProjectRunOperationalStatus for operational_state/blocking fields and RunDebugReport.FailedDeliveries\
-          \ for event_deliveries/dead_letters failure evidence.\n"
+          \ of truth: ProjectRunOperationalStatus for operational_state/blocking fields, RunDebugReport.FailedDeliveries\
+          \ for event_deliveries/dead_letters failure evidence, and RunDebugReport.TestQuiescence for deterministic test\
+          \ assertion-barrier readiness.\n"
         type: object
         additionalProperties: false
         required:
@@ -15965,6 +16004,7 @@ api_specification:
         - blocking_reason
         - heuristics
         - failed_deliveries
+        - test_quiescence
         properties:
           run:
             $ref: '#/components/schemas/RunHeader'
@@ -15993,6 +16033,8 @@ api_specification:
             description: Failed or dead-letter delivery rows with persisted reason/error/retry/dead-letter evidence for this run.
             items:
               $ref: '#/components/schemas/RunDebugFailureDelivery'
+          test_quiescence:
+            $ref: '#/components/schemas/RunTestQuiescence'
       EntitySummary:
         type: object
         additionalProperties: false
@@ -19430,9 +19472,9 @@ api_specification:
     run.diagnose:
       tier: must_have
       description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/run_operational_status_read_surface.go\
-        \ and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries. The single canonical owner for\n\"why\
-        \ isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute\
-        \ it.\n"
+        \ and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\n\
+        RunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't\
+        \ this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n"
       scope:
         required:
         - read:runs

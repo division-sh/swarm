@@ -125,6 +125,14 @@ type RunDebugRuntimeSummary struct {
 	Count     int    `json:"count"`
 }
 
+type RunTestQuiescence struct {
+	Ready                   bool `json:"ready"`
+	ActiveDeliveries        int  `json:"active_deliveries"`
+	UnsettledPipelineEvents int  `json:"unsettled_pipeline_events"`
+	DueTimers               int  `json:"due_timers"`
+	ActiveSessionLeases     int  `json:"active_session_leases"`
+}
+
 type RunDebugReport struct {
 	RunID             string                    `json:"run_id"`
 	RunTableStatus    string                    `json:"run_table_status,omitempty"`
@@ -146,6 +154,7 @@ type RunDebugReport struct {
 	Mutations         []RunDebugMutation        `json:"mutations,omitempty"`
 	RuntimeLogSummary []RunDebugRuntimeSummary  `json:"runtime_log_summary,omitempty"`
 	RuntimeLogs       []RunDebugRuntimeLog      `json:"runtime_logs,omitempty"`
+	TestQuiescence    RunTestQuiescence         `json:"test_quiescence"`
 }
 
 type RunDebugTraceQueryOptions struct {
@@ -533,6 +542,11 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 		return RunDebugReport{}, err
 	}
 	report.FailedDeliveries = failedDeliveries
+	testQuiescence, err := s.loadRunTestQuiescence(ctx, report.RunID)
+	if err != nil {
+		return RunDebugReport{}, err
+	}
+	report.TestQuiescence = testQuiescence
 
 	eventRows, err := s.DB.QueryContext(ctx, `
 		SELECT
@@ -670,6 +684,61 @@ func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, op
 	}
 
 	return report, nil
+}
+
+func (s *PostgresStore) loadRunTestQuiescence(ctx context.Context, runID string) (RunTestQuiescence, error) {
+	var out RunTestQuiescence
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries d
+		WHERE d.run_id = $1::uuid
+		  AND NOT (COALESCE(d.subscriber_type, '') = $2 AND COALESCE(d.subscriber_id, '') = $3)
+		  AND `+activeRunQuiescenceDeliveryPredicateSQL("d")+`
+	`, runID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID).Scan(&out.ActiveDeliveries); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence active deliveries: %w", err)
+	}
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events e
+		LEFT JOIN event_receipts r
+			ON r.event_id = e.event_id
+			AND r.subscriber_type = 'platform'
+			AND r.subscriber_id = 'pipeline'
+		WHERE e.run_id = $1::uuid
+		  AND e.event_name <> '`+runtimeLogEventName+`'
+		  AND (r.event_id IS NULL OR COALESCE(r.outcome, '') <> 'success')
+	`, runID).Scan(&out.UnsettledPipelineEvents); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
+	}
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM timers
+		WHERE run_id = $1::uuid
+		  AND status = 'active'
+		  AND fire_at <= now()
+	`, runID).Scan(&out.DueTimers); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence due timers: %w", err)
+	}
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_sessions
+		WHERE run_id = $1::uuid
+		  AND status = 'active'
+		  AND lease_holder IS NOT NULL
+		  AND lease_expires_at IS NOT NULL
+		  AND lease_expires_at > now()
+	`, runID).Scan(&out.ActiveSessionLeases); err != nil {
+		return RunTestQuiescence{}, fmt.Errorf("load run test quiescence active session leases: %w", err)
+	}
+	out.Ready = runTestQuiescenceReady(out)
+	return out, nil
+}
+
+func runTestQuiescenceReady(value RunTestQuiescence) bool {
+	return value.ActiveDeliveries == 0 &&
+		value.UnsettledPipelineEvents == 0 &&
+		value.DueTimers == 0 &&
+		value.ActiveSessionLeases == 0
 }
 
 func (s *PostgresStore) loadRunDebugFailureDeliveries(ctx context.Context, runID string, limit int) ([]RunDebugFailureDelivery, error) {
