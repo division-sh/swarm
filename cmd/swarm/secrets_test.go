@@ -84,6 +84,74 @@ func TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues(t *testing.
 	}
 }
 
+func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module provider-secrets-test\n")
+	contractsRoot := writeProviderSecretsCommandContractsFixture(t)
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	t.Setenv("OPENAI_API_KEY", "env-only-openai-key")
+	withExecutableRuntimeConfig(t, strings.Join([]string{
+		"llm:",
+		"  backend: openai_responses",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")+"\n")
+
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
+	if code != cliExitRuntime {
+		t.Fatalf("initial check code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var missing secretsCheckResult
+	if err := json.Unmarshal([]byte(stdout), &missing); err != nil {
+		t.Fatalf("decode check json: %v\n%s", err, stdout)
+	}
+	if missing.OK || len(missing.Missing) != 1 {
+		t.Fatalf("initial check result = %+v", missing)
+	}
+	provider := missing.Missing[0]
+	if provider.Key != "OPENAI_API_KEY" || provider.Present || provider.Source != "" {
+		t.Fatalf("provider missing record = %+v, want file-backed missing OPENAI_API_KEY", provider)
+	}
+	if len(provider.RequiredBy) != 1 || provider.RequiredBy[0].Kind != "provider" || provider.RequiredBy[0].Name != "openai_responses" {
+		t.Fatalf("provider required_by = %+v, want provider:openai_responses", provider.RequiredBy)
+	}
+
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "list", "--contracts", contractsRoot, "--missing", "--json"}, "")
+	if code != 0 {
+		t.Fatalf("list --missing code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var listed secretsListResult
+	if err := json.Unmarshal([]byte(stdout), &listed); err != nil {
+		t.Fatalf("decode list json: %v\n%s", err, stdout)
+	}
+	if len(listed.Secrets) != 1 || listed.Secrets[0].Key != "OPENAI_API_KEY" {
+		t.Fatalf("list --missing result = %+v, want missing OPENAI_API_KEY", listed)
+	}
+
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "set", "OPENAI_API_KEY", "--stdin"}, "stored-openai-key\n")
+	if code != 0 {
+		t.Fatalf("set provider code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	if strings.Contains(stdout+stderr, "stored-openai-key") || strings.Contains(stdout+stderr, "env-only-openai-key") {
+		t.Fatalf("set provider output leaked secret stdout=%q stderr=%q", stdout, stderr)
+	}
+
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check", "--contracts", contractsRoot, "--json"}, "")
+	if code != 0 {
+		t.Fatalf("check after set code = %d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	var ok secretsCheckResult
+	if err := json.Unmarshal([]byte(stdout), &ok); err != nil {
+		t.Fatalf("decode ok json: %v\n%s", err, stdout)
+	}
+	if !ok.OK || len(ok.Missing) != 0 {
+		t.Fatalf("check after set result = %+v, want ok", ok)
+	}
+}
+
 func TestSecretsListShowsEnvShadowingAndRemoveKeepsEnvEffective(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
@@ -268,4 +336,44 @@ email_api:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	return root
+}
+
+func writeProviderSecretsCommandContractsFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: provider-secrets-command-fixture
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-secrets-command-fixture\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+provider-agent:
+  id: provider-agent
+  role: provider
+  prompt_ref: provider-agent
+  model: regular
+  mode: task
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "provider-agent.md"), "Handle provider-backed work.\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	return root
+}
+
+func withExecutableRuntimeConfig(t *testing.T, configText string) {
+	t.Helper()
+	original := runtimeConfigExecutablePath
+	exeDir := t.TempDir()
+	exePath := filepath.Join(exeDir, "swarm")
+	writeWorkflowValidationFixtureFile(t, exePath, "")
+	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), configText)
+	runtimeConfigExecutablePath = func() (string, error) {
+		return exePath, nil
+	}
+	t.Cleanup(func() {
+		runtimeConfigExecutablePath = original
+	})
 }
