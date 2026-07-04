@@ -3341,12 +3341,13 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}); err != nil {
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
-	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{}, projection.BundleHash); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
+	runningPlatformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot())
+	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), storeBundle{}, projection.BundleHash, runningPlatformSpecPath); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
 	}
 
 	stores := selectedPostgresStoreBundle(pg, &config.Config{})
-	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), stores, projection.BundleHash)
+	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), stores, projection.BundleHash, runningPlatformSpecPath)
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
 	}

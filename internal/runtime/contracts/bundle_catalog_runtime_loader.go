@@ -13,9 +13,10 @@ import (
 )
 
 type BundleCatalogRuntimeLoadRequest struct {
-	BundleHash  string
-	ContentYAML string
-	DataBlob    []byte
+	BundleHash              string
+	ContentYAML             string
+	DataBlob                []byte
+	RunningPlatformSpecPath string
 }
 
 type BundleCatalogRuntimeSource struct {
@@ -84,7 +85,11 @@ func LoadBundleCatalogRuntimeSource(repoRoot string, req BundleCatalogRuntimeLoa
 	if err != nil {
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("load bundle catalog runtime source: %w", err)
 	}
-	if err := ValidateBundlePlatformVersionCompatibility(bundle); err != nil {
+	runningPlatformVersion, err := loadBundleCatalogRunningPlatformVersion(repoRoot, req.RunningPlatformSpecPath)
+	if err != nil {
+		return BundleCatalogRuntimeSource{}, err
+	}
+	if err := ValidateBundlePlatformVersionCompatibilityForPlatformVersion(bundle, runningPlatformVersion); err != nil {
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("admit bundle catalog runtime source: %w", err)
 	}
 	gotHash, err := BundleHash(bundle)
@@ -103,6 +108,18 @@ func LoadBundleCatalogRuntimeSource(repoRoot string, req BundleCatalogRuntimeLoa
 		Bundle:           bundle,
 		tempRoot:         tempRoot,
 	}, nil
+}
+
+func loadBundleCatalogRunningPlatformVersion(repoRoot, runningPlatformSpecPath string) (string, error) {
+	runningPlatformSpecPath = strings.TrimSpace(runningPlatformSpecPath)
+	if runningPlatformSpecPath == "" {
+		runningPlatformSpecPath = DefaultPlatformSpecFile(repoRoot)
+	}
+	var platform PlatformSpecDocument
+	if err := loadYAMLFile(runningPlatformSpecPath, &platform); err != nil {
+		return "", fmt.Errorf("load running platform spec for bundle catalog admission: %w", err)
+	}
+	return strings.TrimSpace(platform.Platform.Version), nil
 }
 
 func (s BundleCatalogRuntimeSource) Cleanup() error {

@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"encoding/base64"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,6 +72,40 @@ func TestLoadBundleCatalogRuntimeSourceRejectsIncompatiblePersistedBytes(t *test
 	})
 	if err == nil || !strings.Contains(err.Error(), `admit bundle catalog runtime source: platform version compatibility failed`) {
 		t.Fatalf("LoadBundleCatalogRuntimeSource error = %v, want platform_version compatibility failure", err)
+	}
+}
+
+func TestLoadBundleCatalogRuntimeSourceUsesRunningPlatformVersionForAdmission(t *testing.T) {
+	t.Parallel()
+
+	repo := repoRootForContractsTest(t)
+	root := writePlatformVersionCompatibilityContractsDir(t, ">=0.7.0 <0.8.0")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	runningPlatformSpec := writePlatformVersionCompatibilityPlatformSpec(t, repo, "0.8.0")
+
+	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:              projection.BundleHash,
+		ContentYAML:             projection.ContentYAML,
+		DataBlob:                projection.DataBlob,
+		RunningPlatformSpecPath: runningPlatformSpec,
+	})
+	if err == nil {
+		t.Fatal("LoadBundleCatalogRuntimeSource error = nil, want running platform compatibility failure")
+	}
+	for _, want := range []string{
+		`platform_version range ">=0.7.0 <0.8.0" does not include running platform "0.8.0"`,
+		`running platform.version is "0.8.0"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadBundleCatalogRuntimeSource error = %v, want substring %q", err, want)
+		}
 	}
 }
 
@@ -146,4 +181,22 @@ func rewriteBundleCatalogPackageYAML(t *testing.T, contentYAML, old, replacement
 		t.Fatalf("encode content_yaml: %v", err)
 	}
 	return string(raw)
+}
+
+func writePlatformVersionCompatibilityPlatformSpec(t *testing.T, repoRoot, version string) string {
+	t.Helper()
+
+	raw, err := os.ReadFile(DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("read default platform spec: %v", err)
+	}
+	updated := strings.Replace(string(raw), "version: 0.7.0", "version: "+version, 1)
+	if updated == string(raw) {
+		t.Fatal("default platform spec did not contain expected version line")
+	}
+	path := filepath.Join(t.TempDir(), "platform-spec.yaml")
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write running platform spec: %v", err)
+	}
+	return path
 }

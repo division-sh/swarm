@@ -456,6 +456,47 @@ func TestContractBundleSourceLoaderRejectsIncompatiblePlatformVersion(t *testing
 	}
 }
 
+func TestBundleCatalogSelectedContractSourceLoaderUsesRunningPlatformVersionForAdmission(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+		record: store.BundleCatalogRuntimeRecord{
+			BundleHash:  projection.BundleHash,
+			ContentYAML: projection.ContentYAML,
+			DataBlob:    projection.DataBlob,
+		},
+	}
+	loader := BundleCatalogSelectedContractSourceLoader{
+		RepoRoot:         repoRoot,
+		PlatformSpecPath: writeRunForkExecutionPlatformSpecVersion(t, repoRoot, "0.8.0"),
+		Store:            catalogStore,
+	}
+
+	_, err = loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+		BundleHash: projection.BundleHash,
+		Selection: store.RunForkContractSelection{
+			Mode:       store.RunForkContractSelectionModeBundleHash,
+			BundleHash: projection.BundleHash,
+		},
+	})
+	if err == nil {
+		t.Fatal("LoadRunForkSelectedContractSourceForRequest error = nil, want running platform compatibility failure")
+	}
+	for _, want := range []string{
+		runbundle.CodeBundleDataIntegrityError,
+		`platform_version range ">=0.7.0 <0.8.0" does not include running platform "0.8.0"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("LoadRunForkSelectedContractSourceForRequest error = %v, want substring %q", err, want)
+		}
+	}
+}
+
 func TestBundleCatalogSelectedContractSourceLoaderLoadsCrossBundleTargetSelection(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
@@ -716,6 +757,24 @@ func writeSelectedContractFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeRunForkExecutionPlatformSpecVersion(t *testing.T, repoRoot, version string) string {
+	t.Helper()
+
+	raw, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("read default platform spec: %v", err)
+	}
+	updated := strings.Replace(string(raw), "version: 0.7.0", "version: "+version, 1)
+	if updated == string(raw) {
+		t.Fatal("default platform spec did not contain expected version line")
+	}
+	path := filepath.Join(t.TempDir(), "platform-spec.yaml")
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write running platform spec: %v", err)
+	}
+	return path
 }
 
 func testSelectedContractBinding(forkRunID string) store.RunForkSelectedContractBinding {
