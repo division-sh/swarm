@@ -147,6 +147,12 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 	var stopLocal func()
 	if strings.TrimSpace(opts.connectURL) == "" {
 		repo = assetCommandRepoRoot(repo)
+		var err error
+		opts, err = opts.withLocalForegroundServeAuth()
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return commandExitError{code: runCommandErrorExitCode(err)}
+		}
 		if _, err := newCLIAPIClient(opts.apiOptions); err != nil {
 			fmt.Fprintln(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
@@ -264,6 +270,17 @@ func (o runCommandOptions) validate() error {
 		return fmt.Errorf("--payload is required")
 	}
 	return nil
+}
+
+func (o runCommandOptions) withLocalForegroundServeAuth() (runCommandOptions, error) {
+	auth, err := resolveServeAPIAuth(defaultServeOptions())
+	if err != nil {
+		return o, err
+	}
+	if tokenFile := strings.TrimSpace(auth.TokenFile); tokenFile != "" {
+		o.apiOptions.apiTokenFile = tokenFile
+	}
+	return o, nil
 }
 
 func (o runCommandOptions) runtimeEndpoints() (rootCommandOptions, string, error) {
