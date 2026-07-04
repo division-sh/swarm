@@ -13,6 +13,7 @@ import (
 	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -139,7 +140,15 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
-			descriptors, err := runtimecredentials.ListDescriptors(ctx, store, source)
+			providerRequirements, err := loadSecretsProviderRequirements(repo, source)
+			if err != nil {
+				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+			}
+			providerStore, err := providerCredentialStoreForRequirements(providerRequirements)
+			if err != nil {
+				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure provider credential store: %w", err))
+			}
+			descriptors, err := listSecretsDescriptors(ctx, store, providerStore, source, providerRequirements)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -176,10 +185,19 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
-			missing, err := runtimecredentials.MissingRequired(ctx, store, source)
+			providerRequirements, err := loadSecretsProviderRequirements(repo, source)
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
+			providerStore, err := providerCredentialStoreForRequirements(providerRequirements)
+			if err != nil {
+				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure provider credential store: %w", err))
+			}
+			descriptors, err := listSecretsDescriptors(ctx, store, providerStore, source, providerRequirements)
+			if err != nil {
+				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+			}
+			missing := missingSecretDescriptors(descriptors)
 			records := secretRecordsFromDescriptors(missing)
 			result := secretsCheckResult{OK: len(records) == 0, Missing: records}
 			if opts.asJSON {
@@ -319,6 +337,116 @@ func loadSecretsSourceRequired(repo, contractsPath, platformSpecPath string) (se
 		return nil, fmt.Errorf("load Swarm contracts: %w", err)
 	}
 	return semanticview.Wrap(bundle), nil
+}
+
+func loadSecretsProviderRequirements(repo string, source semanticview.Source) (map[string][]runtimecredentials.Requirement, error) {
+	requirements := map[string][]runtimecredentials.Requirement{}
+	if !sourceDeclaresAgents(source) {
+		return requirements, nil
+	}
+	configResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
+	if err != nil {
+		return nil, fmt.Errorf("load runtime config for provider secret requirements: %w", err)
+	}
+	profile, err := configResult.Config.LLMBackendProfile()
+	if err != nil {
+		return nil, fmt.Errorf("resolve provider secret requirement: %w", err)
+	}
+	key := runtimellm.ProviderCredentialKey(profile)
+	if !profile.Credential.Required || key == "" {
+		return requirements, nil
+	}
+	requirements[key] = []runtimecredentials.Requirement{{Kind: "provider", Name: strings.TrimSpace(profile.ID)}}
+	return requirements, nil
+}
+
+func providerCredentialStoreForRequirements(requirements map[string][]runtimecredentials.Requirement) (runtimecredentials.Store, error) {
+	if len(requirements) == 0 {
+		return nil, nil
+	}
+	return buildProviderCredentialStore()
+}
+
+func listSecretsDescriptors(ctx context.Context, store, providerStore runtimecredentials.Store, source semanticview.Source, providerRequirements map[string][]runtimecredentials.Requirement) ([]runtimecredentials.Descriptor, error) {
+	descriptors, err := runtimecredentials.ListDescriptors(ctx, store, source)
+	if err != nil {
+		return nil, err
+	}
+	return mergeProviderSecretDescriptors(ctx, descriptors, providerStore, providerRequirements)
+}
+
+func mergeProviderSecretDescriptors(ctx context.Context, descriptors []runtimecredentials.Descriptor, providerStore runtimecredentials.Store, providerRequirements map[string][]runtimecredentials.Requirement) ([]runtimecredentials.Descriptor, error) {
+	if len(providerRequirements) == 0 {
+		return descriptors, nil
+	}
+	byKey := make(map[string]runtimecredentials.Descriptor, len(descriptors)+len(providerRequirements))
+	for _, desc := range descriptors {
+		byKey[strings.TrimSpace(desc.Key)] = desc
+	}
+	for key, requiredBy := range providerRequirements {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		desc, err := runtimecredentials.Describe(ctx, providerStore, nil, key)
+		if err != nil {
+			return nil, err
+		}
+		if existing, ok := byKey[key]; ok {
+			desc.RequiredBy = mergeCredentialRequirements(existing.RequiredBy, requiredBy)
+		} else {
+			desc.RequiredBy = mergeCredentialRequirements(nil, requiredBy)
+		}
+		byKey[key] = desc
+	}
+	out := make([]runtimecredentials.Descriptor, 0, len(byKey))
+	for _, desc := range byKey {
+		if strings.TrimSpace(desc.Key) == "" {
+			continue
+		}
+		out = append(out, desc)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Key < out[j].Key
+	})
+	return out, nil
+}
+
+func mergeCredentialRequirements(left, right []runtimecredentials.Requirement) []runtimecredentials.Requirement {
+	items := append(append([]runtimecredentials.Requirement{}, left...), right...)
+	out := make([]runtimecredentials.Requirement, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item.Kind = strings.TrimSpace(item.Kind)
+		item.Name = strings.TrimSpace(item.Name)
+		if item.Kind == "" || item.Name == "" {
+			continue
+		}
+		key := item.Kind + "\x00" + item.Name
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind == out[j].Kind {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Kind < out[j].Kind
+	})
+	return out
+}
+
+func missingSecretDescriptors(descriptors []runtimecredentials.Descriptor) []runtimecredentials.Descriptor {
+	out := make([]runtimecredentials.Descriptor, 0)
+	for _, desc := range descriptors {
+		if desc.Present || len(desc.RequiredBy) == 0 {
+			continue
+		}
+		out = append(out, desc)
+	}
+	return out
 }
 
 func secretRecordsFromDescriptors(descriptors []runtimecredentials.Descriptor) []secretRecord {
