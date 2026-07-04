@@ -16,12 +16,34 @@ var builtinWave1ScalarTypes = map[string]struct{}{
 	"uuid":      {},
 }
 
+var projectPackageDocumentFields = map[string]struct{}{
+	"name":             {},
+	"version":          {},
+	"platform_version": {},
+	"author":           {},
+	"description":      {},
+	"keywords":         {},
+	"license":          {},
+	"repository":       {},
+	"extra":            {},
+	"requires":         {},
+	"flows":            {},
+	"packages":         {},
+	"children":         {},
+	"subpackages":      {},
+	"connect":          {},
+	"handoffs":         {},
+}
+
 func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil
 	}
 	if hasYAMLMappingKey(node, "entity_schema") {
 		return fmt.Errorf("RETIRED: package.yaml entity_schema is no longer supported; migrate to entities.yaml")
+	}
+	if err := validateProjectPackageDocumentFields(node); err != nil {
+		return err
 	}
 	var aux struct {
 		Name            string               `yaml:"name"`
@@ -36,9 +58,24 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
 		Connect         []FlowPackageConnect `yaml:"connect"`
 		Handoffs        []ProjectHandoff     `yaml:"handoffs"`
-		EntitySchema    EntitySchema         `yaml:"entity_schema"`
 	}
 	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	keywords, err := decodePackageKeywordsYAML(yamlMappingValue(node, "keywords"))
+	if err != nil {
+		return err
+	}
+	license, err := decodePackageLicenseYAML(yamlMappingValue(node, "license"))
+	if err != nil {
+		return err
+	}
+	repository, err := decodePackageRepositoryYAML(yamlMappingValue(node, "repository"))
+	if err != nil {
+		return err
+	}
+	extra, err := decodePackageExtraYAML(yamlMappingValue(node, "extra"))
+	if err != nil {
 		return err
 	}
 	*p = ProjectPackageDocument{
@@ -47,6 +84,10 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		PlatformVersion: aux.PlatformVersion,
 		Author:          aux.Author,
 		Description:     aux.Description,
+		Keywords:        keywords,
+		License:         license,
+		Repository:      repository,
+		Extra:           extra,
 		Requires:        aux.Requires.normalized(),
 		Flows:           append([]ProjectFlowRef(nil), aux.Flows...),
 		Packages:        append([]ProjectPackageRef(nil), aux.Packages...),
@@ -54,7 +95,37 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Subpackages:     append([]ProjectPackageRef(nil), aux.Subpackages...),
 		Connect:         cloneFlowPackageConnects(aux.Connect),
 		Handoffs:        append([]ProjectHandoff(nil), aux.Handoffs...),
-		EntitySchema:    aux.EntitySchema,
+	}
+	return nil
+}
+
+func validateProjectPackageDocumentFields(node *yaml.Node) error {
+	if node == nil || node.Kind == 0 {
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("package.yaml must be a mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		if _, ok := projectPackageDocumentFields[key]; !ok {
+			return fmt.Errorf("UNDEFINED-FIELD: package.yaml field %q not in platform spec", key)
+		}
+	}
+	return nil
+}
+
+func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if strings.TrimSpace(node.Content[i].Value) == key {
+			return node.Content[i+1]
+		}
 	}
 	return nil
 }

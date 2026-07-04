@@ -6,5 +6,3 @@ description: >
   CONDITION-PAYLOAD error.
 platform_version: ">=0.7.0 <0.8.0"
 flows: []
-trigger:
-  boot: true

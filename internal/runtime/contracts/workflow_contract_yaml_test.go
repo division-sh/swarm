@@ -142,6 +142,160 @@ requires:
 	}
 }
 
+func TestProjectPackageDocumentDecode_PreservesStrictSelfFacts(t *testing.T) {
+	var doc ProjectPackageDocument
+	if err := yaml.Unmarshal([]byte(`
+name: package-self-facts
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+author: platform-team
+description: Strict manifest metadata fixture.
+keywords:
+  - dedup-index
+  - catalog
+license: Apache-2.0
+repository: https://github.com/division-sh/swarm
+extra:
+  colony.division.sh/display_name: Dedup Index
+  colony.division.sh/owner_team: Runtime
+flows: []
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := strings.Join(doc.Keywords, ","), "dedup-index,catalog"; got != want {
+		t.Fatalf("Keywords = %q, want %q", got, want)
+	}
+	if got, want := doc.License, "Apache-2.0"; got != want {
+		t.Fatalf("License = %q, want %q", got, want)
+	}
+	if got, want := doc.Repository, "https://github.com/division-sh/swarm"; got != want {
+		t.Fatalf("Repository = %q, want %q", got, want)
+	}
+	wantExtra := map[string]string{
+		"colony.division.sh/display_name": "Dedup Index",
+		"colony.division.sh/owner_team":   "Runtime",
+	}
+	if !reflect.DeepEqual(doc.Extra, wantExtra) {
+		t.Fatalf("Extra = %#v, want %#v", doc.Extra, wantExtra)
+	}
+}
+
+func TestProjectPackageDocumentDecode_RejectsStrictSelfFactDrift(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "unknown category",
+			body: `
+name: invalid
+category: examples
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+		{
+			name: "unknown homepage",
+			body: `
+name: invalid
+homepage: https://division.sh
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+		{
+			name: "unknown capabilities",
+			body: `
+name: invalid
+capabilities: []
+`,
+			wantErr: "UNDEFINED-FIELD",
+		},
+		{
+			name: "loose license alias",
+			body: `
+name: invalid
+license: Apache
+`,
+			wantErr: "SPDX",
+		},
+		{
+			name: "license expression",
+			body: `
+name: invalid
+license: MIT OR Apache-2.0
+`,
+			wantErr: "SPDX",
+		},
+		{
+			name: "ssh repository",
+			body: `
+name: invalid
+repository: git@github.com:division-sh/swarm.git
+`,
+			wantErr: "GitHub HTTPS",
+		},
+		{
+			name: "repository branch URL",
+			body: `
+name: invalid
+repository: https://github.com/division-sh/swarm/tree/master
+`,
+			wantErr: "https://github.com/{owner}/{repo}",
+		},
+		{
+			name: "repository git suffix",
+			body: `
+name: invalid
+repository: https://github.com/division-sh/swarm.git
+`,
+			wantErr: "https://github.com/{owner}/{repo}",
+		},
+		{
+			name: "uppercase keyword",
+			body: `
+name: invalid
+keywords: [Runtime]
+`,
+			wantErr: "lowercase slug",
+		},
+		{
+			name: "duplicate keyword",
+			body: `
+name: invalid
+keywords: [runtime, runtime]
+`,
+			wantErr: "duplicates",
+		},
+		{
+			name: "extra missing namespace",
+			body: `
+name: invalid
+extra:
+  display_name: Runtime
+`,
+			wantErr: "namespaced",
+		},
+		{
+			name: "extra non-string value",
+			body: `
+name: invalid
+extra:
+  colony.division.sh/enabled: true
+`,
+			wantErr: "must be a string",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc ProjectPackageDocument
+			err := yaml.Unmarshal([]byte(tc.body), &doc)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestProjectPackageDocumentDecode_RejectsMalformedRequiresAndBindShape(t *testing.T) {
 	tests := []struct {
 		name    string

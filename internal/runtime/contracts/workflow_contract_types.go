@@ -674,6 +674,10 @@ type ProjectPackageDocument struct {
 	PlatformVersion string               `yaml:"platform_version"`
 	Author          string               `yaml:"author"`
 	Description     string               `yaml:"description"`
+	Keywords        []string             `yaml:"keywords"`
+	License         string               `yaml:"license"`
+	Repository      string               `yaml:"repository"`
+	Extra           map[string]string    `yaml:"extra"`
 	Requires        FlowPackageRequires  `yaml:"requires"`
 	Flows           []ProjectFlowRef     `yaml:"flows"`
 	Packages        []ProjectPackageRef  `yaml:"packages"`

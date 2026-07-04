@@ -6013,6 +6013,67 @@ flow_model:
       policy.yaml: Flow-specific config (optional — inherits root)
       prompts/: Agent prompt files (optional)
       flows/: Child flows (optional)
+    manifest_self_facts:
+      owner: package.yaml top-level fields decoded by ProjectPackageDocument
+      strict_decoding:
+        rule: >
+          package.yaml top-level keys are fail-closed platform contract input. The loader MUST reject any
+          top-level key that is not in the supported field set and MUST NOT silently ignore, warn-only,
+          compatibility-shim, or preserve unknown top-level fields for later interpretation.
+        supported_fields:
+        - name
+        - version
+        - platform_version
+        - author
+        - description
+        - keywords
+        - license
+        - repository
+        - extra
+        - requires
+        - flows
+        - packages
+        - children
+        - subpackages
+        - connect
+        - handoffs
+        retired_fields:
+          entity_schema: >
+            package.yaml.entity_schema is retired and must fail with the retired-field migration error instead of
+            being accepted as a manifest self-fact. Authoritative entity contracts live in entities.yaml.
+        explicit_non_fields:
+        - homepage
+        - category
+        - capabilities
+        - tools
+        - backends
+      fields:
+        keywords: >
+          Optional list of unique package keyword slugs. Each item MUST be a string using lowercase ASCII letters,
+          digits, and hyphen with no leading/trailing whitespace. Duplicate keywords fail closed.
+        license: >
+          Optional package license. When present it MUST be a non-deprecated SPDX license identifier from the
+          platform's embedded SPDX license-list owner. SPDX expressions, loose aliases, prose, and proprietary
+          placeholders are not accepted in this field.
+        repository: >
+          Optional package source repository. When present it MUST be exactly an HTTPS GitHub repository URL in the
+          form https://github.com/{owner}/{repo}. SSH URLs, arbitrary hosts, homepage/docs URLs, branch/tree/blob/issue
+          URLs, query strings, fragments, URL escapes, trailing slashes, and .git suffixes fail closed.
+        extra: >
+          Optional downstream metadata map. Keys MUST be namespaced as domain.tld/name and values MUST be strings.
+          Swarm stores and projects this map for catalog/read-model consumers but does not interpret its values for
+          runtime semantics.
+      catalog_consumption:
+        owner: bundle catalog projection
+        rule: >
+          Persisted bundle catalog rows MUST consume the typed package manifest owner for these self-facts. The
+          projection exposes them under parsed_json.package and mirrors them into catalog metadata for list/detail
+          read surfaces. Catalog replay MUST parse stored package.yaml through the same strict ProjectPackageDocument
+          owner; persisted unknown top-level fields are invalid runtime input.
+      non_goals:
+      - package.yaml.repository does not implement update or fetch behavior.
+      - package.yaml.extra does not authorize runtime behavior, capability selection, tool binding, backend selection, or category taxonomy.
+      - package.yaml self-facts do not change platform_version compatibility semantics.
     import_boundary:
       description: >
         Imported flow packages declare their required public interface and dependency surface in their own package.yaml
@@ -12879,6 +12940,7 @@ cli_specification:
       - store/data migration and swarm run behavior
     test:
       command: swarm test [scenario-file ...] [--contracts <path>] [--platform-spec <path>] [--timeout <duration>] [--poll-interval <duration>]
+      group: author_validate
       tier: should_have
       implementation_status: implemented_first_slice
       owner: platform-spec.yaml#test_specification.deterministic_scenario_runner
@@ -12996,6 +13058,7 @@ cli_specification:
       - boot-check severity policy
     connections:
       command: swarm connections connect|callback|status|disconnect
+      group: author_validate
       tier: must_have
       implementation_status: implemented_first_slice
       owner: tool_model.managed_credential_store

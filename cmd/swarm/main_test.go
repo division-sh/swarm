@@ -1637,6 +1637,66 @@ platform_version: ">=0.8.0"
 	}
 }
 
+func TestRunVerifyCommandAcceptsPackageManifestSelfFacts(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	chdirForTest(t, t.TempDir())
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: package-self-facts-verify
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+keywords: [dedup-index, catalog]
+license: MIT
+repository: https://github.com/division-sh/swarm
+extra:
+  colony.division.sh/display_name: Package Self Facts Verify
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: package-self-facts-verify\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, output = %q", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "verify ok: contracts=") {
+		t.Fatalf("verify output missing success marker:\n%s", buf.String())
+	}
+}
+
+func TestRunVerifyCommandFailsClosedForUnknownPackageManifestField(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	chdirForTest(t, t.TempDir())
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: package-unknown-field-verify
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+homepage: https://division.sh
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: package-unknown-field-verify\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	var buf bytes.Buffer
+	code := runVerifyCommandWithContractsForTest(context.Background(), "", root, &buf)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
+	}
+	for _, want := range []string{"verify failed: load Swarm contracts:", "UNDEFINED-FIELD", "homepage"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Fatalf("verify output missing %q:\n%s", want, buf.String())
+		}
+	}
+}
+
 func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testing.T) {
 	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
 	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")

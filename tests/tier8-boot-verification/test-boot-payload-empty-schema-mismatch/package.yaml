@@ -5,5 +5,3 @@ description: >
   source event with no payload fields. Platform must catch payload_field_coverage.
 platform_version: ">=0.7.0 <0.8.0"
 flows: []
-trigger:
-  boot: true

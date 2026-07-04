@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -97,7 +98,19 @@ func TestBundleHashV1AcceptsCurrentPlatformSpec(t *testing.T) {
 }
 
 func TestBundleCatalogProjectionUsesCanonicalInputsWithoutHostPaths(t *testing.T) {
-	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: projection\nversion: \"1.0.0\"\nflows:\n  - id: alpha\n    flow: alpha\n")
+	root, platform := writeEquivalentBundleHashFixture(t, "\n", `name: projection
+version: "1.0.0"
+keywords:
+  - dedup-index
+  - catalog
+license: MIT
+repository: https://github.com/division-sh/swarm
+extra:
+  colony.division.sh/display_name: Projection Fixture
+flows:
+  - id: alpha
+    flow: alpha
+`)
 	writeBundleHashText(t, filepath.Join(root, "flows", "alpha", "agents.yaml"), `
 agents:
   reviewer:
@@ -105,6 +118,17 @@ agents:
 `)
 	writeBundleHashBytes(t, filepath.Join(root, "flows", "alpha", "data", "payload.bin"), []byte{0x01, 0x02, 0x03})
 	bundle := bundleHashTestBundle(root, platform)
+	bundle.Package = ProjectPackageDocument{
+		Name:            "projection",
+		Version:         "1.0.0",
+		PlatformVersion: ">=0.7.0 <0.8.0",
+		Keywords:        []string{"dedup-index", "catalog"},
+		License:         "MIT",
+		Repository:      "https://github.com/division-sh/swarm",
+		Extra: map[string]string{
+			"colony.division.sh/display_name": "Projection Fixture",
+		},
+	}
 	bundle.Semantics.Name = "projection"
 	bundle.Semantics.Version = "1.0.0"
 	bundle.Agents = map[string]AgentRegistryEntry{
@@ -162,8 +186,30 @@ agents:
 	if _, hasRuntimeState := reviewer["runtime_state"]; hasRuntimeState {
 		t.Fatalf("agents projection contains runtime state: %#v", reviewer)
 	}
+	pkg, ok := projection.ParsedJSON["package"].(map[string]any)
+	if !ok {
+		t.Fatalf("package projection = %#v", projection.ParsedJSON["package"])
+	}
+	if got, want := pkg["license"], "MIT"; got != want {
+		t.Fatalf("package license = %#v, want %q", got, want)
+	}
+	if got, want := pkg["repository"], "https://github.com/division-sh/swarm"; got != want {
+		t.Fatalf("package repository = %#v, want %q", got, want)
+	}
+	if got, want := pkg["keywords"], []string{"dedup-index", "catalog"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("package keywords = %#v, want %#v", got, want)
+	}
+	if got, want := pkg["extra"], map[string]string{"colony.division.sh/display_name": "Projection Fixture"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("package extra = %#v, want %#v", got, want)
+	}
 	if projection.Metadata["projection_version"] != bundleCatalogProjectionVersion || projection.Metadata["source"] != "swarm serve --contracts" {
 		t.Fatalf("metadata = %#v", projection.Metadata)
+	}
+	if got, want := projection.Metadata["package_license"], "MIT"; got != want {
+		t.Fatalf("metadata package_license = %#v, want %q", got, want)
+	}
+	if got, want := projection.Metadata["package_extra"], map[string]string{"colony.division.sh/display_name": "Projection Fixture"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("metadata package_extra = %#v, want %#v", got, want)
 	}
 }
 
@@ -278,6 +324,29 @@ func TestBundleCatalogRuntimeLoaderFailsClosedForMissingDataOrHashMismatch(t *te
 	})
 	if err == nil || !strings.Contains(err.Error(), "hash mismatch") {
 		t.Fatalf("hash mismatch error = %v, want hash mismatch", err)
+	}
+}
+
+func TestBundleCatalogRuntimeLoaderRejectsUnknownPackageManifestField(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	contractsRoot := filepath.Join(repo, "tests", "tier12-runtime-tools", "test-flow-data-access")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, contractsRoot, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+
+	contentYAML := rewriteBundleCatalogPackageYAML(t, projection.ContentYAML, `"name":"test-flow-data-access"`, `"homepage":"https://division.sh","name":"test-flow-data-access"`)
+	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: contentYAML,
+		DataBlob:    projection.DataBlob,
+	})
+	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") || !strings.Contains(err.Error(), "homepage") {
+		t.Fatalf("LoadBundleCatalogRuntimeSource error = %v, want homepage UNDEFINED-FIELD", err)
 	}
 }
 
