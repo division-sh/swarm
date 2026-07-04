@@ -49,6 +49,7 @@ type scenarioTestFile struct {
 
 type scenarioDocument struct {
 	Name    string
+	Seed    string
 	Vars    map[string]any
 	Steps   []scenarioStep
 	Expect  scenarioExpect
@@ -141,7 +142,7 @@ func newTestCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "test [scenario-file ...]",
-		Short: "Run deterministic scenario tests through public v1 API owners.",
+		Short: "Run deterministic scenario tests through public read owners.",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScenarioTestCommand(cmd.Context(), repoRoot, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, testOpts)
@@ -370,7 +371,11 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 	if err != nil {
 		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
 	}
-	evaluator, err := newScenarioExpressionEvaluator(file.Path, doc.Vars)
+	seed, err := r.scenarioEvaluatorSeed(file, doc)
+	if err != nil {
+		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+	}
+	evaluator, err := newScenarioExpressionEvaluator(seed, doc.Vars)
 	if err != nil {
 		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
 	}
@@ -415,7 +420,7 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 	top := mappingNode(root.Content[0])
 	for key := range top {
 		switch key {
-		case "version", "name", "vars", "steps", "expect", "invalid":
+		case "version", "name", "seed", "vars", "steps", "expect", "invalid":
 		default:
 			return scenarioDocument{}, fmt.Errorf("unsupported top-level field %q", key)
 		}
@@ -429,6 +434,9 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 	doc := scenarioDocument{Vars: map[string]any{}}
 	if node := top["name"]; node != nil {
 		doc.Name = strings.TrimSpace(fmt.Sprint(yamlNodeValue(node)))
+	}
+	if node := top["seed"]; node != nil {
+		doc.Seed = strings.TrimSpace(fmt.Sprint(yamlNodeValue(node)))
 	}
 	if node := top["vars"]; node != nil {
 		vars, ok := yamlNodeValue(node).(map[string]any)
@@ -466,6 +474,24 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 		doc.Invalid = &invalid
 	}
 	return doc, nil
+}
+
+func (r scenarioRunner) scenarioEvaluatorSeed(file scenarioTestFile, doc scenarioDocument) (string, error) {
+	rel, err := filepath.Rel(r.contractsDir, file.Path)
+	if err != nil {
+		return "", fmt.Errorf("derive scenario identity: %w", err)
+	}
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if rel == "." || strings.HasPrefix(rel, "../") || rel == ".." {
+		return "", fmt.Errorf("scenario file %s is outside contract package root", file.Path)
+	}
+	parts := []string{
+		"scenario-v1",
+		"path=" + rel,
+		"name=" + strings.TrimSpace(doc.Name),
+		"seed=" + strings.TrimSpace(doc.Seed),
+	}
+	return strings.Join(parts, "\x00"), nil
 }
 
 func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
@@ -1293,15 +1319,21 @@ func (r scenarioRunner) findMailboxID(ctx context.Context, evaluator *scenarioEx
 func (r scenarioRunner) waitForQuiescence(ctx context.Context, runID string) error {
 	deadline := time.Now().Add(r.timeout)
 	for {
-		active, err := r.activeDeliveryRows(ctx, runID)
+		quiescence, err := r.readTestQuiescence(ctx, runID)
 		if err != nil {
 			return err
 		}
-		if len(active) == 0 {
+		if boolPointerValue(quiescence.Ready) {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("test quiescence deadline reached for run %s with %d active deliveries", runID, len(active))
+			return fmt.Errorf("test quiescence deadline reached for run %s with active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d",
+				runID,
+				intPointerValue(quiescence.ActiveDeliveries),
+				intPointerValue(quiescence.UnsettledPipelineEvents),
+				intPointerValue(quiescence.DueTimers),
+				intPointerValue(quiescence.ActiveSessionLeases),
+			)
 		}
 		timer := time.NewTimer(r.pollInterval)
 		select {
@@ -1313,32 +1345,16 @@ func (r scenarioRunner) waitForQuiescence(ctx context.Context, runID string) err
 	}
 }
 
-func (r scenarioRunner) activeDeliveryRows(ctx context.Context, runID string) ([]diagnosticRunTraceRow, error) {
-	params := map[string]any{
-		"run_id": runID,
-		"limit":  200,
-		"filter": map[string]any{
-			"delivery_status": []string{"pending", "in_progress"},
-		},
+func (r scenarioRunner) readTestQuiescence(ctx context.Context, runID string) (diagnosticRunTestQuiescence, error) {
+	params := map[string]any{"run_id": runID}
+	var result diagnosticRunDiagnosisResult
+	if err := r.client.call(ctx, "run.diagnose", params, &result); err != nil {
+		return diagnosticRunTestQuiescence{}, err
 	}
-	var result diagnosticRunTraceResult
-	if err := r.client.call(ctx, "run.trace", params, &result); err != nil {
-		return nil, err
+	if err := validateDiagnosticRunDiagnosis(result); err != nil {
+		return diagnosticRunTestQuiescence{}, err
 	}
-	if err := validateDiagnosticRunTraceResult(result); err != nil {
-		return nil, err
-	}
-	if err := validateDiagnosticRunTraceSummaryRows(result.Trace); err != nil {
-		return nil, err
-	}
-	active := make([]diagnosticRunTraceRow, 0, len(result.Trace))
-	for _, row := range result.Trace {
-		switch strings.TrimSpace(row.DeliveryStatus) {
-		case "pending", "in_progress":
-			active = append(active, row)
-		}
-	}
-	return active, nil
+	return *result.TestQuiescence, nil
 }
 
 func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, expect scenarioExpect) error {
@@ -1481,15 +1497,29 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID strin
 		"type":   expect.EntityType,
 		"limit":  500,
 	}
-	var result entityListResult
-	if err := r.client.call(ctx, entityListMethod, params, &result); err != nil {
-		return err
+	count := 0
+	seen := map[string]struct{}{}
+	for {
+		var result entityListResult
+		if err := r.client.call(ctx, entityListMethod, params, &result); err != nil {
+			return err
+		}
+		if err := validateEntityListResult(result); err != nil {
+			return err
+		}
+		count += len(result.Entities)
+		cursor := strings.TrimSpace(result.NextCursor)
+		if cursor == "" {
+			break
+		}
+		if _, ok := seen[cursor]; ok {
+			return fmt.Errorf("malformed entity.list result: repeated next_cursor %q", cursor)
+		}
+		seen[cursor] = struct{}{}
+		params["cursor"] = cursor
 	}
-	if err := validateEntityListResult(result); err != nil {
-		return err
-	}
-	if expect.Count != nil && len(result.Entities) != *expect.Count {
-		return fmt.Errorf("entity expectation for type %s got count %d, want %d", expect.EntityType, len(result.Entities), *expect.Count)
+	if expect.Count != nil && count != *expect.Count {
+		return fmt.Errorf("entity expectation for type %s got count %d, want %d", expect.EntityType, count, *expect.Count)
 	}
 	return nil
 }

@@ -154,13 +154,7 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 				if tc.wantMethod == "run.get" {
 					return map[string]any{"run": validDiagnosticRunHeader("run-1")}
 				}
-				return map[string]any{
-					"run":               validDiagnosticRunHeader("run-1"),
-					"operational_state": "stalled",
-					"blocking_layer":    "delivery_lifecycle",
-					"blocking_reason":   "no_active_deliveries",
-					"heuristics":        []any{"dead letters exist for this run"},
-				}
+				return validDiagnosticRunDiagnosis("run-1", "stalled", "delivery_lifecycle", "no_active_deliveries", []any{"dead letters exist for this run"})
 			})
 			defer server.Close()
 
@@ -258,13 +252,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 				case "run.get":
 					return map[string]any{"run": validDiagnosticRunHeaderWithStatus(tc.selected, "paused")}
 				default:
-					return map[string]any{
-						"run":               validDiagnosticRunHeader(tc.selected),
-						"operational_state": "running",
-						"blocking_layer":    "",
-						"blocking_reason":   "",
-						"heuristics":        []any{},
-					}
+					return validDiagnosticRunDiagnosis(tc.selected, "running", "", "", []any{})
 				}
 			})
 			defer server.Close()
@@ -1510,6 +1498,23 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			wantStderr: "heuristics is required",
 		},
 		{
+			name: "run diagnose missing test quiescence",
+			args: []string{"status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"run":               validDiagnosticRunHeader("run-1"),
+					"operational_state": "running",
+					"blocking_layer":    "",
+					"blocking_reason":   "",
+					"heuristics":        []any{},
+				})
+			},
+			wantCode:   3,
+			wantStderr: "test_quiescence is required",
+		},
+		{
 			name: "trace missing trace",
 			args: []string{"trace", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
@@ -1702,6 +1707,24 @@ func validDiagnosticRunHeader(runID string) map[string]any {
 		"entity_count":       2,
 		"event_count":        3,
 		"started_at":         "2026-05-13T10:00:00Z",
+	}
+}
+
+func validDiagnosticRunDiagnosis(runID, state, layer, reason string, heuristics []any) map[string]any {
+	return map[string]any{
+		"run":               validDiagnosticRunHeader(runID),
+		"operational_state": state,
+		"blocking_layer":    layer,
+		"blocking_reason":   reason,
+		"heuristics":        heuristics,
+		"failed_deliveries": []any{},
+		"test_quiescence": map[string]any{
+			"ready":                     true,
+			"active_deliveries":         0,
+			"unsettled_pipeline_events": 0,
+			"due_timers":                0,
+			"active_session_leases":     0,
+		},
 	}
 }
 

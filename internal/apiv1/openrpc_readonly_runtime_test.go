@@ -299,7 +299,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"health.ping":                    {Params: map[string]any{}, ResultKeys: []string{"ok", "ts"}},
 		"mailbox.get":                    {Params: map[string]any{"mailbox_id": "mailbox-1"}, ResultKeys: []string{"item", "payload", "history", "decision_sheet"}},
 		"mailbox.list":                   {Params: map[string]any{}, ResultKeys: []string{"items"}},
-		"run.diagnose":                   {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics"}},
+		"run.diagnose":                   {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run", "operational_state", "blocking_layer", "blocking_reason", "heuristics", "test_quiescence"}},
 		"run.get":                        {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
 		"run.list":                       {Params: map[string]any{}, ResultKeys: []string{"runs"}},
 		"run.trace":                      {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
@@ -1003,6 +1003,10 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		}
 		if len(heuristics) != 0 {
 			t.Fatalf("run.diagnose heuristics = %#v, want empty array", heuristics)
+		}
+		quiescence := asMap(t, result["test_quiescence"])
+		if quiescence["ready"] != true {
+			t.Fatalf("run.diagnose test_quiescence = %#v, want ready", quiescence)
 		}
 	}
 	if methodName == "conversation.get" || methodName == "conversation.current_for_agent" {

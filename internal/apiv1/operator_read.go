@@ -147,6 +147,7 @@ type runDiagnosis struct {
 	BlockingReason   string                          `json:"blocking_reason"`
 	Heuristics       []string                        `json:"heuristics"`
 	FailedDeliveries []store.RunDebugFailureDelivery `json:"failed_deliveries"`
+	TestQuiescence   store.RunTestQuiescence         `json:"test_quiescence"`
 }
 
 var runListStatuses = map[string]struct{}{
@@ -252,6 +253,7 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 				BlockingReason:   strings.TrimSpace(status.BlockingReason),
 				Heuristics:       status.Heuristics,
 				FailedDeliveries: failedDeliveries,
+				TestQuiescence:   normalizeRunTestQuiescence(report.TestQuiescence),
 			}, nil
 		},
 	}
@@ -304,6 +306,14 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	return handlers
+}
+
+func normalizeRunTestQuiescence(value store.RunTestQuiescence) store.RunTestQuiescence {
+	value.Ready = value.ActiveDeliveries == 0 &&
+		value.UnsettledPipelineEvents == 0 &&
+		value.DueTimers == 0 &&
+		value.ActiveSessionLeases == 0
+	return value
 }
 
 func requireRunReadStore(runs RunReadStore) (RunReadStore, error) {
