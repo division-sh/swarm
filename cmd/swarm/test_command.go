@@ -1089,7 +1089,18 @@ func (r scenarioRunner) loadFixturePayload(scenarioPath, rawPath string) (map[st
 	if !pathWithin(r.contractsDir, abs) {
 		return nil, fmt.Errorf("payload.from %s escapes contract package root", rawPath)
 	}
-	raw, err := os.ReadFile(abs)
+	realContractsDir, err := filepath.EvalSymlinks(r.contractsDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve contract package root: %w", err)
+	}
+	realPath, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("resolve payload.from %s: %w", rawPath, err)
+	}
+	if !pathWithin(realContractsDir, realPath) {
+		return nil, fmt.Errorf("payload.from %s escapes contract package root", rawPath)
+	}
+	raw, err := os.ReadFile(realPath)
 	if err != nil {
 		return nil, fmt.Errorf("read payload.from %s: %w", rawPath, err)
 	}
@@ -1179,11 +1190,7 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 	if state.RunID == "" {
 		return fmt.Errorf("%s requires an existing run context", step.Action)
 	}
-	mailboxID, err := r.findMailboxID(ctx, evaluator, state.RunID, step.Match)
-	if err != nil {
-		return err
-	}
-	params := map[string]any{"mailbox_id": mailboxID}
+	params := map[string]any{}
 	if key, err := evaluator.evalValue(step.IdempotencyKey); err != nil {
 		return fmt.Errorf("idempotency_key: %w", err)
 	} else if text := optionalScenarioString(key); text != "" {
@@ -1193,39 +1200,44 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 	case "mailbox.approve":
 		payload, err := evaluator.evalValue(step.Payload)
 		if err != nil {
-			return fmt.Errorf("payload: %w", err)
+			return scenarioTestValidationError{err: fmt.Errorf("payload: %w", err)}
 		}
 		if payload != nil {
 			m, ok := payload.(map[string]any)
 			if !ok {
-				return fmt.Errorf("mailbox.approve payload must be an object")
+				return scenarioTestValidationError{err: fmt.Errorf("mailbox.approve payload must be an object")}
 			}
 			params["decision_payload"] = m
 		}
 	case "mailbox.reject":
 		reason, err := evaluator.evalValue(step.Reason)
 		if err != nil {
-			return fmt.Errorf("reason: %w", err)
+			return scenarioTestValidationError{err: fmt.Errorf("reason: %w", err)}
 		}
-		text := strings.TrimSpace(fmt.Sprint(reason))
+		text := optionalScenarioString(reason)
 		if text == "" {
-			return fmt.Errorf("mailbox.reject reason is required")
+			return scenarioTestValidationError{err: fmt.Errorf("mailbox.reject reason is required")}
 		}
 		params["reason"] = text
 	case "mailbox.defer":
 		until, err := evaluator.evalValue(step.Until)
 		if err != nil {
-			return fmt.Errorf("until: %w", err)
+			return scenarioTestValidationError{err: fmt.Errorf("until: %w", err)}
 		}
-		text := strings.TrimSpace(fmt.Sprint(until))
+		text := optionalScenarioString(until)
 		if text == "" {
-			return fmt.Errorf("mailbox.defer until is required")
+			return scenarioTestValidationError{err: fmt.Errorf("mailbox.defer until is required")}
 		}
 		if _, err := time.Parse(time.RFC3339, text); err != nil {
-			return fmt.Errorf("mailbox.defer until must be RFC3339: %w", err)
+			return scenarioTestValidationError{err: fmt.Errorf("mailbox.defer until must be RFC3339: %w", err)}
 		}
 		params["until"] = text
 	}
+	mailboxID, err := r.findMailboxID(ctx, evaluator, state.RunID, step.Match)
+	if err != nil {
+		return err
+	}
+	params["mailbox_id"] = mailboxID
 	var result mailboxDecisionResult
 	if err := r.client.call(ctx, step.Action, params, &result); err != nil {
 		return err
@@ -1334,10 +1346,7 @@ func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, 
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(rows))
-	for _, row := range rows {
-		names = append(names, row.EventName)
-	}
+	names := uniqueScenarioTraceEventNames(rows)
 	if err := assertScenarioEventExpectations(names, expect.Events); err != nil {
 		return err
 	}
@@ -1352,6 +1361,23 @@ func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, 
 		}
 	}
 	return nil
+}
+
+func uniqueScenarioTraceEventNames(rows []diagnosticRunTraceRow) []string {
+	names := make([]string, 0, len(rows))
+	seen := map[string]struct{}{}
+	for _, row := range rows {
+		eventID := strings.TrimSpace(row.EventID)
+		if eventID == "" {
+			eventID = strings.TrimSpace(row.EventName)
+		}
+		if _, ok := seen[eventID]; ok {
+			continue
+		}
+		seen[eventID] = struct{}{}
+		names = append(names, row.EventName)
+	}
+	return names
 }
 
 func (r scenarioRunner) fetchRunTraceRows(ctx context.Context, runID string) ([]diagnosticRunTraceRow, error) {
