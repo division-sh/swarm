@@ -2666,6 +2666,42 @@ func TestPostgresStore_Inbound_ResolveWithoutRunContextAllowsUnambiguousTarget(t
 	}
 }
 
+func TestPostgresStore_Inbound_ResolveNormalizesWebhookSigningProviderKey(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	s := &PostgresStore{DB: db}
+	ctx := context.Background()
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("insert run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES ('root', 'root', 'static', '{"secrets":{"webhook_signing":{"my_provider":"provider-secret"}}}'::jsonb, 'active', NOW())
+	`); err != nil {
+		t.Fatalf("insert flow instance: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state
+		)
+		VALUES ($1::uuid, $2::uuid, 'root', 'default', 'customer-a', 'Customer A', 'active')
+	`, runID, entityID); err != nil {
+		t.Fatalf("insert entity state: %v", err)
+	}
+
+	target, err := s.ResolveInboundTarget(runtimecorrelation.WithRunID(ctx, runID), "customer-a", "my-provider")
+	if err != nil {
+		t.Fatalf("ResolveInboundTarget: %v", err)
+	}
+	if target.EntityID != entityID || target.EntitySlug != "customer-a" {
+		t.Fatalf("target = %+v, want entity=%s slug=customer-a", target, entityID)
+	}
+	if target.WebhookSecret != "provider-secret" {
+		t.Fatalf("WebhookSecret = %q, want provider-secret", target.WebhookSecret)
+	}
+}
+
 func TestPostgresStore_Inbound_ResolveWithoutRunContextRejectsAmbiguousTarget(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := &PostgresStore{DB: db}

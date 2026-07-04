@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -326,6 +327,23 @@ func (s *runtimeProjectSupervisor) projectStatusLocked() builderpkg.ProjectStatu
 
 type dashboardDynamicRuntimeControl struct {
 	supervisor *runtimeProjectSupervisor
+}
+
+type runtimeProjectInboundHandler struct {
+	supervisor *runtimeProjectSupervisor
+}
+
+func (h runtimeProjectInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if h.supervisor == nil {
+		http.Error(w, "runtime unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	rt := h.supervisor.CurrentRuntime()
+	if rt == nil || rt.InboundGateway == nil {
+		http.Error(w, "runtime ingress unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	rt.InboundGateway.Handler().ServeHTTP(w, r)
 }
 
 func (c dashboardDynamicRuntimeControl) PauseIngress() error {

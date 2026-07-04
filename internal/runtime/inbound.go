@@ -60,6 +60,7 @@ type InboundGateway struct {
 	logger                  *RuntimeLogger
 	shutdownAdmissionClosed func() bool
 	runtimeIngress          *runtimeingress.Controller
+	providers               map[string]inboundProviderAdapter
 }
 
 func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
@@ -73,6 +74,7 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdown
 		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
+		providers:               defaultInboundProviderAdapters(),
 	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g
@@ -132,23 +134,31 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		target = resolved
 	}
 	target.NormalizeEntity()
-	if !verifyProviderSignature(provider, target.WebhookSecret, body, r.Header) {
-		http.Error(w, "invalid signature", http.StatusUnauthorized)
-		return
-	}
-
 	var payload any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		payload = map[string]any{"raw": string(body)}
 	}
 	entityID := target.EffectiveEntityID()
 	entitySlug := target.EffectiveEntitySlug()
-	providerEventID := firstNonEmpty(
-		r.Header.Get("X-Provider-Event-ID"),
-		r.Header.Get("X-Request-ID"),
-		extractProviderEventID(payload),
-		fingerprintInbound(entityID, provider, body),
-	)
+	now := time.Now().UTC()
+	delivery, err := g.providerAdapter(provider).AcceptInbound(inboundProviderRequest{
+		Provider:  provider,
+		Target:    target,
+		Body:      body,
+		Headers:   r.Header,
+		Payload:   payload,
+		Received:  now,
+		UserAgent: r.UserAgent(),
+	})
+	if err != nil {
+		status := http.StatusBadRequest
+		if providerErr, ok := err.(inboundProviderError); ok {
+			status = providerErr.Status
+		}
+		http.Error(w, err.Error(), status)
+		return
+	}
+	providerEventID := delivery.ProviderEventID
 
 	if g.store != nil {
 		inserted, err := g.store.RecordInboundEvent(r.Context(), providerEventID, entityID, provider)
@@ -157,16 +167,18 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !inserted {
-			writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "provider_event_id": providerEventID})
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":              "duplicate",
+				"provider":            provider,
+				"provider_event_id":   providerEventID,
+				"provider_event_type": delivery.ProviderEventType,
+				"event_name":          string(delivery.EventName),
+			})
 			return
 		}
 	}
 
-	now := time.Now().UTC()
-	pubType, pubPayload := buildInboundPublishPayload(provider, entityID, providerEventID, payload, now)
-	pubPayload["headers"] = map[string]any{
-		"user_agent": r.UserAgent(),
-	}
+	pubType, pubPayload := delivery.EventName, delivery.Payload
 	envelopeBytes := mustJSON(pubPayload)
 	if g.bus != nil {
 		pubCtx := runtimebus.WithCurrentRuntimeEpoch(r.Context())
@@ -195,12 +207,23 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"status":            "accepted",
-		"entity_id":         entityID,
-		"entity_slug":       entitySlug,
-		"provider":          provider,
-		"provider_event_id": providerEventID,
+		"status":              "accepted",
+		"entity_id":           entityID,
+		"entity_slug":         entitySlug,
+		"provider":            provider,
+		"provider_event_id":   providerEventID,
+		"provider_event_type": delivery.ProviderEventType,
+		"event_name":          string(delivery.EventName),
 	})
+}
+
+func (g *InboundGateway) providerAdapter(provider string) inboundProviderAdapter {
+	if g != nil {
+		if adapter, ok := g.providers[normalizeProviderName(provider)]; ok && adapter != nil {
+			return adapter
+		}
+	}
+	return rawInboundProviderAdapter{}
 }
 
 func parseWebhookPath(path string) (entityID, provider string, ok bool) {
@@ -215,6 +238,127 @@ func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 		return "", "", false
 	}
 	return entityID, provider, true
+}
+
+func normalizeProviderName(raw string) string {
+	return normalizeEventToken(raw)
+}
+
+type inboundProviderAdapter interface {
+	AcceptInbound(inboundProviderRequest) (inboundProviderDelivery, error)
+}
+
+type inboundProviderRequest struct {
+	Provider  string
+	Target    InboundTarget
+	Body      []byte
+	Headers   http.Header
+	Payload   any
+	Received  time.Time
+	UserAgent string
+}
+
+type inboundProviderDelivery struct {
+	ProviderEventID   string
+	ProviderEventType string
+	EventName         events.EventType
+	Payload           map[string]any
+}
+
+type inboundProviderError struct {
+	Status  int
+	Message string
+}
+
+func (e inboundProviderError) Error() string {
+	return e.Message
+}
+
+func inboundBadRequest(message string) inboundProviderError {
+	return inboundProviderError{Status: http.StatusBadRequest, Message: message}
+}
+
+func inboundUnauthorized(message string) inboundProviderError {
+	return inboundProviderError{Status: http.StatusUnauthorized, Message: message}
+}
+
+func defaultInboundProviderAdapters() map[string]inboundProviderAdapter {
+	return map[string]inboundProviderAdapter{
+		"github": githubInboundProviderAdapter{},
+	}
+}
+
+type githubInboundProviderAdapter struct{}
+
+func (githubInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
+	secret := strings.TrimSpace(req.Target.WebhookSecret)
+	if secret == "" {
+		return inboundProviderDelivery{}, inboundUnauthorized("github webhook signing secret is required")
+	}
+	if !verifyGitHubSignature(secret, req.Body, req.Headers) {
+		return inboundProviderDelivery{}, inboundUnauthorized("invalid github signature")
+	}
+	deliveryID := strings.TrimSpace(req.Headers.Get("X-GitHub-Delivery"))
+	if deliveryID == "" {
+		return inboundProviderDelivery{}, inboundBadRequest("github delivery id is required")
+	}
+	eventType := normalizeEventToken(req.Headers.Get("X-GitHub-Event"))
+	if eventType == "event" {
+		return inboundProviderDelivery{}, inboundBadRequest("github event type is required")
+	}
+	entityID := req.Target.EffectiveEntityID()
+	payload := buildProviderPublishPayload("github", entityID, deliveryID, eventType, req.Payload, req.Received, map[string]any{
+		"user_agent":      req.UserAgent,
+		"github_delivery": deliveryID,
+		"github_event":    eventType,
+	})
+	return inboundProviderDelivery{
+		ProviderEventID:   deliveryID,
+		ProviderEventType: eventType,
+		EventName:         events.EventType("inbound.github." + eventType),
+		Payload:           payload,
+	}, nil
+}
+
+type rawInboundProviderAdapter struct{}
+
+func (rawInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
+	provider := normalizeProviderName(req.Provider)
+	if provider == "" {
+		return inboundProviderDelivery{}, inboundBadRequest("provider is required")
+	}
+	if !verifyRawWebhookSignature(req.Target.WebhookSecret, req.Body, req.Headers) {
+		return inboundProviderDelivery{}, inboundUnauthorized("invalid signature")
+	}
+	entityID := req.Target.EffectiveEntityID()
+	providerEventID := firstNonEmpty(
+		req.Headers.Get("X-Provider-Event-ID"),
+		req.Headers.Get("X-Request-ID"),
+		extractProviderEventID(req.Payload),
+		fingerprintInbound(entityID, provider, req.Body),
+	)
+	providerEventType := resolveProviderEventType(provider, req.Payload)
+	payload := buildProviderPublishPayload(provider, entityID, providerEventID, providerEventType, req.Payload, req.Received, map[string]any{
+		"user_agent": req.UserAgent,
+	})
+	return inboundProviderDelivery{
+		ProviderEventID:   providerEventID,
+		ProviderEventType: providerEventType,
+		EventName:         events.EventType("inbound." + provider),
+		Payload:           payload,
+	}, nil
+}
+
+func buildProviderPublishPayload(provider, entityID, providerEventID, providerEventType string, rawPayload any, now time.Time, headers map[string]any) map[string]any {
+	return map[string]any{
+		"entity_id":         strings.TrimSpace(entityID),
+		"provider":          strings.TrimSpace(provider),
+		"event_type":        strings.TrimSpace(providerEventType),
+		"provider_event_id": strings.TrimSpace(providerEventID),
+		"payload":           rawPayload,
+		"headers":           headers,
+		"received_at":       now.Format(time.RFC3339),
+	}
 }
 
 func extractProviderEventID(payload any) string {
@@ -247,17 +391,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func buildInboundPublishPayload(provider, entityID, providerEventID string, rawPayload any, now time.Time) (events.EventType, map[string]any) {
-	return events.EventType("inbound." + normalizeEventToken(provider)), map[string]any{
-		"entity_id":         strings.TrimSpace(entityID),
-		"provider":          strings.TrimSpace(provider),
-		"event_type":        resolveProviderEventType(provider, rawPayload),
-		"provider_event_id": strings.TrimSpace(providerEventID),
-		"payload":           rawPayload,
-		"received_at":       now.Format(time.RFC3339),
-	}
 }
 
 func firstStringByKeys(obj map[string]any, keys ...string) string {
@@ -345,7 +478,19 @@ func normalizeEventToken(raw string) string {
 	return token
 }
 
-func verifyProviderSignature(provider, secret string, body []byte, headers http.Header) bool {
+func verifyGitHubSignature(secret string, body []byte, headers http.Header) bool {
+	sig := strings.TrimSpace(headers.Get("X-Hub-Signature-256"))
+	if !strings.HasPrefix(strings.ToLower(sig), "sha256=") {
+		return false
+	}
+	given := strings.TrimSpace(sig[len("sha256="):])
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(secret)))
+	_, _ = mac.Write(body)
+	expected := hex.EncodeToString(mac.Sum(nil))
+	return hmac.Equal([]byte(strings.ToLower(given)), []byte(strings.ToLower(expected)))
+}
+
+func verifyRawWebhookSignature(secret string, body []byte, headers http.Header) bool {
 	secret = strings.TrimSpace(secret)
 	// If no secret is configured, accept unsigned ingress.
 	if secret == "" {

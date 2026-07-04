@@ -3554,6 +3554,9 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}
 
 	stores := selectedPostgresStoreBundle(pg, &config.Config{})
+	if stores.InboundStore == nil || stores.runtimeStores().InboundStore == nil {
+		t.Fatal("selected Postgres store bundle missing InboundStore for served webhook ingress")
+	}
 	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRoot(), stores, projection.BundleHash, runningPlatformSpecPath)
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
@@ -7277,8 +7280,17 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":"test","result":{"ok":true}}`))
 	})
+	var inboundHit atomic.Bool
+	inboundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inboundHit.Store(true)
+		if r.URL.Path != "/webhooks/customer-a/github" {
+			t.Errorf("inbound path = %q, want /webhooks/customer-a/github", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"status":"accepted"}`))
+	})
 	toolGateway := runtimemcp.NewGateway(nil, "", runtimemcp.GatewayHooks{})
-	apiHandlerMux := newAPIServer(&ready, apiHandler).Handler
+	apiHandlerMux := newAPIServer(&ready, apiHandler, inboundHandler).Handler
 	mcpHandlerMux := newMCPServer(toolGateway).Handler
 
 	rec := httptest.NewRecorder()
@@ -7315,6 +7327,15 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
+	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(`{"zen":"ok"}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("/webhooks/ status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if !inboundHit.Load() {
+		t.Fatal("/webhooks/ did not route to inbound handler")
+	}
+
+	rec = httptest.NewRecorder()
 	apiHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("api listener /mcp status = %d, want 404", rec.Code)
@@ -7337,7 +7358,7 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 		t.Fatalf("/tools/ route status = %d, want mounted gateway 405", rec.Code)
 	}
 
-	for _, path := range []string{"/healthz", "/readyz", "/v1/rpc", "/v1/ws"} {
+	for _, path := range []string{"/healthz", "/readyz", "/v1/rpc", "/v1/ws", "/webhooks/customer-a/github"} {
 		rec = httptest.NewRecorder()
 		mcpHandlerMux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusNotFound {

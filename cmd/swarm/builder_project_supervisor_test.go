@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +170,53 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_WaitsForRuntimeStartBefor
 	}
 	if !ready.Load() {
 		t.Fatal("ready flag = false after runtime start completed")
+	}
+}
+
+func TestRuntimeProjectInboundHandlerRoutesThroughCurrentRuntimeAfterReplacement(t *testing.T) {
+	oldRT := &runtimepkg.Runtime{
+		InboundGateway: runtimepkg.NewInboundGateway(nil, nil, func() bool { return true }),
+	}
+	newRT := &runtimepkg.Runtime{
+		InboundGateway: runtimepkg.NewInboundGateway(nil, nil, nil),
+	}
+	var ready atomic.Bool
+	ready.Store(true)
+
+	supervisor := &runtimeProjectSupervisor{
+		ready:         &ready,
+		currentRoot:   "/tmp/old-project",
+		currentBundle: &runtimecontracts.WorkflowContractBundle{},
+		currentSource: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		currentRT:     oldRT,
+	}
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
+		return nil
+	}
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error {
+		return nil
+	}
+
+	staticOld := httptest.NewRecorder()
+	oldRT.InboundGateway.Handler().ServeHTTP(staticOld, httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(`{"ok":true}`)))
+	if staticOld.Code != http.StatusServiceUnavailable {
+		t.Fatalf("old captured gateway status = %d, want 503", staticOld.Code)
+	}
+
+	if _, err := supervisor.replaceCurrentRuntime(
+		context.Background(),
+		"/tmp/new-project",
+		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		&runtimecontracts.WorkflowContractBundle{},
+		newRT,
+	); err != nil {
+		t.Fatalf("replaceCurrentRuntime: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	runtimeProjectInboundHandler{supervisor: supervisor}.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(`{"ok":true}`)))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("dynamic inbound handler status = %d, want 202 body=%s", rec.Code, rec.Body.String())
 	}
 }
 

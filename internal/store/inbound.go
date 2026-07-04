@@ -43,7 +43,7 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 		return runtime.InboundTarget{}, err
 	}
 	entityKey = strings.TrimSpace(entityKey)
-	provider = strings.TrimSpace(strings.ToLower(provider))
+	provider = normalizeInboundProviderKey(provider)
 	if entityKey == "" {
 		return runtime.InboundTarget{}, fmt.Errorf("entity key is required")
 	}
@@ -68,20 +68,20 @@ func (s *PostgresStore) ResolveInboundTarget(ctx context.Context, entityKey, pro
 }
 
 func (s *PostgresStore) resolveInboundTargetForRun(ctx context.Context, entityKey, provider, runID string) (runtime.InboundTarget, error) {
-	_ = provider
-
 	var target runtime.InboundTarget
 	const q = `
 		SELECT
-			entity_id::text,
-			COALESCE(NULLIF(slug, ''), '')
-		FROM entity_state
-		WHERE run_id = $2::uuid
-		  AND (slug = $1 OR entity_id::text = $1)
-		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
+			es.entity_id::text,
+			COALESCE(NULLIF(es.slug, ''), ''),
+			COALESCE((fi.config->'secrets'->'webhook_signing')->>$3, '')
+		FROM entity_state es
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.run_id = $2::uuid
+		  AND (es.slug = $1 OR es.entity_id::text = $1)
+		ORDER BY CASE WHEN es.slug = $1 THEN 0 ELSE 1 END, es.created_at DESC, es.updated_at DESC
 		LIMIT 1
 	`
-	if err := s.DB.QueryRowContext(ctx, q, entityKey, runID).Scan(&target.EntityID, &target.EntitySlug); err != nil {
+	if err := s.DB.QueryRowContext(ctx, q, entityKey, runID, provider).Scan(&target.EntityID, &target.EntitySlug, &target.WebhookSecret); err != nil {
 		if err == sql.ErrNoRows {
 			return runtime.InboundTarget{}, fmt.Errorf("entity not found for key: %s", entityKey)
 		}
@@ -94,18 +94,18 @@ func (s *PostgresStore) resolveInboundTargetForRun(ctx context.Context, entityKe
 }
 
 func (s *PostgresStore) resolveInboundTargetUnambiguous(ctx context.Context, entityKey, provider string) (runtime.InboundTarget, error) {
-	_ = provider
-
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT
-			entity_id::text,
-			COALESCE(NULLIF(slug, ''), ''),
-			run_id::text
-		FROM entity_state
-		WHERE slug = $1 OR entity_id::text = $1
-		ORDER BY CASE WHEN slug = $1 THEN 0 ELSE 1 END, created_at DESC, updated_at DESC
+			es.entity_id::text,
+			COALESCE(NULLIF(es.slug, ''), ''),
+			COALESCE((fi.config->'secrets'->'webhook_signing')->>$2, ''),
+			es.run_id::text
+		FROM entity_state es
+		LEFT JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+		WHERE es.slug = $1 OR es.entity_id::text = $1
+		ORDER BY CASE WHEN es.slug = $1 THEN 0 ELSE 1 END, es.created_at DESC, es.updated_at DESC
 		LIMIT 2
-	`, entityKey)
+	`, entityKey, provider)
 	if err != nil {
 		return runtime.InboundTarget{}, fmt.Errorf("resolve inbound target: %w", err)
 	}
@@ -115,7 +115,7 @@ func (s *PostgresStore) resolveInboundTargetUnambiguous(ctx context.Context, ent
 	for rows.Next() {
 		var target runtime.InboundTarget
 		var runID string
-		if err := rows.Scan(&target.EntityID, &target.EntitySlug, &runID); err != nil {
+		if err := rows.Scan(&target.EntityID, &target.EntitySlug, &target.WebhookSecret, &runID); err != nil {
 			return runtime.InboundTarget{}, fmt.Errorf("scan inbound target: %w", err)
 		}
 		if target.EntitySlug == "" {
@@ -181,6 +181,14 @@ func (s *PostgresStore) DeleteInboundEvent(ctx context.Context, providerEventID,
 		return fmt.Errorf("delete inbound event marker: %w", err)
 	}
 	return nil
+}
+
+func normalizeInboundProviderKey(raw string) string {
+	key := strings.TrimSpace(strings.ToLower(raw))
+	key = strings.ReplaceAll(key, ".", "_")
+	key = strings.ReplaceAll(key, "-", "_")
+	key = strings.ReplaceAll(key, " ", "_")
+	return key
 }
 
 func (s *PostgresStore) recordInboundEventSpec(ctx context.Context, providerEventID, entityID, provider string) (bool, error) {
