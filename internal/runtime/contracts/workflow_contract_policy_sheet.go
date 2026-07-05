@@ -522,13 +522,40 @@ func validatePolicySheetPath(expr, label string, allowedRoots []string) error {
 	}
 	for _, allowed := range allowedRoots {
 		if root == allowed {
-			if strings.ContainsAny(expr, " \t+-*/()[]") {
-				return fmt.Errorf("POLICY-SHEET-ROW: %s %q must be a simple dotted path", label, expr)
+			parts := strings.Split(expr, ".")
+			for idx, part := range parts {
+				if !isPolicySheetPathSegment(part) {
+					return fmt.Errorf("POLICY-SHEET-ROW: %s %q must be a simple dotted path", label, expr)
+				}
+				if idx == 0 && part != allowed {
+					return fmt.Errorf("POLICY-SHEET-ROW: %s %q uses unsupported root %q", label, expr, root)
+				}
 			}
 			return nil
 		}
 	}
 	return fmt.Errorf("POLICY-SHEET-ROW: %s %q uses unsupported root %q", label, expr, root)
+}
+
+func isPolicySheetPathSegment(segment string) bool {
+	if segment == "" {
+		return false
+	}
+	for idx, r := range segment {
+		switch {
+		case r == '_':
+			continue
+		case r >= 'a' && r <= 'z':
+			continue
+		case r >= 'A' && r <= 'Z':
+			continue
+		case idx > 0 && r >= '0' && r <= '9':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func policySheetRoot(expr string) string {
