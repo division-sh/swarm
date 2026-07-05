@@ -2,23 +2,20 @@ package runtime
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha1"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/google/uuid"
 )
+
+const inboundWebhookMaxBodyBytes = 1 << 20
 
 type InboundPersistence interface {
 	RecordInboundEvent(ctx context.Context, providerEventID, entityID, provider string) (bool, error)
@@ -61,7 +58,7 @@ type InboundGateway struct {
 	logger                  *RuntimeLogger
 	shutdownAdmissionClosed func() bool
 	runtimeIngress          *runtimeingress.Controller
-	providers               map[string]inboundProviderAdapter
+	providers               *providertriggers.Registry
 }
 
 func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
@@ -75,7 +72,7 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdown
 		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
-		providers:               defaultInboundProviderAdapters(),
+		providers:               providertriggers.DefaultRegistry(),
 	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g
@@ -113,9 +110,13 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(r.Body, inboundWebhookMaxBodyBytes+1))
 	if err != nil {
 		http.Error(w, "read body failed", http.StatusBadRequest)
+		return
+	}
+	if len(body) > inboundWebhookMaxBodyBytes {
+		http.Error(w, "webhook body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	if len(body) == 0 {
@@ -142,9 +143,13 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	entityID := target.EffectiveEntityID()
 	entitySlug := target.EffectiveEntitySlug()
 	now := time.Now().UTC()
-	delivery, err := g.providerAdapter(provider).AcceptInbound(inboundProviderRequest{
-		Provider:  provider,
-		Target:    target,
+	delivery, err := g.providers.Accept(providertriggers.Request{
+		Provider: provider,
+		Target: providertriggers.Target{
+			EntityID:      target.EntityID,
+			EntitySlug:    target.EntitySlug,
+			WebhookSecret: target.WebhookSecret,
+		},
 		Body:      body,
 		Headers:   r.Header,
 		Payload:   payload,
@@ -153,7 +158,7 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		status := http.StatusBadRequest
-		if providerErr, ok := err.(inboundProviderError); ok {
+		if providerErr, ok := err.(providertriggers.Error); ok {
 			status = providerErr.Status
 		}
 		http.Error(w, err.Error(), status)
@@ -239,15 +244,6 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (g *InboundGateway) providerAdapter(provider string) inboundProviderAdapter {
-	if g != nil {
-		if adapter, ok := g.providers[normalizeProviderName(provider)]; ok && adapter != nil {
-			return adapter
-		}
-	}
-	return rawInboundProviderAdapter{}
-}
-
 func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 	p := strings.Trim(path, "/")
 	parts := strings.Split(p, "/")
@@ -262,222 +258,6 @@ func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 	return entityID, provider, true
 }
 
-func normalizeProviderName(raw string) string {
-	return normalizeEventToken(raw)
-}
-
-type inboundProviderAdapter interface {
-	AcceptInbound(inboundProviderRequest) (inboundProviderDelivery, error)
-}
-
-type inboundProviderRequest struct {
-	Provider  string
-	Target    InboundTarget
-	Body      []byte
-	Headers   http.Header
-	Payload   any
-	Received  time.Time
-	UserAgent string
-}
-
-type inboundProviderDelivery struct {
-	ProviderEventID           string
-	ProviderEventType         string
-	EventName                 events.EventType
-	Payload                   map[string]any
-	Response                  *inboundProviderResponse
-	AcknowledgeBeforeDispatch bool
-}
-
-type inboundProviderResponse struct {
-	Status      int
-	ContentType string
-	Body        []byte
-}
-
-type inboundProviderError struct {
-	Status  int
-	Message string
-}
-
-func (e inboundProviderError) Error() string {
-	return e.Message
-}
-
-func inboundBadRequest(message string) inboundProviderError {
-	return inboundProviderError{Status: http.StatusBadRequest, Message: message}
-}
-
-func inboundUnauthorized(message string) inboundProviderError {
-	return inboundProviderError{Status: http.StatusUnauthorized, Message: message}
-}
-
-func defaultInboundProviderAdapters() map[string]inboundProviderAdapter {
-	return map[string]inboundProviderAdapter{
-		"github": githubInboundProviderAdapter{},
-		"slack":  slackInboundProviderAdapter{},
-	}
-}
-
-type githubInboundProviderAdapter struct{}
-
-func (githubInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
-	secret := strings.TrimSpace(req.Target.WebhookSecret)
-	if secret == "" {
-		return inboundProviderDelivery{}, inboundUnauthorized("github webhook signing secret is required")
-	}
-	if !verifyGitHubSignature(secret, req.Body, req.Headers) {
-		return inboundProviderDelivery{}, inboundUnauthorized("invalid github signature")
-	}
-	deliveryID := strings.TrimSpace(req.Headers.Get("X-GitHub-Delivery"))
-	if deliveryID == "" {
-		return inboundProviderDelivery{}, inboundBadRequest("github delivery id is required")
-	}
-	eventType := normalizeEventToken(req.Headers.Get("X-GitHub-Event"))
-	if eventType == "event" {
-		return inboundProviderDelivery{}, inboundBadRequest("github event type is required")
-	}
-	entityID := req.Target.EffectiveEntityID()
-	payload := buildProviderPublishPayload("github", entityID, deliveryID, eventType, req.Payload, req.Received, map[string]any{
-		"user_agent":      req.UserAgent,
-		"github_delivery": deliveryID,
-		"github_event":    eventType,
-	})
-	return inboundProviderDelivery{
-		ProviderEventID:   deliveryID,
-		ProviderEventType: eventType,
-		EventName:         events.EventType("inbound.github." + eventType),
-		Payload:           payload,
-	}, nil
-}
-
-type rawInboundProviderAdapter struct{}
-
-type slackInboundProviderAdapter struct{}
-
-func (slackInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
-	secret := strings.TrimSpace(req.Target.WebhookSecret)
-	if secret == "" {
-		return inboundProviderDelivery{}, inboundUnauthorized("slack webhook signing secret is required")
-	}
-	if err := verifySlackSignature(secret, req.Body, req.Headers, req.Received); err != nil {
-		return inboundProviderDelivery{}, err
-	}
-
-	payload, ok := req.Payload.(map[string]any)
-	if !ok {
-		return inboundProviderDelivery{}, inboundBadRequest("slack payload object is required")
-	}
-	payloadType := normalizeEventToken(firstStringByKeys(payload, "type"))
-	switch payloadType {
-	case "url_verification":
-		challenge := firstStringByKeys(payload, "challenge")
-		if challenge == "" {
-			return inboundProviderDelivery{}, inboundBadRequest("slack challenge is required")
-		}
-		return inboundProviderDelivery{
-			Response: &inboundProviderResponse{
-				Status:      http.StatusOK,
-				ContentType: "text/plain; charset=utf-8",
-				Body:        []byte(challenge),
-			},
-		}, nil
-	case "event_callback":
-		eventID := firstStringByKeys(payload, "event_id")
-		if eventID == "" {
-			return inboundProviderDelivery{}, inboundBadRequest("slack event_id is required")
-		}
-		innerEvent, ok := payload["event"].(map[string]any)
-		if !ok {
-			return inboundProviderDelivery{}, inboundBadRequest("slack inner event is required")
-		}
-		eventType := normalizeEventToken(firstStringByKeys(innerEvent, "type"))
-		if eventType == "event" {
-			return inboundProviderDelivery{}, inboundBadRequest("slack inner event type is required")
-		}
-		entityID := req.Target.EffectiveEntityID()
-		publishPayload := buildProviderPublishPayload("slack", entityID, eventID, eventType, redactSlackPayload(req.Payload), req.Received, map[string]any{
-			"user_agent":       req.UserAgent,
-			"slack_event_id":   eventID,
-			"slack_event_type": eventType,
-		})
-		return inboundProviderDelivery{
-			ProviderEventID:           eventID,
-			ProviderEventType:         eventType,
-			EventName:                 events.EventType("inbound.slack." + eventType),
-			Payload:                   publishPayload,
-			AcknowledgeBeforeDispatch: true,
-		}, nil
-	default:
-		if payloadType == "event" {
-			return inboundProviderDelivery{}, inboundBadRequest("slack payload type is required")
-		}
-		return inboundProviderDelivery{}, inboundBadRequest("unsupported slack payload type")
-	}
-}
-
-func (rawInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
-	provider := normalizeProviderName(req.Provider)
-	if provider == "" {
-		return inboundProviderDelivery{}, inboundBadRequest("provider is required")
-	}
-	if !verifyRawWebhookSignature(req.Target.WebhookSecret, req.Body, req.Headers) {
-		return inboundProviderDelivery{}, inboundUnauthorized("invalid signature")
-	}
-	entityID := req.Target.EffectiveEntityID()
-	providerEventID := firstNonEmpty(
-		req.Headers.Get("X-Provider-Event-ID"),
-		req.Headers.Get("X-Request-ID"),
-		extractProviderEventID(req.Payload),
-		fingerprintInbound(entityID, provider, req.Body),
-	)
-	providerEventType := resolveProviderEventType(provider, req.Payload)
-	payload := buildProviderPublishPayload(provider, entityID, providerEventID, providerEventType, req.Payload, req.Received, map[string]any{
-		"user_agent": req.UserAgent,
-	})
-	return inboundProviderDelivery{
-		ProviderEventID:   providerEventID,
-		ProviderEventType: providerEventType,
-		EventName:         events.EventType("inbound." + provider),
-		Payload:           payload,
-	}, nil
-}
-
-func buildProviderPublishPayload(provider, entityID, providerEventID, providerEventType string, rawPayload any, now time.Time, headers map[string]any) map[string]any {
-	return map[string]any{
-		"entity_id":         strings.TrimSpace(entityID),
-		"provider":          strings.TrimSpace(provider),
-		"event_type":        strings.TrimSpace(providerEventType),
-		"provider_event_id": strings.TrimSpace(providerEventID),
-		"payload":           rawPayload,
-		"headers":           headers,
-		"received_at":       now.Format(time.RFC3339),
-	}
-}
-
-func extractProviderEventID(payload any) string {
-	m, ok := payload.(map[string]any)
-	if !ok {
-		return ""
-	}
-	for _, key := range []string{"id", "event_id", "message_id"} {
-		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
-}
-
-func fingerprintInbound(entityID, provider string, body []byte) string {
-	h := sha1.New()
-	_, _ = h.Write([]byte(entityID))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(provider))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write(body)
-	return "fp:" + hex.EncodeToString(h.Sum(nil))
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -485,207 +265,6 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func firstStringByKeys(obj map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if obj == nil {
-			break
-		}
-		if v, ok := obj[key]; ok {
-			switch t := v.(type) {
-			case string:
-				if s := strings.TrimSpace(t); s != "" {
-					return s
-				}
-			case json.Number:
-				if s := strings.TrimSpace(t.String()); s != "" {
-					return s
-				}
-			default:
-				if s := strings.TrimSpace(fmt.Sprint(t)); s != "" && s != "<nil>" && s != "map[]" && s != "[]" {
-					return s
-				}
-			}
-		}
-	}
-	return ""
-}
-
-func firstStringSliceByKeys(obj map[string]any, keys ...string) []string {
-	for _, key := range keys {
-		if obj == nil {
-			break
-		}
-		v, ok := obj[key]
-		if !ok {
-			continue
-		}
-		switch t := v.(type) {
-		case []string:
-			out := make([]string, 0, len(t))
-			for _, s := range t {
-				if trimmed := strings.TrimSpace(s); trimmed != "" {
-					out = append(out, trimmed)
-				}
-			}
-			if len(out) > 0 {
-				return out
-			}
-		case []any:
-			out := make([]string, 0, len(t))
-			for _, item := range t {
-				if trimmed := strings.TrimSpace(fmt.Sprint(item)); trimmed != "" && trimmed != "<nil>" {
-					out = append(out, trimmed)
-				}
-			}
-			if len(out) > 0 {
-				return out
-			}
-		case string:
-			if trimmed := strings.TrimSpace(t); trimmed != "" {
-				return []string{trimmed}
-			}
-		}
-	}
-	return []string{}
-}
-
-func resolveProviderEventType(provider string, payload any) string {
-	m, _ := payload.(map[string]any)
-	for _, key := range []string{"event_type", "type", "status", "kind", "action"} {
-		if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
-			return normalizeEventToken(v)
-		}
-	}
-	return "event"
-}
-
-func normalizeEventToken(raw string) string {
-	token := strings.TrimSpace(strings.ToLower(raw))
-	token = strings.ReplaceAll(token, ".", "_")
-	token = strings.ReplaceAll(token, "-", "_")
-	token = strings.ReplaceAll(token, " ", "_")
-	if token == "" {
-		return "event"
-	}
-	return token
-}
-
-func verifyGitHubSignature(secret string, body []byte, headers http.Header) bool {
-	sig := strings.TrimSpace(headers.Get("X-Hub-Signature-256"))
-	if !strings.HasPrefix(strings.ToLower(sig), "sha256=") {
-		return false
-	}
-	given := strings.TrimSpace(sig[len("sha256="):])
-	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(secret)))
-	_, _ = mac.Write(body)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(strings.ToLower(given)), []byte(strings.ToLower(expected)))
-}
-
-func verifySlackSignature(secret string, body []byte, headers http.Header, now time.Time) error {
-	timestampHeader := strings.TrimSpace(headers.Get("X-Slack-Request-Timestamp"))
-	if timestampHeader == "" {
-		return inboundUnauthorized("slack request timestamp is required")
-	}
-	timestamp, err := strconv.ParseInt(timestampHeader, 10, 64)
-	if err != nil {
-		return inboundUnauthorized("invalid slack request timestamp")
-	}
-	requestTime := time.Unix(timestamp, 0).UTC()
-	if requestTime.After(now.Add(5*time.Minute)) || requestTime.Before(now.Add(-5*time.Minute)) {
-		return inboundUnauthorized("stale slack request timestamp")
-	}
-
-	signature := strings.TrimSpace(headers.Get("X-Slack-Signature"))
-	if !strings.HasPrefix(strings.ToLower(signature), "v0=") {
-		return inboundUnauthorized("slack signature is required")
-	}
-	base := "v0:" + timestampHeader + ":" + string(body)
-	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(secret)))
-	_, _ = mac.Write([]byte(base))
-	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(strings.ToLower(signature)), []byte(strings.ToLower(expected))) {
-		return inboundUnauthorized("invalid slack signature")
-	}
-	return nil
-}
-
-func redactSlackPayload(payload any) any {
-	switch v := payload.(type) {
-	case map[string]any:
-		redacted := make(map[string]any, len(v))
-		for key, value := range v {
-			if strings.EqualFold(key, "token") {
-				redacted[key] = "[redacted]"
-				continue
-			}
-			redacted[key] = redactSlackPayload(value)
-		}
-		return redacted
-	case []any:
-		redacted := make([]any, len(v))
-		for i, value := range v {
-			redacted[i] = redactSlackPayload(value)
-		}
-		return redacted
-	default:
-		return v
-	}
-}
-
-func verifyRawWebhookSignature(secret string, body []byte, headers http.Header) bool {
-	secret = strings.TrimSpace(secret)
-	// If no secret is configured, accept unsigned ingress.
-	if secret == "" {
-		return true
-	}
-	if sig := strings.TrimSpace(headers.Get("X-Hub-Signature-256")); strings.HasPrefix(strings.ToLower(sig), "sha256=") {
-		given := strings.TrimPrefix(sig, "sha256=")
-		mac := hmac.New(sha256.New, []byte(secret))
-		_, _ = mac.Write(body)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		return hmac.Equal([]byte(strings.ToLower(given)), []byte(strings.ToLower(expected)))
-	}
-	if sig := strings.TrimSpace(headers.Get("Stripe-Signature")); sig != "" {
-		timestamp := ""
-		v1Sigs := make([]string, 0, 2)
-		for _, part := range strings.Split(sig, ",") {
-			kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
-			if len(kv) != 2 {
-				continue
-			}
-			switch strings.TrimSpace(kv[0]) {
-			case "t":
-				timestamp = strings.TrimSpace(kv[1])
-			case "v1":
-				v1Sigs = append(v1Sigs, strings.TrimSpace(kv[1]))
-			}
-		}
-		if timestamp == "" || len(v1Sigs) == 0 {
-			return false
-		}
-		mac := hmac.New(sha256.New, []byte(secret))
-		_, _ = mac.Write([]byte(timestamp))
-		_, _ = mac.Write([]byte("."))
-		_, _ = mac.Write(body)
-		expected := hex.EncodeToString(mac.Sum(nil))
-		for _, candidate := range v1Sigs {
-			if hmac.Equal([]byte(strings.ToLower(candidate)), []byte(strings.ToLower(expected))) {
-				return true
-			}
-		}
-		return false
-	}
-	token := strings.TrimSpace(headers.Get("X-Webhook-Token"))
-	if token == "" {
-		auth := strings.TrimSpace(headers.Get("Authorization"))
-		if strings.HasPrefix(strings.ToLower(auth), "bearer ") {
-			token = strings.TrimSpace(auth[7:])
-		}
-	}
-	return hmac.Equal([]byte(token), []byte(secret))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

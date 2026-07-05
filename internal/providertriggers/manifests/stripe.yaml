@@ -1,0 +1,34 @@
+provider: stripe
+payload_object_required: true
+payload_object_error: stripe payload object is required
+secret:
+  required: true
+signature:
+  type: hmac_sha256
+  header: Stripe-Signature
+  signed_payload: timestamp_dot_raw_body
+  signature_param: v1
+  missing_error: stripe signature is required
+  invalid_error: invalid stripe signature
+  timestamp:
+    param: t
+    tolerance: 5m
+    missing_error: stripe signature timestamp is required
+    invalid_error: invalid stripe signature timestamp
+    stale_error: stale stripe signature timestamp
+delivery_id:
+  json_path: $.id
+  required: true
+  missing_error: stripe event id is required
+event_type:
+  json_path: $.type
+  required: true
+  missing_error: stripe event type is required
+event_name:
+  literal: inbound.stripe
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  stripe_event_id: delivery_id
+  stripe_event_type: event_type

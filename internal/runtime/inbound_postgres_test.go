@@ -22,6 +22,7 @@ import (
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -231,6 +232,171 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	}
 }
 
+func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	const (
+		runID             = "43000000-0000-0000-0000-000000000001"
+		entityID          = "43000000-0000-0000-0000-000000000002"
+		flowInstance      = "stripe-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "stripe"
+		webhookSecret     = "stripe-secret"
+		providerEventID   = "evt_123"
+		agentID           = "stripe-webhook-subscriber"
+		providerEventName = "inbound.stripe"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	pg := &store.PostgresStore{DB: db}
+	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	bus.SetRuntimeIngressDispatchGate(controller)
+
+	eventType := events.EventType(providerEventName)
+	ch := bus.Subscribe(agentID, eventType)
+	defer bus.Unsubscribe(agentID)
+
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_pause",
+		ControlledBy: "test",
+	}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g.SetRuntimeIngress(controller)
+
+	body := []byte(`{"id":"evt_123","type":"invoice.paid","data":{"object":{"id":"in_123"}}}`)
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", stripeWebhookSignature(webhookSecret, timestamp, body))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "invoice_paid" {
+		t.Fatalf("provider_event_type = %q, want invoice_paid", got)
+	}
+	requireNoInboundBusEvent(t, ch, "paused Stripe webhook before resume")
+	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows while paused = %d, want 1", got)
+	}
+	if got := loadPostgresAgentDeliveryStatus(t, ctx, db, eventID, agentID); got != "pending" {
+		t.Fatalf("agent delivery status while paused = %q, want pending", got)
+	}
+	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
+	}
+	if got := countPostgresAgentReceiptsForEvent(t, ctx, db, eventID, agentID); got != 0 {
+		t.Fatalf("agent receipts while paused = %d, want 0", got)
+	}
+
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_resume",
+		ControlledBy: "test",
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.ReleasedCount != 1 {
+		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
+	}
+	got := requireInboundBusEvent(t, ch, "paused Stripe webhook release after resume")
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
+	}
+	if got.Type() != eventType {
+		t.Fatalf("delivered event type = %s, want %s", got.Type(), eventType)
+	}
+	requireNoInboundBusEvent(t, ch, "paused Stripe webhook releases exactly once")
+	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows after resume = %d, want 1", got)
+	}
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows after resume = %d, want 1", got)
+	}
+}
+
+func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	const (
+		runID             = "44000000-0000-0000-0000-000000000001"
+		entityID          = "44000000-0000-0000-0000-000000000002"
+		flowInstance      = "stripe-sqlite-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "stripe"
+		webhookSecret     = "stripe-secret"
+		providerEventID   = "evt_456"
+		agentID           = "stripe-sqlite-webhook-subscriber"
+		providerEventName = "inbound.stripe"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(sqliteStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+
+	body := []byte(`{"id":"evt_456","type":"customer.created","data":{"object":{"id":"cus_123"}}}`)
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
+	req = req.WithContext(ctx)
+	req.Header.Set("Stripe-Signature", stripeWebhookSignature(webhookSecret, timestamp, body))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
+	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "customer_created" {
+		t.Fatalf("provider_event_type = %q, want customer_created", got)
+	}
+	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// The Stripe manifest uses durable_before_dispatch; this proof is about
+		// durable persisted evidence, not immediate post-ack handler scheduling.
+	}
+}
+
 func seedPostgresInboundGatewayRuntime(
 	t *testing.T,
 	ctx context.Context,
@@ -298,6 +464,69 @@ func seedPostgresInboundGatewayRuntime(
 	}
 }
 
+func seedSQLiteInboundGatewayRuntime(
+	t *testing.T,
+	ctx context.Context,
+	sqliteStore *store.SQLiteRuntimeStore,
+	runID string,
+	entityID string,
+	flowInstance string,
+	entitySlug string,
+	provider string,
+	webhookSecret string,
+	agentID string,
+) {
+	t.Helper()
+	now := time.Now().UTC()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, runID, now); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	configBytes, err := json.Marshal(map[string]any{
+		"secrets": map[string]any{
+			"webhook_signing": map[string]string{
+				provider: webhookSecret,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal sqlite flow config: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, created_at)
+		VALUES (?, 'test', 'static', ?, 'active', ?)
+	`, flowInstance, string(configBytes), now); err != nil {
+		t.Fatalf("seed sqlite flow instance: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
+			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+		) VALUES (?, ?, ?, 'default', ?, 'Customer A', 'active',
+			'{}', '{}', '{}', 1, ?, ?, ?)
+	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
+		t.Fatalf("seed sqlite entity state: %v", err)
+	}
+	if err := sqliteStore.UpsertAgent(ctx, runtimemanager.PersistedAgent{
+		Config: runtimeactors.AgentConfig{
+			ID:            agentID,
+			Role:          "observer",
+			Mode:          "global",
+			Type:          "stub",
+			Model:         "regular",
+			Config:        []byte(`{}`),
+			Subscriptions: []string{"inbound.stripe"},
+		},
+		Status:    "active",
+		HiredBy:   "test",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	}
+}
+
 func loadPostgresInboundProviderEventID(t *testing.T, ctx context.Context, db *sql.DB, runID string, entityID string, eventName string, providerEventID string) string {
 	t.Helper()
 	var eventID string
@@ -316,6 +545,19 @@ func loadPostgresInboundProviderEventID(t *testing.T, ctx context.Context, db *s
 	return eventID
 }
 
+func loadPostgresInboundProviderEventPayloadField(t *testing.T, ctx context.Context, db *sql.DB, eventID string, field string) string {
+	t.Helper()
+	var value string
+	if err := db.QueryRowContext(ctx, `
+		SELECT payload->>$2
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID, field).Scan(&value); err != nil {
+		t.Fatalf("load postgres inbound provider payload field %s: %v", field, err)
+	}
+	return value
+}
+
 func countPostgresInboundProviderEvents(t *testing.T, ctx context.Context, db *sql.DB, runID string, entityID string, eventName string, providerEventID string) int {
 	t.Helper()
 	var count int
@@ -328,6 +570,84 @@ func countPostgresInboundProviderEvents(t *testing.T, ctx context.Context, db *s
 		  AND payload->>'provider_event_id' = $4
 	`, runID, entityID, eventName, providerEventID).Scan(&count); err != nil {
 		t.Fatalf("count inbound provider events: %v", err)
+	}
+	return count
+}
+
+func loadSQLiteInboundProviderEventID(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) string {
+	t.Helper()
+	var eventID string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT event_id
+		FROM events
+		WHERE run_id = ?
+		  AND entity_id = ?
+		  AND event_name = ?
+		  AND json_extract(payload, '$.provider_event_id') = ?
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, runID, entityID, eventName, providerEventID).Scan(&eventID); err != nil {
+		t.Fatalf("load sqlite inbound provider event id: %v", err)
+	}
+	return eventID
+}
+
+func countSQLiteInboundProviderEvents(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, runID string, entityID string, eventName string, providerEventID string) int {
+	t.Helper()
+	var count int
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE run_id = ?
+		  AND entity_id = ?
+		  AND event_name = ?
+		  AND json_extract(payload, '$.provider_event_id') = ?
+	`, runID, entityID, eventName, providerEventID).Scan(&count); err != nil {
+		t.Fatalf("count sqlite inbound provider events: %v", err)
+	}
+	return count
+}
+
+func loadSQLiteInboundProviderEventPayloadField(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, field string) string {
+	t.Helper()
+	var value string
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT json_extract(payload, ?)
+		FROM events
+		WHERE event_id = ?
+	`, "$."+field, eventID).Scan(&value); err != nil {
+		t.Fatalf("load sqlite inbound provider payload field %s: %v", field, err)
+	}
+	return value
+}
+
+func countSQLiteInboundMarkers(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, providerEventID string, entityID string, provider string) int {
+	t.Helper()
+	var count int
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM events
+		WHERE event_name = 'platform.inbound_recorded'
+		  AND entity_id = ?
+		  AND json_extract(payload, '$.provider_event_id') = ?
+		  AND json_extract(payload, '$.provider') = ?
+	`, entityID, providerEventID, provider).Scan(&count); err != nil {
+		t.Fatalf("count sqlite inbound marker events: %v", err)
+	}
+	return count
+}
+
+func countSQLiteAgentDeliveriesForEvent(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID string, agentID string) int {
+	t.Helper()
+	var count int
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE event_id = ?
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = ?
+	`, eventID, agentID).Scan(&count); err != nil {
+		t.Fatalf("count sqlite agent deliveries for %s: %v", eventID, err)
 	}
 	return count
 }
@@ -438,4 +758,10 @@ func slackWebhookSignature(secret string, timestamp string, body []byte) string 
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte("v0:" + timestamp + ":" + string(body)))
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func stripeWebhookSignature(secret string, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
+	return "t=" + timestamp + ",v1=" + hex.EncodeToString(mac.Sum(nil))
 }
