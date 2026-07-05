@@ -309,7 +309,7 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"data_dir: " + filepath.Join(canonicalRepo, ".swarm", "data"),
 		"command_classes:",
 		"#1614",
-		"#1615 store/data migration and swarm run semantics (implemented)",
+		"#1615 store/data migration and swarm run start semantics (implemented)",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor target output missing %q:\n%s", want, stdout.String())

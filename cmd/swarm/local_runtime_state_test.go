@@ -99,7 +99,7 @@ func TestPrepareLocalRunProjectClaimRejectsLiveProjectContext(t *testing.T) {
 		apiOptions:    apiOptions,
 		contractsPath: contractsPath,
 	}, cliContractPlatformSpecPaths{ContractsPath: contractsPath})
-	if err == nil || !strings.Contains(err.Error(), "local swarm run requires exclusive project runtime") || !strings.Contains(err.Error(), "--connect") {
+	if err == nil || !strings.Contains(err.Error(), "local swarm run start requires exclusive project runtime") || !strings.Contains(err.Error(), "--connect") {
 		t.Fatalf("prepareLocalRunProjectClaim error = %v, want live project runtime conflict", err)
 	}
 }
