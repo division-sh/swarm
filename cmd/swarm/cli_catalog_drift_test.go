@@ -413,11 +413,22 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		for i, line := range strings.Split(string(raw), "\n") {
-			wordHit := retiredWords.MatchString(line)
-			bareHit := bareRunStart.MatchString(line)
+		physical := strings.Split(string(raw), "\n")
+		for i, line := range physical {
+			// Wrapped/folded scalars split spellings across physical lines
+			// (#1686 re-review seven): scan each line joined with its
+			// successor, whitespace-collapsed, so the unit of meaning is the
+			// logical text. Exemption markers on either physical line cover
+			// the join. Not covered (stated, not hidden): spellings assembled
+			// by code (string concatenation) rather than written in text.
+			scanText := line
+			if i+1 < len(physical) {
+				scanText = strings.TrimRight(line, " \\") + " " + strings.TrimLeft(physical[i+1], " \\")
+			}
+			wordHit := retiredWords.MatchString(line) || retiredWords.MatchString(scanText)
+			bareHit := bareRunStart.MatchString(line) || bareRunStart.MatchString(scanText)
 			if !bareHit {
-				for _, match := range bareRunPhrase.FindAllStringSubmatch(line, -1) {
+				for _, match := range bareRunPhrase.FindAllStringSubmatch(scanText, -1) {
 					if !liveRunSubcommands[match[1]] {
 						bareHit = true
 						break
@@ -427,10 +438,10 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 			if !wordHit && !bareHit {
 				continue
 			}
-			if wordHit && historicalMarker.MatchString(line) {
+			if wordHit && historicalMarker.MatchString(scanText) {
 				wordHit = false
 			}
-			if bareHit && bareRunHistoricalMarker.MatchString(line) {
+			if bareHit && bareRunHistoricalMarker.MatchString(scanText) {
 				bareHit = false
 			}
 			if !wordHit && !bareHit {

@@ -11762,7 +11762,7 @@ cli_specification:
           historical `--health-addr` implementation name. #992 consumes this owner for Cobra/runtime listener bind
           wiring and `swarm run start --api-port` as an API listener consumer. #844 consumes this owner for `swarm
           serve` listener env/config precedence. OpenRPC remains unchanged; enable-disable controls and `swarm
-          run --mcp-port` support remain follow-up work.
+          run start --mcp-port` support remain follow-up work.
       trace_filters_and_subscription_recovery:
         disposition: promoted_first_slice
         tracker: '#855'
@@ -13781,8 +13781,8 @@ cli_specification:
         run_command_consumer_boundary:
           swarm_run_api_port: >
             Current `swarm run start --api-port` remains a local-start convenience consumer of the serve startup owner
-            and now maps to the API listener bind address. A later CLI v2.1 cleanup may replace it with `swarm run
-            --api-listen-addr`.
+            and now maps to the API listener bind address. A later CLI cleanup may replace it with `swarm run
+            start --api-listen-addr`.
           swarm_run_mcp_port: >
             Current `swarm run start --mcp-port` MUST remain fail-closed until a later child explicitly promotes local
             foreground MCP listener control. `swarm serve` now owns MCP listener binding through
@@ -13985,7 +13985,7 @@ cli_specification:
       remaining_tail: '#750 has no remaining promoted serve/dev lifecycle tail after #830. `platform.shutdown` event persistence
         and persisted delivery/receipt interruption reasons remain unpromoted unless a later child makes them authoritative.'
     run_group:
-      command: swarm run
+      command: swarm run # live noun-group form: bare run prints group help
       tier: must_have
       implementation_status: implemented
       group: run_operate
@@ -15606,7 +15606,7 @@ cli_specification:
         rejected-for-now, not open; reopening requires a new tracked lead decision.
     target_rows:
       run_group:
-        command: swarm run
+        command: swarm run # live noun-group form: bare run prints group help
         group: run_operate
         behavior: Bare `swarm run` prints the run noun-group help and exits 0. It does not start a run.
       run_start:
