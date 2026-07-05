@@ -132,6 +132,9 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	if got := evt.Type(); got != events.EventType("research.scanner_source_scrape.succeeded") {
 		t.Fatalf("event type = %q", got)
 	}
+	if got, want := evt.ID(), activityResultEventID(intent, intent.SuccessEvent); got != want {
+		t.Fatalf("result event id = %q, want deterministic %q", got, want)
+	}
 	if got := evt.ParentEventID(); got != "evt-1" {
 		t.Fatalf("parent event id = %q", got)
 	}
@@ -148,6 +151,123 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	}
 	if result["title"] != "Example Source" {
 		t.Fatalf("result title = %#v", result["title"])
+	}
+}
+
+func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, "temporary", http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Example Source"})
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"source_scrape": {
+				HandlerType: "http",
+				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+				OutputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object",
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    server.URL,
+				},
+			},
+		},
+	})
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
+	intent := testActivityIntent("https://example.com/source")
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+	handled, err := pc.handleEventResult(context.Background(), request.Event)
+	if err != nil {
+		t.Fatalf("handleEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("handleEventResult handled = false, want true")
+	}
+	if calls != 2 {
+		t.Fatalf("server calls = %d, want retry then success", calls)
+	}
+	if len(bus.publishes) != 1 {
+		t.Fatalf("published events = %d, want 1", len(bus.publishes))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishes[0].Payload(), &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	if got := payload["attempt"]; got != float64(2) {
+		t.Fatalf("payload attempt = %#v, want 2", got)
+	}
+}
+
+func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"source_scrape": {
+				HandlerType: "http",
+				EffectClass: string(runtimecontracts.ActivityEffectClassIdempotentWrite),
+				OutputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object",
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "POST",
+					URL:    server.URL,
+				},
+			},
+		},
+	})
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: source},
+	})
+	intent := testActivityIntent("https://example.com/source")
+	intent.EffectClass = runtimecontracts.ActivityEffectClassIdempotentWrite
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+	handled, err := pc.handleEventResult(context.Background(), request.Event)
+	if err != nil {
+		t.Fatalf("handleEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("handleEventResult handled = false, want true")
+	}
+	if calls != 0 {
+		t.Fatalf("server calls = %d, want no outbound write execution", calls)
+	}
+	if len(bus.publishes) != 1 {
+		t.Fatalf("published events = %d, want 1 failure event", len(bus.publishes))
+	}
+	evt := bus.publishes[0]
+	if got := evt.Type(); got != events.EventType("research.scanner_source_scrape.failed") {
+		t.Fatalf("event type = %q, want failure", got)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	if got, _ := payload["error"].(string); !strings.Contains(got, "not executable in Stage 1") {
+		t.Fatalf("error = %q, want fail-closed unsupported write effect", got)
 	}
 }
 

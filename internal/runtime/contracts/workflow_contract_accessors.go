@@ -211,11 +211,17 @@ func (b *WorkflowContractBundle) ToolEntryForAgent(agentID, toolID string) (Tool
 	entry, ok := b.Tools[toolID]
 	return entry, ok
 }
+func (b *WorkflowContractBundle) AuthoredEventEntries() map[string]EventCatalogEntry {
+	if b == nil {
+		return nil
+	}
+	return cloneEventCatalogEntryMap(b.Events)
+}
 func (b *WorkflowContractBundle) EventEntries() map[string]EventCatalogEntry {
 	if b == nil {
 		return nil
 	}
-	out := cloneEventCatalogEntryMap(b.Events)
+	out := b.AuthoredEventEntries()
 	for eventType, entry := range b.GeneratedActivityEventEntries() {
 		out[eventType] = entry
 	}
@@ -271,22 +277,24 @@ func (b *WorkflowContractBundle) FlowPath(flowID string) string {
 	}
 	return flowmodel.PathForID(b.FlowTree, flowID, func(view *FlowContractView) string { return view.Path })
 }
-func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogEntry {
+func (b *WorkflowContractBundle) AuthoredResolvedEventCatalog() map[string]EventCatalogEntry {
 	if b == nil {
 		return nil
 	}
 	if b.FlowTree.Root == nil {
-		out := cloneEventCatalogEntryMap(b.Events)
-		for eventType, entry := range b.GeneratedActivityEventEntries() {
-			out[eventType] = entry
-		}
-		return out
+		return cloneEventCatalogEntryMap(b.Events)
 	}
-	out := flowmodel.ResolveEntries(
+	return flowmodel.ResolveEntries(
 		b.FlowTree,
 		flowViewChildren,
 		func(view *FlowContractView) map[string]EventCatalogEntry { return view.Events },
 	)
+}
+func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogEntry {
+	if b == nil {
+		return nil
+	}
+	out := b.AuthoredResolvedEventCatalog()
 	for eventType, entry := range b.GeneratedActivityEventEntries() {
 		out[eventType] = entry
 	}

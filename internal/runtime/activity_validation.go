@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -23,6 +25,7 @@ func validateDurableActivitySurface(source semanticview.Source) []error {
 			errs = append(errs, validateHandlerActivitySurface(source, flowID, nodeID, handlerEventKey, handler)...)
 		}
 	}
+	errs = append(errs, validateActivityResultEventNameCollisions(source)...)
 	return errs
 }
 
@@ -141,9 +144,11 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	}
 	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
 	if effectClass == "" {
-		errs = append(errs, fmt.Errorf("%s: tool %q must declare effect_class read_only, idempotent_write, or non_idempotent_write", context, toolID))
+		errs = append(errs, fmt.Errorf("%s: tool %q must declare effect_class; the Stage 1 executable value is read_only", context, toolID))
 	} else if effectClass == runtimecontracts.ActivityEffectClassLongRunning {
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class long_running is split to later durable resume/cancel support", context, toolID))
+	} else if effectClass == runtimecontracts.ActivityEffectClassIdempotentWrite || effectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is split until the activity runtime owns stable attempt/result journaling and idempotency execution", context, toolID, effectClass))
 	} else if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, tool.EffectClass))
 	}
@@ -159,6 +164,76 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 		errs = append(errs, fmt.Errorf("%s: generated result event names could not be derived", context))
 	}
 	return errs
+}
+
+func validateActivityResultEventNameCollisions(source semanticview.Source) []error {
+	if source == nil {
+		return nil
+	}
+	authored := map[string]string{}
+	addAuthoredEvents := func(entries map[string]runtimecontracts.EventCatalogEntry, owner string) {
+		for eventType := range entries {
+			normalized := eventidentity.Normalize(eventType)
+			if normalized == "" {
+				continue
+			}
+			if _, exists := authored[normalized]; !exists {
+				authored[normalized] = owner
+			}
+		}
+	}
+	addAuthoredEvents(source.AuthoredEventEntries(), "authored event")
+	addAuthoredEvents(source.AuthoredResolvedEventCatalog(), "authored resolved event")
+
+	nodes := source.NodeEntries()
+	nodeIDs := make([]string, 0, len(nodes))
+	for nodeID := range nodes {
+		nodeID = strings.TrimSpace(nodeID)
+		if nodeID != "" {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+	}
+	sort.Strings(nodeIDs)
+
+	var errs []error
+	generated := map[string]string{}
+	for _, nodeID := range nodeIDs {
+		flowID := ""
+		if sourceInfo, ok := source.NodeContractSource(nodeID); ok {
+			flowID = strings.TrimSpace(sourceInfo.FlowID)
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(flowID, nodeID, source.NodeEventHandlers(nodeID)) {
+			context := activitySiteContext(site)
+			resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
+			for _, eventType := range []string{resultEvents.SuccessEvent, resultEvents.FailureEvent} {
+				normalized := eventidentity.Normalize(eventType)
+				if normalized == "" {
+					continue
+				}
+				if owner, ok := authored[normalized]; ok {
+					errs = append(errs, fmt.Errorf("%s: generated activity result event %q collides with %s %q", context, normalized, owner, normalized))
+					continue
+				}
+				if previous, ok := generated[normalized]; ok {
+					errs = append(errs, fmt.Errorf("%s: generated activity result event %q collides with generated result event from %s", context, normalized, previous))
+					continue
+				}
+				generated[normalized] = context
+			}
+		}
+	}
+	return errs
+}
+
+func activitySiteContext(site runtimecontracts.ActivitySite) string {
+	context := fmt.Sprintf("node %s handler %s", strings.TrimSpace(site.NodeID), strings.TrimSpace(site.HandlerEventKey))
+	if site.RuleIndex >= 0 {
+		if strings.TrimSpace(site.RuleID) != "" {
+			return fmt.Sprintf("%s.rules[%s].activity", context, strings.TrimSpace(site.RuleID))
+		}
+		return fmt.Sprintf("%s.rules[%d].activity", context, site.RuleIndex)
+	}
+	return context + ".activity"
 }
 
 func validateActivityInputAgainstToolSchema(context string, activity runtimecontracts.ActivitySpec, schema runtimecontracts.ToolInputSchema) []error {

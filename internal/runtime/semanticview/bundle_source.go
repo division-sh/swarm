@@ -351,6 +351,9 @@ func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContra
 func (s bundleSource) AgentEntries() map[string]runtimecontracts.AgentRegistryEntry {
 	return s.bundle.AgentEntries()
 }
+func (s bundleSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
+	return s.bundle.AuthoredEventEntries()
+}
 func (s bundleSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.EventEntries()
 }
@@ -362,6 +365,9 @@ func (s bundleSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry 
 }
 func (s bundleSource) ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
 	return s.bundle.ToolEntryForAgent(agentID, toolID)
+}
+func (s bundleSource) AuthoredResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
+	return s.bundle.AuthoredResolvedEventCatalog()
 }
 
 func flowLocalEventSetForWildcardSource(source Source, flowID string) map[string]struct{} {

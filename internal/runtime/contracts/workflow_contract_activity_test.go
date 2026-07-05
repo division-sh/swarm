@@ -96,7 +96,7 @@ func TestActivityEffectClassDefaults(t *testing.T) {
 			maxAttempts: 2,
 			backoff:     "exponential",
 			forkPolicy:  ActivityForkReuseRecordedResult,
-			supported:   true,
+			supported:   false,
 		},
 		{
 			name:        "non idempotent write",
@@ -104,7 +104,7 @@ func TestActivityEffectClassDefaults(t *testing.T) {
 			maxAttempts: 1,
 			backoff:     "none",
 			forkPolicy:  ActivityForkRequireConfirmation,
-			supported:   true,
+			supported:   false,
 		},
 		{
 			name:        "long running split",

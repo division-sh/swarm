@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/google/uuid"
@@ -102,11 +103,32 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q is not declared", intent.Tool))
 	}
-	result, err := executeActivityHTTPTool(ctx, client, intent, tool)
-	if err != nil {
-		return d.publishActivityFailure(ctx, intent, err)
+	toolEffectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
+	if toolEffectClass != intent.EffectClass {
+		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q effect_class changed from request %q to %q", intent.Tool, intent.EffectClass, toolEffectClass))
 	}
-	return d.publishActivitySuccess(ctx, intent, result)
+	if !runtimecontracts.SupportedActivityEffectClass(toolEffectClass) {
+		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q effect_class %q is not executable in Stage 1", intent.Tool, toolEffectClass))
+	}
+	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		attemptIntent := intent
+		attemptIntent.Attempt = attempt
+		result, err := executeActivityHTTPTool(ctx, client, attemptIntent, tool)
+		if err == nil {
+			return d.publishActivitySuccess(ctx, attemptIntent, result)
+		}
+		lastErr = err
+		if attempt < maxAttempts {
+			if err := waitActivityRetryBackoff(ctx, intent.RetryBackoff, attempt); err != nil {
+				return err
+			}
+		}
+	}
+	failureIntent := intent
+	failureIntent.Attempt = maxAttempts
+	return d.publishActivityFailure(ctx, failureIntent, lastErr)
 }
 
 func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, evt events.Event) (bool, error) {
@@ -206,6 +228,70 @@ func activityRequestEventID(intent runtimeengine.ActivityIntent) string {
 		fmt.Sprintf("%d", intent.Attempt),
 	}
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-request:"+strings.Join(parts, "\x00"))).String()
+}
+
+func activityResultEventID(intent runtimeengine.ActivityIntent, eventType string) string {
+	intent = intent.Normalized()
+	parts := []string{
+		intent.SourceRunID,
+		intent.SourceEventID,
+		intent.ParentEventID,
+		intent.EntityID.String(),
+		intent.FlowID.String(),
+		intent.NodeID.String(),
+		intent.HandlerEventKey,
+		intent.ActivityID,
+		intent.Tool,
+		eventidentity.Normalize(eventType),
+	}
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:activity-result:"+strings.Join(parts, "\x00"))).String()
+}
+
+func activityRetryMaxAttempts(intent runtimeengine.ActivityIntent, effectClass runtimecontracts.ActivityEffectClass) int {
+	if intent.RetryMaxAttempts > 0 {
+		return intent.RetryMaxAttempts
+	}
+	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
+	if defaults.MaxAttempts > 0 {
+		return defaults.MaxAttempts
+	}
+	return 1
+}
+
+func waitActivityRetryBackoff(ctx context.Context, backoff string, completedAttempt int) error {
+	delay := activityRetryDelay(backoff, completedAttempt)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func activityRetryDelay(backoff string, completedAttempt int) time.Duration {
+	switch strings.TrimSpace(strings.ToLower(backoff)) {
+	case "", "none":
+		return 0
+	case "exponential":
+		if completedAttempt < 1 {
+			completedAttempt = 1
+		}
+		delay := 10 * time.Millisecond
+		for i := 1; i < completedAttempt && delay < time.Second; i++ {
+			delay *= 2
+		}
+		if delay > time.Second {
+			return time.Second
+		}
+		return delay
+	default:
+		return 10 * time.Millisecond
+	}
 }
 
 func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activityRequestPayload {
@@ -532,7 +618,7 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 		return err
 	}
 	evt := events.NewChildEventWithLineage(
-		uuid.NewString(),
+		activityResultEventID(intent, eventType),
 		events.EventType(eventType),
 		intent.NodeID.String(),
 		intent.SourceTaskID,
