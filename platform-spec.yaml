@@ -3164,7 +3164,7 @@ engine:
     - "SQLite dialect/schema/bootstrap is promoted by #1085."
     - "Backend-neutral core runtime persistence stores are promoted by #1086."
     - "SQLite runtime construction semantics remain under #1087 parent closeout; mailbox_write materialization is promoted by #1186 and must consume its backend-neutral owner rather than the raw pipeline SQL database."
-    - "Public local/dev default flip plus zero-service swarm run proof is promoted by #1088."
+    - "Public local/dev default flip plus zero-service swarm run start proof is promoted by #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_store_schema_dialect_bootstrap:
     promoted_by: '#1085'
@@ -3208,7 +3208,7 @@ engine:
     split_boundaries:
     - "Core runtime store method portability is promoted by #1086."
     - "Explicit SQLite local-runtime session locking, event delivery/replay, and trace/read model semantics are promoted under #1087 child closeout."
-    - "Public local/dev default flip plus zero-service swarm run proof is promoted by #1088."
+    - "Public local/dev default flip plus zero-service swarm run start proof is promoted by #1088."
     - "Docs, CI, and repo-wide stale-default closeout remains split to #1089."
   runtime_core_persistence_store_contracts:
     promoted_by: '#1086'
@@ -3238,7 +3238,7 @@ engine:
           to Postgres-only runtime consumers.
         - Must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
         - >
-          Must support the #1088 zero-service SQLite `swarm run` local/dev default and explicit Postgres opt-in proof.
+          Must support the #1088 zero-service SQLite `swarm run start` local/dev default and explicit Postgres opt-in proof.
           SQLite construction remains local/dev support only; it does not promote production multi-writer SQLite semantics.
     selected_contracts:
     - name: runtime_store_bundle_construction
@@ -3612,7 +3612,7 @@ engine:
         consumer must receive a separately gated backend-neutral owner before it can participate in explicit SQLite runtime
         construction.
     split_boundaries:
-    - "Public local/dev SQLite default flip and zero-service swarm run proof are promoted by #1088."
+    - "Public local/dev SQLite default flip and zero-service swarm run start proof are promoted by #1088."
     - "Docs, CI, repo-wide stale-default closeout, and #1066 parent proof remain split to #1089."
     - "Production multi-writer SQLite concurrency semantics are not promoted by #1087."
     - "Additional raw-SQL runtime feature parity for SQLite requires a separately gated backend-neutral owner before use."
@@ -11778,7 +11778,7 @@ cli_specification:
           RunTraceFilter fields for event-name, subscriber identity, entity-id, and delivery-status are promoted on
           `/v1/rpc run.trace` and `/v1/ws run.subscribe_trace` and consumed by `swarm run trace` snapshot and follow
           modes. Snapshot `until` is promoted on `/v1/rpc run.trace` only as an inclusive upper bound. Review-artifact
-          `--include-payload`, shared `swarm run` recovery, and multi-run `--all` remain explicitly unpromoted split
+          `--include-payload`, shared `swarm run start` recovery, and multi-run `--all` remain explicitly unpromoted split
           tails until later gated children promote their own canonical owners.
       mailbox_decision_sheet_and_result_ux:
         disposition: promoted_first_slice
@@ -12169,7 +12169,7 @@ cli_specification:
       - '#1138/#1213 host workspace claude_cli execution support remains split.'
       - '#1441 parent local proof setup remains open after this child unless all sibling tails are closed separately.'
     no_args_behavior: '`swarm` with no arguments prints root help and exits 0. Bare `swarm` MUST NOT start the runtime.'
-    daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
+    daemon_startup: '`swarm serve` owns runtime/API/health/MCP startup. `swarm run start` may consume the serve startup owner for local foreground start, but MUST NOT fork a second runtime boot owner.'
     cli_consumes_api_rule: 'All CLI commands that read or mutate runtime state consume the canonical API at /v1/rpc or /v1/ws. The only local file-contract carve-out is `swarm verify`, which validates contract files on disk and does not require runtime DB/API state.'
     topology: >
       CLI v2 uses top-level verbs for dominant single-intent operations, resource-noun-first
@@ -12462,7 +12462,7 @@ cli_specification:
       - '#844 universal flag/config/env precedence; config-file no_color and CLI logging behavior implementation remain split'
       - '#846 error-channel and exit-code classification; closed first slice'
       - '#839 retired namespace migration cleanup'
-      - '#743 swarm run behavior and follow semantics; output-mode implementation may consume this contract later'
+      - '#743 swarm run start behavior and follow semantics; output-mode implementation may consume this contract later'
       - 'absent #735 command families'
       - API/runtime method semantics
       - JSON error-body or rich structured-error output unless a later tracked child promotes it
@@ -12566,7 +12566,7 @@ cli_specification:
       - '#848 output-mode/shared renderer implementation tails'
       - '#931 color/no-color policy; closed first slice'
       - '#884/#750 serve listener/runtime behavior'
-      - '#743 swarm run behavior and follow semantics'
+      - '#743 swarm run start behavior and follow semantics'
       - '`swarm logs --level` and `swarm incidents --level` runtime result filters'
       - persisted runtime `log_level` payloads and runtime/daemon logging configuration
       implementation_boundaries:
@@ -12591,7 +12591,7 @@ cli_specification:
         only. Runtime identity and local context registry primitives are promoted separately under
         local_context_registry_authority. #1614 consumes those primitives for TCP project-scoped `serve --dev`
         registration and current API-backed command targeting. This owner still does not migrate store/data paths,
-        change `swarm run` default/foreground behavior, or implement IPC/unix dialing policy.
+        change `swarm run start` default/foreground behavior, or implement IPC/unix dialing policy.
       invariant: >
         You target the project you are in. If you are not in a project, or the project has no live known runtime after
         the registry children exist, Swarm may use the selected/default context or built-in loopback target according to
@@ -12735,7 +12735,7 @@ cli_specification:
           fail-closed as an unknown/unsupported flag.
       split_siblings:
       - '#1614 project-scoped serve/API command targeting (implemented)'
-      - '#1615 store/data migration and swarm run semantics (implemented)'
+      - '#1615 store/data migration and swarm run start semantics (implemented)'
       - '#1576 transport-aware descriptors and IPC/ephemeral-port direction'
       implementation_boundaries:
       - 'The shared CLI config parser may accept `swarm_dir`, but API connection/auth resolution must ignore it.'
@@ -12888,7 +12888,7 @@ cli_specification:
       implementation_boundaries:
       - '`serve --dev` project-scoped TCP descriptor registration is consumed by #1614; non-dev serve registration remains unpromoted.'
       - 'API-backed command target resolver consumes context descriptors through #1614 only.'
-      - 'No runtime store/data path migration or `swarm run` behavior change in #1613; #1615 owns that behavior.'
+      - 'No runtime store/data path migration or `swarm run start` behavior change in #1613; #1615 owns that behavior.'
       - 'No unix socket dialing policy in #1613; #1576 owns actual IPC transport behavior.'
     repo_dotenv_source_authority:
       promoted_by: '#1635'
@@ -13090,7 +13090,7 @@ cli_specification:
       - '#1636 client-side API target/auth env removal'
       - '#1647 server-side swarm serve API token secure-source ownership'
       - '#884/#750 serve listener enable-disable controls and runtime topology siblings'
-      - '#743 swarm run behavior and follow semantics'
+      - '#743 swarm run start behavior and follow semantics'
       - '`--no-retry` retry policy'
       implementation_boundaries:
       - 'API-backed command leaves consume one cmd/swarm resolver for this owner.'
@@ -13189,7 +13189,7 @@ cli_specification:
       scope: >
         First-slice normalization for currently implemented API-backed CLI commands. This applies to diagnostics/read
         paths, mailbox list/view/decisions, version --server, agents list/view, agent mutations, control commands, event
-        list/follow/view/replay/publish, entity list/view/aggregate, and swarm run shared API/client failures. Future
+        list/follow/view/replay/publish, entity list/view/aggregate, and swarm run start shared API/client failures. Future
         command families consume this contract when their API-backed implementation is promoted.
       canonical_owner: cmd/swarm shared CLI API error classifier
       stdout_rule: >
@@ -13222,7 +13222,7 @@ cli_specification:
         and structured `data.details` when the server supplies them; they MUST NOT collapse `-32603` to the bare string
         `internal error`.
       command_local_preservation: >
-        Commands may define resource-specific not-found and conflict application-code sets, and `swarm run` preserves
+        Commands may define resource-specific not-found and conflict application-code sets, and `swarm run start` preserves
         terminal workflow exit 7 and interrupt/detach exit 130. Those command-local helpers still delegate shared
         API/client categories to the canonical classifier.
       split_siblings:
@@ -13300,7 +13300,7 @@ cli_specification:
       - stale gateway env precedence or auto-fix policy
       - deployment-mode profile management
       - trusted runtime identity and context registry consumption
-      - store/data migration and swarm run behavior
+      - store/data migration and swarm run start behavior
     test:
       command: swarm test [scenario-file ...] [--contracts <path>] [--platform-spec <path>] [--timeout <duration>] [--poll-interval <duration>]
       group: author_validate
@@ -13578,7 +13578,7 @@ cli_specification:
         - --log-level
         sibling_boundaries: >
           Output modes remain governed by `cli_specification.foundations.output_contract`; universal config/env
-          precedence remains #844; `swarm run` foreground/follow behavior remains #743; final split API/MCP
+          precedence remains #844; `swarm run start` foreground/follow behavior remains #743; final split API/MCP
           listener runtime binding is consumed by `listener_topology_v2_1`, while enable-disable controls remain
           future work outside this historical unified-listener evidence row.
       listener_topology_v2_1:
@@ -13647,7 +13647,7 @@ cli_specification:
           - '`swarm serve` API listener bind address.'
           - '`swarm serve` MCP listener bind address.'
           not_applies_to:
-          - '`swarm run` local foreground listener startup.'
+          - '`swarm run start` local foreground listener startup.'
           - API client connection/auth configuration such as `--api-server`, context descriptors, and `api_server`.
           - '`swarm serve --config`, which remains command-local runtime configuration.'
           source_order:
@@ -13980,7 +13980,7 @@ cli_specification:
           containers, unrelated containers, and runtime-owned `kind=agent` or `kind=flow` containers are preserved fail-closed.
         sibling_boundaries: >
           `platform.shutdown` event persistence, persisted `interrupted_by_shutdown` delivery/receipt terminalization,
-          destructive reset/runtime.nuke behavior, and `swarm run` foreground behavior remain outside this owner unless a later
+          destructive reset/runtime.nuke behavior, and `swarm run start` foreground behavior remain outside this owner unless a later
           child promotes them.
       remaining_tail: '#750 has no remaining promoted serve/dev lifecycle tail after #830. `platform.shutdown` event persistence
         and persisted delivery/receipt interruption reasons remain unpromoted unless a later child makes them authoritative.'
@@ -14027,7 +14027,7 @@ cli_specification:
       - --api-port <int>
       dropped_flags:
         --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run start --connect ... --no-follow`.'
-        --mcp-port: 'Unsupported in #743; `swarm run` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
+        --mcp-port: 'Unsupported in #743; `swarm run start` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
       modes:
         foreground_local_start:
           invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>] --platform-spec <path>
@@ -14172,7 +14172,7 @@ cli_specification:
             `-f` is an exact CLI-only shorthand for `--follow`. It selects the same `/v1/ws run.subscribe_trace`
             follow path, accepts the same `--no-retry` modifier, rejects the same fixed-window snapshot flags before
             any API or WebSocket call, and does not introduce distinct runtime semantics, output behavior, or
-            `swarm run` follow behavior. It may carry the promoted RunTraceFilter param when typed filter flags are present.
+            `swarm run start` follow behavior. It may carry the promoted RunTraceFilter param when typed filter flags are present.
         scope: >
           Applies only to `swarm run trace --follow` / `swarm run trace -f`. `swarm run start` foreground follow, connected follow, and reattach keep their
           existing lifecycle policy and may continue to use the shared one-shot `subscribeRunTrace` helper without inheriting
@@ -14219,11 +14219,11 @@ cli_specification:
         - --no-retry proves one-shot close behavior and no replay_since
         - malformed subscription responses and notifications fail closed without retrying indefinitely
         - Ctrl-C detaches with exit 130 and does not call run.stop
-        - '`swarm run` foreground/follow and reattach regression proof remains unchanged'
+        - '`swarm run start` foreground/follow and reattach regression proof remains unchanged'
         - static no-bypass proof for no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy transports
         split_tail:
           include_payload: Not promoted; RunTraceRow has no payload field and output/schema ownership is split.
-          shared_run_follow_recovery: Not promoted; `swarm run` follow and reattach have distinct lifecycle semantics and remain split.
+          shared_run_follow_recovery: Not promoted; `swarm run start` follow and reattach have distinct lifecycle semantics and remain split.
           all_runs: Not promoted; multi-run trace needs a canonical multi-run owner or explicit run.list + run.trace composition contract.
     mailbox_list:
       command: swarm mailbox list
@@ -15479,7 +15479,7 @@ cli_specification:
         implements the runtime bind slice for `swarm serve --api-listen-addr` and `--mcp-listen-addr`, route
         partitioning, listener bind failures, `--health-addr` retirement, MCP gateway URL alignment, and
         `swarm run start --api-port` as an API listener consumer. #844 implements `swarm serve` listener env/config
-        precedence. Remaining listener topology tail is API/MCP enable-disable controls and any future `swarm run`
+        precedence. Remaining listener topology tail is API/MCP enable-disable controls and any future `swarm run start`
         MCP listener consumer.
       remaining_tail: 'No promoted serve lifecycle tail remains after #830. `platform.shutdown` and persisted `interrupted_by_shutdown`
         remain unpromoted unless a later runtime lifecycle child makes them authoritative; not a direct blocker for #743 API owners.'
@@ -19542,7 +19542,7 @@ api_specification:
       \ set. The minimal API surface required to:\n                (a) close Empire #57 (mailbox approval API gap blocking\n\
       \                    every end-to-end run), and\n                (b) back the promoted CLI v2 read commands\n\
       \                    (`swarm run list`, `swarm run status`, `swarm run trace`, `swarm health`; pre-v2.2 spellings at promotion time)\n\
-      \                    and the promoted `swarm run` follow/cancellation paths.\n\
+      \                    and the promoted `swarm run start` follow/cancellation paths.\n\
       \                Implementable as one PR; 14 methods total.\n  should_have \u2014 v1-scoped but ships in subsequent\
       \ slices. Spec is\n                authoritative now (so consumers can plan against it),\n                but implementation\
       \ is sequenced after the must_have set.\n                Includes remaining streaming subscriptions, observability drill-down\n\
@@ -21922,7 +21922,7 @@ api_specification:
       private_makefile_helper_retired: >
         The former private Makefile/script runtime helper is not a supported
         public surface. Public consumers use `swarm serve` for runtime startup,
-        `swarm run` for run creation, `swarm health` for readiness/identity,
+        `swarm run start` for run creation, `swarm health` for readiness/identity,
         `swarm agent directive` for directive delivery, and `swarm control
         nuke` for destructive reset through `/v1/rpc runtime.nuke`. No
         compatibility wrapper or alternate helper owner remains for those
@@ -21956,7 +21956,7 @@ api_specification:
       scopes, and errors.
     - "Idempotency replay-store implementation: (method, actor, idempotency_key) \u2192 response; 24h TTL; IDEMPOTENCY_CONFLICT\
       \ response on body mismatch."
-    - run.stop is must-have because promoted CLI v2 `swarm run` foreground modes require Ctrl-C cancellation after run creation.
+    - run.stop is must-have because promoted CLI v2 `swarm run start` foreground modes require Ctrl-C cancellation after run creation.
     - run.subscribe_trace is must-have because promoted CLI v2 `swarm run start` foreground follow and `swarm run trace --follow` depend
       on it. Remaining subscription methods are sequenced by their own slices, but every subscription wire format must match
       the geth-style rpc.subscription shape.

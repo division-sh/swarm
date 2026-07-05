@@ -591,7 +591,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 func doctorTargetSplitSiblings() []string {
 	return []string{
 		"#1614 project-scoped serve/API command targeting",
-		"#1615 store/data migration and swarm run semantics (implemented)",
+		"#1615 store/data migration and swarm run start semantics (implemented)",
 		"#1576 transport-aware descriptors and IPC/ephemeral-port direction",
 	}
 }

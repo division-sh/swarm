@@ -280,7 +280,7 @@ rows:
 
   - id: cli_agents_list_run_id
     category: cli
-    concept: swarm agents list --run-id is split until agent.list run-scope authority exists.
+    concept: swarm agent list --run-id is split until agent.list run-scope authority exists.
     classification: explicit_split
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: modified_commands_planned}

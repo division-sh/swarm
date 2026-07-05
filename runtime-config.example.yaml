@@ -1,5 +1,5 @@
 # Example Swarm runtime config for `swarm serve --config` or local
-# `swarm run --config` startup.
+# `swarm run start --config` startup.
 #
 # This file uses the runtime-config shape, which is separate from the shared
 # CLI config shape in config.example.yaml. Keep credentials in `swarm secrets`

@@ -63,7 +63,7 @@ rows:
         name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe
 
   - id: run_contracts_default_sqlite
-    surface: default SQLite swarm run --contracts no-service path
+    surface: default SQLite swarm run start --contracts no-service path
     classification: add_to_matrix
     tier: required_smoke
     backends: [default_sqlite]
@@ -71,7 +71,7 @@ rows:
     api_methods: [health.check, run.start, run.get]
     openrpc_matrix_methods: [health.check, run.start, run.get]
     store_owners:
-      - cmd/swarm run command local serve owner
+      - cmd/swarm run start command local serve owner
       - internal/store/backendselection
       - /v1/rpc health.check
       - /v1/rpc run.start
@@ -88,7 +88,7 @@ rows:
       process run smoke to every PR.
 
   - id: run_contracts_explicit_postgres
-    surface: explicit Postgres counterpart for swarm run --contracts
+    surface: explicit Postgres counterpart for swarm run start --contracts
     classification: add_to_matrix
     tier: full_conformance
     backends: [explicit_postgres]
@@ -96,7 +96,7 @@ rows:
     api_methods: [health.check, run.start, run.get]
     openrpc_matrix_methods: [health.check, run.start, run.get]
     store_owners:
-      - cmd/swarm run command local serve owner
+      - cmd/swarm run start command local serve owner
       - internal/store/backendselection
       - /v1/rpc health.check
       - /v1/rpc run.start
@@ -135,7 +135,7 @@ rows:
         name: TestOperatorEntityHandlersExposeEntityNativeReads
 
   - id: entity_read_cli
-    surface: swarm entities list, swarm entity view, and swarm entity aggregate
+    surface: swarm entity list, swarm entity view, and swarm entity aggregate
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
@@ -160,7 +160,7 @@ rows:
       command across both backends.
 
   - id: status_run_get_entity_count
-    surface: swarm status and /v1/rpc run.get entity_count correctness
+    surface: swarm run status and /v1/rpc run.get entity_count correctness
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]

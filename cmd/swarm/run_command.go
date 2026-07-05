@@ -436,7 +436,7 @@ func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runComma
 		canonicalProjectRoot: project.CanonicalProjectRoot,
 	}
 	if err := guardServeProjectContext(ctx, registry, cliProject, contextName, false); err != nil {
-		return nil, fmt.Errorf("local swarm run requires exclusive project runtime: %w; use --connect to target an existing runtime explicitly or stop the existing project runtime", err)
+		return nil, fmt.Errorf("local swarm run start requires exclusive project runtime: %w; use --connect to target an existing runtime explicitly or stop the existing project runtime", err)
 	}
 	release, err := registry.AcquireProjectClaim(project.CanonicalProjectRoot, contextName)
 	if err != nil {
