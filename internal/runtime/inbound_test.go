@@ -9,7 +9,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,8 +344,413 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 	}
 }
 
+func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPublish(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"url_verification","challenge":"challenge-value","token":"deprecated-token"}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "challenge-value" {
+		t.Fatalf("body = %q, want challenge-value", rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("Slack url_verification recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+	if strings.Contains(rec.Body.String(), "slack-secret") || strings.Contains(rec.Body.String(), "deprecated-token") {
+		t.Fatal("Slack secret material leaked into challenge response")
+	}
+}
+
+func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPublish(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"url_verification","token":"deprecated-token"}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("Slack url_verification without challenge recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:   "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug: "customer-a",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("Slack request without configured signing secret recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		configure func(*http.Request, []byte)
+	}{
+		{
+			name: "missing signature",
+			configure: func(req *http.Request, body []byte) {
+				req.Header.Set("X-Slack-Request-Timestamp", strconv.FormatInt(time.Now().UTC().Unix(), 10))
+			},
+		},
+		{
+			name: "invalid signature",
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("X-Slack-Request-Timestamp", timestamp)
+				req.Header.Set("X-Slack-Signature", slackWebhookSignature("wrong-secret", timestamp, body))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := runtimebus.NewEventBus(eventStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			store := &recordingInboundStore{
+				target: InboundTarget{
+					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+					EntitySlug:    "customer-a",
+					WebhookSecret: "slack-secret",
+				},
+				inserted: true,
+			}
+			g := NewInboundGateway(bus, nil, nil, store)
+
+			body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
+			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/slack", strings.NewReader(string(body)))
+			tc.configure(req, body)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+			}
+			if store.recorded {
+				t.Fatal("Slack request with invalid signature recorded inbound marker")
+			}
+			if len(eventStore.events) != 0 {
+				t.Fatalf("published events = %d, want 0", len(eventStore.events))
+			}
+		})
+	}
+}
+
+func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, "1")
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("Slack request with stale timestamp recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"event_callback","token":"deprecated-token","event_id":"Ev123ABC456","event":{"type":"message.channels","text":"hello"}}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if !store.recorded {
+		t.Fatal("expected Slack callback to record inbound marker")
+	}
+	if store.providerEventID != "Ev123ABC456" {
+		t.Fatalf("providerEventID = %q, want Ev123ABC456", store.providerEventID)
+	}
+	if store.provider != "slack" {
+		t.Fatalf("provider = %q, want slack", store.provider)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.Type() != events.EventType("inbound.slack.message_channels") {
+		t.Fatalf("event type = %q, want inbound.slack.message_channels", evt.Type())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["provider_event_id"] != "Ev123ABC456" || payload["event_type"] != "message_channels" || payload["provider"] != "slack" {
+		t.Fatalf("payload = %+v, want Slack delivery identity", payload)
+	}
+	payloadJSON := string(evt.Payload())
+	if strings.Contains(rec.Body.String(), "slack-secret") || strings.Contains(payloadJSON, "slack-secret") {
+		t.Fatal("Slack signing secret leaked into readback or event payload")
+	}
+	if strings.Contains(payloadJSON, "deprecated-token") {
+		t.Fatal("Slack deprecated verification token leaked into event payload")
+	}
+}
+
+func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCompletes(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseDispatch := func() {
+		releaseOnce.Do(func() {
+			close(release)
+		})
+	}
+	t.Cleanup(releaseDispatch)
+	bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{
+			blockingInboundInterceptor{started: started, release: release},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message","text":"hello"}}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	responseDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		g.Handler().ServeHTTP(rec, req)
+		responseDone <- rec
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Slack callback post-commit dispatch did not start")
+	}
+	select {
+	case rec := <-responseDone:
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Slack callback response waited for post-commit dispatch completion")
+	}
+	if !store.recorded {
+		t.Fatal("expected Slack callback to record inbound marker before acknowledgement")
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
+	}
+
+	releaseDispatch()
+	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)
+	}
+}
+
+func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"event_callback","event":{"type":"message"}}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("Slack callback without event_id recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "slack-secret",
+		},
+		inserted: false,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message"}}`)
+	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate response = %s", rec.Body.String())
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
 func githubWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedSlackRequest(path string, secret string, body []byte, timestamp string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	req.Header.Set("X-Slack-Signature", slackWebhookSignature(secret, timestamp, body))
+	return req
+}
+
+func slackWebhookSignature(secret string, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte("v0:" + timestamp + ":" + string(body)))
+	return "v0=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+type blockingInboundInterceptor struct {
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (i blockingInboundInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, error) {
+	select {
+	case i.started <- struct{}{}:
+	default:
+	}
+	select {
+	case <-i.release:
+		return true, nil, nil
+	case <-ctx.Done():
+		return false, nil, ctx.Err()
+	}
 }

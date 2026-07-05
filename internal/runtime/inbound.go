@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -158,6 +159,20 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), status)
 		return
 	}
+	if delivery.Response != nil {
+		status := delivery.Response.Status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		contentType := strings.TrimSpace(delivery.Response.ContentType)
+		if contentType == "" {
+			contentType = "text/plain; charset=utf-8"
+		}
+		w.Header().Set("content-type", contentType)
+		w.WriteHeader(status)
+		_, _ = w.Write(delivery.Response.Body)
+		return
+	}
 	providerEventID := delivery.ProviderEventID
 
 	if g.store != nil {
@@ -182,7 +197,14 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	envelopeBytes := mustJSON(pubPayload)
 	if g.bus != nil {
 		pubCtx := runtimebus.WithCurrentRuntimeEpoch(r.Context())
-		if err := g.bus.Publish(pubCtx, events.NewRootIngressEvent(uuid.NewString(), pubType, "inbound-gateway", "", envelopeBytes, 0, "", "", events.EventEnvelope{EntityID: entityID}, now)); err != nil {
+		published := events.NewRootIngressEvent(uuid.NewString(), pubType, "inbound-gateway", "", envelopeBytes, 0, "", "", events.EventEnvelope{EntityID: entityID}, now)
+		var err error
+		if delivery.AcknowledgeBeforeDispatch {
+			err = g.bus.PublishAcknowledged(pubCtx, published)
+		} else {
+			err = g.bus.Publish(pubCtx, published)
+		}
+		if err != nil {
 			if g.logger != nil {
 				handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", g.logger.Error(r.Context(), "inbound-gateway", "publish_failed", map[string]any{
 					"provider":          provider,
@@ -259,10 +281,18 @@ type inboundProviderRequest struct {
 }
 
 type inboundProviderDelivery struct {
-	ProviderEventID   string
-	ProviderEventType string
-	EventName         events.EventType
-	Payload           map[string]any
+	ProviderEventID           string
+	ProviderEventType         string
+	EventName                 events.EventType
+	Payload                   map[string]any
+	Response                  *inboundProviderResponse
+	AcknowledgeBeforeDispatch bool
+}
+
+type inboundProviderResponse struct {
+	Status      int
+	ContentType string
+	Body        []byte
 }
 
 type inboundProviderError struct {
@@ -285,6 +315,7 @@ func inboundUnauthorized(message string) inboundProviderError {
 func defaultInboundProviderAdapters() map[string]inboundProviderAdapter {
 	return map[string]inboundProviderAdapter{
 		"github": githubInboundProviderAdapter{},
+		"slack":  slackInboundProviderAdapter{},
 	}
 }
 
@@ -321,6 +352,69 @@ func (githubInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (i
 }
 
 type rawInboundProviderAdapter struct{}
+
+type slackInboundProviderAdapter struct{}
+
+func (slackInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
+	secret := strings.TrimSpace(req.Target.WebhookSecret)
+	if secret == "" {
+		return inboundProviderDelivery{}, inboundUnauthorized("slack webhook signing secret is required")
+	}
+	if err := verifySlackSignature(secret, req.Body, req.Headers, req.Received); err != nil {
+		return inboundProviderDelivery{}, err
+	}
+
+	payload, ok := req.Payload.(map[string]any)
+	if !ok {
+		return inboundProviderDelivery{}, inboundBadRequest("slack payload object is required")
+	}
+	payloadType := normalizeEventToken(firstStringByKeys(payload, "type"))
+	switch payloadType {
+	case "url_verification":
+		challenge := firstStringByKeys(payload, "challenge")
+		if challenge == "" {
+			return inboundProviderDelivery{}, inboundBadRequest("slack challenge is required")
+		}
+		return inboundProviderDelivery{
+			Response: &inboundProviderResponse{
+				Status:      http.StatusOK,
+				ContentType: "text/plain; charset=utf-8",
+				Body:        []byte(challenge),
+			},
+		}, nil
+	case "event_callback":
+		eventID := firstStringByKeys(payload, "event_id")
+		if eventID == "" {
+			return inboundProviderDelivery{}, inboundBadRequest("slack event_id is required")
+		}
+		innerEvent, ok := payload["event"].(map[string]any)
+		if !ok {
+			return inboundProviderDelivery{}, inboundBadRequest("slack inner event is required")
+		}
+		eventType := normalizeEventToken(firstStringByKeys(innerEvent, "type"))
+		if eventType == "event" {
+			return inboundProviderDelivery{}, inboundBadRequest("slack inner event type is required")
+		}
+		entityID := req.Target.EffectiveEntityID()
+		publishPayload := buildProviderPublishPayload("slack", entityID, eventID, eventType, redactSlackPayload(req.Payload), req.Received, map[string]any{
+			"user_agent":       req.UserAgent,
+			"slack_event_id":   eventID,
+			"slack_event_type": eventType,
+		})
+		return inboundProviderDelivery{
+			ProviderEventID:           eventID,
+			ProviderEventType:         eventType,
+			EventName:                 events.EventType("inbound.slack." + eventType),
+			Payload:                   publishPayload,
+			AcknowledgeBeforeDispatch: true,
+		}, nil
+	default:
+		if payloadType == "event" {
+			return inboundProviderDelivery{}, inboundBadRequest("slack payload type is required")
+		}
+		return inboundProviderDelivery{}, inboundBadRequest("unsupported slack payload type")
+	}
+}
 
 func (rawInboundProviderAdapter) AcceptInbound(req inboundProviderRequest) (inboundProviderDelivery, error) {
 	provider := normalizeProviderName(req.Provider)
@@ -488,6 +582,57 @@ func verifyGitHubSignature(secret string, body []byte, headers http.Header) bool
 	_, _ = mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(strings.ToLower(given)), []byte(strings.ToLower(expected)))
+}
+
+func verifySlackSignature(secret string, body []byte, headers http.Header, now time.Time) error {
+	timestampHeader := strings.TrimSpace(headers.Get("X-Slack-Request-Timestamp"))
+	if timestampHeader == "" {
+		return inboundUnauthorized("slack request timestamp is required")
+	}
+	timestamp, err := strconv.ParseInt(timestampHeader, 10, 64)
+	if err != nil {
+		return inboundUnauthorized("invalid slack request timestamp")
+	}
+	requestTime := time.Unix(timestamp, 0).UTC()
+	if requestTime.After(now.Add(5*time.Minute)) || requestTime.Before(now.Add(-5*time.Minute)) {
+		return inboundUnauthorized("stale slack request timestamp")
+	}
+
+	signature := strings.TrimSpace(headers.Get("X-Slack-Signature"))
+	if !strings.HasPrefix(strings.ToLower(signature), "v0=") {
+		return inboundUnauthorized("slack signature is required")
+	}
+	base := "v0:" + timestampHeader + ":" + string(body)
+	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(secret)))
+	_, _ = mac.Write([]byte(base))
+	expected := "v0=" + hex.EncodeToString(mac.Sum(nil))
+	if !hmac.Equal([]byte(strings.ToLower(signature)), []byte(strings.ToLower(expected))) {
+		return inboundUnauthorized("invalid slack signature")
+	}
+	return nil
+}
+
+func redactSlackPayload(payload any) any {
+	switch v := payload.(type) {
+	case map[string]any:
+		redacted := make(map[string]any, len(v))
+		for key, value := range v {
+			if strings.EqualFold(key, "token") {
+				redacted[key] = "[redacted]"
+				continue
+			}
+			redacted[key] = redactSlackPayload(value)
+		}
+		return redacted
+	case []any:
+		redacted := make([]any, len(v))
+		for i, value := range v {
+			redacted[i] = redactSlackPayload(value)
+		}
+		return redacted
+	default:
+		return v
+	}
 }
 
 func verifyRawWebhookSignature(secret string, body []byte, headers http.Header) bool {

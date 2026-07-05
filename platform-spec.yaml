@@ -5539,12 +5539,14 @@ tool_model:
     - creating a second generic webhook gateway
     - managed OAuth/token lifecycle, which belongs to `managed_credential_store`
     - provider API subscription setup/teardown unless a later child explicitly selects it
-    - Slack URL-verification challenge handling or broad provider-catalog expansion in the first slice
+    - broad provider-catalog expansion outside explicitly selected provider children
     - DB connectors, AWS SigV4/AssumeRole, non-HTTP, or native connector auth
     existing_gateway_owner: >
       `internal/runtime/inbound.go` remains the generic HTTP ingress executor for `/webhooks/{entity}/{provider}`. It
-      consumes `runtime_ingress.queueable_ingress.inbound.webhook`, persists the inbound dedupe marker before publish, and
-      publishes the normalized root ingress event returned by the provider adapter.
+      consumes `runtime_ingress.queueable_ingress.inbound.webhook`, delegates configured-provider interpretation to the
+      provider adapter, persists the inbound dedupe marker before publish for delivery callbacks, and publishes the
+      normalized root ingress event returned by the provider adapter. Provider adapters may also return an authenticated
+      response-only result when the provider protocol requires a challenge response that is not a delivery.
     secret_binding: >
       The first-slice signing-secret binding is `flow_instances.config.secrets.webhook_signing.<provider>`, where
       `<provider>` is the normalized provider token. Secret values are never returned by webhook responses or readback
@@ -5563,6 +5565,38 @@ tool_model:
         `X-GitHub-Event` is the authoritative provider event type. The canonical emitted event name is
         `inbound.github.<normalized_event_type>` and the payload includes provider, provider_event_id, event_type,
         original payload, redacted headers, and received_at.
+    configured_provider_children:
+    - provider: slack
+      issue: "#1691"
+      signature: >
+        Slack webhook deliveries and URL-verification requests require a configured signing secret and valid
+        `X-Slack-Signature` over the raw body. The verifier MUST compute HMAC-SHA256 using the base string
+        `v0:{X-Slack-Request-Timestamp}:{raw_body}` and compare the full `v0=` signature in constant time. Missing signing
+        secret, missing or malformed signature headers, invalid signatures, and stale timestamps fail before dedupe marker
+        persistence and before event publish.
+      replay_window: >
+        `X-Slack-Request-Timestamp` MUST parse as Unix seconds and be within five minutes of runtime receipt time. Requests
+        outside that window are rejected as replay-risk traffic before any marker or event side effect.
+      url_verification: >
+        Slack `type: url_verification` requests are authenticated provider ingress but not provider deliveries. After
+        successful signature and replay validation, the adapter returns HTTP 200 with the `challenge` value as a
+        response-only result. Missing `challenge` fails closed. URL verification MUST NOT call `RecordInboundEvent` and MUST
+        NOT publish an EventBus event.
+      delivery_id: >
+        Slack `type: event_callback` requests require the outer `event_id`; that value is the authoritative provider
+        delivery id and dedupe-key input. Missing `event_id` fails before dedupe marker persistence.
+      acknowledgement: >
+        Accepted Slack `event_callback` requests return success after the inbound dedupe marker, canonical event record,
+        recipient manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement
+        MUST NOT wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        Slack event callbacks use the inner `event.type` as the authoritative provider event type. The canonical emitted
+        event name is `inbound.slack.<normalized_inner_event_type>`. Missing inner event or missing inner event type fails
+        before dedupe marker persistence.
+      redaction: >
+        Slack signing secrets and deprecated verification tokens are not returned by webhook responses, logs, persisted
+        marker readback, or published provider payloads. Deprecated Slack `token` fields are not accepted as primary proof
+        of request authenticity.
     raw_webhook_mode: >
       Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
       does not prove provider-trigger adapter closure. Configured providers MUST consume their adapter owner rather than
