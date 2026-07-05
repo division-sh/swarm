@@ -2142,8 +2142,8 @@ handler_specification:
           using credentials, managed_credential, response_mapping, rate_limit, or rate_limit_max_wait are not admitted to
           activities in Stage 1; those subfeatures require later owner consumption before activity execution may claim them.
         platform_builtin: Not callable from activity in Stage 1; fail closed. This includes `artifact_repo_commit`, which
-          remains action-owned under `handler_fields.action.artifact_repo_commit` until a separately gated write-effect
-          activity migration preserves that action's artifact safety and idempotency guarantees.
+          remains action-owned under `handler_fields.action.valid_values.artifact_repo_commit` until a separately gated
+          write-effect activity migration preserves that action's artifact safety and idempotency guarantees.
         mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classes are not authoritative; an
           authored registration-site override is required in a future slice before MCP tools can be activity-callable.
         native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
