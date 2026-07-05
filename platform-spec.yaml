@@ -11840,7 +11840,7 @@ cli_specification:
           cli_specification.retired_namespaces and cli_specification.parent_tail.retired_or_fail_closed.
           Promoted fail-closed migration surfaces are `swarm investigate *`, `swarm control mailbox`,
           and legacy `swarm fork --dry-run|--materialize-only|--activate|--contracts` harness forms only.
-          #1012 restores top-level `swarm fork <source-run-id> ...` as planned public source authority.
+          #1012 restored top-level `swarm fork <source-run-id> ...` as the then-planned public source authority; superseded by CLI v2.2 (#1654/#1677), which retires the top-level spelling fail-closed and makes `swarm run fork` the public command.
           Review-artifact-only `swarm runtime pause|resume` and
           `swarm control run pause|continue|stop` are explicitly unpromoted candidate/backlog
           spellings; their current generic Cobra unknown-command behavior is intentional unless a
@@ -11928,10 +11928,12 @@ cli_specification:
       fork_fail_closed_stub:
         classification: superseded_by_multi_bundle_source_authority
         reason: >
-          Previous tracked prose treated top-level `swarm fork` as retired. #1012 promotes the multi-bundle
-          source authority and restores top-level `swarm fork <source-run-id> ...` as the intended future public command
-          over /v1/rpc run.fork. Historical harness flags remain rejected; the bare public command remains absent until
-          #989 implements API/runtime/CLI behavior.
+          Previous tracked prose treated top-level `swarm fork` as retired. #1012 then promoted the multi-bundle
+          source authority and restored top-level `swarm fork <source-run-id> ...` as the then-intended public command
+          over /v1/rpc run.fork, implemented by #989/#1023. That authority is itself superseded by CLI v2.2
+          (#1654/#1677): the top-level `swarm fork` spelling is retired fail-closed per
+          cli_specification.retired_namespaces.topology_v2_2_retired_spellings and the public command is
+          `swarm run fork`. Historical harness flags remain rejected.
       runtime_and_control_run_legacy_spellings:
         classification: unpromoted_candidate_backlog
         reason: >
