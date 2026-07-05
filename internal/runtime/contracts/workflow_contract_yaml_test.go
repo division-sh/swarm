@@ -1020,6 +1020,29 @@ required_agents:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_TracksRequiredAgentsPresence(t *testing.T) {
+	tests := []struct {
+		name     string
+		yamlText string
+		declared bool
+	}{
+		{name: "omitted", yamlText: "name: worker\n", declared: false},
+		{name: "explicit empty", yamlText: "name: worker\nrequired_agents: []\n", declared: true},
+		{name: "explicit entries", yamlText: "name: worker\nrequired_agents:\n  - role: analyst\n", declared: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var schema FlowSchemaDocument
+			if err := yaml.Unmarshal([]byte(tc.yamlText), &schema); err != nil {
+				t.Fatalf("yaml.Unmarshal: %v", err)
+			}
+			if schema.RequiredAgentsDeclared != tc.declared {
+				t.Fatalf("RequiredAgentsDeclared = %v, want %v", schema.RequiredAgentsDeclared, tc.declared)
+			}
+		})
+	}
+}
+
 func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *testing.T) {
 	tests := []struct {
 		name    string

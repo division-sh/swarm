@@ -107,6 +107,61 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 	}
 }
 
+func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{
+		Path: "analysis",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:         "analysis",
+			SchemaFile: "flows/analysis/schema.yaml",
+			AgentsFile: "flows/analysis/agents.yaml",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{RequiredAgentsDeclared: true},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"analyzer": {Subscriptions: []string{"analysis.requested"}},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{
+			RootSchemaFile:    "schema.yaml",
+			ProjectAgentsFile: "agents.yaml",
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"root-agent": {
+				Subscriptions: []string{"root.requested"},
+				EmitEvents:    []string{"root.done"},
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"analysis": flow.Schema,
+		},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{flow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"analysis": &flow,
+			},
+		},
+	}
+
+	view := mustBuild(t, semanticview.Wrap(bundle), nil)
+
+	if view.Root.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceInferred ||
+		len(view.Root.RequiredAgents.Agents) != 1 ||
+		view.Root.RequiredAgents.Agents[0].Role != "root-agent" ||
+		view.Root.RequiredAgents.Agents[0].Source != runtimecontracts.RequiredAgentSourceInferred {
+		t.Fatalf("root required_agents view = %#v, want inferred root-agent", view.Root.RequiredAgents)
+	}
+	analysis := flowByID(t, view, "analysis")
+	if analysis.RequiredAgents.Source != runtimecontracts.RequiredAgentSourceExplicit {
+		t.Fatalf("flow required_agents source = %q, want explicit", analysis.RequiredAgents.Source)
+	}
+	if len(analysis.RequiredAgents.Agents) != 0 {
+		t.Fatalf("flow required_agents agents = %#v, want explicit empty boundary", analysis.RequiredAgents.Agents)
+	}
+}
+
 func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{BadConnectMapping: true})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})

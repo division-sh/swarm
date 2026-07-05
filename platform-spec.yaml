@@ -956,13 +956,20 @@ contract_formats:
         provider-visible or callable surface.'
     schema_source: entities.yaml + types.yaml
   required_agents:
-    description: required_agents in schema.yaml declares agents the flow needs.
+    description: 'schema.yaml required_agents is optional. When omitted, the flow''s effective required-agent facts are
+      inferred from same-scope agents.yaml map keys plus each agent''s subscriptions and emit_events. When present,
+      including an explicit empty list, required_agents is an explicit interface/implementation boundary and no inference
+      from agents.yaml is performed for that scope.'
     fulfillment_rule: 'The agent YAML map key must match the role field in required_agents. This is the canonical identity:
-      if schema says role: classifier-agent, agents.yaml must have a top-level key classifier-agent. No separate fulfills:
-      field.'
-    note_on_empty: required_agents entries with empty subscriptions and emits are valid. They declare that the flow needs
+      if an explicit schema boundary says role: classifier-agent, agents.yaml must have a top-level key classifier-agent.
+      No separate fulfills: field. Inferred facts use the agents.yaml map key as the role and MUST NOT fall back to
+      agent-authored role or id fields.'
+    note_on_empty: 'required_agents entries with empty subscriptions and emits are valid. They declare that the flow needs
       this agent role to exist, even if the agent only uses the universal communication/mailbox tools (agent_message,
-      mailbox_send). Common for managerial roles that coordinate via messages rather than event subscriptions.
+      mailbox_send). Common for managerial roles that coordinate via messages rather than event subscriptions. An explicit
+      required_agents: [] declares an explicit no-role boundary and MUST NOT infer agents from agents.yaml.'
+    generated_view: The generated/expanded authoring view MUST expose each effective required-agent fact and whether it
+      was explicitly authored or inferred from same-scope agents.yaml. It MUST also expose explicit empty boundaries.
   hello_world_example:
     description: Minimal flow that processes one event and advances state.
     package_yaml: 'name: hello
@@ -2804,7 +2811,10 @@ engine:
         conflict = boot error).'
     - step: 8
       name: validate_required_agents
-      action: Every flow's required_agents roles must be fulfilled by agents in that flow's agents.yaml.
+      action: 'Build effective required-agent facts for every scope. If schema.required_agents is omitted, infer facts from
+        same-scope agents.yaml map keys, subscriptions, and emit_events. If schema.required_agents is present, including
+        an empty list, validate that explicit boundary strictly against same-scope agents.yaml by exact map key and required
+        subscription/emit coverage.'
     - step: 9
       name: validate_tools
       action: Every tool in every agent's tools must exist in the tool registry.
@@ -4579,8 +4589,9 @@ engine:
     - id: required_agents_match
       severity: error
       scope: root-and-per-flow
-      trigger: A flow schema declares a required_agents role that has no matching agent in that scope's agents.yaml by
-        exact map key; or the matching agent does not cover all required subscribes_to / emits events.
+      trigger: An explicit schema.required_agents boundary declares a role that has no matching agent in that scope's
+        agents.yaml by exact map key; or the matching agent does not cover all required subscribes_to / emits events.
+        Omitted required_agents is not a restatement surface and MUST NOT trigger this check by itself.
       when: boot-only
     - id: handler_field_compliance
       severity: error
@@ -6173,7 +6184,8 @@ flow_model:
       flows, and handoffs. All other files are optional depending on what the flow does.
     files:
       package.yaml: Flow manifest (required)
-      schema.yaml: Pins, states, required_agents (required)
+      schema.yaml: Pins and states. required_agents is optional; omission infers same-scope implementation-local agents,
+        while presence declares an explicit interface boundary.
       agents.yaml: Agent definitions (required if flow has agents)
       events.yaml: Event schemas (optional — flow may only compose children)
       nodes.yaml: System nodes with handlers (optional)
@@ -7036,19 +7048,21 @@ flow_model:
       inter-flow topology. Runtime implementation and flow migration must consume flow_model.flow_package.composition_routing
       and engine.cross_flow_routing as the authoritative source for composed route semantics.
   required_agents:
-    description: 'Each flow schema declares required_agents — agent role sockets that the root flow must fill. Each entry
-      specifies: role name, events the agent subscribes to, events it emits, and a description. The platform validates at
-      boot that every required role has a matching agent in agents.yaml.'
+    description: 'Each flow has effective required-agent facts. If schema.required_agents is omitted, the platform derives
+      those facts from same-scope agents.yaml map keys plus subscriptions and emit_events. If schema.required_agents is
+      present, each entry is an explicit agent role socket that the root flow or implementation must fill. Presence,
+      including an empty list, disables inference for that scope.'
     schema_field: required_agents
     entry_format:
       role: Name of the required role
       subscribes_to: Events the agent must subscribe to
       emits: Events the agent must emit
       description: What the agent does in this flow
-    fulfillment: 'An agent fulfills a role if BOTH conditions hold: (1) the agent YAML map key in agents.yaml
-      matches the role name in required_agents (canonical identity binding), AND (2) the agent''s subscriptions
-      include all required subscribes_to events and its emit_events include all required emits. Both checks
-      run at boot. Identity binding is by name; behavioral fulfillment is by subscription/emit coverage.'
+    fulfillment: 'For explicit required_agents, an agent fulfills a role if BOTH conditions hold: (1) the agent YAML map
+      key in agents.yaml matches the role name in required_agents (canonical identity binding), AND (2) the agent''s
+      subscriptions include all required subscribes_to events and its emit_events include all required emits. Inferred
+      facts are generated from the same agents.yaml facts and then consumed by bootverify/runtime as the canonical effective
+      required-agent view. Identity binding is by map key; behavioral fulfillment is by subscription/emit coverage.'
   schema_merging:
     description: When a root flow installs multiple flows, the platform merges their schemas. All output data pins become
       entity table columns. Input data pins are validated against available outputs. Two flows writing the same field is a
@@ -13729,7 +13743,7 @@ cli_specification:
             owner: internal/runtime
           - step: 14
             name: flow_required_agents
-            owner: internal/runtime
+            owner: internal/runtime effective required-agent view derived by internal/runtime/contracts
           - step: 15
             name: workspace_validation_and_system_containers
             owner: internal/runtime

@@ -95,6 +95,8 @@ type WorkflowSemanticView struct {
 	FlowWrites             map[string][]string
 	CompositionConnects    []FlowPackageConnect
 	FlowAgents             map[string][]FlowRequiredAgent
+	RootAgentFacts         []RequiredAgentFact
+	FlowAgentFacts         map[string][]RequiredAgentFact
 	WritePinOwners         map[string][]string
 	EffectiveNodes         map[string]SystemNodeEffectiveSemantics
 	NodeHandlers           map[string]map[string]SystemNodeEventHandler
@@ -837,20 +839,21 @@ type ContractItemSource struct {
 	File       string
 }
 type FlowSchemaDocument struct {
-	Name              string                          `yaml:"name"`
-	Mode              string                          `yaml:"mode"`
-	Entity            string                          `yaml:"entity"`
-	Instance          FlowTemplateInstanceDeclaration `yaml:"instance"`
-	InitialState      string                          `yaml:"initial_state"`
-	NamespacePrefix   string                          `yaml:"-"`
-	NamespaceRule     string                          `yaml:"-"`
-	TerminalStates    []string                        `yaml:"terminal_states"`
-	States            []string                        `yaml:"states"`
-	Pins              FlowPins                        `yaml:"pins"`
-	ToolSurface       FlowToolSurfaceContract         `yaml:"tool_surface"`
-	RequiredAgents    []FlowRequiredAgent             `yaml:"required_agents"`
-	InstanceVariables FlowInstanceVariables           `yaml:"instance_variables"`
-	AutoEmitOnCreate  AutoEmitOnCreateContract        `yaml:"auto_emit_on_create"`
+	Name                   string                          `yaml:"name"`
+	Mode                   string                          `yaml:"mode"`
+	Entity                 string                          `yaml:"entity"`
+	Instance               FlowTemplateInstanceDeclaration `yaml:"instance"`
+	InitialState           string                          `yaml:"initial_state"`
+	NamespacePrefix        string                          `yaml:"-"`
+	NamespaceRule          string                          `yaml:"-"`
+	TerminalStates         []string                        `yaml:"terminal_states"`
+	States                 []string                        `yaml:"states"`
+	Pins                   FlowPins                        `yaml:"pins"`
+	ToolSurface            FlowToolSurfaceContract         `yaml:"tool_surface"`
+	RequiredAgents         []FlowRequiredAgent             `yaml:"required_agents"`
+	RequiredAgentsDeclared bool                            `yaml:"-"`
+	InstanceVariables      FlowInstanceVariables           `yaml:"instance_variables"`
+	AutoEmitOnCreate       AutoEmitOnCreateContract        `yaml:"auto_emit_on_create"`
 }
 
 const (
@@ -996,6 +999,14 @@ type FlowRequiredAgent struct {
 	SubscribesTo []string `yaml:"subscribes_to"`
 	Emits        []string `yaml:"emits"`
 	Description  string   `yaml:"description"`
+}
+type RequiredAgentFact struct {
+	Role         string   `json:"role"`
+	SubscribesTo []string `json:"subscribes_to,omitempty"`
+	Emits        []string `json:"emits,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Source       string   `json:"source"`
+	SourceFile   string   `json:"source_file,omitempty"`
 }
 type WorkflowStageContract struct {
 	ID          string `yaml:"id"`

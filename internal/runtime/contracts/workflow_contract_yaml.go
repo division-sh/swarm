@@ -48,6 +48,7 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*d = FlowSchemaDocument(aux)
+	d.RequiredAgentsDeclared = hasYAMLMappingKey(node, "required_agents")
 	return nil
 }
 

@@ -33,6 +33,7 @@ type EquivalenceView struct {
 
 type RootView struct {
 	SourceFiles        RootSourceFiles    `json:"source_files"`
+	RequiredAgents     RequiredAgentsView `json:"required_agents"`
 	PrimaryEntity      *PrimaryEntityView `json:"primary_entity,omitempty"`
 	PrimaryEntityError string             `json:"primary_entity_error,omitempty"`
 }
@@ -41,6 +42,7 @@ type RootSourceFiles struct {
 	Schema   string `json:"schema,omitempty"`
 	Entities string `json:"entities,omitempty"`
 	Package  string `json:"package,omitempty"`
+	Agents   string `json:"agents,omitempty"`
 }
 
 type FlowView struct {
@@ -48,6 +50,7 @@ type FlowView struct {
 	Path                 string                    `json:"path,omitempty"`
 	Mode                 string                    `json:"mode,omitempty"`
 	SourceFiles          FlowSourceFiles           `json:"source_files"`
+	RequiredAgents       RequiredAgentsView        `json:"required_agents"`
 	PrimaryEntity        *PrimaryEntityView        `json:"primary_entity,omitempty"`
 	PrimaryEntityError   string                    `json:"primary_entity_error,omitempty"`
 	TemplateInstance     *TemplateInstanceView     `json:"template_instance,omitempty"`
@@ -65,6 +68,22 @@ type FlowSourceFiles struct {
 	Entities string `json:"entities,omitempty"`
 	Nodes    string `json:"nodes,omitempty"`
 	Events   string `json:"events,omitempty"`
+	Agents   string `json:"agents,omitempty"`
+}
+
+type RequiredAgentsView struct {
+	Source     string              `json:"source"`
+	SourceFile string              `json:"source_file,omitempty"`
+	Agents     []RequiredAgentView `json:"agents"`
+}
+
+type RequiredAgentView struct {
+	Role         string   `json:"role"`
+	SubscribesTo []string `json:"subscribes_to,omitempty"`
+	Emits        []string `json:"emits,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	Source       string   `json:"source"`
+	SourceFile   string   `json:"source_file,omitempty"`
 }
 
 type PrimaryEntityView struct {
@@ -230,6 +249,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 			ProjectionOnly: true,
 			CanonicalOwners: []string{
 				"runtime/contracts.WorkflowContractBundle",
+				"runtime/contracts effective required-agent facts",
 				"runtime/contracts primary entity/template/singleton accessors",
 				"runtime/core/pinrouting.LowerCompositionConnectRoutePlans",
 				"runtime/entityruntime.ResolveContainedOperationTarget",
@@ -246,7 +266,11 @@ func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
 			Schema:   strings.TrimSpace(bundle.Paths.RootSchemaFile),
 			Entities: strings.TrimSpace(bundle.Paths.RootEntitiesFile),
 			Package:  strings.TrimSpace(bundle.Paths.ProjectPackageFile),
+			Agents:   strings.TrimSpace(bundle.Paths.ProjectAgentsFile),
 		},
+	}
+	if bundle.RootSchema != nil {
+		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), bundle.Paths.RootSchemaFile, bundle.Paths.ProjectAgentsFile)
 	}
 	declared := ""
 	if bundle.RootSchema != nil {
@@ -276,8 +300,14 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			Path:        strings.Trim(strings.TrimSpace(flow.Path), "/"),
 			Mode:        strings.TrimSpace(schema.Mode),
 			SourceFiles: flowSourceFiles(bundle, flow),
-			InputPins:   inputPinViews(source, flowID, schema.Pins.Inputs.EventPins),
-			OutputPins:  outputPinViews(source, flowID, schema.Pins.Outputs.EventPins),
+			RequiredAgents: requiredAgentsView(
+				schema,
+				bundle.FlowRequiredAgentFacts(flowID),
+				flow.Paths.SchemaFile,
+				flow.Paths.AgentsFile,
+			),
+			InputPins:  inputPinViews(source, flowID, schema.Pins.Inputs.EventPins),
+			OutputPins: outputPinViews(source, flowID, schema.Pins.Outputs.EventPins),
 		}
 		if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
 			item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
@@ -317,7 +347,33 @@ func flowSourceFiles(bundle *runtimecontracts.WorkflowContractBundle, flow runti
 		Entities: strings.TrimSpace(flow.Paths.EntitiesFile),
 		Nodes:    strings.TrimSpace(flow.Paths.NodesFile),
 		Events:   strings.TrimSpace(flow.Paths.EventsFile),
+		Agents:   strings.TrimSpace(flow.Paths.AgentsFile),
 	}
+}
+
+func requiredAgentsView(schema runtimecontracts.FlowSchemaDocument, facts []runtimecontracts.RequiredAgentFact, schemaFile, agentsFile string) RequiredAgentsView {
+	source := runtimecontracts.RequiredAgentSourceInferred
+	sourceFile := strings.TrimSpace(agentsFile)
+	if runtimecontracts.RequiredAgentsDeclared(schema) {
+		source = runtimecontracts.RequiredAgentSourceExplicit
+		sourceFile = strings.TrimSpace(schemaFile)
+	}
+	out := RequiredAgentsView{
+		Source:     source,
+		SourceFile: sourceFile,
+		Agents:     make([]RequiredAgentView, 0, len(facts)),
+	}
+	for _, fact := range facts {
+		out.Agents = append(out.Agents, RequiredAgentView{
+			Role:         strings.TrimSpace(fact.Role),
+			SubscribesTo: normalizedStrings(fact.SubscribesTo),
+			Emits:        normalizedStrings(fact.Emits),
+			Description:  strings.TrimSpace(fact.Description),
+			Source:       strings.TrimSpace(fact.Source),
+			SourceFile:   strings.TrimSpace(fact.SourceFile),
+		})
+	}
+	return out
 }
 
 func primaryEntityView(primary runtimecontracts.PrimaryEntityContract, sourceFile string) *PrimaryEntityView {
