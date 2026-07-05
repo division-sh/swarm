@@ -371,7 +371,7 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	liveRunSubcommands := map[string]bool{"start": true, "list": true, "status": true, "trace": true, "fork": true}
 	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical|noun-group|run command group|promoted pointer message")
 	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|#[0-9]{3}|--dry-run\\|" +
-		"|^\\s*action: '|^\\s*current: swarm ")
+		"|^\\s*current: swarm ")
 
 	root := driftTestRepoRoot(t)
 	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
