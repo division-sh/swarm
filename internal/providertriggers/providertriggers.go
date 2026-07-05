@@ -246,16 +246,53 @@ func (m Manifest) Validate() error {
 	if m.DeliveryID.Required && m.DeliveryID.Header == "" && m.DeliveryID.JSONPath == "" {
 		return fmt.Errorf("%s manifest delivery_id source is required", provider)
 	}
+	if err := validateJSONPath(provider, "delivery_id.json_path", m.DeliveryID.JSONPath); err != nil {
+		return err
+	}
 	if m.EventType.Required && m.EventType.Header == "" && m.EventType.JSONPath == "" {
 		return fmt.Errorf("%s manifest event_type source is required", provider)
 	}
-	if strings.TrimSpace(m.EventName.Literal) == "" && strings.TrimSpace(m.EventName.Template) == "" {
+	if err := validateJSONPath(provider, "event_type.json_path", m.EventType.JSONPath); err != nil {
+		return err
+	}
+	if m.Challenge != nil {
+		if err := validateJSONPath(provider, "challenge.when.json_path", m.Challenge.When.JSONPath); err != nil {
+			return err
+		}
+		if err := validateJSONPath(provider, "challenge.response.json_path", m.Challenge.Response.JSONPath); err != nil {
+			return err
+		}
+	}
+	if m.DeliveryCondition != nil {
+		if err := validateJSONPath(provider, "delivery_condition.json_path", m.DeliveryCondition.JSONPath); err != nil {
+			return err
+		}
+	}
+	eventNameLiteral := strings.TrimSpace(m.EventName.Literal)
+	eventNameTemplate := strings.TrimSpace(m.EventName.Template)
+	if eventNameLiteral == "" && eventNameTemplate == "" {
 		return fmt.Errorf("%s manifest event_name is required", provider)
+	}
+	if eventNameLiteral != "" && eventNameTemplate != "" {
+		return fmt.Errorf("%s manifest event_name must use literal or template, not both", provider)
+	}
+	if eventNameTemplate != "" && provider != "github" && provider != "slack" {
+		return fmt.Errorf("%s manifest event_name template is reserved for grandfathered GitHub/Slack compatibility", provider)
 	}
 	switch strings.TrimSpace(m.Ack.Mode) {
 	case "", "after_publish", "durable_before_dispatch":
 	default:
 		return fmt.Errorf("%s manifest has unsupported ack mode %q", provider, m.Ack.Mode)
+	}
+	for key, source := range m.Metadata {
+		if strings.TrimSpace(key) == "" {
+			return fmt.Errorf("%s manifest metadata key is required", provider)
+		}
+		switch strings.TrimSpace(source) {
+		case "user_agent", "delivery_id", "event_type":
+		default:
+			return fmt.Errorf("%s manifest metadata %q has unsupported source %q", provider, key, source)
+		}
 	}
 	return nil
 }
@@ -307,11 +344,11 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 	if !ok || strings.TrimSpace(deliveryID) == "" {
 		return Delivery{}, badRequest(firstNonEmpty(m.DeliveryID.MissingError, provider+" delivery id is required"))
 	}
-	eventType, ok := m.EventType.Resolve(req)
-	eventType = NormalizeEventToken(eventType)
-	if !ok || eventType == "event" {
+	rawEventType, ok := m.EventType.Resolve(req)
+	if !ok || strings.TrimSpace(rawEventType) == "" {
 		return Delivery{}, badRequest(firstNonEmpty(m.EventType.MissingError, provider+" event type is required"))
 	}
+	eventType := NormalizeEventToken(rawEventType)
 	entityID := req.Target.EffectiveEntityID()
 	payload := m.buildPublishPayload(provider, entityID, deliveryID, eventType, req)
 	return Delivery{
@@ -338,6 +375,9 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 			return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 		}
 		timestampValues := params.Values(firstNonEmpty(m.Signature.TimestampParam(), "t"))
+		if len(timestampValues) > 1 {
+			return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+		}
 		if len(timestampValues) > 0 {
 			timestamp = timestampValues[0]
 		}
@@ -616,6 +656,42 @@ func valueFromJSONPath(payload any, path string) (any, bool) {
 		}
 	}
 	return current, true
+}
+
+func validateJSONPath(provider, field, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" || path == "$" {
+		return nil
+	}
+	if !strings.HasPrefix(path, "$.") {
+		return fmt.Errorf("%s manifest %s has unsupported json_path %q", provider, field, path)
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "$."), ".")
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" || !validJSONPathSegment(part) {
+			return fmt.Errorf("%s manifest %s has unsupported json_path %q", provider, field, path)
+		}
+	}
+	return nil
+}
+
+func validJSONPathSegment(part string) bool {
+	for _, r := range part {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func redactPayload(payload any, keys []string) any {

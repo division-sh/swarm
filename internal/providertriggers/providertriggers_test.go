@@ -178,6 +178,92 @@ func TestStripeManifestRejectsMalformedSignatureParams(t *testing.T) {
 	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",broken,v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
 	_, err = DefaultRegistry().Accept(req)
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
+
+	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",t="+strconvFormatUnix(now)+",v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
+	_, err = DefaultRegistry().Accept(req)
+	requireProviderTriggerError(t, err, http.StatusUnauthorized)
+}
+
+func TestStripeManifestAcceptsLiteralEventType(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	body := []byte(`{"id":"evt_123","type":"event"}`)
+	req := Request{
+		Provider: "stripe",
+		Target: Target{
+			EntityID:      "entity-1",
+			WebhookSecret: "stripe-secret",
+		},
+		Body:     body,
+		Headers:  make(http.Header),
+		Payload:  map[string]any{"id": "evt_123", "type": "event"},
+		Received: now,
+	}
+	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
+
+	delivery, err := DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Stripe literal event type: %v", err)
+	}
+	if delivery.ProviderEventType != "event" {
+		t.Fatalf("ProviderEventType = %q, want event", delivery.ProviderEventType)
+	}
+	if delivery.EventName != "inbound.stripe" {
+		t.Fatalf("EventName = %q, want inbound.stripe", delivery.EventName)
+	}
+}
+
+func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		manifest Manifest
+	}{
+		{
+			name: "invalid json path syntax",
+			manifest: Manifest{
+				Provider:   "badpath",
+				DeliveryID: ValueSource{JSONPath: "$..id", Required: true},
+				EventType:  ValueSource{JSONPath: "$.type", Required: true},
+				EventName:  EventNameManifest{Literal: "inbound.badpath"},
+			},
+		},
+		{
+			name: "unknown metadata source",
+			manifest: Manifest{
+				Provider:   "badmetadata",
+				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
+				EventType:  ValueSource{JSONPath: "$.type", Required: true},
+				EventName:  EventNameManifest{Literal: "inbound.badmetadata"},
+				Metadata:   map[string]string{"bad": "unknown_source"},
+			},
+		},
+		{
+			name: "new provider event name template",
+			manifest: Manifest{
+				Provider:   "badtemplate",
+				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
+				EventType:  ValueSource{JSONPath: "$.type", Required: true},
+				EventName:  EventNameManifest{Template: "inbound.badtemplate.{event_type}"},
+			},
+		},
+		{
+			name: "literal and template both set",
+			manifest: Manifest{
+				Provider:   "ambiguousname",
+				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
+				EventType:  ValueSource{JSONPath: "$.type", Required: true},
+				EventName: EventNameManifest{
+					Literal:  "inbound.ambiguousname",
+					Template: "inbound.ambiguousname.{event_type}",
+				},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := NewRegistry(tc.manifest); err == nil {
+				t.Fatal("NewRegistry succeeded, want validation error")
+			}
+		})
+	}
 }
 
 func TestRegistryRejectsEmptyProvider(t *testing.T) {

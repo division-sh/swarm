@@ -835,6 +835,15 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
+			name: "duplicate timestamp params with otherwise valid signature",
+			body: []byte(`{"id":"evt_123","type":"invoice.paid"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", "t="+timestamp+",t="+timestamp+",v1="+stripeSignatureHex("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
 			name: "stale timestamp",
 			body: []byte(`{"id":"evt_123","type":"invoice.paid"}`),
 			configure: func(req *http.Request, body []byte) {
