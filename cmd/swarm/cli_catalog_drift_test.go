@@ -376,9 +376,11 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	// hides (#1686 re-reviews three, five, and six).
 	// Marker vocabulary is built top-down from words that can ONLY describe
 	// closed history — never authority direction. "restore" was removed after
-	// re-review eight: "restores X as planned authority" is the stale claim
+	// re-reviews eight and nine ("restores X as planned authority",
+	// "X work remain split"): active/future authority language is the stale claim
 	// itself, and it exempted itself through the marker (drift blessing drift).
-	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|--dry-run\\|")
+	// Split/remaining-work language is tracker state, not closed history.
+	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|--dry-run\\|")
 
 	root := driftTestRepoRoot(t)
 	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
