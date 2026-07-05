@@ -113,8 +113,18 @@ repairs:
       fork policy ad hoc from orchestration or trace code.
   - id: artifact_repo_commit_disposition
     owner_issue: 1667
-    decision: split_explicit_disposition
-    current_action_survives_until_disposition: true
+    decision: canonical_action_owner_until_write_activity_journal
+    canonical_owner: platform-spec.yaml#handler_specification.handler_fields.action.artifact_repo_commit
+    current_disposition: canonical_platform_action_owner
+    activity_owner_status: non_owner_for_artifact_commits
+    migration_blocker: stable_activity_attempt_result_journal_and_idempotency_execution_owner
+    future_migration_condition: >
+      Only a separately gated write-effect activity migration may rebind
+      artifact repository commits, and only if it preserves artifact root/path
+      safety, provider request history, output-state repair, and declared
+      success/failure result-event guarantees in the same merge-bearing
+      spec/runtime/verifier PR.
+    current_action_survives_until_migration: true
   - id: stage_order_after_activity
     owner_issue: 1668
     decision: declarative_helpers_before_compute_module
@@ -207,7 +217,7 @@ manifestation_coverage:
     status: closed_by_design_record
     proof: repairs.effect_class_fork_policy_defaults
   - id: artifact_repo_commit_silence
-    status: split_to_child_issue
+    status: closed_by_child_issue
     proof: repairs.artifact_repo_commit_disposition
   - id: python_launch_language_decision
     status: closed_by_design_record

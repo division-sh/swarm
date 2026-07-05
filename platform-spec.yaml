@@ -2087,6 +2087,24 @@ handler_specification:
             the accepted request but entity output persistence is missing or stale, retry reconstructs and persists the
             contract-visible repo_url, current_ref, file_manifest, status, and last_source_event_id from durable provider history.
             If failure_event is declared, the runtime also enqueues that typed event in the same transaction as failed status.
+          durable_activity_disposition:
+            current_owner: >
+              This action remains the canonical platform owner for artifact repository commits. Authors request
+              artifact repository writes through `action.id: artifact_repo_commit`; durable `activity` is not an alternate
+              authoring, verification, dispatch, replay, or result-event path for artifact commits in the current platform.
+            activity_non_owner_paths: >
+              `artifact_repo_commit` is not callable as a platform_builtin, MCP, native/generated,
+              shell, product-local git, or HTTP-tool activity. Those paths must fail closed or remain different semantic
+              concepts; they do not prove artifact commit support.
+            migration_blocker: >
+              Generic durable activities currently execute only read_only authored HTTP tools. idempotent_write
+              and non_idempotent_write activities remain non-executable until a stable activity attempt/result journal and
+              idempotency execution owner are specified and implemented.
+            future_migration_condition: >
+              A separately gated migration may rebind artifact repository commits to a built-in
+              activity only if it preserves the current provider/root/path allowlist, schema/size/ref validation, provider
+              request history, output-state repair, and success/failure result-event guarantees in the same merge-bearing
+              spec/runtime/verifier PR.
           fail_closed: Invalid provider, missing or non-UUID identities, invalid root, traversal, symlink/root escape, allowlist
             miss, unsupported content type, missing/failed yaml schema validation, size-limit violation, git write/commit failure,
             invalid ref, and idempotency conflict all fail closed. No agent prompt, native_tools, shell command, or product-local
@@ -2123,7 +2141,9 @@ handler_specification:
           in tools.yaml, resolve to handler_type http, include an http block, and declare effect_class read_only. HTTP tools
           using credentials, managed_credential, response_mapping, rate_limit, or rate_limit_max_wait are not admitted to
           activities in Stage 1; those subfeatures require later owner consumption before activity execution may claim them.
-        platform_builtin: Not callable from activity in Stage 1; fail closed.
+        platform_builtin: Not callable from activity in Stage 1; fail closed. This includes `artifact_repo_commit`, which
+          remains action-owned under `handler_fields.action.artifact_repo_commit` until a separately gated write-effect
+          activity migration preserves that action's artifact safety and idempotency guarantees.
         mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classes are not authoritative; an
           authored registration-site override is required in a future slice before MCP tools can be activity-callable.
         native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
