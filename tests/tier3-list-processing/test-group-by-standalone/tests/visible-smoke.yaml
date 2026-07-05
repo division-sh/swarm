@@ -1,0 +1,27 @@
+name: test-group-by-standalone visible smoke
+steps:
+  - publish: items.submitted
+    payload:
+      items:
+        - name: a
+          category: x
+        - name: b
+          category: y
+        - name: c
+          category: x
+expect:
+  events:
+    include: [items.grouped]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        grouped:
+          x:
+            - name: a
+              category: x
+            - name: c
+              category: x
+          y:
+            - name: b
+              category: y

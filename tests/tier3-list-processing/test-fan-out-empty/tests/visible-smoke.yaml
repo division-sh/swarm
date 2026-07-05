@@ -1,0 +1,11 @@
+name: test-fan-out-empty visible smoke
+steps:
+  - publish: batch.submitted
+    payload:
+      items: []
+expect:
+  entities:
+    - type: default
+      current_state: scanning
+      fields:
+        fan_out_count: 0

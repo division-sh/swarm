@@ -1,0 +1,16 @@
+name: test-fan-out-count visible smoke
+steps:
+  - publish: batch.received
+    payload:
+      items:
+        - id: task-a
+        - id: task-b
+        - id: task-c
+expect:
+  events:
+    include: [task.dispatched]
+  entities:
+    - type: default
+      current_state: processing
+      fields:
+        fan_out_count: 3
