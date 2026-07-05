@@ -344,7 +344,7 @@ func TestPostgresDSNFromConfigSecretKeyUsesFileStoreNotEnvOverlay(t *testing.T) 
 	if err != nil {
 		t.Fatalf("postgresDSNFromConfig: %v", err)
 	}
-	if !strings.Contains(dsn, "password=file-secret") {
+	if !strings.Contains(dsn, "password='file-secret'") {
 		t.Fatalf("dsn = %q, want file-backed password", dsn)
 	}
 	if strings.Contains(dsn, "env-shadow") {

@@ -35,18 +35,30 @@ func DSNFromConfig(cfg config.DatabaseConfig, password string) string {
 		sslMode = "disable"
 	}
 	parts := []string{
-		fmt.Sprintf("host=%s", cfg.Host),
+		postgresKeywordParam("host", cfg.Host),
 		fmt.Sprintf("port=%d", cfg.Port),
-		fmt.Sprintf("dbname=%s", cfg.Name),
-		fmt.Sprintf("sslmode=%s", sslMode),
+		postgresKeywordParam("dbname", cfg.Name),
+		postgresKeywordParam("sslmode", sslMode),
 	}
 	if cfg.User != "" {
-		parts = append(parts, fmt.Sprintf("user=%s", cfg.User))
+		parts = append(parts, postgresKeywordParam("user", cfg.User))
 	}
 	if password != "" {
-		parts = append(parts, fmt.Sprintf("password=%s", password))
+		parts = append(parts, postgresKeywordParam("password", password))
 	}
 	return strings.Join(parts, " ")
+}
+
+func postgresKeywordParam(key, value string) string {
+	if value == "" {
+		return key + "="
+	}
+	return fmt.Sprintf("%s='%s'", key, escapePostgresKeywordValue(value))
+}
+
+func escapePostgresKeywordValue(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	return strings.ReplaceAll(value, `'`, `\'`)
 }
 
 func NewPostgresStore(dsn string) (*PostgresStore, error) {
