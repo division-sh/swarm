@@ -2,9 +2,15 @@ package providertriggers
 
 import (
 	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -212,6 +218,175 @@ func TestStripeManifestAcceptsLiteralEventType(t *testing.T) {
 	}
 }
 
+func TestTwilioManifestAcceptsSignedFormWebhook(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
+	form := url.Values{
+		"Body":          {"hello from twilio"},
+		"From":          {"+15551234567"},
+		"MessageSid":    {"SM1234567890abcdef"},
+		"To":            {"+15557654321"},
+		"UnexpectedNew": {"still signed"},
+	}
+	req := Request{
+		Provider: "twilio",
+		Target: Target{
+			EntityID:      "entity-1",
+			WebhookSecret: "twilio-secret",
+		},
+		Method:      http.MethodPost,
+		URL:         requestURL,
+		Body:        []byte(form.Encode()),
+		Headers:     make(http.Header),
+		Payload:     map[string]any{"raw": form.Encode()},
+		ContentType: "application/x-www-form-urlencoded",
+		Query:       url.Values{"tenant": {"alpha"}},
+		Form:        form,
+		FormParsed:  true,
+		Received:    now,
+		UserAgent:   "twilio-test",
+	}
+	req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", requestURL, form))
+
+	delivery, err := DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Twilio form webhook: %v", err)
+	}
+	if delivery.ProviderEventID != "SM1234567890abcdef" {
+		t.Fatalf("ProviderEventID = %q, want MessageSid", delivery.ProviderEventID)
+	}
+	if delivery.ProviderEventType != "message_received" {
+		t.Fatalf("ProviderEventType = %q, want message_received", delivery.ProviderEventType)
+	}
+	if delivery.EventName != "inbound.twilio" {
+		t.Fatalf("EventName = %q, want inbound.twilio", delivery.EventName)
+	}
+	if !delivery.AcknowledgeBeforeDispatch {
+		t.Fatal("Twilio delivery did not request durable_before_dispatch acknowledgement")
+	}
+	payload, ok := delivery.Payload["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload = %T, want form payload map", delivery.Payload["payload"])
+	}
+	if payload["Body"] != "hello from twilio" || payload["UnexpectedNew"] != "still signed" {
+		t.Fatalf("form payload = %+v, want Twilio form parameters without allowlist loss", payload)
+	}
+	headers, ok := delivery.Payload["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+	}
+	if headers["twilio_message_sid"] != "SM1234567890abcdef" || headers["twilio_event_type"] != "message_received" {
+		t.Fatalf("headers = %+v, want Twilio manifest metadata", headers)
+	}
+	encoded := fmtPayload(delivery.Payload)
+	if strings.Contains(encoded, "twilio-secret") {
+		t.Fatal("Twilio signing secret leaked into delivery payload")
+	}
+}
+
+func TestTwilioManifestRejectsAmbiguousOrUnsupportedCallbacks(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
+	validForm := url.Values{
+		"Body":       {"hello"},
+		"MessageSid": {"SM1234567890abcdef"},
+	}
+	validRequest := func() Request {
+		req := Request{
+			Provider: "twilio",
+			Target: Target{
+				EntityID:      "entity-1",
+				WebhookSecret: "twilio-secret",
+			},
+			Method:      http.MethodPost,
+			URL:         requestURL,
+			Body:        []byte(validForm.Encode()),
+			Headers:     make(http.Header),
+			Payload:     map[string]any{"raw": validForm.Encode()},
+			ContentType: "application/x-www-form-urlencoded",
+			Query:       url.Values{"tenant": {"alpha"}},
+			Form:        cloneValues(validForm),
+			FormParsed:  true,
+			Received:    now,
+		}
+		req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", requestURL, validForm))
+		return req
+	}
+	for _, tc := range []struct {
+		name       string
+		configure  func(Request) Request
+		wantStatus int
+	}{
+		{
+			name: "missing signature",
+			configure: func(req Request) Request {
+				req.Headers.Del("X-Twilio-Signature")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "url mismatch",
+			configure: func(req Request) Request {
+				req.URL = "https://example.com/webhooks/customer-a/twilio?tenant=beta"
+				req.Query = url.Values{"tenant": {"beta"}}
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "duplicate query params",
+			configure: func(req Request) Request {
+				req.URL = "https://example.com/webhooks/customer-a/twilio?tenant=alpha&tenant=beta"
+				req.Query = url.Values{"tenant": {"alpha", "beta"}}
+				req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", req.URL, validForm))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "duplicate form params",
+			configure: func(req Request) Request {
+				req.Form = cloneValues(validForm)
+				req.Form["Body"] = []string{"hello", "tampered"}
+				req.Body = []byte(req.Form.Encode())
+				req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", req.URL, req.Form))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing message sid",
+			configure: func(req Request) Request {
+				req.Form = url.Values{"Body": {"hello"}}
+				req.Body = []byte(req.Form.Encode())
+				req.Headers.Set("X-Twilio-Signature", twilioSignatureBase64("twilio-secret", req.URL, req.Form))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "json body sha256 mode unsupported in this slice",
+			configure: func(req Request) Request {
+				req.URL = "https://example.com/webhooks/customer-a/twilio?bodySHA256=abc123"
+				req.Query = url.Values{"bodySHA256": {"abc123"}}
+				req.Body = []byte(`{"MessageSid":"SM1234567890abcdef"}`)
+				req.Payload = map[string]any{"MessageSid": "SM1234567890abcdef"}
+				req.ContentType = "application/json"
+				req.Form = nil
+				req.FormParsed = false
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DefaultRegistry().Accept(tc.configure(validRequest()))
+			requireProviderTriggerError(t, err, tc.wantStatus)
+		})
+	}
+}
+
 func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -255,6 +430,47 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 					Literal:  "inbound.ambiguousname",
 					Template: "inbound.ambiguousname.{event_type}",
 				},
+			},
+		},
+		{
+			name: "url sorted form requires hmac sha1",
+			manifest: Manifest{
+				Provider: "badformsignature",
+				Secret:   SecretManifest{Required: true},
+				Signature: SignatureManifest{
+					Type:          "hmac_sha256",
+					Encoding:      "base64",
+					Header:        "X-Signature",
+					SignedPayload: "url_plus_sorted_form",
+				},
+				DeliveryID: ValueSource{FormParam: "MessageSid", Required: true},
+				EventType:  ValueSource{Literal: "message_received", Required: true},
+				EventName:  EventNameManifest{Literal: "inbound.badformsignature"},
+			},
+		},
+		{
+			name: "url sorted form requires base64",
+			manifest: Manifest{
+				Provider: "badformencoding",
+				Secret:   SecretManifest{Required: true},
+				Signature: SignatureManifest{
+					Type:          "hmac_sha1",
+					Encoding:      "hex",
+					Header:        "X-Signature",
+					SignedPayload: "url_plus_sorted_form",
+				},
+				DeliveryID: ValueSource{FormParam: "MessageSid", Required: true},
+				EventType:  ValueSource{Literal: "message_received", Required: true},
+				EventName:  EventNameManifest{Literal: "inbound.badformencoding"},
+			},
+		},
+		{
+			name: "ambiguous value source",
+			manifest: Manifest{
+				Provider:   "badsource",
+				DeliveryID: ValueSource{Header: "X-Delivery", FormParam: "MessageSid", Required: true},
+				EventType:  ValueSource{Literal: "message_received", Required: true},
+				EventName:  EventNameManifest{Literal: "inbound.badsource"},
 			},
 		},
 	} {
@@ -414,6 +630,43 @@ func stripeSignatureHex(secret, timestamp string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func twilioSignatureBase64(secret, requestURL string, form url.Values) string {
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write([]byte(twilioSignedPayload(requestURL, form)))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func twilioSignedPayload(requestURL string, form url.Values) string {
+	keys := make([]string, 0, len(form))
+	for key := range form {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(requestURL)
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteString(form.Get(key))
+	}
+	return b.String()
+}
+
+func cloneValues(values url.Values) url.Values {
+	cloned := make(url.Values, len(values))
+	for key, items := range values {
+		cloned[key] = append([]string(nil), items...)
+	}
+	return cloned
+}
+
+func fmtPayload(payload map[string]any) string {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf("%+v", payload)
+	}
+	return string(body)
 }
 
 func strconvFormatUnix(t time.Time) string {

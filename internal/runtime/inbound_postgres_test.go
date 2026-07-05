@@ -3,12 +3,16 @@ package runtime_test
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -397,6 +401,137 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	}
 }
 
+func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	const (
+		runID             = "45000000-0000-0000-0000-000000000001"
+		entityID          = "45000000-0000-0000-0000-000000000002"
+		flowInstance      = "twilio-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "twilio"
+		webhookSecret     = "twilio-secret"
+		providerEventID   = "SM1234567890abcdef"
+		agentID           = "twilio-webhook-subscriber"
+		providerEventName = "inbound.twilio"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	pg := &store.PostgresStore{DB: db}
+	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+
+	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
+	form := url.Values{
+		"Body":       {"hello from twilio"},
+		"From":       {"+15551234567"},
+		"MessageSid": {providerEventID},
+		"To":         {"+15557654321"},
+	}
+	req := newSignedTwilioRequest(requestURL, webhookSecret, form)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "message_received" {
+		t.Fatalf("provider_event_type = %q, want message_received", got)
+	}
+	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// Twilio uses durable_before_dispatch; this proof is about persisted
+		// evidence and supported store admission, not handler completion.
+	}
+}
+
+func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	const (
+		runID             = "46000000-0000-0000-0000-000000000001"
+		entityID          = "46000000-0000-0000-0000-000000000002"
+		flowInstance      = "twilio-sqlite-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "twilio"
+		webhookSecret     = "twilio-secret"
+		providerEventID   = "SMabcdef1234567890"
+		agentID           = "twilio-sqlite-webhook-subscriber"
+		providerEventName = "inbound.twilio"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(sqliteStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+
+	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
+	form := url.Values{
+		"Body":       {"hello from sqlite"},
+		"From":       {"+15551234567"},
+		"MessageSid": {providerEventID},
+		"To":         {"+15557654321"},
+	}
+	req := newSignedTwilioRequest(requestURL, webhookSecret, form)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
+	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "message_received" {
+		t.Fatalf("provider_event_type = %q, want message_received", got)
+	}
+	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// Twilio uses durable_before_dispatch; this proof is about persisted
+		// evidence and supported store admission, not handler completion.
+	}
+}
+
 func seedPostgresInboundGatewayRuntime(
 	t *testing.T,
 	ctx context.Context,
@@ -764,4 +899,32 @@ func stripeWebhookSignature(secret string, timestamp string, body []byte) string
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
 	return "t=" + timestamp + ",v1=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedTwilioRequest(requestURL string, secret string, form url.Values) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, requestURL, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Twilio-Signature", twilioWebhookSignature(secret, requestURL, form))
+	return req
+}
+
+func twilioWebhookSignature(secret, requestURL string, form url.Values) string {
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write([]byte(twilioSignedPayload(requestURL, form)))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func twilioSignedPayload(requestURL string, form url.Values) string {
+	keys := make([]string, 0, len(form))
+	for key := range form {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(requestURL)
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteString(form.Get(key))
+	}
+	return b.String()
 }

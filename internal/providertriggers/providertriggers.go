@@ -5,10 +5,14 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,13 +35,21 @@ func (t Target) EffectiveEntityID() string {
 }
 
 type Request struct {
-	Provider  string
-	Target    Target
-	Body      []byte
-	Headers   http.Header
-	Payload   any
-	Received  time.Time
-	UserAgent string
+	Provider        string
+	Target          Target
+	Method          string
+	URL             string
+	Body            []byte
+	Headers         http.Header
+	Payload         any
+	ContentType     string
+	Query           url.Values
+	QueryParseError string
+	Form            url.Values
+	FormParsed      bool
+	FormParseError  string
+	Received        time.Time
+	UserAgent       string
 }
 
 type Delivery struct {
@@ -139,6 +151,7 @@ type Manifest struct {
 	Provider              string             `yaml:"provider"`
 	PayloadObjectRequired bool               `yaml:"payload_object_required"`
 	PayloadObjectError    string             `yaml:"payload_object_error"`
+	PayloadSource         string             `yaml:"payload_source"`
 	Secret                SecretManifest     `yaml:"secret"`
 	Signature             SignatureManifest  `yaml:"signature"`
 	Challenge             *ChallengeManifest `yaml:"challenge"`
@@ -157,6 +170,7 @@ type SecretManifest struct {
 
 type SignatureManifest struct {
 	Type           string             `yaml:"type"`
+	Encoding       string             `yaml:"encoding"`
 	Header         string             `yaml:"header"`
 	Prefix         string             `yaml:"prefix"`
 	SignedPayload  string             `yaml:"signed_payload"`
@@ -198,6 +212,9 @@ type ConditionManifest struct {
 type ValueSource struct {
 	Header       string `yaml:"header"`
 	JSONPath     string `yaml:"json_path"`
+	FormParam    string `yaml:"form_param"`
+	QueryParam   string `yaml:"query_param"`
+	Literal      string `yaml:"literal"`
 	Required     bool   `yaml:"required"`
 	MissingError string `yaml:"missing_error"`
 }
@@ -227,33 +244,56 @@ func (m Manifest) Validate() error {
 	if m.Secret.Required && m.Signature.Type == "" {
 		return fmt.Errorf("%s manifest requires signature when secret is required", provider)
 	}
-	if m.Signature.Type != "" && strings.TrimSpace(m.Signature.Type) != "hmac_sha256" {
-		return fmt.Errorf("%s manifest has unsupported signature type %q", provider, m.Signature.Type)
+	switch strings.TrimSpace(m.PayloadSource) {
+	case "", "payload", "form":
+	default:
+		return fmt.Errorf("%s manifest has unsupported payload_source %q", provider, m.PayloadSource)
+	}
+	if m.Signature.Type != "" {
+		switch strings.TrimSpace(m.Signature.Type) {
+		case "hmac_sha256", "hmac_sha1":
+		default:
+			return fmt.Errorf("%s manifest has unsupported signature type %q", provider, m.Signature.Type)
+		}
+		switch m.Signature.digestEncoding() {
+		case "hex", "base64":
+		default:
+			return fmt.Errorf("%s manifest has unsupported signature encoding %q", provider, m.Signature.Encoding)
+		}
 	}
 	if m.Signature.Type != "" {
 		if strings.TrimSpace(m.Signature.Header) == "" {
 			return fmt.Errorf("%s manifest signature header is required", provider)
 		}
 		switch strings.TrimSpace(m.Signature.SignedPayload) {
-		case "raw_body", "slack_v0", "timestamp_dot_raw_body":
+		case "raw_body", "slack_v0", "timestamp_dot_raw_body", "url_plus_sorted_form":
 		default:
 			return fmt.Errorf("%s manifest has unsupported signed_payload %q", provider, m.Signature.SignedPayload)
 		}
-		if m.Signature.SignedPayload != "raw_body" && m.Signature.Timestamp == nil {
-			return fmt.Errorf("%s manifest timestamp is required for %s", provider, m.Signature.SignedPayload)
+		switch strings.TrimSpace(m.Signature.SignedPayload) {
+		case "slack_v0", "timestamp_dot_raw_body":
+			if m.Signature.Timestamp == nil {
+				return fmt.Errorf("%s manifest timestamp is required for %s", provider, m.Signature.SignedPayload)
+			}
+		}
+		if strings.TrimSpace(m.Signature.SignedPayload) == "url_plus_sorted_form" && m.Signature.digestEncoding() != "base64" {
+			return fmt.Errorf("%s manifest url_plus_sorted_form signatures require base64 encoding", provider)
+		}
+		if strings.TrimSpace(m.Signature.SignedPayload) == "url_plus_sorted_form" && strings.TrimSpace(m.Signature.Type) != "hmac_sha1" {
+			return fmt.Errorf("%s manifest url_plus_sorted_form signatures require hmac_sha1", provider)
 		}
 	}
-	if m.DeliveryID.Required && m.DeliveryID.Header == "" && m.DeliveryID.JSONPath == "" {
+	if err := validateValueSource(provider, "delivery_id", m.DeliveryID); err != nil {
+		return err
+	}
+	if m.DeliveryID.Required && m.DeliveryID.sourceCount() == 0 {
 		return fmt.Errorf("%s manifest delivery_id source is required", provider)
 	}
-	if err := validateJSONPath(provider, "delivery_id.json_path", m.DeliveryID.JSONPath); err != nil {
+	if err := validateValueSource(provider, "event_type", m.EventType); err != nil {
 		return err
 	}
-	if m.EventType.Required && m.EventType.Header == "" && m.EventType.JSONPath == "" {
+	if m.EventType.Required && m.EventType.sourceCount() == 0 {
 		return fmt.Errorf("%s manifest event_type source is required", provider)
-	}
-	if err := validateJSONPath(provider, "event_type.json_path", m.EventType.JSONPath); err != nil {
-		return err
 	}
 	if m.Challenge != nil {
 		if err := validateJSONPath(provider, "challenge.when.json_path", m.Challenge.When.JSONPath); err != nil {
@@ -404,15 +444,19 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 	if len(candidates) == 0 {
 		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
 	}
-	signedPayload, err := m.Signature.signedPayload(timestamp, req.Body)
+	signedPayload, err := m.Signature.signedPayload(timestamp, req)
 	if err != nil {
 		return err
 	}
-	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(secret)))
+	hashFunc, err := m.Signature.hashFunc()
+	if err != nil {
+		return err
+	}
+	mac := hmac.New(hashFunc, []byte(strings.TrimSpace(secret)))
 	_, _ = mac.Write(signedPayload)
-	expected := hex.EncodeToString(mac.Sum(nil))
+	expected := m.Signature.encodeDigest(mac.Sum(nil))
 	for _, candidate := range candidates {
-		if hmac.Equal([]byte(strings.ToLower(strings.TrimSpace(candidate))), []byte(strings.ToLower(expected))) {
+		if m.Signature.signatureEqual(candidate, expected) {
 			return nil
 		}
 	}
@@ -426,14 +470,53 @@ func (s SignatureManifest) TimestampParam() string {
 	return strings.TrimSpace(s.Timestamp.Param)
 }
 
-func (s SignatureManifest) signedPayload(timestamp string, body []byte) ([]byte, error) {
+func (s SignatureManifest) hashFunc() (func() hash.Hash, error) {
+	switch strings.TrimSpace(s.Type) {
+	case "hmac_sha256":
+		return sha256.New, nil
+	case "hmac_sha1":
+		return sha1.New, nil
+	default:
+		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+	}
+}
+
+func (s SignatureManifest) digestEncoding() string {
+	encoding := strings.TrimSpace(s.Encoding)
+	if encoding == "" {
+		return "hex"
+	}
+	return encoding
+}
+
+func (s SignatureManifest) encodeDigest(sum []byte) string {
+	switch s.digestEncoding() {
+	case "base64":
+		return base64.StdEncoding.EncodeToString(sum)
+	default:
+		return hex.EncodeToString(sum)
+	}
+}
+
+func (s SignatureManifest) signatureEqual(candidate, expected string) bool {
+	candidate = strings.TrimSpace(candidate)
+	if s.digestEncoding() == "hex" {
+		candidate = strings.ToLower(candidate)
+		expected = strings.ToLower(expected)
+	}
+	return hmac.Equal([]byte(candidate), []byte(expected))
+}
+
+func (s SignatureManifest) signedPayload(timestamp string, req Request) ([]byte, error) {
 	switch strings.TrimSpace(s.SignedPayload) {
 	case "raw_body":
-		return body, nil
+		return req.Body, nil
 	case "slack_v0":
-		return []byte("v0:" + timestamp + ":" + string(body)), nil
+		return []byte("v0:" + timestamp + ":" + string(req.Body)), nil
 	case "timestamp_dot_raw_body":
-		return []byte(timestamp + "." + string(body)), nil
+		return []byte(timestamp + "." + string(req.Body)), nil
+	case "url_plus_sorted_form":
+		return signedPayloadURLPlusSortedForm(s, req)
 	default:
 		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
 	}
@@ -484,12 +567,21 @@ func (c ConditionManifest) Evaluate(payload any) (bool, error) {
 }
 
 func (s ValueSource) Resolve(req Request) (string, bool) {
+	if strings.TrimSpace(s.Literal) != "" {
+		return strings.TrimSpace(s.Literal), true
+	}
 	if strings.TrimSpace(s.Header) != "" {
 		value := strings.TrimSpace(req.Headers.Get(s.Header))
 		return value, value != ""
 	}
 	if strings.TrimSpace(s.JSONPath) != "" {
 		return stringFromJSONPath(req.Payload, s.JSONPath)
+	}
+	if strings.TrimSpace(s.FormParam) != "" {
+		return singleParamValue(req.Form, s.FormParam)
+	}
+	if strings.TrimSpace(s.QueryParam) != "" {
+		return singleParamValue(req.Query, s.QueryParam)
 	}
 	return "", false
 }
@@ -505,6 +597,9 @@ func (m Manifest) resolveEventName(eventType string) string {
 
 func (m Manifest) buildPublishPayload(provider, entityID, deliveryID, eventType string, req Request) map[string]any {
 	rawPayload := redactPayload(req.Payload, m.RedactKeys)
+	if strings.TrimSpace(m.PayloadSource) == "form" {
+		rawPayload = redactPayload(formValuesPayload(req.Form), m.RedactKeys)
+	}
 	headers := make(map[string]any, len(m.Metadata))
 	for key, source := range m.Metadata {
 		switch source {
@@ -527,6 +622,67 @@ func (m Manifest) buildPublishPayload(provider, entityID, deliveryID, eventType 
 		"headers":              headers,
 		"received_at":          req.Received.UTC().Format(time.RFC3339),
 	}
+}
+
+func signedPayloadURLPlusSortedForm(s SignatureManifest, req Request) ([]byte, error) {
+	if strings.TrimSpace(req.URL) == "" {
+		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+	}
+	if strings.TrimSpace(req.QueryParseError) != "" || strings.TrimSpace(req.FormParseError) != "" {
+		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+	}
+	if !req.FormParsed {
+		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+	}
+	if hasDuplicateValues(req.Query) || hasDuplicateValues(req.Form) {
+		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+	}
+	keys := make([]string, 0, len(req.Form))
+	for key := range req.Form {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(req.URL)
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteString(req.Form.Get(key))
+	}
+	return []byte(b.String()), nil
+}
+
+func hasDuplicateValues(values url.Values) bool {
+	for _, items := range values {
+		if len(items) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func singleParamValue(values url.Values, key string) (string, bool) {
+	items := values[strings.TrimSpace(key)]
+	if len(items) != 1 {
+		return "", false
+	}
+	value := strings.TrimSpace(items[0])
+	return value, value != ""
+}
+
+func formValuesPayload(values url.Values) map[string]any {
+	payload := make(map[string]any, len(values))
+	for key, items := range values {
+		if len(items) == 1 {
+			payload[key] = items[0]
+			continue
+		}
+		copied := make([]any, 0, len(items))
+		for _, item := range items {
+			copied = append(copied, item)
+		}
+		payload[key] = copied
+	}
+	return payload
 }
 
 func acceptRaw(req Request) (Delivery, error) {
@@ -673,6 +829,23 @@ func validateJSONPath(provider, field, path string) error {
 		}
 	}
 	return nil
+}
+
+func validateValueSource(provider, field string, source ValueSource) error {
+	if source.sourceCount() > 1 {
+		return fmt.Errorf("%s manifest %s must use exactly one source", provider, field)
+	}
+	return validateJSONPath(provider, field+".json_path", source.JSONPath)
+}
+
+func (s ValueSource) sourceCount() int {
+	count := 0
+	for _, value := range []string{s.Header, s.JSONPath, s.FormParam, s.QueryParam, s.Literal} {
+		if strings.TrimSpace(value) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 func validJSONPathSegment(part string) bool {

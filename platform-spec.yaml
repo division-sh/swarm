@@ -5671,18 +5671,30 @@ tool_model:
     manifest_vocabulary:
       provider: normalized provider token matched from `/webhooks/{entity}/{provider}`
       payload_object_required: fail closed when the decoded request payload is not a JSON object
+      payload_source: >
+        Source for the provider payload embedded in the published normalized event. The default `payload` uses the decoded
+        JSON object or raw-body wrapper. `form` uses the gateway-parsed `application/x-www-form-urlencoded` parameter set
+        and requires the relevant signed-payload recipe to fail closed on malformed form input.
       secret.required: require a configured signing secret before accepting the provider callback
       signature: >
-        HMAC-SHA256 signature verification over a manifest-selected signed payload. Supported signed payloads are
-        `raw_body`, `slack_v0`, and `timestamp_dot_raw_body`. The interpreter supports fixed signature prefixes, structured
-        comma-separated signature parameters, timestamp extraction from headers or parameters, replay tolerance windows, and
-        constant-time comparison against every configured signature candidate.
+        HMAC-SHA256 or HMAC-SHA1 signature verification over a manifest-selected signed payload, encoded as lowercase hex
+        by default or Base64 when the manifest selects `encoding: base64`. Supported signed payloads are `raw_body`,
+        `slack_v0`, `timestamp_dot_raw_body`, and `url_plus_sorted_form`. The interpreter supports fixed signature
+        prefixes, structured comma-separated signature parameters, timestamp extraction from headers or parameters, replay
+        tolerance windows, exact request URL plus sorted form-parameter canonicalization, and constant-time comparison
+        against every configured signature candidate.
       challenge: >
         Authenticated response-only callback handling. A matched challenge branch must not persist an inbound dedupe marker
         and must not publish a Swarm event.
       delivery_condition: JSON object condition that must match before a provider delivery is accepted.
-      delivery_id: authoritative provider delivery id source for dedupe marker input.
-      event_type: authoritative provider event type source for normalized provider_event_type payload metadata.
+      request_facts: >
+        The gateway passes provider-neutral request facts to the manifest interpreter: method, direct scheme/host/request
+        URI URL, content type, parsed query values, parsed form values, parse-error state, raw body, headers, decoded payload,
+        receipt time, and user agent. The first-slice exact URL source is the request received by the API listener; forwarded
+        proxy/header trust and callback URL lifecycle remain parent-tail work. Recipes that require URL/form facts MUST fail
+        closed when those facts are missing, malformed, or ambiguous.
+      delivery_id: authoritative provider delivery id source for dedupe marker input. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
+      event_type: authoritative provider event type source for normalized provider_event_type payload metadata. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
       event_name: literal or `{event_type}` template for the emitted Swarm event name.
       event_name_policy: >
         New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
@@ -5769,12 +5781,36 @@ tool_model:
         Stripe payload `type` is the authoritative provider event type and is emitted in payload metadata as normalized
         `provider_event_type`. The canonical emitted event name is `inbound.stripe`, not `inbound.stripe.<event_type>`.
         Missing `type` fails before dedupe marker persistence.
+    - provider: twilio
+      issue: "#1725"
+      signature: >
+        Twilio form/query webhook deliveries in this slice require a configured signing secret and a valid
+        `X-Twilio-Signature` HMAC-SHA1 Base64 signature. The manifest interpreter MUST compute the signed payload as the
+        exact request URL received by the API listener, including any query string, followed by every parsed form parameter
+        name and value concatenated in lexicographic parameter-name order with no delimiters. Missing signing secret,
+        missing signature, invalid signature, URL mismatch, malformed query/form parsing, and duplicate query or form
+        parameter names fail before dedupe marker persistence and before event publish.
+      callback_shape: >
+        The approved #1725 slice supports `application/x-www-form-urlencoded` Twilio callbacks only. Twilio JSON callbacks
+        using `bodySHA256` are not supported by this slice and MUST fail closed rather than falling through to raw webhook
+        mode or partial Twilio acceptance.
+      delivery_id: >
+        `MessageSid` form parameter is the authoritative provider delivery id and dedupe-key input for the selected Twilio
+        messaging callback slice. Missing `MessageSid` fails before dedupe marker persistence.
+      acknowledgement: >
+        Accepted Twilio deliveries return success after the inbound dedupe marker, canonical event record, recipient
+        manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement MUST NOT
+        wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        The selected Twilio messaging callback slice emits literal provider_event_type `message_received` in payload
+        metadata. The canonical emitted Swarm event name is literal `inbound.twilio`, not a dynamic template.
     raw_webhook_mode: >
       Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
       does not prove provider-trigger adapter closure. Configured providers MUST consume their manifest interpreter owner
       rather than generic signature, delivery-id, event-type, acknowledgement, or `inbound.{provider}` mapping fallbacks.
-      Raw webhook mode MUST NOT interpret `Stripe-Signature`; Stripe-signature semantics belong only to the configured
-      Stripe provider manifest.
+      Raw webhook mode MUST NOT interpret configured-provider signatures such as `Stripe-Signature` or
+      `X-Twilio-Signature`; configured-provider signature semantics belong only to the corresponding configured-provider
+      manifest.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.
