@@ -8,5 +8,5 @@ expect:
   events:
     include: [evidence.recorded]
   entities:
-    - type: default
+    - type: evidence_case
       current_state: collecting
