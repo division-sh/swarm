@@ -359,24 +359,49 @@ func validatePolicySheetRanges(value string, ranges []policySheetRangeForValidat
 	}
 	for i := 0; i < len(ranges); i++ {
 		for j := i + 1; j < len(ranges); j++ {
-			if policySheetNumericRangesOverlap(ranges[i], ranges[j]) {
-				return fmt.Errorf("POLICY-SHEET-ROW: overlapping literal ranges for %s at rules[%d] and rules[%d]", value, ranges[i].Index, ranges[j].Index)
-			}
-		}
-	}
-	for i := 1; i < len(ranges); i++ {
-		prev := ranges[i-1]
-		curr := ranges[i]
-		if prev.Upper.Value == "" || curr.Lower.Value == "" {
-			continue
-		}
-		if prev.Upper.Kind == "policy" || curr.Lower.Kind == "policy" {
-			if err := graph.proveOrdered(prev.Upper.Value, curr.Lower.Value); err != nil {
-				return fmt.Errorf("POLICY-SHEET-ROW: adjacent ranges for %s at rules[%d]/rules[%d]: %w", value, prev.Index, curr.Index, err)
+			if err := validatePolicySheetRangePairDoesNotOverlap(value, graph, ranges[i], ranges[j]); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+func validatePolicySheetRangePairDoesNotOverlap(value string, graph *policySheetMonotonicityGraph, a, b policySheetRangeForValidation) error {
+	if aNumeric := policySheetRangeUsesOnlyLiteralBounds(a); aNumeric && policySheetRangeUsesOnlyLiteralBounds(b) {
+		if policySheetNumericRangesOverlap(a, b) {
+			return fmt.Errorf("POLICY-SHEET-ROW: overlapping literal ranges for %s at rules[%d] and rules[%d]", value, a.Index, b.Index)
+		}
+		return nil
+	}
+	if policySheetRangesAreStructurallyDisjoint(graph, a, b) {
+		return nil
+	}
+	return fmt.Errorf("POLICY-SHEET-ROW: overlapping ranges for %s at rules[%d] and rules[%d]", value, a.Index, b.Index)
+}
+
+func policySheetRangeUsesOnlyLiteralBounds(row policySheetRangeForValidation) bool {
+	if row.Lower.Value != "" && row.Lower.Kind != "literal" {
+		return false
+	}
+	if row.Upper.Value != "" && row.Upper.Kind != "literal" {
+		return false
+	}
+	return true
+}
+
+func policySheetRangesAreStructurallyDisjoint(graph *policySheetMonotonicityGraph, a, b policySheetRangeForValidation) bool {
+	return policySheetUpperBeforeLower(graph, a.Upper, b.Lower) || policySheetUpperBeforeLower(graph, b.Upper, a.Lower)
+}
+
+func policySheetUpperBeforeLower(graph *policySheetMonotonicityGraph, upper, lower PolicySheetRangeBound) bool {
+	if upper.Value == "" || lower.Value == "" {
+		return false
+	}
+	if err := graph.proveOrdered(upper.Value, lower.Value); err != nil {
+		return false
+	}
+	return upper.Operator == "<" || lower.Operator == ">"
 }
 
 func policySheetNumericRangesOverlap(a, b policySheetRangeForValidation) bool {
