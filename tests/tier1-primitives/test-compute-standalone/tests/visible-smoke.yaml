@@ -16,4 +16,4 @@ expect:
     - type: core
       current_state: done
       fields:
-        composite: computed_value
+        composite: 0
