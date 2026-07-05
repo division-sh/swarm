@@ -753,13 +753,21 @@ rules:
       monotonicity:
         - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
     emit: treasury.warning_recorded
+  - id: treasury_throttle
+    range:
+      value: entity.spend_ratio
+      gte: policy.throttle_pct / 100
+      lt: 1.0
+      monotonicity:
+        - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
+    emit: treasury.throttle_recorded
   - id: default_route
     default: true
     emit: scan.default_requested
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
-	if got, want := len(handler.Rules), 5; got != want {
+	if got, want := len(handler.Rules), 6; got != want {
 		t.Fatalf("rules len = %d, want %d", got, want)
 	}
 	wantConditions := []string{
@@ -767,12 +775,14 @@ rules:
 		`payload.mode == "deep"`,
 		`payload.mode == "quick" && payload.target == "repository"`,
 		`entity.spend_ratio >= policy.warning_pct / 100 && entity.spend_ratio < policy.throttle_pct / 100`,
+		`entity.spend_ratio >= policy.throttle_pct / 100 && entity.spend_ratio < 1.0`,
 		"else",
 	}
 	wantKinds := []PolicySheetRowKind{
 		PolicySheetRowKindWhen,
 		PolicySheetRowKindCase,
 		PolicySheetRowKindCase,
+		PolicySheetRowKindRange,
 		PolicySheetRowKindRange,
 		PolicySheetRowKindDefault,
 	}
@@ -925,6 +935,30 @@ rules:
     advances_to: fallback
 `,
 			contains: "requires monotonicity",
+		},
+		{
+			name: "overlapping open ended policy ranges",
+			body: `
+rules:
+  - id: warning
+    range:
+      value: entity.spend_ratio
+      gte: policy.warning_ratio
+      monotonicity:
+        - policy.warning_ratio <= policy.throttle_ratio <= 1.0
+    advances_to: warning
+  - id: throttle
+    range:
+      value: entity.spend_ratio
+      gte: policy.throttle_ratio
+      monotonicity:
+        - policy.warning_ratio <= policy.throttle_ratio <= 1.0
+    advances_to: throttle
+  - id: fallback
+    default: true
+    advances_to: fallback
+`,
+			contains: "overlapping ranges",
 		},
 		{
 			name: "unsupported selector root",
