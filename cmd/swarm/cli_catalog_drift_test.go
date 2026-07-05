@@ -346,14 +346,15 @@ func TestRetiredSpellingsWithConnectionFlagsStillPointToReplacement(t *testing.T
 	}
 }
 
-// Retired topology spellings must not survive anywhere topology is expressed
-// as unstructured text: Go sources (guidance strings, bind metadata,
-// comments), platform-spec present-truth prose, README, and CI workflows.
-// Structured surfaces are covered by the tests above; this scan closes the
-// unstructured-string class that three review cycles on #1686 kept finding.
-// Lines carrying an explicit retirement/historical marker are exempt — a
-// retirement message may name the spelling it retires, and historical
-// ledgers may record superseded decisions.
+// The one rule (lead-directed on #1686): every current/public command-spelling
+// surface must either derive from the catalog/cobra tree, be covered by this
+// scan, or be explicitly marked historical on the line. The scan therefore
+// walks the whole repo — every *.go (non-test), *.yaml/*.yml (including
+// testdata), markdown, and workflow file — rather than an enumerated subset;
+// five review cycles proved that enumerating surfaces is how the class
+// survives. Lines carrying an explicit retirement/historical marker are
+// exempt: a retirement message may name the spelling it retires, and
+// historical ledgers may record superseded decisions.
 func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	retiredWords := regexp.MustCompile("swarm (runs|agents|events|entities|conversations)([^a-z]|$)" +
 		"|swarm (status|trace)([^a-z]|$)" +
@@ -362,31 +363,47 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	// spec prose — the #1686 re-review rejected a spec-wide exemption as
 	// institutionalizing drift. Only explicit retirement language exempts a
 	// line; present-truth rows must say `swarm run start`.
-	bareRunStart := regexp.MustCompile("swarm run --|foreground `swarm run`")
-	// unbackticked "foreground swarm run" needs a not-followed-by-" start" check
-	// that RE2 cannot express; handled below.
-	bareRunPhrase := "foreground swarm run"
-	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical")
+	bareRunStart := regexp.MustCompile("swarm run --|`swarm run`")
+	// unbackticked bare-run behavioral prose ("swarm run consumes", "foreground
+	// swarm run") needs a not-followed-by-live-subcommand check that RE2 cannot
+	// express; handled below.
+	bareRunPhrase := regexp.MustCompile(`swarm run ([a-z]+)`)
+	liveRunSubcommands := map[string]bool{"start": true, "list": true, "status": true, "trace": true, "fork": true}
+	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical|noun-group|run command group|promoted pointer message")
 	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|#[0-9]{3}|--dry-run\\|" +
 		"|^\\s*action: '|^\\s*current: swarm ")
 
 	root := driftTestRepoRoot(t)
+	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
 	var targets []string
-	goFiles, err := filepath.Glob(filepath.Join(root, "cmd", "swarm", "*.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, f := range goFiles {
-		if !strings.HasSuffix(f, "_test.go") { // tests exercise retired spellings on purpose
-			targets = append(targets, f)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-	}
-	targets = append(targets, filepath.Join(root, "platform-spec.yaml"), filepath.Join(root, "README.md"))
-	workflows, err := filepath.Glob(filepath.Join(root, ".github", "workflows", "*.yml"))
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		switch {
+		case strings.HasSuffix(name, "_test.go"):
+			return nil // tests exercise retired spellings on purpose
+		case name == "CHANGELOG.md":
+			return nil // historical by definition
+		case strings.HasSuffix(name, ".go"), strings.HasSuffix(name, ".yaml"),
+			strings.HasSuffix(name, ".yml"), strings.HasSuffix(name, ".md"):
+			targets = append(targets, path)
+		}
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets = append(targets, workflows...)
+	if len(targets) < 100 {
+		t.Fatalf("scan targets = %d, want a repo-wide sweep; walk is broken", len(targets))
+	}
 
 	for _, path := range targets {
 		raw, err := os.ReadFile(path)
@@ -397,17 +414,11 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 			wordHit := retiredWords.MatchString(line)
 			bareHit := bareRunStart.MatchString(line)
 			if !bareHit {
-				for idx := strings.Index(line, bareRunPhrase); idx >= 0; {
-					rest := line[idx+len(bareRunPhrase):]
-					if !strings.HasPrefix(rest, " start") {
+				for _, match := range bareRunPhrase.FindAllStringSubmatch(line, -1) {
+					if !liveRunSubcommands[match[1]] {
 						bareHit = true
 						break
 					}
-					next := strings.Index(rest, bareRunPhrase)
-					if next < 0 {
-						break
-					}
-					idx += len(bareRunPhrase) + next
 				}
 			}
 			if !wordHit && !bareHit {
