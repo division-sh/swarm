@@ -9192,7 +9192,7 @@ multi_bundle_persistence:
         - Cross-bundle run.fork target selection is implemented for already loaded/boot-pinned target BundleContexts under #976.
         - Final lifecycle/scoped API conformance matrix remains #1025.
         - Ambient CLI bundle context remains #1028.
-        - Bundle CLI inventory and swarm fork consumers remain #1023/#989.
+        - Bundle CLI inventory and swarm run fork consumers remain #1023/#989.
         - Delete/runtime.nuke/lifecycle cleanup remains #987/#988/#998/#1008/#1009.
     dynamic_load_source_authority:
       tracker: '#1209'
@@ -15167,7 +15167,7 @@ cli_specification:
         include_forks_cross_surface: '#749 parent tail; normal conversation/dashboard surfaces do not consume fork-local turns in this slice.'
         dashboard_builder: '#749 parent tail.'
         sharing_acl_pinning: '#749 parent tail; fixed TTL/delete lifecycle only.'
-        run_fork_swarm_fork: '#989/#1023 implemented separately as the distinct run.fork/swarm fork concept.'
+        run_fork_swarm_fork: '#989/#1023 implemented separately as the distinct run.fork/swarm fork concept (pre-v2.2 spelling; the public command is now `swarm run fork`).'
         direct_storage_or_runtime_reads: forbidden for the CLI consumer.
       proof_expectations:
       - fake API server tests prove exact JSON-RPC method names and params for every subcommand
@@ -15657,63 +15657,63 @@ cli_specification:
         inherits_contract: cli_specification.command_catalog.conversations_list
     superseded_spellings:
       run_bare_start:
-        current: swarm run [flags]
+        current: swarm run [flags] # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm run start [flags]
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm run` no longer starts a run. Use `swarm run start ...`. Bare `swarm run` prints the run command group.'
       runs:
-        current: swarm runs
+        current: swarm runs # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm run list
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm runs` was renamed. Use `swarm run list`.'
       status:
-        current: swarm status
+        current: swarm status # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm run status
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm status` was renamed. Use `swarm run status`.'
       trace:
-        current: swarm trace
+        current: swarm trace # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm run trace
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm trace` was renamed. Use `swarm run trace`.'
       fork:
-        current: swarm fork
+        current: swarm fork # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm run fork
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm fork` was renamed. Use `swarm run fork`.'
       agents:
-        current: swarm agents [list]
+        current: swarm agents [list] # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm agent list
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm agents` was renamed. Use `swarm agent list`.'
       events:
-        current: swarm events list|follow
+        current: swarm events list|follow # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm event list|follow
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm events` was renamed. Use `swarm event list` or `swarm event follow`.'
       entities:
-        current: swarm entities list
+        current: swarm entities list # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm entity list
         current_status: retired
         disposition: fail_closed_pointer
         exit_code: 2
         message: 'ERROR: `swarm entities` was renamed. Use `swarm entity list`.'
       conversations:
-        current: swarm conversations list
+        current: swarm conversations list # retired pre-v2.2 spelling (historical decision record)
         replacement: swarm conversation list
         current_status: retired
         disposition: fail_closed_pointer
@@ -15761,7 +15761,7 @@ api_specification:
       bundle register CLI consumer is implemented by #1167, and local contracts-directory packaging is implemented by
       #1187 through the non-hashing upload packager owner, while archive packaging remains split.
       run.fork is also promoted into method_catalog/OpenRPC with matching selected-contract API/runtime handler proof by
-      #989. The swarm bundle list/show/agents/register/delete and swarm fork CLI consumers are implemented by #1023/#1167/#1187/#1200 and
+      #989. The swarm bundle list/show/agents/register/delete and swarm run fork CLI consumers are implemented by #1023/#1167/#1187/#1200 and
       consume only those canonical /v1/rpc methods. bundle.delete is promoted into method_catalog/OpenRPC with matching
       API/runtime handler proof by #1018 and #1019: omitted or false force performs non-force deletion and force=true
       performs force cleanup. Remaining multi-bundle methods and shapes are

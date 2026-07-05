@@ -370,8 +370,11 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	bareRunPhrase := regexp.MustCompile(`swarm run ([a-z]+)`)
 	liveRunSubcommands := map[string]bool{"start": true, "list": true, "status": true, "trace": true, "fork": true}
 	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical|noun-group|run command group|promoted pointer message")
-	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|#[0-9]{3}|--dry-run\\|" +
-		"|^\\s*current: swarm ")
+	// Exemptions are line-local and explicit only: the line itself must carry
+	// historical/retirement language. No category-level shapes (field names,
+	// issue references, block types) exempt anything — that is how drift
+	// hides (#1686 re-reviews three, five, and six).
+	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|--dry-run\\|")
 
 	root := driftTestRepoRoot(t)
 	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
