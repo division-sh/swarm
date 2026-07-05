@@ -1,0 +1,12 @@
+name: test-sets-gate visible smoke
+steps:
+  - publish: gate.requested
+    payload: {}
+expect:
+  events:
+    include: [gate.set]
+  entities:
+    - type: default
+      current_state: pending
+      gates:
+        g1_check: true

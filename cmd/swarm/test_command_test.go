@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -206,6 +207,183 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+}
+
+func TestSwarmTestRunsTier1PositiveEmissionCatalogCompanions(t *testing.T) {
+	for _, packageName := range []string{
+		"test-advances-to",
+		"test-advances-to-terminal",
+		"test-compute-standalone",
+		"test-data-accumulation-direct",
+		"test-data-accumulation-literal",
+		"test-data-accumulation-mapped",
+		"test-emits-multiple",
+		"test-emits-payload-transform",
+		"test-from-filter",
+		"test-guard-escalate",
+		"test-guard-multi",
+		"test-guard-pass",
+		"test-guard-policy-ref",
+		"test-on-complete-first-match",
+		"test-on-complete-second-match",
+		"test-record-evidence",
+		"test-rules-advances-to",
+		"test-rules-else",
+		"test-rules-match",
+		"test-sets-gate",
+	} {
+		t.Run(packageName, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			setCLIAPITestToken(t, "test-token")
+			contractsPath := filepath.Join(repoRoot(), "tests", "tier1-primitives", packageName)
+			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
+			raw, err := os.ReadFile(scenarioPath)
+			if err != nil {
+				t.Fatalf("read scenario: %v", err)
+			}
+			doc, err := parseScenarioDocument(raw)
+			if err != nil {
+				t.Fatalf("parse scenario: %v", err)
+			}
+			if len(doc.Steps) != 1 || doc.Steps[0].Action != "publish" {
+				t.Fatalf("scenario steps = %#v, want one publish step", doc.Steps)
+			}
+			if len(doc.Expect.Events.Include) == 0 {
+				t.Fatal("scenario must include a positive emitted-event expectation")
+			}
+			if len(doc.Expect.Entities) != 1 || !doc.Expect.Entities[0].StateSet {
+				t.Fatalf("scenario entity expectations = %#v, want one current_state detail assertion", doc.Expect.Entities)
+			}
+			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
+		})
+	}
+}
+
+func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string, doc scenarioDocument) {
+	t.Helper()
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+	step := doc.Steps[0]
+	entityExpect := doc.Expect.Entities[0]
+	currentState, ok := entityExpect.CurrentState.(string)
+	if !ok || strings.TrimSpace(currentState) == "" {
+		t.Fatalf("entity current_state = %#v, want string", entityExpect.CurrentState)
+	}
+	fields := map[string]any{}
+	if entityExpect.FieldsSet {
+		fields = entityExpect.Fields
+	}
+	gates := map[string]any{}
+	if entityExpect.GatesSet {
+		gates = entityExpect.Gates
+	}
+
+	var calls []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/rpc" {
+			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case eventPublishMethod:
+			if req.Params["event_name"] != step.PublishEvent || req.Params["bundle_hash"] != bundleHash {
+				t.Fatalf("event.publish params = %#v", req.Params)
+			}
+			wantPayload, ok := step.Payload.(map[string]any)
+			if !ok {
+				t.Fatalf("scenario payload = %#v, want mapping", step.Payload)
+			}
+			gotPayload, ok := req.Params["payload"].(map[string]any)
+			if !ok {
+				t.Fatalf("event.publish payload = %#v, want mapping", req.Params["payload"])
+			}
+			if err := assertScenarioJSONEqual("event.publish payload", gotPayload, wantPayload); err != nil {
+				t.Fatal(err)
+			}
+			if step.Emitter != nil {
+				wantEmitter, ok := step.Emitter.(string)
+				if !ok {
+					t.Fatalf("scenario emitter = %#v, want string", step.Emitter)
+				}
+				if req.Params["emitter"] != strings.TrimSpace(wantEmitter) {
+					t.Fatalf("event.publish emitter = %#v, want %#v", req.Params["emitter"], step.Emitter)
+				}
+			} else if _, ok := req.Params["emitter"]; ok {
+				t.Fatalf("event.publish unexpectedly sent emitter: %#v", req.Params)
+			}
+			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+		case "run.trace":
+			rows := []map[string]any{scenarioTraceRowForEvent("event-1", step.PublishEvent)}
+			for i, eventName := range doc.Expect.Events.Include {
+				rows = append(rows, scenarioTraceRowForEvent(fmt.Sprintf("event-%d", i+2), eventName))
+			}
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": rows})
+		case entityListMethod:
+			if req.Params["run_id"] != "run-1" || req.Params["type"] != entityExpect.EntityType {
+				t.Fatalf("entity.list params = %#v", req.Params)
+			}
+			entity := validEntitySummary("entity-1")
+			entity["entity_type"] = entityExpect.EntityType
+			entity["current_state"] = strings.TrimSpace(currentState)
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
+		case entityGetMethod:
+			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
+				t.Fatalf("entity.get params = %#v", req.Params)
+			}
+			result := validEntityFullResult("entity-1")
+			entity := result["entity"].(map[string]any)
+			entity["entity_type"] = entityExpect.EntityType
+			entity["current_state"] = strings.TrimSpace(currentState)
+			result["fields"] = fields
+			result["gates"] = gates
+			writeJSONRPCResult(t, w, req.ID, result)
+		default:
+			t.Fatalf("unexpected method = %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+		"--timeout", "2s",
+		"--poll-interval", "10ms",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertScenarioTestMethods(t, calls, []string{
+		eventPublishMethod,
+		"run.diagnose",
+		"run.diagnose",
+		"run.trace",
+		entityListMethod,
+		entityGetMethod,
+	})
+	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func scenarioTraceRowForEvent(eventID, eventName string) map[string]any {
+	row := validRunCommandTraceRow(eventID)
+	row["event_name"] = eventName
+	return row
 }
 
 func TestSwarmTestRejectsInvalidFixtureSchemaBeforePublish(t *testing.T) {

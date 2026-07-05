@@ -1,0 +1,12 @@
+name: test-guard-multi visible smoke
+steps:
+  - publish: check.requested
+    payload:
+      score: 85
+      level: 5
+expect:
+  events:
+    include: [check.passed]
+  entities:
+    - type: default
+      current_state: done

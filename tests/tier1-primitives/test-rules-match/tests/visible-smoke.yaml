@@ -1,0 +1,11 @@
+name: test-rules-match visible smoke
+steps:
+  - publish: item.received
+    payload:
+      kind: a
+expect:
+  events:
+    include: [routed.a]
+  entities:
+    - type: default
+      current_state: pending

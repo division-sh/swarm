@@ -1,0 +1,11 @@
+name: test-rules-advances-to visible smoke
+steps:
+  - publish: item.reviewed
+    payload:
+      decision: approve
+expect:
+  events:
+    include: [item.approved]
+  entities:
+    - type: default
+      current_state: approved

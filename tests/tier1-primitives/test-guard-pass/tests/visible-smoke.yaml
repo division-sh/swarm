@@ -1,0 +1,11 @@
+name: test-guard-pass visible smoke
+steps:
+  - publish: check.requested
+    payload:
+      score: 85
+expect:
+  events:
+    include: [check.passed]
+  entities:
+    - type: default
+      current_state: done

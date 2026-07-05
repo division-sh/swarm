@@ -1,0 +1,11 @@
+name: test-from-filter visible smoke
+steps:
+  - publish: task.completed
+    emitter: flow-a/agent-1
+    payload: {}
+expect:
+  events:
+    include: [task.acknowledged]
+  entities:
+    - type: default
+      current_state: done

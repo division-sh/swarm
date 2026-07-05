@@ -1,0 +1,11 @@
+name: test-guard-escalate visible smoke
+steps:
+  - publish: check.requested
+    payload:
+      score: 50
+expect:
+  events:
+    include: [check.escalated]
+  entities:
+    - type: default
+      current_state: pending

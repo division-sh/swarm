@@ -1,0 +1,11 @@
+name: test-guard-policy-ref visible smoke
+steps:
+  - publish: check.requested
+    payload:
+      region: us-east
+expect:
+  events:
+    include: [check.passed]
+  entities:
+    - type: default
+      current_state: done

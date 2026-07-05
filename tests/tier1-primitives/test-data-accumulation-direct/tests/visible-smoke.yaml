@@ -1,0 +1,15 @@
+name: test-data-accumulation-direct visible smoke
+steps:
+  - publish: item.received
+    payload:
+      name: test
+      score: 85
+expect:
+  events:
+    include: [item.stored]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        item_name: test
+        score: 85
