@@ -40,6 +40,8 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		FlowWrites:             map[string][]string{},
 		CompositionConnects:    nil,
 		FlowAgents:             map[string][]FlowRequiredAgent{},
+		RootAgentFacts:         nil,
+		FlowAgentFacts:         map[string][]RequiredAgentFact{},
 		WritePinOwners:         map[string][]string{},
 		EffectiveNodes:         map[string]SystemNodeEffectiveSemantics{},
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
@@ -48,6 +50,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	}
 	semantics.Guards = appendPlatformBuiltinGuardEntries(semantics.Guards, bundle.Platform.BuiltinHooks.Guards)
 	semantics.Actions = appendPlatformBuiltinActionEntries(semantics.Actions, bundle.Platform.BuiltinHooks.Actions)
+	semantics.RootAgentFacts = bundle.RootRequiredAgentFacts()
 	for _, entry := range semantics.Guards {
 		if id := strings.TrimSpace(entry.ID); id != "" {
 			semantics.GuardByID[id] = entry
@@ -79,7 +82,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.FlowOutputEventPins[flowID] = semanticOutputEventPins(schema.Pins.Outputs)
 		semantics.FlowReads[flowID] = append([]string{}, schema.Pins.Inputs.Reads...)
 		semantics.FlowWrites[flowID] = append([]string{}, schema.Pins.Outputs.Writes...)
-		semantics.FlowAgents[flowID] = append([]FlowRequiredAgent{}, schema.RequiredAgents...)
+		facts := bundle.FlowRequiredAgentFacts(flowID)
+		semantics.FlowAgentFacts[flowID] = facts
+		semantics.FlowAgents[flowID] = FlowRequiredAgentsFromFacts(facts)
 		for _, writePin := range schema.Pins.Outputs.Writes {
 			writePin = strings.TrimSpace(writePin)
 			if writePin == "" {

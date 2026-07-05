@@ -1525,10 +1525,11 @@ func catalogPromptAgentEntry(agent map[string]any) runtimecontracts.AgentRegistr
 
 func catalogRequiredAgentIssues(scope catalogBootScope) []catalogBootIssue {
 	scopeLabel := catalogBootScopeLabel(scope)
+	agents := catalogRequiredAgentEntries(scope.Agents)
 	findings := runtimerequiredagents.CheckScope(runtimerequiredagents.Scope{
 		ID:       scopeLabel,
-		Agents:   catalogRequiredAgentEntries(scope.Agents),
-		Required: catalogRequiredAgentRequirements(scope.Schema),
+		Agents:   agents,
+		Required: catalogEffectiveRequiredAgentRequirements(scope.Schema, agents),
 	})
 	issues := make([]catalogBootIssue, 0, len(findings))
 	for _, finding := range findings {
@@ -1558,6 +1559,11 @@ func catalogRequiredAgentEntries(rawAgents map[string]any) map[string]runtimecon
 		}
 	}
 	return agents
+}
+
+func catalogEffectiveRequiredAgentRequirements(schema map[string]any, agents map[string]runtimecontracts.AgentRegistryEntry) []runtimecontracts.FlowRequiredAgent {
+	_, declared := schema["required_agents"]
+	return runtimerequiredagents.EffectiveRequirements(agents, catalogRequiredAgentRequirements(schema), declared)
 }
 
 func catalogRequiredAgentRequirements(schema map[string]any) []runtimecontracts.FlowRequiredAgent {

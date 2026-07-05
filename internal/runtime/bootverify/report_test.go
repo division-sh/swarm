@@ -1737,6 +1737,72 @@ func TestRun_MapsRequiredAgentMismatchToNamedError(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsOmittedRequiredAgentsToInferFromAgents(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{
+		Path: "analysis",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: "analysis",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"analyzer": {
+				Subscriptions: []string{"analysis.requested"},
+				EmitEvents:    []string{"analysis.done"},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"root-worker": {
+				Subscriptions: []string{"root.requested"},
+				EmitEvents:    []string{"root.done"},
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"analysis": flow.Schema,
+		},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{flow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"analysis": &flow,
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "required_agents_match", "") {
+		t.Fatalf("unexpected required_agents_match for omitted inferred required_agents, got %#v", report.Errors())
+	}
+}
+
+func TestRun_PreservesExplicitEmptyRequiredAgentsBoundary(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			RequiredAgentsDeclared: true,
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"root-worker": {
+				Subscriptions: []string{"root.requested"},
+				EmitEvents:    []string{"root.done"},
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	if got := source.RequiredAgents(); len(got) != 0 {
+		t.Fatalf("source.RequiredAgents = %#v, want explicit empty boundary without inference", got)
+	}
+
+	report := Run(context.Background(), source, Options{})
+
+	if reportContains(report.Errors(), "required_agents_match", "") {
+		t.Fatalf("unexpected required_agents_match for explicit empty required_agents, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsRequiredAgentRoleFallbackWithoutMapKey(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
@@ -1820,6 +1886,30 @@ func TestRun_ReportsRootRequiredAgentSubscriptionMismatch(t *testing.T) {
 
 	if !reportContains(report.Errors(), "required_agents_match", "root required agent worker subscriptions mismatch") {
 		t.Fatalf("expected root required_agents_match subscriptions error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsRootRequiredAgentEmitMismatch(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{
+				Role:  "worker",
+				Emits: []string{"task.completed"},
+			}},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"worker": {
+				ID:         "worker",
+				Role:       "worker",
+				EmitEvents: []string{"task.failed"},
+			},
+		},
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "required_agents_match", "root required agent worker emits mismatch") {
+		t.Fatalf("expected root required_agents_match emits error, got %#v", report.Errors())
 	}
 }
 

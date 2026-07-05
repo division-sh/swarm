@@ -7,11 +7,103 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 )
 
+const (
+	RequiredAgentSourceExplicit = "explicit"
+	RequiredAgentSourceInferred = "inferred"
+)
+
 func EffectiveSystemNodeID(nodeKey string, node SystemNodeContract) string {
 	if nodeKey := strings.TrimSpace(nodeKey); nodeKey != "" {
 		return nodeKey
 	}
 	return strings.TrimSpace(node.ID)
+}
+
+func RequiredAgentsDeclared(schema FlowSchemaDocument) bool {
+	return schema.RequiredAgentsDeclared || len(schema.RequiredAgents) > 0
+}
+
+func EffectiveRequiredAgentFacts(schema FlowSchemaDocument, agents map[string]AgentRegistryEntry, schemaFile, agentsFile string) []RequiredAgentFact {
+	if RequiredAgentsDeclared(schema) {
+		return explicitRequiredAgentFacts(schema.RequiredAgents, schemaFile)
+	}
+	return inferredRequiredAgentFacts(agents, agentsFile)
+}
+
+func FlowRequiredAgentsFromFacts(facts []RequiredAgentFact) []FlowRequiredAgent {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]FlowRequiredAgent, 0, len(facts))
+	for _, fact := range facts {
+		out = append(out, FlowRequiredAgent{
+			Role:         strings.TrimSpace(fact.Role),
+			SubscribesTo: normalizeStrings(fact.SubscribesTo),
+			Emits:        normalizeStrings(fact.Emits),
+			Description:  strings.TrimSpace(fact.Description),
+		})
+	}
+	return out
+}
+
+func cloneRequiredAgentFacts(facts []RequiredAgentFact) []RequiredAgentFact {
+	if len(facts) == 0 {
+		return nil
+	}
+	out := make([]RequiredAgentFact, len(facts))
+	for i, fact := range facts {
+		out[i] = RequiredAgentFact{
+			Role:         strings.TrimSpace(fact.Role),
+			SubscribesTo: normalizeStrings(fact.SubscribesTo),
+			Emits:        normalizeStrings(fact.Emits),
+			Description:  strings.TrimSpace(fact.Description),
+			Source:       strings.TrimSpace(fact.Source),
+			SourceFile:   strings.TrimSpace(fact.SourceFile),
+		}
+	}
+	return out
+}
+
+func explicitRequiredAgentFacts(required []FlowRequiredAgent, sourceFile string) []RequiredAgentFact {
+	if len(required) == 0 {
+		return nil
+	}
+	sourceFile = strings.TrimSpace(sourceFile)
+	out := make([]RequiredAgentFact, 0, len(required))
+	for _, requiredAgent := range required {
+		out = append(out, RequiredAgentFact{
+			Role:         strings.TrimSpace(requiredAgent.Role),
+			SubscribesTo: normalizeStrings(requiredAgent.SubscribesTo),
+			Emits:        normalizeStrings(requiredAgent.Emits),
+			Description:  strings.TrimSpace(requiredAgent.Description),
+			Source:       RequiredAgentSourceExplicit,
+			SourceFile:   sourceFile,
+		})
+	}
+	return out
+}
+
+func inferredRequiredAgentFacts(agents map[string]AgentRegistryEntry, sourceFile string) []RequiredAgentFact {
+	if len(agents) == 0 {
+		return nil
+	}
+	sourceFile = strings.TrimSpace(sourceFile)
+	out := make([]RequiredAgentFact, 0, len(agents))
+	for _, agentID := range sortedContractKeys(agents) {
+		agentID = strings.TrimSpace(agentID)
+		if agentID == "" {
+			continue
+		}
+		agent := agents[agentID]
+		out = append(out, RequiredAgentFact{
+			Role:         agentID,
+			SubscribesTo: normalizeStrings(agent.Subscriptions),
+			Emits:        normalizeStrings(agent.EmitEvents),
+			Source:       RequiredAgentSourceInferred,
+			SourceFile:   sourceFile,
+		})
+	}
+	return out
 }
 
 func SystemNodeIDMatchesKey(nodeKey, authoredID string) bool {

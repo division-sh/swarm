@@ -167,3 +167,35 @@ func TestCatalogRequiredAgentIssuesRequireMapKeyIdentity(t *testing.T) {
 		t.Fatalf("issues = %#v, want REQUIRED-AGENT", issues)
 	}
 }
+
+func TestCatalogRequiredAgentIssuesInferOmittedFromAgents(t *testing.T) {
+	issues := catalogRequiredAgentIssues(catalogBootScope{
+		Name: "analysis",
+		Agents: map[string]any{
+			"worker": map[string]any{
+				"subscriptions": []any{"analysis.requested"},
+				"emit_events":   []any{"analysis.done"},
+			},
+		},
+		Schema: map[string]any{},
+	})
+
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want omitted required_agents inferred from agents.yaml", issues)
+	}
+}
+
+func TestCatalogRequiredAgentRequirementsPreserveExplicitEmpty(t *testing.T) {
+	agents := catalogRequiredAgentEntries(map[string]any{
+		"worker": map[string]any{
+			"subscriptions": []any{"analysis.requested"},
+		},
+	})
+	required := catalogEffectiveRequiredAgentRequirements(map[string]any{
+		"required_agents": []any{},
+	}, agents)
+
+	if len(required) != 0 {
+		t.Fatalf("required = %#v, want explicit empty required_agents without inference", required)
+	}
+}

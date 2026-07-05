@@ -101,6 +101,73 @@ func TestLoadWorkflowContractBundleBuildsRecursiveFlowTree(t *testing.T) {
 	}
 }
 
+func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testing.T) {
+	flowView := &FlowContractView{
+		Paths: FlowContractPaths{ID: "analysis", SchemaFile: "flows/analysis/schema.yaml", AgentsFile: "flows/analysis/agents.yaml"},
+		Agents: map[string]AgentRegistryEntry{
+			"analyzer": {
+				Subscriptions: []string{"analysis.requested"},
+				EmitEvents:    []string{"analysis.done"},
+			},
+		},
+	}
+	bundle := &WorkflowContractBundle{
+		Paths:      ContractPaths{RootSchemaFile: "schema.yaml", ProjectAgentsFile: "agents.yaml"},
+		RootSchema: &FlowSchemaDocument{},
+		Agents: map[string]AgentRegistryEntry{
+			"root-agent": {
+				Subscriptions: []string{"root.requested"},
+				EmitEvents:    []string{"root.done"},
+			},
+		},
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"analysis": {},
+		},
+		FlowTree: FlowTree{ByID: map[string]*FlowContractView{"analysis": flowView}},
+	}
+
+	rootFacts := bundle.RootRequiredAgentFacts()
+	if len(rootFacts) != 1 || rootFacts[0].Role != "root-agent" || rootFacts[0].Source != RequiredAgentSourceInferred {
+		t.Fatalf("root required agent facts = %#v, want inferred root-agent", rootFacts)
+	}
+	flowFacts := bundle.FlowRequiredAgentFacts("analysis")
+	if len(flowFacts) != 1 || flowFacts[0].Role != "analyzer" || flowFacts[0].Source != RequiredAgentSourceInferred {
+		t.Fatalf("flow required agent facts = %#v, want inferred analyzer", flowFacts)
+	}
+	if got := bundle.FlowRequiredAgents("analysis"); len(got) != 1 || got[0].SubscribesTo[0] != "analysis.requested" || got[0].Emits[0] != "analysis.done" {
+		t.Fatalf("effective flow required agents = %#v, want inferred subscriptions/emits", got)
+	}
+}
+
+func TestWorkflowContractBundleEffectiveRequiredAgentsPreserveExplicitEmpty(t *testing.T) {
+	flowView := &FlowContractView{
+		Paths: FlowContractPaths{ID: "analysis", SchemaFile: "flows/analysis/schema.yaml", AgentsFile: "flows/analysis/agents.yaml"},
+		Agents: map[string]AgentRegistryEntry{
+			"analyzer": {Subscriptions: []string{"analysis.requested"}},
+		},
+	}
+	bundle := &WorkflowContractBundle{
+		Paths: ContractPaths{RootSchemaFile: "schema.yaml", ProjectAgentsFile: "agents.yaml"},
+		RootSchema: &FlowSchemaDocument{
+			RequiredAgentsDeclared: true,
+		},
+		Agents: map[string]AgentRegistryEntry{
+			"root-agent": {Subscriptions: []string{"root.requested"}},
+		},
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"analysis": {RequiredAgentsDeclared: true},
+		},
+		FlowTree: FlowTree{ByID: map[string]*FlowContractView{"analysis": flowView}},
+	}
+
+	if got := bundle.RootRequiredAgents(); len(got) != 0 {
+		t.Fatalf("root required agents = %#v, want explicit empty boundary", got)
+	}
+	if got := bundle.FlowRequiredAgents("analysis"); len(got) != 0 {
+		t.Fatalf("flow required agents = %#v, want explicit empty boundary", got)
+	}
+}
+
 func TestLoadWorkflowContractBundleLoadsCanonicalToolSchemasFromRootAndFlowTools(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()

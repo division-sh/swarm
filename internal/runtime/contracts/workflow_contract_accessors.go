@@ -626,21 +626,70 @@ func (b *WorkflowContractBundle) FlowEventMatches(flowID, subscription, eventTyp
 	return scope.Matches(subscription, eventType, b.flowEventDescendants(flowID))
 }
 func (b *WorkflowContractBundle) FlowRequiredAgents(flowID string) []FlowRequiredAgent {
+	return FlowRequiredAgentsFromFacts(b.FlowRequiredAgentFacts(flowID))
+}
+func (b *WorkflowContractBundle) FlowRequiredAgentFacts(flowID string) []RequiredAgentFact {
 	if b == nil {
 		return nil
 	}
-	agents := b.Semantics.FlowAgents[strings.TrimSpace(flowID)]
-	out := make([]FlowRequiredAgent, len(agents))
-	copy(out, agents)
-	return out
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return nil
+	}
+	if schema, ok := b.FlowSchemas[flowID]; ok {
+		agents, agentsFile := b.flowRequiredAgentScope(flowID)
+		return EffectiveRequiredAgentFacts(schema, agents, b.flowRequiredAgentSchemaFile(flowID), agentsFile)
+	}
+	if facts := b.Semantics.FlowAgentFacts[flowID]; len(facts) > 0 {
+		return cloneRequiredAgentFacts(facts)
+	}
+	return explicitRequiredAgentFacts(b.Semantics.FlowAgents[flowID], b.flowRequiredAgentSchemaFile(flowID))
 }
 func (b *WorkflowContractBundle) RootRequiredAgents() []FlowRequiredAgent {
+	return FlowRequiredAgentsFromFacts(b.RootRequiredAgentFacts())
+}
+func (b *WorkflowContractBundle) RootRequiredAgentFacts() []RequiredAgentFact {
 	if b == nil || b.RootSchema == nil {
 		return nil
 	}
-	out := make([]FlowRequiredAgent, len(b.RootSchema.RequiredAgents))
-	copy(out, b.RootSchema.RequiredAgents)
-	return out
+	agents, agentsFile := b.rootRequiredAgentScope()
+	return EffectiveRequiredAgentFacts(*b.RootSchema, agents, b.Paths.RootSchemaFile, agentsFile)
+}
+func (b *WorkflowContractBundle) rootRequiredAgentScope() (map[string]AgentRegistryEntry, string) {
+	if b == nil {
+		return nil, ""
+	}
+	for _, view := range b.ProjectViews() {
+		if strings.TrimSpace(view.Paths.ParentKey) == "" && view.Paths.Depth == 0 {
+			return cloneAgentRegistryEntryMap(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
+		}
+	}
+	for _, view := range b.ProjectViews() {
+		if strings.TrimSpace(view.Paths.ParentKey) == "" {
+			return cloneAgentRegistryEntryMap(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
+		}
+	}
+	return cloneAgentRegistryEntryMap(b.Agents), strings.TrimSpace(b.Paths.ProjectAgentsFile)
+}
+func (b *WorkflowContractBundle) flowRequiredAgentScope(flowID string) (map[string]AgentRegistryEntry, string) {
+	flowID = strings.TrimSpace(flowID)
+	if b == nil || flowID == "" {
+		return nil, ""
+	}
+	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
+		return cloneAgentRegistryEntryMap(view.Agents), strings.TrimSpace(view.Paths.AgentsFile)
+	}
+	return nil, ""
+}
+func (b *WorkflowContractBundle) flowRequiredAgentSchemaFile(flowID string) string {
+	flowID = strings.TrimSpace(flowID)
+	if b == nil || flowID == "" {
+		return ""
+	}
+	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
+		return strings.TrimSpace(view.Paths.SchemaFile)
+	}
+	return ""
 }
 func (b *WorkflowContractBundle) WritePinOwners(pin string) []string {
 	if b == nil {

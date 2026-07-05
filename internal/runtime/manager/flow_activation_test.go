@@ -1485,6 +1485,33 @@ func TestEnsureStaticFlowRequiredAgentsRegistersStaticFlowSubscriptions(t *testi
 	}
 }
 
+func TestEnsureStaticFlowRequiredAgentsInfersFromOmittedRequiredAgents(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	store := &flowActivationTestStore{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{}, store)
+	bundle := testStaticFlowBundle()
+	schema := bundle.FlowSchemas["analyzer-flow"]
+	schema.RequiredAgents = nil
+	schema.RequiredAgentsDeclared = false
+	bundle.FlowSchemas["analyzer-flow"] = schema
+	bundle.Semantics.FlowAgents = map[string][]runtimecontracts.FlowRequiredAgent{}
+	bundle.Semantics.FlowAgentFacts = map[string][]runtimecontracts.RequiredAgentFact{}
+
+	if err := am.EnsureStaticFlowRequiredAgents(context.Background(), semanticview.Wrap(bundle)); err != nil {
+		t.Fatalf("EnsureStaticFlowRequiredAgents: %v", err)
+	}
+	cfg, ok := am.GetAgentConfig("analyzer")
+	if !ok {
+		t.Fatal("expected inferred static flow required agent config")
+	}
+	if len(cfg.Subscriptions) != 1 || cfg.Subscriptions[0] != "analyzer-flow/analysis.requested" {
+		t.Fatalf("subscriptions = %#v, want [analyzer-flow/analysis.requested]", cfg.Subscriptions)
+	}
+	if len(store.upserts) != 1 || store.upserts[0].Config.ID != "analyzer" {
+		t.Fatalf("persisted agents = %#v, want analyzer", store.upserts)
+	}
+}
+
 func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing.T) {
 	records, err := staticRequiredAgentsForScope(nil, "analysis", "analysis", map[string]runtimecontracts.AgentRegistryEntry{
 		"worker-alias": {
