@@ -817,11 +817,20 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name: "malformed signature params",
+			name: "wrong signature version param",
 			body: []byte(`{"id":"evt_123","type":"invoice.paid"}`),
 			configure: func(req *http.Request, body []byte) {
 				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 				req.Header.Set("Stripe-Signature", "t="+timestamp+",v0="+stripeSignatureHex("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "malformed signature component with otherwise valid signature",
+			body: []byte(`{"id":"evt_123","type":"invoice.paid"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", "t="+timestamp+",broken,v1="+stripeSignatureHex("stripe-secret", timestamp, body))
 			},
 			wantStatus: http.StatusUnauthorized,
 		},
@@ -844,8 +853,35 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 			wantStatus: http.StatusBadRequest,
 		},
 		{
+			name: "object event id",
+			body: []byte(`{"id":{"nested":"evt_123"},"type":"invoice.paid"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
 			name: "missing event type",
 			body: []byte(`{"id":"evt_123"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "bool event type",
+			body: []byte(`{"id":"evt_123","type":true}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "list event type",
+			body: []byte(`{"id":"evt_123","type":["invoice.paid"]}`),
 			configure: func(req *http.Request, body []byte) {
 				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
 				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))

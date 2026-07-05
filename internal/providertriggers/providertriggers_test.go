@@ -68,6 +68,92 @@ func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) 
 		_, err := registry.Accept(req)
 		requireProviderTriggerError(t, err, http.StatusUnauthorized)
 	})
+
+	t.Run("object event type fails closed", func(t *testing.T) {
+		body := []byte(`{"event_type":"safe.event"}`)
+		req := hostileRequest(now, body)
+		req.Headers.Set("X-Hostile-Delivery", "delivery-header")
+		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
+		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
+		req.Payload = map[string]any{
+			"event_type": map[string]any{"nested": "safe.event"},
+		}
+		_, err := registry.Accept(req)
+		requireProviderTriggerError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("list event type fails closed", func(t *testing.T) {
+		body := []byte(`{"event_type":"safe.event"}`)
+		req := hostileRequest(now, body)
+		req.Headers.Set("X-Hostile-Delivery", "delivery-header")
+		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
+		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
+		req.Payload = map[string]any{
+			"event_type": []any{"safe.event"},
+		}
+		_, err := registry.Accept(req)
+		requireProviderTriggerError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("bool event type fails closed", func(t *testing.T) {
+		body := []byte(`{"event_type":"safe.event"}`)
+		req := hostileRequest(now, body)
+		req.Headers.Set("X-Hostile-Delivery", "delivery-header")
+		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
+		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
+		req.Payload = map[string]any{
+			"event_type": true,
+		}
+		_, err := registry.Accept(req)
+		requireProviderTriggerError(t, err, http.StatusBadRequest)
+	})
+}
+
+func TestManifestInterpreterRejectsMalformedJSONPathIdentityPayloads(t *testing.T) {
+	registry := newHostilePayloadIdentityRegistry(t)
+	now := time.Unix(1710000000, 0).UTC()
+
+	t.Run("object delivery id fails closed", func(t *testing.T) {
+		body := []byte(`{"event_id":{"nested":"delivery"},"event_type":"safe.event"}`)
+		req := hostileRequest(now, body)
+		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
+		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
+		req.Payload = map[string]any{
+			"event_id":   map[string]any{"nested": "delivery"},
+			"event_type": "safe.event",
+		}
+
+		_, err := registry.Accept(req)
+		requireProviderTriggerError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("list delivery id fails closed", func(t *testing.T) {
+		body := []byte(`{"event_id":["delivery"],"event_type":"safe.event"}`)
+		req := hostileRequest(now, body)
+		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
+		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
+		req.Payload = map[string]any{
+			"event_id":   []any{"delivery"},
+			"event_type": "safe.event",
+		}
+
+		_, err := registry.Accept(req)
+		requireProviderTriggerError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("bool event type fails closed", func(t *testing.T) {
+		body := []byte(`{"event_id":"delivery","event_type":true}`)
+		req := hostileRequest(now, body)
+		req.Headers.Set("X-Hostile-Timestamp", strconvFormatUnix(now))
+		req.Headers.Set("X-Hostile-Signature", hostileSignature("hostile-secret", strconvFormatUnix(now), body))
+		req.Payload = map[string]any{
+			"event_id":   "delivery",
+			"event_type": true,
+		}
+
+		_, err := registry.Accept(req)
+		requireProviderTriggerError(t, err, http.StatusBadRequest)
+	})
 }
 
 func TestStripeManifestRejectsMalformedSignatureParams(t *testing.T) {
@@ -87,6 +173,10 @@ func TestStripeManifestRejectsMalformedSignatureParams(t *testing.T) {
 	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",v0="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
 
 	_, err := DefaultRegistry().Accept(req)
+	requireProviderTriggerError(t, err, http.StatusUnauthorized)
+
+	req.Headers.Set("Stripe-Signature", "t="+strconvFormatUnix(now)+",broken,v1="+stripeSignatureHex("stripe-secret", strconvFormatUnix(now), body))
+	_, err = DefaultRegistry().Accept(req)
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
 }
 
@@ -142,6 +232,48 @@ func newHostileRegistry(t *testing.T) *Registry {
 	registry, err := NewRegistry(manifest)
 	if err != nil {
 		t.Fatalf("NewRegistry hostile: %v", err)
+	}
+	return registry
+}
+
+func newHostilePayloadIdentityRegistry(t *testing.T) *Registry {
+	t.Helper()
+	manifest := Manifest{
+		Provider:              "hostile",
+		PayloadObjectRequired: true,
+		PayloadObjectError:    "hostile payload object is required",
+		Secret:                SecretManifest{Required: true},
+		Signature: SignatureManifest{
+			Type:          "hmac_sha256",
+			Header:        "X-Hostile-Signature",
+			Prefix:        "v1=",
+			SignedPayload: "timestamp_dot_raw_body",
+			MissingError:  "hostile signature is required",
+			InvalidError:  "invalid hostile signature",
+			Timestamp: &TimestampManifest{
+				Header:       "X-Hostile-Timestamp",
+				Tolerance:    "5m",
+				MissingError: "hostile timestamp is required",
+				InvalidError: "invalid hostile timestamp",
+				StaleError:   "stale hostile timestamp",
+			},
+		},
+		DeliveryID: ValueSource{
+			JSONPath:     "$.event_id",
+			Required:     true,
+			MissingError: "hostile delivery id is required",
+		},
+		EventType: ValueSource{
+			JSONPath:     "$.event_type",
+			Required:     true,
+			MissingError: "hostile event type is required",
+		},
+		EventName: EventNameManifest{Literal: "inbound.hostile"},
+		Ack:       AckManifest{Mode: "durable_before_dispatch"},
+	}
+	registry, err := NewRegistry(manifest)
+	if err != nil {
+		t.Fatalf("NewRegistry hostile payload identity: %v", err)
 	}
 	return registry
 }
