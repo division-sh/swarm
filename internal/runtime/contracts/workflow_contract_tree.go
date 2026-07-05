@@ -35,6 +35,11 @@ func loadProjectContractView(paths ProjectPackagePaths, manifest ProjectPackageD
 	if err := loadOptionalYAMLMap(paths.ProjectAgentsFile, &view.Agents); err != nil {
 		return view, err
 	}
+	agents, err := normalizeAgentRegistryEntries(view.Agents, paths.ProjectAgentsFile)
+	if err != nil {
+		return view, err
+	}
+	view.Agents = agents
 	if err := loadOptionalYAMLMap(paths.ProjectToolsFile, &view.Tools); err != nil {
 		return view, err
 	}
@@ -67,6 +72,11 @@ func loadFlowContractView(paths FlowContractPaths, schema FlowSchemaDocument) (F
 	if err := loadOptionalYAMLMap(paths.AgentsFile, &view.Agents); err != nil {
 		return view, err
 	}
+	agents, err := normalizeAgentRegistryEntries(view.Agents, paths.AgentsFile)
+	if err != nil {
+		return view, err
+	}
+	view.Agents = agents
 	if err := loadOptionalYAMLMap(paths.ToolsFile, &view.Tools); err != nil {
 		return view, err
 	}
@@ -74,6 +84,33 @@ func loadFlowContractView(paths FlowContractPaths, schema FlowSchemaDocument) (F
 		return view, err
 	}
 	return view, nil
+}
+
+func normalizeAgentRegistryEntries(entries map[string]AgentRegistryEntry, sourceFile string) (map[string]AgentRegistryEntry, error) {
+	if len(entries) == 0 {
+		return map[string]AgentRegistryEntry{}, nil
+	}
+	out := make(map[string]AgentRegistryEntry, len(entries))
+	for key, entry := range entries {
+		trimmedKey := strings.TrimSpace(key)
+		if trimmedKey == "" {
+			continue
+		}
+		if err := validateAgentRegistryMapKey(trimmedKey, sourceFile); err != nil {
+			return nil, err
+		}
+		out[trimmedKey] = EffectiveAgentRegistryEntry(trimmedKey, entry)
+	}
+	return out, nil
+}
+
+func validateAgentRegistryMapKey(key, sourceFile string) error {
+	switch strings.TrimSpace(key) {
+	case "agent_defaults", "agent_profiles", "profiles":
+		return fmt.Errorf("UNSUPPORTED: %s key %q is reserved for a later #1685 gate and is not accepted by Layer 1 platform defaults", strings.TrimSpace(sourceFile), key)
+	default:
+		return nil
+	}
 }
 func buildFlowTree(bundle *WorkflowContractBundle, flowViewsByID map[string]FlowContractView) error {
 	if bundle == nil {

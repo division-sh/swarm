@@ -95,7 +95,7 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 		AutoEmitEvent: strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event),
 		Nodes:         view.Nodes,
 		Events:        view.Events,
-		Agents:        view.Agents,
+		Agents:        runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
 		Tools:         view.Tools,
 		Policy:        view.Policy,
 	}

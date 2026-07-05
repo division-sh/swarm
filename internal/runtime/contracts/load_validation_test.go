@@ -300,6 +300,64 @@ subscriptions: [scan.requested]
 	}
 }
 
+func TestEffectiveAgentRegistryEntryAppliesLayer1PlatformDefaults(t *testing.T) {
+	var entry AgentRegistryEntry
+	err := yaml.Unmarshal([]byte(`
+role: researcher
+model: regular
+subscriptions: [scan.requested]
+`), &entry)
+	if err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	effective := EffectiveAgentRegistryEntry("researcher", entry)
+	if effective.Type != DefaultAgentType {
+		t.Fatalf("type = %q, want %q", effective.Type, DefaultAgentType)
+	}
+	if effective.Mode != DefaultAgentMode || effective.ConversationMode != DefaultAgentMode || effective.SessionScope != "" {
+		t.Fatalf("mode/conversation/session = (%q, %q, %q), want task/task/empty", effective.Mode, effective.ConversationMode, effective.SessionScope)
+	}
+	if effective.MaxTurnsPerTask != DefaultAgentMaxTurnsPerTask {
+		t.Fatalf("max_turns_per_task = %d, want %d", effective.MaxTurnsPerTask, DefaultAgentMaxTurnsPerTask)
+	}
+	if effective.WorkspaceClass != "" {
+		t.Fatalf("workspace_class = %q, want empty", effective.WorkspaceClass)
+	}
+	for _, field := range []string{"type", "mode", "max_turns_per_task", "workspace_class"} {
+		if got := effective.EffectiveSourceForField(field); got != AgentFieldSourcePlatformDefault {
+			t.Fatalf("%s source = %q, want %q", field, got, AgentFieldSourcePlatformDefault)
+		}
+	}
+	if got := effective.EffectiveSourceForField("model"); got != AgentFieldSourceAuthored {
+		t.Fatalf("model source = %q, want %q", got, AgentFieldSourceAuthored)
+	}
+}
+
+func TestAgentRegistryEntryRejectsExplicitInvalidLayer1Values(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		contains string
+	}{
+		{name: "empty_mode", body: "mode:\n", contains: "mode is required"},
+		{name: "zero_max_turns", body: "max_turns_per_task: 0\n", contains: "max_turns_per_task must be positive"},
+		{name: "negative_max_turns", body: "max_turns_per_task: -1\n", contains: "max_turns_per_task must be positive"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry AgentRegistryEntry
+			err := yaml.Unmarshal([]byte(`
+role: researcher
+model: regular
+subscriptions: [scan.requested]
+`+tt.body), &entry)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
+			}
+		})
+	}
+}
+
 func TestAgentRegistryEntryRejectsRetiredMemoryModeFieldsAndAliases(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -327,6 +385,48 @@ subscriptions: [scan.requested]
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
 			}
 		})
+	}
+}
+
+func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		contains string
+	}{
+		{name: "profile", body: "profile: cheap\n", contains: "reserved for a later #1685/#1703 gate"},
+		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "reserved for a later #1685/#1703 gate"},
+		{name: "unknown", body: "surprise_field: true\n", contains: "UNDEFINED-FIELD"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry AgentRegistryEntry
+			err := yaml.Unmarshal([]byte(`
+role: researcher
+model: regular
+subscriptions: [scan.requested]
+`+tt.body), &entry)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
+			}
+		})
+	}
+}
+
+func TestLoadWorkflowContractBundleRejectsLayer2AgentDefaultsBlock(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	root := t.TempDir()
+	writeFieldReconciliationBundle(t, root, "", "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+agent_defaults:
+  model: regular
+worker:
+  model: regular
+  subscriptions: [work.requested]
+`)
+	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err == nil || !strings.Contains(err.Error(), "agent_defaults") || !strings.Contains(err.Error(), "Layer 1 platform defaults") {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want agent_defaults Layer 1 rejection", err)
 	}
 }
 

@@ -1829,3 +1829,111 @@ func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {
 		t.Fatalf("native_tools = %#v, want bash/file_io true", cfg.NativeTools)
 	}
 }
+
+func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t *testing.T) {
+	source := loadAgentPlatformDefaultsMaterializationSource(t)
+
+	staticScope, ok := source.FlowScopeByID("static_support")
+	if !ok {
+		t.Fatal("static_support flow scope missing")
+	}
+	staticEntry := staticScope.Agents["worker"]
+	staticCfg, err := buildStaticFlowAgentConfig(source, "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSet(staticScope.Agents))
+	if err != nil {
+		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
+	}
+	assertMaterializedAgentPlatformDefaults(t, staticCfg)
+
+	templateScope, ok := source.FlowScopeByID("template_support")
+	if !ok {
+		t.Fatal("template_support flow scope missing")
+	}
+	templateEntry := templateScope.Agents["worker"]
+	templateCfg, err := buildFlowAgentConfig(
+		source,
+		"template_support",
+		"inst-1",
+		"entity-1",
+		"template_support/inst-1",
+		"worker",
+		templateEntry,
+		map[string]string{"instance_id": "inst-1"},
+		staticFlowLocalEventSet(templateScope.Agents),
+		map[string]any{},
+	)
+	if err != nil {
+		t.Fatalf("buildFlowAgentConfig: %v", err)
+	}
+	assertMaterializedAgentPlatformDefaults(t, templateCfg)
+}
+
+func assertMaterializedAgentPlatformDefaults(t *testing.T, cfg models.AgentConfig) {
+	t.Helper()
+	if cfg.Type != runtimecontracts.DefaultAgentType {
+		t.Fatalf("Type = %q, want %q", cfg.Type, runtimecontracts.DefaultAgentType)
+	}
+	if cfg.ConversationMode != runtimecontracts.DefaultAgentMode {
+		t.Fatalf("ConversationMode = %q, want %q", cfg.ConversationMode, runtimecontracts.DefaultAgentMode)
+	}
+	if cfg.SessionScope != "" {
+		t.Fatalf("SessionScope = %q, want empty for task default", cfg.SessionScope)
+	}
+	if cfg.MaxTurnsPerTask != runtimecontracts.DefaultAgentMaxTurnsPerTask {
+		t.Fatalf("MaxTurnsPerTask = %d, want %d", cfg.MaxTurnsPerTask, runtimecontracts.DefaultAgentMaxTurnsPerTask)
+	}
+	if cfg.WorkspaceClass != "" {
+		t.Fatalf("WorkspaceClass = %q, want empty default", cfg.WorkspaceClass)
+	}
+}
+
+func loadAgentPlatformDefaultsMaterializationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	root := t.TempDir()
+
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: agent-defaults-materialization
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: static_support
+    flow: static_support
+    mode: static
+  - id: template_support
+    flow: template_support
+    mode: template
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-defaults-materialization\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	for _, flowID := range []string{"static_support", "template_support"} {
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "tools.yaml"), "{}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), flowID+".requested:\n  entity_id: string\n")
+	}
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "static_support", "agents.yaml"), `
+worker:
+  model: regular
+  subscriptions:
+    - static_support.requested
+  emit_events: []
+`)
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "template_support", "agents.yaml"), `
+worker:
+  id: worker-{instance_id}
+  model: regular
+  subscriptions:
+    - template_support.requested
+  emit_events: []
+`)
+
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}

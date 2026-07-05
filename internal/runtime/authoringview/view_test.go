@@ -162,6 +162,80 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 	}
 }
 
+func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
+	flow := runtimecontracts.FlowContractView{
+		Path: "analysis",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:         "analysis",
+			SchemaFile: "flows/analysis/schema.yaml",
+			AgentsFile: "flows/analysis/agents.yaml",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{Name: "analysis"},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"analyzer": {
+				Model:         "regular",
+				Subscriptions: []string{"analysis.requested"},
+			},
+		},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{
+			RootSchemaFile:    "schema.yaml",
+			ProjectAgentsFile: "agents.yaml",
+		},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"root-agent": {
+				Model:         "regular",
+				Subscriptions: []string{"root.requested"},
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"analysis": flow.Schema,
+		},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{flow},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"analysis": &flow,
+			},
+		},
+	}
+
+	view := mustBuild(t, semanticview.Wrap(bundle), nil)
+
+	rootAgent := agentByID(t, view.Root.Agents, "root-agent")
+	assertDefaultedAgentField(t, rootAgent, "type", runtimecontracts.DefaultAgentType)
+	assertDefaultedAgentField(t, rootAgent, "mode", runtimecontracts.DefaultAgentMode)
+	assertDefaultedAgentField(t, rootAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
+	assertDefaultedAgentField(t, rootAgent, "workspace_class", "")
+	if got := rootAgent.Fields["model"].Source; got != runtimecontracts.AgentFieldSourceAuthored {
+		t.Fatalf("root-agent model source = %q, want authored", got)
+	}
+
+	analysis := flowByID(t, view, "analysis")
+	flowAgent := agentByID(t, analysis.Agents, "analyzer")
+	assertDefaultedAgentField(t, flowAgent, "type", runtimecontracts.DefaultAgentType)
+	assertDefaultedAgentField(t, flowAgent, "mode", runtimecontracts.DefaultAgentMode)
+	assertDefaultedAgentField(t, flowAgent, "max_turns_per_task", runtimecontracts.DefaultAgentMaxTurnsPerTask)
+	assertDefaultedAgentField(t, flowAgent, "workspace_class", "")
+}
+
+func assertDefaultedAgentField(t testing.TB, agent AgentView, field string, want any) {
+	t.Helper()
+	got, ok := agent.Fields[field]
+	if !ok {
+		t.Fatalf("agent %s field %s missing in %#v", agent.ID, field, agent.Fields)
+	}
+	if got.Value != want {
+		t.Fatalf("agent %s field %s value = %#v, want %#v", agent.ID, field, got.Value, want)
+	}
+	if got.Source != runtimecontracts.AgentFieldSourcePlatformDefault {
+		t.Fatalf("agent %s field %s source = %q, want %q", agent.ID, field, got.Source, runtimecontracts.AgentFieldSourcePlatformDefault)
+	}
+}
+
 func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{BadConnectMapping: true})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
@@ -323,6 +397,17 @@ func outputPinByName(t testing.TB, flow FlowView, name string) OutputPinView {
 	}
 	t.Fatalf("output pin %q not found in %#v", name, flow.OutputPins)
 	return OutputPinView{}
+}
+
+func agentByID(t testing.TB, agents []AgentView, id string) AgentView {
+	t.Helper()
+	for _, agent := range agents {
+		if agent.ID == id {
+			return agent
+		}
+	}
+	t.Fatalf("agent %q not found in %#v", id, agents)
+	return AgentView{}
 }
 
 func diagnosticByCheckID(t testing.TB, view View, checkID string) DiagnosticView {

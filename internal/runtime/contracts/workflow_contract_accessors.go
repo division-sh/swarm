@@ -174,7 +174,7 @@ func (b *WorkflowContractBundle) AgentEntries() map[string]AgentRegistryEntry {
 	if b == nil {
 		return nil
 	}
-	return cloneAgentRegistryEntryMap(b.Agents)
+	return EffectiveAgentRegistryEntries(b.Agents)
 }
 func (b *WorkflowContractBundle) AgentEntry(id string) (AgentRegistryEntry, bool) {
 	id = strings.TrimSpace(id)
@@ -182,7 +182,10 @@ func (b *WorkflowContractBundle) AgentEntry(id string) (AgentRegistryEntry, bool
 		return AgentRegistryEntry{}, false
 	}
 	entry, ok := b.Agents[id]
-	return entry, ok
+	if !ok {
+		return AgentRegistryEntry{}, false
+	}
+	return EffectiveAgentRegistryEntry(id, entry), true
 }
 func (b *WorkflowContractBundle) HasAgent(id string) bool {
 	_, ok := b.AgentEntry(id)
@@ -661,15 +664,15 @@ func (b *WorkflowContractBundle) rootRequiredAgentScope() (map[string]AgentRegis
 	}
 	for _, view := range b.ProjectViews() {
 		if strings.TrimSpace(view.Paths.ParentKey) == "" && view.Paths.Depth == 0 {
-			return cloneAgentRegistryEntryMap(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
+			return EffectiveAgentRegistryEntries(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
 		}
 	}
 	for _, view := range b.ProjectViews() {
 		if strings.TrimSpace(view.Paths.ParentKey) == "" {
-			return cloneAgentRegistryEntryMap(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
+			return EffectiveAgentRegistryEntries(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
 		}
 	}
-	return cloneAgentRegistryEntryMap(b.Agents), strings.TrimSpace(b.Paths.ProjectAgentsFile)
+	return EffectiveAgentRegistryEntries(b.Agents), strings.TrimSpace(b.Paths.ProjectAgentsFile)
 }
 func (b *WorkflowContractBundle) flowRequiredAgentScope(flowID string) (map[string]AgentRegistryEntry, string) {
 	flowID = strings.TrimSpace(flowID)
@@ -677,7 +680,7 @@ func (b *WorkflowContractBundle) flowRequiredAgentScope(flowID string) (map[stri
 		return nil, ""
 	}
 	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
-		return cloneAgentRegistryEntryMap(view.Agents), strings.TrimSpace(view.Paths.AgentsFile)
+		return EffectiveAgentRegistryEntries(view.Agents), strings.TrimSpace(view.Paths.AgentsFile)
 	}
 	return nil, ""
 }
@@ -821,7 +824,7 @@ func (b *WorkflowContractBundle) ScopedAgentEntries() map[string]AgentRegistryEn
 	if b == nil {
 		return nil
 	}
-	return cloneAgentRegistryEntryMap(b.scopedAgents)
+	return EffectiveAgentRegistryEntries(b.scopedAgents)
 }
 func (b *WorkflowContractBundle) ScopedEventEntries() map[string]EventCatalogEntry {
 	if b == nil {

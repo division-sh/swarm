@@ -1376,28 +1376,24 @@ type AgentRegistryEntry struct {
 	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
 	EmitEvents             []string                        `yaml:"emit_events"`
 	Implementation         string                          `yaml:"implementation"`
+	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`
+	EffectiveFieldSources  map[string]string               `yaml:"-" json:"-"`
 }
 
 type agentRegistryEntryYAML AgentRegistryEntry
 
 func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
-	if value != nil && value.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(value.Content); i += 2 {
-			switch strings.TrimSpace(value.Content[i].Value) {
-			case "model_tier":
-				return fmt.Errorf("RETIRED: agent field model_tier is retired; use model")
-			case "conversation_mode":
-				return fmt.Errorf("RETIRED: agent field conversation_mode is retired; use mode")
-			case "session_scope":
-				return fmt.Errorf("RETIRED: agent field session_scope is runtime-derived from mode")
-			case "session_scope_authority":
-				return fmt.Errorf("RETIRED: agent field session_scope_authority is platform-internal runtime state")
-			case "tools_tier2":
-				return fmt.Errorf("RETIRED: agent field tools_tier2 is retired; use tools")
-			case "subscriptions_bootstrap":
-				return fmt.Errorf("RETIRED: agent field subscriptions_bootstrap is retired; use subscriptions")
-			case "subscribes_to":
-				return fmt.Errorf("RETIRED: agent field subscribes_to is retired for agents.yaml; use subscriptions")
+	authoredFields, err := validateAgentRegistryEntryYAMLFields(value)
+	if err != nil {
+		return err
+	}
+	if authoredFields["max_turns_per_task"] {
+		for i := 0; value != nil && value.Kind == yaml.MappingNode && i+1 < len(value.Content); i += 2 {
+			if strings.TrimSpace(value.Content[i].Value) != "max_turns_per_task" {
+				continue
+			}
+			if strings.TrimSpace(value.Content[i+1].Value) == "" {
+				return fmt.Errorf("agent field max_turns_per_task must be positive when authored")
 			}
 		}
 	}
@@ -1405,15 +1401,66 @@ func (e *AgentRegistryEntry) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode(&decoded); err != nil {
 		return err
 	}
-	mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(decoded.Mode)
-	if err != nil {
-		return fmt.Errorf("agent field mode: %w", err)
+	if authoredFields["max_turns_per_task"] && decoded.MaxTurnsPerTask <= 0 {
+		return fmt.Errorf("agent field max_turns_per_task must be positive when authored")
 	}
-	decoded.Mode = mode.String()
-	decoded.ConversationMode = mode.String()
-	decoded.SessionScope = scope.String()
+	if authoredFields["mode"] {
+		mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(decoded.Mode)
+		if err != nil {
+			return fmt.Errorf("agent field mode: %w", err)
+		}
+		decoded.Mode = mode.String()
+		decoded.ConversationMode = mode.String()
+		decoded.SessionScope = scope.String()
+	}
 	*e = AgentRegistryEntry(decoded)
+	e.AuthoredFields = authoredFields
 	return nil
+}
+
+func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, error) {
+	authoredFields := map[string]bool{}
+	if value != nil && value.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			field := strings.TrimSpace(value.Content[i].Value)
+			authoredFields[field] = true
+			switch field {
+			case "model_tier":
+				return nil, fmt.Errorf("RETIRED: agent field model_tier is retired; use model")
+			case "conversation_mode":
+				return nil, fmt.Errorf("RETIRED: agent field conversation_mode is retired; use mode")
+			case "session_scope":
+				return nil, fmt.Errorf("RETIRED: agent field session_scope is runtime-derived from mode")
+			case "session_scope_authority":
+				return nil, fmt.Errorf("RETIRED: agent field session_scope_authority is platform-internal runtime state")
+			case "tools_tier2":
+				return nil, fmt.Errorf("RETIRED: agent field tools_tier2 is retired; use tools")
+			case "subscriptions_bootstrap":
+				return nil, fmt.Errorf("RETIRED: agent field subscriptions_bootstrap is retired; use subscriptions")
+			case "subscribes_to":
+				return nil, fmt.Errorf("RETIRED: agent field subscribes_to is retired for agents.yaml; use subscriptions")
+			case "profile", "agent_defaults", "agent_profiles", "runtime_id_template":
+				return nil, fmt.Errorf("UNSUPPORTED: agent field %s is reserved for a later #1685/#1703 gate and is not accepted by Layer 1 platform defaults", field)
+			default:
+				if !supportedAgentRegistryEntryField(field) {
+					return nil, fmt.Errorf("UNDEFINED-FIELD: agent field %s is not supported", field)
+				}
+			}
+		}
+	}
+	return authoredFields, nil
+}
+
+func supportedAgentRegistryEntryField(field string) bool {
+	switch strings.TrimSpace(field) {
+	case "id", "type", "role", "prompt_ref", "entity_writes",
+		"permissions", "permissions_bundle", "workspace_class", "manager_fallback",
+		"node_type", "model", "mode", "max_turns_per_task", "subscriptions",
+		"tools", "native_tools", "flow_data_access", "emit_events", "implementation":
+		return true
+	default:
+		return false
+	}
 }
 
 func (e AgentRegistryEntry) ConfiguredTools() []string {
