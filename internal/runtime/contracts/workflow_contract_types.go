@@ -151,6 +151,7 @@ type HandlerRuleEntry struct {
 	ID               string                   `yaml:"id"`
 	Description      string                   `yaml:"description"`
 	Condition        string                   `yaml:"condition"`
+	PolicyRow        PolicySheetRowMetadata   `yaml:"-"`
 	AdvancesTo       string                   `yaml:"advances_to"`
 	Emit             EmitSpec                 `yaml:"emit"`
 	Action           ActionSpec               `yaml:"action"`
@@ -158,6 +159,31 @@ type HandlerRuleEntry struct {
 	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
 	Compute          *ComputeSpec             `yaml:"compute"`
 	FanOut           *FanOutSpec              `yaml:"fan_out"`
+}
+
+type PolicySheetRowKind string
+
+const (
+	PolicySheetRowKindWhen    PolicySheetRowKind = "when"
+	PolicySheetRowKindCase    PolicySheetRowKind = "case"
+	PolicySheetRowKindRange   PolicySheetRowKind = "range"
+	PolicySheetRowKindDefault PolicySheetRowKind = "default"
+)
+
+type PolicySheetRowMetadata struct {
+	Kind         PolicySheetRowKind
+	Selectors    []string
+	CaseValues   []string
+	RangeValue   string
+	RangeLower   PolicySheetRangeBound
+	RangeUpper   PolicySheetRangeBound
+	Monotonicity []string
+}
+
+type PolicySheetRangeBound struct {
+	Operator string
+	Value    string
+	Kind     string
 }
 
 type ActivityEffectClass string

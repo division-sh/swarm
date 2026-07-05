@@ -1254,14 +1254,21 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 				return nil, err
 			}
 		}
+		if err := validatePolicySheetRows(rules, context); err != nil {
+			return nil, err
+		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
+		if hasAnyYAMLMappingKey(node, "condition", "when", "case", "range", "else", "default", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
 			rule, err := decodeHandlerRuleEntryNode(node, context)
 			if err != nil || rule == nil {
 				return nil, err
 			}
-			return []HandlerRuleEntry{*rule}, nil
+			rules := []HandlerRuleEntry{*rule}
+			if err := validatePolicySheetRows(rules, context); err != nil {
+				return nil, err
+			}
+			return rules, nil
 		}
 		rules := make([]HandlerRuleEntry, 0, len(node.Content)/2)
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -1280,6 +1287,9 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 				rule.ID = id
 			}
 			rules = append(rules, rule)
+		}
+		if err := validatePolicySheetRows(rules, context); err != nil {
+			return nil, err
 		}
 		return rules, nil
 	default:

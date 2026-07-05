@@ -21,6 +21,9 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*r = HandlerRuleEntry(aux)
+	if err := lowerPolicySheetRuleNode(node, r); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -32,6 +35,11 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		"id":                {},
 		"description":       {},
 		"condition":         {},
+		"when":              {},
+		"case":              {},
+		"range":             {},
+		"else":              {},
+		"default":           {},
 		"advances_to":       {},
 		"emit":              {},
 		"action":            {},
@@ -50,6 +58,12 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 			return fmt.Errorf("RETIRED: rule field %q is retired; use emit: <event> or emit: {event, fields}", key)
 		case "payload_transform":
 			return fmt.Errorf("RETIRED: rule field %q is retired; move payload ownership into rule-local emit.fields", key)
+		case "switch", "lookup", "threshold":
+			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is not a standalone row type; use rules when/case/range selection rows or split value lookup to compute", key)
+		case "policy":
+			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q would create a second policy-sheet authoring owner; enhance rules in place", key)
+		case "temporal", "join", "loop", "collection", "schedule", "validate":
+			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is outside the #1713 selection-row scope", key)
 		}
 		if _, ok := allowed[key]; !ok {
 			return fmt.Errorf("UNDEFINED-FIELD: rule field %q not in platform spec", key)

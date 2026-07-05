@@ -18,6 +18,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"gopkg.in/yaml.v3"
 )
 
 func stubSource() semanticview.Source {
@@ -2086,6 +2087,53 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	}
 	if result.NextState != "approved" {
 		t.Fatalf("NextState = %q", result.NextState)
+	}
+}
+
+func TestExecutor_PolicySheetRowsExecuteThroughRules(t *testing.T) {
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  - id: deep_scan
+    case:
+      selector: payload.mode
+      equals: deep
+    advances_to: deep_scan
+  - id: fallback
+    default: true
+    advances_to: fallback
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  stubStateRepo{},
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{
+		`payload.mode == "deep"`: true,
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    eventtest.RootIngress("evt-1", "scan.requested", "", "", json.RawMessage(`{"mode":"deep"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler:  handler,
+		State:    testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.RuleID; got != "deep_scan" {
+		t.Fatalf("RuleID = %q, want deep_scan", got)
+	}
+	if got := result.NextState; got != "deep_scan" {
+		t.Fatalf("NextState = %q, want deep_scan", got)
 	}
 }
 
