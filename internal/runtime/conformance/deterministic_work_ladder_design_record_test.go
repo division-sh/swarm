@@ -71,21 +71,26 @@ type deterministicWorkLadderLockedBoundary struct {
 }
 
 type deterministicWorkLadderDesignRepair struct {
-	ID                                    string   `yaml:"id"`
-	OwnerIssue                            int      `yaml:"owner_issue"`
-	Decision                              string   `yaml:"decision"`
-	HiddenRuntimeSurfaceAllowed           bool     `yaml:"hidden_runtime_surface_allowed"`
-	RequiredSurfaces                      []string `yaml:"required_surfaces"`
-	SelectedName                          string   `yaml:"selected_name"`
-	ExistingComputeOwner                  string   `yaml:"existing_compute_owner"`
-	ExistingComputePreserved              bool     `yaml:"existing_compute_preserved"`
-	ForbiddenOverloads                    []string `yaml:"forbidden_overloads"`
-	ProseOnlyPlacementAllowed             bool     `yaml:"prose_only_placement_allowed"`
-	MCPSelfClassificationAuthoritative    bool     `yaml:"mcp_self_classification_authoritative"`
-	DefaultWithoutAuthoredClassification  string   `yaml:"default_without_authored_classification"`
-	CurrentActionSurvivesUntilDisposition bool     `yaml:"current_action_survives_until_disposition"`
-	EvidenceOwner                         string   `yaml:"evidence_owner"`
-	Note                                  string   `yaml:"note"`
+	ID                                   string   `yaml:"id"`
+	OwnerIssue                           int      `yaml:"owner_issue"`
+	Decision                             string   `yaml:"decision"`
+	HiddenRuntimeSurfaceAllowed          bool     `yaml:"hidden_runtime_surface_allowed"`
+	RequiredSurfaces                     []string `yaml:"required_surfaces"`
+	SelectedName                         string   `yaml:"selected_name"`
+	ExistingComputeOwner                 string   `yaml:"existing_compute_owner"`
+	ExistingComputePreserved             bool     `yaml:"existing_compute_preserved"`
+	ForbiddenOverloads                   []string `yaml:"forbidden_overloads"`
+	ProseOnlyPlacementAllowed            bool     `yaml:"prose_only_placement_allowed"`
+	MCPSelfClassificationAuthoritative   bool     `yaml:"mcp_self_classification_authoritative"`
+	DefaultWithoutAuthoredClassification string   `yaml:"default_without_authored_classification"`
+	CanonicalOwner                       string   `yaml:"canonical_owner"`
+	CurrentDisposition                   string   `yaml:"current_disposition"`
+	ActivityOwnerStatus                  string   `yaml:"activity_owner_status"`
+	MigrationBlocker                     string   `yaml:"migration_blocker"`
+	FutureMigrationCondition             string   `yaml:"future_migration_condition"`
+	CurrentActionSurvivesUntilMigration  bool     `yaml:"current_action_survives_until_migration"`
+	EvidenceOwner                        string   `yaml:"evidence_owner"`
+	Note                                 string   `yaml:"note"`
 }
 
 type deterministicWorkLadderLaunchLanguage struct {
@@ -263,6 +268,75 @@ func TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims(t *testi
 				t.Fatalf("validation problems missing %q:\n- %s", tc.want, strings.Join(problems, "\n- "))
 			}
 		})
+	}
+}
+
+func TestDeterministicWorkLadderArtifactRepoDispositionPromotedToPlatformSpec(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+	artifact := yamlMapAt(t, spec,
+		"handler_specification",
+		"handler_fields",
+		"action",
+		"valid_values",
+		"artifact_repo_commit",
+	)
+	disposition := yamlMapValue(t, artifact, "durable_activity_disposition")
+	for field, wants := range map[string][]string{
+		"current_owner": {
+			"canonical platform owner",
+			"action.id: artifact_repo_commit",
+			"not an alternate",
+		},
+		"activity_non_owner_paths": {
+			"platform_builtin",
+			"MCP",
+			"native/generated",
+			"shell",
+			"HTTP-tool activity",
+			"fail closed",
+		},
+		"migration_blocker": {
+			"read_only authored HTTP",
+			"idempotent_write",
+			"non_idempotent_write",
+			"stable activity attempt/result journal",
+			"idempotency execution owner",
+		},
+		"future_migration_condition": {
+			"separately gated migration",
+			"provider/root/path allowlist",
+			"provider request history",
+			"output-state repair",
+			"success/failure result-event guarantees",
+		},
+	} {
+		got := yamlStringValue(t, disposition, field)
+		for _, want := range wants {
+			if !strings.Contains(got, want) {
+				t.Fatalf("platform spec artifact_repo_commit durable_activity_disposition.%s missing %q in:\n%s", field, want, got)
+			}
+		}
+	}
+
+	platformBuiltin := yamlStringAt(t, spec,
+		"handler_specification",
+		"handler_fields",
+		"activity",
+		"supported_tool_sources",
+		"platform_builtin",
+	)
+	for _, want := range []string{"Not callable from activity", "artifact_repo_commit", "action-owned", "write-effect activity migration"} {
+		if !strings.Contains(platformBuiltin, want) {
+			t.Fatalf("platform spec activity.supported_tool_sources.platform_builtin missing %q in:\n%s", want, platformBuiltin)
+		}
 	}
 }
 
@@ -517,8 +591,28 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 	if artifactDisposition.OwnerIssue != 1667 {
 		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition owner_issue = %d, want 1667", artifactDisposition.OwnerIssue))
 	}
-	if !artifactDisposition.CurrentActionSurvivesUntilDisposition {
-		problems = append(problems, "repair artifact_repo_commit_disposition current_action_survives_until_disposition = false, want true")
+	if artifactDisposition.Decision != "canonical_action_owner_until_write_activity_journal" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition decision = %q, want canonical_action_owner_until_write_activity_journal", artifactDisposition.Decision))
+	}
+	if artifactDisposition.CanonicalOwner != "platform-spec.yaml#handler_specification.handler_fields.action.artifact_repo_commit" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition canonical_owner = %q, want platform-spec.yaml#handler_specification.handler_fields.action.artifact_repo_commit", artifactDisposition.CanonicalOwner))
+	}
+	if artifactDisposition.CurrentDisposition != "canonical_platform_action_owner" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition current_disposition = %q, want canonical_platform_action_owner", artifactDisposition.CurrentDisposition))
+	}
+	if artifactDisposition.ActivityOwnerStatus != "non_owner_for_artifact_commits" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition activity_owner_status = %q, want non_owner_for_artifact_commits", artifactDisposition.ActivityOwnerStatus))
+	}
+	if artifactDisposition.MigrationBlocker != "stable_activity_attempt_result_journal_and_idempotency_execution_owner" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition migration_blocker = %q, want stable_activity_attempt_result_journal_and_idempotency_execution_owner", artifactDisposition.MigrationBlocker))
+	}
+	for _, want := range []string{"separately gated", "artifact root/path safety", "provider request history", "output-state repair", "result-event guarantees"} {
+		if !strings.Contains(artifactDisposition.FutureMigrationCondition, want) {
+			problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition future_migration_condition missing %q", want))
+		}
+	}
+	if !artifactDisposition.CurrentActionSurvivesUntilMigration {
+		problems = append(problems, "repair artifact_repo_commit_disposition current_action_survives_until_migration = false, want true")
 	}
 
 	stageOrder := byID["stage_order_after_activity"]
@@ -657,6 +751,9 @@ func validateDeterministicWorkLadderManifestationCoverage(coverage []determinist
 			problems = append(problems, fmt.Sprintf("manifestation_coverage missing %s", id))
 		}
 	}
+	if artifactSilence, ok := byID["artifact_repo_commit_silence"]; ok && artifactSilence.Status != "closed_by_child_issue" {
+		problems = append(problems, fmt.Sprintf("manifestation artifact_repo_commit_silence status = %q, want closed_by_child_issue", artifactSilence.Status))
+	}
 	return problems
 }
 
@@ -701,6 +798,50 @@ func deterministicWorkLadderManifestationByID(t *testing.T, record *deterministi
 	}
 	t.Fatalf("manifestation %s not found", id)
 	return deterministicWorkLadderDesignManifestation{}
+}
+
+func yamlMapAt(t *testing.T, root map[string]any, path ...string) map[string]any {
+	t.Helper()
+	current := root
+	for _, key := range path {
+		current = yamlMapValue(t, current, key)
+	}
+	return current
+}
+
+func yamlStringAt(t *testing.T, root map[string]any, path ...string) string {
+	t.Helper()
+	if len(path) == 0 {
+		t.Fatal("empty yaml string path")
+	}
+	parent := yamlMapAt(t, root, path[:len(path)-1]...)
+	return yamlStringValue(t, parent, path[len(path)-1])
+}
+
+func yamlMapValue(t *testing.T, parent map[string]any, key string) map[string]any {
+	t.Helper()
+	raw, ok := parent[key]
+	if !ok {
+		t.Fatalf("yaml map missing key %s", key)
+	}
+	value, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("yaml key %s type = %T, want map[string]any", key, raw)
+	}
+	return value
+}
+
+func yamlStringValue(t *testing.T, parent map[string]any, key string) string {
+	t.Helper()
+	raw, ok := parent[key]
+	if !ok {
+		t.Fatalf("yaml map missing key %s", key)
+	}
+	value, ok := raw.(string)
+	if !ok {
+		t.Fatalf("yaml key %s type = %T, want string", key, raw)
+	}
+	return value
 }
 
 func deterministicWorkLadderStringsExcept(values []string, remove string) []string {
