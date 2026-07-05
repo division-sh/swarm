@@ -48,6 +48,7 @@ type deterministicWorkLadderDesignSourceRefs struct {
 	Stage0Artifact         string   `yaml:"stage0_artifact"`
 	LockedDesignDiscussion string   `yaml:"locked_design_discussion"`
 	DiscussionAmendment    string   `yaml:"discussion_amendment"`
+	AuthoringUXDiscussion  string   `yaml:"authoring_ux_discussion"`
 	AdjacentContext        []string `yaml:"adjacent_context"`
 }
 
@@ -186,6 +187,14 @@ func TestDeterministicWorkLadderDesignRecordRejectsStaleOrRuntimeClaims(t *testi
 				repair.Decision = "orchestration_decides_later"
 			},
 			want: "repair effect_class_fork_policy_defaults decision = \"orchestration_decides_later\", want default_fork_policy_must_be_specified_with_effect_classes",
+		},
+		{
+			name: "policy sheet row model split into standalone keywords",
+			mutate: func(record *deterministicWorkLadderDesignRecord) {
+				repair := deterministicWorkLadderDesignRepairByID(t, record, "policy_sheet_row_model")
+				repair.Decision = "standalone_switch_lookup_threshold_keywords"
+			},
+			want: "repair policy_sheet_row_model decision = \"standalone_switch_lookup_threshold_keywords\", want first_selection_helpers_are_policy_sheet_row_types",
 		},
 		{
 			name: "duplicate repair id",
@@ -424,6 +433,9 @@ func validateDeterministicWorkLadderDesignRefs(refs deterministicWorkLadderDesig
 	if !strings.Contains(refs.DiscussionAmendment, "github.com/division-sh/swarm/discussions/1460#discussioncomment-") {
 		problems = append(problems, "source_refs discussion_amendment missing #1460 discussion comment URL")
 	}
+	if refs.AuthoringUXDiscussion != "https://github.com/division-sh/swarm/discussions/1711" {
+		problems = append(problems, fmt.Sprintf("source_refs authoring_ux_discussion = %q, want https://github.com/division-sh/swarm/discussions/1711", refs.AuthoringUXDiscussion))
+	}
 	for _, ref := range []string{refs.Issue, refs.PreAuditComment, refs.GateComment, refs.ParentTracker, refs.LockedDesignDiscussion} {
 		if strings.TrimSpace(ref) == "" {
 			problems = append(problems, "source_refs contains empty required URL")
@@ -623,7 +635,38 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 		problems = append(problems, fmt.Sprintf("repair stage_order_after_activity evidence_owner = %q, want %s", stageOrder.EvidenceOwner, deterministicWorkLadderStage0Path))
 	}
 
-	for _, id := range []string{"activity_result_event_materialization", "compute_name_collision", "activity_graph_placement", "tool_effect_class_authority", "activity_minimal_authoring_form", "effect_class_fork_policy_defaults", "artifact_repo_commit_disposition", "stage_order_after_activity"} {
+	policySheet := byID["policy_sheet_row_model"]
+	if policySheet.OwnerIssue != 1668 {
+		problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model owner_issue = %d, want 1668", policySheet.OwnerIssue))
+	}
+	if policySheet.Decision != "first_selection_helpers_are_policy_sheet_row_types" {
+		problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model decision = %q, want first_selection_helpers_are_policy_sheet_row_types", policySheet.Decision))
+	}
+	if policySheet.EvidenceOwner != deterministicWorkLadderStage0Path {
+		problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model evidence_owner = %q, want %s", policySheet.EvidenceOwner, deterministicWorkLadderStage0Path))
+	}
+	for _, forbidden := range []string{"handler_fields.switch", "handler_fields.lookup", "handler_fields.threshold"} {
+		if !stringSet(policySheet.ForbiddenOverloads)[forbidden] {
+			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model forbidden_overloads missing %s", forbidden))
+		}
+	}
+	for _, surface := range []string{"design_record", "future_platform_spec", "authoring_ux"} {
+		if !stringSet(policySheet.RequiredSurfaces)[surface] {
+			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model required_surfaces missing %s", surface))
+		}
+	}
+	for _, want := range []string{"ordered policy-sheet authoring construct", "not standalone handler", "closed and statically verifiable", "rules selected-branch model", "value-derivation rows lower to compute", "not an implementation claim"} {
+		if !strings.Contains(policySheet.Note, want) {
+			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model note missing %q", want))
+		}
+	}
+	for _, want := range []string{"selection rows lower to platform-spec.yaml#handler_specification.handler_fields.rules", "value rows lower to platform-spec.yaml#handler_specification.handler_fields.compute"} {
+		if !strings.Contains(policySheet.CanonicalOwner, want) {
+			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model canonical_owner missing %q", want))
+		}
+	}
+
+	for _, id := range []string{"activity_result_event_materialization", "compute_name_collision", "activity_graph_placement", "tool_effect_class_authority", "activity_minimal_authoring_form", "effect_class_fork_policy_defaults", "artifact_repo_commit_disposition", "stage_order_after_activity", "policy_sheet_row_model"} {
 		if _, ok := byID[id]; !ok {
 			problems = append(problems, fmt.Sprintf("repairs missing %s", id))
 		}
@@ -682,6 +725,9 @@ func validateDeterministicWorkLadderDesignConsumers(consumers []deterministicWor
 	if !containsSubstring(byIssue[1666].Consumes, "activity_minimal_authoring_form") {
 		problems = append(problems, "child_consumers #1666 does not consume activity_minimal_authoring_form")
 	}
+	if !containsSubstring(byIssue[1668].Consumes, "policy_sheet_row_model") {
+		problems = append(problems, "child_consumers #1668 does not consume policy_sheet_row_model")
+	}
 	if !containsSubstring(byIssue[1671].Consumes, "effect_class_fork_policy_defaults") {
 		problems = append(problems, "child_consumers #1671 does not consume effect_class_fork_policy_defaults")
 	}
@@ -705,6 +751,7 @@ func validateDeterministicWorkLadderInvalidatedClaims(claims []string) []string 
 		"launch_language_scope_is_open_ended_multi_language",
 		"design_discussion_or_private_docs_are_runtime_authority",
 		"speculative_platform_spec_notes_are_allowed_without_implementation",
+		"switch_lookup_threshold_are_standalone_handler_keywords",
 	} {
 		if !set[claim] {
 			problems = append(problems, fmt.Sprintf("invalidated_claims missing %s", claim))
@@ -746,6 +793,7 @@ func validateDeterministicWorkLadderManifestationCoverage(coverage []determinist
 		"python_launch_language_decision",
 		"stale_discussion_authority",
 		"speculative_platform_spec_authority",
+		"standalone_helper_keyword_drift",
 	} {
 		if _, ok := byID[id]; !ok {
 			problems = append(problems, fmt.Sprintf("manifestation_coverage missing %s", id))
