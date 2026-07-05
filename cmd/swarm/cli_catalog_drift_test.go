@@ -374,7 +374,11 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	// historical/retirement language. No category-level shapes (field names,
 	// issue references, block types) exempt anything — that is how drift
 	// hides (#1686 re-reviews three, five, and six).
-	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|--dry-run\\|")
+	// Marker vocabulary is built top-down from words that can ONLY describe
+	// closed history — never authority direction. "restore" was removed after
+	// re-review eight: "restores X as planned authority" is the stale claim
+	// itself, and it exempted itself through the marker (drift blessing drift).
+	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|--dry-run\\|")
 
 	root := driftTestRepoRoot(t)
 	skipDirs := map[string]bool{".git": true, "worktrees": true, ".swarm": true, "coverage": true, "data": true}
