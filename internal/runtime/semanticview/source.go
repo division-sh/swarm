@@ -64,8 +64,10 @@ type Source interface {
 	NodeEventHandler(nodeID, eventType string) (runtimecontracts.SystemNodeEventHandler, bool)
 	NodeEntries() map[string]runtimecontracts.SystemNodeContract
 	AgentEntries() map[string]runtimecontracts.AgentRegistryEntry
+	AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool)
 	ToolEntries() map[string]runtimecontracts.ToolSchemaEntry
 	ToolEntryForAgent(agentID, toolID string) (runtimecontracts.ToolSchemaEntry, bool)
+	AuthoredResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry
 }

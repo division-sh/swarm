@@ -201,6 +201,127 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 	}
 }
 
+func TestValidateWorkflowContractSurface_DurableActivityWriteEffectClassesFailClosed(t *testing.T) {
+	for _, effectClass := range []runtimecontracts.ActivityEffectClass{
+		runtimecontracts.ActivityEffectClassIdempotentWrite,
+		runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+	} {
+		t.Run(string(effectClass), func(t *testing.T) {
+			bundle := testRuntimeWorkflowValidationBundle()
+			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+				"source_scrape": {
+					HandlerType: "http",
+					EffectClass: string(effectClass),
+					InputSchema: runtimecontracts.ToolInputSchema{
+						Type: "object",
+					},
+					HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
+				},
+			}
+			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+				"scanner": {
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+						"source.requested": {
+							Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
+						},
+					},
+				},
+			}
+			_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+				CheckMCPReachable:              false,
+				StrictEmitSchemas:              false,
+				FatalToolImplementationWarning: false,
+				FatalBootWarnings:              false,
+			})
+			if err == nil || !strings.Contains(err.Error(), "stable attempt/result journaling and idempotency execution") {
+				t.Fatalf("ValidateWorkflowContractSurface error = %v, want write effect fail-closed", err)
+			}
+		})
+	}
+}
+
+func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectAuthoredCollision(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"scanner_source_requested_source_scrape.succeeded": {
+			Note: "authored event with generated activity result name",
+		},
+	}
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"source_scrape": {
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object",
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "generated activity result event \"scanner_source_requested_source_scrape.succeeded\" collides with authored event") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want authored event collision", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGeneratedCollision(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"source_scrape": {
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object",
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test"},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{
+						ID:   "shared_activity",
+						Tool: "source_scrape",
+					},
+				},
+			},
+		},
+		"reader": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.other_requested": {
+					Activity: runtimecontracts.ActivitySpec{
+						ID:   "/shared_activity/",
+						Tool: "source_scrape",
+					},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "generated activity result event \"shared_activity.succeeded\" collides with generated result event") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want generated event collision", err)
+	}
+}
+
 func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClosed(t *testing.T) {
 	cases := []struct {
 		name        string
