@@ -101,14 +101,6 @@ func rejectUnsupportedNestedActivityContexts(context string, handler runtimecont
 			errs = append(errs, fmt.Errorf("%s.accumulate.on_timeout.activity: durable activity is not supported in accumulator timeout in Stage 1", context))
 		}
 	}
-	for idx, branch := range handler.Branch {
-		if branch.Then != nil && !branch.Then.Activity.Empty() {
-			errs = append(errs, fmt.Errorf("%s.branch[%d].then.activity: durable activity is not supported in branch rules in Stage 1", context, idx))
-		}
-		if branch.Else != nil && !branch.Else.Activity.Empty() {
-			errs = append(errs, fmt.Errorf("%s.branch[%d].else.activity: durable activity is not supported in branch rules in Stage 1", context, idx))
-		}
-	}
 	return errs
 }
 

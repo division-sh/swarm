@@ -988,7 +988,7 @@ contract_formats:
   produces_derivation: >-
     The produces field on system nodes is OPTIONAL. If omitted, the platform derives the effective production surface from
     every supported declarative emit site at boot: handler top-level emit, rule-local emit, rules emit template specialization
-    effective emits, on_complete branch emit, accumulate.on_timeout emit, and fan_out emit. Runtime routing, producer authority,
+    effective emits, selected on_complete emit, accumulate.on_timeout emit, and fan_out emit. Runtime routing, producer authority,
     and transition checks consume this effective production surface, not raw authored produces. If present, produces is an
     explicit authored assertion surface: the verifier checks it matches actual emits, including an explicit empty list, with
     a PRODUCES-DRIFT warning. Authors should omit produces and let the platform derive it.
@@ -1370,7 +1370,7 @@ handler_specification:
       \ data into handler context)\n       └→ clear_gates (optional — reset gates before guard)\n            └→ guard\n            └→ accumulate\n                 └→ filter (optional — prune accumulated\
       \ items)\n                      └→ reduce (optional — aggregate filtered items to single value)\n                  \
       \         └→ count (optional — count items)\n                                └→ compute\n                          \
-      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, or active branch/timeout/fan_out emit)\n                    \
+      \           └→ emit-site selection (handler emit OR active emit set: selected rule emit/template then on_success.emit, selected on_complete/timeout emit, or fan_out emit)\n                    \
       \                      └→ advances_to ─┐\n                                             sets_gate ────┤ (independent\
       \ of each other)\n                                             data_accumulation ┘\n                         \
       \                         └→ projection (materialize_from, if accumulator projection eligible)\n                  \
@@ -1390,7 +1390,8 @@ handler_specification:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
     on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after accumulation/computation.
     rules: Map of {condition, emit/advances_to/data_accumulation} — condition-based routing over the rule
-      condition context. Used for type dispatching without changing branch precedence.
+      condition context. `rules` is the canonical handler-phase branch-selection owner. Retired `handler.branch`
+      syntax is unsupported and must fail closed instead of being interpreted, lowered, or preserved as compatibility syntax.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
     accumulate_incomplete: If accumulation is not yet complete, handler stops after recording the arrival. No further steps
@@ -1752,7 +1753,7 @@ handler_specification:
       field: emit
       type: 'scalar event name OR object: {event, fields, target, broadcast}'
       purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
-        has no nested emit sites. Nested emit sites are branch-local on_complete emit, rules emit, accumulate.on_timeout emit,
+        has no nested emit sites. Nested emit sites are selected on_complete emit, rules emit, accumulate.on_timeout emit,
         and fan_out emit.
       sub_fields:
         event: string — event to emit
@@ -2168,16 +2169,18 @@ handler_specification:
         with_emit: PROHIBITED in Stage 1. Use generated activity result events instead. Immediate authored emit+activity ordering
           is intentionally not defined in this slice.
         with_rules: A top-level handler activity is allowed only when the handler has no rules. In a rules handler, activity
-          must be declared on the selected handler.rules[*] branch. on_complete, accumulator completion/timeout, and branch
-          activity sites are not supported in Stage 1.
+          must be declared on the selected handler.rules[*] branch. on_complete and accumulator completion/timeout activity
+          sites are not supported in Stage 1. Retired `handler.branch` syntax is unsupported for all handler semantics,
+          including activity placement.
       execution_position: After emit.event/action selection point and before clear. The intent is persisted inside the handler
         transaction; tool execution and generated result publication occur after commit and outside the entity lock.
     retired_fields:
-      description: Legacy declarative emit carriers retired by the structured emit grammar.
+      description: Legacy handler fields retired by the structured handler grammar.
       rule: These fields are retired compatibility syntax, not alternate current-contract forms.
       entries:
       - "`emits` — retired; use `emit`"
       - "`payload_transform` — retired; move payload ownership into `emit.fields` at the active emit site"
+      - "`handler.branch` — retired; use `rules` for handler-phase branch selection"
       - "`fan_out.emit_per_item` — retired; use `fan_out.emit`"
       - "`fan_out.emit_mapping` — retired; no direct replacement in the current fan_out model. Use a single `fan_out.emit` and route before or after fan-out if per-item event-name branching is required."
       - "`fan_out.target` — retired; `fan_out.emit` routes through ordinary emit target semantics or, for composed pin-declared outputs, through output pin plus parent connect route authority."
@@ -2318,12 +2321,12 @@ handler_specification:
   - 'filter → reduce: pruned items available before aggregation'
   - 'reduce → count: aggregated result available before counting'
   - 'count → compute: all list processing complete before computation'
-  - 'compute → emit-site selection: computed values written before branch/rule/timeout selection evaluates'
-  - 'emit-site selection → advances_to: the selected rule/branch/timeout advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
-  - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/branch/timeout entries do not declare or override sets_gate'
-  - 'emit-site selection → data_accumulation: selected rule/branch/timeout data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
+  - 'compute → emit-site selection: computed values written before rule/on_complete/timeout selection evaluates'
+  - 'emit-site selection → advances_to: the selected rule/on_complete/timeout advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
+  - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/on_complete/timeout entries do not declare or override sets_gate'
+  - 'emit-site selection → data_accumulation: selected rule/on_complete/timeout data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
   - 'advances_to, sets_gate, data_accumulation: INDEPENDENT — no causal dependency, any order valid'
-  - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected branch writes'
+  - 'data_accumulation → projection: accumulator-to-entity materialize_from writes run after selected rule/on_complete/timeout writes'
   - 'projection → emit.fields: emit payload expressions observe projected entity fields'
   - 'emit.fields → emit.event: output payload constructed before event persisted'
   - 'emit.event → action: events persisted before platform actions execute'
@@ -2376,8 +2379,8 @@ handler_specification:
       advances_to: Handler-level advances_to is the default transition target. A matched rule with a non-empty advances_to
         overrides the handler-level target for that execution only.
       sets_gate: sets_gate is handler-level only in the supported handler/rule vocabulary. Rules, on_complete entries,
-        accumulate.on_timeout entries, and branch entries do not declare or override sets_gate.
-      data_accumulation: Handler-level data_accumulation supplements the selected rule/branch/timeout data_accumulation in
+        and accumulate.on_timeout entries do not declare or override sets_gate.
+      data_accumulation: Handler-level data_accumulation supplements the selected rule/on_complete/timeout data_accumulation in
         the same atomic transaction. Selected entry writes run before handler-level writes. This is additive composition,
         not default/override precedence.
       emit_and_action: Bare emit and action never fall through from a handler into a rules-based multi-emit/action handler.
@@ -5122,7 +5125,7 @@ tool_model:
       search_entities: Query entities by stage, field values, or metadata. Legacy trusted runtime-internal compatibility
         surface; not provider-visible or callable for normal agents.
     handler_actions:
-      description: These are handler/action-branch ACTION field values, not agent-callable tools. They are invoked via the
+      description: These are handler/rules-branch ACTION field values, not agent-callable tools. They are invoked via the
         action field in node handlers without rules or in selected handler.rules branches. The platform ships the handler code.
         They are listed separately from the tool catalog because agents cannot call them directly.
       actions:

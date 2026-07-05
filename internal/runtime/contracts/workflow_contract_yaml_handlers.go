@@ -778,7 +778,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		Reduce               *ReduceSpec              `yaml:"reduce"`
 		Count                *CountSpec               `yaml:"count"`
 		Clear                yaml.Node                `yaml:"clear"`
-		Branch               yaml.Node                `yaml:"branch"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -849,9 +848,6 @@ func (h *SystemNodeEventHandler) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	if h.Clear, err = decodeClearSpecNode(&aux.Clear); err != nil {
-		return err
-	}
-	if h.Branch, err = decodeBranchSpecsNode(&aux.Branch); err != nil {
 		return err
 	}
 	if err := HandlerEmitSiteOwnershipError(*h); err != nil {
@@ -1144,7 +1140,6 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		"instance_id_from":        {},
 		"config_from":             {},
 		"from":                    {},
-		"branch":                  {},
 		"dedup_by":                {},
 	}
 	deprecated := map[string]struct{}{
@@ -1163,6 +1158,8 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 			return fmt.Errorf("DEPRECATED: handler uses deprecated field %q", key)
 		}
 		switch key {
+		case "branch":
+			return fmt.Errorf("RETIRED: handler field %q is retired; use rules for branch selection", key)
 		case "emits":
 			return fmt.Errorf("RETIRED: handler field %q is retired; use emit: <event> or emit: {event, fields}", key)
 		case "payload_transform":
@@ -1522,17 +1519,6 @@ func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
 	}
 	spec.Entries = spec.ConfigEntries()
 	return spec, nil
-}
-
-func decodeBranchSpecsNode(node *yaml.Node) ([]BranchSpec, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, nil
-	}
-	var specs []BranchSpec
-	if err := node.Decode(&specs); err != nil {
-		return nil, err
-	}
-	return specs, nil
 }
 
 func decodeEventEmitterNode(node *yaml.Node) (EventEmitterRef, []string, error) {

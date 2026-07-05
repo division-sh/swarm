@@ -25,19 +25,6 @@ func TestHandlerEmitEventsIncludesArtifactRepoCommitResults(t *testing.T) {
 				},
 			},
 		}},
-		Branch: []BranchSpec{{
-			Then: &HandlerRuleEntry{Emit: EmitSpec{Event: "branch.then.emitted"}},
-			Else: &HandlerRuleEntry{
-				Emit: EmitSpec{Event: "branch.else.emitted"},
-				Action: ActionSpec{
-					ID: "artifact_repo_commit",
-					ArtifactRepo: &ArtifactRepoSpec{
-						SuccessEvent: "artifact_repo.branch_completed",
-						FailureEvent: "artifact_repo.branch_failed",
-					},
-				},
-			},
-		}},
 	}
 
 	got := HandlerEmitEvents(handler)
@@ -48,24 +35,20 @@ func TestHandlerEmitEventsIncludesArtifactRepoCommitResults(t *testing.T) {
 		"rule.emitted",
 		"artifact_repo.rule_completed",
 		"artifact_repo.rule_failed",
-		"branch.then.emitted",
-		"branch.else.emitted",
-		"artifact_repo.branch_completed",
-		"artifact_repo.branch_failed",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("HandlerEmitEvents() = %#v, want %#v", got, want)
 	}
 }
 
-func TestHandlerHasNestedEmitSitesIncludesBranch(t *testing.T) {
+func TestHandlerHasNestedEmitSitesIncludesRules(t *testing.T) {
 	handler := SystemNodeEventHandler{
-		Branch: []BranchSpec{{
-			Then: &HandlerRuleEntry{Emit: EmitSpec{Event: "branch.then.emitted"}},
+		Rules: []HandlerRuleEntry{{
+			Emit: EmitSpec{Event: "rules.then.emitted"},
 		}},
 	}
 	if !HandlerHasNestedEmitSites(handler) {
-		t.Fatal("HandlerHasNestedEmitSites() = false, want true for branch emit sites")
+		t.Fatal("HandlerHasNestedEmitSites() = false, want true for rules emit sites")
 	}
 }
 

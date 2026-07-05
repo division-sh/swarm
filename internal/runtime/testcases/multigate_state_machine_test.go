@@ -30,7 +30,4 @@ func TestGenericBundle_MultigateStateMachinePatterns(t *testing.T) {
 	if !hasAll(deliver.ClearGates, "intake_ready", "score_ready") {
 		t.Fatalf("expected delivery to clear upstream gates, got %v", deliver.ClearGates)
 	}
-	if len(deliver.Branch) != 1 || deliver.Branch[0].Then == nil {
-		t.Fatalf("expected follow-up delivery branch, got %+v", deliver.Branch)
-	}
 }

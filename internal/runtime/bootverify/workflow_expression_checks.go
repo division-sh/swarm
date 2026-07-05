@@ -454,17 +454,6 @@ func handlerEntityExpressions(handler runtimecontracts.SystemNodeEventHandler) [
 			}
 		}
 	}
-	for _, branch := range handler.Branch {
-		if condition := strings.TrimSpace(branch.Condition); condition != "" && !strings.EqualFold(condition, "else") {
-			out = append(out, expressionReference{Kind: "branch condition", Expression: condition, Phase: runtimepipeline.WorkflowEntityFieldLifecycleRule})
-		}
-		if branch.Then != nil {
-			appendRuleExpressions("branch.then", *branch.Then)
-		}
-		if branch.Else != nil {
-			appendRuleExpressions("branch.else", *branch.Else)
-		}
-	}
 	return out
 }
 
@@ -632,14 +621,6 @@ func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) 
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			addRuleWriters(*handler.Accumulate.OnTimeout)
-		}
-	}
-	for _, branch := range handler.Branch {
-		if branch.Then != nil {
-			addRuleWriters(*branch.Then)
-		}
-		if branch.Else != nil {
-			addRuleWriters(*branch.Else)
 		}
 	}
 	return out

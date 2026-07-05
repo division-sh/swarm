@@ -55,9 +55,6 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 			out = append(out, ruleEmitEvents(*handler.Accumulate.OnTimeout)...)
 		}
 	}
-	for _, branch := range handler.Branch {
-		out = append(out, branchEmitEvents(branch)...)
-	}
 	if handler.FanOut != nil {
 		if eventType := handler.FanOut.Emit.EventType(); eventType != "" {
 			out = append(out, eventType)
@@ -111,14 +108,6 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 			if handler.Accumulate.OnTimeout.FanOut != nil {
 				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit)
 			}
-		}
-	}
-	for idx, branch := range handler.Branch {
-		if branch.Then != nil {
-			add("handler.branch.then.emit", indexedHandlerEmitSiteKey("handler.branch", idx, "then.emit"), branch.Then.ID, idx, branch.Then.Emit)
-		}
-		if branch.Else != nil {
-			add("handler.branch.else.emit", indexedHandlerEmitSiteKey("handler.branch", idx, "else.emit"), branch.Else.ID, idx, branch.Else.Emit)
 		}
 	}
 	if handler.FanOut != nil {
@@ -203,17 +192,6 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 	return uniqueOrderedStrings(out)
 }
 
-func branchEmitEvents(branch BranchSpec) []string {
-	out := make([]string, 0, 4)
-	if branch.Then != nil {
-		out = append(out, ruleEmitEvents(*branch.Then)...)
-	}
-	if branch.Else != nil {
-		out = append(out, ruleEmitEvents(*branch.Else)...)
-	}
-	return uniqueOrderedStrings(out)
-}
-
 func actionResultEvents(action ActionSpec) []string {
 	if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
 		return nil
@@ -232,9 +210,6 @@ func HandlerHasNestedEmitSites(handler SystemNodeEventHandler) bool {
 		return true
 	}
 	if len(handler.OnComplete) > 0 {
-		return true
-	}
-	if len(handler.Branch) > 0 {
 		return true
 	}
 	if handler.Accumulate != nil {
@@ -320,9 +295,6 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 	}
 	if handler.FanOut != nil {
 		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is only supported with handler.rules, not fan_out")
-	}
-	if len(handler.Branch) > 0 {
-		return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is only supported with handler.rules, not branch")
 	}
 	if handler.Accumulate != nil {
 		if len(handler.Accumulate.OnComplete) > 0 {
@@ -429,18 +401,6 @@ func rejectEventlessEmitSpecs(handler SystemNodeEventHandler) error {
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			if err := requireRuleEmitEvents("accumulate.on_timeout", 0, *handler.Accumulate.OnTimeout); err != nil {
-				return err
-			}
-		}
-	}
-	for idx, branch := range handler.Branch {
-		if branch.Then != nil {
-			if err := requireRuleEmitEvents("branch.then", idx, *branch.Then); err != nil {
-				return err
-			}
-		}
-		if branch.Else != nil {
-			if err := requireRuleEmitEvents("branch.else", idx, *branch.Else); err != nil {
 				return err
 			}
 		}

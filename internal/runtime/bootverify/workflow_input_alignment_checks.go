@@ -182,14 +182,6 @@ func payloadFieldCoverageSites(source semanticview.Source) []payloadFieldCoverag
 					add(ruleScope("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID)+".data_accumulation", handler.Accumulate.OnTimeout.DataAccumulation)
 				}
 			}
-			for idx, branch := range handler.Branch {
-				if branch.Then != nil {
-					add(ruleScope("handler.branch.then", idx, branch.Then.ID)+".data_accumulation", branch.Then.DataAccumulation)
-				}
-				if branch.Else != nil {
-					add(ruleScope("handler.branch.else", idx, branch.Else.ID)+".data_accumulation", branch.Else.DataAccumulation)
-				}
-			}
 		}
 	}
 	return out

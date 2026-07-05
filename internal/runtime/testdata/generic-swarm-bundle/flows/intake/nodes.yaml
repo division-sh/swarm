@@ -20,16 +20,6 @@ intake-router:
         emit:
           event: item.processed
           broadcast: true
-      branch:
-        - condition: payload.priority == 'urgent'
-          then:
-            emit:
-              event: item.processed
-              broadcast: true
-          else:
-            emit:
-              event: item.processed
-              broadcast: true
     item.processed:
       accumulate:
         expected_from: payload.expected_workers

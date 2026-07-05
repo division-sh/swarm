@@ -146,7 +146,6 @@ type HandlerTransitionSemantic struct {
 	Reduce               *ReduceSpec
 	Count                *CountSpec
 	Clear                *ClearSpec
-	Branch               []BranchSpec
 }
 type HandlerRuleEntry struct {
 	ID               string                   `yaml:"id"`
@@ -400,11 +399,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-type BranchSpec struct {
-	Condition string            `yaml:"condition"`
-	Then      *HandlerRuleEntry `yaml:"then"`
-	Else      *HandlerRuleEntry `yaml:"else"`
-}
 type GateSpec struct {
 	Name  string `yaml:"name"`
 	Value any    `yaml:"value"`
@@ -1302,7 +1296,6 @@ type SystemNodeEventHandler struct {
 	Reduce               *ReduceSpec               `yaml:"reduce"`
 	Count                *CountSpec                `yaml:"count"`
 	Clear                *ClearSpec                `yaml:"clear"`
-	Branch               []BranchSpec              `yaml:"branch"`
 }
 type EventCatalogEntry struct {
 	Swarm             EventSwarmMetadata `yaml:"swarm"`

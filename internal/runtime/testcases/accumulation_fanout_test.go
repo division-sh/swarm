@@ -18,9 +18,6 @@ func TestGenericBundle_AccumulationFanoutPatterns(t *testing.T) {
 	if created.FanOut.ItemsFrom != "payload.items" || created.FanOut.Emit.EventType() != "intake/item.processed" {
 		t.Fatalf("unexpected fan_out spec: %+v", created.FanOut)
 	}
-	if len(created.Branch) != 1 || created.Branch[0].Then == nil || created.Branch[0].Else == nil {
-		t.Fatalf("expected urgent/non-urgent branch on item.created, got %+v", created.Branch)
-	}
 	fannedOut := previewHandler(t, bundle, "intake-router", "item.created", map[string]any{
 		"item_id":   "item-123",
 		"priority":  "urgent",

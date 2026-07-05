@@ -208,21 +208,6 @@ func DefaultSystemNodeHandlerSourceEvent(handler SystemNodeEventHandler, trigger
 		}
 		handler.Accumulate = &accumulate
 	}
-	if len(handler.Branch) > 0 {
-		handler.Branch = append([]BranchSpec(nil), handler.Branch...)
-		for i := range handler.Branch {
-			if handler.Branch[i].Then != nil {
-				then := *handler.Branch[i].Then
-				then.DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(then.DataAccumulation, triggerEvent)
-				handler.Branch[i].Then = &then
-			}
-			if handler.Branch[i].Else != nil {
-				otherwise := *handler.Branch[i].Else
-				otherwise.DataAccumulation = defaultWorkflowDataAccumulationSourceEvent(otherwise.DataAccumulation, triggerEvent)
-				handler.Branch[i].Else = &otherwise
-			}
-		}
-	}
 	return handler
 }
 

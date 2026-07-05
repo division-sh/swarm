@@ -633,14 +633,6 @@ func wave1HandlerWriteTargets(flowID, nodeID, eventType string, handler runtimec
 			addRuleTargets(scope, *handler.Accumulate.OnTimeout)
 		}
 	}
-	for idx, branch := range handler.Branch {
-		if branch.Then != nil {
-			addRuleTargets(fmt.Sprintf("handler.branch[%d].then", idx), *branch.Then)
-		}
-		if branch.Else != nil {
-			addRuleTargets(fmt.Sprintf("handler.branch[%d].else", idx), *branch.Else)
-		}
-	}
 	return out
 }
 
