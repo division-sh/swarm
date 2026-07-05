@@ -1563,7 +1563,11 @@ func catalogRequiredAgentEntries(rawAgents map[string]any) map[string]runtimecon
 
 func catalogEffectiveRequiredAgentRequirements(schema map[string]any, agents map[string]runtimecontracts.AgentRegistryEntry) []runtimecontracts.FlowRequiredAgent {
 	_, declared := schema["required_agents"]
-	return runtimerequiredagents.EffectiveRequirements(agents, catalogRequiredAgentRequirements(schema), declared)
+	facts := runtimecontracts.EffectiveRequiredAgentFacts(runtimecontracts.FlowSchemaDocument{
+		RequiredAgents:         catalogRequiredAgentRequirements(schema),
+		RequiredAgentsDeclared: declared,
+	}, agents, "", "")
+	return runtimecontracts.FlowRequiredAgentsFromFacts(facts)
 }
 
 func catalogRequiredAgentRequirements(schema map[string]any) []runtimecontracts.FlowRequiredAgent {

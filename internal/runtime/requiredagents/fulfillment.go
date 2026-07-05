@@ -134,29 +134,6 @@ func CheckScope(scope Scope) []Finding {
 	return findings
 }
 
-func EffectiveRequirements(agents map[string]runtimecontracts.AgentRegistryEntry, explicit []runtimecontracts.FlowRequiredAgent, declared bool) []runtimecontracts.FlowRequiredAgent {
-	if declared || len(explicit) > 0 {
-		return cloneRequiredAgents(explicit)
-	}
-	if len(agents) == 0 {
-		return nil
-	}
-	out := make([]runtimecontracts.FlowRequiredAgent, 0, len(agents))
-	for _, agentID := range sortedAgentKeys(agents) {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		agent := agents[agentID]
-		out = append(out, runtimecontracts.FlowRequiredAgent{
-			Role:         agentID,
-			SubscribesTo: normalizeStrings(agent.Subscriptions),
-			Emits:        normalizeStrings(agent.EmitEvents),
-		})
-	}
-	return out
-}
-
 func ResolveAgent(agents map[string]runtimecontracts.AgentRegistryEntry, required runtimecontracts.FlowRequiredAgent) (string, runtimecontracts.AgentRegistryEntry, bool) {
 	role := strings.TrimSpace(required.Role)
 	if role == "" {
@@ -171,34 +148,6 @@ func ResolveAgent(agents map[string]runtimecontracts.AgentRegistryEntry, require
 
 func AgentSubscriptions(agent runtimecontracts.AgentRegistryEntry) []string {
 	return append([]string{}, agent.Subscriptions...)
-}
-
-func cloneRequiredAgents(in []runtimecontracts.FlowRequiredAgent) []runtimecontracts.FlowRequiredAgent {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]runtimecontracts.FlowRequiredAgent, len(in))
-	for i, required := range in {
-		out[i] = runtimecontracts.FlowRequiredAgent{
-			Role:         strings.TrimSpace(required.Role),
-			SubscribesTo: normalizeStrings(required.SubscribesTo),
-			Emits:        normalizeStrings(required.Emits),
-			Description:  strings.TrimSpace(required.Description),
-		}
-	}
-	return out
-}
-
-func sortedAgentKeys(agents map[string]runtimecontracts.AgentRegistryEntry) []string {
-	if len(agents) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(agents))
-	for key := range agents {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func MissingList(values []string) string {
