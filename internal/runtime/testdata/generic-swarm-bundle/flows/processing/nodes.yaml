@@ -16,14 +16,6 @@ processing-node:
         id: delivery_enabled
         check: policy.delivery_enabled
         on_fail: reject
-      branch:
-        - condition: payload.priority == 'urgent'
-          then:
-            emit:
-              event: item.completed
-          else:
-            emit:
-              event: item.rejected
       compute:
         operation: pick_or_average
         store_as: score

@@ -160,7 +160,6 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 				Reduce:               handler.Reduce,
 				Count:                handler.Count,
 				Clear:                handler.Clear,
-				Branch:               append([]BranchSpec{}, handler.Branch...),
 			}
 			semantics.HandlerTransitions = append(semantics.HandlerTransitions, transition)
 			if derivedTransition, ok := deriveWorkflowTransitionContract(transition); ok {

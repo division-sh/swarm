@@ -22,12 +22,6 @@ delivery-node:
       clear_gates:
         - intake_ready
         - score_ready
-      branch:
-        - condition: payload.priority == 'urgent'
-          then:
-            emit:
-              event: item.completed
-              broadcast: true
     timer.item.timeout:
       advances_to: completed
       emit:

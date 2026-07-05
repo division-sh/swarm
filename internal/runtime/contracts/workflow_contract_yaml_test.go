@@ -711,6 +711,23 @@ emit: score.ready
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_RejectsRetiredBranch(t *testing.T) {
+	var handler SystemNodeEventHandler
+	err := yaml.Unmarshal([]byte(`
+branch:
+  - condition: payload.priority == 'urgent'
+    then:
+      emit:
+        event: item.completed
+    else:
+      emit:
+        event: item.rejected
+`), &handler)
+	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "branch") || !strings.Contains(err.Error(), "rules") {
+		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED branch rejection pointing to rules", err)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`

@@ -717,14 +717,6 @@ func containedOperationRefs(flowID, nodeID string, node runtimecontracts.SystemN
 				out = append(out, writeRefs(flowID, nodeID, eventType, scope+".data_accumulation", handler.Accumulate.OnTimeout.DataAccumulation.Writes)...)
 			}
 		}
-		for idx, branch := range handler.Branch {
-			if branch.Then != nil {
-				out = append(out, writeRefs(flowID, nodeID, eventType, fmt.Sprintf("handler.branch[%d].then.data_accumulation", idx), branch.Then.DataAccumulation.Writes)...)
-			}
-			if branch.Else != nil {
-				out = append(out, writeRefs(flowID, nodeID, eventType, fmt.Sprintf("handler.branch[%d].else.data_accumulation", idx), branch.Else.DataAccumulation.Writes)...)
-			}
-		}
 	}
 	return out
 }

@@ -407,18 +407,6 @@ func validateHandlerEntityWriteTargets(source semanticview.Source, flowID string
 			}
 		}
 	}
-	for _, branch := range handler.Branch {
-		if branch.Then != nil {
-			if err := validateRule("handler.branch.then", *branch.Then); err != nil {
-				return err
-			}
-		}
-		if branch.Else != nil {
-			if err := validateRule("handler.branch.else", *branch.Else); err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 

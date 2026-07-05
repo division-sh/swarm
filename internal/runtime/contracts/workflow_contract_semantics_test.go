@@ -74,11 +74,19 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 							OnTimeout: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.expired"}},
 						},
 					},
-					"task.branch": {
-						Branch: []BranchSpec{{
-							Then: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.branch.then"}},
-							Else: &HandlerRuleEntry{Emit: EmitSpec{Event: "task.branch.else"}},
-						}},
+					"task.rules": {
+						Rules: []HandlerRuleEntry{
+							{
+								ID:        "priority",
+								Condition: "payload.priority == 'urgent'",
+								Emit:      EmitSpec{Event: "task.rules.then"},
+							},
+							{
+								ID:        "fallback",
+								Condition: "else",
+								Emit:      EmitSpec{Event: "task.rules.else"},
+							},
+						},
 						FanOut: &FanOutSpec{Emit: EmitSpec{Event: "task.child"}},
 					},
 				},
@@ -105,10 +113,10 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	if got, want := effective.ExecutionType, SystemNodeExecutionType; got != want {
 		t.Fatalf("effective execution type = %q, want %q", got, want)
 	}
-	if got, want := effective.RuntimeSubscriptions, []string{"task.branch", "task.review", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
+	if got, want := effective.RuntimeSubscriptions, []string{"task.review", "task.rules", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective subscriptions = %#v, want %#v", got, want)
 	}
-	if got, want := effective.Produces, []string{"task.approved", "task.branch.else", "task.branch.then", "task.child", "task.done", "task.expired"}; !reflect.DeepEqual(got, want) {
+	if got, want := effective.Produces, []string{"task.approved", "task.child", "task.done", "task.expired", "task.rules.else", "task.rules.then"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective produces = %#v, want %#v", got, want)
 	}
 	handler, ok := bundle.NodeEventHandler("worker", "task.start")

@@ -19,7 +19,7 @@ func TestGenericBundle_SystemNodeReliabilityPatterns(t *testing.T) {
 	}
 
 	handler := mustHandler(t, bundle, "processing-node", "item.review_requested")
-	if len(handler.Branch) == 0 || handler.Branch[0].Else == nil {
-		t.Fatalf("expected fallback branch for review handler, got %+v", handler.Branch)
+	if len(handler.Rules) != 2 || handler.Rules[1].Condition != "else" {
+		t.Fatalf("expected approve/reject rules with fallback, got %+v", handler.Rules)
 	}
 }
