@@ -1,0 +1,27 @@
+provider: github
+payload_object_required: false
+secret:
+  required: true
+signature:
+  type: hmac_sha256
+  header: X-Hub-Signature-256
+  prefix: sha256=
+  signed_payload: raw_body
+  missing_error: invalid github signature
+  invalid_error: invalid github signature
+delivery_id:
+  header: X-GitHub-Delivery
+  required: true
+  missing_error: github delivery id is required
+event_type:
+  header: X-GitHub-Event
+  required: true
+  missing_error: github event type is required
+event_name:
+  template: inbound.github.{event_type}
+ack:
+  mode: after_publish
+metadata:
+  user_agent: user_agent
+  github_delivery: delivery_id
+  github_event: event_type

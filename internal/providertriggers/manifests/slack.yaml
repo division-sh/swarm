@@ -1,0 +1,52 @@
+provider: slack
+payload_object_required: true
+payload_object_error: slack payload object is required
+secret:
+  required: true
+signature:
+  type: hmac_sha256
+  header: X-Slack-Signature
+  prefix: v0=
+  signed_payload: slack_v0
+  missing_error: slack signature is required
+  invalid_error: invalid slack signature
+  timestamp:
+    header: X-Slack-Request-Timestamp
+    tolerance: 5m
+    missing_error: slack request timestamp is required
+    invalid_error: invalid slack request timestamp
+    stale_error: stale slack request timestamp
+challenge:
+  when:
+    json_path: $.type
+    equals: url_verification
+    normalize: true
+  response:
+    json_path: $.challenge
+    missing_error: slack challenge is required
+    content_type: text/plain; charset=utf-8
+    status: 200
+delivery_condition:
+  json_path: $.type
+  equals: event_callback
+  normalize: true
+  missing_error: slack payload type is required
+  mismatch_error: unsupported slack payload type
+delivery_id:
+  json_path: $.event_id
+  required: true
+  missing_error: slack event_id is required
+event_type:
+  json_path: $.event.type
+  required: true
+  missing_error: slack inner event type is required
+event_name:
+  template: inbound.slack.{event_type}
+ack:
+  mode: durable_before_dispatch
+redact_keys:
+  - token
+metadata:
+  user_agent: user_agent
+  slack_event_id: delivery_id
+  slack_event_type: event_type

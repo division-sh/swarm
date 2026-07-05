@@ -718,6 +718,274 @@ func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
 	}
 }
 
+func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseDispatch := func() {
+		releaseOnce.Do(func() {
+			close(release)
+		})
+	}
+	t.Cleanup(releaseDispatch)
+	bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{
+			blockingInboundInterceptor{started: started, release: release},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "stripe-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"id":"evt_123","type":"invoice.paid","data":{"object":{"id":"in_123"}}}`)
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
+	req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+	responseDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		g.Handler().ServeHTTP(rec, req)
+		responseDone <- rec
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stripe callback post-commit dispatch did not start")
+	}
+	select {
+	case rec := <-responseDone:
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Stripe callback response waited for post-commit dispatch completion")
+	}
+	if !store.recorded {
+		t.Fatal("expected Stripe callback to record inbound marker")
+	}
+	if store.providerEventID != "evt_123" {
+		t.Fatalf("providerEventID = %q, want evt_123", store.providerEventID)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.Type() != events.EventType("inbound.stripe") {
+		t.Fatalf("event type = %q, want inbound.stripe", evt.Type())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["provider_event_id"] != "evt_123" || payload["provider_event_type"] != "invoice_paid" || payload["provider"] != "stripe" {
+		t.Fatalf("payload = %+v, want Stripe delivery identity", payload)
+	}
+	if strings.Contains(string(evt.Payload()), "stripe-secret") {
+		t.Fatal("Stripe signing secret leaked into event payload")
+	}
+
+	releaseDispatch()
+	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)
+	}
+}
+
+func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       []byte
+		configure  func(*http.Request, []byte)
+		wantStatus int
+	}{
+		{
+			name:       "missing signature",
+			body:       []byte(`{"id":"evt_123","type":"invoice.paid"}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "malformed signature params",
+			body: []byte(`{"id":"evt_123","type":"invoice.paid"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", "t="+timestamp+",v0="+stripeSignatureHex("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "stale timestamp",
+			body: []byte(`{"id":"evt_123","type":"invoice.paid"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Add(-10*time.Minute).Unix(), 10)
+				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing event id",
+			body: []byte(`{"type":"invoice.paid"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing event type",
+			body: []byte(`{"id":"evt_123"}`),
+			configure: func(req *http.Request, body []byte) {
+				timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+				req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := runtimebus.NewEventBus(eventStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			store := &recordingInboundStore{
+				target: InboundTarget{
+					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+					EntitySlug:    "customer-a",
+					WebhookSecret: "stripe-secret",
+				},
+				inserted: true,
+			}
+			g := NewInboundGateway(bus, nil, nil, store)
+
+			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(tc.body)))
+			tc.configure(req, tc.body)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if store.recorded {
+				t.Fatal("invalid Stripe request recorded inbound marker")
+			}
+			if len(eventStore.events) != 0 {
+				t.Fatalf("published events = %d, want 0", len(eventStore.events))
+			}
+		})
+	}
+}
+
+func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "stripe-secret",
+		},
+		inserted: false,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"id":"evt_123","type":"invoice.paid"}`)
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
+	req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate response = %s", rec.Body.String())
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "raw-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"id":"evt_123","type":"invoice.paid"}`)
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
+	req.Header.Set("Stripe-Signature", stripeWebhookSignature("raw-secret", timestamp, body))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("raw fallback accepted Stripe-Signature and recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "github-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(strings.Repeat("a", inboundWebhookMaxBodyBytes+1)))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("oversized webhook body recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
 func githubWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
@@ -735,6 +1003,16 @@ func slackWebhookSignature(secret string, timestamp string, body []byte) string 
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte("v0:" + timestamp + ":" + string(body)))
 	return "v0=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func stripeWebhookSignature(secret string, timestamp string, body []byte) string {
+	return "t=" + timestamp + ",v1=" + stripeSignatureHex(secret, timestamp, body)
+}
+
+func stripeSignatureHex(secret string, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 type blockingInboundInterceptor struct {

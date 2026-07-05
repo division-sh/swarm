@@ -5637,13 +5637,15 @@ tool_model:
       surfaces. Supported readback surfaces return only redacted metadata and failure evidence.
   provider_trigger_adapters:
     description: >
-      Source authority for first-class provider webhook triggers on top of the existing `inbound.webhook` gateway. It does
-      not replace the generic gateway; it makes provider-specific callback binding, signing, delivery identity, event
-      mapping, dedupe, and redacted readback semantics explicit for configured providers.
+      Source authority for first-class provider webhook triggers on top of the existing `inbound.webhook` gateway. The
+      provider-trigger manifest interpreter is the configured-provider semantic owner. It does not replace the generic
+      gateway; it makes provider-specific callback binding, signing, delivery identity, event mapping, dedupe,
+      acknowledgement timing, and redacted readback semantics explicit for configured providers.
     scope:
     - manual/declarative webhook registration for configured provider triggers
     - served `/webhooks/{entity}/{provider}` route mounted on the supported API listener
     - selected runtime store wiring through `runtime.Stores.InboundStore`
+    - static built-in provider-trigger manifest loading for selected first-class providers
     - provider-specific signature policy and signing-secret lookup
     - provider delivery-id extraction and dedupe-key authority
     - provider event-type extraction and canonical Swarm event mapping
@@ -5657,16 +5659,43 @@ tool_model:
     existing_gateway_owner: >
       `internal/runtime/inbound.go` remains the generic HTTP ingress executor for `/webhooks/{entity}/{provider}`. It
       consumes `runtime_ingress.queueable_ingress.inbound.webhook`, delegates configured-provider interpretation to the
-      provider adapter, persists the inbound dedupe marker before publish for delivery callbacks, and publishes the
-      normalized root ingress event returned by the provider adapter. Provider adapters may also return an authenticated
-      response-only result when the provider protocol requires a challenge response that is not a delivery.
+      provider-trigger manifest interpreter, persists the inbound dedupe marker before publish for delivery callbacks, and
+      publishes the normalized root ingress event returned by the manifest interpreter. Provider manifests may also return
+      an authenticated response-only result when the provider protocol requires a challenge response that is not a
+      delivery.
+    manifest_interpreter_owner: >
+      `internal/providertriggers` is the configured-provider manifest interpreter and canonical owner for first-class
+      provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
+      A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
+      extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
+    manifest_vocabulary:
+      provider: normalized provider token matched from `/webhooks/{entity}/{provider}`
+      payload_object_required: fail closed when the decoded request payload is not a JSON object
+      secret.required: require a configured signing secret before accepting the provider callback
+      signature: >
+        HMAC-SHA256 signature verification over a manifest-selected signed payload. Supported signed payloads are
+        `raw_body`, `slack_v0`, and `timestamp_dot_raw_body`. The interpreter supports fixed signature prefixes, structured
+        comma-separated signature parameters, timestamp extraction from headers or parameters, replay tolerance windows, and
+        constant-time comparison against every configured signature candidate.
+      challenge: >
+        Authenticated response-only callback handling. A matched challenge branch must not persist an inbound dedupe marker
+        and must not publish a Swarm event.
+      delivery_condition: JSON object condition that must match before a provider delivery is accepted.
+      delivery_id: authoritative provider delivery id source for dedupe marker input.
+      event_type: authoritative provider event type source for normalized provider_event_type payload metadata.
+      event_name: literal or `{event_type}` template for the emitted Swarm event name.
+      ack.mode: >
+        `after_publish` returns after normal publish completion. `durable_before_dispatch` returns after the inbound marker,
+        event row, recipient manifest, and subscribed replay scope are durably persisted or queued, without waiting for
+        post-commit pipeline dispatch, system-node execution, or agent handling.
+      redact_keys: payload keys that must be replaced before publication or readback.
     secret_binding: >
       The first-slice signing-secret binding is `flow_instances.config.secrets.webhook_signing.<provider>`, where
       `<provider>` is the normalized provider token. Secret values are never returned by webhook responses or readback
       surfaces. Production deployments may replace the backing config storage with an external vault reference while
       preserving the same semantic binding.
-    first_provider:
-      provider: github
+    configured_provider_manifests:
+    - provider: github
       signature: >
         GitHub webhook deliveries require a configured signing secret and a valid `X-Hub-Signature-256` HMAC-SHA256
         signature over the raw request body. Missing signing secret, missing signature, or invalid signature fails before
@@ -5677,8 +5706,7 @@ tool_model:
       event_type: >
         `X-GitHub-Event` is the authoritative provider event type. The canonical emitted event name is
         `inbound.github.<normalized_event_type>` and the payload includes provider, provider_event_id, event_type,
-        original payload, redacted headers, and received_at.
-    configured_provider_children:
+        provider_event_type, provider_delivery_id, original payload, redacted headers, and received_at.
     - provider: slack
       issue: "#1691"
       signature: >
@@ -5710,10 +5738,34 @@ tool_model:
         Slack signing secrets and deprecated verification tokens are not returned by webhook responses, logs, persisted
         marker readback, or published provider payloads. Deprecated Slack `token` fields are not accepted as primary proof
         of request authenticity.
+    - provider: stripe
+      issue: "#1704"
+      signature: >
+        Stripe webhook deliveries require a configured signing secret and valid `Stripe-Signature` HMAC-SHA256 signature.
+        The manifest interpreter MUST parse comma-separated signature parameters, require `t` and at least one `v1`
+        candidate, compute the signed payload as `{t}.{raw_body}`, and compare each `v1` candidate in constant time.
+        Missing signing secret, missing signature, missing `t`, missing `v1`, malformed timestamp, invalid signature, and
+        stale timestamp fail before dedupe marker persistence and before event publish.
+      replay_window: >
+        The `t` signature parameter MUST parse as Unix seconds and be within five minutes of runtime receipt time. Requests
+        outside that window are rejected as replay-risk traffic before any marker or event side effect.
+      delivery_id: >
+        Stripe payload `id` is the authoritative provider delivery id and dedupe-key input. Missing `id` fails before
+        dedupe marker persistence.
+      acknowledgement: >
+        Accepted Stripe deliveries return success after the inbound dedupe marker, canonical event record, recipient
+        manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement MUST NOT
+        wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        Stripe payload `type` is the authoritative provider event type and is emitted in payload metadata as normalized
+        `provider_event_type`. The canonical emitted event name is `inbound.stripe`, not `inbound.stripe.<event_type>`.
+        Missing `type` fails before dedupe marker persistence.
     raw_webhook_mode: >
       Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
-      does not prove provider-trigger adapter closure. Configured providers MUST consume their adapter owner rather than
-      generic signature, delivery-id, event-type, or `inbound.{provider}` mapping fallbacks.
+      does not prove provider-trigger adapter closure. Configured providers MUST consume their manifest interpreter owner
+      rather than generic signature, delivery-id, event-type, acknowledgement, or `inbound.{provider}` mapping fallbacks.
+      Raw webhook mode MUST NOT interpret `Stripe-Signature`; Stripe-signature semantics belong only to the configured
+      Stripe provider manifest.
   custom_tool_schema:
     description: Accepted fields for tool definitions in tools.yaml. This is the union of fields across all implementation
       classes.
