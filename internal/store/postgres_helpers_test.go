@@ -12,6 +12,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func portFromDSN(t *testing.T, dsn string) int {
@@ -52,6 +53,33 @@ func fmtSscanf(s string, out *int) {
 	*out = n
 }
 
+func TestDSNFromConfigQuotesKeywordValues(t *testing.T) {
+	cfg := config.DatabaseConfig{
+		Host:    "127.0.0.1",
+		Port:    5432,
+		Name:    "swarm db",
+		User:    "swarm user",
+		SSLMode: "disable",
+	}
+	password := `has space 'quote' \slash user=other`
+
+	dsn := DSNFromConfig(cfg, password)
+	for _, want := range []string{
+		`host='127.0.0.1'`,
+		`dbname='swarm db'`,
+		`sslmode='disable'`,
+		`user='swarm user'`,
+		`password='has space \'quote\' \\slash user=other'`,
+	} {
+		if !strings.Contains(dsn, want) {
+			t.Fatalf("DSNFromConfig() = %q, want substring %q", dsn, want)
+		}
+	}
+	if _, err := pq.NewConnector(dsn); err != nil {
+		t.Fatalf("pq.NewConnector(%q): %v", dsn, err)
+	}
+}
+
 func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
@@ -67,7 +95,7 @@ func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 		PoolSize: 5,
 	}
 	gotDSN := DSNFromConfig(cfg, "postgres")
-	if !strings.Contains(gotDSN, "host=127.0.0.1") || !strings.Contains(gotDSN, "dbname="+dbName) {
+	if !strings.Contains(gotDSN, "host='127.0.0.1'") || !strings.Contains(gotDSN, "dbname='"+dbName+"'") {
 		t.Fatalf("unexpected dsn: %q", gotDSN)
 	}
 	pg, err := NewPostgresStore(gotDSN)
