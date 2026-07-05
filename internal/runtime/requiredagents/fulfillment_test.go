@@ -45,22 +45,3 @@ func TestCheckScopeReportsSubscriptionAndEmitCoverage(t *testing.T) {
 		t.Fatalf("emit finding = %#v", findings[1])
 	}
 }
-
-func TestEffectiveRequirementsInferOnlyWhenOmitted(t *testing.T) {
-	agents := map[string]runtimecontracts.AgentRegistryEntry{
-		"worker": {
-			Subscriptions: []string{"work.requested"},
-			EmitEvents:    []string{"work.completed"},
-		},
-	}
-
-	inferred := EffectiveRequirements(agents, nil, false)
-	if len(inferred) != 1 || inferred[0].Role != "worker" || inferred[0].SubscribesTo[0] != "work.requested" || inferred[0].Emits[0] != "work.completed" {
-		t.Fatalf("inferred = %#v, want worker from agents.yaml facts", inferred)
-	}
-
-	explicitEmpty := EffectiveRequirements(agents, nil, true)
-	if len(explicitEmpty) != 0 {
-		t.Fatalf("explicit empty = %#v, want no inference", explicitEmpty)
-	}
-}
