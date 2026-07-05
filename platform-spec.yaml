@@ -11819,11 +11819,11 @@ cli_specification:
       conversations:
         disposition: future_child
         tracker: '#735'
-        action: '`swarm conversations list`, `swarm conversation view`, and `swarm conversation turn` require separate gated children.'
+        action: '`swarm conversation list` (v2.2 spelling), `swarm conversation view`, and `swarm conversation turn` require separate gated children.'
       entities:
         disposition: promoted_first_slice
         tracker: '#892'
-        action: '`swarm entities list`, `swarm entity view`, and `swarm entity aggregate` are promoted as one bounded read-only CLI child over /v1/rpc entity.list, entity.get, and entity.aggregate; conversations and forkchat remain split.'
+        action: '`swarm entity list` (v2.2 spelling), `swarm entity view`, and `swarm entity aggregate` are promoted as one bounded read-only CLI child over /v1/rpc entity.list, entity.get, and entity.aggregate; conversations and forkchat remain split.'
       logs:
         disposition: promoted_first_slice
         tracker: '#876'
