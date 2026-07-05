@@ -582,7 +582,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		{
 			Name:        "startup_and_run",
 			Status:      "implemented",
-			Fallthrough: "serve --dev and default foreground swarm run consume local runtime state authority; swarm run blocks when a live project runtime exists unless connected targeting is explicit",
+			Fallthrough: "serve --dev and default foreground swarm run start consume local runtime state authority; swarm run start blocks when a live project runtime exists unless connected targeting is explicit",
 			Commands:    []string{"swarm serve --dev", "swarm run start"},
 		},
 	}

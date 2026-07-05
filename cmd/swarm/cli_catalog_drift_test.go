@@ -358,10 +358,15 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 	retiredWords := regexp.MustCompile("swarm (runs|agents|events|entities|conversations)([^a-z]|$)" +
 		"|swarm (status|trace)([^a-z]|$)" +
 		"|swarm fork([^a-z]|$)") // forkchat excluded by the non-letter guard
-	// The bare-run start form is scanned only in user-visible surfaces; spec
-	// prose references run-start flags in contexts where the flag, not the
-	// spelling, is the subject.
-	bareRunStart := regexp.MustCompile("swarm run --")
+	// The bare-run start form is scanned everywhere, including authoritative
+	// spec prose — the #1686 re-review rejected a spec-wide exemption as
+	// institutionalizing drift. Only explicit retirement language exempts a
+	// line; present-truth rows must say `swarm run start`.
+	bareRunStart := regexp.MustCompile("swarm run --|foreground `swarm run`")
+	// unbackticked "foreground swarm run" needs a not-followed-by-" start" check
+	// that RE2 cannot express; handled below.
+	bareRunPhrase := "foreground swarm run"
+	bareRunHistoricalMarker := regexp.MustCompile("(?i)retired|renamed|no longer|superseded|historical")
 	historicalMarker := regexp.MustCompile("(?i)renamed|retired|no longer|historical|superseded|restore|previous tracked prose|unpromoted|candidate backlog|v1 retirement|v2\\.2|legacy|remain split|#[0-9]{3}|--dry-run\\|" +
 		"|^\\s*action: '|^\\s*current: swarm ")
 
@@ -388,12 +393,33 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		isSpec := strings.HasSuffix(path, "platform-spec.yaml")
 		for i, line := range strings.Split(string(raw), "\n") {
-			if !retiredWords.MatchString(line) && (isSpec || !bareRunStart.MatchString(line)) {
+			wordHit := retiredWords.MatchString(line)
+			bareHit := bareRunStart.MatchString(line)
+			if !bareHit {
+				for idx := strings.Index(line, bareRunPhrase); idx >= 0; {
+					rest := line[idx+len(bareRunPhrase):]
+					if !strings.HasPrefix(rest, " start") {
+						bareHit = true
+						break
+					}
+					next := strings.Index(rest, bareRunPhrase)
+					if next < 0 {
+						break
+					}
+					idx += len(bareRunPhrase) + next
+				}
+			}
+			if !wordHit && !bareHit {
 				continue
 			}
-			if historicalMarker.MatchString(line) {
+			if wordHit && historicalMarker.MatchString(line) {
+				wordHit = false
+			}
+			if bareHit && bareRunHistoricalMarker.MatchString(line) {
+				bareHit = false
+			}
+			if !wordHit && !bareHit {
 				continue
 			}
 			rel, _ := filepath.Rel(root, path)

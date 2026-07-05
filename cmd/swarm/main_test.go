@@ -1152,12 +1152,12 @@ func TestPlatformSpecServeUnifiedListenerBindContractPromoted(t *testing.T) {
 			t.Fatalf("listener MCP routes missing %q: %#v", want, spec.Routes.WhenMCPGatewayInstalled)
 		}
 	}
-	for _, want := range []string{"swarm run --api-port", "consumer", "second bind owner"} {
+	for _, want := range []string{"swarm run start --api-port", "consumer", "second bind owner"} {
 		if !strings.Contains(spec.ConsumerBoundaries.SwarmRunAPIPort, want) {
 			t.Fatalf("api-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunAPIPort)
 		}
 	}
-	for _, want := range []string{"swarm run --mcp-port", "fail before API/WS calls", "local foreground MCP listener control"} {
+	for _, want := range []string{"swarm run start --mcp-port", "fail before API/WS calls", "local foreground MCP listener control"} {
 		if !strings.Contains(spec.ConsumerBoundaries.SwarmRunMCPPort, want) {
 			t.Fatalf("mcp-port boundary missing %q:\n%s", want, spec.ConsumerBoundaries.SwarmRunMCPPort)
 		}
@@ -1264,7 +1264,7 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 			t.Fatalf("mcp routes missing %q: %#v", want, spec.Listeners.MCP.Routes)
 		}
 	}
-	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "`swarm run --mcp-port` remains fail-closed", "#844 implements `swarm serve` listener source precedence"} {
+	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "`swarm run start --mcp-port` remains fail-closed", "#844 implements `swarm serve` listener source precedence"} {
 		if !stringSliceContains(spec.ImplementationBoundaries, want) {
 			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}
@@ -2295,7 +2295,7 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 	if !strings.Contains(command.PromotedBy, "#1139") || !strings.Contains(command.PromotedBy, "#1223") || command.Owner != "workspace_model.data_source_authority" || command.Flag != "--data <path>" {
 		t.Fatalf("serve command data authority = %#v", command)
 	}
-	for _, want := range []string{"serve boot", "local foreground swarm run", "Builder project reload", "selected-contract run-fork"} {
+	for _, want := range []string{"serve boot", "local foreground `swarm run start`", "Builder project reload", "selected-contract run-fork"} {
 		if !joinedContains(command.Consumers, want) {
 			t.Fatalf("serve command data authority consumers missing %q: %#v", want, command.Consumers)
 		}
@@ -2688,7 +2688,7 @@ func TestPlatformSpecLocalCLITestGatewayStartupPromoted(t *testing.T) {
 			t.Fatalf("local cli_test gateway startup scope missing %q:\n%s", want, startup.Scope)
 		}
 	}
-	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "removed", "per-boot", "binding token", "SWARM_TOOL_GATEWAY_URL", "not source authority", "Local foreground `swarm run`"} {
+	for _, want := range []string{"SWARM_TOOL_GATEWAY_TOKEN", "removed", "per-boot", "binding token", "SWARM_TOOL_GATEWAY_URL", "not source authority", "Local foreground `swarm run start`"} {
 		if !strings.Contains(startup.GatewayTokenRule, want) {
 			t.Fatalf("gateway token rule missing %q:\n%s", want, startup.GatewayTokenRule)
 		}
@@ -2822,7 +2822,7 @@ func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) 
 	if !strings.Contains(availability.CanonicalOwner, "cli_specification.foundations.local_cli_test_workspace_cli_availability") {
 		t.Fatalf("canonical owner does not point at local_cli_test_workspace_cli_availability: %s", availability.CanonicalOwner)
 	}
-	for _, want := range []string{"remaining #997", "workspace image/default-agent Claude CLI availability", "local `swarm serve`", "local foreground `swarm run`"} {
+	for _, want := range []string{"remaining #997", "workspace image/default-agent Claude CLI availability", "local `swarm serve`", "local foreground `swarm run start`"} {
 		if !strings.Contains(availability.Scope, want) {
 			t.Fatalf("local cli_test workspace cli availability scope missing %q:\n%s", want, availability.Scope)
 		}
@@ -2832,7 +2832,7 @@ func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) 
 			t.Fatalf("workspace cli rule missing %q:\n%s", want, availability.WorkspaceCLIRule)
 		}
 	}
-	for _, want := range []string{"local `swarm serve`", "local foreground `swarm run`", "managed-agent startup validation", "Claude CLI startup probe", "configured workspace image/container targets"} {
+	for _, want := range []string{"local `swarm serve`", "local foreground `swarm run start`", "managed-agent startup validation", "Claude CLI startup probe", "configured workspace image/container targets"} {
 		if !stringSliceContains(availability.Consumers, want) {
 			t.Fatalf("local cli_test workspace cli availability consumers missing %q: %#v", want, availability.Consumers)
 		}
@@ -3190,12 +3190,12 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.contract_platform_spec_path_resolution") {
 		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
 	}
-	for _, want := range []string{"swarm verify", "swarm serve", "local foreground `swarm run`"} {
+	for _, want := range []string{"swarm verify", "swarm serve", "local foreground `swarm run start`"} {
 		if !stringSliceContains(spec.AppliesTo, want) {
 			t.Fatalf("applies_to missing %q: %#v", want, spec.AppliesTo)
 		}
 	}
-	for _, want := range []string{"swarm run --connect", "swarm run --reattach", "root/global `--config`"} {
+	for _, want := range []string{"swarm run start --connect", "swarm run start --reattach", "root/global `--config`"} {
 		if !stringSliceContains(spec.NotAppliesTo, want) {
 			t.Fatalf("not_applies_to missing %q: %#v", want, spec.NotAppliesTo)
 		}
