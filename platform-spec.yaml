@@ -5684,11 +5684,20 @@ tool_model:
       delivery_id: authoritative provider delivery id source for dedupe marker input.
       event_type: authoritative provider event type source for normalized provider_event_type payload metadata.
       event_name: literal or `{event_type}` template for the emitted Swarm event name.
+      event_name_policy: >
+        New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
+        `provider_event_type`. The `{event_type}` template form is grandfathered only for the existing GitHub and Slack
+        manifests because live subscriptions already consume `inbound.github.<event_type>` and
+        `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
+        decision.
       ack.mode: >
         `after_publish` returns after normal publish completion. `durable_before_dispatch` returns after the inbound marker,
         event row, recipient manifest, and subscribed replay scope are durably persisted or queued, without waiting for
         post-commit pipeline dispatch, system-node execution, or agent handling.
       redact_keys: payload keys that must be replaced before publication or readback.
+      signed_payload_recipe_discipline: >
+        Signed-payload recipes are shared scheme families, not provider-specific escape hatches. New recipes should be added
+        only when they generalize a provider family; recipe count should grow sublinearly as provider coverage expands.
     secret_binding: >
       The first-slice signing-secret binding is `flow_instances.config.secrets.webhook_signing.<provider>`, where
       `<provider>` is the normalized provider token. Secret values are never returned by webhook responses or readback
