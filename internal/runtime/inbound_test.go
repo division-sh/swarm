@@ -3,12 +3,17 @@ package runtime
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -966,6 +971,199 @@ func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
 	}
 }
 
+func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "twilio-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
+	form := url.Values{
+		"Body":          {"hello from twilio"},
+		"From":          {"+15551234567"},
+		"MessageSid":    {"SM1234567890abcdef"},
+		"To":            {"+15557654321"},
+		"UnexpectedNew": {"still signed"},
+	}
+	req := newSignedTwilioRequest(requestURL, "twilio-secret", form)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if !store.recorded {
+		t.Fatal("expected Twilio delivery to record inbound marker")
+	}
+	if store.providerEventID != "SM1234567890abcdef" {
+		t.Fatalf("providerEventID = %q, want MessageSid", store.providerEventID)
+	}
+	if store.provider != "twilio" {
+		t.Fatalf("provider = %q, want twilio", store.provider)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.Type() != events.EventType("inbound.twilio") {
+		t.Fatalf("event type = %q, want inbound.twilio", evt.Type())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["provider_event_id"] != "SM1234567890abcdef" ||
+		payload["provider_event_type"] != "message_received" ||
+		payload["provider"] != "twilio" {
+		t.Fatalf("payload = %+v, want Twilio manifest delivery identity", payload)
+	}
+	formPayload, ok := payload["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload.payload = %T, want form payload map", payload["payload"])
+	}
+	if formPayload["Body"] != "hello from twilio" || formPayload["UnexpectedNew"] != "still signed" {
+		t.Fatalf("form payload = %+v, want evolving Twilio form parameters preserved", formPayload)
+	}
+	if strings.Contains(rec.Body.String(), "twilio-secret") || strings.Contains(string(evt.Payload()), "twilio-secret") {
+		t.Fatal("Twilio signing secret leaked into readback or event payload")
+	}
+}
+
+func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		requestURL string
+		form       url.Values
+		configure  func(*http.Request, url.Values, string)
+		wantStatus int
+	}{
+		{
+			name:       "missing signature",
+			requestURL: "https://example.com/webhooks/customer-a/twilio?tenant=alpha",
+			form:       url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}},
+			configure: func(req *http.Request, form url.Values, requestURL string) {
+				req.Header.Del("X-Twilio-Signature")
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "url mismatch",
+			requestURL: "https://example.com/webhooks/customer-a/twilio?tenant=beta",
+			form:       url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}},
+			configure: func(req *http.Request, form url.Values, requestURL string) {
+				req.Header.Set("X-Twilio-Signature", twilioWebhookSignature("twilio-secret", "https://example.com/webhooks/customer-a/twilio?tenant=alpha", form))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "duplicate query params",
+			requestURL: "https://example.com/webhooks/customer-a/twilio?tenant=alpha&tenant=beta",
+			form:       url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}},
+			configure:  func(*http.Request, url.Values, string) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "duplicate form params",
+			requestURL: "https://example.com/webhooks/customer-a/twilio?tenant=alpha",
+			form:       url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello", "tampered"}},
+			configure:  func(*http.Request, url.Values, string) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "missing message sid",
+			requestURL: "https://example.com/webhooks/customer-a/twilio?tenant=alpha",
+			form:       url.Values{"Body": {"hello"}},
+			configure:  func(*http.Request, url.Values, string) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "json body sha256 mode unsupported in this slice",
+			requestURL: "https://example.com/webhooks/customer-a/twilio?bodySHA256=abc123",
+			form:       url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}},
+			configure: func(req *http.Request, form url.Values, requestURL string) {
+				req.Header.Set("Content-Type", "application/json")
+				req.Body = io.NopCloser(strings.NewReader(`{"MessageSid":"SM1234567890abcdef"}`))
+				req.ContentLength = int64(len(`{"MessageSid":"SM1234567890abcdef"}`))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := runtimebus.NewEventBus(eventStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			store := &recordingInboundStore{
+				target: InboundTarget{
+					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+					EntitySlug:    "customer-a",
+					WebhookSecret: "twilio-secret",
+				},
+				inserted: true,
+			}
+			g := NewInboundGateway(bus, nil, nil, store)
+			req := newSignedTwilioRequest(tc.requestURL, "twilio-secret", tc.form)
+			tc.configure(req, tc.form, tc.requestURL)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if store.recorded {
+				t.Fatal("invalid Twilio request recorded inbound marker")
+			}
+			if len(eventStore.events) != 0 {
+				t.Fatalf("published events = %d, want 0", len(eventStore.events))
+			}
+		})
+	}
+}
+
+func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "twilio-secret",
+		},
+		inserted: false,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
+	form := url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}}
+	req := newSignedTwilioRequest(requestURL, "twilio-secret", form)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate response = %s", rec.Body.String())
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
 func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -1058,6 +1256,34 @@ func stripeSignatureHex(secret string, timestamp string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(timestamp + "." + string(body)))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedTwilioRequest(requestURL string, secret string, form url.Values) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, requestURL, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Twilio-Signature", twilioWebhookSignature(secret, requestURL, form))
+	return req
+}
+
+func twilioWebhookSignature(secret, requestURL string, form url.Values) string {
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write([]byte(twilioSignedPayload(requestURL, form)))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func twilioSignedPayload(requestURL string, form url.Values) string {
+	keys := make([]string, 0, len(form))
+	for key := range form {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteString(requestURL)
+	for _, key := range keys {
+		b.WriteString(key)
+		b.WriteString(form.Get(key))
+	}
+	return b.String()
 }
 
 type blockingInboundInterceptor struct {

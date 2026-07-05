@@ -1,0 +1,26 @@
+provider: twilio
+payload_source: form
+secret:
+  required: true
+signature:
+  type: hmac_sha1
+  encoding: base64
+  header: X-Twilio-Signature
+  signed_payload: url_plus_sorted_form
+  missing_error: twilio signature is required
+  invalid_error: invalid twilio signature
+delivery_id:
+  form_param: MessageSid
+  required: true
+  missing_error: twilio MessageSid is required
+event_type:
+  literal: message_received
+  required: true
+event_name:
+  literal: inbound.twilio
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  twilio_message_sid: delivery_id
+  twilio_event_type: event_type

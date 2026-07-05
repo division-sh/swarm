@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -122,6 +124,9 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if len(body) == 0 {
 		body = []byte("{}")
 	}
+	requestURL := inboundRequestURL(r)
+	queryValues, queryParseError := inboundQueryValues(r)
+	formValues, formParsed, formParseError := inboundFormValues(r.Header.Get("Content-Type"), body)
 
 	target := InboundTarget{
 		EntityID:   entityKey,
@@ -150,11 +155,19 @@ func (g *InboundGateway) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			EntitySlug:    target.EntitySlug,
 			WebhookSecret: target.WebhookSecret,
 		},
-		Body:      body,
-		Headers:   r.Header,
-		Payload:   payload,
-		Received:  now,
-		UserAgent: r.UserAgent(),
+		Method:          r.Method,
+		URL:             requestURL,
+		Body:            body,
+		Headers:         r.Header,
+		Payload:         payload,
+		ContentType:     r.Header.Get("Content-Type"),
+		Query:           queryValues,
+		QueryParseError: queryParseError,
+		Form:            formValues,
+		FormParsed:      formParsed,
+		FormParseError:  formParseError,
+		Received:        now,
+		UserAgent:       r.UserAgent(),
 	})
 	if err != nil {
 		status := http.StatusBadRequest
@@ -256,6 +269,63 @@ func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 		return "", "", false
 	}
 	return entityID, provider, true
+}
+
+func inboundRequestURL(r *http.Request) string {
+	if r == nil || r.URL == nil || strings.TrimSpace(r.URL.Fragment) != "" {
+		return ""
+	}
+	scheme := "http"
+	host := strings.TrimSpace(r.Host)
+	if r.URL.IsAbs() {
+		if strings.TrimSpace(r.URL.Scheme) == "" {
+			return ""
+		}
+		scheme = strings.TrimSpace(r.URL.Scheme)
+		if host == "" {
+			host = strings.TrimSpace(r.URL.Host)
+		}
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+	if host == "" {
+		return ""
+	}
+	uri := r.URL.RequestURI()
+	if strings.TrimSpace(uri) == "" {
+		uri = "/"
+	}
+	return scheme + "://" + host + uri
+}
+
+func inboundQueryValues(r *http.Request) (url.Values, string) {
+	if r == nil || r.URL == nil || strings.TrimSpace(r.URL.RawQuery) == "" {
+		return nil, ""
+	}
+	values, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, err.Error()
+	}
+	return values, ""
+}
+
+func inboundFormValues(contentType string, body []byte) (url.Values, bool, string) {
+	contentType = strings.TrimSpace(contentType)
+	if contentType == "" {
+		return nil, false, ""
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return nil, false, err.Error()
+	}
+	if !strings.EqualFold(mediaType, "application/x-www-form-urlencoded") {
+		return nil, false, ""
+	}
+	values, err := url.ParseQuery(string(body))
+	if err != nil {
+		return nil, true, err.Error()
+	}
+	return values, true, ""
 }
 
 func firstNonEmpty(values ...string) string {
