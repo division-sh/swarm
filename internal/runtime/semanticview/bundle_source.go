@@ -120,7 +120,7 @@ func (s bundleSource) ProjectScopes() []ProjectScope {
 			PromptsDir:   strings.TrimSpace(view.Paths.ProjectPromptsDir),
 			Nodes:        view.Nodes,
 			Events:       view.Events,
-			Agents:       view.Agents,
+			Agents:       runtimecontracts.EffectiveAgentRegistryEntries(view.Agents),
 			Tools:        view.Tools,
 			Policy:       view.Policy,
 		})
@@ -349,7 +349,7 @@ func (s bundleSource) NodeEntries() map[string]runtimecontracts.SystemNodeContra
 	return s.bundle.NodeEntries()
 }
 func (s bundleSource) AgentEntries() map[string]runtimecontracts.AgentRegistryEntry {
-	return s.bundle.AgentEntries()
+	return runtimecontracts.EffectiveAgentRegistryEntries(s.bundle.AgentEntries())
 }
 func (s bundleSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.AuthoredEventEntries()

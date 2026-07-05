@@ -336,7 +336,40 @@ func cloneAgentRegistryEntryMap(in map[string]AgentRegistryEntry) map[string]Age
 	}
 	out := make(map[string]AgentRegistryEntry, len(in))
 	for key, value := range in {
-		out[key] = value
+		out[key] = cloneAgentRegistryEntry(value)
+	}
+	return out
+}
+func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
+	out := in
+	out.AuthoredFields = cloneBoolMap(in.AuthoredFields)
+	out.EffectiveFieldSources = cloneStringMap(in.EffectiveFieldSources)
+	if len(in.EntityWrites) > 0 {
+		out.EntityWrites = make(map[string]AgentEntityWriteDecl, len(in.EntityWrites))
+		for key, value := range in.EntityWrites {
+			out.EntityWrites[key] = value
+		}
+	}
+	if len(in.NativeTools) > 0 {
+		out.NativeTools = make(map[string]any, len(in.NativeTools))
+		for key, value := range in.NativeTools {
+			out.NativeTools[key] = value
+		}
+	}
+	if len(in.Permissions) > 0 {
+		out.Permissions = append([]string{}, in.Permissions...)
+	}
+	if len(in.Subscriptions) > 0 {
+		out.Subscriptions = append([]string{}, in.Subscriptions...)
+	}
+	if len(in.Tools) > 0 {
+		out.Tools = append([]string{}, in.Tools...)
+	}
+	if len(in.FlowDataAccess) > 0 {
+		out.FlowDataAccess = append([]string{}, in.FlowDataAccess...)
+	}
+	if len(in.EmitEvents) > 0 {
+		out.EmitEvents = append([]string{}, in.EmitEvents...)
 	}
 	return out
 }

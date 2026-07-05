@@ -5,12 +5,117 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
 const (
 	RequiredAgentSourceExplicit = "explicit"
 	RequiredAgentSourceInferred = "inferred"
 )
+
+const (
+	AgentFieldSourceAuthored        = "authored"
+	AgentFieldSourcePlatformDefault = "platform_default"
+	AgentFieldSourceDerived         = "derived"
+
+	DefaultAgentType            = "generic"
+	DefaultAgentMode            = "task"
+	DefaultAgentMaxTurnsPerTask = 100
+)
+
+func EffectiveAgentRegistryEntries(entries map[string]AgentRegistryEntry) map[string]AgentRegistryEntry {
+	if len(entries) == 0 {
+		return map[string]AgentRegistryEntry{}
+	}
+	out := make(map[string]AgentRegistryEntry, len(entries))
+	for key, entry := range entries {
+		out[key] = EffectiveAgentRegistryEntry(key, entry)
+	}
+	return out
+}
+
+func EffectiveAgentRegistryEntry(logicalID string, entry AgentRegistryEntry) AgentRegistryEntry {
+	_ = strings.TrimSpace(logicalID)
+	effective := cloneAgentRegistryEntry(entry)
+	effective.AuthoredFields = cloneBoolMap(entry.AuthoredFields)
+	effective.EffectiveFieldSources = cloneStringMap(entry.EffectiveFieldSources)
+	if effective.EffectiveFieldSources == nil {
+		effective.EffectiveFieldSources = map[string]string{}
+	}
+
+	if strings.TrimSpace(effective.Type) == "" {
+		effective.Type = DefaultAgentType
+		effective.EffectiveFieldSources["type"] = AgentFieldSourcePlatformDefault
+	} else {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "type", AgentFieldSourceAuthored)
+	}
+
+	modeValue := firstNonEmpty(effective.Mode, effective.ConversationMode)
+	if modeValue == "" {
+		modeValue = DefaultAgentMode
+		effective.EffectiveFieldSources["mode"] = AgentFieldSourcePlatformDefault
+	} else {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "mode", AgentFieldSourceAuthored)
+	}
+	mode, scope, err := runtimesessions.ResolveAuthoredAgentMemoryMode(modeValue)
+	if err == nil {
+		effective.Mode = mode.String()
+		effective.ConversationMode = mode.String()
+		effective.SessionScope = scope.String()
+	}
+	if strings.TrimSpace(effective.SessionScope) != "" {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "session_scope", AgentFieldSourceDerived)
+	}
+
+	if effective.MaxTurnsPerTask <= 0 {
+		effective.MaxTurnsPerTask = DefaultAgentMaxTurnsPerTask
+		effective.EffectiveFieldSources["max_turns_per_task"] = AgentFieldSourcePlatformDefault
+	} else {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "max_turns_per_task", AgentFieldSourceAuthored)
+	}
+
+	if _, ok := effective.EffectiveFieldSources["workspace_class"]; !ok {
+		if effective.AuthoredFields["workspace_class"] {
+			effective.EffectiveFieldSources["workspace_class"] = AgentFieldSourceAuthored
+		} else {
+			effective.EffectiveFieldSources["workspace_class"] = AgentFieldSourcePlatformDefault
+		}
+	}
+	if strings.TrimSpace(effective.Model) != "" || effective.AuthoredFields["model"] {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "model", AgentFieldSourceAuthored)
+	}
+	if strings.TrimSpace(effective.ManagerFallback) != "" || effective.AuthoredFields["manager_fallback"] {
+		setAgentFieldSourceIfEmpty(effective.EffectiveFieldSources, "manager_fallback", AgentFieldSourceAuthored)
+	}
+
+	return effective
+}
+
+func (e AgentRegistryEntry) EffectiveSourceForField(field string) string {
+	if len(e.EffectiveFieldSources) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(e.EffectiveFieldSources[strings.TrimSpace(field)])
+}
+
+func setAgentFieldSourceIfEmpty(sources map[string]string, field, source string) {
+	field = strings.TrimSpace(field)
+	if field == "" || strings.TrimSpace(sources[field]) != "" {
+		return
+	}
+	sources[field] = strings.TrimSpace(source)
+}
+
+func cloneBoolMap(in map[string]bool) map[string]bool {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
 
 func EffectiveSystemNodeID(nodeKey string, node SystemNodeContract) string {
 	if nodeKey := strings.TrimSpace(nodeKey); nodeKey != "" {

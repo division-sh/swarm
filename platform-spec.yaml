@@ -4048,6 +4048,46 @@ engine:
           context across multiple events for the same entity but has separate sessions for different entities. Useful for
           agents that need continuity (e.g., research agent building a brief over multiple turns).'
       default: task
+    platform_defaults:
+      description: Agent contracts have a contracts-owned effective view before boot verification, generated/expanded
+        views, catalog/read surfaces, and runtime materialization consume them. Layer 1 defaults add no authored
+        syntax; they derive only safe platform-owned fields when omitted from an agent declaration.
+      canonical_owner: internal/runtime/contracts effective AgentRegistryEntry normalization
+      precedence:
+      - Explicit authored agent field wins.
+      - If the field is omitted and listed in this section, the platform default is materialized into the effective
+        agent entry with provenance `platform_default`.
+      - If the field is omitted and not listed in this section, no platform default exists.
+      fields:
+        type:
+          default: generic
+          rationale: Promotes the historical runtime fallback in generic agent construction into contracts-owned
+            effective semantics.
+        mode:
+          default: task
+          rationale: Consumes the public `mode` owner and derives runtime `conversation_mode` / `session_scope`
+            from the effective value.
+        max_turns_per_task:
+          default: 100
+          authored_constraint: When explicitly authored, the value MUST be positive.
+          rationale: Promotes the historical LLM-agent runtime fallback into contracts-owned effective semantics.
+        workspace_class:
+          default: absent/empty
+          rationale: No workspace class is invented by the platform. Named classes remain explicit product policy.
+      no_default_fields:
+        model: Cost/provider-bearing. It remains explicit in Layer 1 and missing model aliases fail validation.
+        manager_fallback: No platform default in Layer 1; explicit value only.
+      generated_view:
+        rule: Generated/expanded views MUST show each effective Layer 1 field value and whether it was authored
+          directly or platform-defaulted. Derived runtime session fields may be shown as derived from the effective
+          `mode`.
+      unsupported_layer_syntax:
+        rule: Authored `agent_defaults`, named `profile`, `agent_profiles`, and `runtime_id_template` syntax is not
+          accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
+      exclusions:
+      - No defaults for logical identity, runtime/display id templates, subscriptions, emit_events, required_agents,
+        pins, events, entities, public interfaces, policy, credentials, permissions, permissions_bundle, tools,
+        native_tools, or flow_data_access.
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
         be modified at runtime. This is the agent's declared event contract.

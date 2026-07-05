@@ -217,6 +217,10 @@ func mergeAgentContracts(bundle *WorkflowContractBundle, entries map[string]Agen
 		if key == "" {
 			continue
 		}
+		if err := validateAgentRegistryMapKey(key, source.File); err != nil {
+			return err
+		}
+		entry = EffectiveAgentRegistryEntry(key, entry)
 		scopedKey := contractScopeKey(source, key)
 		if existing, ok := bundle.scopedAgentSources[scopedKey]; ok {
 			if reflect.DeepEqual(bundle.scopedAgents[scopedKey], entry) {

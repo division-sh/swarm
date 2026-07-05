@@ -2640,6 +2640,35 @@ root-flow:
 	}
 }
 
+func TestRun_DefaultsOmittedAgentModeButKeepsModelExplicit(t *testing.T) {
+	root := writeSessionScopeValidationFixture(t, `
+root-defaulted:
+  id: root-defaulted
+  model: regular
+  subscriptions:
+    - item.created
+`, "", "")
+
+	report := Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	if reportContains(report.Errors(), "invalid_field_detection", "missing required field mode") {
+		t.Fatalf("unexpected missing mode error with platform default: %#v", report.Errors())
+	}
+
+	root = writeSessionScopeValidationFixture(t, `
+root-missing-model:
+  id: root-missing-model
+  subscriptions:
+    - item.created
+`, "", "")
+
+	report = Run(context.Background(), loadSessionScopeValidationFixture(t, root), Options{})
+
+	if !reportContains(report.Errors(), "invalid_field_detection", "model is required") {
+		t.Fatalf("expected missing model error to remain explicit, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsEntitySessionScopeInStatelessFlow(t *testing.T) {
 	root := writeSessionScopeValidationFixture(t, "{}\n", `
 name: support

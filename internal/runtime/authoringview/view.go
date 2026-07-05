@@ -33,6 +33,7 @@ type EquivalenceView struct {
 
 type RootView struct {
 	SourceFiles        RootSourceFiles    `json:"source_files"`
+	Agents             []AgentView        `json:"agents,omitempty"`
 	RequiredAgents     RequiredAgentsView `json:"required_agents"`
 	PrimaryEntity      *PrimaryEntityView `json:"primary_entity,omitempty"`
 	PrimaryEntityError string             `json:"primary_entity_error,omitempty"`
@@ -50,6 +51,7 @@ type FlowView struct {
 	Path                 string                    `json:"path,omitempty"`
 	Mode                 string                    `json:"mode,omitempty"`
 	SourceFiles          FlowSourceFiles           `json:"source_files"`
+	Agents               []AgentView               `json:"agents,omitempty"`
 	RequiredAgents       RequiredAgentsView        `json:"required_agents"`
 	PrimaryEntity        *PrimaryEntityView        `json:"primary_entity,omitempty"`
 	PrimaryEntityError   string                    `json:"primary_entity_error,omitempty"`
@@ -84,6 +86,17 @@ type RequiredAgentView struct {
 	Description  string   `json:"description,omitempty"`
 	Source       string   `json:"source"`
 	SourceFile   string   `json:"source_file,omitempty"`
+}
+
+type AgentView struct {
+	ID         string                    `json:"id"`
+	SourceFile string                    `json:"source_file,omitempty"`
+	Fields     map[string]AgentFieldView `json:"fields,omitempty"`
+}
+
+type AgentFieldView struct {
+	Value  any    `json:"value"`
+	Source string `json:"source"`
 }
 
 type PrimaryEntityView struct {
@@ -261,6 +274,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 }
 
 func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
+	rootAgents, rootAgentsFile := rootAgentViewEntries(bundle)
 	out := RootView{
 		SourceFiles: RootSourceFiles{
 			Schema:   strings.TrimSpace(bundle.Paths.RootSchemaFile),
@@ -268,6 +282,7 @@ func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
 			Package:  strings.TrimSpace(bundle.Paths.ProjectPackageFile),
 			Agents:   strings.TrimSpace(bundle.Paths.ProjectAgentsFile),
 		},
+		Agents: agentViews(rootAgents, rootAgentsFile),
 	}
 	if bundle.RootSchema != nil {
 		out.RequiredAgents = requiredAgentsView(*bundle.RootSchema, bundle.RootRequiredAgentFacts(), bundle.Paths.RootSchemaFile, bundle.Paths.ProjectAgentsFile)
@@ -300,6 +315,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			Path:        strings.Trim(strings.TrimSpace(flow.Path), "/"),
 			Mode:        strings.TrimSpace(schema.Mode),
 			SourceFiles: flowSourceFiles(bundle, flow),
+			Agents:      agentViews(flow.Agents, flow.Paths.AgentsFile),
 			RequiredAgents: requiredAgentsView(
 				schema,
 				bundle.FlowRequiredAgentFacts(flowID),
@@ -338,6 +354,81 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		out = append(out, item)
 	}
 	return out
+}
+
+func rootAgentViewEntries(bundle *runtimecontracts.WorkflowContractBundle) (map[string]runtimecontracts.AgentRegistryEntry, string) {
+	if bundle == nil {
+		return nil, ""
+	}
+	for _, view := range bundle.ProjectViews() {
+		if strings.TrimSpace(view.Paths.ParentKey) == "" && view.Paths.Depth == 0 {
+			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile)
+		}
+	}
+	for _, view := range bundle.ProjectViews() {
+		if strings.TrimSpace(view.Paths.ParentKey) == "" {
+			return view.Agents, strings.TrimSpace(view.Paths.ProjectAgentsFile)
+		}
+	}
+	return bundle.AgentEntries(), strings.TrimSpace(bundle.Paths.ProjectAgentsFile)
+}
+
+func agentViews(entries map[string]runtimecontracts.AgentRegistryEntry, sourceFile string) []AgentView {
+	if len(entries) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(entries))
+	for id := range entries {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out := make([]AgentView, 0, len(ids))
+	for _, id := range ids {
+		entry := runtimecontracts.EffectiveAgentRegistryEntry(id, entries[id])
+		fields := map[string]AgentFieldView{}
+		addAgentField(fields, entry, "type", entry.Type)
+		addAgentField(fields, entry, "model", entry.Model)
+		addAgentField(fields, entry, "mode", entry.Mode)
+		addAgentField(fields, entry, "session_scope", entry.SessionScope)
+		addAgentField(fields, entry, "max_turns_per_task", entry.MaxTurnsPerTask)
+		addAgentField(fields, entry, "workspace_class", entry.WorkspaceClass)
+		addAgentField(fields, entry, "manager_fallback", entry.ManagerFallback)
+		out = append(out, AgentView{
+			ID:         id,
+			SourceFile: strings.TrimSpace(sourceFile),
+			Fields:     fields,
+		})
+	}
+	return out
+}
+
+func addAgentField(fields map[string]AgentFieldView, entry runtimecontracts.AgentRegistryEntry, name string, value any) {
+	source := entry.EffectiveSourceForField(name)
+	if strings.TrimSpace(source) == "" {
+		switch typed := value.(type) {
+		case string:
+			if strings.TrimSpace(typed) == "" {
+				return
+			}
+			source = runtimecontracts.AgentFieldSourceAuthored
+		case int:
+			if typed == 0 {
+				return
+			}
+			source = runtimecontracts.AgentFieldSourceAuthored
+		default:
+			if value == nil {
+				return
+			}
+			source = runtimecontracts.AgentFieldSourceAuthored
+		}
+	}
+	fields[name] = AgentFieldView{
+		Value:  value,
+		Source: source,
+	}
 }
 
 func flowSourceFiles(bundle *runtimecontracts.WorkflowContractBundle, flow runtimecontracts.FlowContractView) FlowSourceFiles {
