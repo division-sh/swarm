@@ -1,0 +1,13 @@
+name: test-data-accumulation-mapped visible smoke
+steps:
+  - publish: item.received
+    payload:
+      src_name: mapped-value
+expect:
+  events:
+    include: [item.stored]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        item_name: mapped-value

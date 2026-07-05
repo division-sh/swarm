@@ -1,0 +1,19 @@
+name: test-compute-standalone visible smoke
+steps:
+  - publish: scores.ready
+    payload:
+      scores:
+        - dimension: a
+          value: 80
+        - dimension: b
+          value: 90
+        - dimension: c
+          value: 70
+expect:
+  events:
+    include: [scores.computed]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        composite: computed_value

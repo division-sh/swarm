@@ -1,0 +1,11 @@
+name: test-on-complete-second-match visible smoke
+steps:
+  - publish: item.evaluated
+    payload:
+      score: 50
+expect:
+  events:
+    include: [item.failed]
+  entities:
+    - type: default
+      current_state: failed

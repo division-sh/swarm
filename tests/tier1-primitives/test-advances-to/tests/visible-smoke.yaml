@@ -1,0 +1,10 @@
+name: test-advances-to visible smoke
+steps:
+  - publish: task.started
+    payload: {}
+expect:
+  events:
+    include: [task.progressed]
+  entities:
+    - type: default
+      current_state: processing

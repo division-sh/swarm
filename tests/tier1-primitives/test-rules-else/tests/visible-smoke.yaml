@@ -1,0 +1,11 @@
+name: test-rules-else visible smoke
+steps:
+  - publish: item.received
+    payload:
+      kind: z
+expect:
+  events:
+    include: [routed.unknown]
+  entities:
+    - type: default
+      current_state: pending

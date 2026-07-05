@@ -1,0 +1,11 @@
+name: test-on-complete-first-match visible smoke
+steps:
+  - publish: item.evaluated
+    payload:
+      score: 80
+expect:
+  events:
+    include: [item.passed]
+  entities:
+    - type: default
+      current_state: passed

@@ -1,0 +1,10 @@
+name: test-advances-to-terminal visible smoke
+steps:
+  - publish: task.completed
+    payload: {}
+expect:
+  events:
+    include: [task.finished]
+  entities:
+    - type: default
+      current_state: done

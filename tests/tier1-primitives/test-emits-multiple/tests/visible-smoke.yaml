@@ -1,0 +1,10 @@
+name: test-emits-multiple visible smoke
+steps:
+  - publish: item.received
+    payload: {}
+expect:
+  events:
+    include: [item.processed]
+  entities:
+    - type: default
+      current_state: done

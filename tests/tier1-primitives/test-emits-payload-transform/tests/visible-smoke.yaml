@@ -1,0 +1,11 @@
+name: test-emits-payload-transform visible smoke
+steps:
+  - publish: item.received
+    payload:
+      raw_score: 25
+expect:
+  events:
+    include: [item.scored]
+  entities:
+    - type: default
+      current_state: done

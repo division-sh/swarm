@@ -1,0 +1,12 @@
+name: test-data-accumulation-literal visible smoke
+steps:
+  - publish: item.received
+    payload: {}
+expect:
+  events:
+    include: [item.categorized]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        category: premium
