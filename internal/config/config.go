@@ -248,13 +248,7 @@ func (c *Config) validateDatabasePasswordSource() error {
 	if c == nil {
 		return nil
 	}
-	if err := ValidateDatabasePasswordDeclaration(c.Database); err != nil {
-		return err
-	}
-	if strings.EqualFold(strings.TrimSpace(c.Store.Backend), "postgres") {
-		return ValidatePostgresDatabasePasswordSource(c.Database)
-	}
-	return nil
+	return ValidateDatabasePasswordDeclaration(c.Database)
 }
 
 func ValidateDatabasePasswordDeclaration(db DatabaseConfig) error {

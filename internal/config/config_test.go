@@ -110,18 +110,27 @@ func TestValidate_RejectsMultipleDatabasePasswordSources(t *testing.T) {
 	}
 }
 
-func TestValidate_PostgresRequiresDatabasePasswordSource(t *testing.T) {
+func TestValidate_DoesNotRequirePostgresPasswordBeforeBackendSelection(t *testing.T) {
 	c := validDatabasePasswordConfig()
 	c.Store.Backend = "postgres"
 
-	err := c.Validate()
-	if err == nil || !strings.Contains(err.Error(), "postgres store requires exactly one database password source") {
-		t.Fatalf("Validate error = %v, want missing postgres password source rejection", err)
-	}
-
-	c.Database.PasswordFile = "/run/secrets/db-password"
 	if err := c.Validate(); err != nil {
-		t.Fatalf("Validate with password_file: %v", err)
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidatePostgresDatabasePasswordSourceRequiresSource(t *testing.T) {
+	err := ValidatePostgresDatabasePasswordSource(DatabaseConfig{})
+	if err == nil || !strings.Contains(err.Error(), "postgres store requires exactly one database password source") {
+		t.Fatalf("ValidatePostgresDatabasePasswordSource error = %v, want missing postgres password source rejection", err)
+	}
+}
+
+func TestValidatePostgresDatabasePasswordSourceAcceptsExplicitSource(t *testing.T) {
+	c := validDatabasePasswordConfig()
+	c.Database.PasswordFile = "/run/secrets/db-password"
+	if err := ValidatePostgresDatabasePasswordSource(c.Database); err != nil {
+		t.Fatalf("ValidatePostgresDatabasePasswordSource with password_file: %v", err)
 	}
 }
 

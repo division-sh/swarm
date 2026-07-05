@@ -28,6 +28,7 @@ const (
 	runCommandStatusFailed         = "failed"
 	runCommandStatusCancelled      = "cancelled"
 	runCommandStatusForked         = "forked"
+	runCommandTerminalTraceDrain   = 100 * time.Millisecond
 )
 
 type runCommandOptions struct {
@@ -574,6 +575,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	for {
+		rows = drainAvailableRunTraceRows(out, rows)
 		select {
 		case <-ctx.Done():
 			if stopOnInterrupt {
@@ -606,11 +608,64 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
 			if runCommandTerminalStatus(run.Status) {
+				var drainErr error
+				rows, drainErr = drainRunTraceRowsBeforeTerminal(out, sub, rows, runCommandTerminalTraceDrain)
+				if drainErr != nil {
+					fmt.Fprintln(errOut, drainErr)
+					return commandExitError{code: runCommandErrorExitCode(drainErr)}
+				}
 				writeRunCommandTerminalSummary(out, run)
 				return runCommandTerminalExit(run.Status)
 			}
 		}
 	}
+}
+
+func drainAvailableRunTraceRows(out io.Writer, rows chan diagnosticRunTraceRow) chan diagnosticRunTraceRow {
+	for rows != nil {
+		select {
+		case row, ok := <-rows:
+			if !ok {
+				return nil
+			}
+			writeRunCommandTraceRow(out, row)
+		default:
+			return rows
+		}
+	}
+	return nil
+}
+
+func drainRunTraceRowsBeforeTerminal(out io.Writer, sub *runTraceSubscription, rows chan diagnosticRunTraceRow, quiet time.Duration) (chan diagnosticRunTraceRow, error) {
+	rows = drainAvailableRunTraceRows(out, rows)
+	if rows == nil || quiet <= 0 {
+		return rows, nil
+	}
+	timer := time.NewTimer(quiet)
+	defer timer.Stop()
+	for rows != nil {
+		select {
+		case row, ok := <-rows:
+			if !ok {
+				return nil, nil
+			}
+			writeRunCommandTraceRow(out, row)
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(quiet)
+		case err := <-sub.errs:
+			if err != nil {
+				return rows, err
+			}
+		case <-timer.C:
+			return rows, nil
+		}
+	}
+	return nil, nil
 }
 
 func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time, extraParams map[string]any) (*runTraceSubscription, error) {

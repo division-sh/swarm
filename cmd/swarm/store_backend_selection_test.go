@@ -218,6 +218,44 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 	}
 }
 
+func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirement(t *testing.T) {
+	unsetStoreSelectorEnv(t)
+	configPath := writeStoreBackendRuntimeConfigWithoutPasswordSource(t, storebackend.BackendPostgres.String())
+
+	oldBuildStores := buildStoresForServe
+	var captured storebackend.Selection
+	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (storeBundle, error) {
+		captured = selection
+		return storeBundle{}, errors.New("stop after selector proof")
+	}
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuildStores
+	})
+
+	var out bytes.Buffer
+	code := runServeRuntime(context.Background(), t.TempDir(), serveOptions{
+		ConfigPath:         configPath,
+		StoreMode:          storebackend.BackendSQLite.String(),
+		StoreModeSet:       true,
+		APIListenAddr:      defaultAPIListenAddr,
+		MCPListenAddr:      defaultMCPListenAddr,
+		ShutdownGrace:      runtime.DefaultShutdownGrace,
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+		Output:             &out,
+	})
+	if code != 1 {
+		t.Fatalf("runServeRuntime code = %d, want selector proof failure 1; output=%s", code, out.String())
+	}
+	if captured.Backend != storebackend.BackendSQLite || captured.BackendSource != storebackend.SourceFlag {
+		t.Fatalf("selection = %#v, want flag-selected sqlite before postgres password requirement", captured)
+	}
+	if strings.Contains(out.String(), "postgres store requires exactly one database password source") {
+		t.Fatalf("output = %q, want no config-load postgres password rejection before effective store selection", out.String())
+	}
+}
+
 func TestDatabaseEnvDetailsDoNotImplyPostgresSelection(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	t.Setenv("SWARM_DB_HOST", "db-env-host")
@@ -580,6 +618,29 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+	return path
+}
+
+func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	contents := strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
+		"store:",
+		"  backend: " + backend,
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
 	return path
