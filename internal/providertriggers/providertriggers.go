@@ -333,7 +333,10 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 		candidates []string
 	)
 	if strings.TrimSpace(m.Signature.SignatureParam) != "" {
-		params := parseHeaderParams(sigHeader)
+		params, err := parseHeaderParams(sigHeader)
+		if err != nil {
+			return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+		}
 		timestampValues := params.Values(firstNonEmpty(m.Signature.TimestampParam(), "t"))
 		if len(timestampValues) > 0 {
 			timestamp = timestampValues[0]
@@ -586,12 +589,10 @@ func stringFromJSONPath(payload any, path string) (string, bool) {
 		return strings.TrimSpace(t), strings.TrimSpace(t) != ""
 	case json.Number:
 		return strings.TrimSpace(t.String()), strings.TrimSpace(t.String()) != ""
+	case float64:
+		return strings.TrimSpace(strconv.FormatFloat(t, 'f', -1, 64)), true
 	default:
-		s := strings.TrimSpace(fmt.Sprint(t))
-		if s == "" || s == "<nil>" || s == "map[]" || s == "[]" {
-			return "", false
-		}
-		return s, true
+		return "", false
 	}
 }
 
@@ -653,21 +654,25 @@ func redactValue(payload any, keys map[string]struct{}) any {
 
 type headerParams map[string][]string
 
-func parseHeaderParams(header string) headerParams {
+func parseHeaderParams(header string) (headerParams, error) {
 	out := make(headerParams)
 	for _, part := range strings.Split(header, ",") {
-		kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("empty signature parameter")
+		}
+		kv := strings.SplitN(part, "=", 2)
 		if len(kv) != 2 {
-			continue
+			return nil, fmt.Errorf("malformed signature parameter")
 		}
 		key := strings.TrimSpace(kv[0])
 		value := strings.TrimSpace(kv[1])
 		if key == "" || value == "" {
-			continue
+			return nil, fmt.Errorf("empty signature parameter")
 		}
 		out[key] = append(out[key], value)
 	}
-	return out
+	return out, nil
 }
 
 func (p headerParams) Values(key string) []string {
