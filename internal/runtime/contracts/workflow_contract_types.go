@@ -1367,6 +1367,7 @@ type AgentRegistryEntry struct {
 	ConversationMode       string                          `yaml:"conversation_mode"`
 	SessionScope           string                          `yaml:"session_scope"`
 	MaxTurnsPerTask        int                             `yaml:"max_turns_per_task"`
+	PromptInputs           []string                        `yaml:"prompt_inputs" json:"prompt_inputs,omitempty"`
 	Subscriptions          []string                        `yaml:"subscriptions"`
 	SubscriptionsBootstrap []string                        `yaml:"subscriptions_bootstrap"`
 	SubscribesTo           []string                        `yaml:"subscribes_to"`
@@ -1456,7 +1457,7 @@ func supportedAgentRegistryEntryField(field string) bool {
 	case "id", "type", "role", "prompt_ref", "entity_writes",
 		"permissions", "permissions_bundle", "workspace_class", "manager_fallback",
 		"node_type", "model", "mode", "max_turns_per_task", "subscriptions",
-		"tools", "native_tools", "flow_data_access", "emit_events", "implementation":
+		"prompt_inputs", "tools", "native_tools", "flow_data_access", "emit_events", "implementation":
 		return true
 	default:
 		return false

@@ -362,6 +362,9 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	if len(in.Subscriptions) > 0 {
 		out.Subscriptions = append([]string{}, in.Subscriptions...)
 	}
+	if len(in.PromptInputs) > 0 {
+		out.PromptInputs = append([]string{}, in.PromptInputs...)
+	}
 	if len(in.Tools) > 0 {
 		out.Tools = append([]string{}, in.Tools...)
 	}

@@ -413,6 +413,33 @@ subscriptions: [scan.requested]
 	}
 }
 
+func TestLoadWorkflowContractBundleAllowsAgentPromptInputs(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	root := t.TempDir()
+	writeFieldReconciliationBundle(t, root, "", "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+worker:
+  model: regular
+  prompt_inputs: [customer_name, order_type]
+  subscriptions: [work.requested]
+`)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	entry, ok := bundle.AgentEntry("worker")
+	if !ok {
+		t.Fatalf("worker agent missing: %#v", bundle.Agents)
+	}
+	if got, want := strings.Join(entry.PromptInputs, ","), "customer_name,order_type"; got != want {
+		t.Fatalf("PromptInputs = %q, want %q", got, want)
+	}
+	if !entry.AuthoredFields["prompt_inputs"] {
+		t.Fatalf("prompt_inputs authored field not recorded: %#v", entry.AuthoredFields)
+	}
+}
+
 func TestLoadWorkflowContractBundleRejectsLayer2AgentDefaultsBlock(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
