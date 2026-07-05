@@ -28,6 +28,7 @@ source_refs:
   stage0_artifact: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
   locked_design_discussion: https://github.com/division-sh/swarm/discussions/1460
   discussion_amendment: https://github.com/division-sh/swarm/discussions/1460#discussioncomment-17533294
+  authoring_ux_discussion: https://github.com/division-sh/swarm/discussions/1711
   adjacent_context:
     - https://github.com/division-sh/swarm/issues/1652
     - https://github.com/division-sh/swarm/issues/1654
@@ -129,6 +130,28 @@ repairs:
     owner_issue: 1668
     decision: declarative_helpers_before_compute_module
     evidence_owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
+  - id: policy_sheet_row_model
+    owner_issue: 1668
+    decision: first_selection_helpers_are_policy_sheet_row_types
+    evidence_owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
+    canonical_owner: future policy-sheet authoring construct; selection rows lower to platform-spec.yaml#handler_specification.handler_fields.rules and value rows lower to platform-spec.yaml#handler_specification.handler_fields.compute
+    forbidden_overloads:
+      - handler_fields.switch
+      - handler_fields.lookup
+      - handler_fields.threshold
+    required_surfaces:
+      - design_record
+      - future_platform_spec
+      - authoring_ux
+    note: >
+      #1668 switch, lookup, and threshold candidates are the first row types of
+      one ordered policy-sheet authoring construct, not standalone handler
+      fields. The row-type vocabulary is closed and statically verifiable:
+      branch-selection rows lower to the existing rules selected-branch model,
+      value-derivation rows lower to compute, and future temporal, join, loop,
+      collection, or schedule rows may be added only as separately gated closed
+      row types with their own verifier checks. This record is not an
+      implementation claim and does not promote policy-sheet runtime semantics.
 launch_language:
   owner_issue: 1670
   selected: python
@@ -156,6 +179,7 @@ child_consumers:
     role: declarative_helpers
     consumes:
       - stage_order_after_activity
+      - policy_sheet_row_model
       - locked_boundary.expression_language_policy
   - issue: 1669
     role: compute_module_runtime
@@ -191,6 +215,7 @@ invalidated_claims:
   - launch_language_scope_is_open_ended_multi_language
   - design_discussion_or_private_docs_are_runtime_authority
   - speculative_platform_spec_notes_are_allowed_without_implementation
+  - switch_lookup_threshold_are_standalone_handler_keywords
 manifestation_coverage:
   - id: stale_logic_node_language
     status: closed_by_design_record
@@ -228,3 +253,6 @@ manifestation_coverage:
   - id: speculative_platform_spec_authority
     status: closed_by_design_record
     proof: authority
+  - id: standalone_helper_keyword_drift
+    status: closed_by_design_record
+    proof: repairs.policy_sheet_row_model
