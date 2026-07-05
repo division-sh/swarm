@@ -25,8 +25,9 @@ func cliAPIConnectionFlagsChanged(cmd *cobra.Command) bool {
 }
 
 func validateCLIAPIConnectionFlagPlacement(args []string) error {
-	index, flag := firstCLIAPIConnectionFlagIndex(args)
-	if index < 0 || cliAPIConnectionFlagAfterLeafCommand(args[:index]) || cliTopologyRetiredOrGroupPrefix(stripRootPersistentFlagsForCLIAPIPlacement(args[:index])) {
+	stripped := stripRootPersistentFlags(args)
+	index, flag := firstCLIAPIConnectionFlagIndex(stripped)
+	if index < 0 || cliAPIConnectionFlagAfterLeafCommand(stripped[:index]) || cliTopologyRetiredOrGroupPrefix(stripped[:index]) {
 		return nil
 	}
 	return &cliAPIValidationError{message: "unknown flag: " + flag}
@@ -51,7 +52,6 @@ func firstCLIAPIConnectionFlagIndex(args []string) (int, string) {
 }
 
 func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
-	prefix = stripRootPersistentFlagsForCLIAPIPlacement(prefix)
 	leafCommands := [][]string{
 		{"run", "list"},
 		{"run", "status"},
@@ -111,7 +111,12 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 	return false
 }
 
-func stripRootPersistentFlagsForCLIAPIPlacement(args []string) []string {
+// stripRootPersistentFlags normalizes argv the way cobra will after parsing
+// root persistent flags. Every pre-dispatch argv interpreter MUST classify
+// command paths against this normalized view, never raw argv — a validator
+// reading raw argv sees ["--swarm-dir","X","run","list"] where cobra sees
+// ["run","list"] and misfires before dispatch (#1686 re-review ten).
+func stripRootPersistentFlags(args []string) []string {
 	if len(args) == 0 {
 		return args
 	}

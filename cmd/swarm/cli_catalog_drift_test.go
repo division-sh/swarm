@@ -458,3 +458,77 @@ func TestNoRetiredSpellingsInUnstructuredSources(t *testing.T) {
 		}
 	}
 }
+
+// Pre-dispatch argv interpreters must classify command paths against the same
+// normalized argv cobra sees — root persistent flags stripped. A validator
+// reading raw argv misfires on `swarm --swarm-dir X <command> --flag` before
+// dispatch, for live and retired commands alike (#1686 re-review ten). One
+// matrix over every pre-dispatch validator and every target kind.
+func TestPreDispatchValidatorsNormalizeRootPersistentFlags(t *testing.T) {
+	rootFlagForms := [][]string{
+		{},
+		{"--swarm-dir", "/tmp/swarm-x"},
+		{"--swarm-dir=/tmp/swarm-x"},
+	}
+	for _, tc := range []struct {
+		name        string
+		commandPath []string
+		flag        []string
+		wantValid   bool // pre-dispatch validators must not reject; cobra owns the rest
+	}{
+		// logging flag on live/migrated leaves (the lead's concrete failures)
+		{"run list log-level", []string{"run", "list"}, []string{"--log-level", "debug"}, true},
+		{"conversation list log-level", []string{"conversation", "list"}, []string{"--log-level", "debug"}, true},
+		{"run status log-level", []string{"run", "status"}, []string{"--log-level", "debug"}, true},
+		// retired spellings + bare run group must fall through to their stubs
+		{"retired runs log-level", []string{"runs"}, []string{"--log-level", "debug"}, true},
+		{"bare run log-level", []string{"run"}, []string{"--log-level", "debug"}, true},
+		{"retired trace log-level", []string{"trace"}, []string{"--log-level", "debug"}, true},
+		// api-connection flags, same matrix
+		{"run list api-server", []string{"run", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		{"retired fork api-server", []string{"fork"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		{"bare run api-server", []string{"run"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		// misplacement must still fail closed regardless of root flags
+		{"root-level log-level misplaced", nil, []string{"--log-level", "debug"}, false},
+		{"root-level api-server misplaced", nil, []string{"--api-server", "http://x"}, false},
+	} {
+		for _, rootFlags := range rootFlagForms {
+			args := append(append(append([]string{}, rootFlags...), tc.commandPath...), tc.flag...)
+			loggingErr := validateCLILoggingFlagPlacement(args)
+			apiErr := validateCLIAPIConnectionFlagPlacement(args)
+			gotValid := loggingErr == nil && apiErr == nil
+			if gotValid != tc.wantValid {
+				t.Errorf("%s with root flags %v: valid = %v, want %v (logging=%v api=%v)",
+					tc.name, rootFlags, gotValid, tc.wantValid, loggingErr, apiErr)
+			}
+		}
+	}
+}
+
+// End-to-end proof for the exact reported failures: root persistent flags
+// before migrated and retired commands must reach cobra (live behavior or
+// promoted pointer stubs), never a generic pre-dispatch flag error.
+func TestRootPersistentFlagsBeforeMigratedAndRetiredCommands(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		wantCode   int
+		wantStderr string
+	}{
+		{[]string{"--swarm-dir", "/tmp/swarm-x", "runs", "--log-level", "debug"}, 2, "Use `swarm run list`"},
+		{[]string{"--swarm-dir", "/tmp/swarm-x", "run", "--log-level", "debug"}, 2, "Use `swarm run start ...`"},
+		{[]string{"--swarm-dir", "/tmp/swarm-x", "fork", "--api-server", "http://127.0.0.1:9"}, 2, "Use `swarm run fork`"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommand(context.Background(), t.TempDir(), tc.args, &stdout, &stderr)
+		if code != tc.wantCode {
+			t.Errorf("%v: code = %d, want %d (stderr=%q)", tc.args, code, tc.wantCode, stderr.String())
+			continue
+		}
+		if !strings.Contains(stderr.String(), tc.wantStderr) {
+			t.Errorf("%v: stderr %q missing %q", tc.args, stderr.String(), tc.wantStderr)
+		}
+		if strings.Contains(stderr.String(), "unknown flag: --log-level") || strings.Contains(stderr.String(), "unknown flag: --api-server") {
+			t.Errorf("%v: generic pre-dispatch flag error leaked: %q", tc.args, stderr.String())
+		}
+	}
+}
