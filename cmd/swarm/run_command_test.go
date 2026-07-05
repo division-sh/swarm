@@ -437,6 +437,7 @@ func TestRunCommandBundleFingerprintSerializesLegacyBundleRef(t *testing.T) {
 func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	tracePrinted := make(chan struct{})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			switch req.Method {
@@ -446,8 +447,12 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 				return map[string]any{"run_id": "run-foreground", "status": "running"}
 			case "run.get":
 				run := validDiagnosticRunHeader("run-foreground")
-				run["status"] = "completed"
-				run["ended_at"] = "2026-05-13T10:01:00Z"
+				select {
+				case <-tracePrinted:
+					run["status"] = "completed"
+					run["ended_at"] = "2026-05-13T10:01:00Z"
+				default:
+				}
 				return map[string]any{"run": run}
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
@@ -458,18 +463,55 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 	})
 	defer server.Close()
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, testRunCommandOptions(server))
+	stdout := &notifyingBuffer{needle: "trace event_id=evt-foreground", notify: tracePrinted}
+	var stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	code := executeRootCommandWithOptions(ctx, t.TempDir(), []string{"run", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get"})
+	methods := runCommandMethodNames(*calls)
+	if len(methods) < 3 || methods[0] != "health.check" || methods[1] != "run.start" {
+		t.Fatalf("methods = %v, want health.check, run.start, then one or more run.get calls", methods)
+	}
+	for i, method := range methods[2:] {
+		if method != "run.get" {
+			t.Fatalf("method[%d] = %q, want run.get; all=%v", i+2, method, methods)
+		}
+	}
 	assertRunCommandTraceSubscription(t, wsRequests, "run-foreground", true)
 	for _, want := range []string{"trace event_id=evt-foreground", "run terminal: run_id=run-foreground status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
+}
+
+type notifyingBuffer struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	needle string
+	notify chan struct{}
+	once   sync.Once
+}
+
+func (b *notifyingBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n, err := b.buf.Write(p)
+	if b.notify != nil && strings.Contains(b.buf.String(), b.needle) {
+		b.once.Do(func() {
+			close(b.notify)
+		})
+	}
+	return n, err
+}
+
+func (b *notifyingBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func TestRunCommandReattachTerminalUsesRunGetWithoutWebSocket(t *testing.T) {
