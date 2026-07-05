@@ -114,7 +114,7 @@ repairs:
   - id: artifact_repo_commit_disposition
     owner_issue: 1667
     decision: canonical_action_owner_until_write_activity_journal
-    canonical_owner: platform-spec.yaml#handler_specification.handler_fields.action.artifact_repo_commit
+    canonical_owner: platform-spec.yaml#handler_specification.handler_fields.action.valid_values.artifact_repo_commit
     current_disposition: canonical_platform_action_owner
     activity_owner_status: non_owner_for_artifact_commits
     migration_blocker: stable_activity_attempt_result_journal_and_idempotency_execution_owner

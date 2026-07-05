@@ -594,8 +594,8 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 	if artifactDisposition.Decision != "canonical_action_owner_until_write_activity_journal" {
 		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition decision = %q, want canonical_action_owner_until_write_activity_journal", artifactDisposition.Decision))
 	}
-	if artifactDisposition.CanonicalOwner != "platform-spec.yaml#handler_specification.handler_fields.action.artifact_repo_commit" {
-		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition canonical_owner = %q, want platform-spec.yaml#handler_specification.handler_fields.action.artifact_repo_commit", artifactDisposition.CanonicalOwner))
+	if artifactDisposition.CanonicalOwner != "platform-spec.yaml#handler_specification.handler_fields.action.valid_values.artifact_repo_commit" {
+		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition canonical_owner = %q, want platform-spec.yaml#handler_specification.handler_fields.action.valid_values.artifact_repo_commit", artifactDisposition.CanonicalOwner))
 	}
 	if artifactDisposition.CurrentDisposition != "canonical_platform_action_owner" {
 		problems = append(problems, fmt.Sprintf("repair artifact_repo_commit_disposition current_disposition = %q, want canonical_platform_action_owner", artifactDisposition.CurrentDisposition))
