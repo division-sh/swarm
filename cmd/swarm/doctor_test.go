@@ -662,7 +662,7 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 			t.Fatalf("preflight categories missing %q: %#v", want, preflight.FindingCategories)
 		}
 	}
-	for _, want := range []string{"swarm doctor", "swarm serve --dev", "swarm run --backend claude_cli"} {
+	for _, want := range []string{"swarm doctor", "swarm serve --dev", "swarm run start --backend claude_cli"} {
 		if !strings.Contains(preflight.CommandModeRule, want) && !strings.Contains(preflight.Scope, want) {
 			t.Fatalf("preflight spec missing consumer %q:\n%#v", want, preflight)
 		}

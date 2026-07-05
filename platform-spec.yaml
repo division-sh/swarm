@@ -3149,7 +3149,7 @@ engine:
     - Explicit postgres selection must remain available through flag, runtime config, and deprecated environment fallback
       and must reach the existing Postgres runtime store path.
     - >
-      Local/dev SQLite `swarm run --contracts` may stamp an ephemeral bundle source fact when no Postgres bundle catalog
+      Local/dev SQLite `swarm run start --contracts` may stamp an ephemeral bundle source fact when no Postgres bundle catalog
       is present. DB-loaded `--bundle-hash` boot remains Postgres-only until a separate bundle-catalog portability owner
       promotes SQLite support.
     required_consumers:
@@ -9158,7 +9158,7 @@ multi_bundle_persistence:
         - DB-loaded same-bundle source/fork loaders consume the persisted bundle catalog runtime source owner.
         - New-work routing and bundle_hash admission remain #1022.
         - Bundle register/delete APIs remain #1017/#1018/#1019.
-        - SQLite local/dev runtime support is promoted for `swarm run --contracts`, but DB-loaded `--bundle-hash`
+        - SQLite local/dev runtime support is promoted for `swarm run start --contracts`, but DB-loaded `--bundle-hash`
           bundle-catalog boot remains Postgres-only unless separately gated.
     serve_db_loaded_runtime_source:
       status: implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts
@@ -10198,7 +10198,7 @@ runtime_storage:
     requirements:
     - The resolved path MUST be an absolute runtime-private host path.
     - The resolved path MUST be writable by the runtime process when `artifact_repo_commit` executes.
-    - When a loaded bundle declares `artifact_repo_commit`, `swarm serve` and local foreground `swarm run` MUST validate
+    - When a loaded bundle declares `artifact_repo_commit`, `swarm serve` and local foreground `swarm run start` MUST validate
       that the resolved artifact root and its local-git storage base at `<artifact_root>/repos` are writable before runtime
       readiness. Bundles that do not declare `artifact_repo_commit` MUST NOT fail solely because the default artifact root is
       currently unwritable.
@@ -10268,14 +10268,14 @@ workspace_model:
     consumer_boundaries:
       - '`swarm workspace build` is the setup producer for this first slice.'
       - '`swarm doctor --backend claude_cli` may report or recommend the build command, but MUST NOT build images.'
-      - '`swarm serve --dev --backend claude_cli` and local foreground `swarm run --backend claude_cli` MUST NOT auto-build images.'
+      - '`swarm serve --dev --backend claude_cli` and local foreground `swarm run start --backend claude_cli` MUST NOT auto-build images.'
       - 'Host workspace backend execution, local API connection discovery, stale MCP gateway env policy, Compose setup, and docs rollout remain split.'
   data_source_authority:
     promoted_by: '#1139/#1223'
     implementation_status: implemented
     canonical_owner: platform-spec.yaml#workspace_model.data_source_authority
     scope: >
-      Defines the host/source authority for the agent-visible `/data` mount for `swarm serve`, local foreground `swarm run`,
+      Defines the host/source authority for the agent-visible `/data` mount for `swarm serve`, local foreground `swarm run start`,
       and current workspace lifecycle consumers. Compose/Postgres onboarding (#1137), host workspace backend execution
       parity (#1138/#1213), SQLite store concurrency, agent-free workspace-init skipping, and mount destination override
       cleanup remain split.
@@ -10314,7 +10314,7 @@ workspace_model:
       validating contents beyond mount readability, or folding runtime `/data` into workflow bundle identity.
     consumers:
     - swarm serve boot workspace lifecycle
-    - local foreground swarm run startup through the serve startup owner
+    - local foreground `swarm run start` startup through the serve startup owner
     - builder project supervisor reload workspace lifecycle
     - selected-contract run-fork workspace lifecycle
     - Docker workspace manager SharedDataSource mount consumer
@@ -11760,7 +11760,7 @@ cli_specification:
           cli_specification.command_catalog.serve.listener_topology_v2_1. The final contract uses separate API
           and MCP listen-address socket owners, superseding the CLI UX v2 draft's port-only serve flags and the
           historical `--health-addr` implementation name. #992 consumes this owner for Cobra/runtime listener bind
-          wiring and `swarm run --api-port` as an API listener consumer. #844 consumes this owner for `swarm
+          wiring and `swarm run start --api-port` as an API listener consumer. #844 consumes this owner for `swarm
           serve` listener env/config precedence. OpenRPC remains unchanged; enable-disable controls and `swarm
           run --mcp-port` support remain follow-up work.
       trace_filters_and_subscription_recovery:
@@ -11995,7 +11995,7 @@ cli_specification:
         startup probes, and MCP HTTP config generation MUST consume the binding token. The token env var
         MUST NOT own endpoint reachability or token authority. `SWARM_TOOL_GATEWAY_URL` and
         `SWARM_TOOL_GATEWAY_CONTAINER_URL` are not source authority for local serve/run endpoint binding.
-        Local foreground `swarm run` consumes the same serve startup owner and MUST NOT fork an independent
+        Local foreground `swarm run start` consumes the same serve startup owner and MUST NOT fork an independent
         gateway-token owner.
       gateway_token_consumers:
       - 'runtime `RuntimeOptions.ToolGatewayBinding`'
@@ -12044,7 +12044,7 @@ cli_specification:
         `swarm serve` MUST bind the MCP/tool listener first, then create `ToolGatewayBinding` from that bound
         address. The host endpoint is the listener URL reachable by the serve process. The workspace endpoint
         is the workspace-backend projection for containers or workspace processes. The binding source records
-        the bound MCP listener, and the lifecycle owner is serve boot. Local foreground `swarm run` consumes
+        the bound MCP listener, and the lifecycle owner is serve boot. Local foreground `swarm run start` consumes
         the same binding path through the serve startup owner. Selected-fork ephemeral gateways MUST create their
         own typed binding from the actual ephemeral gateway listener, with selected-fork lifecycle/source metadata,
         and pass that binding directly to selected-fork runtime consumers.
@@ -12078,7 +12078,7 @@ cli_specification:
         adjacent and does not prove MCP/tool-gateway/forkchat routing is context-aware.
       consumers:
       - '`cmd/swarm` serve listener binding'
-      - 'local foreground `swarm run` through the serve startup owner'
+      - 'local foreground `swarm run start` through the serve startup owner'
       - 'runtime `RuntimeOptions.ToolGatewayBinding`'
       - runtime MCP gateway auth
       - '`internal/runtime/llm.ValidateClaudeCLIRuntimeConfig`'
@@ -12104,7 +12104,7 @@ cli_specification:
         Merge-bearing CLI/runtime authority for the remaining #997 local `cli_test`
         workspace image/default-agent Claude CLI availability and early actionable
         startup diagnostics class. This owner applies to agent-present local
-        `swarm serve` and local foreground `swarm run` flows that consume the serve
+        `swarm serve` and local foreground `swarm run start` flows that consume the serve
         startup owner. It does not reopen #1002 source-root workspace image
         packaging, #996 Docker Compose setup, #995 schema migration diagnostics,
         API conformance, selected-contract/multi-bundle work, or public quickstart
@@ -12122,7 +12122,7 @@ cli_specification:
         to a compatible image.
       consumers:
       - 'local `swarm serve` runtime startup for agent-present `cli_test` bundles'
-      - 'local foreground `swarm run` that consumes the serve startup owner'
+      - 'local foreground `swarm run start` that consumes the serve startup owner'
       - '`internal/runtime/runtime_claude_startup.go` managed-agent startup validation'
       - '`internal/runtime/llm` Claude CLI startup probe and per-turn fallback diagnostics'
       - '`internal/runtime/workspace` configured workspace image/container targets'
@@ -12140,7 +12140,7 @@ cli_specification:
         Merge-bearing authority for local `claude_cli` prerequisite diagnostics and admission. The owner materializes typed
         prerequisite findings for the selected backend and local runtime path, reports them through `swarm doctor`, and feeds
         the relevant fail-closed subset into `swarm serve --dev --backend claude_cli` and local foreground
-        `swarm run --backend claude_cli` through the serve startup owner. It is not a deployment profile system and does not
+        `swarm run start --backend claude_cli` through the serve startup owner. It is not a deployment profile system and does not
         build workspace images, write local connection files, or change stale gateway env precedence.
       finding_categories:
       - backend_prerequisite
@@ -12151,7 +12151,7 @@ cli_specification:
       - dev_convenience_prerequisite
       command_mode_rule: >
         `swarm doctor --backend claude_cli` renders the shared findings without starting runtime. `swarm serve --dev
-        --backend claude_cli` and local foreground `swarm run --backend claude_cli` consume the same owner as admission
+        --backend claude_cli` and local foreground `swarm run start --backend claude_cli` consume the same owner as admission
         evidence and fail closed before readiness when a blocking prerequisite is missing. Non-dev `swarm serve
         --backend claude_cli` consumes the runtime-safety subset where the selected disk-contract startup path needs the same
         prerequisites; dev-only conveniences must not leak into deployment-mode serve.
@@ -12721,7 +12721,7 @@ cli_specification:
           - swarm run start
           fallthrough: >
             `serve --dev` registers a project-scoped TCP context after a pre-bind project claim and after the final API
-            target/runtime_instance_id are known. Default foreground `swarm run` consumes the same local runtime state
+            target/runtime_instance_id are known. Default foreground `swarm run start` consumes the same local runtime state
             authority and project live-runtime guard; it fails closed inside a project that already has a live runtime
             unless the user targets that runtime explicitly through connected API mode.
       doctor_target_surface:
@@ -12750,7 +12750,7 @@ cli_specification:
       implementation_owner: cmd/swarm local runtime state resolver
       scope: >
         Merge-bearing authority for local runtime store path, agent-visible data source defaulting, descriptor store/data
-        metadata, doctor target reporting, and foreground `swarm run` local-start admission. It closes the previous
+        metadata, doctor target reporting, and foreground `swarm run start` local-start admission. It closes the previous
         asymmetry where store/data could resolve from cwd while command targeting resolved through project/global context
         selection.
       invariant: >
@@ -12789,13 +12789,13 @@ cli_specification:
           The project default is created with mode 0755 only for a project-local root. No-project and borrowed-project
           local startup fail closed unless an explicit data source or deployment alternate is selected.
       run_startup_rule: >
-        Default foreground `swarm run` starts a descriptorless local runtime only after the same project live-runtime
+        Default foreground `swarm run start` starts a descriptorless local runtime only after the same project live-runtime
         guard used by `serve --dev`. A live project context blocks local foreground startup with guidance to use
         connected targeting or stop the existing runtime. Connected and reattach paths are API-owned and MUST NOT start
         local store/data.
       consumers:
       - swarm serve startup
-      - local foreground swarm run startup
+      - local foreground `swarm run start` startup
       - workspace data source selection and local preflight validation
       - runtime store selection before store construction
       - serve --dev context descriptor store_path/data_dir metadata
@@ -12947,7 +12947,7 @@ cli_specification:
       applies_to:
       - Runtime-state CLI commands that call the platform JSON-RPC or WebSocket API.
       - '`swarm version --server` when it queries the platform API.'
-      - '`swarm run --connect` only for shared API client/auth error categories; run mode and follow semantics remain #743.'
+      - '`swarm run start --connect` only for shared API client/auth error categories; run mode and follow semantics remain #743.'
       not_applies_to:
       - '`swarm serve` runtime configuration such as the existing command-local `--config` runtime-config path.'
       - '`swarm verify` contract-file validation, except for contract/platform-spec path resolution governed by
@@ -13105,17 +13105,17 @@ cli_specification:
       scope: >
         Merge-bearing CLI v2 authority for selecting the local workflow contract bundle path and the platform
         spec YAML path. This owner covers the currently implemented local file-contract surfaces only: `swarm
-        verify`, `swarm serve`, and local foreground `swarm run` before it starts the serve owner. It does not add
+        verify`, `swarm serve`, and local foreground `swarm run start` before it starts the serve owner. It does not add
         API connection behavior, OpenRPC methods, root/global config flags, serve listener binding, retry/follow
         policy, output rendering, or absent command families.
       applies_to:
       - '`swarm verify` local contract-file validation.'
       - '`swarm serve` runtime boot bundle loading.'
-      - 'local foreground `swarm run` as a consumer of serve startup.'
+      - 'local foreground `swarm run start` as a consumer of serve startup.'
       not_applies_to:
-      - '`swarm run --connect` because connected run consumes an existing server and MUST NOT accept local
+      - '`swarm run start --connect` because connected run consumes an existing server and MUST NOT accept local
         contract/platform-spec path overrides.'
-      - '`swarm run --reattach` because reattach consumes existing run/server state and MUST NOT accept local
+      - '`swarm run start --reattach` because reattach consumes existing run/server state and MUST NOT accept local
         contract/platform-spec path overrides.'
       - 'root/global `--config`; the shared CLI config file remains discovered through `SWARM_CONFIG` or XDG only.'
       - 'inline `--api-token`, API auth/config resolver behavior, output/color/logging, retry/follow, and serve
@@ -13500,7 +13500,7 @@ cli_specification:
           borrowed-contract startup fail closed instead of creating cwd-relative or borrowed-tree state.
         consumers:
         - serve boot workspace lifecycle
-        - local foreground swarm run startup through the serve startup owner
+        - local foreground `swarm run start` startup through the serve startup owner
         - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
       workspace_backend_selection:
@@ -13563,11 +13563,11 @@ cli_specification:
         - 'Superseded: final v2.1 route mounting is partitioned by `listener_topology_v2_1`.'
         consumer_boundaries:
           swarm_run_api_port: >
-            Historical #853 boundary: `swarm run --api-port` consumed the unified serve startup/listener owner for
+            Historical #853 boundary: `swarm run start --api-port` consumed the unified serve startup/listener owner for
             local foreground startup. Under `listener_topology_v2_1`, it remains a consumer of the API listener
             owner and MUST NOT become a second bind owner or introduce a separate runtime boot path.
           swarm_run_mcp_port: >
-            `swarm run --mcp-port` remains unsupported until a later child explicitly promotes local foreground
+            `swarm run start --mcp-port` remains unsupported until a later child explicitly promotes local foreground
             MCP listener control. It MUST fail before API/WS calls, local runtime boot, or active-run mutation with
             CLI validation exit 2.
         unpromoted_review_controls:
@@ -13780,19 +13780,19 @@ cli_specification:
             enabled listener names, configured listen addresses, and actual bound addresses.
         run_command_consumer_boundary:
           swarm_run_api_port: >
-            Current `swarm run --api-port` remains a local-start convenience consumer of the serve startup owner
+            Current `swarm run start --api-port` remains a local-start convenience consumer of the serve startup owner
             and now maps to the API listener bind address. A later CLI v2.1 cleanup may replace it with `swarm run
             --api-listen-addr`.
           swarm_run_mcp_port: >
-            Current `swarm run --mcp-port` MUST remain fail-closed until a later child explicitly promotes local
+            Current `swarm run start --mcp-port` MUST remain fail-closed until a later child explicitly promotes local
             foreground MCP listener control. `swarm serve` now owns MCP listener binding through
             `--mcp-listen-addr`; if local foreground startup needs MCP listener control later, prefer a
             listen-address model over port-only `--mcp-port`.
         implementation_boundaries:
         - '#884 promoted the source-of-truth repair only.'
-        - '#992 implements Cobra/runtime binding for `--api-listen-addr` and `--mcp-listen-addr`, route partitioning, listener address validation, listener bind failure exit 3 before readiness, `--health-addr` retirement, MCP gateway URL alignment, and `swarm run --api-port` as an API listener consumer.'
+        - '#992 implements Cobra/runtime binding for `--api-listen-addr` and `--mcp-listen-addr`, route partitioning, listener address validation, listener bind failure exit 3 before readiness, `--health-addr` retirement, MCP gateway URL alignment, and `swarm run start --api-port` as an API listener consumer.'
         - '#844 implements `swarm serve` listener source precedence for `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve_api_listen_addr`, and `serve_mcp_listen_addr`.'
-        - '`swarm run --mcp-port` remains fail-closed until a later child explicitly promotes local foreground MCP listener control.'
+        - '`swarm run start --mcp-port` remains fail-closed until a later child explicitly promotes local foreground MCP listener control.'
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'
       boot_observability:
@@ -14026,7 +14026,7 @@ cli_specification:
       - --run-id <id>
       - --api-port <int>
       dropped_flags:
-        --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run --connect ... --no-follow`.'
+        --detach: 'Unsupported in v2; fail before API calls with exit 2 and migration text. Use `swarm serve` plus `swarm run start --connect ... --no-follow`.'
         --mcp-port: 'Unsupported in #743; `swarm run` may consume the existing serve startup owner, but explicit MCP bind ownership remains split to the #750 serve-owner tail and MUST fail before API/WS calls.'
       modes:
         foreground_local_start:
@@ -15478,7 +15478,7 @@ cli_specification:
         #884 promotes final CLI v2.1 separate API/MCP listen-address topology as source-of-truth repair only. #992
         implements the runtime bind slice for `swarm serve --api-listen-addr` and `--mcp-listen-addr`, route
         partitioning, listener bind failures, `--health-addr` retirement, MCP gateway URL alignment, and
-        `swarm run --api-port` as an API listener consumer. #844 implements `swarm serve` listener env/config
+        `swarm run start --api-port` as an API listener consumer. #844 implements `swarm serve` listener env/config
         precedence. Remaining listener topology tail is API/MCP enable-disable controls and any future `swarm run`
         MCP listener consumer.
       remaining_tail: 'No promoted serve lifecycle tail remains after #830. `platform.shutdown` and persisted `interrupted_by_shutdown`
