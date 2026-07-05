@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +117,109 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("delivered event type = %s, want %s", got.Type(), eventType)
 	}
 	requireNoInboundBusEvent(t, ch, "paused GitHub webhook releases exactly once")
+	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows after resume = %d, want 1", got)
+	}
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows after resume = %d, want 1", got)
+	}
+}
+
+func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	const (
+		runID             = "42000000-0000-0000-0000-000000000001"
+		entityID          = "42000000-0000-0000-0000-000000000002"
+		flowInstance      = "slack-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "slack"
+		webhookSecret     = "slack-secret"
+		providerEventID   = "Ev123ABC456"
+		agentID           = "slack-webhook-subscriber"
+		providerEventName = "inbound.slack.message"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	pg := &store.PostgresStore{DB: db}
+	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeingress.NewController(pg, bus, runtimeingress.Options{})
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	bus.SetRuntimeIngressDispatchGate(controller)
+
+	eventType := events.EventType(providerEventName)
+	ch := bus.Subscribe(agentID, eventType)
+	defer bus.Unsubscribe(agentID)
+
+	if _, err := controller.Pause(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_pause",
+		ControlledBy: "test",
+	}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g.SetRuntimeIngress(controller)
+
+	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message","text":"hello"}}`)
+	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/slack", strings.NewReader(string(body)))
+	req = req.WithContext(ctx)
+	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
+	req.Header.Set("X-Slack-Signature", slackWebhookSignature(webhookSecret, timestamp, body))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	requireNoInboundBusEvent(t, ch, "paused Slack webhook before resume")
+	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows while paused = %d, want 1", got)
+	}
+	if got := loadPostgresAgentDeliveryStatus(t, ctx, db, eventID, agentID); got != "pending" {
+		t.Fatalf("agent delivery status while paused = %q, want pending", got)
+	}
+	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 0 {
+		t.Fatalf("pipeline receipts while paused = %d, want 0", got)
+	}
+	if got := countPostgresAgentReceiptsForEvent(t, ctx, db, eventID, agentID); got != 0 {
+		t.Fatalf("agent receipts while paused = %d, want 0", got)
+	}
+
+	resumed, err := controller.Resume(ctx, runtimeingress.TransitionRequest{
+		Reason:       "test_resume",
+		ControlledBy: "test",
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if resumed.ReleasedCount != 1 {
+		t.Fatalf("released count = %d, want 1", resumed.ReleasedCount)
+	}
+	got := requireInboundBusEvent(t, ch, "paused Slack webhook release after resume")
+	if got.ID() != eventID {
+		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
+	}
+	if got.Type() != eventType {
+		t.Fatalf("delivered event type = %s, want %s", got.Type(), eventType)
+	}
+	requireNoInboundBusEvent(t, ch, "paused Slack webhook releases exactly once")
 	if got := countPostgresPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
 		t.Fatalf("pipeline receipts after resume = %d, want 1", got)
 	}
@@ -328,4 +432,10 @@ func githubWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
+func slackWebhookSignature(secret string, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte("v0:" + timestamp + ":" + string(body)))
+	return "v0=" + hex.EncodeToString(mac.Sum(nil))
 }
