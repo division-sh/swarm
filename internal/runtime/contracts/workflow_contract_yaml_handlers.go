@@ -1259,7 +1259,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 		}
 		return rules, nil
 	case yaml.MappingNode:
-		if hasAnyYAMLMappingKey(node, "condition", "when", "case", "range", "else", "default", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
+		if mappingIsSingleHandlerRuleEntry(node) {
 			rule, err := decodeHandlerRuleEntryNode(node, context)
 			if err != nil || rule == nil {
 				return nil, err
@@ -1295,6 +1295,31 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	default:
 		return nil, fmt.Errorf("unsupported rules yaml node kind %d", node.Kind)
 	}
+}
+
+func mappingIsSingleHandlerRuleEntry(node *yaml.Node) bool {
+	if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
+		return true
+	}
+	if !hasAnyYAMLMappingKey(node, "when", "case", "range", "else", "default") {
+		return false
+	}
+	return !mappingCanBeKeyedHandlerRules(node)
+}
+
+func mappingCanBeKeyedHandlerRules(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if strings.TrimSpace(node.Content[i].Value) == "" {
+			continue
+		}
+		if node.Content[i+1].Kind != yaml.MappingNode {
+			return false
+		}
+	}
+	return true
 }
 
 func rejectRuleActionOutsideRules(rule HandlerRuleEntry, context handlerRuleDecodeContext) error {

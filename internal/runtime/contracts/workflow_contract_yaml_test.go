@@ -792,6 +792,36 @@ rules:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  case:
+    condition: payload.mode == "case"
+    emit: scan.case_requested
+  default:
+    condition: else
+    emit: scan.default_requested
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := len(handler.Rules), 2; got != want {
+		t.Fatalf("rules len = %d, want %d", got, want)
+	}
+	if got := handler.Rules[0].ID; got != "case" {
+		t.Fatalf("rules[0].ID = %q, want case", got)
+	}
+	if got := handler.Rules[0].PolicyRow.Kind; got != "" {
+		t.Fatalf("rules[0].PolicyRow.Kind = %q, want empty", got)
+	}
+	if got := handler.Rules[1].ID; got != "default" {
+		t.Fatalf("rules[1].ID = %q, want default", got)
+	}
+	if got := handler.Rules[1].Condition; got != "else" {
+		t.Fatalf("rules[1].Condition = %q, want else", got)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsInvalidPolicySheetRows(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -910,6 +940,21 @@ rules:
     advances_to: fallback
 `,
 			contains: "unsupported root",
+		},
+		{
+			name: "selector operator injection",
+			body: `
+rules:
+  - id: injected
+    case:
+      selector: 'payload.mode=="admin"||payload.mode'
+      equals: deep
+    advances_to: injected
+  - id: fallback
+    default: true
+    advances_to: fallback
+`,
+			contains: "simple dotted path",
 		},
 		{
 			name: "policy field dual owner",
