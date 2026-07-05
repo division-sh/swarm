@@ -1,0 +1,15 @@
+name: test-fan-out-emit-mapping visible smoke
+steps:
+  - publish: batch.submitted
+    payload:
+      items:
+        - kind: a
+          id: item-1
+        - kind: b
+          id: item-2
+expect:
+  events:
+    include: [routed.a]
+  entities:
+    - type: default
+      current_state: routing

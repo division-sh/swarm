@@ -1,0 +1,16 @@
+name: test-fan-out-basic visible smoke
+steps:
+  - publish: batch.submitted
+    payload:
+      items:
+        - id: item-1
+        - id: item-2
+        - id: item-3
+expect:
+  events:
+    include: [item.assigned]
+  entities:
+    - type: default
+      current_state: scanning
+      fields:
+        fan_out_count: 3

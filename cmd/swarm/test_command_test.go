@@ -259,6 +259,53 @@ func TestSwarmTestRunsTier1PositiveEmissionCatalogCompanions(t *testing.T) {
 	}
 }
 
+func TestSwarmTestRunsTier3ListProcessingCatalogCompanions(t *testing.T) {
+	for _, tc := range []struct {
+		packageName       string
+		wantPositiveEvent bool
+	}{
+		{packageName: "test-fan-out-basic", wantPositiveEvent: true},
+		{packageName: "test-fan-out-count", wantPositiveEvent: true},
+		{packageName: "test-fan-out-emit-mapping", wantPositiveEvent: true},
+		{packageName: "test-fan-out-empty"},
+		{packageName: "test-filter-basic", wantPositiveEvent: true},
+		{packageName: "test-filter-empty", wantPositiveEvent: true},
+		{packageName: "test-group-by-standalone", wantPositiveEvent: true},
+		{packageName: "test-reduce-count", wantPositiveEvent: true},
+		{packageName: "test-reduce-max", wantPositiveEvent: true},
+		{packageName: "test-reduce-min", wantPositiveEvent: true},
+		{packageName: "test-reduce-operation-count", wantPositiveEvent: true},
+	} {
+		t.Run(tc.packageName, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			setCLIAPITestToken(t, "test-token")
+			contractsPath := filepath.Join(repoRoot(), "tests", "tier3-list-processing", tc.packageName)
+			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
+			raw, err := os.ReadFile(scenarioPath)
+			if err != nil {
+				t.Fatalf("read scenario: %v", err)
+			}
+			doc, err := parseScenarioDocument(raw)
+			if err != nil {
+				t.Fatalf("parse scenario: %v", err)
+			}
+			if len(doc.Steps) != 1 || doc.Steps[0].Action != "publish" {
+				t.Fatalf("scenario steps = %#v, want one publish step", doc.Steps)
+			}
+			if tc.wantPositiveEvent && len(doc.Expect.Events.Include) == 0 {
+				t.Fatal("scenario must include a positive emitted-event expectation")
+			}
+			if !tc.wantPositiveEvent && len(doc.Expect.Events.Include) != 0 {
+				t.Fatalf("scenario includes events %#v, want no event-output assertion", doc.Expect.Events.Include)
+			}
+			if len(doc.Expect.Entities) != 1 || !doc.Expect.Entities[0].StateSet {
+				t.Fatalf("scenario entity expectations = %#v, want one current_state detail assertion", doc.Expect.Entities)
+			}
+			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
+		})
+	}
+}
+
 func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string, doc scenarioDocument) {
 	t.Helper()
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)

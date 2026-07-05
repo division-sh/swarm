@@ -1,0 +1,19 @@
+name: test-reduce-count visible smoke
+steps:
+  - publish: items.submitted
+    payload:
+      items:
+        - id: item-1
+          active: true
+        - id: item-2
+          active: false
+        - id: item-3
+          active: true
+expect:
+  events:
+    include: [items.counted]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        active_count: 2

@@ -1,0 +1,17 @@
+name: test-reduce-operation-count visible smoke
+steps:
+  - publish: batch.submitted
+    payload:
+      items:
+        - id: a
+        - id: b
+        - id: c
+        - id: d
+expect:
+  events:
+    include: [batch.counted]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        item_count: 4

@@ -1,0 +1,16 @@
+name: test-filter-empty visible smoke
+steps:
+  - publish: items.submitted
+    payload:
+      items:
+        - score: 10
+        - score: 20
+        - score: 40
+expect:
+  events:
+    include: [items.filtered]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        filtered: []
