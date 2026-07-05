@@ -645,7 +645,7 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 	if policySheet.EvidenceOwner != deterministicWorkLadderStage0Path {
 		problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model evidence_owner = %q, want %s", policySheet.EvidenceOwner, deterministicWorkLadderStage0Path))
 	}
-	for _, forbidden := range []string{"handler_fields.switch", "handler_fields.lookup", "handler_fields.threshold"} {
+	for _, forbidden := range []string{"handler_fields.switch", "handler_fields.lookup", "handler_fields.threshold", "handler_fields.policy"} {
 		if !stringSet(policySheet.ForbiddenOverloads)[forbidden] {
 			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model forbidden_overloads missing %s", forbidden))
 		}
@@ -655,7 +655,7 @@ func validateDeterministicWorkLadderDesignRepairs(repairs []deterministicWorkLad
 			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model required_surfaces missing %s", surface))
 		}
 	}
-	for _, want := range []string{"ordered policy-sheet authoring construct", "not standalone handler", "closed and statically verifiable", "rules selected-branch model", "value-derivation rows lower to compute", "not an implementation claim"} {
+	for _, want := range []string{"ordered policy-sheet authoring construct", "not standalone handler", "current spelling", "enhance rules in place", "closed and statically verifiable", "rules selected-branch model", "value-derivation rows lower to compute", "Stable row IDs", "Discovery row 13", "Treasury row 9", "not an implementation claim"} {
 		if !strings.Contains(policySheet.Note, want) {
 			problems = append(problems, fmt.Sprintf("repair policy_sheet_row_model note missing %q", want))
 		}

@@ -728,6 +728,230 @@ branch:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  - id: cto_revision_gate
+    when: "payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max"
+    advances_to: cto_review
+  - id: deep_scan
+    case:
+      selector: payload.mode
+      equals: deep
+    emit: scan.deep_requested
+  - id: repository_quick_scan
+    case:
+      selectors: [payload.mode, payload.target]
+      equals: [quick, repository]
+    emit: scan.quick_repo_requested
+  - id: treasury_warning
+    range:
+      value: entity.spend_ratio
+      gte: policy.warning_pct / 100
+      lt: policy.throttle_pct / 100
+      monotonicity:
+        - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
+    emit: treasury.warning_recorded
+  - id: default_route
+    default: true
+    emit: scan.default_requested
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := len(handler.Rules), 5; got != want {
+		t.Fatalf("rules len = %d, want %d", got, want)
+	}
+	wantConditions := []string{
+		"payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max",
+		`payload.mode == "deep"`,
+		`payload.mode == "quick" && payload.target == "repository"`,
+		`entity.spend_ratio >= policy.warning_pct / 100 && entity.spend_ratio < policy.throttle_pct / 100`,
+		"else",
+	}
+	wantKinds := []PolicySheetRowKind{
+		PolicySheetRowKindWhen,
+		PolicySheetRowKindCase,
+		PolicySheetRowKindCase,
+		PolicySheetRowKindRange,
+		PolicySheetRowKindDefault,
+	}
+	for idx := range handler.Rules {
+		if got := handler.Rules[idx].Condition; got != wantConditions[idx] {
+			t.Fatalf("rules[%d].Condition = %q, want %q", idx, got, wantConditions[idx])
+		}
+		if got := handler.Rules[idx].PolicyRow.Kind; got != wantKinds[idx] {
+			t.Fatalf("rules[%d].PolicyRow.Kind = %q, want %q", idx, got, wantKinds[idx])
+		}
+	}
+	if got := handler.Rules[2].PolicyRow.Selectors; !reflect.DeepEqual(got, []string{"payload.mode", "payload.target"}) {
+		t.Fatalf("tuple selectors = %#v", got)
+	}
+	if got := handler.Rules[3].PolicyRow.RangeLower.Value; got != "policy.warning_pct / 100" {
+		t.Fatalf("range lower = %q", got)
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsInvalidPolicySheetRows(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		contains string
+	}{
+		{
+			name: "missing default",
+			body: `
+rules:
+  - id: deep_scan
+    case:
+      selector: payload.mode
+      equals: deep
+    emit: scan.deep_requested
+`,
+			contains: "require an else/default row",
+		},
+		{
+			name: "duplicate row ids",
+			body: `
+rules:
+  - id: duplicate
+    when: "payload.ok"
+    advances_to: ok
+  - id: duplicate
+    default: true
+    advances_to: fallback
+`,
+			contains: "duplicate stable row id",
+		},
+		{
+			name: "duplicate case key",
+			body: `
+rules:
+  - id: deep_a
+    case:
+      selector: payload.mode
+      equals: deep
+    emit: scan.deep_a
+  - id: deep_b
+    case:
+      selector: payload.mode
+      equals: deep
+    emit: scan.deep_b
+  - id: fallback
+    default: true
+    emit: scan.default
+`,
+			contains: "duplicate case key",
+		},
+		{
+			name: "overlapping literal ranges",
+			body: `
+rules:
+  - id: low
+    range:
+      value: payload.score
+      gte: 0
+      lt: 10
+    advances_to: low
+  - id: overlap
+    range:
+      value: payload.score
+      gte: 5
+      lt: 15
+    advances_to: overlap
+  - id: fallback
+    default: true
+    advances_to: fallback
+`,
+			contains: "overlapping literal ranges",
+		},
+		{
+			name: "dynamic bound",
+			body: `
+rules:
+  - id: dynamic_bound
+    range:
+      value: entity.spend_ratio
+      gte: payload.warning_ratio
+    advances_to: warning
+  - id: fallback
+    default: true
+    advances_to: fallback
+`,
+			contains: "dynamic bound",
+		},
+		{
+			name: "policy bound missing monotonicity",
+			body: `
+rules:
+  - id: warning
+    range:
+      value: entity.spend_ratio
+      gte: policy.warning_ratio
+      lt: policy.throttle_ratio
+    advances_to: warning
+  - id: fallback
+    default: true
+    advances_to: fallback
+`,
+			contains: "requires monotonicity",
+		},
+		{
+			name: "unsupported selector root",
+			body: `
+rules:
+  - id: fanout_selector
+    case:
+      selector: fan_out.count
+      equals: 3
+    advances_to: fanout
+  - id: fallback
+    default: true
+    advances_to: fallback
+`,
+			contains: "unsupported root",
+		},
+		{
+			name: "policy field dual owner",
+			body: `
+rules:
+  - id: bad_policy
+    policy:
+      row: true
+    advances_to: bad
+`,
+			contains: "second policy-sheet authoring owner",
+		},
+		{
+			name: "typed row outside rules",
+			body: `
+on_complete:
+  - id: done
+    when: "payload.ok"
+    advances_to: done
+`,
+			contains: "only supported under handler.rules",
+		},
+		{
+			name: "standalone handler switch",
+			body: `
+switch:
+  selector: payload.mode
+`,
+			contains: `handler field "switch"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(tt.body), &handler)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
+			}
+		})
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`

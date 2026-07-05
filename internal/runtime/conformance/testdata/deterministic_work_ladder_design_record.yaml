@@ -134,11 +134,12 @@ repairs:
     owner_issue: 1668
     decision: first_selection_helpers_are_policy_sheet_row_types
     evidence_owner: internal/runtime/conformance/testdata/deterministic_work_ladder_stage0.yaml
-    canonical_owner: future policy-sheet authoring construct; selection rows lower to platform-spec.yaml#handler_specification.handler_fields.rules and value rows lower to platform-spec.yaml#handler_specification.handler_fields.compute
+    canonical_owner: current rules policy-sheet authoring construct; selection rows lower to platform-spec.yaml#handler_specification.handler_fields.rules and value rows lower to platform-spec.yaml#handler_specification.handler_fields.compute
     forbidden_overloads:
       - handler_fields.switch
       - handler_fields.lookup
       - handler_fields.threshold
+      - handler_fields.policy
     required_surfaces:
       - design_record
       - future_platform_spec
@@ -146,12 +147,23 @@ repairs:
     note: >
       #1668 switch, lookup, and threshold candidates are the first row types of
       one ordered policy-sheet authoring construct, not standalone handler
-      fields. The row-type vocabulary is closed and statically verifiable:
-      branch-selection rows lower to the existing rules selected-branch model,
-      value-derivation rows lower to compute, and future temporal, join, loop,
-      collection, or schedule rows may be added only as separately gated closed
-      row types with their own verifier checks. This record is not an
-      implementation claim and does not promote policy-sheet runtime semantics.
+      fields. The current spelling of that policy sheet is rules: enhance rules
+      in place instead of adding a co-authorable policy field. The row-type
+      vocabulary is closed and statically verifiable: branch-selection rows
+      lower to the existing rules selected-branch model, value-derivation rows
+      lower to compute, and future temporal, join, loop, collection, or schedule
+      rows may be added only as separately gated closed row types with their own
+      verifier checks. Stable row IDs are trace-addressable contract identity.
+      The evidence pitch is dedup/readability first, then stable IDs plus
+      ordered-explicit rows, then keeping dispatch out of code/agents, with
+      exhaustiveness proof as the safety layer. Discovery row 13 is the
+      strongest selector proof because the legacy mode dispatcher showed
+      switch-as-event-proliferation plus escape to Go; it pre-registers future
+      temporal and collection rows without implementing them here. Treasury row
+      9 is the composition proof: a value row can normalize spend_ratio through
+      compute, then an adjacent selection row dispatches on policy-constant
+      threshold bounds. This record was originally not an implementation claim;
+      #1713 promotes the selection-row subset in platform-spec.yaml.
 launch_language:
   owner_issue: 1670
   selected: python
