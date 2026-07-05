@@ -11851,8 +11851,9 @@ cli_specification:
         action: >
           `swarm forkchat new|resume|list|view|delete` is promoted as a bounded CLI consumer over the
           `conversation.fork|fork_chat|fork_list|fork_view|fork_delete` APIs. Full `--include-forks`
-          cross-surface conversation behavior, Dashboard/Builder views, sharing/ACL/pinning, and public
-          `run.fork` / `swarm fork` work remain split.
+          cross-surface conversation behavior, Dashboard/Builder views, and sharing/ACL/pinning remain
+          split. The public run-fork CLI is implemented as `swarm run fork` (CLI v2.2; the pre-v2.2
+          top-level `swarm fork` spelling is retired fail-closed).
     platform_spec_refinements_not_cleanly_present_in_review_artifact:
       agent_replay_backlog:
         classification: required_current_contract
