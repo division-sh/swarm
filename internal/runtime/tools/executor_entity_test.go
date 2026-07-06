@@ -409,6 +409,80 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 	}
 }
 
+func TestRoleScopedEntityTools_ExcludeEqualityParticipantWriteAffordances(t *testing.T) {
+	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
+	bundle := loadWave1EntityToolMultiFlowBundle(t, map[string]entityToolFlowFixture{
+		"validation": {
+			SchemaYAML: `
+name: validation
+mode: static
+initial_state: queued
+states: [queued, closed]
+terminal_states: [closed]
+tool_surface:
+  role_scoped_entity_tools: true
+`,
+			TypesYAML: `
+types:
+  manifest:
+    component: text
+    owner:
+      type: text
+      equal_to: component
+    description: text
+`,
+			EntitiesYAML: `
+validation_case:
+  component: text
+  owner:
+    type: text
+    equal_to: component
+  manifest: manifest
+  notes: text
+`,
+			AgentsYAML: `
+validation-orchestrator:
+  id: validation-orchestrator
+  role: validation_orchestrator
+  mode: task
+  tools:
+    - save_entity_field
+  entity_writes:
+    validation_case:
+      save:
+        - component
+        - owner
+        - manifest
+        - notes
+`,
+		},
+	})
+	exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
+		WorkflowSource: semanticview.Wrap(bundle),
+	})
+
+	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
+	for _, name := range []string{
+		"save_validation_case_manifest",
+		"update_validation_case_manifest_description",
+		"save_validation_case_notes",
+	} {
+		if _, ok := names[name]; !ok {
+			t.Fatalf("expected generated role-scoped tool %q in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
+	for _, name := range []string{
+		"save_validation_case_component",
+		"save_validation_case_owner",
+		"update_validation_case_manifest_component",
+		"update_validation_case_manifest_owner",
+	} {
+		if _, ok := names[name]; ok {
+			t.Fatalf("equality participant produced mutation tool %q in %#v", name, sortedRoleScopedToolNames(names))
+		}
+	}
+}
+
 func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *testing.T) {
 	actor := models.AgentConfig{ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{
 		"get_entity",
