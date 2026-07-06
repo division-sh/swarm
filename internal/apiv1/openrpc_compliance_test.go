@@ -121,8 +121,8 @@ func TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod(t *testing.T) {
 	if matrix.IssueRole != "provenance" {
 		t.Fatalf("matrix issue_role = %q, want provenance", matrix.IssueRole)
 	}
-	if len(doc.Methods) != 58 {
-		t.Fatalf("generated OpenRPC methods = %d, want 58", len(doc.Methods))
+	if len(doc.Methods) != 59 {
+		t.Fatalf("generated OpenRPC methods = %d, want 59", len(doc.Methods))
 	}
 	if len(matrix.Methods) != len(doc.Methods) {
 		t.Fatalf("matrix rows = %d, want generated method count %d", len(matrix.Methods), len(doc.Methods))

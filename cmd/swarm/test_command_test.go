@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
@@ -121,6 +123,124 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := writeScenarioSetupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+
+	var calls []jsonRPCRequest
+	var setupRunID string
+	var setupEntityID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case scenarioTestSetupEntitiesMethod:
+			if req.Params["bundle_hash"] != bundleHash {
+				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
+			}
+			setupRunID, _ = req.Params["run_id"].(string)
+			if _, err := uuid.Parse(setupRunID); err != nil {
+				t.Fatalf("test.setup_entities run_id = %#v, want UUID", req.Params["run_id"])
+			}
+			entities, ok := req.Params["entities"].([]any)
+			if !ok || len(entities) != 1 {
+				t.Fatalf("test.setup_entities entities = %#v, want one", req.Params["entities"])
+			}
+			entity, ok := entities[0].(map[string]any)
+			if !ok {
+				t.Fatalf("test.setup_entities entity = %#v, want mapping", entities[0])
+			}
+			setupEntityID, _ = entity["entity_id"].(string)
+			if _, err := uuid.Parse(setupEntityID); err != nil {
+				t.Fatalf("test.setup_entities entity_id = %#v, want UUID", entity["entity_id"])
+			}
+			if entity["alias"] != "product" || entity["flow_instance"] != "operating" || entity["entity_type"] != "product" || entity["current_state"] != "waiting" {
+				t.Fatalf("test.setup_entities entity = %#v", entity)
+			}
+			if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], map[string]any{"product_id": "p-1", "note": "seeded"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := assertScenarioJSONEqual("test.setup_entities gates", entity["gates"], map[string]any{"review_ready": true}); err != nil {
+				t.Fatal(err)
+			}
+			writeJSONRPCResult(t, w, req.ID, map[string]any{
+				"run_id": setupRunID,
+				"entities": []map[string]any{{
+					"alias":         "product",
+					"entity_id":     setupEntityID,
+					"flow_instance": "operating",
+					"entity_type":   "product",
+					"current_state": "waiting",
+				}},
+			})
+		case eventPublishMethod:
+			if req.Params["event_name"] != "operating/opco.product_review_requested" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != setupRunID {
+				t.Fatalf("event.publish params = %#v", req.Params)
+			}
+			target, ok := req.Params["target"].(map[string]any)
+			if !ok || target["flow_instance"] != "operating" || target["entity_id"] != setupEntityID {
+				t.Fatalf("event.publish target = %#v", req.Params["target"])
+			}
+			payload, ok := req.Params["payload"].(map[string]any)
+			if !ok || payload["note"] != "approved" {
+				t.Fatalf("event.publish payload = %#v", req.Params["payload"])
+			}
+			result := eventPublishTestResult(false)
+			result["run_id"] = setupRunID
+			result["event_id"] = "event-setup-follow-up"
+			result["source_event_id"] = ""
+			writeJSONRPCResult(t, w, req.ID, result)
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(setupRunID, true))
+		case "run.trace":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{scenarioTraceRowForEvent("event-setup-follow-up", "operating/opco.product_review_requested")}})
+		case entityGetMethod:
+			if req.Params["entity_id"] != setupEntityID || req.Params["run_id"] != setupRunID {
+				t.Fatalf("entity.get params = %#v", req.Params)
+			}
+			result := validEntityFullResult(setupEntityID)
+			entity := result["entity"].(map[string]any)
+			entity["run_id"] = setupRunID
+			entity["entity_type"] = "product"
+			entity["current_state"] = "ready"
+			result["fields"] = map[string]any{"product_id": "p-1", "note": "approved"}
+			result["gates"] = map[string]any{"review_ready": false}
+			writeJSONRPCResult(t, w, req.ID, result)
+		default:
+			t.Fatalf("unexpected method = %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+		"--timeout", "2s",
+		"--poll-interval", "10ms",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertScenarioTestMethods(t, calls, []string{
+		scenarioTestSetupEntitiesMethod,
+		eventPublishMethod,
+		"run.diagnose",
+		"run.diagnose",
+		"run.trace",
+		entityGetMethod,
+	})
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
@@ -607,6 +727,90 @@ steps:
 	}
 }
 
+func TestSwarmTestRejectsInvalidSetupBeforeRPC(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := writeScenarioSetupFixture(t)
+	scenarioPath := filepath.Join(contractsPath, "flows", "operating", "tests", "bad-setup.yaml")
+	writeWorkflowValidationFixtureFile(t, scenarioPath, `
+name: bad setup
+setup:
+  entities:
+    - as: product
+      type: product
+      current_state: waiting
+      fields: {missing: value}
+steps:
+  - publish: opco.product_review_requested
+    target: product
+    payload: {note: approved}
+`)
+	var called bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		scenarioPath,
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != scenarioTestExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
+	}
+	if called {
+		t.Fatal("setup API was called for invalid setup field")
+	}
+	if !strings.Contains(stderr.String(), "fields.missing is not declared") {
+		t.Fatalf("stderr = %q, want undeclared field failure", stderr.String())
+	}
+}
+
+func TestScenarioSetupParserRejectsAmbiguousSetupForms(t *testing.T) {
+	for _, raw := range []string{
+		`
+setup:
+  entities:
+    - as: product
+      type: product
+    - as: product
+      type: product
+steps:
+  - publish: opco.product_review_requested
+    payload: {note: approved}
+`,
+		`
+setup:
+  entities:
+    - as: product
+      type: product
+steps:
+  - publish: opco.product_review_requested
+    target: product
+    target_entity_id: 00000000-0000-0000-0000-000000000001
+    target_flow_instance: operating
+    payload: {note: approved}
+`,
+		`
+steps:
+  - publish: opco.product_review_requested
+    payload: {note: approved}
+expect:
+  entities:
+    - ref: product
+      count: 1
+`,
+	} {
+		if _, err := parseScenarioDocument([]byte(raw)); err == nil {
+			t.Fatalf("parseScenarioDocument unexpectedly accepted:\n%s", raw)
+		}
+	}
+}
+
 func TestSwarmTestRejectsScenariosOutsideSupportedRoots(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
@@ -924,7 +1128,8 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 		t.Fatalf("client: %v", err)
 	}
 	runner := scenarioRunner{client: client}
-	if err := runner.assertEntityExpectation(context.Background(), "run-1", mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{EntityType: "widget", Count: intPtr(2)}); err != nil {
+	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
+	if err := runner.assertEntityExpectation(context.Background(), state, mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{EntityType: "widget", Count: intPtr(2)}); err != nil {
 		t.Fatalf("entity expectation: %v", err)
 	}
 	assertScenarioTestMethods(t, calls, []string{entityListMethod, entityListMethod})
@@ -974,7 +1179,8 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 		"score":      7,
 		"ready":      true,
 	})
-	if err := runner.assertEntityExpectation(context.Background(), "run-1", evaluator, scenarioEntityExpect{
+	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
+	if err := runner.assertEntityExpectation(context.Background(), state, evaluator, scenarioEntityExpect{
 		EntityType:   "widget",
 		CurrentState: "${vars.done_state}",
 		StateSet:     true,
@@ -1011,7 +1217,8 @@ func TestScenarioEntityDetailExpectationFailsClosedOnMultipleMatches(t *testing.
 		t.Fatalf("client: %v", err)
 	}
 	runner := scenarioRunner{client: client}
-	err = runner.assertEntityExpectation(context.Background(), "run-1", mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{
+	state := &scenarioRunState{RunID: "run-1", SetupEntities: map[string]scenarioSetupEntityBinding{}}
+	err = runner.assertEntityExpectation(context.Background(), state, mustScenarioExpressionEvaluator(t, nil), scenarioEntityExpect{
 		EntityType:   "widget",
 		CurrentState: "done",
 		StateSet:     true,
@@ -1090,6 +1297,94 @@ expect:
       current_state: done
 `)
 	return contractsPath
+}
+
+func writeScenarioSetupFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: scenario-setup-fixture
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: operating
+    flow: operating
+    mode: static
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: scenario-setup-fixture
+initial_state: new
+terminal_states: [done]
+states: [new, done]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
+name: operating
+mode: static
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, waiting, ready]
+pins:
+  inputs:
+    events: [opco.product_review_requested]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
+product:
+  product_id: text
+  note: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
+opco.product_review_requested:
+  swarm:
+    source: external
+  note: text
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
+reviewer:
+  id: reviewer
+  execution_type: system_node
+  subscribes_to: [opco.product_review_requested]
+  gate_state:
+    gates: [review_ready]
+  event_handlers:
+    opco.product_review_requested:
+      data_accumulation:
+        source_event: opco.product_review_requested
+        writes:
+          - source_field: note
+            target_field: note
+      clear_gates: [review_ready]
+      advances_to: ready
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "operating", "tests", "setup-target.yaml"), `
+name: setup target and expectation
+setup:
+  entities:
+    - as: product
+      type: product
+      current_state: waiting
+      fields: {product_id: p-1, note: seeded}
+      gates: {review_ready: true}
+steps:
+  - publish: opco.product_review_requested
+    target: product
+    payload: {note: approved}
+expect:
+  entities:
+    - ref: product
+      current_state: ready
+      fields: {product_id: p-1, note: approved}
+      gates: {review_ready: false}
+`)
+	return root
 }
 
 func scenarioRunDiagnoseTestResult(runID string, ready bool) map[string]any {

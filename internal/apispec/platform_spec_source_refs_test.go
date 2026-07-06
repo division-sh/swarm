@@ -118,6 +118,7 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 	consumedOwners := mustMappingValue(t, sourceAuthority, "consumed_owners")
 	for _, key := range []string{
 		"expressions",
+		"setup_pre_state",
 		"event_injection",
 		"mailbox_decisions",
 		"run_readback",
@@ -141,9 +142,25 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 	}
 
 	actionSteps := mustMappingValue(t, runner, "action_steps")
-	for _, key := range []string{"publish", "mailbox_approve", "mailbox_reject", "mailbox_defer"} {
+	for _, key := range []string{"run_context", "publish", "mailbox_approve", "mailbox_reject", "mailbox_defer"} {
 		if !hasMappingKey(actionSteps, key) {
 			t.Fatalf("deterministic scenario runner action_steps.%s missing", key)
+		}
+	}
+
+	setupPreState := mustMappingValue(t, scenarioDocument, "setup_pre_state")
+	for _, key := range []string{"syntax", "owner", "rule", "validation", "alias_consumers", "unsupported_forms"} {
+		if !hasMappingKey(setupPreState, key) {
+			t.Fatalf("deterministic scenario runner scenario_document.setup_pre_state.%s missing", key)
+		}
+	}
+	if got := scalarValue(mappingValue(setupPreState, "owner")); got != "/v1/rpc test.setup_entities" {
+		t.Fatalf("deterministic scenario runner setup_pre_state.owner = %q", got)
+	}
+	aliasConsumers := mustMappingValue(t, setupPreState, "alias_consumers")
+	for _, key := range []string{"publish_target", "expect_entity_ref"} {
+		if !hasMappingKey(aliasConsumers, key) {
+			t.Fatalf("deterministic scenario runner setup_pre_state.alias_consumers.%s missing", key)
 		}
 	}
 
@@ -154,7 +171,7 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 		}
 	}
 	entities := mustMappingValue(t, expectations, "entities")
-	for _, key := range []string{"current_state", "fields", "gates", "count_interaction"} {
+	for _, key := range []string{"ref", "current_state", "fields", "gates", "count_interaction"} {
 		if !hasMappingKey(entities, key) {
 			t.Fatalf("deterministic scenario runner expectations.entities.%s missing", key)
 		}
@@ -163,6 +180,7 @@ func TestPlatformSpecDeterministicScenarioRunnerSourceAuthority(t *testing.T) {
 		key  string
 		want []string
 	}{
+		{key: "ref", want: []string{"setup-alias", "entity.get", "MUST NOT be combined with `count`"}},
 		{key: "current_state", want: []string{"scenario literal model", "CEL", "entity.list", "entity.get", "current_state"}},
 		{key: "fields", want: []string{"EntityFull.fields", "scenario literal model", "CEL", "exactly"}},
 		{key: "gates", want: []string{"EntityFull.gates", "scenario literal model", "CEL", "booleans"}},

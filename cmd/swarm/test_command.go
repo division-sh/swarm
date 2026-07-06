@@ -25,6 +25,8 @@ import (
 )
 
 const (
+	scenarioTestSetupEntitiesMethod = "test.setup_entities"
+
 	scenarioTestExitValidation = 2
 	scenarioTestExitRuntime    = 3
 	scenarioTestExitAuth       = 4
@@ -52,9 +54,26 @@ type scenarioDocument struct {
 	Name    string
 	Seed    string
 	Vars    map[string]any
+	Setup   scenarioSetup
 	Steps   []scenarioStep
 	Expect  scenarioExpect
 	Invalid *scenarioInvalid
+}
+
+type scenarioSetup struct {
+	Entities []scenarioSetupEntity
+}
+
+type scenarioSetupEntity struct {
+	Alias        string
+	EntityType   string
+	Flow         any
+	CurrentState any
+	StateSet     bool
+	Fields       map[string]any
+	FieldsSet    bool
+	Gates        map[string]any
+	GatesSet     bool
 }
 
 type scenarioStep struct {
@@ -67,6 +86,7 @@ type scenarioStep struct {
 	IdempotencyKey     any
 	Emitter            any
 	SourceEventID      any
+	Target             any
 	TargetFlowInstance any
 	TargetEntityID     any
 }
@@ -84,6 +104,7 @@ type scenarioEventExpect struct {
 }
 
 type scenarioEntityExpect struct {
+	Ref          string
 	EntityType   string
 	Count        *int
 	CurrentState any
@@ -106,8 +127,30 @@ type scenarioInvalidCase struct {
 }
 
 type scenarioRunState struct {
-	RunID       string
-	LastEventID string
+	RunID         string
+	LastEventID   string
+	SetupEntities map[string]scenarioSetupEntityBinding
+}
+
+type scenarioSetupEntityBinding struct {
+	Alias        string
+	EntityID     string
+	FlowInstance string
+	EntityType   string
+	CurrentState string
+}
+
+type testSetupEntitiesResult struct {
+	RunID    string                         `json:"run_id"`
+	Entities []testSetupEntityBindingResult `json:"entities"`
+}
+
+type testSetupEntityBindingResult struct {
+	Alias        string `json:"alias"`
+	EntityID     string `json:"entity_id"`
+	FlowInstance string `json:"flow_instance,omitempty"`
+	EntityType   string `json:"entity_type"`
+	CurrentState string `json:"current_state"`
 }
 
 type scenarioTestValidationError struct {
@@ -391,7 +434,12 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 			return scenarioTestValidationError{err: err}
 		}
 	}
-	state := &scenarioRunState{}
+	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
+	if len(doc.Setup.Entities) > 0 {
+		if err := r.runScenarioSetup(ctx, file, evaluator, state, doc.Setup); err != nil {
+			return fmt.Errorf("%s: setup: %w", file.Path, err)
+		}
+	}
 	for i, step := range doc.Steps {
 		if err := r.runScenarioStep(ctx, file, evaluator, state, step); err != nil {
 			return fmt.Errorf("%s: step %d: %w", file.Path, i+1, err)
@@ -407,7 +455,7 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 			return fmt.Errorf("%s: %w", file.Path, err)
 		}
 		if !doc.Expect.empty() {
-			if err := r.evaluateExpectations(ctx, state.RunID, evaluator, doc.Expect); err != nil {
+			if err := r.evaluateExpectations(ctx, state, evaluator, doc.Expect); err != nil {
 				return fmt.Errorf("%s: %w", file.Path, err)
 			}
 		}
@@ -427,7 +475,7 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 	top := mappingNode(root.Content[0])
 	for key := range top {
 		switch key {
-		case "version", "name", "seed", "vars", "steps", "expect", "invalid":
+		case "version", "name", "seed", "vars", "setup", "steps", "expect", "invalid":
 		default:
 			return scenarioDocument{}, fmt.Errorf("unsupported top-level field %q", key)
 		}
@@ -451,6 +499,13 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 			return scenarioDocument{}, fmt.Errorf("vars must be a mapping")
 		}
 		doc.Vars = vars
+	}
+	if node := top["setup"]; node != nil {
+		setup, err := parseScenarioSetup(node)
+		if err != nil {
+			return scenarioDocument{}, err
+		}
+		doc.Setup = setup
 	}
 	stepsNode := top["steps"]
 	if stepsNode == nil {
@@ -483,6 +538,85 @@ func parseScenarioDocument(raw []byte) (scenarioDocument, error) {
 	return doc, nil
 }
 
+func parseScenarioSetup(node *yaml.Node) (scenarioSetup, error) {
+	if node.Kind != yaml.MappingNode {
+		return scenarioSetup{}, fmt.Errorf("setup must be a mapping")
+	}
+	m := yamlNodeValue(node).(map[string]any)
+	for key := range m {
+		switch key {
+		case "entities":
+		default:
+			return scenarioSetup{}, fmt.Errorf("unsupported setup field %q", key)
+		}
+	}
+	rawEntities, ok := m["entities"].([]any)
+	if !ok || len(rawEntities) == 0 {
+		return scenarioSetup{}, fmt.Errorf("setup.entities must be a non-empty list")
+	}
+	seen := map[string]struct{}{}
+	out := scenarioSetup{Entities: make([]scenarioSetupEntity, 0, len(rawEntities))}
+	for i, raw := range rawEntities {
+		item, err := parseScenarioSetupEntity(raw, i)
+		if err != nil {
+			return scenarioSetup{}, err
+		}
+		if _, ok := seen[item.Alias]; ok {
+			return scenarioSetup{}, fmt.Errorf("setup.entities[%d].as %q is duplicated", i, item.Alias)
+		}
+		seen[item.Alias] = struct{}{}
+		out.Entities = append(out.Entities, item)
+	}
+	return out, nil
+}
+
+func parseScenarioSetupEntity(raw any, i int) (scenarioSetupEntity, error) {
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d] must be a mapping", i)
+	}
+	var item scenarioSetupEntity
+	for key, value := range m {
+		switch key {
+		case "as":
+			item.Alias = strings.TrimSpace(fmt.Sprint(value))
+		case "type":
+			item.EntityType = strings.TrimSpace(fmt.Sprint(value))
+		case "flow":
+			item.Flow = cloneAny(value)
+		case "current_state":
+			if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+				return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].current_state must be non-empty", i)
+			}
+			item.CurrentState = cloneAny(value)
+			item.StateSet = true
+		case "fields":
+			fields, ok := value.(map[string]any)
+			if !ok {
+				return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].fields must be a mapping", i)
+			}
+			item.Fields = cloneAnyMap(fields)
+			item.FieldsSet = true
+		case "gates":
+			gates, ok := value.(map[string]any)
+			if !ok {
+				return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].gates must be a mapping", i)
+			}
+			item.Gates = cloneAnyMap(gates)
+			item.GatesSet = true
+		default:
+			return scenarioSetupEntity{}, fmt.Errorf("unsupported setup.entities[%d] field %q", i, key)
+		}
+	}
+	if item.Alias == "" {
+		return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].as is required", i)
+	}
+	if item.EntityType == "" {
+		return scenarioSetupEntity{}, fmt.Errorf("setup.entities[%d].type is required", i)
+	}
+	return item, nil
+}
+
 func (r scenarioRunner) scenarioEvaluatorSeed(file scenarioTestFile, doc scenarioDocument) (string, error) {
 	rel, err := filepath.Rel(r.contractsDir, file.Path)
 	if err != nil {
@@ -513,9 +647,17 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 		}
 		for key := range m {
 			switch key {
-			case "publish", "payload", "idempotency_key", "emitter", "source_event_id", "target_flow_instance", "target_entity_id":
+			case "publish", "payload", "idempotency_key", "emitter", "source_event_id", "target", "target_flow_instance", "target_entity_id":
 			default:
 				return scenarioStep{}, fmt.Errorf("unsupported publish step field %q", key)
+			}
+		}
+		if _, ok := m["target"]; ok {
+			if _, hasFlow := m["target_flow_instance"]; hasFlow {
+				return scenarioStep{}, fmt.Errorf("publish step target cannot be combined with target_flow_instance")
+			}
+			if _, hasEntity := m["target_entity_id"]; hasEntity {
+				return scenarioStep{}, fmt.Errorf("publish step target cannot be combined with target_entity_id")
 			}
 		}
 		return scenarioStep{
@@ -525,6 +667,7 @@ func parseScenarioStep(node *yaml.Node) (scenarioStep, error) {
 			IdempotencyKey:     m["idempotency_key"],
 			Emitter:            m["emitter"],
 			SourceEventID:      m["source_event_id"],
+			Target:             m["target"],
 			TargetFlowInstance: m["target_flow_instance"],
 			TargetEntityID:     m["target_entity_id"],
 		}, nil
@@ -657,6 +800,8 @@ func parseScenarioEntityExpect(value any) ([]scenarioEntityExpect, error) {
 		var item scenarioEntityExpect
 		for key, value := range m {
 			switch key {
+			case "ref":
+				item.Ref = strings.TrimSpace(fmt.Sprint(value))
 			case "type":
 				item.EntityType = strings.TrimSpace(fmt.Sprint(value))
 			case "count":
@@ -690,9 +835,14 @@ func parseScenarioEntityExpect(value any) ([]scenarioEntityExpect, error) {
 			}
 		}
 		if item.EntityType == "" {
-			return nil, fmt.Errorf("expect.entities[%d].type is required", i)
+			if item.Ref == "" {
+				return nil, fmt.Errorf("expect.entities[%d].type is required", i)
+			}
 		}
 		detail := item.hasDetailAssertion()
+		if item.Ref != "" && item.Count != nil {
+			return nil, fmt.Errorf("expect.entities[%d].count cannot be combined with ref", i)
+		}
 		if item.Count != nil && detail {
 			return nil, fmt.Errorf("expect.entities[%d].count cannot be combined with current_state, fields, or gates", i)
 		}
@@ -994,6 +1144,369 @@ func invalidBasePublishStep(base map[string]any) (scenarioStep, error) {
 	return scenarioStep{Action: "publish", PublishEvent: eventName, Payload: base["payload"]}, nil
 }
 
+func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestFile, evaluator *scenarioExpressionEvaluator, state *scenarioRunState, setup scenarioSetup) error {
+	if state.RunID != "" {
+		return scenarioTestValidationError{err: fmt.Errorf("setup requires an empty run context")}
+	}
+	runID := scenarioUUID(evaluator.seed, "setup.run")
+	params := map[string]any{
+		"bundle_hash":     r.bundleHash,
+		"run_id":          runID,
+		"idempotency_key": scenarioSHA40(evaluator.seed + "\x00setup.entities"),
+	}
+	entities := make([]any, 0, len(setup.Entities))
+	for _, entity := range setup.Entities {
+		evaluated, err := r.evaluateScenarioSetupEntity(file, evaluator, entity)
+		if err != nil {
+			return scenarioTestValidationError{err: err}
+		}
+		entityID := scenarioUUID(evaluator.seed, "setup.entity."+evaluated.Alias)
+		entities = append(entities, map[string]any{
+			"alias":         evaluated.Alias,
+			"entity_id":     entityID,
+			"flow_instance": evaluated.FlowID,
+			"entity_type":   evaluated.EntityType,
+			"current_state": evaluated.CurrentState,
+			"fields":        evaluated.Fields,
+			"gates":         evaluated.Gates,
+		})
+	}
+	params["entities"] = entities
+	var result testSetupEntitiesResult
+	if err := r.client.call(ctx, scenarioTestSetupEntitiesMethod, params, &result); err != nil {
+		return err
+	}
+	if err := validateTestSetupEntitiesResult(result, runID); err != nil {
+		return err
+	}
+	state.RunID = strings.TrimSpace(result.RunID)
+	state.SetupEntities = map[string]scenarioSetupEntityBinding{}
+	for _, entity := range result.Entities {
+		alias := strings.TrimSpace(entity.Alias)
+		state.SetupEntities[alias] = scenarioSetupEntityBinding{
+			Alias:        alias,
+			EntityID:     strings.TrimSpace(entity.EntityID),
+			FlowInstance: strings.Trim(strings.TrimSpace(entity.FlowInstance), "/"),
+			EntityType:   strings.TrimSpace(entity.EntityType),
+			CurrentState: strings.TrimSpace(entity.CurrentState),
+		}
+	}
+	return nil
+}
+
+type evaluatedScenarioSetupEntity struct {
+	Alias        string
+	FlowID       string
+	EntityType   string
+	CurrentState string
+	Fields       map[string]any
+	Gates        map[string]bool
+}
+
+func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evaluator *scenarioExpressionEvaluator, entity scenarioSetupEntity) (evaluatedScenarioSetupEntity, error) {
+	flowID := strings.Trim(strings.TrimSpace(file.FlowID), "/")
+	if entity.Flow != nil {
+		value, err := evaluator.evalValue(entity.Flow)
+		if err != nil {
+			return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].flow: %w", entity.Alias, err)
+		}
+		flowID = strings.Trim(optionalScenarioString(value), "/")
+	}
+	primary, err := r.bundle.ResolveFlowPrimaryEntity(flowID)
+	if err != nil {
+		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].flow: %w", entity.Alias, err)
+	}
+	if primary.EntityType != entity.EntityType {
+		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].type = %q, want declared entity type %q for flow %s", entity.Alias, entity.EntityType, primary.EntityType, scenarioFlowLabel(flowID))
+	}
+	currentState := ""
+	if entity.StateSet {
+		value, err := evaluator.evalValue(entity.CurrentState)
+		if err != nil {
+			return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state: %w", entity.Alias, err)
+		}
+		currentState = optionalScenarioString(value)
+	} else {
+		currentState = strings.TrimSpace(r.bundle.FlowInitialStage(flowID))
+	}
+	if currentState == "" {
+		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state is required because flow %s has no initial state", entity.Alias, scenarioFlowLabel(flowID))
+	}
+	if !scenarioStringSliceContains(r.bundle.FlowStates(flowID), currentState) {
+		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].current_state %q is not declared for flow %s", entity.Alias, currentState, scenarioFlowLabel(flowID))
+	}
+	fields, err := r.evaluateScenarioSetupFields(evaluator, primary, entity)
+	if err != nil {
+		return evaluatedScenarioSetupEntity{}, err
+	}
+	gates, err := r.evaluateScenarioSetupGates(evaluator, flowID, entity)
+	if err != nil {
+		return evaluatedScenarioSetupEntity{}, err
+	}
+	return evaluatedScenarioSetupEntity{
+		Alias:        entity.Alias,
+		FlowID:       flowID,
+		EntityType:   entity.EntityType,
+		CurrentState: currentState,
+		Fields:       fields,
+		Gates:        gates,
+	}, nil
+}
+
+func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressionEvaluator, primary runtimecontracts.PrimaryEntityContract, entity scenarioSetupEntity) (map[string]any, error) {
+	if !entity.FieldsSet {
+		return map[string]any{}, nil
+	}
+	value, err := evaluator.evalValue(entity.Fields)
+	if err != nil {
+		return nil, fmt.Errorf("setup.entities[%s].fields: %w", entity.Alias, err)
+	}
+	fields, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("setup.entities[%s].fields must evaluate to a mapping", entity.Alias)
+	}
+	for field, fieldValue := range fields {
+		decl, ok := primary.Contract.Fields[field]
+		if !ok {
+			return nil, fmt.Errorf("setup.entities[%s].fields.%s is not declared on entity type %s", entity.Alias, field, primary.EntityType)
+		}
+		if err := validateScenarioSetupFieldValue(fieldValue, decl.Type, primary.Types); err != nil {
+			return nil, fmt.Errorf("setup.entities[%s].fields.%s: %w", entity.Alias, field, err)
+		}
+	}
+	return fields, nil
+}
+
+func (r scenarioRunner) evaluateScenarioSetupGates(evaluator *scenarioExpressionEvaluator, flowID string, entity scenarioSetupEntity) (map[string]bool, error) {
+	if !entity.GatesSet {
+		return map[string]bool{}, nil
+	}
+	value, err := evaluator.evalValue(entity.Gates)
+	if err != nil {
+		return nil, fmt.Errorf("setup.entities[%s].gates: %w", entity.Alias, err)
+	}
+	raw, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("setup.entities[%s].gates must evaluate to a mapping", entity.Alias)
+	}
+	declared := r.declaredScenarioGateNames(flowID)
+	out := make(map[string]bool, len(raw))
+	for gate, rawValue := range raw {
+		boolValue, ok := rawValue.(bool)
+		if !ok {
+			return nil, fmt.Errorf("setup.entities[%s].gates.%s must evaluate to boolean", entity.Alias, gate)
+		}
+		if _, ok := declared[gate]; !ok {
+			return nil, fmt.Errorf("setup.entities[%s].gates.%s is not declared for flow %s", entity.Alias, gate, scenarioFlowLabel(flowID))
+		}
+		out[gate] = boolValue
+	}
+	return out, nil
+}
+
+func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]struct{} {
+	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
+	out := map[string]struct{}{}
+	for nodeID, node := range r.bundle.Nodes {
+		source, ok := r.bundle.NodeContractSource(nodeID)
+		if !ok || strings.Trim(strings.TrimSpace(source.FlowID), "/") != flowID {
+			continue
+		}
+		for _, gate := range node.GateState.Gates {
+			if name := strings.TrimSpace(gate.Name); name != "" {
+				out[name] = struct{}{}
+			}
+		}
+	}
+	for _, transition := range r.bundle.DerivedHandlerTransitions() {
+		if strings.Trim(strings.TrimSpace(transition.FlowID), "/") != flowID {
+			continue
+		}
+		if transition.SetsGate != nil {
+			if name := strings.TrimSpace(transition.SetsGate.Name); name != "" {
+				out[name] = struct{}{}
+			}
+		}
+		for _, gate := range transition.ClearGates {
+			gate = strings.TrimSpace(gate)
+			if gate != "" && gate != "*" {
+				out[gate] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func validateScenarioSetupFieldValue(value any, typeRef string, catalog runtimecontracts.TypeCatalogDocument) error {
+	return validateScenarioSetupFieldValueDepth(value, strings.TrimSpace(typeRef), catalog, 0)
+}
+
+func validateScenarioSetupFieldValueDepth(value any, typeRef string, catalog runtimecontracts.TypeCatalogDocument, depth int) error {
+	if depth > 16 {
+		return fmt.Errorf("type alias cycle or excessive nesting at %s", typeRef)
+	}
+	if scalar, ok := scenarioSetupScalarDecl(catalog, typeRef); ok {
+		return validateScenarioSetupFieldValueDepth(value, scalar.Base, catalog, depth+1)
+	}
+	if enum, ok := scenarioSetupEnumDecl(catalog, typeRef); ok {
+		text, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("must be string for enum %s", typeRef)
+		}
+		for _, allowed := range enum.Values {
+			if text == allowed {
+				return nil
+			}
+		}
+		return fmt.Errorf("must be one of %s", strings.Join(enum.Values, ", "))
+	}
+	if _, ok := scenarioSetupNamedTypeDecl(catalog, typeRef); ok {
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("must be object for %s", typeRef)
+		}
+		return nil
+	}
+	typeRef = strings.TrimSpace(strings.ToLower(typeRef))
+	switch {
+	case typeRef == "", typeRef == "any", typeRef == "json":
+		return nil
+	case typeRef == "text" || typeRef == "string" || typeRef == "uuid" || typeRef == "timestamp":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("must be string for %s", typeRef)
+		}
+		if typeRef == "uuid" {
+			if _, err := uuid.Parse(strings.TrimSpace(fmt.Sprint(value))); err != nil {
+				return fmt.Errorf("must be UUID")
+			}
+		}
+	case typeRef == "bool" || typeRef == "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("must be boolean")
+		}
+	case typeRef == "int" || typeRef == "integer":
+		if !scenarioValueIsInteger(value) {
+			return fmt.Errorf("must be integer")
+		}
+	case typeRef == "number" || typeRef == "numeric" || typeRef == "float" || typeRef == "double":
+		if !scenarioValueIsNumber(value) {
+			return fmt.Errorf("must be number")
+		}
+	case typeRef == "object" || typeRef == "map":
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("must be object")
+		}
+	case typeRef == "array" || typeRef == "list" || strings.HasPrefix(typeRef, "list<") || strings.HasSuffix(typeRef, "[]"):
+		if _, ok := value.([]any); !ok {
+			return fmt.Errorf("must be array")
+		}
+	default:
+		return nil
+	}
+	return nil
+}
+
+func scenarioSetupScalarDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.ScalarTypeDecl, bool) {
+	name = strings.TrimSpace(name)
+	if catalog.Scalars == nil || name == "" {
+		return runtimecontracts.ScalarTypeDecl{}, false
+	}
+	if decl, ok := catalog.Scalars[name]; ok {
+		return decl, true
+	}
+	decl, ok := catalog.Scalars[strings.ToLower(name)]
+	return decl, ok
+}
+
+func scenarioSetupEnumDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.EnumTypeDecl, bool) {
+	name = strings.TrimSpace(name)
+	if catalog.Enums == nil || name == "" {
+		return runtimecontracts.EnumTypeDecl{}, false
+	}
+	if decl, ok := catalog.Enums[name]; ok {
+		return decl, true
+	}
+	decl, ok := catalog.Enums[strings.ToLower(name)]
+	return decl, ok
+}
+
+func scenarioSetupNamedTypeDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.NamedTypeDecl, bool) {
+	name = strings.TrimSpace(name)
+	if catalog.Types == nil || name == "" {
+		return runtimecontracts.NamedTypeDecl{}, false
+	}
+	if decl, ok := catalog.Types[name]; ok {
+		return decl, true
+	}
+	decl, ok := catalog.Types[strings.ToLower(name)]
+	return decl, ok
+}
+
+func scenarioValueIsInteger(value any) bool {
+	switch typed := value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case float64:
+		return typed == float64(int64(typed))
+	default:
+		return false
+	}
+}
+
+func scenarioValueIsNumber(value any) bool {
+	switch value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func scenarioFlowLabel(flowID string) string {
+	if strings.TrimSpace(flowID) == "" {
+		return "<root>"
+	}
+	return strings.Trim(strings.TrimSpace(flowID), "/")
+}
+
+func validateTestSetupEntitiesResult(result testSetupEntitiesResult, wantRunID string) error {
+	result.RunID = strings.TrimSpace(result.RunID)
+	if result.RunID == "" {
+		return fmt.Errorf("malformed test.setup_entities result: run_id is required")
+	}
+	if wantRunID != "" && result.RunID != wantRunID {
+		return fmt.Errorf("malformed test.setup_entities result: run_id = %q, want %q", result.RunID, wantRunID)
+	}
+	if len(result.Entities) == 0 {
+		return fmt.Errorf("malformed test.setup_entities result: entities is required")
+	}
+	aliases := map[string]struct{}{}
+	for i, entity := range result.Entities {
+		if strings.TrimSpace(entity.Alias) == "" {
+			return fmt.Errorf("malformed test.setup_entities result: entities[%d].alias is required", i)
+		}
+		if _, ok := aliases[entity.Alias]; ok {
+			return fmt.Errorf("malformed test.setup_entities result: entities[%d].alias %q is repeated", i, entity.Alias)
+		}
+		aliases[entity.Alias] = struct{}{}
+		for _, field := range []struct {
+			name  string
+			value string
+		}{
+			{name: "entity_id", value: entity.EntityID},
+			{name: "entity_type", value: entity.EntityType},
+			{name: "current_state", value: entity.CurrentState},
+		} {
+			if strings.TrimSpace(field.value) == "" {
+				return fmt.Errorf("malformed test.setup_entities result: entities[%d].%s is required", i, field.name)
+			}
+		}
+		if _, err := uuid.Parse(entity.EntityID); err != nil {
+			return fmt.Errorf("malformed test.setup_entities result: entities[%d].entity_id must be UUID", i)
+		}
+	}
+	return nil
+}
+
 func (r scenarioRunner) runScenarioStep(ctx context.Context, file scenarioTestFile, evaluator *scenarioExpressionEvaluator, state *scenarioRunState, step scenarioStep) error {
 	switch step.Action {
 	case "publish":
@@ -1048,6 +1561,28 @@ func (r scenarioRunner) runPublishStep(ctx context.Context, file scenarioTestFil
 	}
 	targetFlowText := optionalScenarioString(targetFlow)
 	targetEntityText := optionalScenarioString(targetEntity)
+	if step.Target != nil {
+		targetAliasValue, err := evaluator.evalValue(step.Target)
+		if err != nil {
+			return fmt.Errorf("target: %w", err)
+		}
+		targetAlias := optionalScenarioString(targetAliasValue)
+		if targetAlias == "" {
+			return fmt.Errorf("target must evaluate to a non-empty setup alias")
+		}
+		if state.RunID == "" {
+			return fmt.Errorf("target alias requires an existing run context")
+		}
+		binding, ok := state.SetupEntities[targetAlias]
+		if !ok {
+			return fmt.Errorf("target alias %q is not declared in setup.entities", targetAlias)
+		}
+		if strings.TrimSpace(binding.FlowInstance) == "" {
+			return fmt.Errorf("target alias %q resolves to root entity; event.publish target requires a flow-scoped setup entity", targetAlias)
+		}
+		targetFlowText = binding.FlowInstance
+		targetEntityText = binding.EntityID
+	}
 	if targetFlowText != "" || targetEntityText != "" {
 		if state.RunID == "" {
 			return fmt.Errorf("target route requires an existing run context")
@@ -1395,7 +1930,8 @@ func (r scenarioRunner) readTestQuiescence(ctx context.Context, runID string) (d
 	return *result.TestQuiescence, nil
 }
 
-func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, evaluator *scenarioExpressionEvaluator, expect scenarioExpect) error {
+func (r scenarioRunner) evaluateExpectations(ctx context.Context, state *scenarioRunState, evaluator *scenarioExpressionEvaluator, expect scenarioExpect) error {
+	runID := state.RunID
 	rows, err := r.fetchRunTraceRows(ctx, runID)
 	if err != nil {
 		return err
@@ -1410,7 +1946,7 @@ func (r scenarioRunner) evaluateExpectations(ctx context.Context, runID string, 
 		}
 	}
 	for _, entity := range expect.Entities {
-		if err := r.assertEntityExpectation(ctx, runID, evaluator, entity); err != nil {
+		if err := r.assertEntityExpectation(ctx, state, evaluator, entity); err != nil {
 			return err
 		}
 	}
@@ -1529,7 +2065,18 @@ func (r scenarioRunner) assertNoDeadLetters(ctx context.Context, runID string) e
 	}
 }
 
-func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID string, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {
+func (r scenarioRunner) assertEntityExpectation(ctx context.Context, state *scenarioRunState, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {
+	runID := state.RunID
+	if expect.Ref != "" {
+		binding, ok := state.SetupEntities[expect.Ref]
+		if !ok {
+			return fmt.Errorf("expect.entities ref %q is not declared in setup.entities", expect.Ref)
+		}
+		if expect.EntityType != "" && expect.EntityType != binding.EntityType {
+			return fmt.Errorf("expect.entities ref %q type = %q, want %q", expect.Ref, binding.EntityType, expect.EntityType)
+		}
+		return r.assertEntityDetailExpectation(ctx, runID, binding.EntityID, binding.EntityType, evaluator, expect)
+	}
 	params := map[string]any{
 		"run_id": runID,
 		"type":   expect.EntityType,
@@ -1566,11 +2113,14 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID strin
 	if count != 1 {
 		return fmt.Errorf("entity detail expectation for type %s returned %d entities, want exactly one", expect.EntityType, count)
 	}
+	return r.assertEntityDetailExpectation(ctx, runID, entities[0].EntityID, expect.EntityType, evaluator, expect)
+}
+
+func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID string, entityID string, entityType string, evaluator *scenarioExpressionEvaluator, expect scenarioEntityExpect) error {
 	detail, err := expect.evaluatedDetail(evaluator)
 	if err != nil {
 		return err
 	}
-	entityID := entities[0].EntityID
 	var full entityFull
 	if err := r.client.call(ctx, entityGetMethod, map[string]any{"entity_id": entityID, "run_id": runID}, &full); err != nil {
 		return err
@@ -1584,8 +2134,8 @@ func (r scenarioRunner) assertEntityExpectation(ctx context.Context, runID strin
 	if full.Entity.RunID != runID {
 		return fmt.Errorf("malformed entity.get result: entity.run_id = %q, want %q", full.Entity.RunID, runID)
 	}
-	if full.Entity.EntityType != expect.EntityType {
-		return fmt.Errorf("malformed entity.get result: entity.entity_type = %q, want %q", full.Entity.EntityType, expect.EntityType)
+	if full.Entity.EntityType != entityType {
+		return fmt.Errorf("malformed entity.get result: entity.entity_type = %q, want %q", full.Entity.EntityType, entityType)
 	}
 	if detail.State != nil && full.Entity.CurrentState != *detail.State {
 		return fmt.Errorf("entity %s current_state = %q, want %q", entityID, full.Entity.CurrentState, *detail.State)

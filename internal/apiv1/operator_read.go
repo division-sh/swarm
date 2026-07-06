@@ -70,6 +70,10 @@ type BundleDeleteExecutor interface {
 	Execute(context.Context, bundledelete.Request) (bundledelete.Result, error)
 }
 
+type TestSetupStore interface {
+	SetupScenarioEntities(context.Context, store.ScenarioSetupRequest) (store.ScenarioSetupResult, error)
+}
+
 type OperatorReadOptions struct {
 	Now                    func() time.Time
 	Ready                  func() bool
@@ -91,6 +95,7 @@ type OperatorReadOptions struct {
 	RunFork                RunForkExecutor
 	AgentControl           AgentControlController
 	Mailbox                MailboxAPIStore
+	TestSetup              TestSetupStore
 	Idempotency            APIIdempotencyStore
 	Events                 EventPublisher
 	RunControl             RunControlController
@@ -264,6 +269,9 @@ func OperatorReadHandlers(opts OperatorReadOptions) map[string]MethodHandler {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorEventPublishHandlers(opts) {
+		handlers[name] = handler
+	}
+	for name, handler := range OperatorTestSetupHandlers(opts) {
 		handlers[name] = handler
 	}
 	for name, handler := range OperatorEventReplayHandlers(opts) {
