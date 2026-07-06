@@ -41,14 +41,37 @@ func ResolvePolicyModulePath(bundle *WorkflowContractBundle, module PolicyModule
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("module path %q must remain inside the contracts root", modulePath)
 	}
-	stat, err := os.Stat(pathAbs)
+	stat, err := lstatNoSymlinkPath(rootAbs, rel, modulePath)
 	if err != nil {
 		return "", fmt.Errorf("module path %q: %w", modulePath, err)
 	}
-	if stat.IsDir() {
-		return "", fmt.Errorf("module path %q must be a file", modulePath)
+	if !stat.Mode().IsRegular() {
+		return "", fmt.Errorf("module path %q must be a regular file", modulePath)
 	}
 	return pathAbs, nil
+}
+
+func lstatNoSymlinkPath(rootAbs, rel, modulePath string) (os.FileInfo, error) {
+	current := rootAbs
+	var last os.FileInfo
+	for _, segment := range strings.Split(rel, string(filepath.Separator)) {
+		if segment == "" || segment == "." {
+			continue
+		}
+		current = filepath.Join(current, segment)
+		info, err := os.Lstat(current)
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("symlinks are not allowed in module path %q", modulePath)
+		}
+		last = info
+	}
+	if last == nil {
+		return nil, fmt.Errorf("module path is required")
+	}
+	return last, nil
 }
 
 func PolicyModuleBytes(bundle *WorkflowContractBundle, module PolicyModule) ([]byte, string, error) {

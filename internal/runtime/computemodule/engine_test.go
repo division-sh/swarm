@@ -1,6 +1,8 @@
 package computemodule
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -26,6 +28,7 @@ func TestExecuteStructuredRenderer(t *testing.T) {
 	result, err := Execute(Request{
 		ModuleID:    "structured_renderer",
 		RowID:       "render_bundle",
+		Digest:      digestFixture(wasm),
 		Wasm:        wasm,
 		Input:       raw,
 		Fuel:        5_000_000,
@@ -66,6 +69,7 @@ func TestExecuteClassifiesFuelAndOutputCapsAsDeterministic(t *testing.T) {
 			req: Request{
 				ModuleID:    "structured_renderer",
 				RowID:       "render_bundle",
+				Digest:      digestFixture(wasm),
 				Wasm:        wasm,
 				Input:       raw,
 				Fuel:        1,
@@ -79,6 +83,7 @@ func TestExecuteClassifiesFuelAndOutputCapsAsDeterministic(t *testing.T) {
 			req: Request{
 				ModuleID:    "structured_renderer",
 				RowID:       "render_bundle",
+				Digest:      digestFixture(wasm),
 				Wasm:        wasm,
 				Input:       raw,
 				Fuel:        5_000_000,
@@ -105,6 +110,31 @@ func TestExecuteClassifiesFuelAndOutputCapsAsDeterministic(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsDigestMismatchBeforeExecution(t *testing.T) {
+	wasm := readFixture(t)
+	raw := []byte(`{"component":"api","owner":"platform","language":"go","files":["main.go"]}`)
+	_, err := Execute(Request{
+		ModuleID:    "structured_renderer",
+		RowID:       "render_bundle",
+		Digest:      "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		Wasm:        wasm,
+		Input:       raw,
+		Fuel:        5_000_000,
+		MemoryPages: 17,
+		OutputBytes: 1024,
+	})
+	if err == nil {
+		t.Fatal("Execute error = nil, want digest mismatch")
+	}
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Code != CodeDigest {
+		t.Fatalf("error = %#v, want code %s", err, CodeDigest)
+	}
+	if !IsDeterministicFailure(err) {
+		t.Fatalf("IsDeterministicFailure(%v) = false", err)
+	}
+}
+
 func readFixture(t *testing.T) []byte {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/structured_renderer.wasm")
@@ -112,4 +142,9 @@ func readFixture(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func digestFixture(wasm []byte) string {
+	sum := sha256.Sum256(wasm)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }

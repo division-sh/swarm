@@ -24,6 +24,7 @@ type Code string
 
 const (
 	CodeCompile      Code = "compute_module_compile"
+	CodeDigest       Code = "compute_module_digest"
 	CodeImport       Code = "compute_module_import"
 	CodeABI          Code = "compute_module_abi"
 	CodeMemory       Code = "compute_module_memory_limit"
@@ -156,6 +157,9 @@ func ValidateCoreJSONModule(wasm []byte, entry string, memoryPages uint32) error
 
 func Execute(req Request) (Result, error) {
 	req.Entry = normalizeEntry(req.Entry)
+	if err := ValidateDigest(req.Wasm, req.Digest); err != nil {
+		return Result{}, &Error{Code: CodeDigest, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+	}
 	if err := ValidateCoreJSONModule(req.Wasm, req.Entry, req.MemoryPages); err != nil {
 		return Result{}, withSite(err, req.ModuleID, req.RowID)
 	}
@@ -272,6 +276,19 @@ func externKind(ty *wasmtime.ExternType) string {
 	default:
 		return "unknown"
 	}
+}
+
+func ValidateDigest(wasm []byte, digest string) error {
+	digest = strings.TrimSpace(digest)
+	if digest == "" {
+		return fmt.Errorf("module digest is required")
+	}
+	sum := sha256.Sum256(wasm)
+	actual := "sha256:" + hex.EncodeToString(sum[:])
+	if digest != actual {
+		return fmt.Errorf("module digest %s does not match module bytes %s", digest, actual)
+	}
+	return nil
 }
 
 func requireMemoryExport(exports map[string]*wasmtime.ExternType, memoryPages uint32) error {
