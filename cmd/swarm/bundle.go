@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -49,6 +50,13 @@ type bundleRegisterCommandOptions struct {
 	contractsSet      bool
 	idempotencyKeySet bool
 	repoRoot          string
+}
+
+type bundleBuildCommandOptions struct {
+	contractsDir string
+	outputRoot   string
+	report       string
+	repoRoot     string
 }
 
 type bundleDeleteCommandOptions struct {
@@ -151,6 +159,7 @@ func newBundleCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
 		newBundleListCommand(opts),
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
+		newBundleBuildCommand(repoRoot),
 		newBundleRegisterCommand(repoRoot, opts),
 		newBundleDeleteCommand(opts),
 	)
@@ -212,6 +221,22 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	bindCLIOutputFlags(cmd, &agentsOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &agentsOpts.apiOptions)
+	return cmd
+}
+
+func newBundleBuildCommand(repoRoot string) *cobra.Command {
+	buildOpts := bundleBuildCommandOptions{repoRoot: repoRoot}
+	cmd := &cobra.Command{
+		Use:   "build",
+		Short: "Materialize a local contract bundle for explicit consumption.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBundleBuildCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), buildOpts)
+		},
+	}
+	cmd.Flags().StringVar(&buildOpts.contractsDir, "contracts", "", "Contracts directory to materialize")
+	cmd.Flags().StringVar(&buildOpts.outputRoot, "output", "", "Output directory root for .swarm/build-style materialized bundles")
+	cmd.Flags().StringVar(&buildOpts.report, "report", "", "Build report format; supported value: json")
 	return cmd
 }
 
@@ -342,6 +367,30 @@ func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bun
 	})
 }
 
+func runBundleBuildCommand(ctx context.Context, out, errOut io.Writer, opts bundleBuildCommandOptions) error {
+	req, reportJSON, err := opts.request()
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	report, err := runtimecontracts.BuildBundleMaterialization(ctx, req)
+	if err != nil {
+		return returnCLIValidationError(errOut, fmt.Errorf("build bundle: %w", err))
+	}
+	if reportJSON {
+		if out == nil {
+			return nil
+		}
+		encoder := json.NewEncoder(out)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("render bundle build report: %w", err))
+		}
+		return nil
+	}
+	writeBundleBuildHuman(out, report)
+	return nil
+}
+
 func runBundleRegisterCommand(ctx context.Context, out, errOut io.Writer, opts bundleRegisterCommandOptions, args []string) error {
 	params, err := opts.params(args)
 	if err != nil {
@@ -411,6 +460,51 @@ func (opts bundleListCommandOptions) params() (map[string]any, error) {
 		params["cursor"] = cursor
 	}
 	return params, nil
+}
+
+func (opts bundleBuildCommandOptions) request() (runtimecontracts.BundleBuildRequest, bool, error) {
+	report := strings.TrimSpace(opts.report)
+	reportJSON := false
+	switch report {
+	case "":
+	case "json":
+		reportJSON = true
+	default:
+		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("--report supports only json")
+	}
+	repoRoot := strings.TrimSpace(opts.repoRoot)
+	if repoRoot == "" {
+		repoRoot = discoverRepoRoot()
+	}
+	if repoRoot == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("resolve repo root: %w", err)
+		}
+		repoRoot = cwd
+	}
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repoRoot, cliContractPlatformSpecPathOptions{
+		ContractsPath: opts.contractsDir,
+	})
+	if err != nil {
+		return runtimecontracts.BundleBuildRequest{}, false, err
+	}
+	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
+	if err != nil {
+		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("resolve contracts: %w", err)
+	}
+	outputRoot := strings.TrimSpace(opts.outputRoot)
+	if outputRoot == "" {
+		outputRoot = filepath.Join(repoRoot, ".swarm", "build")
+	} else {
+		outputRoot = resolvePath(repoRoot, outputRoot)
+	}
+	return runtimecontracts.BundleBuildRequest{
+		RepoRoot:         repoRoot,
+		ContractsRoot:    contractsRoot,
+		PlatformSpecPath: resolvedPaths.PlatformSpecPath,
+		OutputRoot:       outputRoot,
+	}, reportJSON, nil
 }
 
 func (opts bundleRegisterCommandOptions) params(args []string) (map[string]any, error) {
@@ -812,6 +906,13 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 		}
 		fmt.Fprintln(w, strings.Join(fields, " "))
 	}
+}
+
+func writeBundleBuildHuman(w io.Writer, report runtimecontracts.BundleBuildReport) {
+	if w == nil {
+		return
+	}
+	fmt.Fprintf(w, "bundle %s materialized=%s drift=%s modules=%d\n", report.BundleHash, report.OutputPath, report.DriftStatus, len(report.Modules))
 }
 
 func writeBundleRegistrationHuman(w io.Writer, result bundleRegistrationResult) {

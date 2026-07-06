@@ -1667,6 +1667,82 @@ compute_module_contracts:
   - Declarative lookup, validation, selection, and future derive rows remain preferred when they can express the work.
   - Durable activities, orchestration, timers, joins, loops, schedules, host imports, WASI, filesystem/network access,
     shared module packs, source compilation, and file-backed module inputs are separate gates.
+bundle_build_materialization:
+  status: merge_bearing_build_surface
+  implementation_slice: '#1670 Slice A'
+  command: swarm bundle build [--contracts <path>] [--output <path>] [--report json]
+  description: |
+    `swarm bundle build` is the public materialization owner for local
+    contract bundles before explicit test/register/runtime consumption. Slice A
+    supports the existing precompiled Wasm `policy.modules` lane only. The
+    command loads and validates the selected contracts root, consumes canonical
+    BundleHash identity, writes a materialized contracts directory, and emits a
+    deterministic build report. It does not compile source, rewrite policy
+    digests, register bundles, execute tests, or introduce Python runtime
+    semantics.
+  artifact_contract:
+    directory: .swarm/build/<bundle-hash> by default, or <output>/<bundle-hash> when --output is provided
+    contents:
+    - resolved contract source files needed to reconstruct the selected bundle
+    - referenced module bytes included in BundleHash identity
+    - declared module source_path files when source_hash provenance is declared, as freshness proof inputs only
+    - build-manifest.json as a proof artifact
+    manifest:
+      api_version: swarm.bundle.build.v1
+      fields:
+      - bundle_hash
+      - platform_version
+      - spec_version
+      - modules[] with id, flow_id, kind, path, digest, source_path, and source_hash
+      - inputs[] with canonical bundle labels, slash-relative paths, content policy, and size
+      authority: |
+        build-manifest.json is not a semantic owner, source of identity, or
+        runtime authority. BundleHash, platform-spec.yaml, contract source,
+        policy.modules, and compute_module rows remain authoritative.
+  build_report:
+    format: json when --report json is requested; human summary otherwise
+    fields:
+    - api_version
+    - status
+    - drift_status
+    - bundle_hash
+    - output_path
+    - manifest_path
+    - platform_version
+    - spec_version
+    - steps
+    - modules
+    - inputs
+    rule: |
+      Host facts such as output_path may appear in the report. Timestamps,
+      absolute paths, temporary paths, and build-host facts MUST NOT enter the
+      hashed contract content.
+  build_steps:
+    rule: |
+      The implementation exposes an ordered build-step seam. Slice A registers
+      only the existing Wasm policy.modules validation/materialization lane.
+      Python snapshot, archive packaging, watch mode, scaffolding, and source
+      compilation steps are unregistered and unsupported until separately
+      promoted.
+  drift_validation:
+    fail_closed_before_runtime:
+    - missing contract inputs or module bytes
+    - out-of-root paths and symlinks
+    - module digest mismatch
+    - stale source_hash when source_path/source_hash provenance is declared
+    - invalid module ABI, schema, resource limits, or unsupported module shape
+    - unsupported build-step requirements
+    - materialized directory hash mismatch
+  reproducibility:
+    rule: |
+      Same inputs MUST produce the same bundle_hash and byte-identical hashed
+      materialized content. Generated build manifests and reports are excluded
+      from bundle identity unless a later spec section explicitly promotes them.
+  consumer_boundaries:
+  - swarm test --contracts remains an explicit contracts-root consumer and MUST NOT auto-build.
+  - swarm bundle register --contracts remains a non-hashing upload packager and MUST NOT auto-build or silently become bundle build.
+  - Archive/register transport, `--watch`, `bundle new`, Python `kind`, CPython-WASI snapshots, generated Python bindings,
+    and source instrumentation are separate gates.
 runtime_enforcement:
   description: |
     Wave 1 adds authoritative behavioral rules on top of the existing
@@ -10335,6 +10411,7 @@ multi_bundle_persistence:
       - swarm bundle list
       - swarm bundle show <bundle-hash>
       - swarm bundle agents <bundle-hash>
+      - swarm bundle build [--contracts <contracts-directory>] [--output <output-root>] [--report json]
       - swarm bundle register <registration-envelope-yaml> [--data-blob <data-blob-json>] [--idempotency-key <key>]
       - swarm bundle register --contracts <contracts-directory> [--idempotency-key <key>]
       - swarm bundle delete <bundle-hash> [--force] [--dry-run] [--idempotency-key <key>]
@@ -10355,8 +10432,22 @@ multi_bundle_persistence:
         flows/<parent>/flows/<child>/data/.... Empty raw-data files are represented as empty base64 strings. The
         `--contracts` value is an explicit operator input: it MUST name either the selected contracts directory itself
         or that directory's `package.yaml` file shorthand, and MUST NOT fall back to a parent bundle when the supplied
-        path is a typo/non-root child. Archive packaging remains split until archive format and extraction safety rules
-        are promoted.
+        path is a typo/non-root child. It is distinct from `swarm bundle build` materialization. Archive packaging remains
+        split until archive format and extraction safety rules are promoted.
+    bundle_build_materialization:
+      owner: internal/runtime/contracts.BuildBundleMaterialization
+      status: implemented_wasm_slice_a
+      cli_consumer: swarm bundle build [--contracts <contracts-directory>] [--output <output-root>] [--report json]
+      rule: >
+        The bundle build command materializes a local contracts root under <output>/<bundle-hash> (default
+        .swarm/build/<bundle-hash>) for explicit consumption. It consumes BundleHash as the canonical identity owner,
+        copies only bundle contract inputs and referenced module bytes needed to reconstruct that identity, writes
+        build-manifest.json as a proof artifact, and emits a build report. It fails closed before runtime for invalid
+        contract/module shape, missing module bytes, digest mismatch, stale declared source_hash, unsupported build-step
+        requirements, and materialized hash mismatch. Declared source_path files may be copied for source_hash freshness
+        proof but are not BundleHash identity owners. It MUST NOT call bundle.register, run test scenarios, touch
+        store/runtime writers, archive bundles, produce Python snapshots, run Python build steps, or write generated
+        bindings.
     modified_commands_planned:
       - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
@@ -16576,18 +16667,23 @@ cli_specification:
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     bundle:
-      command: swarm bundle list|show|agents|register|delete
+      command: swarm bundle list|show|agents|build|register|delete
       group: author_validate
       tier: should_have
-      implementation_status: implemented_inventory_prepared_envelope_directory_register_and_delete
-      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. Prepared-envelope swarm bundle register and local directory swarm bundle register --contracts are implemented over /v1/rpc bundle.register. Destructive swarm bundle delete is implemented over /v1/rpc bundle.delete. Archive packaging remains split until archive input/extraction safety authority is promoted.'
+      implementation_status: implemented_inventory_build_prepared_envelope_directory_register_and_delete
+      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. Local swarm bundle build materialization is implemented by #1670 Slice A and remains distinct from register/test. Prepared-envelope swarm bundle register and local directory swarm bundle register --contracts are implemented over /v1/rpc bundle.register. Destructive swarm bundle delete is implemented over /v1/rpc bundle.delete. Archive packaging remains split; bundle new, watch mode, and Python snapshot/build support remain split until their authorities are promoted.'
       owners:
       - multi_bundle_persistence.cli_surface.bundle_commands_supported
+      - multi_bundle_persistence.cli_surface.bundle_build_materialization
       - multi_bundle_persistence.api_surface.bundle_methods_planned
       behavior: >
-        Public CLI family for persisted bundle inventory, agent catalog inspection, prepared-envelope registration, and
-        local contracts-directory registration, plus destructive bundle deletion through the canonical API owner.
+        Public CLI family for persisted bundle inventory, agent catalog inspection, local bundle materialization,
+        prepared-envelope registration, and local contracts-directory registration, plus destructive bundle deletion
+        through the canonical API owner.
         The implemented list/show/agents commands consume /v1/rpc bundle.list, bundle.get, and bundle.agents. The
+        implemented build command is local-only: it consumes a selected contracts root, canonical BundleHash, existing
+        policy.modules validation, and the bundle_build_materialization owner to write a materialized directory plus
+        build report without calling API, store, runtime, register, or test owners. The
         implemented register command consumes /v1/rpc bundle.register with an already-prepared
         BundleRegistrationEnvelopeV1 YAML file as content_yaml, optional BundleRegisterDataBlobV1 JSON from
         --data-blob, and optional --idempotency-key, or with --contracts <contracts-directory> through the non-hashing
@@ -16599,6 +16695,10 @@ cli_specification:
         packaging remains split.
       proof_expectations:
       - exact /v1/rpc bundle.list/get/agents calls with only promoted params
+      - local swarm bundle build proves command shape `--contracts`, `--output`, and `--report json`; materialized output
+        under <output>/<bundle-hash>; build-manifest/report fields; wasm-only Slice A build-step registry; source_hash
+        freshness drift; missing module bytes; schema drift; reproducible identical bundle_hash and hashed materialized
+        content; and no API/store/runtime/register/test calls
       - exact /v1/rpc bundle.register call with only content_yaml, optional data_blob, and optional idempotency_key
       - exact /v1/rpc bundle.delete call with only bundle_hash, optional force, optional dry_run, and optional idempotency_key
       - local directory packaging proves traversal/root escape, symlink fail-closed behavior, ignored file/dir policy, slash-relative NFC paths, duplicate and ASCII case-collision failure, text-vs-every-discovered-flow-data split including empty raw data, deterministic ordering, and no bundle_hash param
@@ -16606,7 +16706,8 @@ cli_specification:
       - human and --json output render only server-owned result fields
       - BUNDLE_NOT_FOUND, BUNDLE_REGISTER_CONFLICT, BUNDLE_HAS_ACTIVE_RUNS, BUNDLE_DELETE_IN_PROGRESS, IDEMPOTENCY_CONFLICT, invalid params, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/hash-owner bundle reads or writes from CLI
-      - unpromoted bundle.get alias and archive register packaging remain absent/unknown until later CLI gates
+      - unpromoted bundle.get alias, bundle new, bundle build --watch, archive register packaging, auto-build in test/register,
+        Python kind/snapshot support, and generated bindings remain absent/unknown until later CLI gates
     run_fork:
       command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       group: run_operate

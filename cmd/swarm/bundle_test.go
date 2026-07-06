@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -364,6 +366,106 @@ func TestBundleDeleteHelpDocumentsCanonicalFlags(t *testing.T) {
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestBundleBuildMaterializesContractsAndJSONReport(t *testing.T) {
+	contractsDir := writeBundleBuildCLIContractsFixture(t)
+	outputRoot := filepath.Join(t.TempDir(), "build-output")
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"bundle", "build",
+		"--contracts", contractsDir,
+		"--output", outputRoot,
+		"--report", "json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report struct {
+		APIVersion  string `json:"api_version"`
+		Status      string `json:"status"`
+		DriftStatus string `json:"drift_status"`
+		BundleHash  string `json:"bundle_hash"`
+		OutputPath  string `json:"output_path"`
+		Modules     []struct {
+			ID         string `json:"id"`
+			Kind       string `json:"kind"`
+			Path       string `json:"path"`
+			SourcePath string `json:"source_path"`
+			SourceHash string `json:"source_hash"`
+		} `json:"modules"`
+		Steps []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode build report: %v\n%s", err, stdout.String())
+	}
+	if report.APIVersion != "swarm.bundle.build.v1" || report.Status != "passed" || report.DriftStatus != "clean" {
+		t.Fatalf("report status = %#v", report)
+	}
+	if !strings.HasPrefix(report.BundleHash, "bundle-v1:sha256:") {
+		t.Fatalf("bundle_hash = %q", report.BundleHash)
+	}
+	if got, want := report.OutputPath, filepath.Join(outputRoot, report.BundleHash); got != want {
+		t.Fatalf("output_path = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(report.OutputPath, "build-manifest.json")); err != nil {
+		t.Fatalf("build-manifest.json missing: %v", err)
+	}
+	if got, want := len(report.Modules), 1; got != want {
+		t.Fatalf("report modules = %d, want %d", got, want)
+	}
+	if module := report.Modules[0]; module.ID != "structured_renderer" || module.Kind != "wasm" || module.Path != "modules/structured_renderer.wasm" || module.SourcePath != "src/structured_renderer.rs" || module.SourceHash == "" {
+		t.Fatalf("report module = %#v", module)
+	}
+	if len(report.Steps) != 1 || report.Steps[0].Name != "wasm_policy_modules" || report.Steps[0].Status != "passed" {
+		t.Fatalf("report steps = %#v", report.Steps)
+	}
+}
+
+func TestBundleBuildHelpAndOutOfScopeShapes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "build", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	if code != 0 {
+		t.Fatalf("help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"build", "--contracts", "--output", "--report"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, notWant := range []string{"--watch", "archive", "python", "--api-server", "--json"} {
+		if strings.Contains(stdout.String(), notWant) {
+			t.Fatalf("help contains out-of-scope term %q:\n%s", notWant, stdout.String())
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "watch", args: []string{"bundle", "build", "--watch"}, want: "unknown flag: --watch"},
+		{name: "new", args: []string{"bundle", "new", "wasm", "demo"}, want: `unknown command "new"`},
+		{name: "report", args: []string{"bundle", "build", "--report", "yaml"}, want: "--report supports only json"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout.Reset()
+			stderr.Reset()
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, rootCommandOptions{})
+			if code != cliExitValidation {
+				t.Fatalf("%v code = %d, want %d stdout=%s stderr=%s", tc.args, code, cliExitValidation, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.want) {
+				t.Fatalf("%v stderr = %q, want %q", tc.args, stderr.String(), tc.want)
+			}
+		})
 	}
 }
 
@@ -949,6 +1051,85 @@ func writeBundleRegisterFixtureBytes(t *testing.T, path string, content []byte) 
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func writeBundleBuildCLIContractsFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "package.yaml"), `name: cli-bundle-build
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: render
+    flow: render
+`)
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "flows", "render", "schema.yaml"), `name: render
+mode: static
+states: [ready]
+initial_state: ready
+terminal_states: [ready]
+`)
+	raw, err := os.ReadFile(filepath.Join(repoRoot(), "internal", "runtime", "computemodule", "testdata", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBundleRegisterFixtureBytes(t, filepath.Join(root, "modules", "structured_renderer.wasm"), raw)
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "src", "structured_renderer.rs"), "fn compute() {}\n")
+	writeBundleRegisterFixtureFile(t, filepath.Join(root, "flows", "render", "policy.yaml"), bundleBuildCLIPolicyYAML(t, root))
+	return root
+}
+
+func bundleBuildCLIPolicyYAML(t *testing.T, root string) string {
+	t.Helper()
+	moduleRaw, err := os.ReadFile(filepath.Join(root, "modules", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleSum := sha256.Sum256(moduleRaw)
+	sourceRaw, err := os.ReadFile(filepath.Join(root, "src", "structured_renderer.rs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceSum := sha256.Sum256(sourceRaw)
+	return `modules:
+  structured_renderer:
+    path: modules/structured_renderer.wasm
+    abi: core-json-v1
+    entry: compute
+    digest: sha256:` + hex.EncodeToString(moduleSum[:]) + `
+    source_path: src/structured_renderer.rs
+    source_hash: sha256:` + hex.EncodeToString(sourceSum[:]) + `
+    limits:
+      gas: 5000000
+      memory_pages: 17
+      output_bytes: 1024
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [component, owner, language, files]
+      properties:
+        component:
+          type: string
+        owner:
+          type: string
+        language:
+          type: string
+        files:
+          type: array
+          items:
+            type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [content, format, line_count]
+      properties:
+        content:
+          type: string
+        format:
+          type: string
+        line_count:
+          type: integer
+`
 }
 
 func assertBundleRequest(t *testing.T, req jsonRPCRequest, wantMethod string, wantParams map[string]any) {
