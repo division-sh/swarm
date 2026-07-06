@@ -5772,7 +5772,8 @@ tool_model:
     - manual/declarative webhook registration for configured provider triggers
     - served `/webhooks/{entity}/{provider}` route mounted on the supported API listener
     - selected runtime store wiring through `runtime.Stores.InboundStore`
-    - static built-in provider-trigger manifest loading for selected first-class providers
+    - static built-in provider-trigger manifest loading for selected first-class control providers
+    - verified first-party provider-trigger pack loading through the same envelope path future external packs must use
     - provider-specific signature policy and signing-secret lookup
     - provider delivery-id extraction and dedupe-key authority
     - provider event-type extraction and canonical Swarm event mapping
@@ -5795,6 +5796,78 @@ tool_model:
       provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
       A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
       extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
+    pack_envelope_source_authority:
+      owner: internal/packs universal envelope plus internal/providertriggers trigger body verifier
+      status: >
+        E5 first slice. Provider-trigger packs wrap the frozen provider-trigger manifest vocabulary in a universal pack
+        envelope before registration. The envelope is a trust/admission artifact, not a provider-specific adapter and not a
+        new provider-trigger vocabulary owner.
+      envelope_fields:
+        id: >
+          Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
+          names.
+        version: Required semver pack version.
+        platform_version: >
+          Required compatibility range checked with the same platform-version constraint grammar used by package admission.
+          Missing, malformed, or incompatible ranges fail pack import before provider registration.
+        type: >
+          Required pack body type. The first supported body type is `trigger`; other pack body types require their own
+          gated proof cases.
+        manifest_hash: >
+          Required SHA-256 hash of the exact trigger manifest bytes carried by the pack, formatted as `sha256:<hex>`.
+          Implementations MUST NOT hash re-serialized YAML or semantic object forms because those are not stable contract
+          bytes.
+        provenance: >
+          Required provenance block. The first supported `source` values are `platform` and `external`. Provenance changes
+          review/readback classification but does not create verification shortcuts.
+        capabilities: >
+          Required declared capability surface. The loader derives canonical capabilities mechanically from the accepted
+          trigger manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
+          capabilities, missing capabilities, or narrative/manual capability truth fail import.
+        requires: >
+          Required dependency declaration surface for resources such as `webhook_signing.<provider>`. Declared requirements
+          describe binding needs and readback state; they do not make an otherwise valid pack invalid merely because the
+          deployment has not bound the secret yet.
+        tests: >
+          Required metadata in this slice. Entries must parse as non-empty test references. Executing pack-declared tests is
+          a later gated harness; current behavioral proof remains the provider-trigger conformance/runtime suite.
+      verification_order:
+      - parse envelope with strict known fields
+      - validate id/version/platform_version/type/provenance/tests metadata
+      - read trigger manifest bytes
+      - verify manifest_hash against exact trigger manifest bytes
+      - parse and validate trigger manifest through `internal/providertriggers`
+      - derive trigger capabilities and requires mechanically from the manifest
+      - compare declared capabilities/requires to derived values
+      - reject provider-name collisions across built-in controls, first-party packs, and external packs
+      - register only verified trigger manifests
+      trust_tiers: >
+        Trust tiers differ by provenance value and by readback/operational policy only. First-party bundled packs and
+        future external packs use the identical verifier path. No pack is trusted merely because the platform ships it.
+      shadowing_policy: >
+        No provider-name shadowing is allowed in this slice. Any duplicate normalized provider name across built-in control
+        manifests, first-party bundled packs, or external packs fails closed and reports both sources. Explicit override or
+        replacement semantics require a later gated affordance.
+      capability_surface: >
+        Provider-trigger pack readback renders CAN/CANNOT truth from the verified envelope after derivation/equality checks.
+        The first trigger surface includes CAN receive HTTPS at `/webhooks/{entity}/{provider}`, CAN verify the named signing
+        secret, CAN emit the declared event name, CAN persist dedupe markers, and CANNOT run code before admission, emit
+        undeclared events, or touch unbound resources. Requirement readback marks each declared secret as BOUND or UNBOUND
+        without exposing secret values.
+      unbound_requirement_policy: >
+        A missing deployment binding for a declared signing secret does not reject pack import. Runtime webhook admission
+        still fails closed before signature verification, dedupe marker persistence, or event publish when a required
+        signing secret is unavailable.
+      first_slice_extraction: >
+        Stripe and Slack provider-trigger manifests are first-party bundled packs loaded through this envelope path. GitHub
+        remains a temporary built-in control for the E5 extraction proof only; that control role is not a permanent built-in
+        exemption.
+      non_goals:
+      - provider-trigger manifest vocabulary changes
+      - pack signing, remote distribution, ownership transfer, or marketplace trust economics
+      - executing pack-declared tests
+      - provider setup/teardown, OAuth, connector tools, or provider action calls
+      - arbitrary code/WASM before provider-trigger admission
     manifest_vocabulary:
       provider: normalized provider token matched from `/webhooks/{entity}/{provider}`
       payload_object_required: fail closed when the decoded request payload is not a JSON object

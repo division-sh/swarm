@@ -1,0 +1,23 @@
+id: provider.slack
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: trigger
+manifest_hash: sha256:5d82afeccc5c511cffcaf09620a387caac8e8b61ddccb00c444175a10ce8d34e
+provenance:
+  source: platform
+capabilities:
+  can:
+    receive_https_route: /webhooks/{entity}/slack
+    verify_secret: webhook_signing.slack
+    emit_events:
+      - inbound.slack.{event_type}
+    persist_dedupe_markers: true
+  cannot:
+    - emit_undeclared_events
+    - run_code_before_admission
+    - touch_unbound_resources
+requires:
+  secrets:
+    - webhook_signing.slack
+tests:
+  - providertriggers/slack

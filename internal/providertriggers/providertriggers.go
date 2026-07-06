@@ -8,21 +8,35 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed manifests/*.yaml
+//go:embed manifests/*.yaml packs/*/pack.yaml packs/*/trigger.yaml
 var builtinManifestFS embed.FS
+
+const (
+	triggerPackRoot = "packs"
+
+	cannotRunCodeBeforeAdmission = "run_code_before_admission"
+	cannotEmitUndeclaredEvents   = "emit_undeclared_events"
+	cannotTouchUnboundResources  = "touch_unbound_resources"
+)
 
 type Target struct {
 	EntityID      string
@@ -78,6 +92,20 @@ func (e Error) Error() string {
 
 type Registry struct {
 	manifests map[string]Manifest
+	sources   map[string]string
+}
+
+type ManifestSource struct {
+	Manifest Manifest
+	Source   string
+}
+
+type LoadedPack struct {
+	Envelope     packs.Envelope
+	Manifest     Manifest
+	ManifestBody []byte
+	Directory    string
+	Source       string
 }
 
 func DefaultRegistry() *Registry {
@@ -87,46 +115,211 @@ func DefaultRegistry() *Registry {
 var defaultRegistry = mustDefaultRegistry()
 
 func mustDefaultRegistry() *Registry {
-	entries, err := builtinManifestFS.ReadDir("manifests")
+	sources, err := defaultManifestSources()
 	if err != nil {
 		panic(err)
 	}
-	manifests := make([]Manifest, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
-		}
-		body, err := builtinManifestFS.ReadFile("manifests/" + entry.Name())
-		if err != nil {
-			panic(err)
-		}
-		manifest, err := ParseManifest(body)
-		if err != nil {
-			panic(fmt.Sprintf("%s: %v", entry.Name(), err))
-		}
-		manifests = append(manifests, manifest)
-	}
-	registry, err := NewRegistry(manifests...)
+	registry, err := NewRegistryFromSources(sources...)
 	if err != nil {
 		panic(err)
 	}
 	return registry
 }
 
+func defaultManifestSources() ([]ManifestSource, error) {
+	runningVersion, err := platform.PlatformVersion()
+	if err != nil {
+		return nil, err
+	}
+	manifestSources, err := builtinManifestSources()
+	if err != nil {
+		return nil, err
+	}
+	packSources, _, err := loadPackSourcesFS(builtinManifestFS, triggerPackRoot, runningVersion, packs.ProvenancePlatform)
+	if err != nil {
+		return nil, err
+	}
+	return append(manifestSources, packSources...), nil
+}
+
+func builtinManifestSources() ([]ManifestSource, error) {
+	entries, err := builtinManifestFS.ReadDir("manifests")
+	if err != nil {
+		return nil, err
+	}
+	sources := make([]ManifestSource, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		body, err := builtinManifestFS.ReadFile("manifests/" + entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		manifest, err := ParseManifest(body)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+		}
+		sources = append(sources, ManifestSource{
+			Manifest: manifest,
+			Source:   "builtin:manifests/" + entry.Name(),
+		})
+	}
+	return sources, nil
+}
+
 func NewRegistry(manifests ...Manifest) (*Registry, error) {
-	r := &Registry{manifests: make(map[string]Manifest, len(manifests))}
+	sources := make([]ManifestSource, 0, len(manifests))
 	for _, manifest := range manifests {
+		sources = append(sources, ManifestSource{Manifest: manifest, Source: "direct"})
+	}
+	return NewRegistryFromSources(sources...)
+}
+
+func NewRegistryFromSources(sources ...ManifestSource) (*Registry, error) {
+	r := &Registry{
+		manifests: make(map[string]Manifest, len(sources)),
+		sources:   make(map[string]string, len(sources)),
+	}
+	for _, source := range sources {
+		manifest := source.Manifest
 		if err := manifest.Validate(); err != nil {
 			return nil, err
 		}
 		provider := NormalizeProviderName(manifest.Provider)
-		if _, exists := r.manifests[provider]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger manifest for %q", provider)
+		if existingSource, exists := r.sources[provider]; exists {
+			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existingSource, firstNonEmpty(source.Source, "unknown"))
 		}
 		manifest.Provider = provider
 		r.manifests[provider] = manifest
+		r.sources[provider] = firstNonEmpty(source.Source, "unknown")
 	}
 	return r, nil
+}
+
+func LoadExternalPackDirs(runningPlatformVersion string, dirs ...string) ([]LoadedPack, error) {
+	loaded := make([]LoadedPack, 0, len(dirs))
+	for _, dir := range dirs {
+		pack, err := LoadPackFS(os.DirFS(dir), ".", runningPlatformVersion)
+		if err != nil {
+			return nil, fmt.Errorf("load external provider trigger pack %q: %w", dir, err)
+		}
+		if pack.Envelope.Provenance.Source != packs.ProvenanceExternal {
+			return nil, fmt.Errorf("external provider trigger pack %q must use provenance source %q", dir, packs.ProvenanceExternal)
+		}
+		pack.Source = "external:" + strings.TrimSpace(dir)
+		loaded = append(loaded, pack)
+	}
+	return loaded, nil
+}
+
+func SourcesFromLoadedPacks(loaded ...LoadedPack) []ManifestSource {
+	sources := make([]ManifestSource, 0, len(loaded))
+	for _, pack := range loaded {
+		sources = append(sources, ManifestSource{
+			Manifest: pack.Manifest,
+			Source:   firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source+":"+pack.Envelope.ID),
+		})
+	}
+	return sources
+}
+
+func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
+	loaded, err := packs.Load(fsys, dir, runningPlatformVersion)
+	if err != nil {
+		return LoadedPack{}, err
+	}
+	manifest, err := ParseManifest(loaded.ManifestBody)
+	if err != nil {
+		return LoadedPack{}, fmt.Errorf("parse trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
+	}
+	if err := manifest.Validate(); err != nil {
+		return LoadedPack{}, fmt.Errorf("validate trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
+	}
+	expectedCapabilities := DerivedCapabilities(manifest)
+	if !packs.CapabilitiesEqual(loaded.Envelope.Capabilities, expectedCapabilities) {
+		return LoadedPack{}, fmt.Errorf("pack %q capabilities do not match trigger manifest", loaded.Envelope.ID)
+	}
+	expectedRequires := DerivedRequires(manifest)
+	if !packs.RequiresEqual(loaded.Envelope.Requires, expectedRequires) {
+		return LoadedPack{}, fmt.Errorf("pack %q requires do not match trigger manifest", loaded.Envelope.ID)
+	}
+	return LoadedPack{
+		Envelope:     loaded.Envelope,
+		Manifest:     manifest,
+		ManifestBody: loaded.ManifestBody,
+		Directory:    loaded.Directory,
+		Source:       loaded.Envelope.Provenance.Source + ":" + loaded.Envelope.ID,
+	}, nil
+}
+
+func DerivedCapabilities(manifest Manifest) packs.Capabilities {
+	provider := NormalizeProviderName(manifest.Provider)
+	eventName := strings.TrimSpace(manifest.EventName.Literal)
+	if eventName == "" {
+		eventName = strings.TrimSpace(manifest.EventName.Template)
+	}
+	verifySecret := ""
+	if manifest.Secret.Required {
+		verifySecret = "webhook_signing." + provider
+	}
+	return packs.Capabilities{
+		Can: packs.CanCapabilities{
+			ReceiveHTTPSRoute:    "/webhooks/{entity}/" + provider,
+			VerifySecret:         verifySecret,
+			EmitEvents:           []string{eventName},
+			PersistDedupeMarkers: true,
+		},
+		Cannot: []string{
+			cannotEmitUndeclaredEvents,
+			cannotRunCodeBeforeAdmission,
+			cannotTouchUnboundResources,
+		},
+	}
+}
+
+func DerivedRequires(manifest Manifest) packs.Requires {
+	provider := NormalizeProviderName(manifest.Provider)
+	if manifest.Secret.Required {
+		return packs.Requires{Secrets: []string{"webhook_signing." + provider}}
+	}
+	return packs.Requires{}
+}
+
+func (p LoadedPack) CapabilitySurface(boundSecrets map[string]bool) packs.CapabilitySurface {
+	return p.Envelope.Surface(boundSecrets)
+}
+
+func loadPackSourcesFS(fsys fs.FS, root, runningPlatformVersion, requiredProvenance string) ([]ManifestSource, []LoadedPack, error) {
+	entries, err := fs.ReadDir(fsys, root)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	sources := make([]ManifestSource, 0, len(entries))
+	loaded := make([]LoadedPack, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := path.Join(root, entry.Name())
+		pack, err := LoadPackFS(fsys, dir, runningPlatformVersion)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load provider trigger pack %q: %w", dir, err)
+		}
+		if requiredProvenance != "" && pack.Envelope.Provenance.Source != requiredProvenance {
+			return nil, nil, fmt.Errorf("provider trigger pack %q must use provenance source %q", pack.Envelope.ID, requiredProvenance)
+		}
+		pack.Source = pack.Envelope.Provenance.Source + ":" + pack.Envelope.ID
+		loaded = append(loaded, pack)
+		sources = append(sources, ManifestSource{
+			Manifest: pack.Manifest,
+			Source:   pack.Source,
+		})
+	}
+	return sources, loaded, nil
 }
 
 func (r *Registry) Accept(req Request) (Delivery, error) {

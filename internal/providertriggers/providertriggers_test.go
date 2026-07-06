@@ -8,14 +8,159 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestDefaultRegistryLoadsSlackAndStripeFromVerifiedPlatformPacks(t *testing.T) {
+	registry := DefaultRegistry()
+	if got := registry.sources["github"]; got != "builtin:manifests/github.yaml" {
+		t.Fatalf("github source = %q, want temporary built-in control", got)
+	}
+	if got := registry.sources["slack"]; got != "platform:provider.slack" {
+		t.Fatalf("slack source = %q, want verified platform pack", got)
+	}
+	if got := registry.sources["stripe"]; got != "platform:provider.stripe" {
+		t.Fatalf("stripe source = %q, want verified platform pack", got)
+	}
+}
+
+func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+		mutate   func(t *testing.T, dir string)
+		want     string
+	}{
+		{
+			name:     "platform pack bad exact byte hash",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				appendFile(t, filepath.Join(dir, "trigger.yaml"), "\n")
+			},
+			want: "manifest_hash mismatch",
+		},
+		{
+			name:     "capability declaration drift",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.stripe", "inbound.evil")
+			},
+			want: "capabilities do not match",
+		},
+		{
+			name:     "requires declaration drift",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "requires:\n  secrets:\n    - webhook_signing.stripe", "requires:\n  secrets:\n    - webhook_signing.other")
+			},
+			want: "requires do not match",
+		},
+		{
+			name:     "unknown envelope field",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				appendFile(t, filepath.Join(dir, "pack.yaml"), "unexpected: true\n")
+			},
+			want: "field unexpected not found",
+		},
+		{
+			name:     "incompatible platform version",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), `platform_version: ">=0.7.0 <0.8.0"`, `platform_version: ">=0.8.0"`)
+			},
+			want: "platform_version range",
+		},
+		{
+			name:     "missing tests metadata",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "tests:\n  - providertriggers/stripe\n", "tests: []\n")
+			},
+			want: "tests are required",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := copyBuiltinPackToTemp(t, tc.provider)
+			tc.mutate(t, dir)
+			_, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadPackFS error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
+	dir := copyBuiltinPackToTemp(t, "stripe")
+	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
+	if err != nil {
+		t.Fatalf("LoadPackFS: %v", err)
+	}
+	_, err = NewRegistryFromSources(
+		ManifestSource{Manifest: pack.Manifest, Source: "builtin:manifests/stripe.yaml"},
+		SourcesFromLoadedPacks(pack)[0],
+	)
+	if err == nil {
+		t.Fatal("NewRegistryFromSources succeeded, want duplicate provider failure")
+	}
+	for _, want := range []string{`duplicate provider trigger manifest for "stripe"`, "builtin:manifests/stripe.yaml", "platform:provider.stripe"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("duplicate error = %q, want containing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *testing.T) {
+	dir := copyBuiltinPackToTemp(t, "stripe")
+	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
+	if err != nil {
+		t.Fatalf("LoadPackFS: %v", err)
+	}
+	surface := pack.CapabilitySurface(nil)
+	if len(surface.Requires) != 1 || surface.Requires[0].Name != "webhook_signing.stripe" || surface.Requires[0].Bound {
+		t.Fatalf("surface requires = %+v, want unbound stripe signing secret", surface.Requires)
+	}
+	renderedCan := strings.Join(surface.Can, "\n")
+	if strings.Contains(renderedCan, "stripe-secret") {
+		t.Fatal("capability surface leaked a concrete secret value")
+	}
+	registry, err := NewRegistryFromSources(SourcesFromLoadedPacks(pack)...)
+	if err != nil {
+		t.Fatalf("NewRegistryFromSources: %v", err)
+	}
+	_, err = registry.Accept(Request{
+		Provider: "stripe",
+		Target:   Target{EntitySlug: "customer-a"},
+	})
+	requireProviderTriggerError(t, err, http.StatusUnauthorized)
+}
+
+func TestExternalProviderTriggerPackUsesSameVerifier(t *testing.T) {
+	dir := copyBuiltinPackToTemp(t, "stripe")
+	if _, err := LoadExternalPackDirs("0.7.0", dir); err == nil || !strings.Contains(err.Error(), `must use provenance source "external"`) {
+		t.Fatalf("LoadExternalPackDirs platform provenance error = %v, want external provenance rejection", err)
+	}
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
+	loaded, err := LoadExternalPackDirs("0.7.0", dir)
+	if err != nil {
+		t.Fatalf("LoadExternalPackDirs: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Manifest.Provider != "stripe" {
+		t.Fatalf("loaded external packs = %+v, want stripe", loaded)
+	}
+}
 
 func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) {
 	registry := newHostileRegistry(t)
@@ -1093,4 +1238,50 @@ func fmtPayload(payload map[string]any) string {
 
 func strconvFormatUnix(t time.Time) string {
 	return strconv.FormatInt(t.Unix(), 10)
+}
+
+func copyBuiltinPackToTemp(t *testing.T, provider string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), provider)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir temp pack: %v", err)
+	}
+	for _, name := range []string{"pack.yaml", "trigger.yaml"} {
+		body, err := fs.ReadFile(builtinManifestFS, "packs/"+provider+"/"+name)
+		if err != nil {
+			t.Fatalf("read builtin pack %s/%s: %v", provider, name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+			t.Fatalf("write temp pack %s/%s: %v", provider, name, err)
+		}
+	}
+	return dir
+}
+
+func replaceInFile(t *testing.T, filename, old, replacement string) {
+	t.Helper()
+	body, err := os.ReadFile(filename)
+	if err != nil {
+		t.Fatalf("read %s: %v", filename, err)
+	}
+	text := string(body)
+	if !strings.Contains(text, old) {
+		t.Fatalf("%s does not contain %q", filename, old)
+	}
+	text = strings.Replace(text, old, replacement, 1)
+	if err := os.WriteFile(filename, []byte(text), 0o600); err != nil {
+		t.Fatalf("write %s: %v", filename, err)
+	}
+}
+
+func appendFile(t *testing.T, filename, suffix string) {
+	t.Helper()
+	f, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open %s: %v", filename, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(suffix); err != nil {
+		t.Fatalf("append %s: %v", filename, err)
+	}
 }
