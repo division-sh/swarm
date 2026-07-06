@@ -6249,6 +6249,74 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
+	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
+	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
+
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
+		DataSource:           t.TempDir(),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		RequireBundleMatch:   false,
+		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
+		Verbose:              true,
+		NoRequireBundleMatch: true,
+		TestLLMRuntime:       runtimellm.NoopRuntime{},
+	})
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
+	}
+	output := serve.outputString()
+	if !strings.Contains(output, "workspace backend: host") {
+		t.Fatalf("serve output missing host workspace decision for API-backed agent:\n%s", output)
+	}
+	if strings.Contains(strings.ToLower(output), "docker is not available") {
+		t.Fatalf("API-backed agent serve output shows Docker dependency despite host decision:\n%s", output)
+	}
+}
+
+func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) {
+	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
+
+	var out lockedBuffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
+		DataSource:           t.TempDir(),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		RequireBundleMatch:   false,
+		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
+		Verbose:              true,
+		NoRequireBundleMatch: true,
+		TestLLMRuntime:       runtimellm.NoopRuntime{},
+		Output:               &out,
+	})
+	if code == 0 {
+		t.Fatalf("runServeRuntime code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
+	}
+	output := out.String()
+	for _, want := range []string{"[5/22] runtime_context", "workspace backend: docker", "native_tools.bash", "docker is not available"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("serve output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "[22/22] ready") {
+		t.Fatalf("native bash serve reached readiness despite missing Docker:\n%s", output)
+	}
+}
+
 func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
@@ -10308,6 +10376,24 @@ agent.requested:
   subscriptions: [agent.requested]
 `, agentKey, agentID, agentID, agentID))
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", agentID+".md"), "Handle assigned work.\n")
+	return root
+}
+
+func writeServeRuntimeNativeBashFixture(t *testing.T) string {
+	t.Helper()
+	const agentID = "native-bash-worker"
+	root := writeServeRuntimeAgentSlugFixture(t, "native-bash-docker-required", agentID)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), fmt.Sprintf(`
+%s:
+  id: %s
+  role: %s
+  prompt_ref: %s
+  model: regular
+  mode: task
+  native_tools:
+    bash: true
+  subscriptions: [agent.requested]
+`, agentID, agentID, agentID, agentID))
 	return root
 }
 

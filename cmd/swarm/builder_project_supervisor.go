@@ -38,7 +38,7 @@ type runtimeProjectSupervisor struct {
 	loadWorkflow        func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
 	validateSource      func(context.Context, semanticview.Source) error
 	initStateStores     func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
-	newWorkspaces       func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, error)
+	newWorkspaces       func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error)
 	createRuntime       func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 
 	mu                              sync.RWMutex
@@ -95,12 +95,16 @@ func newRuntimeProjectSupervisor(
 		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
 			return initializeStateStores(ctx, stores, bundle, false)
 		},
-		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
+		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error) {
 			decision, err := decideWorkspaceBackend(workspaceBackend, cfg, source)
 			if err != nil {
-				return nil, err
+				return nil, workspaceBackendSelection{}, err
 			}
-			return configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), contractsRoot, source, mountSources, decision)
+			lifecycle, err := configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), contractsRoot, source, mountSources, decision)
+			if err != nil {
+				return nil, decision, err
+			}
+			return lifecycle, decision, nil
 		},
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)
@@ -196,18 +200,24 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("prepare project bundle source: %w", err)
 	}
-	workspaces, err := s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
+	workspaces, workspaceBackend, err := s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
-	if err := workspaces.ValidateSource(ctx, source); err != nil {
-		return builderpkg.ProjectStatus{}, err
-	}
-	if err := workspaces.EnsurePrereqs(ctx); err != nil {
-		return builderpkg.ProjectStatus{}, err
-	}
-	if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
-		return builderpkg.ProjectStatus{}, err
+	if workspaces == nil {
+		if !workspaceBackend.NoWorkspace {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("workspace lifecycle is not configured for backend %q; no lifecycle is only valid for canonical no-workspace decision", strings.TrimSpace(workspaceBackend.Backend))
+		}
+	} else {
+		if err := workspaces.ValidateSource(ctx, source); err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
+		if err := workspaces.EnsurePrereqs(ctx); err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
+		if err := workspaces.EnsureSystemWorkspaces(ctx); err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
 	}
 
 	newRT, err := s.createRuntime(ctx, runtime.RuntimeDeps{
