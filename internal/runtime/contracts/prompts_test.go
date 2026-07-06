@@ -347,6 +347,45 @@ func TestGeneratedCriteriaPromptSection_FailsClosedWhenReferencedSetUnavailable(
 	}
 }
 
+func TestLoadPromptForAgent_FailsClosedWhenRuntimeCriteriaWidensContractDelivery(t *testing.T) {
+	promptsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(promptsDir, "cto-agent.md"), []byte("Base prompt."), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+	flow := FlowContractView{
+		Paths: FlowContractPaths{ID: "validation", Flow: "validation", PromptsDir: promptsDir},
+		Policy: PolicyDocument{
+			Criteria: map[string]PolicyCriteriaSet{
+				"feasibility_exclusions": criteriaValidationTestSet(),
+			},
+		},
+		Agents: map[string]AgentRegistryEntry{
+			"cto-agent": {Role: "cto", Mode: "task"},
+		},
+	}
+	root := &FlowContractView{Children: []FlowContractView{flow}}
+	bundle := &WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[FlowContractView]{
+			Root: root,
+			ByID: map[string]*FlowContractView{
+				"validation": &root.Children[0],
+			},
+		},
+	}
+
+	_, found, err := NewBundlePromptResolver(bundle).LoadPromptForAgent(models.AgentConfig{
+		ID:       "cto-agent",
+		Role:     "cto",
+		Criteria: []string{"feasibility_exclusions"},
+	}, "")
+	if found {
+		t.Fatal("LoadPromptForAgent found prompt, want criteria authority failure")
+	}
+	if err == nil || !strings.Contains(err.Error(), "runtime criteria refs are not authoritative") {
+		t.Fatalf("LoadPromptForAgent error = %v, want runtime criteria authority failure", err)
+	}
+}
+
 func TestLoadPromptForAgent_FailsClosedWhenCriteriaRefsHaveNoPromptFile(t *testing.T) {
 	t.Run("runtime config criteria", func(t *testing.T) {
 		resolver := NewBundlePromptResolver(&WorkflowContractBundle{})
