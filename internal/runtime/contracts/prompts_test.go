@@ -347,6 +347,41 @@ func TestGeneratedCriteriaPromptSection_FailsClosedWhenReferencedSetUnavailable(
 	}
 }
 
+func TestLoadPromptForAgent_FailsClosedWhenCriteriaRefsHaveNoPromptFile(t *testing.T) {
+	t.Run("runtime config criteria", func(t *testing.T) {
+		resolver := NewBundlePromptResolver(&WorkflowContractBundle{})
+		_, found, err := resolver.LoadPromptForAgent(models.AgentConfig{
+			ID:       "cto-agent",
+			Criteria: []string{"feasibility_exclusions"},
+		}, "")
+		if found {
+			t.Fatal("LoadPromptForAgent found prompt, want criteria delivery failure")
+		}
+		if err == nil || !strings.Contains(err.Error(), "criteria delivery requires a resolved prompt") {
+			t.Fatalf("LoadPromptForAgent error = %v, want criteria delivery failure", err)
+		}
+	})
+
+	t.Run("contract criteria", func(t *testing.T) {
+		bundle := &WorkflowContractBundle{
+			Agents: map[string]AgentRegistryEntry{
+				"cto-agent": {Criteria: []string{"feasibility_exclusions"}},
+			},
+			agentSources: map[string]ContractItemSource{
+				"cto-agent": {FlowID: "validation", Layer: "flow"},
+			},
+		}
+		resolver := NewBundlePromptResolver(bundle)
+		_, found, err := resolver.LoadPromptForAgent(models.AgentConfig{ID: "cto-agent"}, "")
+		if found {
+			t.Fatal("LoadPromptForAgent found prompt, want criteria delivery failure")
+		}
+		if err == nil || !strings.Contains(err.Error(), "criteria delivery requires a resolved prompt") {
+			t.Fatalf("LoadPromptForAgent error = %v, want criteria delivery failure", err)
+		}
+	})
+}
+
 func mustPromptJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)

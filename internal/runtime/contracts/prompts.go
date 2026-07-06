@@ -62,8 +62,18 @@ func NewBundlePromptResolverWithOptions(bundle *WorkflowContractBundle, opts Bun
 
 func (r *BundlePromptResolver) LoadPromptForAgent(cfg models.AgentConfig, mode string) (string, bool, error) {
 	resolution, found, err := r.ResolvePromptFileForAgent(cfg, mode)
-	if err != nil || !found {
-		return "", found, err
+	if err != nil {
+		return "", false, err
+	}
+	if !found {
+		if refs := r.undeliverableCriteriaRefsForAgent(cfg); len(refs) > 0 {
+			agentID := strings.TrimSpace(cfg.ID)
+			if agentID == "" {
+				agentID = strings.TrimSpace(cfg.Role)
+			}
+			return "", false, fmt.Errorf("criteria delivery requires a resolved prompt for criteria-bearing agent %s; criteria refs: %s", agentID, strings.Join(refs, ", "))
+		}
+		return "", false, nil
 	}
 	raw, err := os.ReadFile(resolution.Path)
 	if err != nil {
@@ -82,6 +92,27 @@ func (r *BundlePromptResolver) LoadPromptForAgent(cfg models.AgentConfig, mode s
 		return "", false, fmt.Errorf("render criteria for prompt %s: %w", filepath.Base(resolution.Path), err)
 	}
 	return strings.TrimSpace(prompt), true, nil
+}
+
+func (r *BundlePromptResolver) undeliverableCriteriaRefsForAgent(cfg models.AgentConfig) []string {
+	if refs := normalizeStrings(cfg.Criteria); len(refs) > 0 {
+		return refs
+	}
+	bundle := r.workflowBundle()
+	if bundle == nil {
+		return nil
+	}
+	candidates, _ := r.promptLookupPlan(cfg)
+	for _, agentID := range candidates {
+		record, ok := bundlePromptAgentRecordByLogicalID(bundle, agentID)
+		if !ok {
+			continue
+		}
+		if refs := normalizeStrings(record.Entry.Criteria); len(refs) > 0 {
+			return refs
+		}
+	}
+	return nil
 }
 
 func generatedCriteriaPromptSection(bundle *WorkflowContractBundle, source ContractItemSource, entry AgentRegistryEntry, cfg models.AgentConfig, prompt string) (string, error) {
