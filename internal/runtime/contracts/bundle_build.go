@@ -145,6 +145,9 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 	}
 
 	target := filepath.Join(outputRoot, bundleHash)
+	if err := validateBundleBuildOutputOutsideRecursiveInputs(bundle, outputRoot, target); err != nil {
+		return BundleBuildReport{}, err
+	}
 	if err := os.MkdirAll(outputRoot, 0o755); err != nil {
 		return BundleBuildReport{}, fmt.Errorf("create bundle build output root: %w", err)
 	}
@@ -494,4 +497,76 @@ func writeDeterministicJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o644)
+}
+
+func validateBundleBuildOutputOutsideRecursiveInputs(bundle *WorkflowContractBundle, outputRoot, target string) error {
+	outputRootAbs, err := filepath.Abs(strings.TrimSpace(outputRoot))
+	if err != nil {
+		return fmt.Errorf("resolve bundle build output root: %w", err)
+	}
+	targetAbs, err := filepath.Abs(strings.TrimSpace(target))
+	if err != nil {
+		return fmt.Errorf("resolve bundle build output target: %w", err)
+	}
+	recursiveInputs, err := bundleBuildRecursiveInputDirs(bundle)
+	if err != nil {
+		return err
+	}
+	for _, dir := range recursiveInputs {
+		if pathWithinDir(outputRootAbs, dir) || pathWithinDir(targetAbs, dir) {
+			return fmt.Errorf("bundle build output root %s must not be inside hashed recursive input %s", filepath.Clean(outputRootAbs), dir)
+		}
+	}
+	return nil
+}
+
+func bundleBuildRecursiveInputDirs(bundle *WorkflowContractBundle) ([]string, error) {
+	if bundle == nil {
+		return nil, nil
+	}
+	dirs := []string{bundle.Paths.ProjectPromptsDir}
+	rootPackagePath := strings.TrimSpace(bundle.Paths.ProjectPackageFile)
+	for _, pkg := range bundle.Paths.ProjectPackages {
+		isRootPackage := rootPackagePath != "" && sameFilePath(pkg.PackageFile, rootPackagePath)
+		if !isRootPackage {
+			dirs = append(dirs, pkg.ProjectPromptsDir)
+		}
+		for _, flow := range pkg.Flows {
+			dirs = append(dirs, flow.PromptsDir, flow.DataDir)
+		}
+	}
+	if len(bundle.Paths.ProjectPackages) == 0 {
+		for _, flow := range bundle.Paths.Flows {
+			dirs = append(dirs, flow.PromptsDir, flow.DataDir)
+		}
+	}
+
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			continue
+		}
+		abs, err := canonicalAbsDir(dir, "bundle recursive input")
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[abs]; exists {
+			continue
+		}
+		seen[abs] = struct{}{}
+		out = append(out, abs)
+	}
+	return out, nil
+}
+
+func pathWithinDir(path, dir string) bool {
+	path = filepath.Clean(path)
+	dir = filepath.Clean(dir)
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
