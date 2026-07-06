@@ -1,6 +1,7 @@
 package flowmodel
 
 import (
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -154,6 +155,132 @@ validation:
 	}
 	if set.Rules[0].PinCandidate == nil || !*set.Rules[0].PinCandidate {
 		t.Fatalf("pin_candidate = %#v, want true", set.Rules[0].PinCandidate)
+	}
+}
+
+func TestPolicyDocumentValidationRejectsUnknownFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		contains string
+	}{
+		{
+			name: "set unknown field",
+			body: `
+validation:
+  deploy_manifest:
+    schema: {}
+    classes:
+      invalid: {disposition: deploy.manifest_invalid}
+    inputs:
+      source_ref: string
+      manifest_source_ref: string
+    rules:
+      - id: VR-001
+        class: invalid
+        text: Manifest source ref must match request source ref.
+        pin_candidate: true
+        check:
+          equal: {left: input.source_ref, right: input.manifest_source_ref}
+`,
+			contains: `unsupported field "schema"`,
+		},
+		{
+			name: "class unknown field",
+			body: `
+validation:
+  deploy_manifest:
+    classes:
+      invalid:
+        disposition: deploy.manifest_invalid
+        retry: never
+    inputs:
+      source_ref: string
+      manifest_source_ref: string
+    rules:
+      - id: VR-001
+        class: invalid
+        text: Manifest source ref must match request source ref.
+        pin_candidate: true
+        check:
+          equal: {left: input.source_ref, right: input.manifest_source_ref}
+`,
+			contains: `unsupported field "retry"`,
+		},
+		{
+			name: "rule unknown field",
+			body: `
+validation:
+  deploy_manifest:
+    classes:
+      invalid: {disposition: deploy.manifest_invalid}
+    inputs:
+      source_ref: string
+      manifest_source_ref: string
+    rules:
+      - id: VR-001
+        class: invalid
+        text: Manifest source ref must match request source ref.
+        pin_candidate: true
+        emit: deploy.manifest_invalid
+        check:
+          equal: {left: input.source_ref, right: input.manifest_source_ref}
+`,
+			contains: `unsupported field "emit"`,
+		},
+		{
+			name: "check extra predicate",
+			body: `
+validation:
+  deploy_manifest:
+    classes:
+      invalid: {disposition: deploy.manifest_invalid}
+    inputs:
+      source_ref: string
+      manifest_source_ref: string
+    rules:
+      - id: VR-001
+        class: invalid
+        text: Manifest source ref must match request source ref.
+        pin_candidate: true
+        check:
+          equal: {left: input.source_ref, right: input.manifest_source_ref}
+          regex: {input: input.source_ref, pattern: "^[a-f0-9]+$"}
+`,
+			contains: `unsupported field "regex"`,
+		},
+		{
+			name: "equal unknown field",
+			body: `
+validation:
+  deploy_manifest:
+    classes:
+      invalid: {disposition: deploy.manifest_invalid}
+    inputs:
+      source_ref: string
+      manifest_source_ref: string
+    rules:
+      - id: VR-001
+        class: invalid
+        text: Manifest source ref must match request source ref.
+        pin_candidate: true
+        check:
+          equal:
+            left: input.source_ref
+            right: input.manifest_source_ref
+            normalize: true
+`,
+			contains: `unsupported field "normalize"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var doc PolicyDocument
+			err := yaml.Unmarshal([]byte(tt.body), &doc)
+			if err == nil || !strings.Contains(err.Error(), tt.contains) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
+			}
+		})
 	}
 }
 
