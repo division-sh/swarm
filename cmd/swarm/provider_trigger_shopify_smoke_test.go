@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,8 +50,9 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 	}
 	apiVersion := strings.TrimSpace(os.Getenv("SHOPIFY_FLAG_API_VERSION"))
 	if apiVersion == "" {
-		apiVersion = "2026-07"
+		apiVersion = "2026-04"
 	}
+	appPath := shopifyLocalSmokeAppPath(t, clientID, apiVersion)
 
 	const (
 		runID             = "74000000-0000-0000-0000-000000000001"
@@ -81,11 +84,25 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 	apiHandler := http.NotFoundHandler()
 	var ready atomic.Bool
 	ready.Store(true)
-	server := httptest.NewServer(newAPIServer(&ready, apiHandler, inboundHandler).Handler)
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("listen on localhost for Shopify smoke: %v", err)
+	}
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("parse Shopify smoke listener address %q: %v", listener.Addr().String(), err)
+	}
+	server := &httptest.Server{
+		Listener: listener,
+		Config: &http.Server{
+			Handler: newAPIServer(&ready, apiHandler, inboundHandler).Handler,
+		},
+	}
+	server.Start()
 	defer server.Close()
 
-	address := server.URL + "/webhooks/" + entitySlug + "/" + provider
-	output := runShopifyWebhookTrigger(t, shopifyPath, address, topic, apiVersion, clientID, clientSecret)
+	address := "http://localhost:" + port + "/webhooks/" + entitySlug + "/" + provider
+	output := runShopifyWebhookTrigger(t, shopifyPath, address, topic, apiVersion, clientID, clientSecret, appPath)
 	if strings.Contains(output, clientSecret) {
 		t.Fatal("Shopify CLI output contained the client secret")
 	}
@@ -133,6 +150,29 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 	assertShopifyLocalSmokeBadSignatureFailsClosed(t, ctx, address, sqliteStore, runID, entityID, providerEventName, provider)
 }
 
+func shopifyLocalSmokeAppPath(t *testing.T, clientID string, apiVersion string) string {
+	t.Helper()
+	if appPath := strings.TrimSpace(os.Getenv("SHOPIFY_FLAG_PATH")); appPath != "" {
+		return appPath
+	}
+	dir := t.TempDir()
+	config := fmt.Sprintf(`name = "Swarm Provider Trigger Smoke"
+client_id = %q
+application_url = "https://example.com/"
+embedded = false
+
+[auth]
+redirect_urls = ["https://example.com/auth/callback"]
+
+[webhooks]
+api_version = %q
+`, clientID, apiVersion)
+	if err := os.WriteFile(filepath.Join(dir, "shopify.app.toml"), []byte(config), 0o600); err != nil {
+		t.Fatalf("write throwaway Shopify app config: %v", err)
+	}
+	return dir
+}
+
 type shopifyLocalSmokeResponseCapture struct {
 	mu     sync.Mutex
 	status int
@@ -171,17 +211,22 @@ func (w *shopifyLocalSmokeCaptureWriter) Write(data []byte) (int, error) {
 	return w.ResponseWriter.Write(data)
 }
 
-func runShopifyWebhookTrigger(t *testing.T, shopifyPath string, address string, topic string, apiVersion string, clientID string, clientSecret string) string {
+func runShopifyWebhookTrigger(t *testing.T, shopifyPath string, address string, topic string, apiVersion string, clientID string, clientSecret string, appPath string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, shopifyPath,
+	args := []string{
 		"app", "webhook", "trigger",
 		"--address", address,
 		"--topic", topic,
 		"--api-version", apiVersion,
 		"--client-id", clientID,
-	)
+		"--delivery-method", "http",
+	}
+	if appPath != "" {
+		args = append(args, "--path", appPath)
+	}
+	cmd := exec.CommandContext(ctx, shopifyPath, args...)
 	cmd.Env = append(os.Environ(),
 		"SHOPIFY_FLAG_CLIENT_SECRET="+clientSecret,
 		"SHOPIFY_FLAG_ADDRESS="+address,
@@ -191,6 +236,9 @@ func runShopifyWebhookTrigger(t *testing.T, shopifyPath string, address string, 
 		"SHOPIFY_CLI_NO_ANALYTICS=1",
 		"CI=1",
 	)
+	if appPath != "" {
+		cmd.Env = append(cmd.Env, "SHOPIFY_FLAG_PATH="+appPath)
+	}
 	cmd.Stdin = bytes.NewReader(nil)
 	var output bytes.Buffer
 	cmd.Stdout = &output
