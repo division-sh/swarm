@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
@@ -336,8 +337,8 @@ func newSupervisorForLoadProjectFailureTest(
 	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
 		return "store wiring ready", nil
 	}
-	supervisor.newWorkspaces = func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, error) {
-		return lifecycle, nil
+	supervisor.newWorkspaces = func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error) {
+		return lifecycle, workspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
 	if createRuntime != nil {
 		supervisor.createRuntime = createRuntime
@@ -358,9 +359,9 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 		return &runtimepkg.Runtime{}, nil
 	})
 	supervisor.mountSources = wantMountSources
-	supervisor.newWorkspaces = func(_ storeBundle, _ string, _ semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
+	supervisor.newWorkspaces = func(_ storeBundle, _ string, _ semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error) {
 		gotMountSources = mountSources
-		return stubWorkspaceLifecycle{}, nil
+		return stubWorkspaceLifecycle{}, workspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
@@ -415,6 +416,68 @@ func TestRuntimeProjectSupervisorLoadProject_PropagatesWorkspaceAdmissionFailure
 				t.Fatalf("CurrentRuntime = %p after %s failure, want nil", supervisor.CurrentRuntime(), tc.name)
 			}
 		})
+	}
+}
+
+func TestRuntimeProjectSupervisorOpenProjectNoAgentSkipsWorkspaceLifecycle(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	var ready atomic.Bool
+	var createdWorkspace bool
+	var gotWorkspace workspace.Lifecycle
+
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, nil, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		gotWorkspace = deps.Options.WorkspaceLifecycle
+		return &runtimepkg.Runtime{}, nil
+	})
+	supervisor.ready = &ready
+	supervisor.cfg = &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}}
+	supervisor.workspaceBackend = workspaceBackendSelection{Source: "capability-derived"}
+	supervisor.newWorkspaces = func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error) {
+		createdWorkspace = true
+		decision, err := decideWorkspaceBackend(supervisor.workspaceBackend, supervisor.cfg, source)
+		if err != nil {
+			return nil, workspaceBackendSelection{}, err
+		}
+		lifecycle, err := configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), contractsRoot, source, mountSources, decision)
+		if err != nil {
+			return nil, decision, err
+		}
+		return lifecycle, decision, nil
+	}
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+
+	status, err := supervisor.OpenProject(context.Background(), projectRoot)
+	if err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if !status.Loaded {
+		t.Fatal("status.Loaded = false, want true")
+	}
+	if !ready.Load() {
+		t.Fatal("ready flag = false, want true")
+	}
+	if !createdWorkspace {
+		t.Fatal("shared backend workspace factory was not called")
+	}
+	if gotWorkspace != nil {
+		t.Fatalf("runtime workspace lifecycle = %T, want nil for no-agent no-workspace decision", gotWorkspace)
+	}
+}
+
+func TestRuntimeProjectSupervisorOpenProjectRejectsNilLifecycleWithoutNoWorkspaceDecision(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, nil, func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		t.Fatal("createRuntime should not be called when lifecycle is nil without no-workspace decision")
+		return nil, nil
+	})
+	supervisor.newWorkspaces = func(storeBundle, string, semanticview.Source, workspaceMountSources) (workspace.Lifecycle, workspaceBackendSelection, error) {
+		return nil, workspaceBackendSelection{Backend: workspace.BackendHost, Source: "test"}, nil
+	}
+
+	_, err := supervisor.OpenProject(context.Background(), projectRoot)
+	if err == nil || !strings.Contains(err.Error(), "no lifecycle is only valid for canonical no-workspace decision") {
+		t.Fatalf("OpenProject err = %v, want nil lifecycle guard", err)
 	}
 }
 
