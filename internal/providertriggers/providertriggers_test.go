@@ -20,16 +20,13 @@ import (
 	"time"
 )
 
-func TestDefaultRegistryLoadsSlackAndStripeFromVerifiedPlatformPacks(t *testing.T) {
+func TestDefaultRegistryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
 	registry := DefaultRegistry()
-	if got := registry.sources["github"]; got != "builtin:manifests/github.yaml" {
-		t.Fatalf("github source = %q, want temporary built-in control", got)
-	}
-	if got := registry.sources["slack"]; got != "platform:provider.slack" {
-		t.Fatalf("slack source = %q, want verified platform pack", got)
-	}
-	if got := registry.sources["stripe"]; got != "platform:provider.stripe" {
-		t.Fatalf("stripe source = %q, want verified platform pack", got)
+	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "twilio", "typeform"} {
+		want := "platform:provider." + provider
+		if got := registry.sources[provider]; got != want {
+			t.Fatalf("%s source = %q, want verified platform pack %q", provider, got, want)
+		}
 	}
 }
 
@@ -42,7 +39,7 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 	}{
 		{
 			name:     "platform pack bad exact byte hash",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
 				appendFile(t, filepath.Join(dir, "trigger.yaml"), "\n")
 			},
@@ -50,7 +47,7 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 		},
 		{
 			name:     "unknown trigger manifest field",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
 				appendFile(t, filepath.Join(dir, "trigger.yaml"), "redact_keyz:\n  - secret\n")
 				rewritePackHash(t, dir)
@@ -59,23 +56,23 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 		},
 		{
 			name:     "capability declaration drift",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.stripe", "inbound.evil")
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.github.{event_type}", "inbound.evil")
 			},
 			want: "capabilities do not match",
 		},
 		{
 			name:     "requires declaration drift",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "requires:\n  secrets:\n    - webhook_signing.stripe", "requires:\n  secrets:\n    - webhook_signing.other")
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "requires:\n  secrets:\n    - webhook_signing.github", "requires:\n  secrets:\n    - webhook_signing.other")
 			},
 			want: "requires do not match",
 		},
 		{
 			name:     "unknown envelope field",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
 				appendFile(t, filepath.Join(dir, "pack.yaml"), "unexpected: true\n")
 			},
@@ -83,7 +80,7 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 		},
 		{
 			name:     "incompatible platform version",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
 				replaceInFile(t, filepath.Join(dir, "pack.yaml"), `platform_version: ">=0.7.0 <0.8.0"`, `platform_version: ">=0.8.0"`)
 			},
@@ -91,9 +88,9 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 		},
 		{
 			name:     "missing tests metadata",
-			provider: "stripe",
+			provider: "github",
 			mutate: func(t *testing.T, dir string) {
-				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "tests:\n  - providertriggers/stripe\n", "tests: []\n")
+				replaceInFile(t, filepath.Join(dir, "pack.yaml"), "tests:\n  - providertriggers/github\n", "tests: []\n")
 			},
 			want: "tests are required",
 		},
@@ -112,19 +109,19 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 }
 
 func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
-	dir := copyBuiltinPackToTemp(t, "stripe")
+	dir := copyBuiltinPackToTemp(t, "github")
 	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
 	if err != nil {
 		t.Fatalf("LoadPackFS: %v", err)
 	}
 	_, err = NewRegistryFromSources(
-		ManifestSource{Manifest: pack.Manifest, Source: "builtin:manifests/stripe.yaml"},
+		ManifestSource{Manifest: pack.Manifest, Source: "external:/tmp/github"},
 		SourcesFromLoadedPacks(pack)[0],
 	)
 	if err == nil {
 		t.Fatal("NewRegistryFromSources succeeded, want duplicate provider failure")
 	}
-	for _, want := range []string{`duplicate provider trigger manifest for "stripe"`, "builtin:manifests/stripe.yaml", "platform:provider.stripe"} {
+	for _, want := range []string{`duplicate provider trigger manifest for "github"`, "external:/tmp/github", "platform:provider.github"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("duplicate error = %q, want containing %q", err.Error(), want)
 		}
@@ -167,14 +164,14 @@ func TestProviderTriggerRegistryLoadsExternalPackDirs(t *testing.T) {
 }
 
 func TestProviderTriggerRegistryRejectsExternalShadowingAgainstPlatformPack(t *testing.T) {
-	dir := copyBuiltinPackToTemp(t, "stripe")
+	dir := copyBuiltinPackToTemp(t, "github")
 	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
 
 	_, _, err := NewRegistryWithExternalPackDirs("0.7.0", dir)
 	if err == nil {
 		t.Fatal("NewRegistryWithExternalPackDirs succeeded, want duplicate provider failure")
 	}
-	for _, want := range []string{`duplicate provider trigger manifest for "stripe"`, "platform:provider.stripe", "external:" + dir} {
+	for _, want := range []string{`duplicate provider trigger manifest for "github"`, "platform:provider.github", "external:" + dir} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("duplicate error = %q, want containing %q", err.Error(), want)
 		}
