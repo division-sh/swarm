@@ -8,7 +8,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/bytecodealliance/wasmtime-go"
+	"github.com/bytecodealliance/wasmtime-go/v46"
 )
 
 const (
@@ -16,8 +16,9 @@ const (
 	DefaultEntry  = "compute"
 	memoryExport  = "memory"
 	allocExport   = "alloc"
-	versionModule = "github.com/bytecodealliance/wasmtime-go"
+	versionModule = "github.com/bytecodealliance/wasmtime-go/v46"
 	deterministic = "compute_module_deterministic_no_retry"
+	wasmPageSize  = 64 * 1024
 )
 
 type Code string
@@ -169,12 +170,13 @@ func Execute(req Request) (Result, error) {
 		return Result{}, &Error{Code: CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
 	store := wasmtime.NewStore(engine)
-	if err := store.AddFuel(req.Fuel); err != nil {
+	store.Limiter(memoryLimitBytes(req.MemoryPages), -1, -1, -1, -1)
+	if err := store.SetFuel(req.Fuel); err != nil {
 		return Result{}, &Error{Code: CodeFuel, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
 	instance, err := wasmtime.NewInstance(store, module, nil)
 	if err != nil {
-		return Result{}, &Error{Code: CodeTrap, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+		return Result{}, classifyCallError(req, CodeTrap, err)
 	}
 	memoryExt := instance.GetExport(store, memoryExport)
 	if memoryExt == nil || memoryExt.Memory() == nil {
@@ -220,7 +222,10 @@ func Execute(req Request) (Result, error) {
 	if err != nil {
 		return Result{}, &Error{Code: CodeOutputBounds, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
-	fuelConsumed, _ := store.FuelConsumed()
+	fuelConsumed := req.Fuel
+	if remaining, err := store.GetFuel(); err == nil && remaining <= req.Fuel {
+		fuelConsumed = req.Fuel - remaining
+	}
 	sum := sha256.Sum256(output)
 	return Result{
 		Output:       output,
@@ -247,8 +252,8 @@ func newEngine() *wasmtime.Engine {
 	cfg.SetWasmBulkMemory(true)
 	cfg.SetWasmMemory64(false)
 	cfg.SetWasmMultiMemory(false)
-	cfg.SetWasmReferenceTypes(true)
 	cfg.SetWasmSIMD(false)
+	cfg.SetWasmRelaxedSIMD(false)
 	cfg.SetWasmThreads(false)
 	return wasmtime.NewEngineWithConfig(cfg)
 }
@@ -307,13 +312,14 @@ func requireMemoryExport(exports map[string]*wasmtime.ExternType, memoryPages ui
 	if memoryPages == 0 {
 		return &Error{Code: CodeMemory, Err: fmt.Errorf("memory page limit is required")}
 	}
-	// wasmtime-go v1.0 exposes no StoreLimits API. Requiring the exported
-	// memory's Wasm maximum to fit the contract limit makes memory.grow fail
-	// inside the engine instead of relying on post-execution detection.
 	if max > uint64(memoryPages) {
 		return &Error{Code: CodeMemory, Err: fmt.Errorf("%s maximum %d pages exceeds declared limit %d", memoryExport, max, memoryPages)}
 	}
 	return nil
+}
+
+func memoryLimitBytes(memoryPages uint32) int64 {
+	return int64(memoryPages) * wasmPageSize
 }
 
 func requireFuncExport(exports map[string]*wasmtime.ExternType, name string, params, results []wasmtime.ValKind) error {
@@ -358,8 +364,12 @@ func withSite(err error, moduleID, rowID string) error {
 
 func classifyCallError(req Request, fallback Code, err error) error {
 	code := fallback
-	if strings.Contains(strings.ToLower(err.Error()), "fuel") {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "fuel"):
 		code = CodeFuel
+	case strings.Contains(message, "memory") || strings.Contains(message, "resource limiter"):
+		code = CodeMemory
 	}
 	return &Error{Code: code, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 }

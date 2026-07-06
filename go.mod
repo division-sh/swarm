@@ -5,7 +5,7 @@ go 1.23.0
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/Masterminds/semver/v3 v3.3.1
-	github.com/bytecodealliance/wasmtime-go v1.0.0
+	github.com/bytecodealliance/wasmtime-go/v46 v46.0.1
 	github.com/google/cel-go v0.27.0
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

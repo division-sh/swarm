@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/bytecodealliance/wasmtime-go"
+	"github.com/bytecodealliance/wasmtime-go/v46"
 )
 
 func TestExecuteStructuredRenderer(t *testing.T) {
