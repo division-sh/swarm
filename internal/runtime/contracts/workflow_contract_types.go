@@ -167,6 +167,7 @@ const (
 	PolicySheetRowKindWhen    PolicySheetRowKind = "when"
 	PolicySheetRowKindCase    PolicySheetRowKind = "case"
 	PolicySheetRowKindRange   PolicySheetRowKind = "range"
+	PolicySheetRowKindLookup  PolicySheetRowKind = "lookup"
 	PolicySheetRowKindDefault PolicySheetRowKind = "default"
 )
 
@@ -178,6 +179,7 @@ type PolicySheetRowMetadata struct {
 	RangeLower   PolicySheetRangeBound
 	RangeUpper   PolicySheetRangeBound
 	Monotonicity []string
+	Lookup       *ComputeLookupSpec
 }
 
 type PolicySheetRangeBound struct {
@@ -307,14 +309,38 @@ type AccumulateSpec struct {
 	OnTimeout    *HandlerRuleEntry    `yaml:"on_timeout"`
 }
 type ComputeSpec struct {
-	Operation   ComputeOperation `yaml:"operation"`
-	Tiers       []ComputeTier    `yaml:"tiers"`
-	Keys        ComputeKeyConfig `yaml:"keys"`
-	Params      map[string]any   `yaml:"params"`
-	StoreAs     string           `yaml:"store_as"`
-	Description string           `yaml:"description"`
-	ValueField  string           `yaml:"value_field"`
-	WeightField string           `yaml:"weight_field"`
+	Operation   ComputeOperation   `yaml:"operation"`
+	Tiers       []ComputeTier      `yaml:"tiers"`
+	Keys        ComputeKeyConfig   `yaml:"keys"`
+	Params      map[string]any     `yaml:"params"`
+	StoreAs     string             `yaml:"store_as"`
+	Description string             `yaml:"description"`
+	ValueField  string             `yaml:"value_field"`
+	WeightField string             `yaml:"weight_field"`
+	Lookup      *ComputeLookupSpec `yaml:"-"`
+}
+
+type ComputeLookupSpec struct {
+	RowID           string               `yaml:"-"`
+	On              []string             `yaml:"-"`
+	OnPaths         []paths.Path         `yaml:"-"`
+	Entries         []ComputeLookupEntry `yaml:"-"`
+	DefaultFail     bool                 `yaml:"-"`
+	DefaultDeclared bool                 `yaml:"-"`
+}
+
+type ComputeLookupEntry struct {
+	Key          []ComputeLookupLiteral `yaml:"-"`
+	Value        any                    `yaml:"-"`
+	ValueKind    string                 `yaml:"-"`
+	ValueSummary string                 `yaml:"-"`
+}
+
+type ComputeLookupLiteral struct {
+	Value     any    `yaml:"-"`
+	Kind      string `yaml:"-"`
+	Canonical string `yaml:"-"`
+	Summary   string `yaml:"-"`
 }
 type ComputeTier struct {
 	Dimensions []string `yaml:"dimensions"`

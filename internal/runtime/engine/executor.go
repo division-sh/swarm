@@ -988,12 +988,44 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 }
 
 func (e *Executor) stepCompute(frame *executionFrame) error {
-	spec := e.selectedCompute(frame)
+	if frame.rule != nil {
+		spec := frame.rule.Compute
+		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup {
+			return nil
+		}
+		return e.executeComputeSpec(frame, spec)
+	}
+	if frame.req.Handler.Compute != nil {
+		if err := e.executeComputeSpec(frame, frame.req.Handler.Compute); err != nil {
+			return err
+		}
+	}
+	for idx := range frame.req.Handler.Rules {
+		rule := &frame.req.Handler.Rules[idx]
+		if rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindLookup || rule.Compute == nil {
+			continue
+		}
+		if err := e.executeComputeSpec(frame, rule.Compute); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontracts.ComputeSpec) error {
 	if spec == nil {
 		return nil
 	}
 	acc, _ := loadAccumulatorForBucket(frame.state.State, handlerAccumulatorBucketRef(frame.req))
-	value, err := computeValue(acc, frame.payload, spec)
+	var (
+		value any
+		err   error
+	)
+	if spec.Operation == runtimecontracts.ComputeOpLookup {
+		value, err = computeLookupValue(e.currentContext(frame), spec)
+	} else {
+		value, err = computeValue(acc, frame.payload, spec)
+	}
 	if err != nil {
 		return err
 	}
@@ -2116,6 +2148,9 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry) (*runtimecontracts.HandlerRuleEntry, error) {
 	for idx := range rules {
 		rule := &rules[idx]
+		if rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindLookup {
+			continue
+		}
 		condition := strings.TrimSpace(rule.Condition)
 		if condition == "" || strings.EqualFold(condition, "else") {
 			return rule, nil

@@ -27,6 +27,7 @@ type workflowExpressionContext struct {
 	Event                        map[string]any
 	Payload                      map[string]any
 	Policy                       map[string]any
+	Computed                     map[string]any
 	Accumulated                  any
 	FanOut                       map[string]any
 	WorkflowName                 string
@@ -47,6 +48,7 @@ func newWorkflowExpressionEvaluator() *workflowExpressionEvaluator {
 		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
+		cel.Variable("computed", cel.DynType),
 		cel.Variable("accumulated", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
 		cel.Function("count_ge",
@@ -91,6 +93,7 @@ func (e *workflowExpressionEvaluator) EvalBool(expression string, ctx workflowEx
 		"event":       workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Event)),
 		"payload":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Payload)),
 		"policy":      workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Policy)),
+		"computed":    workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.Computed)),
 		"accumulated": normalizedCtx.Accumulated,
 		"fan_out":     workflowNormalizeCELInput(cloneStringAnyMap(normalizedCtx.FanOut)),
 	})
@@ -159,6 +162,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 			Event:                        cloneStringAnyMap(ctx.Event),
 			Payload:                      cloneStringAnyMap(ctx.Payload),
 			Policy:                       cloneStringAnyMap(ctx.Policy),
+			Computed:                     cloneStringAnyMap(ctx.Computed),
 			Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 			FanOut:                       cloneStringAnyMap(ctx.FanOut),
 			WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
@@ -196,6 +200,7 @@ func normalizeWorkflowExpression(expression string, ctx workflowExpressionContex
 		Event:                        cloneStringAnyMap(ctx.Event),
 		Payload:                      cloneStringAnyMap(ctx.Payload),
 		Policy:                       cloneStringAnyMap(ctx.Policy),
+		Computed:                     cloneStringAnyMap(ctx.Computed),
 		Accumulated:                  cloneAccumulatedItems(ctx.Accumulated),
 		FanOut:                       cloneStringAnyMap(ctx.FanOut),
 		WorkflowName:                 strings.TrimSpace(ctx.WorkflowName),
@@ -307,7 +312,7 @@ func workflowExpressionResolveQueryOperand(raw string, ctx workflowExpressionCon
 	}
 	if root, scoped := workflowExpressionQueryOperandScope(raw); scoped {
 		switch root {
-		case "entity", "_entity", "event", "payload", "policy", "fan_out":
+		case "entity", "_entity", "event", "payload", "policy", "computed", "fan_out":
 			if ctx.AllowUnresolvedQueryOperands {
 				return raw, nil
 			}
@@ -350,6 +355,8 @@ func workflowExpressionLookupContextValue(ref string, ctx workflowExpressionCont
 		return workflowExpressionLookupPath(ctx.Payload, strings.TrimPrefix(ref, "payload."))
 	case strings.HasPrefix(ref, "policy."):
 		return workflowExpressionLookupPath(ctx.Policy, strings.TrimPrefix(ref, "policy."))
+	case strings.HasPrefix(ref, "computed."):
+		return workflowExpressionLookupPath(ctx.Computed, strings.TrimPrefix(ref, "computed."))
 	case strings.HasPrefix(ref, "fan_out."):
 		return workflowExpressionLookupPath(ctx.FanOut, strings.TrimPrefix(ref, "fan_out."))
 	default:

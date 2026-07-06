@@ -57,6 +57,10 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 			expression: `_entity.id != "" && payload.score >= policy.threshold && event.source.entity_id != ""`,
 		},
 		{
+			name:       "computed",
+			expression: `computed.template_path == "templates/service/go"`,
+		},
+		{
 			name:       "query entities",
 			expression: `query_entities(name == payload.name).count == 0`,
 		},
@@ -90,6 +94,19 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 				t.Fatalf("expected rule condition %q to validate, got %v", tt.expression, err)
 			}
 		})
+	}
+}
+
+func TestWorkflowExpressionEvaluator_AllowsComputedNamespace(t *testing.T) {
+	eval := newWorkflowExpressionEvaluator()
+	ok, err := eval.EvalBool(`computed.template_path == "templates/service/go"`, workflowExpressionContext{
+		Computed: map[string]any{"template_path": "templates/service/go"},
+	})
+	if err != nil {
+		t.Fatalf("EvalBool computed namespace error = %v", err)
+	}
+	if !ok {
+		t.Fatal("expected computed namespace condition to evaluate true")
 	}
 }
 

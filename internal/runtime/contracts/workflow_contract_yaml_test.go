@@ -802,6 +802,65 @@ rules:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_LowersPolicySheetLookupValueRows(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  - id: scaffold_paths
+    lookup:
+      on: [payload.scaffold_type, payload.language]
+      entries:
+        - key: [service, go]
+          value: templates/service/go
+        - key: [library, go]
+          value: templates/library/go
+      into: computed.template_path
+      default: fail
+  - id: use_service_template
+    when: computed.template_path == "templates/service/go"
+    emit: repo.service_template_selected
+  - id: fallback
+    default: true
+    emit: repo.other_template_selected
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := len(handler.Rules), 3; got != want {
+		t.Fatalf("rules len = %d, want %d", got, want)
+	}
+	lookupRule := handler.Rules[0]
+	if got := lookupRule.PolicyRow.Kind; got != PolicySheetRowKindLookup {
+		t.Fatalf("lookup PolicyRow.Kind = %q, want lookup", got)
+	}
+	if lookupRule.Compute == nil {
+		t.Fatal("lookup row Compute = nil")
+	}
+	if got := lookupRule.Compute.Operation; got != ComputeOpLookup {
+		t.Fatalf("lookup Compute.Operation = %q, want lookup", got)
+	}
+	if got := lookupRule.Compute.StoreAs; got != "computed.template_path" {
+		t.Fatalf("lookup StoreAs = %q, want computed.template_path", got)
+	}
+	if lookupRule.Compute.Lookup == nil {
+		t.Fatal("lookup Compute.Lookup = nil")
+	}
+	if got := lookupRule.Compute.Lookup.On; !reflect.DeepEqual(got, []string{"payload.scaffold_type", "payload.language"}) {
+		t.Fatalf("lookup on = %#v", got)
+	}
+	if got := len(lookupRule.Compute.Lookup.Entries); got != 2 {
+		t.Fatalf("lookup entries len = %d, want 2", got)
+	}
+	if got := lookupRule.Compute.Lookup.Entries[0].Value; got != "templates/service/go" {
+		t.Fatalf("lookup first value = %#v", got)
+	}
+	if !lookupRule.Compute.Lookup.DefaultDeclared || !lookupRule.Compute.Lookup.DefaultFail {
+		t.Fatalf("lookup default flags = declared:%v fail:%v, want declared fail", lookupRule.Compute.Lookup.DefaultDeclared, lookupRule.Compute.Lookup.DefaultFail)
+	}
+	if got := handler.Rules[1].Condition; got != `computed.template_path == "templates/service/go"` {
+		t.Fatalf("consumer condition = %q", got)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
@@ -1000,6 +1059,63 @@ rules:
     advances_to: bad
 `,
 			contains: "second policy-sheet authoring owner",
+		},
+		{
+			name: "lookup into entity",
+			body: `
+rules:
+  - id: bad_lookup
+    lookup:
+      on: payload.kind
+      entries:
+        - key: service
+          value: templates/service/go
+      into: entity.template_path
+      default: fail
+`,
+			contains: "computed.*",
+		},
+		{
+			name: "lookup duplicate key",
+			body: `
+rules:
+  - id: duplicate_lookup
+    lookup:
+      on: [payload.kind, payload.language]
+      entries:
+        - key: [service, go]
+          value: templates/service/go
+        - key: [service, go]
+          value: templates/service/go-v2
+      into: computed.template_path
+      default: fail
+`,
+			contains: "duplicate lookup key",
+		},
+		{
+			name: "lookup branch output",
+			body: `
+rules:
+  - id: bad_lookup_branch
+    lookup:
+      on: payload.kind
+      entries:
+        - key: service
+          value: templates/service/go
+      into: computed.template_path
+      default: fail
+    emit: repo.service_template_selected
+`,
+			contains: "cannot declare branch outputs",
+		},
+		{
+			name: "public compute lookup",
+			body: `
+compute:
+  operation: lookup
+  store_as: computed.template_path
+`,
+			contains: "internal to policy-sheet value rows",
 		},
 		{
 			name: "typed row outside rules",

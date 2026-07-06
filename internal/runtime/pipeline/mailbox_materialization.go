@@ -177,6 +177,7 @@ func evalMailboxExpressionValue(base runtimeengine.BaseContext, expr runtimecont
 			Event:          base.Event.Raw(),
 			Payload:        base.Payload.Raw(),
 			Policy:         base.Policy.Raw(),
+			Computed:       base.Computed.Raw(),
 			FanOut:         base.FanOut.Raw(),
 		}, workflowexpr.ValueExpressionOptions{})
 		if err != nil {

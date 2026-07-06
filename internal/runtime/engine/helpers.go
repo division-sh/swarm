@@ -240,6 +240,7 @@ func evalWorkflowValueExpression(base BaseContext, state ExecutionState, express
 		Event:          base.Event.Raw(),
 		Payload:        base.Payload.Raw(),
 		Policy:         base.Policy.Raw(),
+		Computed:       base.Computed.Raw(),
 		FanOut:         state.FanOut,
 	}, opts)
 }
@@ -868,9 +869,60 @@ func computeValue(acc *Accumulator, payload map[string]any, spec *runtimecontrac
 		}), nil
 	case runtimecontracts.ComputeOpCount:
 		return len(acc.Items), nil
+	case runtimecontracts.ComputeOpLookup:
+		return nil, fmt.Errorf("lookup compute requires handler context")
 	default:
 		return nil, ErrNotImplemented
 	}
+}
+
+func computeLookupValue(ctx BaseContext, spec *runtimecontracts.ComputeSpec) (any, error) {
+	if spec == nil || spec.Lookup == nil {
+		return nil, ErrNotImplemented
+	}
+	lookup := spec.Lookup
+	key := make([]runtimecontracts.ComputeLookupLiteral, 0, len(lookup.OnPaths))
+	unmatched := make([]string, 0, len(lookup.OnPaths))
+	for idx, path := range lookup.OnPaths {
+		value, ok := ctx.Lookup(path)
+		if !ok {
+			unmatched = append(unmatched, strings.TrimSpace(lookup.On[idx])+"=<missing>")
+			key = append(key, runtimecontracts.ComputeLookupLiteral{Canonical: "<missing>"})
+			continue
+		}
+		kind, summary, canonical, ok := runtimecontracts.CanonicalizeComputeLookupValue(value)
+		if !ok {
+			unmatched = append(unmatched, strings.TrimSpace(lookup.On[idx])+"=<unsupported>")
+			key = append(key, runtimecontracts.ComputeLookupLiteral{Canonical: "<unsupported>"})
+			continue
+		}
+		unmatched = append(unmatched, strings.TrimSpace(lookup.On[idx])+"="+summary)
+		key = append(key, runtimecontracts.ComputeLookupLiteral{
+			Value:     value,
+			Kind:      kind,
+			Canonical: canonical,
+			Summary:   summary,
+		})
+	}
+	canonical := computeLookupCanonicalKey(key)
+	for _, entry := range lookup.Entries {
+		if computeLookupCanonicalKey(entry.Key) == canonical {
+			return entry.Value, nil
+		}
+	}
+	rowID := strings.TrimSpace(lookup.RowID)
+	if rowID == "" {
+		rowID = strings.TrimSpace(spec.StoreAs)
+	}
+	return nil, fmt.Errorf("lookup_miss_no_retry: row %s unmatched tuple [%s]", rowID, strings.Join(unmatched, ", "))
+}
+
+func computeLookupCanonicalKey(key []runtimecontracts.ComputeLookupLiteral) string {
+	parts := make([]string, 0, len(key))
+	for _, literal := range key {
+		parts = append(parts, literal.Canonical)
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func computeWeightedAverage(acc *Accumulator, spec *runtimecontracts.ComputeSpec) float64 {

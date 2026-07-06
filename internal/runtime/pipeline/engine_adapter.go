@@ -39,6 +39,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		Event:          cloneStringAnyMap(ctx.Event.Raw()),
 		Payload:        cloneStringAnyMap(ctx.Payload.Raw()),
 		Policy:         cloneStringAnyMap(ctx.Policy.Raw()),
+		Computed:       cloneStringAnyMap(ctx.Computed.Raw()),
 		Accumulated:    accumulatedItemsForCEL(ctx.Accumulated.Raw()),
 		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
 		WorkflowName:   firstNonEmptyString(strings.TrimSpace(ctx.FlowID), e.workflowName()),

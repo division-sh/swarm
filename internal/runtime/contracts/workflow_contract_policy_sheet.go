@@ -1,11 +1,13 @@
 package contracts
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
 
@@ -14,7 +16,7 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		return nil
 	}
 	rowNodes := map[string]*yaml.Node{}
-	for _, key := range []string{"when", "case", "range", "else", "default"} {
+	for _, key := range []string{"when", "case", "range", "lookup", "else", "default"} {
 		if value := yamlMappingValueNode(node, key); value != nil {
 			rowNodes[key] = value
 		}
@@ -54,6 +56,17 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		}
 		rule.Condition = condition
 		rule.PolicyRow = metadata
+	case rowNodes["lookup"] != nil:
+		metadata, compute, err := decodePolicySheetLookupRow(rowNodes["lookup"], strings.TrimSpace(rule.ID))
+		if err != nil {
+			return err
+		}
+		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) != "" ||
+			!rule.Activity.Empty() || rule.DataAccumulation.HasWrites() || rule.FanOut != nil || rule.Compute != nil {
+			return fmt.Errorf("POLICY-SHEET-ROW: lookup row %q derives a value only and cannot declare branch outputs", strings.TrimSpace(rule.ID))
+		}
+		rule.Compute = compute
+		rule.PolicyRow = metadata
 	case rowNodes["else"] != nil:
 		if err := requirePolicySheetBoolTrue(rowNodes["else"], "else"); err != nil {
 			return err
@@ -85,6 +98,7 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 		return fmt.Errorf("POLICY-SHEET-ROW: typed policy-sheet rows are only supported under handler.rules")
 	}
 	seenIDs := map[string]int{}
+	hasSelectionRow := false
 	hasDefault := false
 	caseKeys := map[string]int{}
 	rangesByValue := map[string][]policySheetRangeForValidation{}
@@ -99,6 +113,9 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 		seenIDs[id] = idx
 		if strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
 			hasDefault = true
+		}
+		if rule.PolicyRow.Kind == PolicySheetRowKindWhen || rule.PolicyRow.Kind == PolicySheetRowKindCase || rule.PolicyRow.Kind == PolicySheetRowKindRange {
+			hasSelectionRow = true
 		}
 		switch rule.PolicyRow.Kind {
 		case PolicySheetRowKindCase:
@@ -117,7 +134,7 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 			})
 		}
 	}
-	if !hasDefault {
+	if hasSelectionRow && !hasDefault {
 		return fmt.Errorf("POLICY-SHEET-ROW: rules with typed policy-sheet rows require an else/default row")
 	}
 	for value, ranges := range rangesByValue {
@@ -231,6 +248,287 @@ func decodePolicySheetRangeRow(node *yaml.Node) (string, PolicySheetRowMetadata,
 		RangeUpper:   upper,
 		Monotonicity: monotonicity,
 	}, nil
+}
+
+func decodePolicySheetLookupRow(node *yaml.Node, rowID string) (PolicySheetRowMetadata, *ComputeSpec, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return PolicySheetRowMetadata{}, nil, fmt.Errorf("POLICY-SHEET-ROW: lookup row must be a mapping")
+	}
+	if err := validatePolicySheetMappingKeys(node, "lookup", map[string]struct{}{"on": {}, "entries": {}, "into": {}, "default": {}}); err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	on, err := decodePolicySheetLookupOn(yamlMappingValueNode(node, "on"))
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	into, err := decodePolicySheetScalarString(yamlMappingValueNode(node, "into"), "lookup.into")
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	if err := validatePolicySheetLookupInto(into); err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	entries, err := decodePolicySheetLookupEntries(yamlMappingValueNode(node, "entries"), len(on))
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	defaultFail, defaultDeclared, err := decodePolicySheetLookupDefault(yamlMappingValueNode(node, "default"))
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	spec := ComputeLookupSpec{
+		RowID:           strings.TrimSpace(rowID),
+		On:              on,
+		OnPaths:         make([]paths.Path, 0, len(on)),
+		Entries:         entries,
+		DefaultFail:     defaultFail,
+		DefaultDeclared: defaultDeclared,
+	}
+	for _, selector := range on {
+		spec.OnPaths = append(spec.OnPaths, paths.Parse(selector))
+	}
+	compute := &ComputeSpec{
+		Operation: ComputeOpLookup,
+		StoreAs:   strings.TrimSpace(into),
+		Lookup:    &spec,
+	}
+	metadata := PolicySheetRowMetadata{
+		Kind:   PolicySheetRowKindLookup,
+		Lookup: &spec,
+	}
+	return metadata, compute, nil
+}
+
+func decodePolicySheetLookupOn(node *yaml.Node) ([]string, error) {
+	on, err := decodePolicySheetStringList(node, "lookup.on")
+	if err != nil {
+		return nil, err
+	}
+	if len(on) == 0 {
+		return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.on requires at least one explicit root path")
+	}
+	for _, selector := range on {
+		if err := validatePolicySheetPath(selector, "lookup.on", []string{"payload", "entity", "policy", "event"}); err != nil {
+			return nil, err
+		}
+	}
+	return on, nil
+}
+
+func validatePolicySheetLookupInto(into string) error {
+	parsed := paths.Parse(into)
+	if parsed.Root != paths.RootComputed || len(parsed.Segments) == 0 {
+		return fmt.Errorf("POLICY-SHEET-ROW: lookup.into %q must target computed.*", strings.TrimSpace(into))
+	}
+	for _, segment := range parsed.Segments {
+		if !isPolicySheetPathSegment(segment) {
+			return fmt.Errorf("POLICY-SHEET-ROW: lookup.into %q must be a simple computed.* path", strings.TrimSpace(into))
+		}
+	}
+	return nil
+}
+
+func decodePolicySheetLookupEntries(node *yaml.Node, keyWidth int) ([]ComputeLookupEntry, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.entries is required")
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.entries must be a list of {key, value} entries")
+	}
+	if len(node.Content) == 0 {
+		return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.entries requires at least one entry")
+	}
+	out := make([]ComputeLookupEntry, 0, len(node.Content))
+	seen := map[string]int{}
+	valueKind := ""
+	for idx, item := range node.Content {
+		entry, err := decodePolicySheetLookupEntry(item, keyWidth)
+		if err != nil {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.entries[%d]: %w", idx, err)
+		}
+		key := canonicalPolicySheetLookupKey(entry.Key)
+		if prev, ok := seen[key]; ok {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: duplicate lookup key at entries[%d] and entries[%d]", prev, idx)
+		}
+		seen[key] = idx
+		if valueKind == "" {
+			valueKind = entry.ValueKind
+		} else if entry.ValueKind != valueKind {
+			return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.entries[%d] value type %s does not match earlier value type %s", idx, entry.ValueKind, valueKind)
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+func decodePolicySheetLookupEntry(node *yaml.Node, keyWidth int) (ComputeLookupEntry, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return ComputeLookupEntry{}, fmt.Errorf("entry must be a mapping")
+	}
+	if err := validatePolicySheetMappingKeys(node, "lookup.entry", map[string]struct{}{"key": {}, "value": {}}); err != nil {
+		return ComputeLookupEntry{}, err
+	}
+	keyNode := yamlMappingValueNode(node, "key")
+	if keyNode == nil {
+		return ComputeLookupEntry{}, fmt.Errorf("key is required")
+	}
+	valueNode := yamlMappingValueNode(node, "value")
+	if valueNode == nil {
+		return ComputeLookupEntry{}, fmt.Errorf("value is required")
+	}
+	key, err := decodePolicySheetLookupKey(keyNode, keyWidth)
+	if err != nil {
+		return ComputeLookupEntry{}, err
+	}
+	value, valueKind, valueSummary, err := decodePolicySheetLookupScalar(valueNode, "value")
+	if err != nil {
+		return ComputeLookupEntry{}, err
+	}
+	return ComputeLookupEntry{
+		Key:          key,
+		Value:        value,
+		ValueKind:    valueKind,
+		ValueSummary: valueSummary,
+	}, nil
+}
+
+func decodePolicySheetLookupKey(node *yaml.Node, keyWidth int) ([]ComputeLookupLiteral, error) {
+	if keyWidth == 1 && node.Kind != yaml.SequenceNode {
+		literal, err := decodePolicySheetLookupLiteral(node, "key")
+		if err != nil {
+			return nil, err
+		}
+		return []ComputeLookupLiteral{literal}, nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("key must be a scalar list matching lookup.on")
+	}
+	if len(node.Content) != keyWidth {
+		return nil, fmt.Errorf("key width %d does not match lookup.on width %d", len(node.Content), keyWidth)
+	}
+	out := make([]ComputeLookupLiteral, 0, len(node.Content))
+	for idx, item := range node.Content {
+		literal, err := decodePolicySheetLookupLiteral(item, fmt.Sprintf("key[%d]", idx))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, literal)
+	}
+	return out, nil
+}
+
+func decodePolicySheetLookupLiteral(node *yaml.Node, label string) (ComputeLookupLiteral, error) {
+	value, _, _, err := decodePolicySheetLookupScalar(node, label)
+	if err != nil {
+		return ComputeLookupLiteral{}, err
+	}
+	kind, summary, canonical, ok := CanonicalizeComputeLookupValue(value)
+	if !ok {
+		return ComputeLookupLiteral{}, fmt.Errorf("%s uses unsupported lookup key type %T", label, value)
+	}
+	return ComputeLookupLiteral{
+		Value:     value,
+		Kind:      kind,
+		Canonical: canonical,
+		Summary:   summary,
+	}, nil
+}
+
+func decodePolicySheetLookupScalar(node *yaml.Node, label string) (any, string, string, error) {
+	if node == nil || node.Kind != yaml.ScalarNode {
+		return nil, "", "", fmt.Errorf("%s must be a scalar", label)
+	}
+	raw := strings.TrimSpace(node.Value)
+	switch strings.TrimSpace(node.Tag) {
+	case "!!str", "":
+		return raw, "string", strconv.Quote(raw), nil
+	case "!!bool":
+		if raw != "true" && raw != "false" {
+			return nil, "", "", fmt.Errorf("%s bool literal %q is invalid", label, raw)
+		}
+		return raw == "true", "bool", raw, nil
+	case "!!int":
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("%s integer literal %q is invalid", label, raw)
+		}
+		return parsed, "int", strconv.FormatInt(parsed, 10), nil
+	case "!!float":
+		parsed, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("%s numeric literal %q is invalid", label, raw)
+		}
+		return parsed, "number", strconv.FormatFloat(parsed, 'g', -1, 64), nil
+	case "!!null":
+		return nil, "", "", fmt.Errorf("%s null literal is not supported in lookup tables", label)
+	default:
+		return nil, "", "", fmt.Errorf("%s uses unsupported literal tag %s", label, node.Tag)
+	}
+}
+
+func decodePolicySheetLookupDefault(node *yaml.Node) (bool, bool, error) {
+	if node == nil || node.Kind == 0 {
+		return false, false, nil
+	}
+	if node.Kind != yaml.ScalarNode {
+		return false, false, fmt.Errorf("POLICY-SHEET-ROW: lookup.default must be scalar fail")
+	}
+	if strings.TrimSpace(node.Value) != "fail" {
+		return false, false, fmt.Errorf("POLICY-SHEET-ROW: lookup.default currently supports only fail")
+	}
+	return true, true, nil
+}
+
+func canonicalPolicySheetLookupKey(key []ComputeLookupLiteral) string {
+	parts := make([]string, 0, len(key))
+	for _, literal := range key {
+		parts = append(parts, literal.Canonical)
+	}
+	return strings.Join(parts, "\x00")
+}
+
+func CanonicalizeComputeLookupValue(value any) (kind, summary, canonical string, ok bool) {
+	switch typed := value.(type) {
+	case string:
+		kind, summary = "string", strconv.Quote(typed)
+	case bool:
+		kind, summary = "bool", strconv.FormatBool(typed)
+	case int:
+		kind, summary = "int", strconv.FormatInt(int64(typed), 10)
+	case int8:
+		kind, summary = "int", strconv.FormatInt(int64(typed), 10)
+	case int16:
+		kind, summary = "int", strconv.FormatInt(int64(typed), 10)
+	case int32:
+		kind, summary = "int", strconv.FormatInt(int64(typed), 10)
+	case int64:
+		kind, summary = "int", strconv.FormatInt(typed, 10)
+	case uint:
+		kind, summary = "int", strconv.FormatUint(uint64(typed), 10)
+	case uint8:
+		kind, summary = "int", strconv.FormatUint(uint64(typed), 10)
+	case uint16:
+		kind, summary = "int", strconv.FormatUint(uint64(typed), 10)
+	case uint32:
+		kind, summary = "int", strconv.FormatUint(uint64(typed), 10)
+	case uint64:
+		kind, summary = "int", strconv.FormatUint(typed, 10)
+	case float32:
+		kind, summary = "number", strconv.FormatFloat(float64(typed), 'g', -1, 64)
+	case float64:
+		kind, summary = "number", strconv.FormatFloat(typed, 'g', -1, 64)
+	case json.Number:
+		if i, err := typed.Int64(); err == nil {
+			kind, summary = "int", strconv.FormatInt(i, 10)
+		} else if f, err := typed.Float64(); err == nil {
+			kind, summary = "number", strconv.FormatFloat(f, 'g', -1, 64)
+		} else {
+			return "", "", "", false
+		}
+	default:
+		return "", "", "", false
+	}
+	return kind, summary, kind + ":" + summary, true
 }
 
 func decodePolicySheetSelectors(node *yaml.Node) ([]string, error) {

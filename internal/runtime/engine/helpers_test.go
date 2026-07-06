@@ -111,12 +111,14 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	base := BaseContext{
 		PlatformEntity: values.Wrap(map[string]any{"current_state": "researching"}),
 		Payload:        values.Wrap(map[string]any{"score": 9}),
+		Computed:       values.Wrap(map[string]any{"template_path": "templates/service/go"}),
 	}
 	state := ExecutionState{}
 	transformed, err := emitFieldsPayload(base, state, runtimecontracts.EmitSpec{
 		Fields: map[string]runtimecontracts.ExpressionValue{
 			"nested.score":   runtimecontracts.CELExpression("payload.score"),
 			"nested.state":   runtimecontracts.CELExpression("_entity.current_state"),
+			"nested.path":    runtimecontracts.CELExpression("computed.template_path"),
 			"literal.string": runtimecontracts.CELExpression(`"hello"`),
 			"explicit.ref":   runtimecontracts.RefExpression("payload.score"),
 			"explicit.value": runtimecontracts.LiteralExpression("ready"),
@@ -134,6 +136,9 @@ func TestSetValuePathAndEmitFieldsPayload(t *testing.T) {
 	}
 	if got := nested["state"]; got != "researching" {
 		t.Fatalf("nested.state = %#v", got)
+	}
+	if got := nested["path"]; got != "templates/service/go" {
+		t.Fatalf("nested.path = %#v", got)
 	}
 	literal, ok := transformed["literal"].(map[string]any)
 	if !ok || literal["string"] != "hello" {
@@ -582,5 +587,83 @@ func TestComputeValue(t *testing.T) {
 	}
 	if got := value.(float64); got != 81 {
 		t.Fatalf("computeValue legacy weighted_average = %v, want 81", got)
+	}
+}
+
+func TestComputeLookupValueMatchesExactTuple(t *testing.T) {
+	base := BaseContext{
+		Payload: values.Wrap(map[string]any{
+			"scaffold_type": "service",
+			"language":      "go",
+		}),
+	}
+	value, err := computeLookupValue(base, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpLookup,
+		StoreAs:   "computed.template_path",
+		Lookup: &runtimecontracts.ComputeLookupSpec{
+			RowID: "scaffold_paths",
+			On:    []string{"payload.scaffold_type", "payload.language"},
+			OnPaths: []paths.Path{
+				paths.Parse("payload.scaffold_type"),
+				paths.Parse("payload.language"),
+			},
+			DefaultDeclared: true,
+			DefaultFail:     true,
+			Entries: []runtimecontracts.ComputeLookupEntry{{
+				Key: []runtimecontracts.ComputeLookupLiteral{
+					{Value: "service", Kind: "string", Canonical: "string:\"service\"", Summary: `"service"`},
+					{Value: "go", Kind: "string", Canonical: "string:\"go\"", Summary: `"go"`},
+				},
+				Value:        "templates/service/go",
+				ValueKind:    "string",
+				ValueSummary: `"templates/service/go"`,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("computeLookupValue error = %v", err)
+	}
+	if got := value; got != "templates/service/go" {
+		t.Fatalf("computeLookupValue = %#v, want templates/service/go", got)
+	}
+}
+
+func TestComputeLookupValueMissFailsClosedNoRetry(t *testing.T) {
+	base := BaseContext{
+		Payload: values.Wrap(map[string]any{
+			"scaffold_type": "service",
+			"language":      "rust",
+		}),
+	}
+	_, err := computeLookupValue(base, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpLookup,
+		StoreAs:   "computed.template_path",
+		Lookup: &runtimecontracts.ComputeLookupSpec{
+			RowID: "scaffold_paths",
+			On:    []string{"payload.scaffold_type", "payload.language"},
+			OnPaths: []paths.Path{
+				paths.Parse("payload.scaffold_type"),
+				paths.Parse("payload.language"),
+			},
+			DefaultDeclared: true,
+			DefaultFail:     true,
+			Entries: []runtimecontracts.ComputeLookupEntry{{
+				Key: []runtimecontracts.ComputeLookupLiteral{
+					{Value: "service", Kind: "string", Canonical: "string:\"service\"", Summary: `"service"`},
+					{Value: "go", Kind: "string", Canonical: "string:\"go\"", Summary: `"go"`},
+				},
+				Value:        "templates/service/go",
+				ValueKind:    "string",
+				ValueSummary: `"templates/service/go"`,
+			}},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected lookup miss error")
+	}
+	for _, want := range []string{"lookup_miss_no_retry", "scaffold_paths", `"rust"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("lookup miss error = %q, want containing %q", err.Error(), want)
+		}
 	}
 }
