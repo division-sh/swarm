@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1519,6 +1520,91 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 	}
 	if got := result.StateMutation.Metadata["component_count"]; got != 2 {
 		t.Fatalf("component_count = %#v, want 2", got)
+	}
+}
+
+func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       stubSource(),
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`computed.template_path == "templates/service/go"`: func(base BaseContext) (bool, error) {
+			return base.Computed.Raw()["template_path"] == "templates/service/go", nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	lookup := &runtimecontracts.ComputeLookupSpec{
+		RowID: "scaffold_paths",
+		On:    []string{"payload.scaffold_type", "payload.language"},
+		OnPaths: []runtimepaths.Path{
+			runtimepaths.Parse("payload.scaffold_type"),
+			runtimepaths.Parse("payload.language"),
+		},
+		DefaultDeclared: true,
+		DefaultFail:     true,
+		Entries: []runtimecontracts.ComputeLookupEntry{{
+			Key: []runtimecontracts.ComputeLookupLiteral{
+				{Value: "service", Kind: "string", Canonical: "string:\"service\"", Summary: `"service"`},
+				{Value: "go", Kind: "string", Canonical: "string:\"go\"", Summary: `"go"`},
+			},
+			Value:        "templates/service/go",
+			ValueKind:    "string",
+			ValueSummary: `"templates/service/go"`,
+		}},
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("repo-scaffold"),
+		Event: eventtest.RootIngress(
+			"evt-1",
+			events.EventType("repo.scaffold_requested"),
+			"",
+			"",
+			mustEncodeJSON(t, map[string]any{"scaffold_type": "service", "language": "go"}),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		),
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					ID:        "scaffold_paths",
+					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindLookup, Lookup: lookup},
+					Compute: &runtimecontracts.ComputeSpec{
+						Operation: runtimecontracts.ComputeOpLookup,
+						StoreAs:   "computed.template_path",
+						Lookup:    lookup,
+					},
+				},
+				{
+					ID:        "service_route",
+					Condition: `computed.template_path == "templates/service/go"`,
+					Emit:      runtimecontracts.EmitSpec{Event: "repo.service_template_selected"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := result.Computed["template_path"]; got != "templates/service/go" {
+		t.Fatalf("result computed template_path = %#v, want templates/service/go", got)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("emit intents = %d, want 1", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type()); got != "repo.service_template_selected" {
+		t.Fatalf("emit event = %q, want repo.service_template_selected", got)
 	}
 }
 

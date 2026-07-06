@@ -21,6 +21,18 @@ func TestEvalValueExpression_AllowsNullPresenceCheckOnMissingField(t *testing.T)
 	}
 }
 
+func TestEvalValueExpression_AllowsComputedNamespace(t *testing.T) {
+	value, err := EvalValueExpression(`computed.template_path`, ValueContext{
+		Computed: map[string]any{"template_path": "templates/service/go"},
+	})
+	if err != nil {
+		t.Fatalf("EvalValueExpression computed namespace error = %v", err)
+	}
+	if got := value; got != "templates/service/go" {
+		t.Fatalf("EvalValueExpression computed namespace = %#v, want templates/service/go", got)
+	}
+}
+
 func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
 	_, err := EvalValueExpression(`entity.revision_count + 1`, ValueContext{
 		Entity: map[string]any{},

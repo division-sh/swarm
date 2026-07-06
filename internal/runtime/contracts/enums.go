@@ -68,6 +68,7 @@ const (
 	ComputeOpMin
 	ComputeOpMax
 	ComputeOpCount
+	ComputeOpLookup
 )
 
 func ParseComputeOperation(text string) (ComputeOperation, error) {
@@ -84,6 +85,8 @@ func ParseComputeOperation(text string) (ComputeOperation, error) {
 		return ComputeOpMax, nil
 	case "count":
 		return ComputeOpCount, nil
+	case "lookup":
+		return ComputeOpUnknown, fmt.Errorf("compute operation %q is internal to policy-sheet value rows; author lookup rows under rules", text)
 	case "":
 		return ComputeOpUnknown, nil
 	default:
@@ -105,6 +108,8 @@ func (o ComputeOperation) String() string {
 		return "max"
 	case ComputeOpCount:
 		return "count"
+	case ComputeOpLookup:
+		return "lookup"
 	default:
 		return ""
 	}

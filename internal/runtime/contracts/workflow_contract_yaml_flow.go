@@ -38,6 +38,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		"when":              {},
 		"case":              {},
 		"range":             {},
+		"lookup":            {},
 		"else":              {},
 		"default":           {},
 		"advances_to":       {},
@@ -58,7 +59,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 			return fmt.Errorf("RETIRED: rule field %q is retired; use emit: <event> or emit: {event, fields}", key)
 		case "payload_transform":
 			return fmt.Errorf("RETIRED: rule field %q is retired; move payload ownership into rule-local emit.fields", key)
-		case "switch", "lookup", "threshold":
+		case "switch", "threshold":
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is not a standalone row type; use rules when/case/range selection rows or split value lookup to compute", key)
 		case "policy":
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q would create a second policy-sheet authoring owner; enhance rules in place", key)

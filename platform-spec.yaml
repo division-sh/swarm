@@ -1610,6 +1610,21 @@ handler_specification:
         store_as: string — entity field to store result
         description: string — human-readable note
       operation_requirements:
+        lookup:
+          status: internal_lowering_only
+          description: |
+            `lookup` is the compute-owned internal operation produced by
+            policy-sheet lookup value rows. It is not a public
+            `compute.operation` authoring value. Public YAML must author lookup
+            value derivation as a `rules[*].lookup` policy-sheet row. The
+            lowered compute plan reads explicit context roots, performs exact
+            typed tuple matching against an inline finite table, and writes the
+            result to a turn-scoped `computed.*` binding.
+          public_authoring: 'forbidden; `compute.operation: lookup` fails closed.'
+          miss_disposition: |
+            A table miss with `default: fail` is deterministic, no-retry, emits
+            a typed diagnostic naming the row ID and unmatched tuple, and
+            performs no side effects.
         weighted_average:
           description: Compute a weighted average across tiers of accumulated items.
           required:
@@ -1857,9 +1872,10 @@ handler_specification:
         rule-condition handler context; common dispatch reads payload fields, but selection is not payload-only.
       rule_fields:
         condition: string — CEL expression evaluated against the rule-condition handler context. Allowed roots
-          are payload.*, entity.*, policy.*, event.*, and query_entities(...). accumulated.*, fan_out.*, and
-          item.* are unavailable in rules.condition. entity.* reads use the pre-rule entity state and the same
-          declared-field validation as other rule-phase handler conditions.
+          are payload.*, entity.*, policy.*, event.*, computed.*, and query_entities(...). accumulated.*, fan_out.*,
+          and item.* are unavailable in rules.condition. entity.* reads use the pre-rule entity state and the same
+          declared-field validation as other rule-phase handler conditions. computed.* reads are turn-scoped
+          values written earlier in the handler compute phase, including lookup value rows.
         when: >-
           string — first-class policy-sheet selection row for compound relational conditions. Lowers to condition
           and otherwise uses the ordinary selected-branch rule fields. Must not be combined with condition, case, range,
@@ -1875,6 +1891,13 @@ handler_specification:
           expressions. Entity/payload/event dynamic bounds are forbidden and fail closed; normalize those values through
           compute/value rows first. Policy-constant bounds require `monotonicity` declarations using `<=` so verify can
           prove structural ordering and non-overlap. Literal ranges are checked for absolute overlap.
+        lookup: >-
+          object — first-class policy-sheet value row for finite tuple/key-to-value mapping. Public shape is
+          `{on: [<explicit root path>, ...], entries: [{key: [<scalar>, ...], value: <scalar>}], into: computed.<name>,
+          default: fail}`. Single-key rows may author a scalar `key`; tuple rows use list keys. Entries are inline only
+          in this slice. Lookup rows bind a value and do not select a branch, emit, advance state, execute action/activity,
+          fan_out, data_accumulation, or public compute. The row lowers to the compute-owned internal lookup operation
+          and runs before selection rows consume computed.*.
         else: boolean true — explicit default row. Lowers to the ordinary else selected branch.
         default: boolean true — alias for else, used when the authoring intent is an explicit policy-sheet default row.
         emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
@@ -1883,9 +1906,9 @@ handler_specification:
         data_accumulation: object — optional data write (same format as handler-level)
         description: string — human-readable note
       policy_sheet_selection_rows:
-        scope: Selection-only rows in this slice are `when`, `case`, `range`, and explicit else/default rows. Value
-          derivation rows lower to compute in a separate child; schema validation and temporal/join/loop/collection/schedule
-          rows are separate future gates.
+        scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
+          under `policy_sheet_value_rows`; schema validation, arithmetic/expression derivation, and
+          temporal/join/loop/collection/schedule rows are separate future gates.
         stable_identity: Typed policy-sheet rows require stable IDs. The selected row ID is trace-addressable contract
           identity and must survive authoring edits.
         lowering: Accepted selection rows lower before runtime execution into ordinary selected `HandlerRuleEntry` branches.
@@ -1897,6 +1920,29 @@ handler_specification:
           - "`handler.switch`, `handler.lookup`, `handler.threshold` — not standalone handler fields"
           - "`policy` as a co-authorable handler field while `rules` remains authorable"
           - runtime-only table, switch, lookup, threshold, or range interpreters
+      policy_sheet_value_rows:
+        scope: Value rows in this slice support only `lookup`, a finite inline exact-match table whose right-hand side is
+          a scalar value. Arithmetic/expression derivation, schema validation, file-backed tables, temporal rows, join rows,
+          loop rows, collection rows, and schedule rows are separate gates.
+        ownership: The policy sheet is the authoring construct. Lookup rows lower to the compute owner; they do not create
+          a second runtime table interpreter and do not make public `compute.lookup` authorable.
+        ordering: The sheet is not a sequential program. Row types lower into their declared runtime phases. Lookup value
+          rows run in compute phase before branch selection; selection rows then read computed.*. Selection outcomes are
+          not values and may not be consumed by lookup rows.
+        target_namespace: lookup.into MUST be an explicit simple computed.* path. Entity persistence is forbidden for
+          derived lookup values; computed.* is turn-scoped and is not written to entity_state unless a separate declared
+          data write explicitly persists a value under its own owner.
+        matching: lookup.on entries MUST use explicit roots. Matching is exact typed equality through one canonicalization
+          path shared by duplicate-key detection and runtime matching. Key literals are type-checked against known root
+          schemas; the string "1" and the number 1 are different keys.
+        default_and_exhaustiveness: >-
+          Closed domains may omit `default: fail` only when boot verification proves exhaustive table coverage. Any open or
+          unknown domain component requires `default: fail`.
+        diagnostics: >-
+          A `default: fail` miss is deterministic no-retry failure with row ID and unmatched tuple in diagnostics, distinct from
+          validation failures.
+        dead_binding: lookup.into bindings must be consumed by a supported downstream condition, emit field, activity input,
+          fan_out, or expression in the same handler; unconsumed bindings fail boot verification.
       emit_template_specialization:
         syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
           `emit.from` / `emit.fields`. Each rule then declares `emit.fields` and may declare the same `emit.from` without
@@ -2287,6 +2333,17 @@ handler_specification:
           fields written by data_accumulation instead.'
         usage_example: "data_accumulation:\n  writes:\n  - target_field: expected_count\n    expression:\
           \ fan_out.count"
+      computed:
+        resolves_to: 'Turn-scoped derived handler values written by compute-owned operations. Public authors may read
+          computed.* in rule conditions and expression-value surfaces after the value has been produced by the handler
+          dependency graph.'
+        populated_by: 'compute.store_as targets under computed.* and policy-sheet lookup value rows lowering to internal
+          compute lookup plans.'
+        persistence_model: 'Read/write handler context only. computed.* is not persisted entity state, not event payload,
+          and not replay authority unless a separate declared owner explicitly writes a computed value to a durable surface.'
+        available_in: 'rules.condition, emit.fields CEL expressions, mailbox/action expression values, activity inputs,
+          fan_out inputs, and query_entities scoped operands when the runtime context contains the value.'
+        not_available_as: 'lookup.into may write computed.*; entity.* durable cache fallback for lookup values is forbidden.'
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
@@ -2311,7 +2368,7 @@ handler_specification:
         declared_field_resolution: Every entity.X reference must resolve against the inferred entity contract.
         nested_type_resolution: Nested paths must resolve through named types to a declared field.
         filter_leaf_rule: query_entities filter paths must resolve to scalar or enum leaves.
-        query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, fan_out)
+        query_operand_rule: query_entities operands with supported scopes (entity, event, payload, policy, computed, fan_out)
           are validated as scoped operands; unsupported scoped roots are invalid. Runtime evaluation fails closed
           when a supported scoped operand is unavailable in the handler context.
       rule: 'For every entity.X used as a value, X must be declared on the inferred entity contract. Universal

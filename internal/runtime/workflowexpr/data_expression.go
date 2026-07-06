@@ -41,6 +41,7 @@ type ValueContext struct {
 	Event          map[string]any
 	Payload        map[string]any
 	Policy         map[string]any
+	Computed       map[string]any
 	FanOut         map[string]any
 }
 
@@ -105,12 +106,13 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 		return nil, err
 	}
 	activation := map[string]any{
-		"entity":  NormalizeCELInputMap(ctx.Entity),
-		"_entity": NormalizeCELInputMap(ctx.PlatformEntity),
-		"event":   NormalizeCELInputMap(ctx.Event),
-		"payload": NormalizeCELInputMap(ctx.Payload),
-		"policy":  NormalizeCELInputMap(ctx.Policy),
-		"fan_out": NormalizeCELInputMap(ctx.FanOut),
+		"entity":   NormalizeCELInputMap(ctx.Entity),
+		"_entity":  NormalizeCELInputMap(ctx.PlatformEntity),
+		"event":    NormalizeCELInputMap(ctx.Event),
+		"payload":  NormalizeCELInputMap(ctx.Payload),
+		"policy":   NormalizeCELInputMap(ctx.Policy),
+		"computed": NormalizeCELInputMap(ctx.Computed),
+		"fan_out":  NormalizeCELInputMap(ctx.FanOut),
 	}
 	if opts.AllowBareItem {
 		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
@@ -706,6 +708,7 @@ func newDataExpressionEnv(allowBareItem bool) (*cel.Env, error) {
 		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
+		cel.Variable("computed", cel.DynType),
 		cel.Variable("fan_out", cel.DynType),
 	}
 	if allowBareItem {
