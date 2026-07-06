@@ -947,6 +947,7 @@ func NormalizeEventToken(raw string) string {
 	token := strings.TrimSpace(strings.ToLower(raw))
 	token = strings.ReplaceAll(token, ".", "_")
 	token = strings.ReplaceAll(token, "-", "_")
+	token = strings.ReplaceAll(token, "/", "_")
 	token = strings.ReplaceAll(token, " ", "_")
 	if token == "" {
 		return "event"

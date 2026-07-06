@@ -131,6 +131,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -234,6 +235,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
@@ -339,6 +341,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
 		t.Fatalf("provider event rows after resume = %d, want 1", got)
 	}
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -399,6 +402,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 		// The Stripe manifest uses durable_before_dispatch; this proof is about
 		// durable persisted evidence, not immediate post-ack handler scheduling.
 	}
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
@@ -466,6 +470,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 		// Twilio uses durable_before_dispatch; this proof is about persisted
 		// evidence and supported store admission, not handler completion.
 	}
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
@@ -530,6 +535,132 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 		// Twilio uses durable_before_dispatch; this proof is about persisted
 		// evidence and supported store admission, not handler completion.
 	}
+	waitForInboundBusQuiescence(t, bus)
+}
+
+func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	const (
+		runID             = "47000000-0000-0000-0000-000000000001"
+		entityID          = "47000000-0000-0000-0000-000000000002"
+		flowInstance      = "shopify-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "shopify"
+		webhookSecret     = "shopify-secret"
+		providerEventID   = "webhook-123"
+		agentID           = "shopify-webhook-subscriber"
+		providerEventName = "inbound.shopify"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	pg := &store.PostgresStore{DB: db}
+	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+
+	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
+	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", webhookSecret, body)
+	req = req.WithContext(ctx)
+	req.Header.Set("X-Shopify-Webhook-Id", providerEventID)
+	req.Header.Set("X-Shopify-Topic", "orders/create")
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "orders_create" {
+		t.Fatalf("provider_event_type = %q, want orders_create", got)
+	}
+	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// Shopify uses durable_before_dispatch; this proof is about persisted
+		// evidence and supported store admission, not handler completion.
+	}
+	waitForInboundBusQuiescence(t, bus)
+}
+
+func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	const (
+		runID             = "48000000-0000-0000-0000-000000000001"
+		entityID          = "48000000-0000-0000-0000-000000000002"
+		flowInstance      = "shopify-sqlite-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "shopify"
+		webhookSecret     = "shopify-secret"
+		providerEventID   = "webhook-456"
+		agentID           = "shopify-sqlite-webhook-subscriber"
+		providerEventName = "inbound.shopify"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(sqliteStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+
+	body := []byte(`{"id":456,"line_items":[{"sku":"xyz"}]}`)
+	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", webhookSecret, body)
+	req = req.WithContext(ctx)
+	req.Header.Set("X-Shopify-Webhook-Id", providerEventID)
+	req.Header.Set("X-Shopify-Topic", "orders/updated")
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
+	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "orders_updated" {
+		t.Fatalf("provider_event_type = %q, want orders_updated", got)
+	}
+	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// Shopify uses durable_before_dispatch; this proof is about persisted
+		// evidence and supported store admission, not handler completion.
+	}
+	waitForInboundBusQuiescence(t, bus)
 }
 
 func seedPostgresInboundGatewayRuntime(
@@ -652,7 +783,7 @@ func seedSQLiteInboundGatewayRuntime(
 			Type:          "stub",
 			Model:         "regular",
 			Config:        []byte(`{}`),
-			Subscriptions: []string{"inbound.stripe"},
+			Subscriptions: []string{"inbound." + provider},
 		},
 		Status:    "active",
 		HiredBy:   "test",
@@ -883,6 +1014,15 @@ func requireNoInboundBusEvent(t testing.TB, ch <-chan events.Event, context stri
 	}
 }
 
+func waitForInboundBusQuiescence(t testing.TB, bus *runtimebus.EventBus) {
+	t.Helper()
+	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("WaitForQuiescence: %v", err)
+	}
+}
+
 func githubWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
@@ -927,4 +1067,16 @@ func twilioSignedPayload(requestURL string, form url.Values) string {
 		b.WriteString(form.Get(key))
 	}
 	return b.String()
+}
+
+func newSignedShopifyRequest(path string, secret string, body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature(secret, body))
+	return req
+}
+
+func shopifyWebhookSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }

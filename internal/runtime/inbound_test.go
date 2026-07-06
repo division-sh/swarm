@@ -1164,6 +1164,221 @@ func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T)
 	}
 }
 
+func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "shopify-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
+	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", "shopify-secret", body)
+	req.Header.Set("X-Shopify-Webhook-Id", "webhook-123")
+	req.Header.Set("X-Shopify-Topic", "orders/create")
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if !store.recorded {
+		t.Fatal("expected Shopify delivery to record inbound marker")
+	}
+	if store.providerEventID != "webhook-123" {
+		t.Fatalf("providerEventID = %q, want webhook-123", store.providerEventID)
+	}
+	if store.provider != "shopify" {
+		t.Fatalf("provider = %q, want shopify", store.provider)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.Type() != events.EventType("inbound.shopify") {
+		t.Fatalf("event type = %q, want inbound.shopify", evt.Type())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload["provider_event_id"] != "webhook-123" ||
+		payload["provider_event_type"] != "orders_create" ||
+		payload["provider"] != "shopify" {
+		t.Fatalf("payload = %+v, want Shopify manifest delivery identity", payload)
+	}
+	if strings.Contains(rec.Body.String(), "shopify-secret") || strings.Contains(string(evt.Payload()), "shopify-secret") {
+		t.Fatal("Shopify signing secret leaked into readback or event payload")
+	}
+}
+
+func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       []byte
+		configure  func(*http.Request, []byte)
+		wantStatus int
+	}{
+		{
+			name:       "missing signature",
+			body:       []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "invalid signature",
+			body: []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`),
+			configure: func(req *http.Request, body []byte) {
+				req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("wrong-secret", body))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "raw body mutation",
+			body: []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`),
+			configure: func(req *http.Request, body []byte) {
+				signedBody := []byte(`{"line_items":[{"sku":"abc"}],"id":123}`)
+				req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("shopify-secret", signedBody))
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing webhook id",
+			body: []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`),
+			configure: func(req *http.Request, body []byte) {
+				req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("shopify-secret", body))
+				req.Header.Del("X-Shopify-Webhook-Id")
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing topic",
+			body: []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`),
+			configure: func(req *http.Request, body []byte) {
+				req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("shopify-secret", body))
+				req.Header.Del("X-Shopify-Topic")
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "non object payload",
+			body: []byte(`[{"id":123}]`),
+			configure: func(req *http.Request, body []byte) {
+				req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("shopify-secret", body))
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := runtimebus.NewEventBus(eventStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			store := &recordingInboundStore{
+				target: InboundTarget{
+					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+					EntitySlug:    "customer-a",
+					WebhookSecret: "shopify-secret",
+				},
+				inserted: true,
+			}
+			g := NewInboundGateway(bus, nil, nil, store)
+			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/shopify", strings.NewReader(string(tc.body)))
+			req.Header.Set("X-Shopify-Webhook-Id", "webhook-123")
+			req.Header.Set("X-Shopify-Topic", "orders/create")
+			tc.configure(req, tc.body)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if store.recorded {
+				t.Fatal("invalid Shopify request recorded inbound marker")
+			}
+			if len(eventStore.events) != 0 {
+				t.Fatalf("published events = %d, want 0", len(eventStore.events))
+			}
+		})
+	}
+}
+
+func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "shopify-secret",
+		},
+		inserted: false,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
+	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", "shopify-secret", body)
+	req.Header.Set("X-Shopify-Webhook-Id", "webhook-123")
+	req.Header.Set("X-Shopify-Topic", "orders/create")
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate response = %s", rec.Body.String())
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
+func TestInboundGateway_RawFallbackDoesNotInterpretShopifySignature(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "raw-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
+	req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("raw-secret", body))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("raw fallback accepted Shopify signature and recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
 func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	bus, err := runtimebus.NewEventBus(eventStore)
@@ -1284,6 +1499,18 @@ func twilioSignedPayload(requestURL string, form url.Values) string {
 		b.WriteString(form.Get(key))
 	}
 	return b.String()
+}
+
+func newSignedShopifyRequest(path string, secret string, body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature(secret, body))
+	return req
+}
+
+func shopifyWebhookSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 type blockingInboundInterceptor struct {

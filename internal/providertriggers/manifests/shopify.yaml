@@ -1,0 +1,28 @@
+provider: shopify
+payload_object_required: true
+payload_object_error: shopify payload object is required
+secret:
+  required: true
+signature:
+  type: hmac_sha256
+  encoding: base64
+  header: X-Shopify-Hmac-Sha256
+  signed_payload: raw_body
+  missing_error: shopify signature is required
+  invalid_error: invalid shopify signature
+delivery_id:
+  header: X-Shopify-Webhook-Id
+  required: true
+  missing_error: shopify webhook id is required
+event_type:
+  header: X-Shopify-Topic
+  required: true
+  missing_error: shopify topic is required
+event_name:
+  literal: inbound.shopify
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  shopify_webhook_id: delivery_id
+  shopify_topic: event_type
