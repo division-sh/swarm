@@ -11,6 +11,7 @@ Prerequisites:
 - Shopify CLI installed as `shopify`.
 - Shopify CLI authenticated enough to run `shopify app webhook trigger`.
 - A Shopify app client ID and client secret.
+- `SHOPIFY_FLAG_PATH` only when you want to use an existing Shopify app directory. If omitted, the smoke creates a minimal throwaway `shopify.app.toml` that contains the supplied client ID and webhook API version.
 
 Run:
 
@@ -25,7 +26,8 @@ Optional overrides:
 
 ```sh
 SHOPIFY_FLAG_TOPIC='orders/create'
-SHOPIFY_FLAG_API_VERSION='2026-07'
+SHOPIFY_FLAG_API_VERSION='2026-04'
+SHOPIFY_FLAG_PATH='/path/to/shopify/app'
 ```
 
 The smoke intentionally uses `SHOPIFY_FLAG_CLIENT_SECRET` as an environment variable instead of a CLI argument so the signing secret is not placed in the process argv. Missing prerequisites skip the test. Present prerequisites plus mismatched provider delivery fail the test.
