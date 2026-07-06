@@ -27,3 +27,5 @@ expect:
   entities:
   - ref: entity
     current_state: complete
+    fields:
+      composite: 81
