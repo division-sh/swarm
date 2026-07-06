@@ -5169,20 +5169,111 @@ func TestManagerStore_AppendAgentTurn_TaskCreatesAuditRowIfMissing(t *testing.T)
 	}
 
 	var count, turns int
+	var persistedScope, persistedScopeKey string
 	if err := db.QueryRowContext(ctx, `
 		SELECT
 			COUNT(*),
+			COALESCE(MAX(scope), ''),
+			COALESCE(MAX(scope_key), ''),
 			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND runtime_mode = 'task')
 		FROM agent_conversation_audits
 		WHERE session_id = $1::uuid
-	`, sessionID).Scan(&count, &turns); err != nil {
+	`, sessionID).Scan(&count, &persistedScope, &persistedScopeKey, &turns); err != nil {
 		t.Fatalf("count synthesized task persistence: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("expected one synthesized task audit row, got %d", count)
 	}
+	if persistedScope != "global" || persistedScopeKey != "" {
+		t.Fatalf("synthesized task audit identity scope=%q scope_key=%q, want global/no scope_key", persistedScope, persistedScopeKey)
+	}
 	if turns != 1 {
 		t.Fatalf("expected one task agent_turn row after synthesized append, got %d", turns)
+	}
+}
+
+func TestManagerStore_AppendAgentTurn_TaskEntityScopeSurvivesConversationUpsert(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	entityID := uuid.NewString()
+	runID := uuid.NewString()
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		ScopeKey:       "noncanonical-task-key",
+		RunID:          runID,
+		EntityID:       entityID,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task entity): %v", err)
+	}
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		ScopeKey:  "snapshot-task-key",
+		RunID:     runID,
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "user", Content: "entity task"},
+			{Role: "assistant", Content: "entity done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task entity): %v", err)
+	}
+
+	var count, turns int
+	var scope, scopeKey, gotEntityID, flowInstance, conversation, persistedRunID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(MAX(scope), ''),
+			COALESCE(MAX(scope_key), ''),
+			COALESCE(MAX(entity_id::text), ''),
+			COALESCE(MAX(flow_instance), ''),
+			COALESCE(MAX(conversation::text), ''),
+			COALESCE(MAX(run_id::text), ''),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND runtime_mode = 'task' AND entity_id = $2::uuid)
+		FROM agent_conversation_audits
+		WHERE session_id = $1::uuid
+	`, sessionID, entityID).Scan(&count, &scope, &scopeKey, &gotEntityID, &flowInstance, &conversation, &persistedRunID, &turns); err != nil {
+		t.Fatalf("read entity task audit row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit row count = %d, want 1", count)
+	}
+	if scope != "entity" || scopeKey != entityID || gotEntityID != entityID || flowInstance != "" {
+		t.Fatalf("audit identity scope=%q scope_key=%q entity_id=%q flow_instance=%q, want entity %s", scope, scopeKey, gotEntityID, flowInstance, entityID)
+	}
+	if persistedRunID != "" && persistedRunID != runID {
+		t.Fatalf("audit run_id = %q, want %q or absent when audit run_id capability is unavailable", persistedRunID, runID)
+	}
+	if !strings.Contains(conversation, "entity done") {
+		t.Fatalf("conversation = %s, want persisted assistant message", conversation)
+	}
+	if turns != 1 {
+		t.Fatalf("linked task turn count = %d, want 1", turns)
+	}
+
+	detail, err := pg.LoadOperatorConversation(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadOperatorConversation: %v", err)
+	}
+	if detail.Conversation.Scope != "entity" || detail.Conversation.ScopeKey != entityID || detail.Conversation.RuntimeMode != "task" || detail.Conversation.TurnCount != 1 {
+		t.Fatalf("operator conversation summary = %+v, want entity-scoped task audit with one turn", detail.Conversation)
+	}
+	if len(detail.Turns) != 1 {
+		t.Fatalf("operator conversation turns = %d, want 1", len(detail.Turns))
 	}
 }
 

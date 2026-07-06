@@ -452,7 +452,7 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 	if caps.Conversations.Audits != SchemaFlavorCanonical {
 		return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 	}
-	scopeKey := strings.TrimSpace(rec.ScopeKey)
+	identity := taskAuditIdentityFromTurn(rec)
 	if caps.Conversations.AuditRunID {
 		if err := s.ensureRunRow(ctx, caps, tx, rec.RunID, "", "", true); err != nil {
 			return err
@@ -471,27 +471,40 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			$1::uuid,
 			$2,
 			NULLIF($3,'')::uuid,
-			NULL,
-			NULLIF($4, ''),
-			$5,
+			NULLIF($4,''),
+			NULLIF($5, ''),
+			$6,
 			'[]'::jsonb,
 			0,
-			$6,
+			$7,
 			'{}'::jsonb,
 			'active',
 			now(),
 			now()
 		)
 		ON CONFLICT (session_id) DO UPDATE SET
+			entity_id = COALESCE(EXCLUDED.entity_id, agent_conversation_audits.entity_id),
+			flow_instance = COALESCE(EXCLUDED.flow_instance, agent_conversation_audits.flow_instance),
+			scope_key = CASE
+				WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope_key
+				WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope_key
+				ELSE COALESCE(EXCLUDED.scope_key, agent_conversation_audits.scope_key)
+			END,
+			scope = CASE
+				WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope
+				WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope
+				ELSE EXCLUDED.scope
+			END,
 			status = 'active',
 			updated_at = now()
 	`
 	args := []any{
 		rec.SessionID,
 		rec.AgentID,
-		rec.EntityID,
-		scopeKey,
-		"global",
+		identity.EntityID,
+		identity.FlowInstance,
+		identity.ScopeKey,
+		identity.Scope,
 		runtimesessions.RuntimeModeTask.String(),
 	}
 	if caps.Conversations.AuditRunID {
@@ -505,12 +518,12 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 				NULLIF($2,'')::uuid,
 				$3,
 				NULLIF($4,'')::uuid,
-				NULL,
-				NULLIF($5, ''),
-				$6,
+				NULLIF($5,''),
+				NULLIF($6, ''),
+				$7,
 				'[]'::jsonb,
 				0,
-				$7,
+				$8,
 				'{}'::jsonb,
 				'active',
 				now(),
@@ -518,6 +531,18 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			)
 			ON CONFLICT (session_id) DO UPDATE SET
 				run_id = COALESCE(agent_conversation_audits.run_id, EXCLUDED.run_id),
+				entity_id = COALESCE(EXCLUDED.entity_id, agent_conversation_audits.entity_id),
+				flow_instance = COALESCE(EXCLUDED.flow_instance, agent_conversation_audits.flow_instance),
+				scope_key = CASE
+					WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope_key
+					WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope_key
+					ELSE COALESCE(EXCLUDED.scope_key, agent_conversation_audits.scope_key)
+				END,
+				scope = CASE
+					WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope
+					WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope
+					ELSE EXCLUDED.scope
+				END,
 				status = 'active',
 				updated_at = now()
 		`
@@ -525,9 +550,10 @@ func (s *PostgresStore) ensureTaskConversationAuditRowTx(ctx context.Context, tx
 			rec.SessionID,
 			nullUUIDString(rec.RunID),
 			rec.AgentID,
-			rec.EntityID,
-			scopeKey,
-			"global",
+			identity.EntityID,
+			identity.FlowInstance,
+			identity.ScopeKey,
+			identity.Scope,
 			runtimesessions.RuntimeModeTask.String(),
 		}
 	}
@@ -612,11 +638,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		if caps.Conversations.Audits != SchemaFlavorCanonical {
 			return unsupportedSchemaCapability("agent_conversation_audits", caps.Conversations.Audits)
 		}
-		scopeKey := strings.TrimSpace(rec.ScopeKey)
-		scope := resolved.Scope.String()
-		if scope == "" {
-			scope = runtimesessions.SessionScopeGlobal.String()
-		}
+		identity := taskAuditIdentityFromConversation(rec)
 		q := `
 			INSERT INTO agent_conversation_audits (
 				session_id, agent_id, entity_id, flow_instance, scope_key, scope,
@@ -624,13 +646,13 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			)
 			VALUES (
 				$1::uuid,
-				$2,
-				NULLIF($3,'')::uuid,
-				NULLIF($4,''),
-				$5,
-				$6,
-				$7::jsonb,
-				$8,
+			$2,
+			NULLIF($3,'')::uuid,
+			NULLIF($4,''),
+			NULLIF($5, ''),
+			$6,
+			$7::jsonb,
+			$8,
 				$9,
 				$10::jsonb,
 				$11,
@@ -639,10 +661,18 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 			)
 			ON CONFLICT (session_id) DO UPDATE SET
 				agent_id = EXCLUDED.agent_id,
-				entity_id = EXCLUDED.entity_id,
-				flow_instance = EXCLUDED.flow_instance,
-				scope_key = EXCLUDED.scope_key,
-				scope = EXCLUDED.scope,
+				entity_id = COALESCE(EXCLUDED.entity_id, agent_conversation_audits.entity_id),
+				flow_instance = COALESCE(EXCLUDED.flow_instance, agent_conversation_audits.flow_instance),
+				scope_key = CASE
+					WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope_key
+					WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope_key
+					ELSE COALESCE(EXCLUDED.scope_key, agent_conversation_audits.scope_key)
+				END,
+				scope = CASE
+					WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope
+					WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope
+					ELSE EXCLUDED.scope
+				END,
 				conversation = EXCLUDED.conversation,
 				turn_count = EXCLUDED.turn_count,
 				runtime_mode = EXCLUDED.runtime_mode,
@@ -653,10 +683,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 		args := []any{
 			sessionID,
 			rec.AgentID,
-			resolved.EntityID,
-			resolved.FlowInstance,
-			scopeKey,
-			scope,
+			identity.EntityID,
+			identity.FlowInstance,
+			identity.ScopeKey,
+			identity.Scope,
 			string(msgJSON),
 			rec.TurnCount,
 			mode.String(),
@@ -678,7 +708,7 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 					$3,
 					NULLIF($4,'')::uuid,
 					NULLIF($5,''),
-					$6,
+					NULLIF($6, ''),
 					$7,
 					$8::jsonb,
 					$9,
@@ -691,10 +721,18 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				ON CONFLICT (session_id) DO UPDATE SET
 					run_id = COALESCE(EXCLUDED.run_id, agent_conversation_audits.run_id),
 					agent_id = EXCLUDED.agent_id,
-					entity_id = EXCLUDED.entity_id,
-					flow_instance = EXCLUDED.flow_instance,
-					scope_key = EXCLUDED.scope_key,
-					scope = EXCLUDED.scope,
+					entity_id = COALESCE(EXCLUDED.entity_id, agent_conversation_audits.entity_id),
+					flow_instance = COALESCE(EXCLUDED.flow_instance, agent_conversation_audits.flow_instance),
+					scope_key = CASE
+						WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope_key
+						WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope_key
+						ELSE COALESCE(EXCLUDED.scope_key, agent_conversation_audits.scope_key)
+					END,
+					scope = CASE
+						WHEN EXCLUDED.entity_id IS NOT NULL OR EXCLUDED.flow_instance IS NOT NULL THEN EXCLUDED.scope
+						WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope
+						ELSE EXCLUDED.scope
+					END,
 					conversation = EXCLUDED.conversation,
 					turn_count = EXCLUDED.turn_count,
 					runtime_mode = EXCLUDED.runtime_mode,
@@ -706,10 +744,10 @@ func (s *PostgresStore) UpsertConversation(ctx context.Context, rec runtimellm.C
 				sessionID,
 				runID,
 				rec.AgentID,
-				resolved.EntityID,
-				resolved.FlowInstance,
-				scopeKey,
-				scope,
+				identity.EntityID,
+				identity.FlowInstance,
+				identity.ScopeKey,
+				identity.Scope,
 				string(msgJSON),
 				rec.TurnCount,
 				mode.String(),

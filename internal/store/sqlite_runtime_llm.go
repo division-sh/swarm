@@ -128,6 +128,7 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 			return err
 		}
 		if resolved.Stateless {
+			identity := taskAuditIdentityFromConversation(rec)
 			if _, err := tx.ExecContext(txctx, `
 				INSERT INTO agent_conversation_audits (
 					session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
@@ -139,18 +140,26 @@ func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec runtime
 				ON CONFLICT(session_id) DO UPDATE SET
 					run_id = COALESCE(excluded.run_id, agent_conversation_audits.run_id),
 					agent_id = excluded.agent_id,
-					entity_id = excluded.entity_id,
-					flow_instance = excluded.flow_instance,
-					scope_key = excluded.scope_key,
-					scope = excluded.scope,
+					entity_id = COALESCE(excluded.entity_id, agent_conversation_audits.entity_id),
+					flow_instance = COALESCE(excluded.flow_instance, agent_conversation_audits.flow_instance),
+					scope_key = CASE
+						WHEN excluded.entity_id IS NOT NULL OR excluded.flow_instance IS NOT NULL THEN excluded.scope_key
+						WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope_key
+						ELSE COALESCE(excluded.scope_key, agent_conversation_audits.scope_key)
+					END,
+					scope = CASE
+						WHEN excluded.entity_id IS NOT NULL OR excluded.flow_instance IS NOT NULL THEN excluded.scope
+						WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope
+						ELSE excluded.scope
+					END,
 					conversation = excluded.conversation,
 					turn_count = excluded.turn_count,
 					runtime_mode = excluded.runtime_mode,
 					runtime_state = json_patch(COALESCE(agent_conversation_audits.runtime_state, '{}'), excluded.runtime_state),
 					status = excluded.status,
 					updated_at = excluded.updated_at
-			`, sessionID, sqliteNullUUID(runID), agentID, sqliteNullUUID(resolved.EntityID), sqliteNullString(resolved.FlowInstance),
-				sqliteNullString(resolved.ScopeKey), resolved.Scope.String(), string(msgJSON), rec.TurnCount, mode.String(),
+			`, sessionID, sqliteNullUUID(runID), agentID, sqliteNullUUID(identity.EntityID), sqliteNullString(identity.FlowInstance),
+				sqliteNullString(identity.ScopeKey), identity.Scope, string(msgJSON), rec.TurnCount, mode.String(),
 				runtimeStatePatch, status, now, now); err != nil {
 				return fmt.Errorf("upsert sqlite task conversation audit: %w", err)
 			}
@@ -302,14 +311,7 @@ func (s *SQLiteRuntimeStore) ensureSQLiteTaskConversationAuditRowTx(ctx context.
 		return fmt.Errorf("task conversation audit session_id is required")
 	}
 	runID := nullUUIDString(rec.RunID)
-	scopeKey := strings.TrimSpace(rec.ScopeKey)
-	scope := "global"
-	if strings.TrimSpace(rec.EntityID) != "" {
-		scope = "entity"
-		if scopeKey == "" {
-			scopeKey = strings.TrimSpace(rec.EntityID)
-		}
-	}
+	identity := taskAuditIdentityFromTurn(rec)
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
 			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
@@ -320,9 +322,22 @@ func (s *SQLiteRuntimeStore) ensureSQLiteTaskConversationAuditRowTx(ctx context.
 		)
 		ON CONFLICT(session_id) DO UPDATE SET
 			run_id = COALESCE(agent_conversation_audits.run_id, excluded.run_id),
+			entity_id = COALESCE(excluded.entity_id, agent_conversation_audits.entity_id),
+			flow_instance = COALESCE(excluded.flow_instance, agent_conversation_audits.flow_instance),
+			scope_key = CASE
+				WHEN excluded.entity_id IS NOT NULL OR excluded.flow_instance IS NOT NULL THEN excluded.scope_key
+				WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope_key
+				ELSE COALESCE(excluded.scope_key, agent_conversation_audits.scope_key)
+			END,
+			scope = CASE
+				WHEN excluded.entity_id IS NOT NULL OR excluded.flow_instance IS NOT NULL THEN excluded.scope
+				WHEN agent_conversation_audits.entity_id IS NOT NULL OR agent_conversation_audits.flow_instance IS NOT NULL THEN agent_conversation_audits.scope
+				ELSE excluded.scope
+			END,
+			status = excluded.status,
 			updated_at = excluded.updated_at
-	`, sessionID, sqliteNullUUID(runID), strings.TrimSpace(rec.AgentID), sqliteNullUUID(rec.EntityID), nil,
-		sqliteNullString(scopeKey), scope, now, now)
+	`, sessionID, sqliteNullUUID(runID), strings.TrimSpace(rec.AgentID), sqliteNullUUID(identity.EntityID), sqliteNullString(identity.FlowInstance),
+		sqliteNullString(identity.ScopeKey), identity.Scope, now, now)
 	if err != nil {
 		return fmt.Errorf("ensure sqlite task conversation audit row: %w", err)
 	}
