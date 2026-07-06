@@ -1,0 +1,25 @@
+provider: telegram
+payload_object_required: true
+payload_object_error: telegram update object is required
+secret:
+  required: true
+signature:
+  type: token_equality
+  header: X-Telegram-Bot-Api-Secret-Token
+  missing_error: telegram secret token is required
+  invalid_error: invalid telegram secret token
+delivery_id:
+  json_path: $.update_id
+  required: true
+  missing_error: telegram update_id is required
+event_type:
+  literal: update
+  required: true
+event_name:
+  literal: inbound.telegram
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  telegram_update_id: delivery_id
+  telegram_update_type: event_type

@@ -6122,9 +6122,9 @@ tool_model:
         still fails closed before signature verification, dedupe marker persistence, or event publish when a required
         signing secret is unavailable.
       first_party_pack_migration: >
-        GitHub, Slack, Stripe, Twilio, Shopify, Typeform, and Intercom provider-trigger manifests are first-party bundled
-        packs loaded through this envelope path. There is no permanent built-in-control exemption for configured-provider
-        manifests.
+        GitHub, Slack, Stripe, Twilio, Shopify, Typeform, Intercom, and Telegram provider-trigger manifests are first-party
+        bundled packs loaded through this envelope path. There is no permanent built-in-control exemption for
+        configured-provider manifests.
       non_goals:
       - provider-trigger manifest vocabulary changes
       - pack signing, remote distribution, ownership transfer, or marketplace trust economics
@@ -6140,12 +6140,15 @@ tool_model:
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       secret.required: require a configured signing secret before accepting the provider callback
       signature: >
-        HMAC-SHA256 or HMAC-SHA1 signature verification over a manifest-selected signed payload, encoded as lowercase hex
-        by default or Base64 when the manifest selects `encoding: base64`. Supported signed payloads are `raw_body`,
-        `slack_v0`, `timestamp_dot_raw_body`, and `url_plus_sorted_form`. The interpreter supports fixed signature
-        prefixes, structured comma-separated signature parameters, timestamp extraction from headers or parameters, replay
-        tolerance windows, exact request URL plus sorted form-parameter canonicalization, and constant-time comparison
-        against every configured signature candidate.
+        Configured-provider authenticity verification. HMAC-SHA256 and HMAC-SHA1 verify a manifest-selected signed payload,
+        encoded as lowercase hex by default or Base64 when the manifest selects `encoding: base64`. Supported signed
+        payloads are `raw_body`, `slack_v0`, `timestamp_dot_raw_body`, and `url_plus_sorted_form`. The interpreter supports
+        fixed signature prefixes, structured comma-separated signature parameters, timestamp extraction from headers or
+        parameters, replay tolerance windows, exact request URL plus sorted form-parameter canonicalization, and
+        constant-time comparison against every configured signature candidate. `token_equality` verifies providers that send
+        the configured signing secret directly in a manifest-selected header; it MUST require `secret.required`, MUST compare
+        the header value to the configured `webhook_signing.<provider>` secret in constant time, and MUST reject HMAC-only
+        fields such as `encoding`, `prefix`, `signed_payload`, `signature_param`, and timestamp settings.
       challenge: >
         Authenticated response-only callback handling. A matched challenge branch must not persist an inbound dedupe marker
         and must not publish a Swarm event.
@@ -6322,6 +6325,25 @@ tool_model:
         Payload `topic` is the authoritative provider event type and is emitted in payload metadata as normalized
         `provider_event_type`. The canonical emitted Swarm event name is literal `inbound.intercom`, not a dynamic
         template. Missing `topic` fails before dedupe marker persistence.
+    - provider: telegram
+      issue: "#1764"
+      signature: >
+        Telegram webhook deliveries require a configured `secret_token` binding and a matching
+        `X-Telegram-Bot-Api-Secret-Token` header. The manifest interpreter MUST compare the header token to
+        `webhook_signing.telegram` in constant time. Missing signing secret, missing token header, duplicate token headers,
+        wrong token header, or any HMAC-style payload/signature interpretation fails before dedupe marker persistence and
+        before event publish.
+      delivery_id: >
+        Payload `update_id` is the authoritative provider delivery id and dedupe-key input for configured Telegram triggers.
+        Missing `update_id` fails before dedupe marker persistence.
+      acknowledgement: >
+        Accepted Telegram deliveries return success after the inbound dedupe marker, canonical event record, recipient
+        manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement MUST NOT
+        wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        The approved #1764 slice emits literal provider_event_type `update` in payload metadata. The canonical emitted Swarm
+        event name is literal `inbound.telegram`, not a dynamic template. Granular Telegram update classification from fields
+        such as `message`, `edited_message`, or `callback_query` is a later gated semantic concept.
     raw_webhook_mode: >
       Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
       does not prove provider-trigger adapter closure. Configured providers MUST consume their manifest interpreter owner

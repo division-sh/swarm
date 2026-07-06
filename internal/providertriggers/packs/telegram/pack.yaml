@@ -1,0 +1,23 @@
+id: provider.telegram
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: trigger
+manifest_hash: sha256:5e3c264b31da7a2d2cba83ab97d9f9af6005c8f35f1fcc25e538e1c9bd5fb638
+provenance:
+  source: platform
+capabilities:
+  can:
+    receive_https_route: /webhooks/{entity}/telegram
+    verify_secret: webhook_signing.telegram
+    emit_events:
+      - inbound.telegram
+    persist_dedupe_markers: true
+  cannot:
+    - emit_undeclared_events
+    - run_code_before_admission
+    - touch_unbound_resources
+requires:
+  secrets:
+    - webhook_signing.telegram
+tests:
+  - providertriggers/telegram

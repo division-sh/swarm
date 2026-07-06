@@ -1659,6 +1659,223 @@ func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(
 	}
 }
 
+func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseDispatch := func() {
+		releaseOnce.Do(func() {
+			close(release)
+		})
+	}
+	t.Cleanup(releaseDispatch)
+	bus, err := runtimebus.NewEventBusWithOptions(eventStore, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{
+			blockingInboundInterceptor{started: started, release: release},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "telegram-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
+	responseDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		rec := httptest.NewRecorder()
+		g.Handler().ServeHTTP(rec, req)
+		responseDone <- rec
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Telegram callback post-commit dispatch did not start")
+	}
+	select {
+	case rec := <-responseDone:
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "telegram-secret") {
+			t.Fatal("Telegram secret token leaked into readback")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Telegram callback response waited for post-commit dispatch completion")
+	}
+	if !store.recorded {
+		t.Fatal("expected Telegram delivery to record inbound marker")
+	}
+	if store.providerEventID != "123456789" {
+		t.Fatalf("providerEventID = %q, want 123456789", store.providerEventID)
+	}
+	if store.provider != "telegram" {
+		t.Fatalf("provider = %q, want telegram", store.provider)
+	}
+	if len(eventStore.events) != 1 {
+		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
+	}
+	evt := eventStore.events[0]
+	if evt.Type() != events.EventType("inbound.telegram") {
+		t.Fatalf("event type = %q, want inbound.telegram", evt.Type())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	headers, ok := payload["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers = %T, want metadata map", payload["headers"])
+	}
+	if payload["provider_event_id"] != "123456789" ||
+		payload["provider_event_type"] != "update" ||
+		payload["provider"] != "telegram" ||
+		headers["telegram_update_id"] != "123456789" ||
+		headers["telegram_update_type"] != "update" {
+		t.Fatalf("payload = %+v, want Telegram manifest delivery identity", payload)
+	}
+	if strings.Contains(string(evt.Payload()), "telegram-secret") {
+		t.Fatal("Telegram secret token leaked into event payload")
+	}
+
+	releaseDispatch()
+	waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := bus.WaitForQuiescence(waitCtx); err != nil {
+		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)
+	}
+}
+
+func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       []byte
+		target     InboundTarget
+		configure  func(*http.Request, []byte)
+		wantStatus int
+	}{
+		{
+			name:       "missing configured secret",
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
+			target:     InboundTarget{EntityID: "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a", EntitySlug: "customer-a"},
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "missing token header",
+			body:       []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
+			configure:  func(req *http.Request, _ []byte) { req.Header.Del("X-Telegram-Bot-Api-Secret-Token") },
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "duplicate token header",
+			body: []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
+			configure: func(req *http.Request, _ []byte) {
+				req.Header.Add("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "invalid token header",
+			body: []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`),
+			configure: func(req *http.Request, _ []byte) {
+				req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "wrong-secret")
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "missing update id",
+			body:       []byte(`{"message":{"message_id":7,"text":"hello"}}`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "non object payload",
+			body:       []byte(`[{"update_id":123456789}]`),
+			configure:  func(*http.Request, []byte) {},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eventStore := &capturingInboundEventStore{}
+			bus, err := runtimebus.NewEventBus(eventStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			target := tc.target
+			if target.EntityID == "" {
+				target = InboundTarget{
+					EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+					EntitySlug:    "customer-a",
+					WebhookSecret: "telegram-secret",
+				}
+			}
+			store := &recordingInboundStore{
+				target:   target,
+				inserted: true,
+			}
+			g := NewInboundGateway(bus, nil, nil, store)
+
+			req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", tc.body)
+			tc.configure(req, tc.body)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+			if store.recorded {
+				t.Fatal("invalid Telegram request recorded inbound marker")
+			}
+			if len(eventStore.events) != 0 {
+				t.Fatalf("published events = %d, want 0", len(eventStore.events))
+			}
+		})
+	}
+}
+
+func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "telegram-secret",
+		},
+		inserted: false,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`)
+	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("duplicate response = %s", rec.Body.String())
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
+	}
+}
+
 func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -1711,6 +1928,39 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(
 				t.Fatalf("published events = %d, want 0", len(eventStore.events))
 			}
 		})
+	}
+}
+
+func TestInboundGateway_RawFallbackDoesNotInterpretTelegramSecretToken(t *testing.T) {
+	eventStore := &capturingInboundEventStore{}
+	bus, err := runtimebus.NewEventBus(eventStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{
+		target: InboundTarget{
+			EntityID:      "3fd8fc37-6d02-4d50-8bb7-14c6cb0fed0a",
+			EntitySlug:    "customer-a",
+			WebhookSecret: "raw-secret",
+		},
+		inserted: true,
+	}
+	g := NewInboundGateway(bus, nil, nil, store)
+
+	body := []byte(`{"update_id":123456789}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "raw-secret")
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 body=%s", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("raw fallback accepted Telegram secret token and recorded inbound marker")
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("published events = %d, want 0", len(eventStore.events))
 	}
 }
 
@@ -1879,6 +2129,12 @@ func shopifyWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedTelegramRequest(path string, secret string, body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", secret)
+	return req
 }
 
 func newSignedTypeformRequest(path string, secret string, body []byte) *http.Request {

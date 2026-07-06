@@ -22,7 +22,7 @@ import (
 
 func TestDefaultRegistryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
 	registry := DefaultRegistry()
-	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "twilio", "typeform"} {
+	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
 		want := "platform:provider." + provider
 		if got := registry.sources[provider]; got != want {
 			t.Fatalf("%s source = %q, want verified platform pack %q", provider, got, want)
@@ -215,6 +215,32 @@ func TestExternalProviderTriggerPackUsesSameVerifier(t *testing.T) {
 	}
 	if len(loaded) != 1 || loaded[0].Manifest.Provider != "stripe" {
 		t.Fatalf("loaded external packs = %+v, want stripe", loaded)
+	}
+}
+
+func TestExternalTelegramProviderTriggerPackUsesSameTokenEqualityVerifier(t *testing.T) {
+	dir := copyBuiltinPackToTemp(t, "telegram")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
+
+	loaded, err := LoadExternalPackDirs("0.7.0", dir)
+	if err != nil {
+		t.Fatalf("LoadExternalPackDirs: %v", err)
+	}
+	registry, err := NewRegistryFromSources(SourcesFromLoadedPacks(loaded...)...)
+	if err != nil {
+		t.Fatalf("NewRegistryFromSources: %v", err)
+	}
+
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	delivery, err := registry.Accept(telegramRequest("telegram-secret", body, map[string]any{
+		"update_id": float64(123456789),
+		"message":   map[string]any{"message_id": float64(7), "chat": map[string]any{"id": float64(42)}, "text": "hello"},
+	}))
+	if err != nil {
+		t.Fatalf("Accept external Telegram webhook: %v", err)
+	}
+	if delivery.ProviderEventID != "123456789" || delivery.ProviderEventType != "update" || delivery.EventName != "inbound.telegram" {
+		t.Fatalf("delivery = %+v, want Telegram manifest identity", delivery)
 	}
 }
 
@@ -986,6 +1012,114 @@ func TestIntercomManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestTelegramManifestAcceptsHeaderTokenUpdate(t *testing.T) {
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	req := telegramRequest("telegram-secret", body, map[string]any{
+		"update_id": float64(123456789),
+		"message":   map[string]any{"message_id": float64(7), "chat": map[string]any{"id": float64(42)}, "text": "hello"},
+	})
+
+	delivery, err := DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Telegram webhook: %v", err)
+	}
+	if delivery.ProviderEventID != "123456789" {
+		t.Fatalf("ProviderEventID = %q, want 123456789", delivery.ProviderEventID)
+	}
+	if delivery.ProviderEventType != "update" {
+		t.Fatalf("ProviderEventType = %q, want update", delivery.ProviderEventType)
+	}
+	if delivery.EventName != "inbound.telegram" {
+		t.Fatalf("EventName = %q, want inbound.telegram", delivery.EventName)
+	}
+	if !delivery.AcknowledgeBeforeDispatch {
+		t.Fatal("Telegram delivery did not request durable_before_dispatch acknowledgement")
+	}
+	headers, ok := delivery.Payload["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+	}
+	if headers["telegram_update_id"] != "123456789" || headers["telegram_update_type"] != "update" {
+		t.Fatalf("headers = %+v, want Telegram manifest metadata", headers)
+	}
+	encoded := fmtPayload(delivery.Payload)
+	if strings.Contains(encoded, "telegram-secret") {
+		t.Fatal("Telegram secret token leaked into delivery payload")
+	}
+}
+
+func TestTelegramManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
+	validBody := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	validPayload := map[string]any{
+		"update_id": float64(123456789),
+		"message":   map[string]any{"message_id": float64(7), "chat": map[string]any{"id": float64(42)}, "text": "hello"},
+	}
+	validRequest := func() Request {
+		return telegramRequest("telegram-secret", validBody, validPayload)
+	}
+	for _, tc := range []struct {
+		name       string
+		configure  func(Request) Request
+		wantStatus int
+	}{
+		{
+			name: "missing configured secret",
+			configure: func(req Request) Request {
+				req.Target.WebhookSecret = ""
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing token header",
+			configure: func(req Request) Request {
+				req.Headers.Del("X-Telegram-Bot-Api-Secret-Token")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "duplicate token header",
+			configure: func(req Request) Request {
+				req.Headers.Add("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "invalid token header",
+			configure: func(req Request) Request {
+				req.Headers.Set("X-Telegram-Bot-Api-Secret-Token", "wrong-secret")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing update id",
+			configure: func(req Request) Request {
+				req.Body = []byte(`{"message":{"message_id":7,"text":"hello"}}`)
+				req.Payload = map[string]any{"message": map[string]any{"message_id": float64(7), "text": "hello"}}
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "non object payload",
+			configure: func(req Request) Request {
+				req.Body = []byte(`[{"update_id":123456789}]`)
+				req.Payload = []any{map[string]any{"update_id": float64(123456789)}}
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DefaultRegistry().Accept(tc.configure(validRequest()))
+			requireProviderTriggerError(t, err, tc.wantStatus)
+		})
+	}
+}
+
 func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -1072,6 +1206,46 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 				EventName:  EventNameManifest{Literal: "inbound.badsource"},
 			},
 		},
+		{
+			name: "token equality requires secret",
+			manifest: Manifest{
+				Provider:   "badtokenwithoutsecret",
+				Signature:  SignatureManifest{Type: "token_equality", Header: "X-Token"},
+				DeliveryID: ValueSource{JSONPath: "$.update_id", Required: true},
+				EventType:  ValueSource{Literal: "update", Required: true},
+				EventName:  EventNameManifest{Literal: "inbound.badtokenwithoutsecret"},
+			},
+		},
+		{
+			name: "token equality rejects encoding",
+			manifest: tokenEqualityValidationManifest("badtokenencoding", func(sig *SignatureManifest) {
+				sig.Encoding = "hex"
+			}),
+		},
+		{
+			name: "token equality rejects prefix",
+			manifest: tokenEqualityValidationManifest("badtokenprefix", func(sig *SignatureManifest) {
+				sig.Prefix = "v1="
+			}),
+		},
+		{
+			name: "token equality rejects signed payload",
+			manifest: tokenEqualityValidationManifest("badtokensignedpayload", func(sig *SignatureManifest) {
+				sig.SignedPayload = "raw_body"
+			}),
+		},
+		{
+			name: "token equality rejects signature param",
+			manifest: tokenEqualityValidationManifest("badtokensignatureparam", func(sig *SignatureManifest) {
+				sig.SignatureParam = "v1"
+			}),
+		},
+		{
+			name: "token equality rejects timestamp",
+			manifest: tokenEqualityValidationManifest("badtokentimestamp", func(sig *SignatureManifest) {
+				sig.Timestamp = &TimestampManifest{Header: "X-Timestamp", Tolerance: "5m"}
+			}),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := NewRegistry(tc.manifest); err == nil {
@@ -1094,6 +1268,36 @@ func TestRegistryRejectsEmptyProvider(t *testing.T) {
 func TestNormalizeEventTokenNormalizesProviderTopicSeparators(t *testing.T) {
 	if got := NormalizeEventToken("orders/create"); got != "orders_create" {
 		t.Fatalf("NormalizeEventToken = %q, want orders_create", got)
+	}
+}
+
+func telegramRequest(secret string, body []byte, payload any) Request {
+	req := Request{
+		Provider: "telegram",
+		Target: Target{
+			EntityID:      "entity-1",
+			WebhookSecret: secret,
+		},
+		Body:      body,
+		Headers:   make(http.Header),
+		Payload:   payload,
+		Received:  time.Unix(1710000000, 0).UTC(),
+		UserAgent: "telegram-test",
+	}
+	req.Headers.Set("X-Telegram-Bot-Api-Secret-Token", secret)
+	return req
+}
+
+func tokenEqualityValidationManifest(provider string, mutate func(*SignatureManifest)) Manifest {
+	sig := SignatureManifest{Type: "token_equality", Header: "X-Token"}
+	mutate(&sig)
+	return Manifest{
+		Provider:   provider,
+		Secret:     SecretManifest{Required: true},
+		Signature:  sig,
+		DeliveryID: ValueSource{JSONPath: "$.update_id", Required: true},
+		EventType:  ValueSource{Literal: "update", Required: true},
+		EventName:  EventNameManifest{Literal: "inbound." + provider},
 	}
 }
 
