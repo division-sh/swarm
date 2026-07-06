@@ -207,8 +207,10 @@ func schemaRefinementKind(types TypeCatalogDocument, typeRef string) string {
 		normalized = typeName
 	}
 	switch strings.ToLower(strings.TrimSpace(normalized)) {
-	case "text", "string", "timestamp", "uuid":
+	case "text", "string", "uuid":
 		return "string"
+	case "timestamp":
+		return "timestamp"
 	case "integer":
 		return "integer"
 	case "numeric", "number", "float", "double", "real":

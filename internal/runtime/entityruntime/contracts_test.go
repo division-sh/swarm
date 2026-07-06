@@ -90,6 +90,59 @@ func TestMaterialize_EnforcesSchemaRefinementEquality(t *testing.T) {
 	}
 }
 
+func TestNormalizeFieldValue_RejectsIsolatedEqualityParticipants(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"component": {Type: "text"},
+				"owner": {
+					Type:        "text",
+					Refinements: runtimecontracts.SchemaRefinements{EqualTo: "component"},
+				},
+			},
+		},
+	}
+
+	for _, field := range []string{"owner", "component"} {
+		if _, err := NormalizeFieldValue(contract, field, "deploy"); err == nil || !strings.Contains(err.Error(), "participates in equal_to") {
+			t.Fatalf("NormalizeFieldValue(%s) = %v, want isolated equality rejection", field, err)
+		}
+	}
+	if _, err := Materialize(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {
+		t.Fatalf("Materialize should still allow full-object equality proof: %v", err)
+	}
+}
+
+func TestMaterialize_EnforcesNestedDefaultRefinements(t *testing.T) {
+	minLength := 1
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"spec": {Type: "Spec"},
+			},
+		},
+		Types: runtimecontracts.TypeCatalogDocument{
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"Spec": {
+					Fields: map[string]runtimecontracts.TypeFieldSpec{
+						"name": {
+							Type:        "text",
+							Refinements: runtimecontracts.SchemaRefinements{Length: runtimecontracts.SchemaLengthRefinement{Min: &minLength}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if _, err := Materialize(contract, nil); err == nil || !strings.Contains(err.Error(), "length must be >=") {
+		t.Fatalf("Materialize defaulted nested object = %v, want nested refinement failure", err)
+	}
+	if _, err := Materialize(contract, map[string]any{"spec": map[string]any{"name": "deploy"}}); err != nil {
+		t.Fatalf("Materialize explicit nested object: %v", err)
+	}
+}
+
 func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{
