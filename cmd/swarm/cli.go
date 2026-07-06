@@ -40,6 +40,12 @@ func executeRootCommandWithOptions(ctx context.Context, repo string, args []stri
 		}
 		return cliExitValidation
 	}
+	if err := validateSwarmEnvForCommand(args, repo); err != nil {
+		if errOut != nil {
+			fmt.Fprintln(errOut, err)
+		}
+		return cliExitValidation
+	}
 	cmd := newRootCommandWithOptions(ctx, repo, out, errOut, opts)
 	cmd.SetArgs(args)
 	if err := cmd.ExecuteContext(ctx); err != nil {

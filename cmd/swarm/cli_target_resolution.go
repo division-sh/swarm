@@ -36,8 +36,10 @@ type cliProjectResolution struct {
 }
 
 func resolveCLIAPITarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPITargetResolution, error) {
-	if err := rejectRemovedClientAPIEnvSources(); err != nil {
-		return cliAPITargetResolution{}, err
+	if opts.apiCommandClass != cliAPICommandClassTargetDiagnostic {
+		if err := rejectRemovedClientAPIEnvSources(); err != nil {
+			return cliAPITargetResolution{}, err
+		}
 	}
 	if endpoint := strings.TrimSpace(opts.apiRPCEndpointOverride); endpoint != "" {
 		rpc, err := normalizeCLIAPIRPCEndpoint(endpoint, "internal API endpoint")

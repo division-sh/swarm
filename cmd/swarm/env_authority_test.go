@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -287,6 +288,459 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 	}
 }
 
+func TestRepoWideSwarmEnvAcceptedSetMatchesSpec(t *testing.T) {
+	var spec struct {
+		EnvironmentSourceAuthority struct {
+			RepoWideSwarmEnvAcceptedSet struct {
+				PromotedBy           string   `yaml:"promoted_by"`
+				ParentTracker        string   `yaml:"parent_tracker"`
+				ImplementationStatus string   `yaml:"implementation_status"`
+				CanonicalOwner       string   `yaml:"canonical_owner"`
+				SourceAuthorityRule  string   `yaml:"source_authority_rule"`
+				Categories           []string `yaml:"categories"`
+				AcceptedEnv          []struct {
+					Name      string `yaml:"name"`
+					Prefix    string `yaml:"prefix"`
+					Category  string `yaml:"category"`
+					Owner     string `yaml:"owner"`
+					Migration string `yaml:"migration"`
+				} `yaml:"accepted_env"`
+			} `yaml:"repo_wide_swarm_env_accepted_set"`
+		} `yaml:"environment_source_authority"`
+	}
+	data, err := os.ReadFile(filepath.Join(repoRoot(), defaultPlatformSpecPath))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse platform spec: %v", err)
+	}
+
+	authority := spec.EnvironmentSourceAuthority.RepoWideSwarmEnvAcceptedSet
+	if authority.PromotedBy != "#1731" || authority.ParentTracker != "#1600" || authority.ImplementationStatus != "implemented_first_slice" {
+		t.Fatalf("#1731 env authority status = promoted_by:%q parent:%q status:%q", authority.PromotedBy, authority.ParentTracker, authority.ImplementationStatus)
+	}
+	if authority.CanonicalOwner != swarmEnvAuthorityOwner {
+		t.Fatalf("#1731 canonical owner = %q, want %q", authority.CanonicalOwner, swarmEnvAuthorityOwner)
+	}
+	for _, want := range []string{"no ambient source authority", "typed delegation", "doctor", "generated-boundary", "fail closed"} {
+		if !strings.Contains(authority.SourceAuthorityRule, want) {
+			t.Fatalf("#1731 source authority rule missing %q:\n%s", want, authority.SourceAuthorityRule)
+		}
+	}
+
+	specCategories := map[string]bool{}
+	for _, category := range authority.Categories {
+		if specCategories[category] {
+			t.Fatalf("#1731 duplicate category %q", category)
+		}
+		specCategories[category] = true
+	}
+	for _, category := range []swarmEnvCategory{
+		swarmEnvCategoryBootstrap,
+		swarmEnvCategoryTypedDelegation,
+		swarmEnvCategoryGeneratedBoundary,
+		swarmEnvCategoryTestQuarantine,
+		swarmEnvCategorySeededLegacy,
+		swarmEnvCategoryKnownRetired,
+		swarmEnvCategoryUnknownStale,
+	} {
+		if !specCategories[string(category)] {
+			t.Fatalf("#1731 spec missing category %q: %#v", category, authority.Categories)
+		}
+	}
+
+	specRows := map[string]struct {
+		Category  string
+		Owner     string
+		Migration string
+	}{}
+	for _, row := range authority.AcceptedEnv {
+		key := specSwarmEnvRowKey(row.Name, row.Prefix)
+		if key == "" {
+			t.Fatalf("#1731 accepted env row has neither name nor prefix: %#v", row)
+		}
+		if specRows[key].Category != "" {
+			t.Fatalf("#1731 duplicate accepted env row %q", key)
+		}
+		if !specCategories[row.Category] {
+			t.Fatalf("#1731 row %q uses unknown category %q", key, row.Category)
+		}
+		if strings.TrimSpace(row.Owner) == "" || strings.TrimSpace(row.Migration) == "" {
+			t.Fatalf("#1731 row %q missing owner/migration: %#v", key, row)
+		}
+		if row.Category == string(swarmEnvCategorySeededLegacy) && !strings.Contains(row.Migration, "#") && !strings.Contains(row.Migration, "config") && !strings.Contains(row.Migration, "--") {
+			t.Fatalf("#1731 seeded legacy row %q missing migration pointer: %#v", key, row)
+		}
+		specRows[key] = struct {
+			Category  string
+			Owner     string
+			Migration string
+		}{Category: row.Category, Owner: row.Owner, Migration: row.Migration}
+	}
+
+	codeRows := map[string]swarmEnvCatalogEntry{}
+	for _, entry := range swarmEnvCatalogEntries() {
+		key := catalogSwarmEnvRowKey(entry)
+		if key == "" {
+			t.Fatalf("code catalog entry has neither name nor prefix: %#v", entry)
+		}
+		if _, ok := codeRows[key]; ok {
+			t.Fatalf("code catalog duplicate row %q", key)
+		}
+		codeRows[key] = entry
+	}
+	for key, entry := range codeRows {
+		row, ok := specRows[key]
+		if !ok {
+			t.Fatalf("code catalog row %q missing from #1731 spec", key)
+		}
+		if row.Category != string(entry.Category) || row.Owner != entry.Owner || row.Migration != entry.Migration {
+			t.Fatalf("#1731 spec row %q mismatch\nspec: %#v\ncode: %#v", key, row, entry)
+		}
+	}
+	for key := range specRows {
+		if _, ok := codeRows[key]; !ok {
+			t.Fatalf("#1731 spec row %q missing from code catalog", key)
+		}
+	}
+}
+
+func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"serve",
+		"--api-listen-addr", "127.0.0.1:0",
+		"--mcp-listen-addr", "127.0.0.1:0",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[BLOCKER] env/unknown_stale: SWARM_WORSKPACE_IMAGE",
+		"did you mean SWARM_WORKSPACE_IMAGE",
+		"unset SWARM_WORSKPACE_IMAGE",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestSwarmEnvGuardSkipsPureVersionAndCompletion(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+
+	for _, args := range [][]string{
+		{"version"},
+		{"completion", "bash"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+		if code != cliExitOK {
+			t.Fatalf("%v code = %d, want %d stdout=%s stderr=%s", args, code, cliExitOK, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String()+stderr.String(), "SWARM_WORSKPACE_IMAGE") {
+			t.Fatalf("%v should skip env guard, got stdout=%s stderr=%s", args, stdout.String(), stderr.String())
+		}
+	}
+}
+
+func TestSwarmEnvGuardSkipsPureSubcommandHelpFlags(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+
+	for _, args := range [][]string{
+		{"event", "publish", "--help"},
+		{"run", "start", "--help"},
+		{"run", "start", "-h"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+			if code != cliExitOK {
+				t.Fatalf("%v code = %d, want %d stdout=%s stderr=%s", args, code, cliExitOK, stdout.String(), stderr.String())
+			}
+			output := stdout.String() + stderr.String()
+			if strings.Contains(output, "SWARM_WORSKPACE_IMAGE") {
+				t.Fatalf("%v should skip env guard, got stdout=%s stderr=%s", args, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(output, "Usage:") {
+				t.Fatalf("%v help output missing Usage: stdout=%s stderr=%s", args, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestSwarmEnvGuardDoesNotSkipWhenHelpIsCommandData(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{
+			name: "positional help",
+			args: []string{"event", "publish", "help", "--payload-json", "{}"},
+		},
+		{
+			name: "double dash help data",
+			args: []string{"event", "publish", "--payload-json", "{}", "--", "--help"},
+		},
+		{
+			name: "flag value help data",
+			args: []string{"event", "publish", "--payload-json", "--help"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), tc.args, &stdout, &stderr, defaultRootCommandOptions())
+			if code != cliExitValidation {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+			}
+			for _, want := range []string{
+				"[BLOCKER] env/unknown_stale: SWARM_WORSKPACE_IMAGE",
+				"did you mean SWARM_WORKSPACE_IMAGE",
+			} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+				}
+			}
+		})
+	}
+}
+
+func TestSwarmEnvGuardDoesNotSkipVersionServerEqualsTrue(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"version",
+		"--server=true",
+		"--api-server", "http://127.0.0.1:9",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[BLOCKER] env/unknown_stale: SWARM_WORSKPACE_IMAGE",
+		"did you mean SWARM_WORKSPACE_IMAGE",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestSwarmEnvGuardBlocksGeneratedBoundaryParentEnv(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:19002")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"serve",
+		"--api-listen-addr", "127.0.0.1:0",
+		"--mcp-listen-addr", "127.0.0.1:0",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"[BLOCKER] env/generated_boundary: SWARM_TOOL_GATEWAY_URL",
+		"generated final-boundary env must be injected by Swarm",
+		"unset SWARM_TOOL_GATEWAY_URL",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_DB_PASSWORD", "secret")
+	configPath := filepath.Join(t.TempDir(), "runtime.yaml")
+	writeWorkflowValidationFixtureFile(t, configPath, "database:\n  password_env: SWARM_DB_PASSWORD\n")
+
+	called := false
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, _ serveOptions) int {
+		called = true
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"serve",
+		"--config", configPath,
+		"--api-listen-addr", "127.0.0.1:0",
+		"--mcp-listen-addr", "127.0.0.1:0",
+	}, &stdout, &stderr, opts)
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if !called {
+		t.Fatalf("serve callback was not called; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestSwarmEnvGuardAllowsExecutableAdjacentTypedDatabasePasswordEnvDelegation(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_DB_PASSWORD", "secret")
+	binDir := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(binDir, "config.yaml"), "database:\n  password_env: SWARM_DB_PASSWORD\n")
+	originalExecutablePath := runtimeConfigExecutablePath
+	runtimeConfigExecutablePath = func() (string, error) {
+		return filepath.Join(binDir, "swarm"), nil
+	}
+	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
+
+	called := false
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, _ serveOptions) int {
+		called = true
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"serve",
+		"--api-listen-addr", "127.0.0.1:0",
+		"--mcp-listen-addr", "127.0.0.1:0",
+	}, &stdout, &stderr, opts)
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if !called {
+		t.Fatalf("serve callback was not called; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestSwarmEnvGuardEmptyRetiredEnvUsesNonEmptyBoundary(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "")
+	t.Setenv("SWARM_LLM_BACKEND", "")
+
+	called := false
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, _ serveOptions) int {
+		called = true
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"serve",
+		"--api-listen-addr", "127.0.0.1:0",
+		"--mcp-listen-addr", "127.0.0.1:0",
+	}, &stdout, &stderr, opts)
+	if code != cliExitOK {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	}
+	if !called {
+		t.Fatalf("serve callback was not called; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+}
+
+func TestDoctorReportsSwarmEnvFindingsWithConfigFailure(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	contractsRoot := writeEnvAuthorityContractsFixture(t, "doctor-env-report")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"doctor",
+		"--json",
+		"--config", filepath.Join(t.TempDir(), "missing-runtime.yaml"),
+		"--contracts", contractsRoot,
+		"--platform-spec", defaultPlatformSpecPath,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if report.OK {
+		t.Fatalf("doctor report OK=true, want blockers: %#v", report)
+	}
+	assertLocalPreflightFinding(t, report, localPreflightEnvPrerequisite, string(swarmEnvCategoryUnknownStale), "SWARM_WORSKPACE_IMAGE")
+	assertLocalPreflightFinding(t, report, localPreflightBackendPrerequisite, "config_load_failed", "missing-runtime.yaml")
+}
+
+func TestDoctorTargetReportsSwarmEnvFindings(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_WORSKPACE_IMAGE", "stale")
+	repo := writeDoctorTargetRepo(t)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"doctor",
+		"--target",
+		"--json",
+		"--contracts", filepath.Join(repo, "contracts"),
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor target JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if report.OK {
+		t.Fatalf("doctor target report OK=true, want env blocker: %#v", report)
+	}
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryUnknownStale), "SWARM_WORSKPACE_IMAGE")
+}
+
+func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
+	cases := []string{
+		"SWARM_LLM_BACKEND",
+		"SWARM_RUNTIME_MAX_CONCURRENT_AGENTS",
+		"SWARM_OPENAI_COMPATIBLE_BASE_URL",
+		"SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL",
+	}
+	for _, envName := range cases {
+		t.Run(envName, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			t.Setenv(envName, "stale")
+			repo := writeDoctorTargetRepo(t)
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repo, []string{
+				"doctor",
+				"--target",
+				"--json",
+				"--contracts", filepath.Join(repo, "contracts"),
+			}, &stdout, &stderr, defaultRootCommandOptions())
+			if code != cliExitRuntime {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+			}
+			if stderr.String() != "" {
+				t.Fatalf("stderr = %q, want empty", stderr.String())
+			}
+			var report doctorTargetReport
+			if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+				t.Fatalf("parse doctor target JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+			}
+			if report.OK {
+				t.Fatalf("doctor target report OK=true, want env blocker: %#v", report)
+			}
+			assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
+		})
+	}
+}
+
 func writeEnvAuthorityRepoWithMalformedDotEnv(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -318,6 +772,43 @@ terminal_states:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	return root
+}
+
+func specSwarmEnvRowKey(name, prefix string) string {
+	name = strings.TrimSpace(name)
+	prefix = strings.TrimSpace(prefix)
+	switch {
+	case name != "" && prefix == "":
+		return "name:" + name
+	case prefix != "" && name == "":
+		return "prefix:" + prefix
+	default:
+		return ""
+	}
+}
+
+func catalogSwarmEnvRowKey(entry swarmEnvCatalogEntry) string {
+	return specSwarmEnvRowKey(entry.Name, entry.Prefix)
+}
+
+func assertLocalPreflightFinding(t *testing.T, report localPreflightReport, category localPreflightCategory, code, messagePart string) {
+	t.Helper()
+	for _, finding := range report.Findings {
+		if finding.Category == category && finding.Code == code && strings.Contains(finding.Message, messagePart) {
+			return
+		}
+	}
+	t.Fatalf("missing finding category=%s code=%s message containing %q: %#v", category, code, messagePart, report.Findings)
+}
+
+func assertDoctorTargetEnvFinding(t *testing.T, report doctorTargetReport, code, messagePart string) {
+	t.Helper()
+	for _, finding := range report.Env {
+		if finding.Category == localPreflightEnvPrerequisite && finding.Code == code && strings.Contains(finding.Message, messagePart) {
+			return
+		}
+	}
+	t.Fatalf("missing target env finding code=%s message containing %q: %#v", code, messagePart, report.Env)
 }
 
 func assertNoDotEnvLoadFailure(t testing.TB, output string) {

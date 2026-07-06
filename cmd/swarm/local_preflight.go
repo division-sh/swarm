@@ -30,6 +30,7 @@ const (
 	localPreflightContractSecretPrerequisite localPreflightCategory = "contract_secret_prerequisite"
 	localPreflightProviderPackPrerequisite   localPreflightCategory = "provider_pack_prerequisite"
 	localPreflightDevConveniencePrerequisite localPreflightCategory = "dev_convenience_prerequisite"
+	localPreflightEnvPrerequisite            localPreflightCategory = "env"
 )
 
 type localPreflightSeverity string
@@ -154,6 +155,10 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 }
 
 func (r *localPreflightReport) add(category localPreflightCategory, code string, severity localPreflightSeverity, status localPreflightFindingStatus, message, remediation string) {
+	r.addWithOwner(category, code, severity, status, message, remediation, localPreflightOwner)
+}
+
+func (r *localPreflightReport) addWithOwner(category localPreflightCategory, code string, severity localPreflightSeverity, status localPreflightFindingStatus, message, remediation, owner string) {
 	if r == nil {
 		return
 	}
@@ -165,6 +170,10 @@ func (r *localPreflightReport) add(category localPreflightCategory, code string,
 	if status == "" {
 		status = localPreflightStatusOK
 	}
+	owner = strings.TrimSpace(owner)
+	if owner == "" {
+		owner = localPreflightOwner
+	}
 	r.Findings = append(r.Findings, localPreflightFinding{
 		Category:    category,
 		Code:        code,
@@ -172,7 +181,7 @@ func (r *localPreflightReport) add(category localPreflightCategory, code string,
 		Severity:    severity,
 		Message:     message,
 		Remediation: strings.TrimSpace(remediation),
-		Owner:       localPreflightOwner,
+		Owner:       owner,
 	})
 }
 

@@ -10603,6 +10603,416 @@ runtime_storage:
     - Product contracts and agents MUST NOT rely on the raw host path. The stable product surface remains the opaque
       `swarm-artifact://repos/<repo_id>` URL plus immutable commit ref.
 environment_source_authority:
+  repo_wide_swarm_env_accepted_set:
+    promoted_by: '#1731'
+    parent_tracker: '#1600'
+    implementation_status: implemented_first_slice
+    canonical_owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+    scope: >
+      Repo-wide acceptance authority for process-visible `SWARM_*` environment variables. This owner defines the closed
+      category enum, the static accepted-set catalog, typed delegation admission, doctor reporting, generated-boundary
+      closure, and unknown/stale env fail-closed behavior for covered CLI commands. It does not complete the #1600 parent
+      migration: seeded legacy rows remain live only as migration-bearing TODO entries and MUST shrink in later children.
+    source_authority_rule: >
+      Environment variables have no ambient source authority. A `SWARM_*` variable is accepted only when it is `SWARM_CONFIG`,
+      an exact typed delegation declared by schema-visible config, a currently seeded legacy row with a migration pointer, a
+      test-quarantined row under a test harness, or a generated-boundary row injected by Swarm into a child process. Unknown,
+      known-retired, generated-boundary-in-parent, and production test-quarantine usages MUST fail closed before side effects
+      on covered commands. The guard's source-authority boundary is non-empty after trimming; empty `SWARM_*=` values have
+      no source authority, and any remaining direct legacy readers MUST use the same non-empty boundary until their seeded
+      row is migrated. `swarm doctor` MUST render the same findings instead of being blocked by them.
+    command_guard_scope:
+      guarded: >
+        All side-effect-capable and runtime/target-consuming CLI commands after root flag placement validation and before
+        command side effects.
+      skipped: >
+        Pure help/completion surfaces, including subcommand `-h`/`--help` forms that are not consumed as flag values or
+        written after `--`, and `swarm version` without `--server` do not consume runtime env semantics and skip the guard.
+        Server-targeting version forms, including `--server=true`, are target-consuming and MUST be guarded. `swarm doctor`
+        skips the blocking guard but MUST include an env finding section and exit nonzero when blockers exist, including when
+        legacy runtime-config env rejectors would otherwise fail before the diagnostic report renders.
+    typed_delegation:
+      rule: >
+        Typed delegation is schema-visible and exact. A config field may name one concrete env variable only when that field's
+        schema explicitly supports env delegation. Guard admission MUST use the same supported runtime config source classes
+        as runtime loading, including explicit `--config` and executable-adjacent `config.yaml`. Arbitrary string
+        interpolation such as `${VAR}` is not accepted.
+      first_slice_fields:
+      - database.password_env
+    generated_boundary:
+      rule: >
+        Generated-boundary envs are child-process injection names, not user/operator source authority. Seeing one of these
+        names in Swarm's parent process env is a blocker. The child-process injection set is closed and must be drift-tested
+        against the implementation.
+    test_quarantine:
+      rule: >
+        Test/debug envs are accepted only under the Swarm test harness or Go test binary context. They are banned from public
+        setup docs and must not become production behavior without a new typed flag/config owner.
+    categories:
+    - bootstrap
+    - typed_delegation
+    - generated_boundary
+    - test_quarantine
+    - seeded_legacy
+    - known_retired
+    - unknown_stale
+    accepted_env:
+    - name: SWARM_CONFIG
+      category: bootstrap
+      owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
+      migration: keep bootstrap locator
+    - name: SWARM_API_SERVER
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_API_TOKEN
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_API_TOKEN_FILE
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_API_LISTEN_ADDR
+      category: seeded_legacy
+      owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
+      migration: '#1600 listener config migration'
+    - name: SWARM_MCP_LISTEN_ADDR
+      category: seeded_legacy
+      owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
+      migration: '#1600 listener config migration'
+    - name: SWARM_API_PORT
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_MCP_PORT
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_CONTRACTS_PATH
+      category: seeded_legacy
+      owner: platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution
+      migration: config contracts_path or --contracts
+    - name: SWARM_CONTRACTS_DIR
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_PLATFORM_SPEC_PATH
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_DIR
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_HOME
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_STORE_BACKEND
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection
+      migration: '#1637 store.backend'
+    - name: SWARM_SQLITE_PATH
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.sqlite_path
+      migration: '#1637 store.sqlite.path'
+    - name: SWARM_DB_HOST
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
+      migration: '#1637 database.host'
+    - name: SWARM_DB_PORT
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
+      migration: '#1637 database.port'
+    - name: SWARM_DB_NAME
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
+      migration: '#1637 database.name'
+    - name: SWARM_DB_USER
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
+      migration: '#1637 database.user'
+    - name: SWARM_DB_SSLMODE
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
+      migration: '#1637 database.sslmode'
+    - name: SWARM_DB_POOL_SIZE
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
+      migration: '#1637 database.pool_size'
+    - name: SWARM_DB_PASSWORD
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_WORKSPACE_DATA_SOURCE
+      category: seeded_legacy
+      owner: platform-spec.yaml#workspace_model.data_source_authority
+      migration: '#1600 workspace.data_source'
+    - name: SWARM_WORKSPACE_BACKEND
+      category: seeded_legacy
+      owner: platform-spec.yaml#workspace_model.workspace_backend_selection
+      migration: '#1600 workspace.backend'
+    - name: SWARM_DOCKER_BIN
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace/tooling config'
+    - name: SWARM_WORKSPACE_IMAGE
+      category: seeded_legacy
+      owner: platform-spec.yaml#workspace_model.runtime_image_packaging
+      migration: '#1600 workspace.image'
+    - name: SWARM_WORKSPACE_HOST_ROOT
+      category: seeded_legacy
+      owner: platform-spec.yaml#workspace_model.workspace_backend_selection
+      migration: '#1600 workspace.host_root'
+    - name: SWARM_WORKSPACE_VOLUMES_FROM
+      category: seeded_legacy
+      owner: platform-spec.yaml#workspace_model.data_source_authority
+      migration: '#1600 workspace volumes config'
+    - name: SWARM_WORKSPACE_NETWORK
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace network config'
+    - name: SWARM_WORKSPACE_DATA_MOUNT
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace mount config'
+    - name: SWARM_WORKSPACE_CONTRACTS_SOURCE
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace contracts source config'
+    - name: SWARM_WORKSPACE_CONTRACTS_MOUNT
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace contracts mount config'
+    - name: SWARM_SCAFFOLD_CONTAINER
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SCAFFOLD_WORKDIR
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SCAFFOLD_VOLUME
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SYSTEM_CONTAINER
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SYSTEM_WORKDIR
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SYSTEM_ENTITIES_VOLUME
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SYSTEM_NGINX_VOLUME
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_SYSTEM_SYSTEMD_VOLUME
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_ENTITY_CONTAINER_PREFIX
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_ENTITY_WORKDIR
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 workspace lifecycle config'
+    - name: SWARM_RUNTIME_RECOVERY_ON_STARTUP
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection
+      migration: '#1600 runtime.recovery_on_startup'
+    - name: SWARM_RUNTIME_MAX_CONCURRENT_AGENTS
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_RUNTIME_EVENT_POLL_INTERVAL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_LLM_SESSION_LOCK_TTL
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.session.lock_ttl'
+    - name: SWARM_LLM_SESSION_ROTATE_AFTER_TURNS
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.session.rotate_after_turns'
+    - name: SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.session.rotate_on_parse_failures'
+    - name: SWARM_CLAUDE_API_MAX_RETRIES
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_api.max_retries'
+    - name: SWARM_CLAUDE_API_RETRY_BACKOFF
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_api.retry_backoff'
+    - name: SWARM_CLAUDE_CLI_COMMAND
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.command'
+    - name: SWARM_CLAUDE_CLI_TIMEOUT
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.timeout'
+    - name: SWARM_CLAUDE_CLI_OUTPUT_FORMAT
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.output_format'
+    - name: SWARM_CLAUDE_CLI_RETRIES
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.retries'
+    - name: SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.no_session_persistence'
+    - name: SWARM_CLAUDE_CLI_USE_TMUX
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.use_tmux'
+    - name: SWARM_CLAUDE_TIMEOUT_SECONDS
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.timeout'
+    - name: SWARM_CLAUDE_PERMISSION_MODE
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.permission_mode'
+    - name: SWARM_CLAUDE_BYPASS_PERMISSIONS
+      category: seeded_legacy
+      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
+      migration: '#1600 llm.claude_cli.permission_mode'
+    - name: SWARM_CLAUDE_USE_MCP
+      category: seeded_legacy
+      owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
+      migration: '#1600 typed Claude CLI transport config'
+    - name: SWARM_LLM_BACKEND
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_LLM_RUNTIME_MODE
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_CLAUDE_DEFAULT_MODEL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_CLAUDE_HAIKU_MODEL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_OPENAI_COMPATIBLE_BASE_URL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_OPENAI_COMPATIBLE_LOW_COST_MODEL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_CREDENTIALS_FILE
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: '#1600 secrets file config'
+    - name: SWARM_MANAGED_CREDENTIALS_FILE
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: '#1600 managed credentials file config'
+    - name: SWARM_ARTIFACT_ROOT
+      category: seeded_legacy
+      owner: platform-spec.yaml#runtime_storage.artifact_root
+      migration: '#1600 runtime.artifact_root'
+    - name: SWARM_MONITOR_DIR
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 monitor config'
+    - name: SWARM_PROMPTS_DIR
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 prompt helper config'
+    - name: SWARM_AGENT_CONFIG_MAP_FILE
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 spec helper config'
+    - name: SWARM_VERIFICATION_GATES_FILE
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 spec helper config'
+    - name: SWARM_TOOLING_LOCK_FILE
+      category: seeded_legacy
+      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+      migration: '#1600 spec helper config'
+    - name: SWARM_LOG_LEVEL
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_SQL_DEBUG
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_BOOT_WARNINGS_FATAL
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_EMIT_SCHEMA_STRICT
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_CATALOG_E2E_DEBUG
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_FAKE_DOCKER_STATE
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_LLM_FIRST_TURN_FAKE_DOCKER
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_TEST_HARNESS
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - prefix: SWARM_TEST_
+      category: test_quarantine
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: test/debug quarantine
+    - name: SWARM_TOOL_GATEWAY_URL
+      category: generated_boundary
+      owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
+      migration: generated final-boundary only
+    - name: SWARM_TOOL_GATEWAY_CONTAINER_URL
+      category: generated_boundary
+      owner: platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding
+      migration: generated final-boundary only
+    - name: SWARM_TOOL_GATEWAY_TOKEN
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_BUILDER_AUTH_TOKEN
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
+    - name: SWARM_OPERATOR_AUTH_TOKEN
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
   workspace_monitor_artifact_debug_slice:
     promoted_by: '#1640'
     parent_tracker: '#1600'
