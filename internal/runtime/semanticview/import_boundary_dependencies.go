@@ -432,8 +432,9 @@ func deleteNestedValue(root map[string]any, path string) {
 
 func clonePolicyDocument(in runtimecontracts.PolicyDocument) runtimecontracts.PolicyDocument {
 	out := runtimecontracts.PolicyDocument{
-		Values:   map[string]runtimecontracts.PolicyValue{},
-		Criteria: map[string]runtimecontracts.PolicyCriteriaSet{},
+		Values:     map[string]runtimecontracts.PolicyValue{},
+		Criteria:   map[string]runtimecontracts.PolicyCriteriaSet{},
+		Validation: map[string]runtimecontracts.PolicyValidationSet{},
 	}
 	for key, value := range in.Values {
 		key = strings.TrimSpace(key)
@@ -448,6 +449,13 @@ func clonePolicyDocument(in runtimecontracts.PolicyDocument) runtimecontracts.Po
 			continue
 		}
 		out.Criteria[key] = clonePolicyCriteriaSet(value)
+	}
+	for key, value := range in.Validation {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Validation[key] = clonePolicyValidationSet(value)
 	}
 	return out
 }
@@ -493,6 +501,67 @@ func clonePolicyValue(in runtimecontracts.PolicyValue) runtimecontracts.PolicyVa
 	}
 }
 
+func clonePolicyValidationSet(in runtimecontracts.PolicyValidationSet) runtimecontracts.PolicyValidationSet {
+	out := runtimecontracts.PolicyValidationSet{
+		Classes: map[string]runtimecontracts.PolicyValidationClass{},
+		Inputs:  map[string]string{},
+		Rules:   make([]runtimecontracts.PolicyValidationRule, 0, len(in.Rules)),
+	}
+	for key, value := range in.Classes {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Classes[key] = runtimecontracts.PolicyValidationClass{
+			Disposition: strings.TrimSpace(value.Disposition),
+		}
+	}
+	for key, value := range in.Inputs {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Inputs[key] = strings.TrimSpace(value)
+	}
+	for _, rule := range in.Rules {
+		cloned := runtimecontracts.PolicyValidationRule{
+			ID:     strings.TrimSpace(rule.ID),
+			Class:  strings.TrimSpace(rule.Class),
+			Text:   strings.TrimSpace(rule.Text),
+			Params: map[string]runtimecontracts.PolicyCriteriaParam{},
+			Check: runtimecontracts.PolicyValidationCheck{
+				Equal: clonePolicyValidationEqualCheck(rule.Check.Equal),
+			},
+		}
+		if rule.PinCandidate != nil {
+			value := *rule.PinCandidate
+			cloned.PinCandidate = &value
+		}
+		for key, value := range rule.Params {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			cloned.Params[key] = runtimecontracts.PolicyCriteriaParam{Value: cloneAny(value.Value)}
+		}
+		if len(cloned.Params) == 0 {
+			cloned.Params = nil
+		}
+		out.Rules = append(out.Rules, cloned)
+	}
+	return out
+}
+
+func clonePolicyValidationEqualCheck(in *runtimecontracts.PolicyValidationEqualCheck) *runtimecontracts.PolicyValidationEqualCheck {
+	if in == nil {
+		return nil
+	}
+	return &runtimecontracts.PolicyValidationEqualCheck{
+		Left:  strings.TrimSpace(in.Left),
+		Right: strings.TrimSpace(in.Right),
+	}
+}
+
 func cloneAny(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -520,8 +589,9 @@ func cloneAny(value any) any {
 
 func emptyPolicyDocument() runtimecontracts.PolicyDocument {
 	return runtimecontracts.PolicyDocument{
-		Values:   map[string]runtimecontracts.PolicyValue{},
-		Criteria: map[string]runtimecontracts.PolicyCriteriaSet{},
+		Values:     map[string]runtimecontracts.PolicyValue{},
+		Criteria:   map[string]runtimecontracts.PolicyCriteriaSet{},
+		Validation: map[string]runtimecontracts.PolicyValidationSet{},
 	}
 }
 

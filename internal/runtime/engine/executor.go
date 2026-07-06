@@ -990,7 +990,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 func (e *Executor) stepCompute(frame *executionFrame) error {
 	if frame.rule != nil {
 		spec := frame.rule.Compute
-		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup {
+		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup || spec.Operation == runtimecontracts.ComputeOpValidate {
 			return nil
 		}
 		return e.executeComputeSpec(frame, spec)
@@ -1002,7 +1002,7 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	}
 	for idx := range frame.req.Handler.Rules {
 		rule := &frame.req.Handler.Rules[idx]
-		if rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindLookup || rule.Compute == nil {
+		if (rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindLookup && rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindValidate) || rule.Compute == nil {
 			continue
 		}
 		if err := e.executeComputeSpec(frame, rule.Compute); err != nil {
@@ -1021,13 +1021,19 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 		value any
 		err   error
 	)
-	if spec.Operation == runtimecontracts.ComputeOpLookup {
+	switch spec.Operation {
+	case runtimecontracts.ComputeOpLookup:
 		value, err = computeLookupValue(e.currentContext(frame), spec)
-	} else {
+	case runtimecontracts.ComputeOpValidate:
+		value, err = e.computeValidationValue(frame, spec)
+	default:
 		value, err = computeValue(acc, frame.payload, spec)
 	}
 	if err != nil {
 		return err
+	}
+	if spec.Operation == runtimecontracts.ComputeOpValidate {
+		return e.storeComputedPathOnly(frame, spec.StoreAs, value)
 	}
 	if storeAs := strings.TrimSpace(spec.StoreAs); storeAs != "" {
 		if handlerTargetRequiresCanonicalWrite(storeAs) {
@@ -1052,6 +1058,121 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	frame.state.State.SetMetadata("computed", value)
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.SetMetadata("computed", value)
+	return nil
+}
+
+func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimecontracts.ComputeSpec) (any, error) {
+	if spec == nil || spec.Validation == nil {
+		return nil, ErrNotImplemented
+	}
+	plan := spec.Validation
+	rowID := strings.TrimSpace(plan.RowID)
+	if rowID == "" {
+		rowID = strings.TrimSpace(spec.StoreAs)
+	}
+	policy := e.deps.Source.ResolvedPolicyForFlow(frame.req.FlowID.String())
+	setName := strings.TrimSpace(plan.Set)
+	set, ok := policy.Validation[setName]
+	if !ok {
+		return nil, fmt.Errorf("validation_config_no_retry: row %s references unknown validation set %q", rowID, setName)
+	}
+	current := e.currentContext(frame)
+	inputs := map[string]any{}
+	for name, declaredType := range set.Inputs {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		path, ok := plan.InputPaths[name]
+		if !ok {
+			path = paths.Parse(plan.Input[name])
+		}
+		if path.IsZero() {
+			return nil, fmt.Errorf("validation_input_no_retry: row %s input.%s has no mapped source path", rowID, name)
+		}
+		value, exists := current.Lookup(path)
+		if !exists {
+			return nil, fmt.Errorf("validation_input_no_retry: row %s input.%s source %s is missing", rowID, name, path.String())
+		}
+		if !validationRuntimeValueMatchesType(value, declaredType) {
+			return nil, fmt.Errorf("validation_input_no_retry: row %s input.%s source %s does not match declared type %s", rowID, name, path.String(), strings.TrimSpace(declaredType))
+		}
+		inputs[name] = value
+	}
+	violations := make([]any, 0)
+	for _, rule := range set.Rules {
+		equal := rule.Check.Equal
+		if equal == nil {
+			return nil, fmt.Errorf("validation_config_no_retry: row %s rule %s has no equal check", rowID, strings.TrimSpace(rule.ID))
+		}
+		leftName := validationInputName(equal.Left)
+		rightName := validationInputName(equal.Right)
+		left, leftOK := inputs[leftName]
+		right, rightOK := inputs[rightName]
+		if !leftOK || !rightOK {
+			return nil, fmt.Errorf("validation_input_no_retry: row %s rule %s references unmapped validation input", rowID, strings.TrimSpace(rule.ID))
+		}
+		if reflect.DeepEqual(left, right) {
+			continue
+		}
+		violations = append(violations, map[string]any{
+			"id":          strings.TrimSpace(rule.ID),
+			"class":       strings.TrimSpace(rule.Class),
+			"content_ref": strings.Join([]string{strings.TrimSpace(equal.Left), strings.TrimSpace(equal.Right)}, ","),
+		})
+	}
+	return map[string]any{
+		"valid":      len(violations) == 0,
+		"violations": violations,
+	}, nil
+}
+
+func validationInputName(ref string) string {
+	name, ok := strings.CutPrefix(strings.TrimSpace(ref), "input.")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(name)
+}
+
+func validationRuntimeValueMatchesType(value any, declared string) bool {
+	kind, _, _, ok := runtimecontracts.CanonicalizeComputeLookupValue(value)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(declared)) {
+	case "string", "text", "uuid", "timestamp", "datetime", "date":
+		return kind == "string"
+	case "bool", "boolean":
+		return kind == "bool"
+	case "int", "integer":
+		if kind == "int" {
+			return true
+		}
+		if _, ok := integralLookupFloatSummary(value); ok {
+			return true
+		}
+		return false
+	case "number", "numeric", "float", "double":
+		return kind == "number" || kind == "int"
+	default:
+		return false
+	}
+}
+
+func (e *Executor) storeComputedPathOnly(frame *executionFrame, storeAs string, value any) error {
+	parsed := paths.Parse(storeAs)
+	if parsed.Root != paths.RootComputed || len(parsed.Segments) < 2 || parsed.Segments[0] != "validation" {
+		return fmt.Errorf("validation_config_no_retry: validate.into %q must target computed.validation.*", strings.TrimSpace(storeAs))
+	}
+	if frame.state.Computed == nil {
+		frame.state.Computed = map[string]any{}
+	}
+	if frame.result.Computed == nil {
+		frame.result.Computed = map[string]any{}
+	}
+	values.Wrap(frame.state.Computed).SetPath(parsed, value)
+	values.Wrap(frame.result.Computed).SetPath(parsed, value)
 	return nil
 }
 
@@ -2148,7 +2269,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry) (*runtimecontracts.HandlerRuleEntry, error) {
 	for idx := range rules {
 		rule := &rules[idx]
-		if rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindLookup {
+		if rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindLookup || rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindValidate {
 			continue
 		}
 		condition := strings.TrimSpace(rule.Condition)

@@ -1107,10 +1107,10 @@ type_system:
       omit a refinement only when it is a different semantic concept or an
       explicitly tracked surviving follow-up.
     validation_row_boundary: |
-      Machine-evaluated validation criteria rows are a later #1714 slice and
-      depend on the #1717 stable-ID criteria artifact grammar. They bind
-      computed validation results only; branch routing remains owned by
-      policy-sheet selection rows.
+      Machine-evaluated validation rows are governed by
+      policy_validation_contracts. They consume the stable-ID criteria artifact
+      family with a machine evaluator, bind computed.validation.* results only,
+      and leave branch routing to policy-sheet selection rows.
   field_forms:
     terse: 'field_name: TypeName'
     verbose: |
@@ -1404,10 +1404,113 @@ criteria_contracts:
     - event citation field type and allowed class metadata
     - emitted-event citation fields consumed only by agents that declare the referenced criteria set
   split_boundaries:
-  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar later; they do not ship in #1717.'
+  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar as a sibling policy section with a different
+    evaluator.'
   - '#1718 prompt-frame generation may absorb the deterministic criteria section later; #1717 does not ship the full frame
     generator.'
   - Structured predicates, criteria packs, team packs, CLI/editor UX, and criteria evaluation harnesses are separate gates.
+policy_validation_contracts:
+  status: merge_bearing_runtime_behavior
+  implementation_slice: '#1714'
+  description: |
+    Flow-local machine-evaluated validation sets are stable-ID rule sets
+    declared as a typed `validation:` section inside the owning flow's
+    `policy.yaml`. They share the criteria artifact family but use the
+    platform machine evaluator, not agent judgment. Validation rows bind
+    turn-scoped computed facts only; they do not route, emit, advance state,
+    persist data, call tools, read files, run CEL, or execute code.
+  policy_section:
+    location: flow policy.yaml only
+    field: validation
+    owner: flow-owned PolicyDocument.Validation
+    shape: |
+      validation:
+        <set_name>:
+          classes:
+            <class_name>:
+              disposition: <event_name-or-none>
+          inputs:
+            <input_name>: <scalar_type>
+          rules:
+            - id: <stable-never-reused-id>
+              class: <declared-class>
+              text: <human-readable rule>
+              pin_candidate: true|false
+              check:
+                equal:
+                  left: input.<input_name>
+                  right: input.<input_name>
+    rules:
+    - '`validation:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and
+      MUST NOT appear as `policy.validation`, a prompt variable, or arbitrary policy object data.'
+    - Validation sets are flow-local in this slice. Root/project policy validation, shared validation packs, team packs,
+      marketplace distribution, file-backed rule sets, and external data reads are not implemented.
+    - Rule IDs are stable and never reused within a set. Every set MUST declare at least one class, at least one typed input,
+      and at least one rule.
+    - Every class MUST declare a disposition. Dispositions are consistency metadata for downstream selection-row routing;
+      validation rows themselves do not emit or route.
+    - 'Every rule MUST declare id/class/text, every rule class MUST be declared, every rule MUST explicitly declare
+      `pin_candidate: true|false`, and duplicate rule IDs fail static validation.'
+    - Rule parameters, when present, follow `criteria_contracts` inert scalar/ref rules. They are not expressions and are
+      not consumed by the Slice B equal-only evaluator.
+  evaluator:
+    supported_checks:
+    - equal
+    equal_semantics: |
+      Slice B supports only exact typed equality between declared `input.*` names. Both sides must reference declared inputs
+      with compatible scalar types. Regex, length/range, non_empty, CEL, arithmetic, schema-shape validation, code, tools,
+      I/O, and WASM are outside this slice.
+    inputs: |
+      Validation rule sets are root-agnostic. Handler rows map execution context roots into the declared input signature.
+      Runtime missing inputs, unmapped inputs, unknown sets, or ill-typed inputs are deterministic no-retry failures.
+    result_shape: |
+      Runtime evaluation produces `{valid: bool, violations: [{id, class, content_ref}]}`. A failed equality check appends
+      one violation citing the stable rule ID, class, and violating input references.
+  policy_sheet_validate_rows:
+    field: validate
+    location: handler.rules value row
+    shape: |
+      rules:
+        - id: validate_manifest
+          validate:
+            set: deploy_manifest
+            input:
+              source_ref: payload.source_ref
+              manifest_source_ref: payload.file_manifest.source_ref
+            into: computed.validation.deploy_manifest
+        - id: invalid_manifest
+          when: computed.validation.deploy_manifest.valid == false
+          emit: deploy.manifest_invalid
+    lowering: |
+      `validate:` rows lower to the compute-owned internal validate operation. They run in the value/compute phase before
+      selection rows and bind only `computed.validation.*`. Public `compute.operation: validate` is forbidden.
+    input_roots: '`validate.input` values must be simple explicit paths rooted in payload, entity, event, or computed.'
+    target_namespace: '`validate.into` MUST be a simple explicit `computed.validation.*` path. Entity persistence and generic
+      computed target names are forbidden for validation results.'
+    routing: |
+      Branch routing remains owned by #1713 selection rows. A selection row that consumes an invalid validation result must
+      emit an event declared by the validation set's class dispositions. The validation row never emits, advances state,
+      executes action/activity, fans out, writes data_accumulation, or persists entity state.
+    dead_binding: '`validate.into` bindings must be consumed by a supported downstream condition, emit field, activity input,
+      fan_out, or expression in the same handler; unconsumed bindings fail boot verification.'
+  static_verification:
+    checks:
+    - typed policy.validation shape and flow-local placement
+    - class declaration and disposition completeness
+    - typed input declaration and rule input compatibility
+    - explicit pin_candidate on every rule
+    - equal-only check shape over declared input.* references
+    - validate row set resolution and exact input mapping coverage
+    - validate row lowering to compute-owned internal operation
+    - computed.validation.* target namespace
+    - dead validation-result binding detection
+    - invalid-result routing consistency with declared dispositions
+  split_boundaries:
+  - Schema refinements own pattern, length, range, presence, enum, and same-object equal_to checks.
+  - 'Receiver input pins and static interface negotiation may later absorb `pin_candidate: true` rules; this slice records the
+    marker but does not promote pin declarations.'
+  - Non-equality predicates, richer expression/derive rows, criteria packs, prompt-frame validation, compute/WASM validation,
+    and file-backed validation sets are separate gates.
 runtime_enforcement:
   description: |
     Wave 1 adds authoritative behavioral rules on top of the existing
@@ -1784,6 +1887,23 @@ handler_specification:
             A table miss with `default: fail` is deterministic, no-retry, emits
             a typed diagnostic naming the row ID and unmatched tuple, and
             performs no side effects.
+        validate:
+          status: internal_lowering_only
+          description: |
+            `validate` is the compute-owned internal operation produced by
+            policy-sheet validate value rows. It is not a public
+            `compute.operation` authoring value. Public YAML must author
+            machine validation as a `rules[*].validate` policy-sheet row. The
+            lowered compute plan reads explicit context roots, evaluates the
+            referenced policy.validation set with the Slice B equal-only
+            machine evaluator, and writes the result to a turn-scoped
+            computed.validation.* binding.
+          public_authoring: 'forbidden; `compute.operation: validate` fails closed.'
+          failure_disposition: |
+            Unknown sets, unmapped inputs, missing source paths, ill-typed
+            source values, and malformed rules are deterministic no-retry
+            failures. Equality mismatches produce a computed validation result
+            with stable rule-ID violations and do not retry.
         weighted_average:
           description: Compute a weighted average across tiers of accumulated items.
           required:
@@ -2034,7 +2154,7 @@ handler_specification:
           are payload.*, entity.*, policy.*, event.*, computed.*, and query_entities(...). accumulated.*, fan_out.*,
           and item.* are unavailable in rules.condition. entity.* reads use the pre-rule entity state and the same
           declared-field validation as other rule-phase handler conditions. computed.* reads are turn-scoped
-          values written earlier in the handler compute phase, including lookup value rows.
+          values written earlier in the handler compute phase, including lookup and validate value rows.
         when: >-
           string — first-class policy-sheet selection row for compound relational conditions. Lowers to condition
           and otherwise uses the ordinary selected-branch rule fields. Must not be combined with condition, case, range,
@@ -2059,6 +2179,13 @@ handler_specification:
           in this slice. Lookup rows bind a value and do not select a branch, emit, advance state, execute action/activity,
           fan_out, data_accumulation, or public compute. The row lowers to the compute-owned internal lookup operation
           and runs before selection rows consume computed.*.
+        validate: >-
+          object — first-class policy-sheet value row for machine-evaluated validation against a flow policy.validation
+          set. Public shape is `{set: <validation_set>, input: {<input_name>: <payload|entity|event|computed path>},
+          into: computed.validation.<name>}`. The row maps execution context roots into the validation set's typed input
+          signature, lowers to the compute-owned internal validate operation, binds `{valid, violations}` under
+          computed.validation.*, and runs before selection rows consume the result. It cannot emit, advance state,
+          execute action/activity, fan_out, data_accumulation, or public compute.
         else: boolean true — explicit default row. Lowers to the ordinary else selected branch.
         default: boolean true — alias for else, used when the authoring intent is an explicit policy-sheet default row.
         emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
@@ -2068,8 +2195,8 @@ handler_specification:
         description: string — human-readable note
       policy_sheet_selection_rows:
         scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
-          under `policy_sheet_value_rows`; schema validation, arithmetic/expression derivation, and
-          temporal/join/loop/collection/schedule rows are separate future gates.
+          under `policy_sheet_value_rows`; validate value rows are governed by policy_validation_contracts. Arithmetic/expression
+          derivation and temporal/join/loop/collection/schedule rows are separate future gates.
         stable_identity: Typed policy-sheet rows require stable IDs. The selected row ID is trace-addressable contract
           identity and must survive authoring edits.
         lowering: Accepted selection rows lower before runtime execution into ordinary selected `HandlerRuleEntry` branches.
@@ -2082,17 +2209,20 @@ handler_specification:
           - "`policy` as a co-authorable handler field while `rules` remains authorable"
           - runtime-only table, switch, lookup, threshold, or range interpreters
       policy_sheet_value_rows:
-        scope: Value rows in this slice support only `lookup`, a finite inline exact-match table whose right-hand side is
-          a scalar value. Arithmetic/expression derivation, schema validation, file-backed tables, temporal rows, join rows,
-          loop rows, collection rows, and schedule rows are separate gates.
-        ownership: The policy sheet is the authoring construct. Lookup rows lower to the compute owner; they do not create
-          a second runtime table interpreter and do not make public `compute.lookup` authorable.
+        scope: Value rows in this slice support `lookup`, a finite inline exact-match table whose right-hand side is
+          a scalar value, and `validate`, a machine-evaluated policy.validation row that binds a typed validation result.
+          Arithmetic/expression derivation, file-backed tables, temporal rows, join rows, loop rows, collection rows, and
+          schedule rows are separate gates.
+        ownership: The policy sheet is the authoring construct. Lookup and validate rows lower to the compute owner; they
+          do not create a second runtime table/validation interpreter and do not make public `compute.lookup` or
+          `compute.validate` authorable.
         ordering: The sheet is not a sequential program. Row types lower into their declared runtime phases. Lookup value
-          rows run in compute phase before branch selection; selection rows then read computed.*. Selection outcomes are
-          not values and may not be consumed by lookup rows.
-        target_namespace: lookup.into MUST be an explicit simple computed.* path. Entity persistence is forbidden for
-          derived lookup values; computed.* is turn-scoped and is not written to entity_state unless a separate declared
-          data write explicitly persists a value under its own owner.
+          rows and validate value rows run in compute phase before branch selection; selection rows then read computed.*.
+          Selection outcomes are not values and may not be consumed by value rows.
+        target_namespace: lookup.into MUST be an explicit simple computed.* path. validate.into MUST be an explicit simple
+          computed.validation.* path. Entity persistence is forbidden for derived lookup values and validation results;
+          computed.* is turn-scoped and is not written to entity_state unless a separate declared data write explicitly
+          persists a value under its own owner.
         matching: lookup.on entries MUST use explicit payload.* roots in this slice. Matching is exact typed equality through
           one canonicalization path shared by duplicate-key detection and runtime matching. Key literals are type-checked
           against declared payload field schemas; the string "1" and the number 1 are different keys.
@@ -2102,8 +2232,12 @@ handler_specification:
         diagnostics: >-
           A `default: fail` miss is deterministic no-retry failure with row ID and unmatched tuple in diagnostics, distinct from
           validation failures.
-        dead_binding: lookup.into bindings must be consumed by a supported downstream condition, emit field, activity input,
-          fan_out, or expression in the same handler; unconsumed bindings fail boot verification.
+        validation_rows: >-
+          validate rows reference flow policy.validation sets, map exactly the declared typed inputs, evaluate only Slice B
+          equal checks, and bind `{valid, violations}`. Invalid-result routing is expressed by ordinary selection rows that
+          consume computed.validation.* and emit events declared by the validation set class dispositions.
+        dead_binding: lookup.into and validate.into bindings must be consumed by a supported downstream condition, emit field,
+          activity input, fan_out, or expression in the same handler; unconsumed bindings fail boot verification.
       emit_template_specialization:
         syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
           `emit.from` / `emit.fields`. Each rule then declares `emit.fields` and may declare the same `emit.from` without
@@ -2498,13 +2632,14 @@ handler_specification:
         resolves_to: 'Turn-scoped derived handler values written by compute-owned operations. Public authors may read
           computed.* in rule conditions and expression-value surfaces after the value has been produced by the handler
           dependency graph.'
-        populated_by: 'compute.store_as targets under computed.* and policy-sheet lookup value rows lowering to internal
-          compute lookup plans.'
+        populated_by: 'compute.store_as targets under computed.*, policy-sheet lookup value rows lowering to internal
+          compute lookup plans, and policy-sheet validate value rows lowering to internal compute validation plans.'
         persistence_model: 'Read/write handler context only. computed.* is not persisted entity state, not event payload,
           and not replay authority unless a separate declared owner explicitly writes a computed value to a durable surface.'
         available_in: 'rules.condition, emit.fields CEL expressions, mailbox/action expression values, activity inputs,
           fan_out inputs, and query_entities scoped operands when the runtime context contains the value.'
-        not_available_as: 'lookup.into may write computed.*; entity.* durable cache fallback for lookup values is forbidden.'
+        not_available_as: 'lookup.into may write computed.*; validate.into may write computed.validation.*; entity.* durable
+          cache fallback for lookup or validation values is forbidden.'
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
@@ -5058,6 +5193,13 @@ engine:
         inert params, or non-flow-local placement; an agent criteria ref is malformed or unresolved; an event citation field
         has an unsupported type or missing/invalid allowed_classes; or an agent emits a citation-bearing event without
         declaring the referenced criteria set.
+      when: boot-only
+    - id: policy_sheet_validation_value_rows
+      severity: hard_invalidity
+      scope: per-handler
+      trigger: A policy-sheet validate value row fails to lower through the compute-owned validate operation, writes outside
+        computed.validation.*, references an unresolved policy.validation set, leaves its result unconsumed, or routes an
+        invalid-result branch to an event not declared by the validation set dispositions.
       when: boot-only
     - id: mcp_server_reachable
       severity: warning

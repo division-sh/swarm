@@ -4,8 +4,9 @@ import "strings"
 
 func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
 	out := PolicyDocument{
-		Values:   map[string]PolicyValue{},
-		Criteria: map[string]PolicyCriteriaSet{},
+		Values:     map[string]PolicyValue{},
+		Criteria:   map[string]PolicyCriteriaSet{},
+		Validation: map[string]PolicyValidationSet{},
 	}
 	for key, value := range in.Values {
 		key = strings.TrimSpace(key)
@@ -20,6 +21,13 @@ func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
 			continue
 		}
 		out.Criteria[key] = clonePolicyCriteriaSet(value)
+	}
+	for key, value := range in.Validation {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Validation[key] = clonePolicyValidationSet(value)
 	}
 	return out
 }
@@ -76,6 +84,67 @@ func cloneCriteriaParamValue(value any) any {
 		return out
 	default:
 		return value
+	}
+}
+
+func clonePolicyValidationSet(in PolicyValidationSet) PolicyValidationSet {
+	out := PolicyValidationSet{
+		Classes: map[string]PolicyValidationClass{},
+		Inputs:  map[string]string{},
+	}
+	for key, value := range in.Classes {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Classes[key] = PolicyValidationClass{Disposition: strings.TrimSpace(value.Disposition)}
+	}
+	for key, value := range in.Inputs {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Inputs[key] = strings.TrimSpace(value)
+	}
+	if len(in.Rules) > 0 {
+		out.Rules = make([]PolicyValidationRule, 0, len(in.Rules))
+		for _, rule := range in.Rules {
+			cloned := PolicyValidationRule{
+				ID:     strings.TrimSpace(rule.ID),
+				Class:  strings.TrimSpace(rule.Class),
+				Text:   strings.TrimSpace(rule.Text),
+				Params: map[string]PolicyCriteriaParam{},
+				Check: PolicyValidationCheck{
+					Equal: clonePolicyValidationEqualCheck(rule.Check.Equal),
+				},
+			}
+			if rule.PinCandidate != nil {
+				value := *rule.PinCandidate
+				cloned.PinCandidate = &value
+			}
+			for key, value := range rule.Params {
+				key = strings.TrimSpace(key)
+				if key == "" {
+					continue
+				}
+				cloned.Params[key] = PolicyCriteriaParam{Value: cloneCriteriaParamValue(value.Value)}
+			}
+			if len(cloned.Params) == 0 {
+				cloned.Params = nil
+			}
+			out.Rules = append(out.Rules, cloned)
+		}
+	}
+	return out
+}
+
+func clonePolicyValidationEqualCheck(in *PolicyValidationEqualCheck) *PolicyValidationEqualCheck {
+	if in == nil {
+		return nil
+	}
+	return &PolicyValidationEqualCheck{
+		Left:  strings.TrimSpace(in.Left),
+		Right: strings.TrimSpace(in.Right),
 	}
 }
 

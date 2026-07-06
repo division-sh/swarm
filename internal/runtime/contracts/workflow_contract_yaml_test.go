@@ -861,6 +861,56 @@ rules:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_LowersPolicySheetValidateValueRows(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  - id: validate_manifest
+    validate:
+      set: deploy_manifest
+      input:
+        source_ref: payload.source_ref
+        manifest_source_ref: payload.file_manifest.source_ref
+      into: computed.validation.deploy_manifest
+  - id: invalid_manifest
+    when: computed.validation.deploy_manifest.valid == false
+    emit: deploy.manifest_invalid
+  - id: fallback
+    default: true
+    emit: deploy.manifest_accepted
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := len(handler.Rules), 3; got != want {
+		t.Fatalf("rules len = %d, want %d", got, want)
+	}
+	validateRule := handler.Rules[0]
+	if got := validateRule.PolicyRow.Kind; got != PolicySheetRowKindValidate {
+		t.Fatalf("validate PolicyRow.Kind = %q, want validate", got)
+	}
+	if validateRule.Compute == nil {
+		t.Fatal("validate row Compute = nil")
+	}
+	if got := validateRule.Compute.Operation; got != ComputeOpValidate {
+		t.Fatalf("validate Compute.Operation = %q, want validate", got)
+	}
+	if got := validateRule.Compute.StoreAs; got != "computed.validation.deploy_manifest" {
+		t.Fatalf("validate StoreAs = %q, want computed.validation.deploy_manifest", got)
+	}
+	if validateRule.Compute.Validation == nil {
+		t.Fatal("validate Compute.Validation = nil")
+	}
+	if got := validateRule.Compute.Validation.Set; got != "deploy_manifest" {
+		t.Fatalf("validate set = %q, want deploy_manifest", got)
+	}
+	if got := validateRule.Compute.Validation.Input["source_ref"]; got != "payload.source_ref" {
+		t.Fatalf("validate input source_ref = %q, want payload.source_ref", got)
+	}
+	if got := handler.Rules[1].Condition; got != `computed.validation.deploy_manifest.valid == false` {
+		t.Fatalf("consumer condition = %q", got)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
@@ -1159,6 +1209,15 @@ rules:
 compute:
   operation: lookup
   store_as: computed.template_path
+`,
+			contains: "internal to policy-sheet value rows",
+		},
+		{
+			name: "public compute validate",
+			body: `
+compute:
+  operation: validate
+  store_as: computed.validation.deploy_manifest
 `,
 			contains: "internal to policy-sheet value rows",
 		},

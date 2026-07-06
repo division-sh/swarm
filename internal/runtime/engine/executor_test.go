@@ -1608,6 +1608,130 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 	}
 }
 
+func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
+	pinCandidate := true
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Validation: map[string]runtimecontracts.PolicyValidationSet{
+			"deploy_manifest": {
+				Classes: map[string]runtimecontracts.PolicyValidationClass{
+					"invalid": {Disposition: "deploy.manifest_invalid"},
+				},
+				Inputs: map[string]string{
+					"source_ref":          "string",
+					"manifest_source_ref": "string",
+				},
+				Rules: []runtimecontracts.PolicyValidationRule{{
+					ID:           "VR-001",
+					Class:        "invalid",
+					Text:         "Manifest source ref must match request source ref.",
+					PinCandidate: &pinCandidate,
+					Check: runtimecontracts.PolicyValidationCheck{
+						Equal: &runtimecontracts.PolicyValidationEqualCheck{
+							Left:  "input.source_ref",
+							Right: "input.manifest_source_ref",
+						},
+					},
+				}},
+			},
+		}},
+	})
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       source,
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`computed.validation.deploy_manifest.valid == false`: func(base BaseContext) (bool, error) {
+			validation, _ := base.Computed.Raw()["validation"].(map[string]any)
+			deploy, _ := validation["deploy_manifest"].(map[string]any)
+			return deploy["valid"] == false, nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	validation := &runtimecontracts.ComputeValidationSpec{
+		RowID: "validate_manifest",
+		Set:   "deploy_manifest",
+		Into:  "computed.validation.deploy_manifest",
+		Input: map[string]string{
+			"source_ref":          "payload.source_ref",
+			"manifest_source_ref": "payload.file_manifest.source_ref",
+		},
+		InputPaths: map[string]runtimepaths.Path{
+			"source_ref":          runtimepaths.Parse("payload.source_ref"),
+			"manifest_source_ref": runtimepaths.Parse("payload.file_manifest.source_ref"),
+		},
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("deploy-node"),
+		Event: eventtest.RootIngress(
+			"evt-1",
+			events.EventType("deploy.requested"),
+			"",
+			"",
+			mustEncodeJSON(t, map[string]any{
+				"source_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"file_manifest": map[string]any{
+					"source_ref": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				},
+			}),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		),
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					ID:        "validate_manifest",
+					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindValidate, Validation: validation},
+					Compute: &runtimecontracts.ComputeSpec{
+						Operation:  runtimecontracts.ComputeOpValidate,
+						StoreAs:    "computed.validation.deploy_manifest",
+						Validation: validation,
+					},
+				},
+				{
+					ID:        "invalid_manifest",
+					Condition: `computed.validation.deploy_manifest.valid == false`,
+					Emit:      runtimecontracts.EmitSpec{Event: "deploy.manifest_invalid"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	validationResult, _ := result.Computed["validation"].(map[string]any)
+	deployResult, _ := validationResult["deploy_manifest"].(map[string]any)
+	if got := deployResult["valid"]; got != false {
+		t.Fatalf("validation valid = %#v, want false", got)
+	}
+	violations, _ := deployResult["violations"].([]any)
+	if len(violations) != 1 {
+		t.Fatalf("violations len = %d, want 1: %#v", len(violations), deployResult["violations"])
+	}
+	if got := result.RuleID; got != "invalid_manifest" {
+		t.Fatalf("selected rule = %q, want invalid_manifest", got)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("emit intents = %d, want 1", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type()); got != "deploy.manifest_invalid" {
+		t.Fatalf("emit event = %q, want deploy.manifest_invalid", got)
+	}
+	if _, ok := result.StateMutation.Metadata["validation"]; ok {
+		t.Fatalf("validation result leaked into state mutation metadata: %#v", result.StateMutation.Metadata)
+	}
+}
+
 func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotResolveAtRuntime(t *testing.T) {
 	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
 	exec, err := NewExecutor(RuntimeDependencies{
