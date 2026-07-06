@@ -153,7 +153,10 @@ func promptVariableSources(promptsDir string) []string {
 
 func isPolicyPromptVariableSource(path string) bool {
 	path = filepath.ToSlash(filepath.Clean(path))
-	return strings.HasSuffix(path, "/policy.yaml") || strings.HasSuffix(path, "/runtime/policy.yaml")
+	return path == "policy.yaml" ||
+		path == "runtime/policy.yaml" ||
+		strings.HasSuffix(path, "/policy.yaml") ||
+		strings.HasSuffix(path, "/runtime/policy.yaml")
 }
 
 func renderPromptTemplate(promptText string, vars map[string]any) string {
