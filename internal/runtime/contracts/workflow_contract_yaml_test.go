@@ -1093,6 +1093,51 @@ rules:
 			contains: "duplicate lookup key",
 		},
 		{
+			name: "lookup entity root unsupported",
+			body: `
+rules:
+  - id: entity_lookup
+    lookup:
+      on: entity.kind
+      entries:
+        - key: service
+          value: templates/service/go
+      into: computed.template_path
+      default: fail
+`,
+			contains: `unsupported root "entity"`,
+		},
+		{
+			name: "lookup policy root unsupported",
+			body: `
+rules:
+  - id: policy_lookup
+    lookup:
+      on: policy.kind
+      entries:
+        - key: service
+          value: templates/service/go
+      into: computed.template_path
+      default: fail
+`,
+			contains: `unsupported root "policy"`,
+		},
+		{
+			name: "lookup event root unsupported",
+			body: `
+rules:
+  - id: event_lookup
+    lookup:
+      on: event.kind
+      entries:
+        - key: service
+          value: templates/service/go
+      into: computed.template_path
+      default: fail
+`,
+			contains: `unsupported root "event"`,
+		},
+		{
 			name: "lookup branch output",
 			body: `
 rules:
