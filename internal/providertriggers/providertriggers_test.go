@@ -387,6 +387,138 @@ func TestTwilioManifestRejectsAmbiguousOrUnsupportedCallbacks(t *testing.T) {
 	}
 }
 
+func TestShopifyManifestAcceptsRawBodyBase64Signature(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
+	req := Request{
+		Provider: "shopify",
+		Target: Target{
+			EntityID:      "entity-1",
+			WebhookSecret: "shopify-secret",
+		},
+		Body:      body,
+		Headers:   make(http.Header),
+		Payload:   map[string]any{"id": float64(123), "line_items": []any{map[string]any{"sku": "abc"}}},
+		Received:  now,
+		UserAgent: "shopify-test",
+	}
+	req.Headers.Set("X-Shopify-Hmac-Sha256", shopifySignatureBase64("shopify-secret", body))
+	req.Headers.Set("X-Shopify-Webhook-Id", "webhook-123")
+	req.Headers.Set("X-Shopify-Topic", "orders/create")
+
+	delivery, err := DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Shopify webhook: %v", err)
+	}
+	if delivery.ProviderEventID != "webhook-123" {
+		t.Fatalf("ProviderEventID = %q, want webhook-123", delivery.ProviderEventID)
+	}
+	if delivery.ProviderEventType != "orders_create" {
+		t.Fatalf("ProviderEventType = %q, want orders_create", delivery.ProviderEventType)
+	}
+	if delivery.EventName != "inbound.shopify" {
+		t.Fatalf("EventName = %q, want inbound.shopify", delivery.EventName)
+	}
+	if !delivery.AcknowledgeBeforeDispatch {
+		t.Fatal("Shopify delivery did not request durable_before_dispatch acknowledgement")
+	}
+	headers, ok := delivery.Payload["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+	}
+	if headers["shopify_webhook_id"] != "webhook-123" || headers["shopify_topic"] != "orders_create" {
+		t.Fatalf("headers = %+v, want Shopify manifest metadata", headers)
+	}
+	encoded := fmtPayload(delivery.Payload)
+	if strings.Contains(encoded, "shopify-secret") {
+		t.Fatal("Shopify signing secret leaked into delivery payload")
+	}
+}
+
+func TestShopifyManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	validBody := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
+	validRequest := func() Request {
+		req := Request{
+			Provider: "shopify",
+			Target: Target{
+				EntityID:      "entity-1",
+				WebhookSecret: "shopify-secret",
+			},
+			Body:     validBody,
+			Headers:  make(http.Header),
+			Payload:  map[string]any{"id": float64(123), "line_items": []any{map[string]any{"sku": "abc"}}},
+			Received: now,
+		}
+		req.Headers.Set("X-Shopify-Hmac-Sha256", shopifySignatureBase64("shopify-secret", validBody))
+		req.Headers.Set("X-Shopify-Webhook-Id", "webhook-123")
+		req.Headers.Set("X-Shopify-Topic", "orders/create")
+		return req
+	}
+	for _, tc := range []struct {
+		name       string
+		configure  func(Request) Request
+		wantStatus int
+	}{
+		{
+			name: "missing signature",
+			configure: func(req Request) Request {
+				req.Headers.Del("X-Shopify-Hmac-Sha256")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "invalid signature",
+			configure: func(req Request) Request {
+				req.Headers.Set("X-Shopify-Hmac-Sha256", shopifySignatureBase64("wrong-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "raw body mutation",
+			configure: func(req Request) Request {
+				signedBody := []byte(`{"line_items":[{"sku":"abc"}],"id":123}`)
+				req.Headers.Set("X-Shopify-Hmac-Sha256", shopifySignatureBase64("shopify-secret", signedBody))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing webhook id",
+			configure: func(req Request) Request {
+				req.Headers.Del("X-Shopify-Webhook-Id")
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing topic",
+			configure: func(req Request) Request {
+				req.Headers.Del("X-Shopify-Topic")
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "non object payload",
+			configure: func(req Request) Request {
+				req.Body = []byte(`[{"id":123}]`)
+				req.Payload = []any{map[string]any{"id": float64(123)}}
+				req.Headers.Set("X-Shopify-Hmac-Sha256", shopifySignatureBase64("shopify-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DefaultRegistry().Accept(tc.configure(validRequest()))
+			requireProviderTriggerError(t, err, tc.wantStatus)
+		})
+	}
+}
+
 func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -490,6 +622,12 @@ func TestRegistryRejectsEmptyProvider(t *testing.T) {
 		Payload: map[string]any{},
 	})
 	requireProviderTriggerError(t, err, http.StatusBadRequest)
+}
+
+func TestNormalizeEventTokenNormalizesProviderTopicSeparators(t *testing.T) {
+	if got := NormalizeEventToken("orders/create"); got != "orders_create" {
+		t.Fatalf("NormalizeEventToken = %q, want orders_create", got)
+	}
 }
 
 func newHostileRegistry(t *testing.T) *Registry {
@@ -651,6 +789,12 @@ func twilioSignedPayload(requestURL string, form url.Values) string {
 		b.WriteString(form.Get(key))
 	}
 	return b.String()
+}
+
+func shopifySignatureBase64(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func cloneValues(values url.Values) url.Values {

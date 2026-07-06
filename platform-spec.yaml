@@ -5863,6 +5863,25 @@ tool_model:
       event_type: >
         The selected Twilio messaging callback slice emits literal provider_event_type `message_received` in payload
         metadata. The canonical emitted Swarm event name is literal `inbound.twilio`, not a dynamic template.
+    - provider: shopify
+      issue: "#1728"
+      signature: >
+        Shopify webhook deliveries require a configured signing secret and a valid `X-Shopify-Hmac-Sha256`
+        HMAC-SHA256 Base64 signature over the exact raw request body received by the API listener. The manifest
+        interpreter MUST verify the raw bytes before decoded JSON payload interpretation can influence delivery
+        admission. Missing signing secret, missing signature, invalid signature, or any parsed/re-encoded JSON
+        canonicalization mismatch fails before dedupe marker persistence and before event publish.
+      delivery_id: >
+        `X-Shopify-Webhook-Id` is the authoritative provider delivery id and dedupe-key input for configured Shopify
+        triggers. Missing webhook id fails before dedupe marker persistence.
+      acknowledgement: >
+        Accepted Shopify deliveries return success after the inbound dedupe marker, canonical event record, recipient
+        manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement MUST NOT
+        wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        `X-Shopify-Topic` is the authoritative provider event type and is emitted in payload metadata as normalized
+        `provider_event_type`. The canonical emitted Swarm event name is literal `inbound.shopify`, not a dynamic
+        template. Missing topic fails before dedupe marker persistence.
     raw_webhook_mode: >
       Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
       does not prove provider-trigger adapter closure. Configured providers MUST consume their manifest interpreter owner
