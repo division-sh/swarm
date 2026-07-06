@@ -663,6 +663,195 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	waitForInboundBusQuiescence(t, bus)
 }
 
+func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		runID             string
+		entityID          string
+		flowInstance      string
+		provider          string
+		webhookSecret     string
+		providerEventID   string
+		providerEventType string
+		agentID           string
+		providerEventName string
+		body              []byte
+		newRequest        func(path string, secret string, body []byte) *http.Request
+	}{
+		{
+			name:              "typeform",
+			runID:             "49000000-0000-0000-0000-000000000001",
+			entityID:          "49000000-0000-0000-0000-000000000002",
+			flowInstance:      "typeform-provider-trigger-instance",
+			provider:          "typeform",
+			webhookSecret:     "typeform-secret",
+			providerEventID:   "tf-evt-pg-123",
+			providerEventType: "form_response",
+			agentID:           "typeform-webhook-subscriber",
+			providerEventName: "inbound.typeform",
+			body:              []byte(`{"event_id":"tf-evt-pg-123","event_type":"form_response","form_response":{"token":"abc"}}`),
+			newRequest:        newSignedTypeformRequest,
+		},
+		{
+			name:              "intercom",
+			runID:             "4a000000-0000-0000-0000-000000000001",
+			entityID:          "4a000000-0000-0000-0000-000000000002",
+			flowInstance:      "intercom-provider-trigger-instance",
+			provider:          "intercom",
+			webhookSecret:     "intercom-secret",
+			providerEventID:   "notif_pg_123",
+			providerEventType: "conversation_user_created",
+			agentID:           "intercom-webhook-subscriber",
+			providerEventName: "inbound.intercom",
+			body:              []byte(`{"id":"notif_pg_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`),
+			newRequest:        newSignedIntercomRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+
+			ctx := runtimecorrelation.WithRunID(context.Background(), tc.runID)
+			pg := &store.PostgresStore{DB: db}
+			seedPostgresInboundGatewayRuntime(t, ctx, db, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+
+			bus, err := runtimebus.NewEventBus(pg)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			ch := bus.Subscribe(tc.agentID, events.EventType(tc.providerEventName))
+			defer bus.Unsubscribe(tc.agentID)
+
+			g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+
+			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
+			req = req.WithContext(ctx)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+			}
+			if got := countPostgresInboundMarkers(t, ctx, db, tc.providerEventID, tc.entityID, tc.provider); got != 1 {
+				t.Fatalf("inbound marker rows = %d, want 1", got)
+			}
+			eventID := loadPostgresInboundProviderEventID(t, ctx, db, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID)
+			if got := countPostgresInboundProviderEvents(t, ctx, db, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID); got != 1 {
+				t.Fatalf("provider event rows = %d, want 1", got)
+			}
+			if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != tc.providerEventType {
+				t.Fatalf("provider_event_type = %q, want %s", got, tc.providerEventType)
+			}
+			if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, tc.agentID); got != 1 {
+				t.Fatalf("agent delivery rows = %d, want 1", got)
+			}
+			select {
+			case got := <-ch:
+				if got.ID() != eventID || got.Type() != events.EventType(tc.providerEventName) {
+					t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, tc.providerEventName)
+				}
+			default:
+				// Typeform and Intercom use durable_before_dispatch; this proof is
+				// about persisted evidence and supported store admission.
+			}
+			waitForInboundBusQuiescence(t, bus)
+		})
+	}
+}
+
+func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		runID             string
+		entityID          string
+		flowInstance      string
+		provider          string
+		webhookSecret     string
+		providerEventID   string
+		providerEventType string
+		agentID           string
+		providerEventName string
+		body              []byte
+		newRequest        func(path string, secret string, body []byte) *http.Request
+	}{
+		{
+			name:              "typeform",
+			runID:             "4b000000-0000-0000-0000-000000000001",
+			entityID:          "4b000000-0000-0000-0000-000000000002",
+			flowInstance:      "typeform-sqlite-provider-trigger-instance",
+			provider:          "typeform",
+			webhookSecret:     "typeform-secret",
+			providerEventID:   "tf-evt-sqlite-123",
+			providerEventType: "form_response",
+			agentID:           "typeform-sqlite-webhook-subscriber",
+			providerEventName: "inbound.typeform",
+			body:              []byte(`{"event_id":"tf-evt-sqlite-123","event_type":"form_response","form_response":{"token":"abc"}}`),
+			newRequest:        newSignedTypeformRequest,
+		},
+		{
+			name:              "intercom",
+			runID:             "4c000000-0000-0000-0000-000000000001",
+			entityID:          "4c000000-0000-0000-0000-000000000002",
+			flowInstance:      "intercom-sqlite-provider-trigger-instance",
+			provider:          "intercom",
+			webhookSecret:     "intercom-secret",
+			providerEventID:   "notif_sqlite_123",
+			providerEventType: "conversation_user_created",
+			agentID:           "intercom-sqlite-webhook-subscriber",
+			providerEventName: "inbound.intercom",
+			body:              []byte(`{"id":"notif_sqlite_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`),
+			newRequest:        newSignedIntercomRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := runtimecorrelation.WithRunID(context.Background(), tc.runID)
+			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+			seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+
+			bus, err := runtimebus.NewEventBus(sqliteStore)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			ch := bus.Subscribe(tc.agentID, events.EventType(tc.providerEventName))
+			defer bus.Unsubscribe(tc.agentID)
+
+			g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+
+			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
+			req = req.WithContext(ctx)
+			rec := httptest.NewRecorder()
+			g.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusAccepted {
+				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+			}
+			if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, tc.providerEventID, tc.entityID, tc.provider); got != 1 {
+				t.Fatalf("inbound marker rows = %d, want 1", got)
+			}
+			eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID)
+			if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.providerEventName, tc.providerEventID); got != 1 {
+				t.Fatalf("provider event rows = %d, want 1", got)
+			}
+			if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != tc.providerEventType {
+				t.Fatalf("provider_event_type = %q, want %s", got, tc.providerEventType)
+			}
+			if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, tc.agentID); got != 1 {
+				t.Fatalf("agent delivery rows = %d, want 1", got)
+			}
+			select {
+			case got := <-ch:
+				if got.ID() != eventID || got.Type() != events.EventType(tc.providerEventName) {
+					t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, tc.providerEventName)
+				}
+			default:
+				// Typeform and Intercom use durable_before_dispatch; this proof is
+				// about persisted evidence and supported store admission.
+			}
+			waitForInboundBusQuiescence(t, bus)
+		})
+	}
+}
+
 func seedPostgresInboundGatewayRuntime(
 	t *testing.T,
 	ctx context.Context,
@@ -1079,4 +1268,28 @@ func shopifyWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedTypeformRequest(path string, secret string, body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("Typeform-Signature", typeformWebhookSignature(secret, body))
+	return req
+}
+
+func typeformWebhookSignature(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return "sha256=" + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedIntercomRequest(path string, secret string, body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("X-Hub-Signature", intercomWebhookSignature(secret, body))
+	return req
+}
+
+func intercomWebhookSignature(secret string, body []byte) string {
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return "sha1=" + hex.EncodeToString(mac.Sum(nil))
 }

@@ -5882,6 +5882,42 @@ tool_model:
         `X-Shopify-Topic` is the authoritative provider event type and is emitted in payload metadata as normalized
         `provider_event_type`. The canonical emitted Swarm event name is literal `inbound.shopify`, not a dynamic
         template. Missing topic fails before dedupe marker persistence.
+    - provider: typeform
+      issue: "#1733"
+      signature: >
+        Typeform webhook deliveries require a configured signing secret and a valid `Typeform-Signature` HMAC-SHA256
+        Base64 signature over the exact raw request body received by the API listener. The header value MUST use the
+        `sha256=` prefix. Missing signing secret, missing signature, invalid signature, or any parsed/re-encoded JSON
+        canonicalization mismatch fails before dedupe marker persistence and before event publish.
+      delivery_id: >
+        Payload `event_id` is the authoritative provider delivery id and dedupe-key input for configured Typeform
+        triggers. Missing `event_id` fails before dedupe marker persistence.
+      acknowledgement: >
+        Accepted Typeform deliveries return success after the inbound dedupe marker, canonical event record, recipient
+        manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement MUST NOT
+        wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        Payload `event_type` is the authoritative provider event type and is emitted in payload metadata as normalized
+        `provider_event_type`. The canonical emitted Swarm event name is literal `inbound.typeform`, not a dynamic
+        template. Missing `event_type` fails before dedupe marker persistence.
+    - provider: intercom
+      issue: "#1733"
+      signature: >
+        Intercom webhook deliveries require a configured signing secret and a valid `X-Hub-Signature` HMAC-SHA1 hex
+        signature over the exact raw request body received by the API listener. The header value MUST use the `sha1=`
+        prefix. Missing signing secret, missing signature, invalid signature, or any parsed/re-encoded JSON
+        canonicalization mismatch fails before dedupe marker persistence and before event publish.
+      delivery_id: >
+        Payload `id` is the authoritative provider delivery id and dedupe-key input for configured Intercom triggers.
+        Missing `id` fails before dedupe marker persistence.
+      acknowledgement: >
+        Accepted Intercom deliveries return success after the inbound dedupe marker, canonical event record, recipient
+        manifest, and subscribed replay scope are durably persisted or dispatch-queued. The HTTP acknowledgement MUST NOT
+        wait for post-commit pipeline dispatch, system-node handler execution, or agent delivery completion.
+      event_type: >
+        Payload `topic` is the authoritative provider event type and is emitted in payload metadata as normalized
+        `provider_event_type`. The canonical emitted Swarm event name is literal `inbound.intercom`, not a dynamic
+        template. Missing `topic` fails before dedupe marker persistence.
     raw_webhook_mode: >
       Unknown providers may continue through the raw generic webhook mode, but that path is a different semantic concept and
       does not prove provider-trigger adapter closure. Configured providers MUST consume their manifest interpreter owner

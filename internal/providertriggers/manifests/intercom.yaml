@@ -1,0 +1,28 @@
+provider: intercom
+payload_object_required: true
+payload_object_error: intercom payload object is required
+secret:
+  required: true
+signature:
+  type: hmac_sha1
+  header: X-Hub-Signature
+  prefix: sha1=
+  signed_payload: raw_body
+  missing_error: intercom signature is required
+  invalid_error: invalid intercom signature
+delivery_id:
+  json_path: $.id
+  required: true
+  missing_error: intercom notification id is required
+event_type:
+  json_path: $.topic
+  required: true
+  missing_error: intercom topic is required
+event_name:
+  literal: inbound.intercom
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  intercom_notification_id: delivery_id
+  intercom_topic: event_type

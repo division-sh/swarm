@@ -1,0 +1,29 @@
+provider: typeform
+payload_object_required: true
+payload_object_error: typeform payload object is required
+secret:
+  required: true
+signature:
+  type: hmac_sha256
+  encoding: base64
+  header: Typeform-Signature
+  prefix: sha256=
+  signed_payload: raw_body
+  missing_error: typeform signature is required
+  invalid_error: invalid typeform signature
+delivery_id:
+  json_path: $.event_id
+  required: true
+  missing_error: typeform event_id is required
+event_type:
+  json_path: $.event_type
+  required: true
+  missing_error: typeform event_type is required
+event_name:
+  literal: inbound.typeform
+ack:
+  mode: durable_before_dispatch
+metadata:
+  user_agent: user_agent
+  typeform_event_id: delivery_id
+  typeform_event_type: event_type
