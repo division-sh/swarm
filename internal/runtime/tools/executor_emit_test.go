@@ -176,6 +176,145 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	}
 }
 
+func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
+	tests := []struct {
+		name      string
+		payload   map[string]any
+		wantError string
+	}{
+		{
+			name: "valid single citation",
+			payload: map[string]any{
+				"cite": "FX-HARD-01",
+			},
+		},
+		{
+			name: "valid list citation",
+			payload: map[string]any{
+				"cites": []any{"FX-HARD-01"},
+			},
+		},
+		{
+			name: "unknown id",
+			payload: map[string]any{
+				"cite": "FX-MISSING",
+			},
+			wantError: `unknown criteria id "FX-MISSING"`,
+		},
+		{
+			name: "class mismatch",
+			payload: map[string]any{
+				"cite": "FX-SOFT-04",
+			},
+			wantError: `has class "soft", not one of allowed classes`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			exec, bus, actor := criteriaCitationEmitTestExecutor()
+			_, err := exec.handleEmitTool(context.Background(), actor, "emit_cto_spec_vetoed", tc.payload)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("handleEmitTool: %v", err)
+				}
+				if bus.count != 1 {
+					t.Fatalf("publish count = %d, want 1", bus.count)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("handleEmitTool error = nil, want criteria citation rejection")
+			}
+			runtimeErr, ok := AsRuntimeError(err)
+			if !ok || runtimeErr == nil {
+				t.Fatalf("error = %#v, want runtime error", err)
+			}
+			if runtimeErr.Code != "criteria_citation_validation_failed" {
+				t.Fatalf("runtime error code = %q, want criteria_citation_validation_failed", runtimeErr.Code)
+			}
+			if runtimeErr.Retryable {
+				t.Fatalf("runtime error retryable = true, want false")
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("handleEmitTool error = %v, want %q", err, tc.wantError)
+			}
+			if bus.count != 0 {
+				t.Fatalf("publish count = %d, want 0", bus.count)
+			}
+		})
+	}
+}
+
+func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.AgentConfig) {
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
+		Policy: runtimecontracts.PolicyDocument{
+			Criteria: map[string]runtimecontracts.PolicyCriteriaSet{
+				"feasibility_exclusions": {
+					Classes: map[string]runtimecontracts.PolicyCriteriaClass{
+						"hard": {Disposition: "cto.spec_vetoed"},
+						"soft": {Disposition: "cto.spec_revision_needed"},
+					},
+					Rules: []runtimecontracts.PolicyCriteriaRule{{
+						ID:    "FX-HARD-01",
+						Class: "hard",
+						Text:  "Requires regulated real-time integration.",
+					}, {
+						ID:    "FX-SOFT-04",
+						Class: "soft",
+						Text:  "Missing MVP spec.",
+					}},
+				},
+			},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"cto.spec_vetoed": {
+				Payload: runtimecontracts.EventPayloadSpec{
+					Type: "object",
+					Properties: map[string]runtimecontracts.EventFieldSpec{
+						"cite": {
+							Type: "text",
+							Citation: runtimecontracts.CriteriaCitation{
+								Criteria:       "feasibility_exclusions",
+								AllowedClasses: []string{"hard"},
+							},
+						},
+						"cites": {
+							Type: "[text]",
+							Citation: runtimecontracts.CriteriaCitation{
+								Criteria:       "feasibility_exclusions",
+								AllowedClasses: []string{"hard"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"validation": &root.Children[0],
+			},
+		},
+	}
+	source := semanticview.Wrap(bundle)
+	emitRegistry := NewEmitRegistry(source, nil)
+	bus := &publishBusCapture{}
+	exec := NewExecutorWithOptions(bus, nil, ExecutorOptions{WorkflowSource: source, EmitRegistry: emitRegistry})
+	actor := models.AgentConfig{
+		ID:         "cto-agent",
+		Role:       "cto",
+		Mode:       "validation",
+		FlowPath:   "validation",
+		EmitEvents: []string{"cto.spec_vetoed"},
+		Criteria:   []string{"feasibility_exclusions"},
+	}
+	return exec, bus, actor
+}
+
 func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{

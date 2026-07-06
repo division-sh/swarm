@@ -3,6 +3,8 @@ package tools
 import (
 	"sort"
 	"strings"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 func SnapshotEmitSchemas(registry map[string]EmitSchema) map[string]EmitSchema {
@@ -12,7 +14,29 @@ func SnapshotEmitSchemas(registry map[string]EmitSchema) map[string]EmitSchema {
 		if schemaCopy == nil {
 			schemaCopy = map[string]any{}
 		}
-		out[eventType] = EmitSchema{Description: entry.Description, Schema: schemaCopy}
+		out[eventType] = EmitSchema{
+			Description:    entry.Description,
+			Schema:         schemaCopy,
+			CitationFields: cloneEmitCriteriaCitationMap(entry.CitationFields),
+		}
+	}
+	return out
+}
+
+func cloneEmitCriteriaCitationMap(in map[string]runtimecontracts.CriteriaCitation) map[string]runtimecontracts.CriteriaCitation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]runtimecontracts.CriteriaCitation, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = runtimecontracts.CriteriaCitation{
+			Criteria:       strings.TrimSpace(value.Criteria),
+			AllowedClasses: UniqueNonEmpty(value.AllowedClasses),
+		}
 	}
 	return out
 }

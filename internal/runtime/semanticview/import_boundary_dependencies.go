@@ -373,6 +373,16 @@ func mergePolicyValues(dst *runtimecontracts.PolicyDocument, src runtimecontract
 		}
 		dst.Values[key] = clonePolicyValue(value)
 	}
+	if dst.Criteria == nil {
+		dst.Criteria = map[string]runtimecontracts.PolicyCriteriaSet{}
+	}
+	for key, value := range src.Criteria {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		dst.Criteria[key] = clonePolicyCriteriaSet(value)
+	}
 }
 
 func deletePolicyValueAtPath(doc *runtimecontracts.PolicyDocument, path string) {
@@ -421,13 +431,56 @@ func deleteNestedValue(root map[string]any, path string) {
 }
 
 func clonePolicyDocument(in runtimecontracts.PolicyDocument) runtimecontracts.PolicyDocument {
-	out := runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{}}
+	out := runtimecontracts.PolicyDocument{
+		Values:   map[string]runtimecontracts.PolicyValue{},
+		Criteria: map[string]runtimecontracts.PolicyCriteriaSet{},
+	}
 	for key, value := range in.Values {
 		key = strings.TrimSpace(key)
 		if key == "" {
 			continue
 		}
 		out.Values[key] = clonePolicyValue(value)
+	}
+	for key, value := range in.Criteria {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Criteria[key] = clonePolicyCriteriaSet(value)
+	}
+	return out
+}
+
+func clonePolicyCriteriaSet(in runtimecontracts.PolicyCriteriaSet) runtimecontracts.PolicyCriteriaSet {
+	out := runtimecontracts.PolicyCriteriaSet{
+		Classes: map[string]runtimecontracts.PolicyCriteriaClass{},
+		Rules:   make([]runtimecontracts.PolicyCriteriaRule, 0, len(in.Rules)),
+	}
+	for key, value := range in.Classes {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Classes[key] = runtimecontracts.PolicyCriteriaClass{
+			Disposition: strings.TrimSpace(value.Disposition),
+		}
+	}
+	for _, rule := range in.Rules {
+		cloned := runtimecontracts.PolicyCriteriaRule{
+			ID:     strings.TrimSpace(rule.ID),
+			Class:  strings.TrimSpace(rule.Class),
+			Text:   strings.TrimSpace(rule.Text),
+			Params: map[string]runtimecontracts.PolicyCriteriaParam{},
+		}
+		for key, value := range rule.Params {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			cloned.Params[key] = runtimecontracts.PolicyCriteriaParam{Value: cloneAny(value.Value)}
+		}
+		out.Rules = append(out.Rules, cloned)
 	}
 	return out
 }
@@ -466,7 +519,10 @@ func cloneAny(value any) any {
 }
 
 func emptyPolicyDocument() runtimecontracts.PolicyDocument {
-	return runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{}}
+	return runtimecontracts.PolicyDocument{
+		Values:   map[string]runtimecontracts.PolicyValue{},
+		Criteria: map[string]runtimecontracts.PolicyCriteriaSet{},
+	}
 }
 
 func normalizeDependencySet(values []string) map[string]struct{} {

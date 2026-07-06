@@ -1127,6 +1127,9 @@ type_system:
           min: 0
           max: 100
         equal_to: sibling_field
+        citation:                 # event payload fields only
+          criteria: feasibility_exclusions
+          allowed_classes: [hard, soft]
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
   restrictions:
@@ -1317,6 +1320,94 @@ event_payload_migration:
     - jsonb payload fields
     - inline type: object without declared shape
     - author-declared envelope fields
+criteria_contracts:
+  status: merge_bearing_runtime_behavior
+  implementation_slice: '#1717'
+  description: |
+    Flow-local agent-judged criteria are stable-ID rule sets declared as a
+    typed `criteria:` section inside the owning flow's `policy.yaml`. Criteria
+    are contract artifacts, not prompt prose, generic policy scalar values,
+    flow `data/` files, or `read_flow_data` conventions.
+  policy_section:
+    location: flow policy.yaml only
+    field: criteria
+    owner: flow-owned PolicyDocument.Criteria
+    shape: |
+      criteria:
+        <set_name>:
+          classes:
+            <class_name>:
+              disposition: <event_name-or-none>
+          rules:
+            - id: <stable-never-reused-id>
+              class: <declared-class>
+              text: <human-readable rule>
+              params:
+                <name>: <typed-scalar-or-policy-scalar-ref>
+    rules:
+    - '`criteria:` is a closed typed policy section. It is decoded separately from generic `PolicyDocument.Values` and MUST
+      NOT appear as `policy.criteria`, a prompt variable, or arbitrary policy object data.'
+    - Criteria sets are flow-local in this slice. Root/project policy criteria, project-shared packs, team packs, and
+      marketplace distribution are not implemented.
+    - Rule IDs are stable and never reused within a set. Historical events cite the bundle/contract version active when
+      emitted; this slice does not add a separate criteria-versioning subsystem.
+    - Each set MUST declare at least one class, every class MUST have a disposition, every rule MUST have id/class/text,
+      every rule class MUST be declared, and duplicate rule IDs fail static validation.
+    - Parameters are inert typed scalar literals or references to sibling scalar policy values using `policy.<key>`.
+      Criteria parameters are not CEL, predicates, machine-evaluated checks, or a general expression language.
+  agent_references:
+    field: criteria
+    location: flow-scoped agents.yaml entries
+    syntax: 'criteria: [feasibility_exclusions]'
+    rules:
+    - Agent criteria refs are short set names resolved against the agent's owning flow policy.criteria section. Dotted paths,
+      path separators, duplicates, empty refs, and unresolved refs fail static validation.
+    - Root/project-scoped agents cannot declare criteria in this slice.
+  delivery:
+    generated_context: |
+      Agents that declare criteria receive a deterministic generated "Contract Criteria" prompt/context section rendered from
+      the resolved contract. The generated section is the only PR1 delivery path and is tested as stable so later prompt-frame
+      generation (#1718) can absorb it without changing behavior.
+    forbidden_bypasses:
+    - generic policy prompt variables
+    - '`policy.criteria` expression reads'
+    - flow `data/` files
+    - '`read_flow_data`'
+    - prompt-local hardcoded criteria IDs as authority
+    fail_closed: Runtime inability to deliver an otherwise valid referenced set fails closed before agent judgment proceeds.
+  event_citations:
+    field_metadata: |
+      Event payload fields may declare citation metadata:
+
+      cites:
+        type: text       # or [text] / list<text>
+        citation:
+          criteria: feasibility_exclusions
+          allowed_classes: [hard]
+    type_rule: Citation fields must be text/string or list-of-text/list-of-string.
+    compatibility_rule: |
+      PR1 uses explicit `allowed_classes` on each citation field. The end-state may derive allowed classes from the
+      class-to-disposition mapping, but until that is promoted, missing `allowed_classes` is invalid.
+    emit_boundary: |
+      Generated emit tools validate criteria citations after ordinary payload schema validation and before publish. Unknown IDs,
+      agent-undeclared criteria sets, unresolved sets, wrong citation value shape, and class-incompatible IDs fail in-turn with
+      a non-retryable typed corrective runtime error (`criteria_citation_validation_failed`) and publish zero events.
+    multi_citation: Both single `text` citation fields and list citation fields are supported in this slice.
+  static_verification:
+    checks:
+    - typed policy criteria shape
+    - flow-local placement
+    - unique stable IDs within a set
+    - class declaration and disposition completeness
+    - inert parameter scalar/ref validation
+    - agent criteria references
+    - event citation field type and allowed class metadata
+    - emitted-event citation fields consumed only by agents that declare the referenced criteria set
+  split_boundaries:
+  - '#1714 machine-evaluated validation rows consume this stable-ID rule grammar later; they do not ship in #1717.'
+  - '#1718 prompt-frame generation may absorb the deterministic criteria section later; #1717 does not ship the full frame
+    generator.'
+  - Structured predicates, criteria packs, team packs, CLI/editor UX, and criteria evaluation harnesses are separate gates.
 runtime_enforcement:
   description: |
     Wave 1 adds authoritative behavioral rules on top of the existing
@@ -2429,7 +2520,8 @@ handler_specification:
           source_authority: 'select_entity and select_or_create_entity keys may not use event.*, _entity.*, or payload-owned envelope fields as a source-authority bypass.'
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
-          (or root policy.yaml if not overridden at flow level).'
+          (or root policy.yaml if not overridden at flow level), excluding typed policy sections such
+          as criteria:. policy.criteria is not a generic expression root.'
     boot_validation:
       description: 'The platform MUST validate entity field references at boot against the declared entity contract.
         Declared entity fields are always readable; the boot check is declaration and type resolution, not sparse-field
@@ -4250,7 +4342,7 @@ engine:
           accepted by Layer 1. These fields/blocks MUST fail closed or be separately gated before implementation.
       exclusions:
       - No defaults for logical identity, runtime/display id templates, subscriptions, emit_events, required_agents,
-        pins, events, entities, public interfaces, policy, credentials, permissions, permissions_bundle, tools,
+        pins, events, entities, public interfaces, policy, criteria, credentials, permissions, permissions_bundle, tools,
         native_tools, or flow_data_access.
     subscription_types:
       subscriptions: Static subscription list. Always active from boot (or from instance creation for dynamic flows). Cannot
@@ -4267,7 +4359,8 @@ engine:
         → tool: emit_score_dimension_complete'
       behavior: |
         Each emit tool accepts a payload object matching the event's schema in events.yaml. The platform validates
-        the payload, attaches sender context, and publishes the event.
+        the payload, validates any criteria_contracts.event_citations metadata against the actor's declared criteria sets,
+        attaches sender context, and publishes the event.
         For pin-declared output events, generated agent emit tools MUST consume the same publish-time RoutePlan
         authority as node/system emits. If EventBus preflight reports a canonical lowered parent-connect route
         decision, the tool MUST admit the event to Publish so that EventBus persists and dispatches the typed
@@ -4450,6 +4543,22 @@ engine:
         shared_owner: Verify, boot, runtime tool generation, runtime execution, MCP/tool visibility, and diagnostics must
           consume the same flow-data path/scoping resolver.
         boot_check: flow_data_access_validation
+    criteria:
+      description: Optional flow-scoped agent contract field. Declares the flow-local policy.criteria sets that are
+        delivered to the agent as deterministic generated context and that the agent may cite in generated emit tools.
+      contract_field:
+        field: criteria
+        type: array of short set names
+        location: Flow-scoped agent declaration in agents.yaml. Root/project-scoped agents cannot declare this field in
+          the #1717 slice.
+        default: omitted or empty means no generated criteria context and no criteria citation authority.
+        example: "criteria:\n  - feasibility_exclusions"
+      validation:
+        boot_check: criteria_contract_validation
+        refs: Each item must be a short non-empty set name resolving to the declaring flow's policy.criteria section.
+          Dotted paths and filesystem-like paths are invalid.
+        generated_delivery: Referenced sets are rendered through criteria_contracts.delivery; criteria are not granted by
+          tools, flow_data_access, prompt variables, or generic policy reads.
     native_tools:
       description: Optional agent contract field. Declares which host-level capabilities the agent may use. Default all false
         (omitted = no native capabilities). The native_tools field is the sole authorization gate — no separate permission
@@ -4941,6 +5050,14 @@ engine:
       scope: per-agent
       trigger: A flow-scoped agent's flow_data_access declaration references an invalid, missing, non-regular, escaping, or
         outside-flow data file; or a root/project-scoped agent declares flow_data_access.
+      when: boot-only
+    - id: criteria_contract_validation
+      severity: error
+      scope: per-flow/per-agent/per-event
+      trigger: A policy.criteria set has invalid shape, duplicate stable IDs, undeclared classes, missing dispositions, bad
+        inert params, or non-flow-local placement; an agent criteria ref is malformed or unresolved; an event citation field
+        has an unsupported type or missing/invalid allowed_classes; or an agent emits a citation-bearing event without
+        declaring the referenced criteria set.
       when: boot-only
     - id: mcp_server_reachable
       severity: warning
@@ -6029,7 +6146,7 @@ prompt_templating:
       canonical resolver candidates: prompt_ref, logical agent id, registry entry id, optional {ref}.{mode}.md variant,
       workspace_class-role fallback, shard-parent runtime lookup, and bundle prompt-directory fallback
     variable_syntax: '{{variable_name}}'
-    variable_source: policy.yaml
+    variable_source: policy.yaml scalar values, excluding typed sections such as criteria
   variable_resolution:
     description: Prompt variables ({{token}}) are resolved from multiple sources in priority order. All sources must be scanned
       by compliance tests.
@@ -6038,7 +6155,8 @@ prompt_templating:
       description: Variables declared in the flow schema. Populated at flow instance creation via config_from.
       example: customer_name, order_type, region
     - source: policy (policy.yaml)
-      description: Policy values from flow and root policy files.
+      description: Scalar policy values from flow and root policy files. Typed sections such as criteria are not prompt
+        variables; criteria are delivered only through criteria_contracts.delivery.
       example: max_retries, sla_hours, approval_threshold
     - source: entity_state fields
       description: Entity fields written by data_accumulation. Available at render time from entity context.
@@ -6047,8 +6165,8 @@ prompt_templating:
       description: Platform-injected tokens not declared in contracts. Hardcoded allowlist.
       example: current_date, agent_id, flow_instance_path
     compliance_test_sources: 'TestPromptVariablesComplete must scan ALL of these for each prompt directory: schema.yaml (instance_variables.variables),
-      policy.yaml (all keys), agents.yaml (prompt_inputs), and the runtime-token allowlist. A variable is valid if it appears
-      in ANY of these sources.'
+      policy.yaml scalar keys excluding typed sections such as criteria, agents.yaml (prompt_inputs), and the runtime-token
+      allowlist. A variable is valid if it appears in ANY of these sources.'
   prompt_postamble:
     description: The platform appends a short environment postamble to every agent system prompt at session creation time.
       The postamble tells the agent where it is working — workspace paths and access levels. It does NOT list available tools

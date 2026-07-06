@@ -10,8 +10,9 @@ import (
 )
 
 type EventSchema struct {
-	Description string
-	Schema      map[string]any
+	Description    string
+	Schema         map[string]any
+	CitationFields map[string]CriteriaCitation
 }
 
 func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[string]EventSchema {
@@ -28,6 +29,7 @@ func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[st
 
 func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, types TypeCatalogDocument) EventSchema {
 	properties := make(map[string]any, len(entry.Payload.Properties))
+	citations := map[string]CriteriaCitation{}
 	fieldNames := make([]string, 0, len(entry.Payload.Properties))
 	for fieldName := range entry.Payload.Properties {
 		fieldNames = append(fieldNames, strings.TrimSpace(fieldName))
@@ -50,6 +52,12 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 			prop["description"] = description
 		}
 		applySchemaRefinements(prop, field.Refinements)
+		if strings.TrimSpace(field.Citation.Criteria) != "" || len(field.Citation.AllowedClasses) > 0 {
+			citations[fieldName] = CriteriaCitation{
+				Criteria:       strings.TrimSpace(field.Citation.Criteria),
+				AllowedClasses: normalizeStrings(field.Citation.AllowedClasses),
+			}
+		}
 		properties[fieldName] = prop
 	}
 	schema := map[string]any{
@@ -61,8 +69,9 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		schema["required"] = required
 	}
 	return EventSchema{
-		Description: fmt.Sprintf("Emit %s event", eventType),
-		Schema:      schema,
+		Description:    fmt.Sprintf("Emit %s event", eventType),
+		Schema:         schema,
+		CitationFields: citations,
 	}
 }
 
@@ -661,8 +670,27 @@ func cloneEventSchemaRegistry(in map[string]EventSchema) map[string]EventSchema 
 	out := make(map[string]EventSchema, len(in))
 	for eventType, schema := range in {
 		out[strings.TrimSpace(eventType)] = EventSchema{
-			Description: strings.TrimSpace(schema.Description),
-			Schema:      cloneEventSchemaMap(schema.Schema),
+			Description:    strings.TrimSpace(schema.Description),
+			Schema:         cloneEventSchemaMap(schema.Schema),
+			CitationFields: cloneCriteriaCitationMap(schema.CitationFields),
+		}
+	}
+	return out
+}
+
+func cloneCriteriaCitationMap(in map[string]CriteriaCitation) map[string]CriteriaCitation {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]CriteriaCitation, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = CriteriaCitation{
+			Criteria:       strings.TrimSpace(value.Criteria),
+			AllowedClasses: normalizeStrings(value.AllowedClasses),
 		}
 	}
 	return out

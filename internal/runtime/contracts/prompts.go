@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +77,121 @@ func (r *BundlePromptResolver) LoadPromptForAgent(cfg models.AgentConfig, mode s
 	if err != nil {
 		return "", false, fmt.Errorf("render prompt %s: %w", filepath.Base(resolution.Path), err)
 	}
+	prompt, err = generatedCriteriaPromptSection(r.workflowBundle(), resolution.Source, resolution.Entry, cfg, prompt)
+	if err != nil {
+		return "", false, fmt.Errorf("render criteria for prompt %s: %w", filepath.Base(resolution.Path), err)
+	}
 	return strings.TrimSpace(prompt), true, nil
+}
+
+func generatedCriteriaPromptSection(bundle *WorkflowContractBundle, source ContractItemSource, entry AgentRegistryEntry, cfg models.AgentConfig, prompt string) (string, error) {
+	refs := normalizeStrings(entry.Criteria)
+	if len(refs) == 0 {
+		refs = normalizeStrings(cfg.Criteria)
+	}
+	if len(refs) == 0 {
+		return prompt, nil
+	}
+	flowID := strings.TrimSpace(source.FlowID)
+	if flowID == "" {
+		return "", fmt.Errorf("criteria delivery requires a flow-scoped agent")
+	}
+	if bundle == nil {
+		return "", fmt.Errorf("criteria delivery requires a workflow bundle")
+	}
+	policy := bundle.ResolvedPolicyForFlow(flowID)
+	var section strings.Builder
+	section.WriteString("\n\n## Contract Criteria\n\n")
+	for i, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		set, ok := policy.Criteria[ref]
+		if !ok {
+			return "", fmt.Errorf("criteria set %q does not resolve in flow %s", ref, flowID)
+		}
+		if i > 0 {
+			section.WriteString("\n")
+		}
+		writeCriteriaSetPromptSection(&section, ref, set)
+	}
+	return strings.TrimSpace(prompt) + section.String(), nil
+}
+
+func writeCriteriaSetPromptSection(out *strings.Builder, name string, set PolicyCriteriaSet) {
+	out.WriteString("### ")
+	out.WriteString(strings.TrimSpace(name))
+	out.WriteString("\n\nClasses:\n")
+	for _, className := range sortedCriteriaClassNames(set.Classes) {
+		out.WriteString("- ")
+		out.WriteString(className)
+		disposition := strings.TrimSpace(set.Classes[className].Disposition)
+		if disposition != "" {
+			out.WriteString(": ")
+			out.WriteString(disposition)
+		}
+		out.WriteString("\n")
+	}
+	out.WriteString("\nRules:\n")
+	for _, rule := range sortedCriteriaRules(set.Rules) {
+		out.WriteString("- ")
+		out.WriteString(strings.TrimSpace(rule.ID))
+		if className := strings.TrimSpace(rule.Class); className != "" {
+			out.WriteString(" [")
+			out.WriteString(className)
+			out.WriteString("]")
+		}
+		out.WriteString(": ")
+		out.WriteString(strings.TrimSpace(rule.Text))
+		out.WriteString("\n")
+		if len(rule.Params) > 0 {
+			paramNames := make([]string, 0, len(rule.Params))
+			for name := range rule.Params {
+				name = strings.TrimSpace(name)
+				if name != "" {
+					paramNames = append(paramNames, name)
+				}
+			}
+			sort.Strings(paramNames)
+			for _, paramName := range paramNames {
+				out.WriteString("  - ")
+				out.WriteString(paramName)
+				out.WriteString(": ")
+				out.WriteString(renderCriteriaParamValue(rule.Params[paramName].Value))
+				out.WriteString("\n")
+			}
+		}
+	}
+}
+
+func sortedCriteriaRules(in []PolicyCriteriaRule) []PolicyCriteriaRule {
+	out := append([]PolicyCriteriaRule{}, in...)
+	sort.SliceStable(out, func(i, j int) bool {
+		left := strings.TrimSpace(out[i].ID)
+		right := strings.TrimSpace(out[j].ID)
+		if left == right {
+			return strings.TrimSpace(out[i].Class) < strings.TrimSpace(out[j].Class)
+		}
+		return left < right
+	})
+	return out
+}
+
+func renderCriteriaParamValue(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return "null"
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	default:
+		return fmt.Sprintf("%v", typed)
+	}
 }
 
 func (r *BundlePromptResolver) ResolvePromptFileForAgent(cfg models.AgentConfig, mode string) (PromptFileResolution, bool, error) {
@@ -643,6 +758,7 @@ func promptReservedConfigKeys() map[string]bool {
 		"constraints":        true,
 		"tools":              true,
 		"native_tools":       true,
+		"criteria":           true,
 		"emit_events":        true,
 		"fields":             true,
 		"entity_state":       true,

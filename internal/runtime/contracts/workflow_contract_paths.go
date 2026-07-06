@@ -371,6 +371,9 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	if len(in.FlowDataAccess) > 0 {
 		out.FlowDataAccess = append([]string{}, in.FlowDataAccess...)
 	}
+	if len(in.Criteria) > 0 {
+		out.Criteria = append([]string{}, in.Criteria...)
+	}
 	if len(in.EmitEvents) > 0 {
 		out.EmitEvents = append([]string{}, in.EmitEvents...)
 	}

@@ -65,6 +65,7 @@ type AgentConfig struct {
 	MaxTurnsPerTask       int              `json:"max_turns_per_task,omitempty"`
 	Subscriptions         []string         `json:"subscriptions,omitempty"`
 	EmitEvents            []string         `json:"emit_events,omitempty"`
+	Criteria              []string         `json:"criteria,omitempty"`
 	Tools                 []string         `json:"tools,omitempty"`
 	Permissions           []string         `json:"permissions,omitempty"`
 	NativeTools           NativeToolConfig `json:"native_tools,omitempty"`
@@ -120,6 +121,7 @@ func (cfg *AgentConfig) NormalizeRuntimeDescriptor() {
 	cfg.ParentAgent = strings.TrimSpace(cfg.ParentAgent)
 	cfg.Subscriptions = normalizeStringList(cfg.Subscriptions)
 	cfg.EmitEvents = normalizeStringList(cfg.EmitEvents)
+	cfg.Criteria = normalizeStringList(cfg.Criteria)
 	cfg.Tools = normalizeStringList(cfg.Tools)
 	cfg.Permissions = normalizeStringList(cfg.Permissions)
 	cfg.FlowDataAccess = normalizeStringList(cfg.FlowDataAccess)

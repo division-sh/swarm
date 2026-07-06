@@ -230,6 +230,7 @@ func nativeToolAgentConfig(agentID string, entry runtimecontracts.AgentRegistryE
 		Tools:            entry.ConfiguredTools(),
 		Permissions:      append([]string{}, entry.Permissions...),
 		FlowDataAccess:   append([]string{}, entry.FlowDataAccess...),
+		Criteria:         append([]string{}, entry.Criteria...),
 		WorkspaceClass:   strings.TrimSpace(entry.WorkspaceClass),
 		ManagerFallback:  strings.TrimSpace(entry.ManagerFallback),
 	}

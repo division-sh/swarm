@@ -131,6 +131,7 @@ func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 		AllowInitial:      false,
 		AllowImmutable:    false,
 		AllowUnusedReason: false,
+		AllowCitation:     true,
 	})
 	if err != nil {
 		return err
@@ -139,6 +140,7 @@ func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 		Type:        parsed.Type,
 		Description: parsed.Description,
 		Refinements: parsed.Refinements,
+		Citation:    parsed.Citation,
 	}
 	return nil
 }
