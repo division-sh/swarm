@@ -28,6 +28,7 @@ const (
 	localPreflightServeListenerPrerequisite  localPreflightCategory = "serve_listener_prerequisite"
 	localPreflightGatewayPrerequisite        localPreflightCategory = "gateway_prerequisite"
 	localPreflightContractSecretPrerequisite localPreflightCategory = "contract_secret_prerequisite"
+	localPreflightProviderPackPrerequisite   localPreflightCategory = "provider_pack_prerequisite"
 	localPreflightDevConveniencePrerequisite localPreflightCategory = "dev_convenience_prerequisite"
 )
 

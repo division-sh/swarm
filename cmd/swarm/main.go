@@ -25,6 +25,7 @@ import (
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -385,24 +386,25 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
-	Ctx                    context.Context
-	Stores                 storeBundle
-	Config                 *config.Config
-	Loaded                 serveRuntimeBundle
-	StateStoreSummary      string
-	Options                serveOptions
-	MountSources           workspaceMountSources
-	WorkspaceBackend       workspaceBackendSelection
-	Credentials            runtimecredentials.Store
-	ManagedCredentials     runtimemanagedcredentials.Store
-	ProviderCredentials    runtimecredentials.Store
-	BootStartedAt          time.Time
-	BootProgress           func(runtime.BootProgressEvent)
-	EnableToolGateway      bool
-	ToolGatewayBinding     toolgateway.Binding
-	UseStartupOwnership    bool
-	UseStartupRecovery     bool
-	RequireBundleScopeName bool
+	Ctx                     context.Context
+	Stores                  storeBundle
+	Config                  *config.Config
+	Loaded                  serveRuntimeBundle
+	StateStoreSummary       string
+	Options                 serveOptions
+	MountSources            workspaceMountSources
+	WorkspaceBackend        workspaceBackendSelection
+	Credentials             runtimecredentials.Store
+	ManagedCredentials      runtimemanagedcredentials.Store
+	ProviderCredentials     runtimecredentials.Store
+	ProviderTriggerRegistry *providertriggers.Registry
+	BootStartedAt           time.Time
+	BootProgress            func(runtime.BootProgressEvent)
+	EnableToolGateway       bool
+	ToolGatewayBinding      toolgateway.Binding
+	UseStartupOwnership     bool
+	UseStartupRecovery      bool
+	RequireBundleScopeName  bool
 }
 
 func defaultServeOptions() serveOptions {
@@ -725,6 +727,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			Credentials:                      req.Credentials,
 			ManagedCredentials:               req.ManagedCredentials,
 			ProviderCredentials:              req.ProviderCredentials,
+			ProviderTriggerRegistry:          req.ProviderTriggerRegistry,
 			BootStartedAt:                    req.BootStartedAt,
 			BootProgress:                     req.BootProgress,
 			SystemContainers:                 systemWorkspaceContainers(workspaces),
@@ -812,6 +815,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	cfg := cfgResult.Config
 	reporter.emit(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
+	providerPackLoad, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
+	if err != nil {
+		reporter.emit(2, "config_load", "FAILED", err.Error())
+		log.Printf("load provider trigger packs: %v", err)
+		return 1
+	}
 	if !opts.Dev && !opts.LocalRun {
 		if err := validateServeGatewayURLEnvForNonDev(); err != nil {
 			reporter.emit(2, "serve_admission", "FAILED", err.Error())
@@ -1018,24 +1027,25 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			contextToolGatewayBinding = toolGatewayBinding
 		}
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
-			Ctx:                    ctx,
-			Stores:                 stores,
-			Config:                 cfg,
-			Loaded:                 loaded,
-			StateStoreSummary:      serveStateStoreSummaryAt(stateStoreSummaries, i),
-			Options:                opts,
-			MountSources:           mountSources,
-			WorkspaceBackend:       workspaceBackend,
-			Credentials:            credentialStore,
-			ManagedCredentials:     managedCredentialStore,
-			ProviderCredentials:    providerCredentialStore,
-			BootStartedAt:          bootStartedAt,
-			BootProgress:           reporter.runtimeSink(),
-			EnableToolGateway:      i == 0,
-			ToolGatewayBinding:     contextToolGatewayBinding,
-			UseStartupOwnership:    len(loadedBundles) == 1 && i == 0,
-			UseStartupRecovery:     len(loadedBundles) == 1,
-			RequireBundleScopeName: len(loadedBundles) > 1,
+			Ctx:                     ctx,
+			Stores:                  stores,
+			Config:                  cfg,
+			Loaded:                  loaded,
+			StateStoreSummary:       serveStateStoreSummaryAt(stateStoreSummaries, i),
+			Options:                 opts,
+			MountSources:            mountSources,
+			WorkspaceBackend:        workspaceBackend,
+			Credentials:             credentialStore,
+			ManagedCredentials:      managedCredentialStore,
+			ProviderCredentials:     providerCredentialStore,
+			ProviderTriggerRegistry: providerPackLoad.Registry,
+			BootStartedAt:           bootStartedAt,
+			BootProgress:            reporter.runtimeSink(),
+			EnableToolGateway:       i == 0,
+			ToolGatewayBinding:      contextToolGatewayBinding,
+			UseStartupOwnership:     len(loadedBundles) == 1 && i == 0,
+			UseStartupRecovery:      len(loadedBundles) == 1,
+			RequireBundleScopeName:  len(loadedBundles) > 1,
 		})
 		if err != nil {
 			reporter.emit(5, "runtime_context", "FAILED", err.Error())

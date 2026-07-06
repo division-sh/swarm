@@ -109,6 +109,16 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 			t.Fatalf("report missing finding %q: %#v", want, report.Findings)
 		}
 	}
+	for _, want := range []string{"provider_trigger_pack_slack", "provider_trigger_pack_stripe"} {
+		if !localPreflightReportHasCode(report, want) {
+			t.Fatalf("report missing provider pack finding %q: %#v", want, report.Findings)
+		}
+	}
+	if !localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CAN receive HTTPS route /webhooks/{entity}/stripe") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CANNOT emit_undeclared_events") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "requires webhook_signing.stripe=UNBOUND") {
+		t.Fatalf("stripe provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
+	}
 }
 
 func TestDoctorClaudeCLIPreflightSkipsCredentialForAgentFreeContracts(t *testing.T) {
@@ -619,6 +629,52 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightBeforeStoreSelection(t *test
 	}
 }
 
+func TestRunServeRuntimeRejectsDeclaredProviderTriggerPackBeforeStoreSelection(t *testing.T) {
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+		"provider_triggers:",
+		"  packs:",
+		"    external_dirs:",
+		"      - packs/missing-provider",
+	}, "\n")+"\n")
+
+	var out bytes.Buffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:         configPath,
+		ContractsPath:      doctorAgentContractsPath,
+		DataSource:         t.TempDir(),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "not-a-store",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Output:             &out,
+		Dev:                true,
+	})
+	if code != 1 {
+		t.Fatalf("runServeRuntime code = %d, want config load failure\noutput:\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "config_load") || !strings.Contains(out.String(), filepath.Join(configDir, "packs", "missing-provider")) {
+		t.Fatalf("serve output missing declared provider pack load failure:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "not-a-store") || strings.Contains(out.String(), "db_connection") {
+		t.Fatalf("serve reached store selection instead of failing provider pack admission first:\n%s", out.String())
+	}
+}
+
 func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 	var spec struct {
 		CLISpecification struct {
@@ -952,6 +1008,15 @@ func freeDoctorTCPPort(t *testing.T) string {
 func localPreflightReportHasCode(report localPreflightReport, code string) bool {
 	for _, finding := range report.Findings {
 		if finding.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
+func localPreflightReportFindingContains(report localPreflightReport, code, want string) bool {
+	for _, finding := range report.Findings {
+		if finding.Code == code && strings.Contains(finding.Message, want) {
 			return true
 		}
 	}

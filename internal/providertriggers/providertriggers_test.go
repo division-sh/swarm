@@ -131,6 +131,56 @@ func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
 	}
 }
 
+func TestProviderTriggerRegistryLoadsExternalPackDirs(t *testing.T) {
+	dir := copyBuiltinPackToTemp(t, "stripe")
+	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "provider: stripe", "provider: acme")
+	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "literal: inbound.stripe", "literal: inbound.acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "id: provider.stripe", "id: provider.acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "/webhooks/{entity}/stripe", "/webhooks/{entity}/acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "webhook_signing.stripe", "webhook_signing.acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "webhook_signing.stripe", "webhook_signing.acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.stripe", "inbound.acme")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "providertriggers/stripe", "providertriggers/acme")
+	rewritePackHash(t, dir)
+
+	registry, loaded, err := NewRegistryWithExternalPackDirs("0.7.0", dir)
+	if err != nil {
+		t.Fatalf("NewRegistryWithExternalPackDirs: %v", err)
+	}
+	if got := registry.sources["acme"]; got != "external:"+dir {
+		t.Fatalf("acme source = %q, want external dir source", got)
+	}
+	if got := registry.sources["stripe"]; got != "platform:provider.stripe" {
+		t.Fatalf("stripe source = %q, want platform pack source", got)
+	}
+	foundExternal := false
+	for _, pack := range loaded {
+		if pack.Manifest.Provider == "acme" && pack.Source == "external:"+dir {
+			foundExternal = true
+			break
+		}
+	}
+	if !foundExternal {
+		t.Fatalf("loaded packs = %+v, want external acme pack", loaded)
+	}
+}
+
+func TestProviderTriggerRegistryRejectsExternalShadowingAgainstPlatformPack(t *testing.T) {
+	dir := copyBuiltinPackToTemp(t, "stripe")
+	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
+
+	_, _, err := NewRegistryWithExternalPackDirs("0.7.0", dir)
+	if err == nil {
+		t.Fatal("NewRegistryWithExternalPackDirs succeeded, want duplicate provider failure")
+	}
+	for _, want := range []string{`duplicate provider trigger manifest for "stripe"`, "platform:provider.stripe", "external:" + dir} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("duplicate error = %q, want containing %q", err.Error(), want)
+		}
+	}
+}
+
 func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *testing.T) {
 	dir := copyBuiltinPackToTemp(t, "stripe")
 	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")

@@ -132,15 +132,20 @@ func defaultManifestSources() ([]ManifestSource, error) {
 	if err != nil {
 		return nil, err
 	}
+	sources, _, err := defaultManifestSourcesAndPacks(runningVersion)
+	return sources, err
+}
+
+func defaultManifestSourcesAndPacks(runningVersion string) ([]ManifestSource, []LoadedPack, error) {
 	manifestSources, err := builtinManifestSources()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	packSources, _, err := loadPackSourcesFS(builtinManifestFS, triggerPackRoot, runningVersion, packs.ProvenancePlatform)
+	packSources, loadedPacks, err := loadPackSourcesFS(builtinManifestFS, triggerPackRoot, runningVersion, packs.ProvenancePlatform)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return append(manifestSources, packSources...), nil
+	return append(manifestSources, packSources...), loadedPacks, nil
 }
 
 func builtinManifestSources() ([]ManifestSource, error) {
@@ -212,6 +217,26 @@ func LoadExternalPackDirs(runningPlatformVersion string, dirs ...string) ([]Load
 		loaded = append(loaded, pack)
 	}
 	return loaded, nil
+}
+
+func NewRegistryWithExternalPackDirs(runningPlatformVersion string, dirs ...string) (*Registry, []LoadedPack, error) {
+	sources, platformPacks, err := defaultManifestSourcesAndPacks(runningPlatformVersion)
+	if err != nil {
+		return nil, nil, err
+	}
+	externalPacks, err := LoadExternalPackDirs(runningPlatformVersion, dirs...)
+	if err != nil {
+		return nil, nil, err
+	}
+	sources = append(sources, SourcesFromLoadedPacks(externalPacks...)...)
+	registry, err := NewRegistryFromSources(sources...)
+	if err != nil {
+		return nil, nil, err
+	}
+	loaded := make([]LoadedPack, 0, len(platformPacks)+len(externalPacks))
+	loaded = append(loaded, platformPacks...)
+	loaded = append(loaded, externalPacks...)
+	return registry, loaded, nil
 }
 
 func SourcesFromLoadedPacks(loaded ...LoadedPack) []ManifestSource {
