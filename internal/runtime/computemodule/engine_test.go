@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/bytecodealliance/wasmtime-go"
 )
 
 func TestExecuteStructuredRenderer(t *testing.T) {
@@ -132,6 +134,51 @@ func TestExecuteRejectsDigestMismatchBeforeExecution(t *testing.T) {
 	}
 	if !IsDeterministicFailure(err) {
 		t.Fatalf("IsDeterministicFailure(%v) = false", err)
+	}
+}
+
+func TestValidateCoreJSONModuleRequiresEngineEnforcedMemoryMaximum(t *testing.T) {
+	tests := []struct {
+		name        string
+		memory      string
+		limit       uint32
+		wantMessage string
+	}{
+		{
+			name:        "no_maximum",
+			memory:      `(memory (export "memory") 1)`,
+			limit:       1,
+			wantMessage: "memory must declare a maximum",
+		},
+		{
+			name:        "maximum_exceeds_contract_limit",
+			memory:      `(memory (export "memory") 1 2)`,
+			limit:       1,
+			wantMessage: "maximum 2 pages exceeds declared limit 1",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			wasm, err := wasmtime.Wat2Wasm(`(module
+  ` + tc.memory + `
+  (func (export "alloc") (param i32) (result i32) i32.const 0)
+  (func (export "compute") (param i32 i32) (result i64) i64.const 0)
+)`)
+			if err != nil {
+				t.Fatalf("Wat2Wasm: %v", err)
+			}
+			err = ValidateCoreJSONModule(wasm, DefaultEntry, tc.limit)
+			if err == nil {
+				t.Fatalf("ValidateCoreJSONModule error = nil, want %q", tc.wantMessage)
+			}
+			var typed *Error
+			if !errors.As(err, &typed) || typed.Code != CodeMemory {
+				t.Fatalf("error = %#v, want code %s", err, CodeMemory)
+			}
+			if !strings.Contains(err.Error(), tc.wantMessage) {
+				t.Fatalf("error = %v, want %q", err, tc.wantMessage)
+			}
+		})
 	}
 }
 
