@@ -307,6 +307,9 @@ func requireMemoryExport(exports map[string]*wasmtime.ExternType, memoryPages ui
 	if memoryPages == 0 {
 		return &Error{Code: CodeMemory, Err: fmt.Errorf("memory page limit is required")}
 	}
+	// wasmtime-go v1.0 exposes no StoreLimits API. Requiring the exported
+	// memory's Wasm maximum to fit the contract limit makes memory.grow fail
+	// inside the engine instead of relying on post-execution detection.
 	if max > uint64(memoryPages) {
 		return &Error{Code: CodeMemory, Err: fmt.Errorf("%s maximum %d pages exceeds declared limit %d", memoryExport, max, memoryPages)}
 	}

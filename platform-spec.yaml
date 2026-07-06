@@ -1571,9 +1571,18 @@ compute_module_contracts:
     deterministic_features: |
       Runtime configuration MUST disable nondeterministic or unapproved features
       including threads, SIMD, memory64, and multi-memory. Deterministic core
-      features needed by the compiled fixture ABI, such as bulk memory and
-      reference types, may be enabled only when they do not introduce host
-      capability or nondeterministic execution.
+      features needed by the compiled fixture ABI may be enabled only when they
+      do not introduce host capability or nondeterministic execution. PR1 enables
+      bulk memory and reference types because the precompiled Rust core-module
+      fixture requires them; both remain zero-import, deterministic Wasm
+      execution features rather than host capabilities.
+    memory_limits: |
+      `limits.memory_pages` is a hard contract limit. A supported module's
+      exported memory MUST declare a Wasm maximum, and that maximum MUST be less
+      than or equal to `limits.memory_pages`; missing or larger maxima fail
+      static validation before execution. Runtime MAY additionally apply an
+      engine store/resource limiter when available, but the module-declared
+      maximum is the PR1 grow-time ceiling.
     encoding: |
       Input and output are canonical JSON objects validated against the declared
       schemas. Float/numeric I/O schemas are forbidden in PR1; authors must use
@@ -1619,7 +1628,10 @@ compute_module_contracts:
       The Wasm engine is an implementation detail behind an internal adapter.
       The semantic owners are policy.modules, compute_module rows, the ABI
       contract, and bundle identity. Engine version is recorded in traces and
-      replay evidence but does not define authoring semantics.
+      replay evidence but does not define authoring semantics. PR1 may use a
+      native/cgo engine only as an explicitly recorded implementation decision;
+      the long-run single-binary and platform-owned gas schedule question remains
+      owned by the parent/#1670 follow-up rather than authoring semantics.
     deterministic_failures: |
       Compile/ABI/import rejection, digest mismatch, trap/unreachable, gas/fuel
       exhaustion, memory limit, output-size limit, output bounds, and output
@@ -1627,9 +1639,11 @@ compute_module_contracts:
       diagnostics carrying module ID and row ID.
     trace_and_replay: |
       Runtime traces record module ID, row ID, declared digest, engine version,
-      output hash, and fuel/gas consumed. Replay re-executes deterministic
-      modules and compares recorded evidence; divergence is a typed replay
-      failure, not silent acceptance.
+      output hash, and fuel/gas consumed. PR1 records this evidence. Replay
+      comparison of output hash and fuel/gas consumed is the required follow-up
+      before this surface can claim cross-version deterministic replay closure;
+      divergence must become a typed replay failure rather than silent
+      acceptance.
   bundle_identity:
     rule: |
       Module bytes referenced by policy.modules are part of the bundle contract
