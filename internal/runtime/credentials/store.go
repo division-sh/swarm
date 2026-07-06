@@ -46,6 +46,9 @@ func (EnvStore) Get(_ context.Context, key string) (string, bool, error) {
 		if !ok {
 			continue
 		}
+		if strings.HasPrefix(candidate, "SWARM_") {
+			return "", false, fmt.Errorf("credential env %s is not accepted through dynamic credential lookup; declare a typed source or store the secret with swarm secrets", candidate)
+		}
 		return value, true, nil
 	}
 	return "", false, nil

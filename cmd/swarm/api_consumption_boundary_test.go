@@ -228,11 +228,17 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 
 			var stdout, stderr bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
-			if code != cliExitAuth {
-				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitAuth, stdout.String(), stderr.String())
+			if code != cliExitValidation {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 			}
-			if !strings.Contains(stderr.String(), "API token source is required") {
-				t.Fatalf("stderr = %q, want shared missing-token error", stderr.String())
+			for _, want := range []string{
+				"env/known_retired: SWARM_BUILDER_AUTH_TOKEN",
+				"env/known_retired: SWARM_OPERATOR_AUTH_TOKEN",
+				"not accepted as API auth fallback",
+			} {
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+				}
 			}
 			if calls.Load() != 0 {
 				t.Fatalf("server calls = %d, want 0 before auth", calls.Load())

@@ -265,7 +265,7 @@ func RejectRetiredEnvBackend(lookup EnvLookup) error {
 	if lookup == nil {
 		return nil
 	}
-	if _, ok := lookup(EnvBackend); ok {
+	if value, ok := lookup(EnvBackend); ok && strings.TrimSpace(value) != "" {
 		return fmt.Errorf("%s is retired and must not select the LLM backend; use --backend or %s", EnvBackend, ConfigBackendField)
 	}
 	return nil
@@ -275,7 +275,7 @@ func RejectRetiredEnvRuntimeMode(lookup EnvLookup) error {
 	if lookup == nil {
 		return nil
 	}
-	if _, ok := lookup(RetiredEnvRuntimeMode); ok {
+	if value, ok := lookup(RetiredEnvRuntimeMode); ok && strings.TrimSpace(value) != "" {
 		return fmt.Errorf("%s is retired; use --backend or %s", RetiredEnvRuntimeMode, ConfigBackendField)
 	}
 	return nil
@@ -285,7 +285,7 @@ func RejectRetiredOpenAICompatibleBaseURLEnv(lookup EnvLookup) error {
 	if lookup == nil {
 		return nil
 	}
-	if _, ok := lookup(OpenAICompatibleBaseURLEnv); ok {
+	if value, ok := lookup(OpenAICompatibleBaseURLEnv); ok && strings.TrimSpace(value) != "" {
 		return fmt.Errorf("%s is retired; use %s", OpenAICompatibleBaseURLEnv, OpenAICompatibleBaseURLConfigField)
 	}
 	return nil
@@ -301,7 +301,7 @@ func RejectRetiredModelEnv(lookup EnvLookup) error {
 		OpenAICompatibleDefaultModelEnv,
 		OpenAICompatibleLowCostModelEnv,
 	} {
-		if _, ok := lookup(env); ok {
+		if value, ok := lookup(env); ok && strings.TrimSpace(value) != "" {
 			return fmt.Errorf("%s is retired for model selection; use %s", env, "llm.models")
 		}
 	}

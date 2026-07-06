@@ -257,7 +257,7 @@ func TestDoctorClaudeCLIPreflightReportsRetiredBackendEnv(t *testing.T) {
 	}
 }
 
-func TestDoctorClaudeCLIPreflightWarnsOnRetiredGatewayEnv(t *testing.T) {
+func TestDoctorClaudeCLIPreflightBlocksGeneratedGatewayParentEnv(t *testing.T) {
 	configureDoctorDockerStub(t)
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
@@ -270,10 +270,13 @@ func TestDoctorClaudeCLIPreflightWarnsOnRetiredGatewayEnv(t *testing.T) {
 	args = append(args[:len(args)-4], "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:"+mcpPort)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
-	if code != cliExitOK {
-		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
+		"[BLOCKER] env/generated_boundary: SWARM_TOOL_GATEWAY_URL",
+		"[BLOCKER] env/generated_boundary: SWARM_TOOL_GATEWAY_CONTAINER_URL",
+		"[BLOCKER] env/known_retired: SWARM_TOOL_GATEWAY_TOKEN",
 		"[WARNING] gateway_prerequisite/swarm_tool_gateway_url_retired",
 		"[WARNING] gateway_prerequisite/swarm_tool_gateway_container_url_retired",
 		"SWARM_TOOL_GATEWAY_URL is retired and not accepted as gateway endpoint configuration",
@@ -399,7 +402,7 @@ func TestDoctorTargetJSONReportsMissingAuthWithoutAborting(t *testing.T) {
 	}
 }
 
-func TestDoctorTargetRejectsRemovedAPIClientEnv(t *testing.T) {
+func TestDoctorTargetReportsRemovedAPIClientEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := writeDoctorTargetRepo(t)
 	t.Setenv("SWARM_API_SERVER", "http://127.0.0.1:19002")
@@ -408,20 +411,25 @@ func TestDoctorTargetRejectsRemovedAPIClientEnv(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repo, []string{
-		"doctor", "--target",
+		"doctor", "--target", "--json",
 		"--contracts", filepath.Join(repo, "contracts"),
 	}, &stdout, &stderr, defaultRootCommandOptions())
-	if code != cliExitValidation {
-		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
-	for _, want := range []string{"client-side API environment sources are no longer accepted", "SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE", "--api-server", "--api-token-file"} {
-		if !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
-		}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if stdout.String() != "" {
-		t.Fatalf("stdout = %q, want empty", stdout.String())
+	var report doctorTargetReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse target json: %v\n%s", err, stdout.String())
 	}
+	if report.OK {
+		t.Fatalf("report OK=true, want env blockers: %#v", report)
+	}
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), "SWARM_API_SERVER")
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), "SWARM_API_TOKEN")
+	assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), "SWARM_API_TOKEN_FILE")
 }
 
 func TestDoctorTargetUsesResolvedSwarmDirForExplicitContext(t *testing.T) {

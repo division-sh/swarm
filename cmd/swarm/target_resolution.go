@@ -85,6 +85,7 @@ type doctorTargetReport struct {
 	RuntimeIdentity doctorTargetPendingFact    `json:"runtime_identity"`
 	Store           doctorTargetPath           `json:"store"`
 	Data            doctorTargetPath           `json:"data"`
+	Env             []localPreflightFinding    `json:"env,omitempty"`
 	CommandClasses  []doctorTargetCommandClass `json:"command_classes"`
 	SplitSiblings   []string                   `json:"split_siblings"`
 }
@@ -140,6 +141,8 @@ type doctorTargetCommandClass struct {
 }
 
 func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions) error {
+	envFindings := doctorSwarmEnvFindings(repo, opts.configPath)
+	envReport := doctorTargetEnvReport(envFindings)
 	cfg, err := loadCLIAPIConfigFile()
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -155,17 +158,34 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 		BackendOverride: opts.backend,
 	})
 	if err != nil {
-		return returnCLIValidationError(cmd.ErrOrStderr(), err)
+		if !envReport.HasBlockers() {
+			return returnCLIValidationError(cmd.ErrOrStderr(), err)
+		}
+		runtimeCfgResult.Config = &config.Config{}
 	}
 	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir, runtimeCfgResult.Config)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
+	report.Env = envReport.Findings
+	report.OK = report.OK && !envReport.HasBlockers()
 	if opts.asJSON {
-		return writeDoctorTargetJSON(cmd.OutOrStdout(), report)
+		if err := writeDoctorTargetJSON(cmd.OutOrStdout(), report); err != nil {
+			return err
+		}
+	} else {
+		writeDoctorTargetText(cmd.OutOrStdout(), report)
 	}
-	writeDoctorTargetText(cmd.OutOrStdout(), report)
+	if !report.OK {
+		return commandExitError{code: cliExitRuntime}
+	}
 	return nil
+}
+
+func doctorTargetEnvReport(findings []swarmEnvFinding) localPreflightReport {
+	report := localPreflightReport{Owner: localPreflightOwner, Mode: "doctor_target"}
+	addSwarmEnvFindingsToLocalPreflightReport(&report, findings)
+	return report.finalize()
 }
 
 func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
@@ -275,9 +295,6 @@ func rootSwarmDirFlag(cmd *cobra.Command) (string, bool) {
 }
 
 func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution) (doctorTargetAPI, error) {
-	if err := rejectRemovedClientAPIEnvSources(); err != nil {
-		return doctorTargetAPI{}, err
-	}
 	targetOpts := rootCommandOptions{
 		apiServer:       opts.apiOptions.apiServer,
 		apiTokenFile:    opts.apiOptions.apiTokenFile,
@@ -295,7 +312,7 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFil
 	if err != nil {
 		return doctorTargetAPI{}, err
 	}
-	token, err := resolveCLIAPITokenForTarget(rootCommandOptions{
+	token, err := resolveDoctorTargetAPITokenForTarget(rootCommandOptions{
 		apiTokenFile: opts.apiOptions.apiTokenFile,
 	}, cfg, target)
 	auth := doctorTargetAuth{}
@@ -314,6 +331,33 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFil
 		Auth:        auth,
 		Reason:      doctorTargetAPIReason(target.source),
 	}, nil
+}
+
+func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliAPIConfigFile, target cliAPITargetResolution) (cliAPITokenResolution, error) {
+	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
+		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
+	}
+	if target.descriptor == nil {
+		return resolveDoctorTargetCLIToken(cfg, target.rpcEndpoint)
+	}
+	token, err := localContextDescriptorToken(*target.descriptor, target.rpcEndpoint)
+	if err != nil {
+		return cliAPITokenResolution{}, err
+	}
+	return cliAPITokenResolution{token: token, source: "context descriptor " + target.descriptor.Auth.Mode}, nil
+}
+
+func resolveDoctorTargetCLIToken(cfg cliAPIConfigFile, rpcEndpoint string) (cliAPITokenResolution, error) {
+	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
+		return readCLIAPIExplicitTokenFile(tokenFile, "config api_token_file")
+	}
+	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
+		return cliAPITokenResolution{
+			token:  apiv1.DefaultLoopbackAPIToken,
+			source: string(apiv1.AuthTokenSourceBuiltInLoopbackToken),
+		}, nil
+	}
+	return cliAPITokenResolution{}, errCLIAPITokenRequired
 }
 
 func cliAPIServerBaseFromRPCEndpoint(rpcEndpoint, source string) (string, error) {
@@ -609,8 +653,21 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "swarm target diagnostics: ok\n")
+	status := "ok"
+	if !report.OK {
+		status = "failed"
+	}
+	fmt.Fprintf(out, "swarm target diagnostics: %s\n", status)
 	fmt.Fprintf(out, "owner: %s\n", report.Owner)
+	if len(report.Env) > 0 {
+		fmt.Fprintln(out, "env:")
+		for _, finding := range report.Env {
+			fmt.Fprintf(out, "[%s] %s/%s: %s\n", strings.ToUpper(string(finding.Severity)), finding.Category, finding.Code, finding.Message)
+			if finding.Remediation != "" {
+				fmt.Fprintf(out, "  remediation: %s\n", finding.Remediation)
+			}
+		}
+	}
 	fmt.Fprintf(out, "swarm_dir: %s (source: %s)\n", report.SwarmDir.Path, report.SwarmDir.Source)
 	if report.Project.Status == "resolved" {
 		fmt.Fprintf(out, "project_root: %s (source: %s; canonical: %s; canonicalization: %s)\n", report.Project.ProjectRoot, report.Project.ContractsSource, report.Project.CanonicalProjectRoot, report.Project.CanonicalizationStatus)

@@ -67,6 +67,24 @@ func TestOverlayStore_EnvOverridesFile(t *testing.T) {
 	}
 }
 
+func TestEnvStoreRejectsSwarmCredentialBackdoor(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("SWARM_SECRET_TOKEN", "secret")
+
+	value, ok, err := EnvStore{}.Get(ctx, "SWARM_SECRET_TOKEN")
+	if err == nil {
+		t.Fatalf("Get returned value=%q ok=%v err=nil, want SWARM_* rejection", value, ok)
+	}
+	for _, want := range []string{"SWARM_SECRET_TOKEN", "not accepted through dynamic credential lookup", "swarm secrets"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q: %v", want, err)
+		}
+	}
+	if ok || value != "" {
+		t.Fatalf("Get returned value=%q ok=%v, want no dynamic SWARM_* credential", value, ok)
+	}
+}
+
 func TestListDescriptors_IndexesToolsMCPServersAndWebSearchProvider(t *testing.T) {
 	ctx := context.Background()
 	fileStore, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))

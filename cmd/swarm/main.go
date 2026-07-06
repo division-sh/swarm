@@ -2452,10 +2452,10 @@ func defaultRuntimeConfig() (*config.Config, error) {
 
 func rejectUnsupportedRuntimeControlEnv() error {
 	unsupported := make([]string, 0, 2)
-	if _, ok := os.LookupEnv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS"); ok {
+	if strings.TrimSpace(os.Getenv("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS")) != "" {
 		unsupported = append(unsupported, "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS")
 	}
-	if _, ok := os.LookupEnv("SWARM_RUNTIME_EVENT_POLL_INTERVAL"); ok {
+	if strings.TrimSpace(os.Getenv("SWARM_RUNTIME_EVENT_POLL_INTERVAL")) != "" {
 		unsupported = append(unsupported, "SWARM_RUNTIME_EVENT_POLL_INTERVAL")
 	}
 	if len(unsupported) == 0 {
