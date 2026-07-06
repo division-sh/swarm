@@ -202,12 +202,22 @@ func validateEventCriteriaCitationFields(bundle *WorkflowContractBundle) []error
 			if !criteriaCitationTypeAllowed(field.Type) {
 				errs = append(errs, fmt.Errorf("%w: %s requires text/string or list-of-text field type, got %q", ErrInvalidField, fieldContext, strings.TrimSpace(field.Type)))
 			}
-			if flowID := strings.TrimSpace(source.FlowID); flowID != "" {
-				policy := bundle.ResolvedPolicyForFlow(flowID)
-				if set, ok := policy.Criteria[strings.TrimSpace(field.Citation.Criteria)]; ok {
-					errs = append(errs, validateCriteriaCitationAllowedClasses(fieldContext, field.Citation, set)...)
-				}
+			criteriaName := strings.TrimSpace(field.Citation.Criteria)
+			flowID := strings.TrimSpace(source.FlowID)
+			if criteriaName == "" {
+				continue
 			}
+			if flowID == "" {
+				errs = append(errs, fmt.Errorf("%w: %s requires a flow-scoped event", ErrInvalidField, fieldContext))
+				continue
+			}
+			policy := bundle.ResolvedPolicyForFlow(flowID)
+			set, ok := policy.Criteria[criteriaName]
+			if !ok {
+				errs = append(errs, fmt.Errorf("%w: %s criteria set %q does not resolve in flow %s policy.criteria", ErrInvalidField, fieldContext, criteriaName, flowID))
+				continue
+			}
+			errs = append(errs, validateCriteriaCitationAllowedClasses(fieldContext, field.Citation, set)...)
 		}
 	}
 	return errs

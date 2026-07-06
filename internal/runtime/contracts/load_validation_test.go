@@ -577,6 +577,19 @@ func TestValidateWorkflowCriteriaContractsRejectsInvalidCriteriaShapes(t *testin
 			wantError: "allowed class \"allow\" is not declared",
 		},
 		{
+			name: "event citation criteria ref resolves without emitter",
+			mutate: func(bundle *WorkflowContractBundle) {
+				flow := bundle.FlowTree.ByID["validation"]
+				field := flow.Events["cto.spec_vetoed"].Payload.Properties["cites"]
+				field.Citation.Criteria = "missing"
+				flow.Events["cto.spec_vetoed"].Payload.Properties["cites"] = field
+				bundle.scopedEvents["validation::cto.spec_vetoed"] = flow.Events["cto.spec_vetoed"]
+				bundle.scopedAgents = map[string]AgentRegistryEntry{}
+				bundle.scopedAgentSources = map[string]ContractItemSource{}
+			},
+			wantError: "criteria set \"missing\" does not resolve in flow validation policy.criteria",
+		},
+		{
 			name: "agent emits criteria event without declaring set",
 			mutate: func(bundle *WorkflowContractBundle) {
 				agent := bundle.scopedAgents["validation::cto-agent"]
