@@ -1573,16 +1573,17 @@ compute_module_contracts:
       including threads, SIMD, memory64, and multi-memory. Deterministic core
       features needed by the compiled fixture ABI may be enabled only when they
       do not introduce host capability or nondeterministic execution. PR1 enables
-      bulk memory and reference types because the precompiled Rust core-module
-      fixture requires them; both remain zero-import, deterministic Wasm
-      execution features rather than host capabilities.
+      bulk memory for the precompiled Rust core-module fixture; this remains a
+      zero-import, deterministic Wasm execution feature rather than a host
+      capability.
     memory_limits: |
       `limits.memory_pages` is a hard contract limit. A supported module's
       exported memory MUST declare a Wasm maximum, and that maximum MUST be less
       than or equal to `limits.memory_pages`; missing or larger maxima fail
       static validation before execution. Runtime MAY additionally apply an
       engine store/resource limiter when available, but the module-declared
-      maximum is the PR1 grow-time ceiling.
+      maximum and the runtime engine store/resource limiter are the PR1 grow-time
+      ceilings.
     encoding: |
       Input and output are canonical JSON objects validated against the declared
       schemas. Float/numeric I/O schemas are forbidden in PR1; authors must use
@@ -1639,11 +1640,10 @@ compute_module_contracts:
       diagnostics carrying module ID and row ID.
     trace_and_replay: |
       Runtime traces record module ID, row ID, declared digest, engine version,
-      output hash, and fuel/gas consumed. PR1 records this evidence. Replay
-      comparison of output hash and fuel/gas consumed is the required follow-up
-      before this surface can claim cross-version deterministic replay closure;
-      divergence must become a typed replay failure rather than silent
-      acceptance.
+      output hash, and fuel/gas consumed. Supported replay re-executes module
+      rows and compares the recorded output hash and fuel/gas consumed against
+      the replay execution. Divergence is a typed deterministic replay failure,
+      never silent acceptance.
   bundle_identity:
     rule: |
       Module bytes referenced by policy.modules are part of the bundle contract

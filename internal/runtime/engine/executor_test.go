@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -94,6 +95,95 @@ func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runt
 		},
 	}
 	return semanticview.Wrap(bundle), module
+}
+
+func newStructuredRendererExecutor(t *testing.T, source semanticview.Source) *Executor {
+	t.Helper()
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       source,
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`computed.rendered_bundle.format == "yaml"`: func(base BaseContext) (bool, error) {
+			rendered, _ := base.Computed.Raw()["rendered_bundle"].(map[string]any)
+			return rendered["format"] == "yaml", nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	return exec
+}
+
+func structuredRendererModuleSpec() *runtimecontracts.ComputeModuleSpec {
+	return &runtimecontracts.ComputeModuleSpec{
+		RowID:  "render_bundle",
+		Module: "structured_renderer",
+		Into:   "computed.rendered_bundle",
+		Input: map[string]string{
+			"component": "payload.component",
+			"owner":     "payload.owner",
+			"language":  "payload.language",
+			"files":     "payload.files",
+		},
+		InputPaths: map[string]runtimepaths.Path{
+			"component": runtimepaths.Parse("payload.component"),
+			"owner":     runtimepaths.Parse("payload.owner"),
+			"language":  runtimepaths.Parse("payload.language"),
+			"files":     runtimepaths.Parse("payload.files"),
+		},
+	}
+}
+
+func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontracts.ComputeModuleSpec) ExecutionRequest {
+	t.Helper()
+	return ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("render-node"),
+		FlowID:   identity.FlowID("render"),
+		Event: eventtest.RootIngress(
+			"evt-1",
+			events.EventType("render.requested"),
+			"",
+			"",
+			mustEncodeJSON(t, map[string]any{
+				"component": "api",
+				"owner":     "platform",
+				"language":  "go",
+				"files":     []any{"main.go", "README.md", "service.yaml"},
+			}),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		),
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					ID:        "render_bundle",
+					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindModule, Module: moduleSpec},
+					Compute: &runtimecontracts.ComputeSpec{
+						Operation: runtimecontracts.ComputeOpModule,
+						StoreAs:   "computed.rendered_bundle",
+						Module:    moduleSpec,
+					},
+				},
+				{
+					ID:        "rendered_yaml",
+					Condition: `computed.rendered_bundle.format == "yaml"`,
+					Emit: runtimecontracts.EmitSpec{Event: "bundle.rendered", Fields: map[string]runtimecontracts.ExpressionValue{
+						"content": runtimecontracts.RefExpression("computed.rendered_bundle.content"),
+					}},
+				},
+			},
+		},
+	}
 }
 
 func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
@@ -1785,6 +1875,68 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	trace := result.ComputeModuleTraces[0]
 	if trace.ModuleID != "structured_renderer" || trace.RowID != "render_bundle" || trace.Digest != module.Digest || trace.FuelConsumed == 0 || trace.OutputHash == "" || trace.Engine == "" {
 		t.Fatalf("trace = %#v", trace)
+	}
+}
+
+func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
+	source, _ := sourceWithStructuredRendererModule(t)
+	exec := newStructuredRendererExecutor(t, source)
+	req := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
+
+	first, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("initial Execute error: %v", err)
+	}
+	if got := len(first.ComputeModuleTraces); got != 1 {
+		t.Fatalf("initial traces = %d, want 1", got)
+	}
+
+	req.ExpectedComputeModuleTraces = append([]ComputeModuleTrace(nil), first.ComputeModuleTraces...)
+	replayed, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("replay Execute with matching trace error: %v", err)
+	}
+	if got := len(replayed.ComputeModuleTraces); got != 1 {
+		t.Fatalf("replay traces = %d, want 1", got)
+	}
+
+	req.ExpectedComputeModuleTraces[0].OutputHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	_, err = exec.Execute(context.Background(), req)
+	if err == nil {
+		t.Fatal("replay Execute error = nil, want divergence")
+	}
+	var typed *computemodule.Error
+	if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
+		t.Fatalf("error = %#v, want code %s", err, computemodule.CodeReplay)
+	}
+	if !strings.Contains(err.Error(), "output_hash") {
+		t.Fatalf("error = %v, want output hash diagnostic", err)
+	}
+}
+
+func TestDecodeComputeModuleOutputRejectsTrailingJSON(t *testing.T) {
+	schema := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"content"},
+		"properties": map[string]any{
+			"content": map[string]any{"type": "string"},
+		},
+	}
+	for _, raw := range [][]byte{
+		[]byte(`{"content":"ok"} trailing`),
+		[]byte(`{"content":"ok"} {"content":"again"}`),
+	} {
+		t.Run(string(raw), func(t *testing.T) {
+			_, err := decodeComputeModuleOutput("structured_renderer", "render_bundle", raw, schema)
+			if err == nil {
+				t.Fatal("decodeComputeModuleOutput error = nil, want strict JSON failure")
+			}
+			var typed *computemodule.Error
+			if !errors.As(err, &typed) || typed.Code != computemodule.CodeABI {
+				t.Fatalf("error = %#v, want code %s", err, computemodule.CodeABI)
+			}
+		})
 	}
 }
 

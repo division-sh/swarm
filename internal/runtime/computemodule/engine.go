@@ -33,6 +33,7 @@ const (
 	CodeTrap         Code = "compute_module_trap"
 	CodeOutputSize   Code = "compute_module_output_size"
 	CodeOutputBounds Code = "compute_module_output_bounds"
+	CodeReplay       Code = "compute_module_replay_divergence"
 )
 
 type ModuleImport struct {
@@ -196,7 +197,7 @@ func Execute(req Request) (Result, error) {
 	}
 	allocResult, err := alloc.Call(store, int32(len(req.Input)))
 	if err != nil {
-		return Result{}, classifyCallError(req, CodeFuel, err)
+		return Result{}, classifyCallError(req, CodeTrap, err)
 	}
 	inputPtr, ok := toInt32(allocResult)
 	if !ok || inputPtr < 0 {
