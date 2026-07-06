@@ -383,6 +383,16 @@ func mergePolicyValues(dst *runtimecontracts.PolicyDocument, src runtimecontract
 		}
 		dst.Criteria[key] = clonePolicyCriteriaSet(value)
 	}
+	if dst.Validation == nil {
+		dst.Validation = map[string]runtimecontracts.PolicyValidationSet{}
+	}
+	for key, value := range src.Validation {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		dst.Validation[key] = clonePolicyValidationSet(value)
+	}
 }
 
 func deletePolicyValueAtPath(doc *runtimecontracts.PolicyDocument, path string) {
