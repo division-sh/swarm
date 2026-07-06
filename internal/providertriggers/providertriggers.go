@@ -37,6 +37,10 @@ const (
 	cannotRunCodeBeforeAdmission = "run_code_before_admission"
 	cannotEmitUndeclaredEvents   = "emit_undeclared_events"
 	cannotTouchUnboundResources  = "touch_unbound_resources"
+
+	signatureTypeHMACSHA256    = "hmac_sha256"
+	signatureTypeHMACSHA1      = "hmac_sha1"
+	signatureTypeTokenEquality = "token_equality"
 )
 
 type Target struct {
@@ -440,7 +444,8 @@ func (m Manifest) Validate() error {
 	if provider == "" {
 		return fmt.Errorf("provider is required")
 	}
-	if m.Secret.Required && m.Signature.Type == "" {
+	signatureType := strings.TrimSpace(m.Signature.Type)
+	if m.Secret.Required && signatureType == "" {
 		return fmt.Errorf("%s manifest requires signature when secret is required", provider)
 	}
 	switch strings.TrimSpace(m.PayloadSource) {
@@ -448,38 +453,58 @@ func (m Manifest) Validate() error {
 	default:
 		return fmt.Errorf("%s manifest has unsupported payload_source %q", provider, m.PayloadSource)
 	}
-	if m.Signature.Type != "" {
-		switch strings.TrimSpace(m.Signature.Type) {
-		case "hmac_sha256", "hmac_sha1":
+	if signatureType != "" {
+		switch signatureType {
+		case signatureTypeHMACSHA256, signatureTypeHMACSHA1, signatureTypeTokenEquality:
 		default:
 			return fmt.Errorf("%s manifest has unsupported signature type %q", provider, m.Signature.Type)
 		}
-		switch m.Signature.digestEncoding() {
-		case "hex", "base64":
-		default:
-			return fmt.Errorf("%s manifest has unsupported signature encoding %q", provider, m.Signature.Encoding)
-		}
-	}
-	if m.Signature.Type != "" {
 		if strings.TrimSpace(m.Signature.Header) == "" {
 			return fmt.Errorf("%s manifest signature header is required", provider)
 		}
-		switch strings.TrimSpace(m.Signature.SignedPayload) {
-		case "raw_body", "slack_v0", "timestamp_dot_raw_body", "url_plus_sorted_form":
-		default:
-			return fmt.Errorf("%s manifest has unsupported signed_payload %q", provider, m.Signature.SignedPayload)
-		}
-		switch strings.TrimSpace(m.Signature.SignedPayload) {
-		case "slack_v0", "timestamp_dot_raw_body":
-			if m.Signature.Timestamp == nil {
-				return fmt.Errorf("%s manifest timestamp is required for %s", provider, m.Signature.SignedPayload)
+		switch signatureType {
+		case signatureTypeHMACSHA256, signatureTypeHMACSHA1:
+			switch m.Signature.digestEncoding() {
+			case "hex", "base64":
+			default:
+				return fmt.Errorf("%s manifest has unsupported signature encoding %q", provider, m.Signature.Encoding)
 			}
-		}
-		if strings.TrimSpace(m.Signature.SignedPayload) == "url_plus_sorted_form" && m.Signature.digestEncoding() != "base64" {
-			return fmt.Errorf("%s manifest url_plus_sorted_form signatures require base64 encoding", provider)
-		}
-		if strings.TrimSpace(m.Signature.SignedPayload) == "url_plus_sorted_form" && strings.TrimSpace(m.Signature.Type) != "hmac_sha1" {
-			return fmt.Errorf("%s manifest url_plus_sorted_form signatures require hmac_sha1", provider)
+			switch strings.TrimSpace(m.Signature.SignedPayload) {
+			case "raw_body", "slack_v0", "timestamp_dot_raw_body", "url_plus_sorted_form":
+			default:
+				return fmt.Errorf("%s manifest has unsupported signed_payload %q", provider, m.Signature.SignedPayload)
+			}
+			switch strings.TrimSpace(m.Signature.SignedPayload) {
+			case "slack_v0", "timestamp_dot_raw_body":
+				if m.Signature.Timestamp == nil {
+					return fmt.Errorf("%s manifest timestamp is required for %s", provider, m.Signature.SignedPayload)
+				}
+			}
+			if strings.TrimSpace(m.Signature.SignedPayload) == "url_plus_sorted_form" && m.Signature.digestEncoding() != "base64" {
+				return fmt.Errorf("%s manifest url_plus_sorted_form signatures require base64 encoding", provider)
+			}
+			if strings.TrimSpace(m.Signature.SignedPayload) == "url_plus_sorted_form" && signatureType != signatureTypeHMACSHA1 {
+				return fmt.Errorf("%s manifest url_plus_sorted_form signatures require hmac_sha1", provider)
+			}
+		case signatureTypeTokenEquality:
+			if !m.Secret.Required {
+				return fmt.Errorf("%s manifest token_equality requires secret.required", provider)
+			}
+			if strings.TrimSpace(m.Signature.Encoding) != "" {
+				return fmt.Errorf("%s manifest token_equality must not set encoding", provider)
+			}
+			if strings.TrimSpace(m.Signature.Prefix) != "" {
+				return fmt.Errorf("%s manifest token_equality must not set prefix", provider)
+			}
+			if strings.TrimSpace(m.Signature.SignedPayload) != "" {
+				return fmt.Errorf("%s manifest token_equality must not set signed_payload", provider)
+			}
+			if strings.TrimSpace(m.Signature.SignatureParam) != "" {
+				return fmt.Errorf("%s manifest token_equality must not set signature_param", provider)
+			}
+			if m.Signature.Timestamp != nil {
+				return fmt.Errorf("%s manifest token_equality must not set timestamp", provider)
+			}
 		}
 	}
 	if err := validateValueSource(provider, "delivery_id", m.DeliveryID); err != nil {
@@ -600,6 +625,9 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 }
 
 func (m Manifest) verifySignature(secret string, req Request) error {
+	if strings.TrimSpace(m.Signature.Type) == signatureTypeTokenEquality {
+		return m.verifyTokenEquality(secret, req)
+	}
 	sigHeader := strings.TrimSpace(req.Headers.Get(m.Signature.Header))
 	if sigHeader == "" {
 		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
@@ -662,6 +690,21 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 	return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 }
 
+func (m Manifest) verifyTokenEquality(secret string, req Request) error {
+	values := req.Headers.Values(m.Signature.Header)
+	if len(values) == 0 || strings.TrimSpace(values[0]) == "" {
+		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
+	}
+	if len(values) != 1 {
+		return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+	}
+	token := strings.TrimSpace(values[0])
+	if hmac.Equal([]byte(token), []byte(strings.TrimSpace(secret))) {
+		return nil
+	}
+	return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+}
+
 func (s SignatureManifest) TimestampParam() string {
 	if s.Timestamp == nil {
 		return ""
@@ -671,9 +714,9 @@ func (s SignatureManifest) TimestampParam() string {
 
 func (s SignatureManifest) hashFunc() (func() hash.Hash, error) {
 	switch strings.TrimSpace(s.Type) {
-	case "hmac_sha256":
+	case signatureTypeHMACSHA256:
 		return sha256.New, nil
-	case "hmac_sha1":
+	case signatureTypeHMACSHA1:
 		return sha1.New, nil
 	default:
 		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))

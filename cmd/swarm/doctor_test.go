@@ -115,6 +115,7 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 		"provider_trigger_pack_shopify",
 		"provider_trigger_pack_slack",
 		"provider_trigger_pack_stripe",
+		"provider_trigger_pack_telegram",
 		"provider_trigger_pack_twilio",
 		"provider_trigger_pack_typeform",
 	} {
@@ -131,6 +132,11 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CANNOT emit_undeclared_events") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "requires webhook_signing.stripe=UNBOUND") {
 		t.Fatalf("stripe provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
+	}
+	if !localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "CAN receive HTTPS route /webhooks/{entity}/telegram") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "CANNOT emit_undeclared_events") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "requires webhook_signing.telegram=UNBOUND") {
+		t.Fatalf("telegram provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
 }
 

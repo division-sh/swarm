@@ -663,6 +663,133 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	waitForInboundBusQuiescence(t, bus)
 }
 
+func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	const (
+		runID             = "4d000000-0000-0000-0000-000000000001"
+		entityID          = "4d000000-0000-0000-0000-000000000002"
+		flowInstance      = "telegram-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "telegram"
+		webhookSecret     = "telegram-secret"
+		providerEventID   = "123456789"
+		agentID           = "telegram-webhook-subscriber"
+		providerEventName = "inbound.telegram"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	pg := &store.PostgresStore{DB: db}
+	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
+	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), webhookSecret) {
+		t.Fatal("Telegram secret token leaked into response")
+	}
+	if got := countPostgresInboundMarkers(t, ctx, db, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadPostgresInboundProviderEventID(t, ctx, db, runID, entityID, providerEventName, providerEventID)
+	if got := countPostgresInboundProviderEvents(t, ctx, db, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadPostgresInboundProviderEventPayloadField(t, ctx, db, eventID, "provider_event_type"); got != "update" {
+		t.Fatalf("provider_event_type = %q, want update", got)
+	}
+	if got := countPostgresAgentDeliveriesForEvent(t, ctx, db, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// Telegram uses durable_before_dispatch; this proof is about persisted
+		// evidence and supported store admission.
+	}
+	waitForInboundBusQuiescence(t, bus)
+}
+
+func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *testing.T) {
+	const (
+		runID             = "4e000000-0000-0000-0000-000000000001"
+		entityID          = "4e000000-0000-0000-0000-000000000002"
+		flowInstance      = "telegram-sqlite-provider-trigger-instance"
+		entitySlug        = "customer-a"
+		provider          = "telegram"
+		webhookSecret     = "telegram-secret"
+		providerEventID   = "987654321"
+		agentID           = "telegram-sqlite-webhook-subscriber"
+		providerEventName = "inbound.telegram"
+	)
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+
+	bus, err := runtimebus.NewEventBus(sqliteStore)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
+	defer bus.Unsubscribe(agentID)
+
+	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+
+	body := []byte(`{"update_id":987654321,"message":{"message_id":8,"chat":{"id":42},"text":"hello sqlite"}}`)
+	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), webhookSecret) {
+		t.Fatal("Telegram secret token leaked into response")
+	}
+	if got := countSQLiteInboundMarkers(t, ctx, sqliteStore, providerEventID, entityID, provider); got != 1 {
+		t.Fatalf("inbound marker rows = %d, want 1", got)
+	}
+	eventID := loadSQLiteInboundProviderEventID(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID)
+	if got := countSQLiteInboundProviderEvents(t, ctx, sqliteStore, runID, entityID, providerEventName, providerEventID); got != 1 {
+		t.Fatalf("provider event rows = %d, want 1", got)
+	}
+	if got := loadSQLiteInboundProviderEventPayloadField(t, ctx, sqliteStore, eventID, "provider_event_type"); got != "update" {
+		t.Fatalf("provider_event_type = %q, want update", got)
+	}
+	if got := countSQLiteAgentDeliveriesForEvent(t, ctx, sqliteStore, eventID, agentID); got != 1 {
+		t.Fatalf("agent delivery rows = %d, want 1", got)
+	}
+	select {
+	case got := <-ch:
+		if got.ID() != eventID || got.Type() != events.EventType(providerEventName) {
+			t.Fatalf("delivered event = %s/%s, want %s/%s", got.ID(), got.Type(), eventID, providerEventName)
+		}
+	default:
+		// Telegram uses durable_before_dispatch; this proof is about persisted
+		// evidence and supported store admission.
+	}
+	waitForInboundBusQuiescence(t, bus)
+}
+
 func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
@@ -1268,6 +1395,12 @@ func shopifyWebhookSignature(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func newSignedTelegramRequest(path string, secret string, body []byte) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(body)))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", secret)
+	return req
 }
 
 func newSignedTypeformRequest(path string, secret string, body []byte) *http.Request {
