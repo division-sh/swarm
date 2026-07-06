@@ -1,0 +1,9 @@
+name: test-rules-no-match visible smoke
+steps:
+  - publish: item.received
+    payload:
+      kind: c
+expect:
+  entities:
+    - type: default
+      current_state: pending

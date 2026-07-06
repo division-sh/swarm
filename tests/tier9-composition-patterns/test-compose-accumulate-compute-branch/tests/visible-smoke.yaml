@@ -1,0 +1,13 @@
+name: test-compose-accumulate-compute-branch visible smoke
+steps:
+  - publish: score.submitted
+    payload:
+      value: 81
+expect:
+  events:
+    include: [result.high]
+  entities:
+    - type: core
+      current_state: high
+      fields:
+        score: 81

@@ -1,0 +1,10 @@
+name: test-two-node-chain visible smoke
+steps:
+  - publish: task.started
+    payload: {}
+expect:
+  events:
+    include: [task.progressed, task.finished]
+  entities:
+    - type: default
+      current_state: complete

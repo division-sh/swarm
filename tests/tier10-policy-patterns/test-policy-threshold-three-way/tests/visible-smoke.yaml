@@ -1,0 +1,13 @@
+name: test-policy-threshold-three-way visible smoke
+steps:
+  - publish: eval.submitted
+    payload:
+      score: 60
+expect:
+  events:
+    include: [eval.tier_b]
+  entities:
+    - type: core
+      current_state: tier_b
+      fields:
+        score: 60

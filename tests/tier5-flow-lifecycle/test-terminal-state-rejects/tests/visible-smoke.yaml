@@ -1,0 +1,12 @@
+name: test-terminal-state-rejects visible smoke
+steps:
+  - publish: task.completed
+    payload: {}
+  - publish: task.reopen_requested
+    payload: {}
+expect:
+  events:
+    include: [task.finished]
+  entities:
+    - type: default
+      current_state: done

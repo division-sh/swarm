@@ -1,0 +1,10 @@
+name: test-guard-multi-fail visible smoke
+steps:
+  - publish: check.requested
+    payload:
+      score: 85
+      level: 1
+expect:
+  entities:
+    - type: default
+      current_state: pending

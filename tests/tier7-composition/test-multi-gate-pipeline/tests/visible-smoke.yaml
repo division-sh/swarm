@@ -1,0 +1,20 @@
+name: test-multi-gate-pipeline visible smoke
+steps:
+  - publish: gate.g1_set
+    payload: {}
+  - publish: gate.g2_set
+    payload: {}
+  - publish: gate.g3_set
+    payload: {}
+  - publish: approval.requested
+    payload: {}
+expect:
+  events:
+    include: [gate.set, approval.granted]
+  entities:
+    - type: default
+      current_state: approved
+      gates:
+        g1: true
+        g2: true
+        g3: true

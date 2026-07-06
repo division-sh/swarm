@@ -1,0 +1,9 @@
+name: test-data-pin-wiring visible smoke
+steps:
+  - publish: job.start
+    payload:
+      mode: fast
+      threshold: "0.8"
+expect:
+  events:
+    include: [process.done]

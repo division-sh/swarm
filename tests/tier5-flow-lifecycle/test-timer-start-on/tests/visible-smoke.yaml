@@ -1,0 +1,12 @@
+name: test-timer-start-on visible smoke
+steps:
+  - publish: task.started
+    payload: {}
+  - publish: timer.task_timeout
+    payload: {}
+expect:
+  events:
+    include: [task.timed_out]
+  entities:
+    - type: default
+      current_state: timed_out

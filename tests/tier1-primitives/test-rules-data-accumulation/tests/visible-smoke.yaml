@@ -1,0 +1,12 @@
+name: test-rules-data-accumulation visible smoke
+steps:
+  - publish: item.received
+    payload:
+      kind: a
+      value: 42
+expect:
+  entities:
+    - type: core
+      current_state: pending
+      fields:
+        value: 42

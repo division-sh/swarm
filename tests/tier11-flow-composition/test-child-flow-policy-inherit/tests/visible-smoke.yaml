@@ -1,0 +1,11 @@
+name: test-child-flow-policy-inherit visible smoke
+steps:
+  - publish: child/check.requested
+    payload:
+      score: 55
+expect:
+  events:
+    include: [check.passed]
+  entities:
+    - type: default
+      current_state: approved

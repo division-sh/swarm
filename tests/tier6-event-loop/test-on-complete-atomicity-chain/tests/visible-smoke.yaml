@@ -1,0 +1,14 @@
+name: test-on-complete-atomicity-chain visible smoke
+steps:
+  - publish: task.started
+    payload:
+      ready: true
+      batch_id: batch-42
+expect:
+  events:
+    include: [phase.advanced, task.done]
+  entities:
+    - type: core
+      current_state: done
+      fields:
+        batch_id: batch-42

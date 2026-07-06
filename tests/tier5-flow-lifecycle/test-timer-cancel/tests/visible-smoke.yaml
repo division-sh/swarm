@@ -1,0 +1,12 @@
+name: test-timer-cancel visible smoke
+steps:
+  - publish: timer.scheduled
+    payload: {}
+  - publish: timer.cancel_requested
+    payload: {}
+expect:
+  events:
+    include: [timer.cancelled]
+  entities:
+    - type: default
+      current_state: cancelled

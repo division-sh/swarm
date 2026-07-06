@@ -1,0 +1,10 @@
+name: test-query-group-by visible smoke
+steps:
+  - publish: digest.requested
+    payload: {}
+expect:
+  events:
+    include: [digest.compiled]
+  entities:
+    - type: default
+      current_state: compiled

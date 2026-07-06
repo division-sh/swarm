@@ -1,0 +1,13 @@
+name: test-full-lifecycle visible smoke
+steps:
+  - publish: order.submitted
+    payload:
+      amount: 100
+expect:
+  events:
+    include: [order.validated, order.finalized]
+  entities:
+    - type: default
+      current_state: complete
+      gates:
+        validation_passed: true

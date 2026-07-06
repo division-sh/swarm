@@ -1,0 +1,13 @@
+name: test-terminal-state-preserves visible smoke
+steps:
+  - publish: task.completed
+    payload: {}
+  - publish: task.updated
+    payload:
+      data: late-update
+expect:
+  events:
+    include: [task.finished]
+  entities:
+    - type: default
+      current_state: done

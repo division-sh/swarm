@@ -1,0 +1,10 @@
+name: test-policy-capacity-query visible smoke
+steps:
+  - publish: slot.requested
+    payload: {}
+expect:
+  events:
+    include: [slot.granted]
+  entities:
+    - type: core
+      current_state: active

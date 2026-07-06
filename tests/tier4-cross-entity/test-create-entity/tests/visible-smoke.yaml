@@ -1,0 +1,11 @@
+name: test-create-entity visible smoke
+steps:
+  - publish: entity.create_requested
+    payload:
+      child_id: child-001
+expect:
+  events:
+    include: [entity.created]
+  entities:
+    - type: default
+      current_state: creating

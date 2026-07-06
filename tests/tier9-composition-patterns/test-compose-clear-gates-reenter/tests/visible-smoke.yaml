@@ -1,0 +1,14 @@
+name: test-compose-clear-gates-reenter visible smoke
+steps:
+  - publish: review.done
+    payload: {}
+  - publish: review.insufficient
+    payload: {}
+expect:
+  events:
+    include: [review.approved]
+  entities:
+    - type: default
+      current_state: approved
+      gates:
+        g_reviewed: true

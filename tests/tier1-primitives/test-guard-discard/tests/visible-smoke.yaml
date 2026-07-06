@@ -1,0 +1,9 @@
+name: test-guard-discard visible smoke
+steps:
+  - publish: check.requested
+    payload:
+      score: 50
+expect:
+  entities:
+    - type: default
+      current_state: pending

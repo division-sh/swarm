@@ -1,0 +1,7 @@
+name: test-child-flow-pin-wiring visible smoke
+steps:
+  - publish: job.submit
+    payload: {}
+expect:
+  events:
+    include: [work.requested, work.completed]

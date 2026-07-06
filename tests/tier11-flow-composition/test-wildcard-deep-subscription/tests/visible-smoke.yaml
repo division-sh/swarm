@@ -1,0 +1,7 @@
+name: test-wildcard-deep-subscription visible smoke
+steps:
+  - publish: pipeline.start
+    payload: {}
+expect:
+  events:
+    include: [pipeline.complete]

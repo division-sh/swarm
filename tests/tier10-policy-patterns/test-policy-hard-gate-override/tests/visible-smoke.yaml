@@ -1,0 +1,15 @@
+name: test-policy-hard-gate-override visible smoke
+steps:
+  - publish: score.final
+    payload:
+      main_score: 80
+      secondary_score: 40
+expect:
+  events:
+    include: [result.demoted]
+  entities:
+    - type: core
+      current_state: demoted
+      fields:
+        main_score: 80
+        secondary_score: 40
