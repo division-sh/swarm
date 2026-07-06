@@ -14,12 +14,13 @@ import (
 
 // Config contains platform-generic runtime configuration.
 type Config struct {
-	Runtime    RuntimeConfig   `yaml:"runtime"`
-	Database   DatabaseConfig  `yaml:"database"`
-	Store      StoreConfig     `yaml:"store"`
-	Workspace  WorkspaceConfig `yaml:"workspace"`
-	LLM        LLMConfig       `yaml:"llm"`
-	Extensions map[string]any  `yaml:",inline"`
+	Runtime          RuntimeConfig          `yaml:"runtime"`
+	Database         DatabaseConfig         `yaml:"database"`
+	Store            StoreConfig            `yaml:"store"`
+	Workspace        WorkspaceConfig        `yaml:"workspace"`
+	LLM              LLMConfig              `yaml:"llm"`
+	ProviderTriggers ProviderTriggersConfig `yaml:"provider_triggers"`
+	Extensions       map[string]any         `yaml:",inline"`
 
 	typedExtensions ExtensionsConfig `yaml:"-"`
 	extensionsReady bool             `yaml:"-"`
@@ -30,6 +31,14 @@ type RuntimeConfig struct {
 	MaxConcurrentAgents int           `yaml:"max_concurrent_agents"`
 	EventPollInterval   time.Duration `yaml:"event_poll_interval"`
 	RecoveryOnStartup   bool          `yaml:"recovery_on_startup"`
+}
+
+type ProviderTriggersConfig struct {
+	Packs ProviderTriggerPacksConfig `yaml:"packs"`
+}
+
+type ProviderTriggerPacksConfig struct {
+	ExternalDirs []string `yaml:"external_dirs"`
 }
 
 type DatabaseConfig struct {
@@ -190,6 +199,9 @@ func (c *Config) validate(backendOverride string) error {
 	if err := c.validateDatabasePasswordSource(); err != nil {
 		return err
 	}
+	if err := c.validateProviderTriggerPacks(); err != nil {
+		return err
+	}
 	if err := c.validateRetiredLLMModelConfig(); err != nil {
 		return err
 	}
@@ -249,6 +261,24 @@ func (c *Config) validateDatabasePasswordSource() error {
 		return nil
 	}
 	return ValidateDatabasePasswordDeclaration(c.Database)
+}
+
+func (c *Config) validateProviderTriggerPacks() error {
+	if c == nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for i, dir := range c.ProviderTriggers.Packs.ExternalDirs {
+		dir = strings.TrimSpace(dir)
+		if dir == "" {
+			return fmt.Errorf("provider_triggers.packs.external_dirs[%d] must be non-empty", i)
+		}
+		if _, exists := seen[dir]; exists {
+			return fmt.Errorf("provider_triggers.packs.external_dirs contains duplicate %q", dir)
+		}
+		seen[dir] = struct{}{}
+	}
+	return nil
 }
 
 func ValidateDatabasePasswordDeclaration(db DatabaseConfig) error {

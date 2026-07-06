@@ -5801,7 +5801,9 @@ tool_model:
       status: >
         E5 first slice. Provider-trigger packs wrap the frozen provider-trigger manifest vocabulary in a universal pack
         envelope before registration. The envelope is a trust/admission artifact, not a provider-specific adapter and not a
-        new provider-trigger vocabulary owner.
+        new provider-trigger vocabulary owner. Runtime config declares external provider-trigger pack directories at
+        `provider_triggers.packs.external_dirs`; `swarm serve` resolves those directories at boot and fails closed before
+        runtime construction if any declared pack cannot be verified.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -5832,6 +5834,7 @@ tool_model:
           Required metadata in this slice. Entries must parse as non-empty test references. Executing pack-declared tests is
           a later gated harness; current behavioral proof remains the provider-trigger conformance/runtime suite.
       verification_order:
+      - read declared external pack directories from `provider_triggers.packs.external_dirs`
       - parse envelope with strict known fields
       - validate id/version/platform_version/type/provenance/tests metadata
       - read trigger manifest bytes
@@ -5853,7 +5856,8 @@ tool_model:
         The first trigger surface includes CAN receive HTTPS at `/webhooks/{entity}/{provider}`, CAN verify the named signing
         secret, CAN emit the declared event name, CAN persist dedupe markers, and CANNOT run code before admission, emit
         undeclared events, or touch unbound resources. Requirement readback marks each declared secret as BOUND or UNBOUND
-        without exposing secret values.
+        without exposing secret values. `swarm doctor` is the first operator surface for this readback and renders the same
+        verified first-party and declared external provider-trigger pack capability surface that serve admits at boot.
       unbound_requirement_policy: >
         A missing deployment binding for a declared signing secret does not reject pack import. Runtime webhook admission
         still fails closed before signature verification, dedupe marker persistence, or event publish when a required

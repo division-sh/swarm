@@ -64,9 +64,16 @@ type InboundGateway struct {
 }
 
 func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
+	return NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, nil, stores...)
+}
+
+func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, providers *providertriggers.Registry, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
+	}
+	if providers == nil {
+		providers = providertriggers.DefaultRegistry()
 	}
 	g := &InboundGateway{
 		mux:                     http.NewServeMux(),
@@ -74,7 +81,7 @@ func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdown
 		store:                   store,
 		logger:                  logger,
 		shutdownAdmissionClosed: shutdownAdmissionClosed,
-		providers:               providertriggers.DefaultRegistry(),
+		providers:               providers,
 	}
 	g.mux.HandleFunc("/webhooks/", g.handleWebhook)
 	return g

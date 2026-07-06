@@ -89,6 +89,76 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	}
 }
 
+func TestValidateProviderTriggerExternalPackDirs(t *testing.T) {
+	base := strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: ./reference-data",
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")
+
+	t.Run("accepts declared external dirs", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "swarm.yaml")
+		body := base + "\n" + strings.Join([]string{
+			"provider_triggers:",
+			"  packs:",
+			"    external_dirs:",
+			"      - ./packs/linear",
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got := cfg.ProviderTriggers.Packs.ExternalDirs; len(got) != 1 || got[0] != "./packs/linear" {
+			t.Fatalf("external dirs = %#v, want declared relative path", got)
+		}
+	})
+
+	t.Run("rejects empty entries", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "swarm.yaml")
+		body := base + "\n" + strings.Join([]string{
+			"provider_triggers:",
+			"  packs:",
+			"    external_dirs:",
+			"      - ''",
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), "provider_triggers.packs.external_dirs[0] must be non-empty") {
+			t.Fatalf("Load error = %v, want empty external dir rejection", err)
+		}
+	})
+
+	t.Run("rejects duplicates", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "swarm.yaml")
+		body := base + "\n" + strings.Join([]string{
+			"provider_triggers:",
+			"  packs:",
+			"    external_dirs:",
+			"      - ./packs/linear",
+			"      - ./packs/linear",
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), `provider_triggers.packs.external_dirs contains duplicate "./packs/linear"`) {
+			t.Fatalf("Load error = %v, want duplicate external dir rejection", err)
+		}
+	})
+}
+
 func TestValidate_RejectsPlaintextDatabasePassword(t *testing.T) {
 	c := validDatabasePasswordConfig()
 	c.Database.Password = "postgres"

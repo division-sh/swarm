@@ -117,6 +117,12 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightBackendPrerequisite, "config_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --config, --backend, retired env vars, or llm.backend")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
+	providerPackLoad, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
+	if err != nil {
+		report := localPreflightReport{OK: true, Owner: localPreflightOwner, Mode: "doctor"}
+		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider_triggers.packs.external_dirs or the referenced provider pack envelope")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
 	workspaceBackend, err := resolveWorkspaceBackend(opts.workspaceBackend, opts.workspaceBackendSet, cfgResult.Config)
 	if err != nil {
 		report := localPreflightReport{Owner: localPreflightOwner, Mode: "doctor"}
@@ -160,5 +166,6 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		CheckContractSecrets:   cmd.Flags().Changed("contracts"),
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets("doctor"),
 	})
-	return returnLocalPreflightResult(cmd, report, opts.asJSON)
+	appendProviderTriggerPackSurfaceFindings(&report, providerPackLoad.Loaded)
+	return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 }

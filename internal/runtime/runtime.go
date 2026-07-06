@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -79,6 +80,7 @@ type RuntimeOptions struct {
 	Credentials                      runtimecredentials.Store
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
+	ProviderTriggerRegistry          *providertriggers.Registry
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
 	SystemContainers                 []string
@@ -655,7 +657,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	managerRef = rt.Manager
 
 	if stores.InboundStore != nil {
-		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, stores.InboundStore)
+		rt.InboundGateway = NewInboundGatewayWithProviderRegistry(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, opts.ProviderTriggerRegistry, stores.InboundStore)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 	}
 	if opts.EnableToolGateway {
