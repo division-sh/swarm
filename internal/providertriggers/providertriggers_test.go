@@ -49,6 +49,15 @@ func TestProviderTriggerPackVerificationFailsClosed(t *testing.T) {
 			want: "manifest_hash mismatch",
 		},
 		{
+			name:     "unknown trigger manifest field",
+			provider: "stripe",
+			mutate: func(t *testing.T, dir string) {
+				appendFile(t, filepath.Join(dir, "trigger.yaml"), "redact_keyz:\n  - secret\n")
+				rewritePackHash(t, dir)
+			},
+			want: "field redact_keyz not found",
+		},
+		{
 			name:     "capability declaration drift",
 			provider: "stripe",
 			mutate: func(t *testing.T, dir string) {
@@ -1256,6 +1265,37 @@ func copyBuiltinPackToTemp(t *testing.T, provider string) string {
 		}
 	}
 	return dir
+}
+
+func rewritePackHash(t *testing.T, dir string) {
+	t.Helper()
+	triggerBody, err := os.ReadFile(filepath.Join(dir, "trigger.yaml"))
+	if err != nil {
+		t.Fatalf("read trigger.yaml: %v", err)
+	}
+	sum := sha256.Sum256(triggerBody)
+	newLine := "manifest_hash: sha256:" + hex.EncodeToString(sum[:])
+
+	packPath := filepath.Join(dir, "pack.yaml")
+	packBody, err := os.ReadFile(packPath)
+	if err != nil {
+		t.Fatalf("read pack.yaml: %v", err)
+	}
+	lines := strings.Split(string(packBody), "\n")
+	replaced := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "manifest_hash: ") {
+			lines[i] = newLine
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		t.Fatal("pack.yaml missing manifest_hash line")
+	}
+	if err := os.WriteFile(packPath, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatalf("write pack.yaml: %v", err)
+	}
 }
 
 func replaceInFile(t *testing.T, filename, old, replacement string) {

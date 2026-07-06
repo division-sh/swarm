@@ -1,6 +1,7 @@
 package providertriggers
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -229,7 +230,7 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 	if err != nil {
 		return LoadedPack{}, err
 	}
-	manifest, err := ParseManifest(loaded.ManifestBody)
+	manifest, err := parseManifestStrict(loaded.ManifestBody)
 	if err != nil {
 		return LoadedPack{}, fmt.Errorf("parse trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
@@ -424,6 +425,16 @@ type AckManifest struct {
 func ParseManifest(body []byte) (Manifest, error) {
 	var manifest Manifest
 	if err := yaml.Unmarshal(body, &manifest); err != nil {
+		return Manifest{}, err
+	}
+	return manifest, nil
+}
+
+func parseManifestStrict(body []byte) (Manifest, error) {
+	var manifest Manifest
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&manifest); err != nil {
 		return Manifest{}, err
 	}
 	return manifest, nil
