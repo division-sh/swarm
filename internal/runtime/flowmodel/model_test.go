@@ -1,6 +1,10 @@
 package flowmodel
 
-import "testing"
+import (
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
 
 type testNode struct {
 	ID       string
@@ -68,6 +72,109 @@ func TestResolvePolicyByID_WalksAncestorChain(t *testing.T) {
 	}
 	if got.Values["shared"].Value != "child" {
 		t.Fatalf("expected child override for shared policy, got %#v", got.Values["shared"].Value)
+	}
+}
+
+func TestPolicyDocumentCriteriaIsTypedSectionNotGenericValue(t *testing.T) {
+	var doc PolicyDocument
+	if err := yaml.Unmarshal([]byte(`
+threshold: 12
+criteria:
+  feasibility_exclusions:
+    classes:
+      hard: {disposition: cto.spec_vetoed}
+    rules:
+      - id: FX-HARD-01
+        class: hard
+        text: Requires regulated real-time integration.
+        params:
+          max_features: policy.max_features
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
+	}
+
+	if _, ok := doc.Values["criteria"]; ok {
+		t.Fatalf("criteria leaked into generic policy values: %#v", doc.Values["criteria"])
+	}
+	if got := doc.Values["threshold"].Value; got != 12 {
+		t.Fatalf("threshold value = %#v, want 12", got)
+	}
+	set, ok := doc.Criteria["feasibility_exclusions"]
+	if !ok {
+		t.Fatalf("criteria set missing: %#v", doc.Criteria)
+	}
+	if got := set.Classes["hard"].Disposition; got != "cto.spec_vetoed" {
+		t.Fatalf("hard disposition = %q, want cto.spec_vetoed", got)
+	}
+	if len(set.Rules) != 1 || set.Rules[0].ID != "FX-HARD-01" {
+		t.Fatalf("rules = %#v, want FX-HARD-01", set.Rules)
+	}
+	if got := set.Rules[0].Params["max_features"].Value; got != "policy.max_features" {
+		t.Fatalf("param value = %#v, want policy.max_features", got)
+	}
+}
+
+func TestResolvePolicyByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
+	root := &testNode{
+		ID: "root",
+		Policy: PolicyDocument{
+			Criteria: map[string]PolicyCriteriaSet{
+				"root_set": {
+					Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "root.blocked"}},
+					Rules:   []PolicyCriteriaRule{{ID: "ROOT-1", Class: "hard", Text: "Root rule."}},
+				},
+				"shared": {
+					Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "root.revise"}},
+					Rules:   []PolicyCriteriaRule{{ID: "ROOT-SHARED", Class: "soft", Text: "Root shared."}},
+				},
+			},
+		},
+		Children: []testNode{{
+			ID: "child",
+			Policy: PolicyDocument{
+				Criteria: map[string]PolicyCriteriaSet{
+					"child_set": {
+						Classes: map[string]PolicyCriteriaClass{"allow": {Disposition: "none"}},
+						Rules:   []PolicyCriteriaRule{{ID: "CHILD-1", Class: "allow", Text: "Child rule."}},
+					},
+					"shared": {
+						Classes: map[string]PolicyCriteriaClass{"hard": {Disposition: "child.blocked"}},
+						Rules:   []PolicyCriteriaRule{{ID: "CHILD-SHARED", Class: "hard", Text: "Child shared."}},
+					},
+				},
+			},
+		}},
+	}
+	tree := Tree[testNode]{
+		Root: root,
+		ByID: map[string]*testNode{
+			"root":  root,
+			"child": &root.Children[0],
+		},
+	}
+	base := PolicyDocument{Criteria: map[string]PolicyCriteriaSet{
+		"base_set": {
+			Classes: map[string]PolicyCriteriaClass{"soft": {Disposition: "base.revise"}},
+			Rules:   []PolicyCriteriaRule{{ID: "BASE-1", Class: "soft", Text: "Base rule."}},
+		},
+	}}
+
+	got := ResolvePolicyByID(
+		base,
+		tree,
+		"child",
+		func(node *testNode) string { return node.ID },
+		func(node *testNode) PolicyDocument { return node.Policy },
+		testChildren,
+	)
+
+	for _, name := range []string{"base_set", "root_set", "child_set", "shared"} {
+		if _, ok := got.Criteria[name]; !ok {
+			t.Fatalf("merged criteria missing %q: %#v", name, got.Criteria)
+		}
+	}
+	if gotID := got.Criteria["shared"].Rules[0].ID; gotID != "CHILD-SHARED" {
+		t.Fatalf("shared criteria rule = %q, want child override", gotID)
 	}
 }
 

@@ -867,6 +867,9 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 	if opts.AllowProject {
 		allowed["project"] = struct{}{}
 	}
+	if opts.AllowCitation {
+		allowed["citation"] = struct{}{}
+	}
 
 	var field wave1ParsedFieldNode
 	var listOf string
@@ -934,6 +937,17 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				return wave1ParsedFieldNode{}, fmt.Errorf("%s equal_to field is required", opts.Context)
 			}
 			field.Refinements.EqualTo = target
+		case "citation":
+			if !opts.AllowCitation {
+				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
+			}
+			var citation CriteriaCitation
+			if err := value.Decode(&citation); err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+			citation.Criteria = strings.TrimSpace(citation.Criteria)
+			citation.AllowedClasses = normalizeStrings(citation.AllowedClasses)
+			field.Citation = citation
 		case "initial":
 			var initial any
 			if err := value.Decode(&initial); err != nil {
@@ -1237,6 +1251,7 @@ type wave1FieldNodeOptions struct {
 	AllowUnusedReaderReason bool
 	AllowMaterializeFrom    bool
 	AllowProject            bool
+	AllowCitation           bool
 }
 
 type wave1ParsedFieldNode struct {
@@ -1246,6 +1261,7 @@ type wave1ParsedFieldNode struct {
 	Immutable          bool
 	Description        string
 	Refinements        SchemaRefinements
+	Citation           CriteriaCitation
 	MaterializeFrom    string
 	Project            map[string]any
 	UnusedReason       string

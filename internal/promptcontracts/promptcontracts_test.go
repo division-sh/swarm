@@ -108,6 +108,47 @@ Tier2:
 	}
 }
 
+func TestLoadFromDir_DoesNotRenderPolicyCriteriaAsPromptVariable(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "prompts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir prompts dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "policy.yaml"), []byte(`
+threshold: 55
+criteria:
+  feasibility_exclusions:
+    classes:
+      hard: {disposition: cto.spec_vetoed}
+    rules:
+      - id: FX-HARD-01
+        class: hard
+        text: Requires regulated real-time integration.
+`), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "analysis-agent.md"), []byte("Threshold={{threshold}} Criteria={{criteria}}"), 0o644); err != nil {
+		t.Fatalf("write prompt: %v", err)
+	}
+
+	if _, _, err := LoadFromDir(dir, "analysis-agent", ""); err == nil {
+		t.Fatal("expected unresolved criteria prompt variable")
+	} else if !errors.Is(err, ErrUnresolvedPromptVariables) || !strings.Contains(err.Error(), "criteria") {
+		t.Fatalf("LoadFromDir error = %v, want unresolved criteria variable", err)
+	}
+
+	vars, err := loadPromptVariables(dir)
+	if err != nil {
+		t.Fatalf("loadPromptVariables: %v", err)
+	}
+	if got := vars["threshold"]; got != 55 {
+		t.Fatalf("threshold variable = %#v, want 55", got)
+	}
+	if _, ok := vars["criteria"]; ok {
+		t.Fatalf("criteria leaked into prompt variables: %#v", vars["criteria"])
+	}
+}
+
 func TestLoadFromDir_FailsOnUnresolvedPromptVariable(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "prompts")

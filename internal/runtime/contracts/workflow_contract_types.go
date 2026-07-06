@@ -599,6 +599,10 @@ type NodeGateField struct {
 }
 type PolicyDocument = flowmodel.PolicyDocument
 type PolicyValue = flowmodel.PolicyValue
+type PolicyCriteriaSet = flowmodel.PolicyCriteriaSet
+type PolicyCriteriaClass = flowmodel.PolicyCriteriaClass
+type PolicyCriteriaRule = flowmodel.PolicyCriteriaRule
+type PolicyCriteriaParam = flowmodel.PolicyCriteriaParam
 type ContractURIRegistry = flowmodel.URIRegistry
 type ContractURIRef = flowmodel.URIRef
 type ExpressionKind string
@@ -684,6 +688,11 @@ type EventFieldSpec struct {
 	Type        string            `yaml:"type"`
 	Description string            `yaml:"description"`
 	Refinements SchemaRefinements `yaml:"-"`
+	Citation    CriteriaCitation  `yaml:"citation"`
+}
+type CriteriaCitation struct {
+	Criteria       string   `yaml:"criteria"`
+	AllowedClasses []string `yaml:"allowed_classes"`
 }
 type SchemaLengthRefinement struct {
 	Min *int `yaml:"min"`
@@ -1437,6 +1446,7 @@ type AgentRegistryEntry struct {
 	ToolsTier2             []string                        `yaml:"tools_tier2"`
 	NativeTools            map[string]any                  `yaml:"native_tools"`
 	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
+	Criteria               []string                        `yaml:"criteria" json:"criteria,omitempty"`
 	EmitEvents             []string                        `yaml:"emit_events"`
 	Implementation         string                          `yaml:"implementation"`
 	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`
@@ -1519,7 +1529,7 @@ func supportedAgentRegistryEntryField(field string) bool {
 	case "id", "type", "role", "prompt_ref", "entity_writes",
 		"permissions", "permissions_bundle", "workspace_class", "manager_fallback",
 		"node_type", "model", "mode", "max_turns_per_task", "subscriptions",
-		"prompt_inputs", "tools", "native_tools", "flow_data_access", "emit_events", "implementation":
+		"prompt_inputs", "tools", "native_tools", "flow_data_access", "criteria", "emit_events", "implementation":
 		return true
 	default:
 		return false

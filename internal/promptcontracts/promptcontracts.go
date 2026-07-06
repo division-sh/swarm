@@ -109,6 +109,9 @@ func loadPromptVariables(promptsDir string) (map[string]any, error) {
 		if err := yaml.Unmarshal(raw, &loaded); err != nil {
 			return nil, fmt.Errorf("parse prompt variables from %s: %w", source, err)
 		}
+		if isPolicyPromptVariableSource(source) {
+			delete(loaded, "criteria")
+		}
 		for key, value := range loaded {
 			vars[key] = value
 		}
@@ -146,6 +149,11 @@ func promptVariableSources(promptsDir string) []string {
 		}
 	}
 	return sources
+}
+
+func isPolicyPromptVariableSource(path string) bool {
+	path = filepath.ToSlash(filepath.Clean(path))
+	return strings.HasSuffix(path, "/policy.yaml") || strings.HasSuffix(path, "/runtime/policy.yaml")
 }
 
 func renderPromptTemplate(promptText string, vars map[string]any) string {

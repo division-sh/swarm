@@ -83,6 +83,10 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.EmptyEvent(), "schema_validation_failed", "validation", "validate_schema", wrapped)
 		return nil, wrapped
 	}
+	if err := e.validateEmitCriteriaCitations(actor, schemaEventType, eventSchema, payloadMap); err != nil {
+		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.EmptyEvent(), "criteria_citation_validation_failed", "validation", "validate_criteria_citations", err)
+		return nil, err
+	}
 
 	entityID := strings.TrimSpace(actor.EffectiveEntityID())
 	if entityID == "" {

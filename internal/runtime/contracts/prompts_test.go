@@ -270,6 +270,83 @@ func TestPromptVariableValues_UsesSpecResolutionOrder(t *testing.T) {
 	}
 }
 
+func TestPromptVariableValues_DoesNotExposeCriteriaAsGenericPolicy(t *testing.T) {
+	policy := PolicyDocument{
+		Values: map[string]PolicyValue{
+			"team_name": {Value: "policy-team"},
+		},
+		Criteria: map[string]PolicyCriteriaSet{
+			"feasibility_exclusions": criteriaValidationTestSet(),
+		},
+	}
+
+	vars := promptVariableValuesWithPolicy(nil, ContractItemSource{}, models.AgentConfig{}, policy)
+	if got := vars["team_name"]; got != "policy-team" {
+		t.Fatalf("team_name = %#v, want policy-team", got)
+	}
+	if _, ok := vars["criteria"]; ok {
+		t.Fatalf("criteria leaked into generic prompt variables: %#v", vars["criteria"])
+	}
+}
+
+func TestGeneratedCriteriaPromptSection_DeliversReferencedCriteriaDeterministically(t *testing.T) {
+	flow := FlowContractView{
+		Paths: FlowContractPaths{ID: "validation", Flow: "validation"},
+		Policy: PolicyDocument{
+			Criteria: map[string]PolicyCriteriaSet{
+				"feasibility_exclusions": criteriaValidationTestSet(),
+			},
+		},
+	}
+	root := &FlowContractView{Children: []FlowContractView{flow}}
+	bundle := &WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[FlowContractView]{
+			Root: root,
+			ByID: map[string]*FlowContractView{
+				"validation": &root.Children[0],
+			},
+		},
+	}
+
+	got, err := generatedCriteriaPromptSection(
+		bundle,
+		ContractItemSource{FlowID: "validation"},
+		AgentRegistryEntry{Criteria: []string{"feasibility_exclusions"}},
+		models.AgentConfig{},
+		"Base prompt.",
+	)
+	if err != nil {
+		t.Fatalf("generatedCriteriaPromptSection: %v", err)
+	}
+	for _, want := range []string{
+		"Base prompt.",
+		"## Contract Criteria",
+		"### feasibility_exclusions",
+		"- hard: cto.spec_vetoed",
+		"- soft: cto.spec_revision_needed",
+		"- FX-HARD-01 [hard]: Requires regulated real-time integration.",
+		"  - max_features: policy.max_features",
+		"- FX-SOFT-04 [soft]: Missing MVP spec.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("criteria prompt section missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestGeneratedCriteriaPromptSection_FailsClosedWhenReferencedSetUnavailable(t *testing.T) {
+	_, err := generatedCriteriaPromptSection(
+		nil,
+		ContractItemSource{FlowID: "validation"},
+		AgentRegistryEntry{Criteria: []string{"feasibility_exclusions"}},
+		models.AgentConfig{},
+		"Base prompt.",
+	)
+	if err == nil || !strings.Contains(err.Error(), "criteria delivery requires a workflow bundle") {
+		t.Fatalf("generatedCriteriaPromptSection error = %v, want workflow bundle delivery failure", err)
+	}
+}
+
 func mustPromptJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 	raw, err := json.Marshal(value)
