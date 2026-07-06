@@ -890,7 +890,7 @@ func computeLookupValue(ctx BaseContext, spec *runtimecontracts.ComputeSpec) (an
 			key = append(key, runtimecontracts.ComputeLookupLiteral{Canonical: "<missing>"})
 			continue
 		}
-		kind, summary, canonical, ok := runtimecontracts.CanonicalizeComputeLookupValue(value)
+		kind, summary, canonical, ok := canonicalizeComputeLookupRuntimeValue(value, lookup, idx)
 		if !ok {
 			unmatched = append(unmatched, strings.TrimSpace(lookup.On[idx])+"=<unsupported>")
 			key = append(key, runtimecontracts.ComputeLookupLiteral{Canonical: "<unsupported>"})
@@ -915,6 +915,62 @@ func computeLookupValue(ctx BaseContext, spec *runtimecontracts.ComputeSpec) (an
 		rowID = strings.TrimSpace(spec.StoreAs)
 	}
 	return nil, fmt.Errorf("lookup_miss_no_retry: row %s unmatched tuple [%s]", rowID, strings.Join(unmatched, ", "))
+}
+
+func canonicalizeComputeLookupRuntimeValue(value any, lookup *runtimecontracts.ComputeLookupSpec, column int) (kind, summary, canonical string, ok bool) {
+	kind, summary, canonical, ok = runtimecontracts.CanonicalizeComputeLookupValue(value)
+	if !ok || kind != "number" || computeLookupColumnKind(lookup, column) != "int" {
+		return kind, summary, canonical, ok
+	}
+	integer, ok := integralLookupFloatSummary(value)
+	if !ok {
+		return kind, summary, canonical, true
+	}
+	return "int", integer, "int:" + integer, true
+}
+
+func computeLookupColumnKind(lookup *runtimecontracts.ComputeLookupSpec, column int) string {
+	if lookup == nil || column < 0 {
+		return ""
+	}
+	kind := ""
+	for _, entry := range lookup.Entries {
+		if column >= len(entry.Key) {
+			return ""
+		}
+		entryKind := strings.TrimSpace(entry.Key[column].Kind)
+		if entryKind == "" {
+			return ""
+		}
+		if kind == "" {
+			kind = entryKind
+			continue
+		}
+		if kind != entryKind {
+			return ""
+		}
+	}
+	return kind
+}
+
+func integralLookupFloatSummary(value any) (string, bool) {
+	var f float64
+	switch typed := value.(type) {
+	case float32:
+		f = float64(typed)
+	case float64:
+		f = typed
+	default:
+		return "", false
+	}
+	if math.IsNaN(f) || math.IsInf(f, 0) || math.Trunc(f) != f {
+		return "", false
+	}
+	summary := strconv.FormatFloat(f, 'f', 0, 64)
+	if _, err := strconv.ParseInt(summary, 10, 64); err != nil {
+		return "", false
+	}
+	return summary, true
 }
 
 func computeLookupCanonicalKey(key []runtimecontracts.ComputeLookupLiteral) string {

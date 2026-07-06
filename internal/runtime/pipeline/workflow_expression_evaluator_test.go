@@ -97,6 +97,37 @@ func TestValidateConditionCEL_AllowsRuleConditionCanonicalRoots(t *testing.T) {
 	}
 }
 
+func TestValidateConditionCEL_RestrictsComputedToPostComputeContexts(t *testing.T) {
+	expression := `computed.template_path == "templates/service/go"`
+	for _, context := range []WorkflowConditionContext{
+		WorkflowConditionContextRule,
+		WorkflowConditionContextOnComplete,
+	} {
+		t.Run(string(context)+" allowed", func(t *testing.T) {
+			if err := ValidateConditionCEL(expression, context); err != nil {
+				t.Fatalf("expected computed namespace to validate in %s, got %v", context, err)
+			}
+			if WorkflowConditionMissingRecognizedPrefix(expression, context) {
+				t.Fatalf("expected computed namespace to be a recognized root in %s", context)
+			}
+		})
+	}
+	for _, context := range []WorkflowConditionContext{
+		WorkflowConditionContextGuard,
+		WorkflowConditionContextFilter,
+		WorkflowConditionContextCount,
+	} {
+		t.Run(string(context)+" rejected", func(t *testing.T) {
+			if err := ValidateConditionCEL(expression, context); err == nil {
+				t.Fatalf("expected computed namespace to fail validation in %s", context)
+			}
+			if !WorkflowConditionMissingRecognizedPrefix(expression, context) {
+				t.Fatalf("expected computed namespace to be unrecognized in %s", context)
+			}
+		})
+	}
+}
+
 func TestWorkflowExpressionEvaluator_AllowsComputedNamespace(t *testing.T) {
 	eval := newWorkflowExpressionEvaluator()
 	ok, err := eval.EvalBool(`computed.template_path == "templates/service/go"`, workflowExpressionContext{
