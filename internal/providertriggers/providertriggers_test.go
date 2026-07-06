@@ -519,6 +519,272 @@ func TestShopifyManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
 	}
 }
 
+func TestTypeformManifestAcceptsRawBodyBase64Signature(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	body := []byte(`{"event_id":"tf-evt-123","event_type":"form_response","form_response":{"token":"abc"}}`)
+	req := Request{
+		Provider: "typeform",
+		Target: Target{
+			EntityID:      "entity-1",
+			WebhookSecret: "typeform-secret",
+		},
+		Body:      body,
+		Headers:   make(http.Header),
+		Payload:   map[string]any{"event_id": "tf-evt-123", "event_type": "form_response", "form_response": map[string]any{"token": "abc"}},
+		Received:  now,
+		UserAgent: "typeform-test",
+	}
+	req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", body))
+
+	delivery, err := DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Typeform webhook: %v", err)
+	}
+	if delivery.ProviderEventID != "tf-evt-123" {
+		t.Fatalf("ProviderEventID = %q, want tf-evt-123", delivery.ProviderEventID)
+	}
+	if delivery.ProviderEventType != "form_response" {
+		t.Fatalf("ProviderEventType = %q, want form_response", delivery.ProviderEventType)
+	}
+	if delivery.EventName != "inbound.typeform" {
+		t.Fatalf("EventName = %q, want inbound.typeform", delivery.EventName)
+	}
+	if !delivery.AcknowledgeBeforeDispatch {
+		t.Fatal("Typeform delivery did not request durable_before_dispatch acknowledgement")
+	}
+	headers, ok := delivery.Payload["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+	}
+	if headers["typeform_event_id"] != "tf-evt-123" || headers["typeform_event_type"] != "form_response" {
+		t.Fatalf("headers = %+v, want Typeform manifest metadata", headers)
+	}
+	encoded := fmtPayload(delivery.Payload)
+	if strings.Contains(encoded, "typeform-secret") {
+		t.Fatal("Typeform signing secret leaked into delivery payload")
+	}
+}
+
+func TestTypeformManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	validBody := []byte(`{"event_id":"tf-evt-123","event_type":"form_response","form_response":{"token":"abc"}}`)
+	validPayload := map[string]any{"event_id": "tf-evt-123", "event_type": "form_response", "form_response": map[string]any{"token": "abc"}}
+	validRequest := func() Request {
+		req := Request{
+			Provider: "typeform",
+			Target: Target{
+				EntityID:      "entity-1",
+				WebhookSecret: "typeform-secret",
+			},
+			Body:     validBody,
+			Headers:  make(http.Header),
+			Payload:  validPayload,
+			Received: now,
+		}
+		req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", validBody))
+		return req
+	}
+	for _, tc := range []struct {
+		name       string
+		configure  func(Request) Request
+		wantStatus int
+	}{
+		{
+			name: "missing signature",
+			configure: func(req Request) Request {
+				req.Headers.Del("Typeform-Signature")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "invalid signature",
+			configure: func(req Request) Request {
+				req.Headers.Set("Typeform-Signature", typeformSignatureBase64("wrong-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "raw body mutation",
+			configure: func(req Request) Request {
+				signedBody := []byte(`{"event_type":"form_response","event_id":"tf-evt-123","form_response":{"token":"abc"}}`)
+				req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", signedBody))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing event id",
+			configure: func(req Request) Request {
+				req.Body = []byte(`{"event_type":"form_response","form_response":{"token":"abc"}}`)
+				req.Payload = map[string]any{"event_type": "form_response", "form_response": map[string]any{"token": "abc"}}
+				req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing event type",
+			configure: func(req Request) Request {
+				req.Body = []byte(`{"event_id":"tf-evt-123","form_response":{"token":"abc"}}`)
+				req.Payload = map[string]any{"event_id": "tf-evt-123", "form_response": map[string]any{"token": "abc"}}
+				req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "non object payload",
+			configure: func(req Request) Request {
+				req.Body = []byte(`[{"event_id":"tf-evt-123","event_type":"form_response"}]`)
+				req.Payload = []any{map[string]any{"event_id": "tf-evt-123", "event_type": "form_response"}}
+				req.Headers.Set("Typeform-Signature", typeformSignatureBase64("typeform-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DefaultRegistry().Accept(tc.configure(validRequest()))
+			requireProviderTriggerError(t, err, tc.wantStatus)
+		})
+	}
+}
+
+func TestIntercomManifestAcceptsRawBodySHA1Signature(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	body := []byte(`{"id":"notif_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`)
+	req := Request{
+		Provider: "intercom",
+		Target: Target{
+			EntityID:      "entity-1",
+			WebhookSecret: "intercom-secret",
+		},
+		Body:      body,
+		Headers:   make(http.Header),
+		Payload:   map[string]any{"id": "notif_123", "topic": "conversation.user.created", "data": map[string]any{"item": map[string]any{"id": "conv_1"}}},
+		Received:  now,
+		UserAgent: "intercom-test",
+	}
+	req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", body))
+
+	delivery, err := DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Intercom webhook: %v", err)
+	}
+	if delivery.ProviderEventID != "notif_123" {
+		t.Fatalf("ProviderEventID = %q, want notif_123", delivery.ProviderEventID)
+	}
+	if delivery.ProviderEventType != "conversation_user_created" {
+		t.Fatalf("ProviderEventType = %q, want conversation_user_created", delivery.ProviderEventType)
+	}
+	if delivery.EventName != "inbound.intercom" {
+		t.Fatalf("EventName = %q, want inbound.intercom", delivery.EventName)
+	}
+	if !delivery.AcknowledgeBeforeDispatch {
+		t.Fatal("Intercom delivery did not request durable_before_dispatch acknowledgement")
+	}
+	headers, ok := delivery.Payload["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers = %T, want metadata map", delivery.Payload["headers"])
+	}
+	if headers["intercom_notification_id"] != "notif_123" || headers["intercom_topic"] != "conversation_user_created" {
+		t.Fatalf("headers = %+v, want Intercom manifest metadata", headers)
+	}
+	encoded := fmtPayload(delivery.Payload)
+	if strings.Contains(encoded, "intercom-secret") {
+		t.Fatal("Intercom signing secret leaked into delivery payload")
+	}
+}
+
+func TestIntercomManifestRejectsInvalidInputsBeforeDelivery(t *testing.T) {
+	now := time.Unix(1710000000, 0).UTC()
+	validBody := []byte(`{"id":"notif_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`)
+	validPayload := map[string]any{"id": "notif_123", "topic": "conversation.user.created", "data": map[string]any{"item": map[string]any{"id": "conv_1"}}}
+	validRequest := func() Request {
+		req := Request{
+			Provider: "intercom",
+			Target: Target{
+				EntityID:      "entity-1",
+				WebhookSecret: "intercom-secret",
+			},
+			Body:     validBody,
+			Headers:  make(http.Header),
+			Payload:  validPayload,
+			Received: now,
+		}
+		req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", validBody))
+		return req
+	}
+	for _, tc := range []struct {
+		name       string
+		configure  func(Request) Request
+		wantStatus int
+	}{
+		{
+			name: "missing signature",
+			configure: func(req Request) Request {
+				req.Headers.Del("X-Hub-Signature")
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "invalid signature",
+			configure: func(req Request) Request {
+				req.Headers.Set("X-Hub-Signature", intercomSignatureHex("wrong-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "raw body mutation",
+			configure: func(req Request) Request {
+				signedBody := []byte(`{"topic":"conversation.user.created","id":"notif_123","data":{"item":{"id":"conv_1"}}}`)
+				req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", signedBody))
+				return req
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "missing notification id",
+			configure: func(req Request) Request {
+				req.Body = []byte(`{"topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`)
+				req.Payload = map[string]any{"topic": "conversation.user.created", "data": map[string]any{"item": map[string]any{"id": "conv_1"}}}
+				req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing topic",
+			configure: func(req Request) Request {
+				req.Body = []byte(`{"id":"notif_123","data":{"item":{"id":"conv_1"}}}`)
+				req.Payload = map[string]any{"id": "notif_123", "data": map[string]any{"item": map[string]any{"id": "conv_1"}}}
+				req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "non object payload",
+			configure: func(req Request) Request {
+				req.Body = []byte(`[{"id":"notif_123","topic":"conversation.user.created"}]`)
+				req.Payload = []any{map[string]any{"id": "notif_123", "topic": "conversation.user.created"}}
+				req.Headers.Set("X-Hub-Signature", intercomSignatureHex("intercom-secret", req.Body))
+				return req
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DefaultRegistry().Accept(tc.configure(validRequest()))
+			requireProviderTriggerError(t, err, tc.wantStatus)
+		})
+	}
+}
+
 func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -795,6 +1061,18 @@ func shopifySignatureBase64(secret string, body []byte) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(body)
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func typeformSignatureBase64(secret string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return "sha256=" + base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func intercomSignatureHex(secret string, body []byte) string {
+	mac := hmac.New(sha1.New, []byte(secret))
+	_, _ = mac.Write(body)
+	return "sha1=" + hex.EncodeToString(mac.Sum(nil))
 }
 
 func cloneValues(values url.Values) url.Values {
