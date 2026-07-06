@@ -9519,6 +9519,68 @@ func TestNormalizeContractsRootExplicitPathValidation(t *testing.T) {
 }
 
 func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
+	root := writeVerifyLintEvidenceFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
+		t.Fatalf("verify stdout missing success marker:\n%s", out)
+	} else if strings.Contains(out, "entity_reader_coverage") || strings.Contains(out, "lint_evidence") {
+		t.Fatalf("verify stdout contains advisory diagnostics:\n%s", out)
+	}
+	errText := stderr.String()
+	if !strings.Contains(errText, "INFO: entity_reader_coverage [root] flow root entity_type case declares field untouched with no detected internal reader coverage") {
+		t.Fatalf("verify stderr missing lint evidence:\n%s", errText)
+	}
+	if strings.Contains(errText, "lint_evidence:") {
+		t.Fatalf("verify stderr used legacy lint_evidence prefix:\n%s", errText)
+	}
+
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	opts.output.asJSON = true
+	stdout.Reset()
+	stderr.Reset()
+	code = runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runVerifyCommand --json exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("verify --json stderr = %q, want empty", stderr.String())
+	}
+	verifyJSON := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if len(verifyJSON.LintEvidence) == 0 || verifyJSON.LintEvidence[0].Severity != "lint_evidence" {
+		t.Fatalf("verify --json lint evidence = %#v, want canonical severity", verifyJSON.LintEvidence)
+	}
+}
+
+func TestRunVerifyCommand_JSONDoesNotHideLaterValidationErrorBehindAdvisoryBootFindings(t *testing.T) {
+	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "false")
+	t.Setenv("SWARM_EMIT_SCHEMA_STRICT", "true")
+
+	root := writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t)
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	opts.output.asJSON = true
+
+	var stdout, stderr bytes.Buffer
+	code := runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand --json exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stdout.String()) != "" {
+		t.Fatalf("verify --json stdout = %q, want empty for non-boot validation failure", stdout.String())
+	}
+	if errText := stderr.String(); !strings.Contains(errText, "verify failed: emit schema strict mode enabled") {
+		t.Fatalf("verify --json stderr = %q, want strict emit schema validation failure", errText)
+	}
+}
+
+func writeVerifyLintEvidenceFixture(t *testing.T) string {
+	t.Helper()
 	root := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: verify-lint-evidence
@@ -9579,41 +9641,26 @@ reader:
         check: "entity.priority >= 0"
       advances_to: done
 `)
+	return root
+}
 
-	var stdout, stderr bytes.Buffer
-	code := runVerifyCommandWithContractsOutputForTest(context.Background(), repoRoot(), root, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
-	}
-	if out := stdout.String(); !strings.Contains(out, "verify ok: contracts=") {
-		t.Fatalf("verify stdout missing success marker:\n%s", out)
-	} else if strings.Contains(out, "entity_reader_coverage") || strings.Contains(out, "lint_evidence") {
-		t.Fatalf("verify stdout contains advisory diagnostics:\n%s", out)
-	}
-	errText := stderr.String()
-	if !strings.Contains(errText, "INFO: entity_reader_coverage [root] flow root entity_type case declares field untouched with no detected internal reader coverage") {
-		t.Fatalf("verify stderr missing lint evidence:\n%s", errText)
-	}
-	if strings.Contains(errText, "lint_evidence:") {
-		t.Fatalf("verify stderr used legacy lint_evidence prefix:\n%s", errText)
-	}
-
-	opts := defaultVerifyCommandOptions()
-	opts.contractsPath = root
-	opts.output.asJSON = true
-	stdout.Reset()
-	stderr.Reset()
-	code = runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("runVerifyCommand --json exit code = %d, stdout = %q stderr = %q", code, stdout.String(), stderr.String())
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("verify --json stderr = %q, want empty", stderr.String())
-	}
-	verifyJSON := decodeOutputJSON[verifyCommandResult](t, stdout.String())
-	if len(verifyJSON.LintEvidence) == 0 || verifyJSON.LintEvidence[0].Severity != "lint_evidence" {
-		t.Fatalf("verify --json lint evidence = %#v, want canonical severity", verifyJSON.LintEvidence)
-	}
+func writeVerifyLintEvidenceWithMissingEmitSchemaFixture(t *testing.T) string {
+	t.Helper()
+	root := writeVerifyLintEvidenceFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+strict-schema-agent:
+  id: strict-schema-agent
+  role: strict_schema_agent
+  prompt_ref: strict-schema-agent
+  model: regular
+  mode: task
+  subscriptions: [task.assigned]
+  emit_events: [missing.event]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "strict-schema-agent.md"), `
+Emit the missing event when requested.
+`)
+	return root
 }
 
 func TestRunVerifyCommand_AllowsBootTimerWithoutCancelOn(t *testing.T) {
@@ -9650,16 +9697,43 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
 		}
 	}
+
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	opts.output.asJSON = true
+	stdout.Reset()
+	stderr.Reset()
+	code = runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand --json exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("verify --json stderr = %q, want empty structured failure", stderr.String())
+	}
+	verifyJSON := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if verifyJSON.OK {
+		t.Fatalf("verify --json ok = true, want false: %#v", verifyJSON)
+	}
+	if strings.TrimSpace(verifyJSON.Contracts) != root {
+		t.Fatalf("verify --json contracts = %q, want %q", verifyJSON.Contracts, root)
+	}
+	if len(verifyJSON.Errors) == 0 {
+		t.Fatalf("verify --json errors = %#v, want timer_validation", verifyJSON.Errors)
+	}
+	if got := verifyJSON.Errors[0]; got.CheckID != "timer_validation" || got.Severity != "hard_invalidity" || !strings.Contains(got.Message, "start_on boot does not support cancel_on state:done") {
+		t.Fatalf("verify --json first error = %#v, want structured timer_validation hard invalidity", got)
+	}
 }
 
 func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
+	root := writeVerifyMissingPinWarningFixture(t)
 	var stdout, stderr bytes.Buffer
 	code := runVerifyCommandWithContractsOutputForTest(
 		context.Background(),
 		repoRoot(),
-		writeVerifyMissingPinWarningFixture(t),
+		root,
 		&stdout,
 		&stderr,
 	)
@@ -9682,6 +9756,48 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	if strings.Contains(errText, "boot verification warnings:") {
 		t.Fatalf("verify stderr used legacy fatal warning banner:\n%s", errText)
 	}
+
+	opts := defaultVerifyCommandOptions()
+	opts.contractsPath = root
+	opts.output.asJSON = true
+	stdout.Reset()
+	stderr.Reset()
+	code = runVerifyCommandWithOutput(context.Background(), repoRoot(), opts, &stdout, &stderr)
+	if code == 0 {
+		t.Fatalf("runVerifyCommand --json exit code = 0, stdout = %q stderr = %q", stdout.String(), stderr.String())
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("verify --json stderr = %q, want empty structured warning failure", stderr.String())
+	}
+	verifyJSON := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if verifyJSON.OK {
+		t.Fatalf("verify --json ok = true, want false: %#v", verifyJSON)
+	}
+	if len(verifyJSON.Errors) != 0 {
+		t.Fatalf("verify --json errors = %#v, want warning-only structured failure", verifyJSON.Errors)
+	}
+	if len(verifyJSON.Warnings) == 0 {
+		t.Fatalf("verify --json warnings = %#v, want input_pin_wiring", verifyJSON.Warnings)
+	}
+	if !verifyFindingOutputsContain(verifyJSON.Warnings, "input_pin_wiring", "semantic_drift_warning", "no producer path was found in the authored bundle") {
+		t.Fatalf("verify --json warnings = %#v, want structured input_pin_wiring warning", verifyJSON.Warnings)
+	}
+}
+
+func verifyFindingOutputsContain(findings []verifyFindingOutput, checkID, severity, messageContains string) bool {
+	for _, finding := range findings {
+		if strings.TrimSpace(finding.CheckID) != checkID {
+			continue
+		}
+		if strings.TrimSpace(finding.Severity) != severity {
+			continue
+		}
+		if !strings.Contains(finding.Message, messageContains) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func writeVerifyBootTimerCommandFixture(t *testing.T, cancelOn string) string {

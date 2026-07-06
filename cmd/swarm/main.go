@@ -1319,6 +1319,7 @@ type verifyCommandResult struct {
 	OK               bool                  `json:"ok"`
 	Contracts        string                `json:"contracts"`
 	WorkspaceBackend string                `json:"workspace_backend"`
+	Errors           []verifyFindingOutput `json:"errors"`
 	Warnings         []verifyFindingOutput `json:"warnings"`
 	LintEvidence     []verifyFindingOutput `json:"lint_evidence"`
 }
@@ -1403,18 +1404,19 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
 		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if err != nil {
+			if opts.output.asJSON && verifyValidationResultHasBlockingBootFindings(result, validationOpts) {
+				output := verifyCommandOutput(false, contractsRoot, workspaceBackendDetail, result)
+				if renderErr := renderCLIOutput(out, errOut, opts.output, output, nil, nil); renderErr != nil {
+					return 2
+				}
+				return 1
+			}
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: %v\n", err)
 			}
 			return 1
 		}
-		output := verifyCommandResult{
-			OK:               true,
-			Contracts:        contractsRoot,
-			WorkspaceBackend: workspaceBackendDetail,
-			Warnings:         verifyFindingOutputs(result.BootReport.Warnings()),
-			LintEvidence:     verifyFindingOutputs(result.BootReport.LintEvidence()),
-		}
+		output := verifyCommandOutput(true, contractsRoot, workspaceBackendDetail, result)
 		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
@@ -1429,6 +1431,39 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 	}
 	return 0
+}
+
+func verifyCommandOutput(ok bool, contractsRoot string, workspaceBackend string, result runtime.WorkflowContractValidationResult) verifyCommandResult {
+	return verifyCommandResult{
+		OK:               ok,
+		Contracts:        contractsRoot,
+		WorkspaceBackend: workspaceBackend,
+		Errors:           verifyFindingOutputs(result.BootReport.Errors()),
+		Warnings:         verifyFindingOutputs(result.BootReport.Warnings()),
+		LintEvidence:     verifyFindingOutputs(result.BootReport.LintEvidence()),
+	}
+}
+
+func verifyValidationResultHasBlockingBootFindings(result runtime.WorkflowContractValidationResult, opts runtime.WorkflowContractValidationOptions) bool {
+	if len(result.BootReport.Errors()) > 0 {
+		return true
+	}
+	if !opts.FatalBootWarnings {
+		return false
+	}
+	excluded := make(map[string]struct{}, len(opts.ExcludedFatalBootWarningChecks))
+	for _, checkID := range opts.ExcludedFatalBootWarningChecks {
+		if checkID = strings.TrimSpace(checkID); checkID != "" {
+			excluded[checkID] = struct{}{}
+		}
+	}
+	for _, finding := range result.BootReport.Warnings() {
+		if _, skip := excluded[strings.TrimSpace(finding.CheckID)]; skip {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func verifyFindingOutputs(findings []runtimebootverify.Finding) []verifyFindingOutput {
