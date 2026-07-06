@@ -1,0 +1,17 @@
+name: test-on-complete-with-state setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      priority: high
+steps:
+- publish: item.evaluated
+  payload: {}
+expect:
+  events:
+    include:
+    - item.expedited
+  entities:
+  - ref: entity
+    current_state: done

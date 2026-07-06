@@ -1,0 +1,18 @@
+name: test-policy-multi-guard-partial setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      depth: 3
+      flag_count: 0
+      item_count: 10
+steps:
+- publish: check.requested
+  payload:
+    score: 55
+    confidence: 50
+expect:
+  entities:
+  - ref: entity
+    current_state: pending

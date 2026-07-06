@@ -1,0 +1,17 @@
+name: test-payload-transform-multi-source setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      name: test-entity
+steps:
+- publish: export.requested
+  payload: {}
+expect:
+  events:
+    include:
+    - item.exported
+  entities:
+  - ref: entity
+    current_state: done

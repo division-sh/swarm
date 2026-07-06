@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -215,6 +216,119 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 			entity["current_state"] = "ready"
 			result["fields"] = map[string]any{"product_id": "p-1", "note": "approved"}
 			result["gates"] = map[string]any{"review_ready": false}
+			writeJSONRPCResult(t, w, req.ID, result)
+		default:
+			t.Fatalf("unexpected method = %s", req.Method)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"test",
+		"--contracts", contractsPath,
+		"--platform-spec", defaultPlatformSpecPath,
+		"--timeout", "2s",
+		"--poll-interval", "10ms",
+	}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	assertScenarioTestMethods(t, calls, []string{
+		scenarioTestSetupEntitiesMethod,
+		eventPublishMethod,
+		"run.diagnose",
+		"run.diagnose",
+		"run.trace",
+		entityGetMethod,
+	})
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	setCLIAPITestToken(t, "test-token")
+	contractsPath := writeScenarioRootSetupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+
+	var calls []jsonRPCRequest
+	var setupRunID string
+	var setupEntityID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		calls = append(calls, req)
+		switch req.Method {
+		case scenarioTestSetupEntitiesMethod:
+			if req.Params["bundle_hash"] != bundleHash {
+				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
+			}
+			setupRunID, _ = req.Params["run_id"].(string)
+			if _, err := uuid.Parse(setupRunID); err != nil {
+				t.Fatalf("test.setup_entities run_id = %#v, want UUID", req.Params["run_id"])
+			}
+			entities, ok := req.Params["entities"].([]any)
+			if !ok || len(entities) != 1 {
+				t.Fatalf("test.setup_entities entities = %#v, want one", req.Params["entities"])
+			}
+			entity, ok := entities[0].(map[string]any)
+			if !ok {
+				t.Fatalf("test.setup_entities entity = %#v, want mapping", entities[0])
+			}
+			setupEntityID, _ = entity["entity_id"].(string)
+			if want := runtimeflowidentity.EntityID(setupRunID); setupEntityID != want {
+				t.Fatalf("test.setup_entities root entity_id = %q, want canonical run root %q", setupEntityID, want)
+			}
+			if entity["alias"] != "widget" || entity["flow_instance"] != "" || entity["entity_type"] != "widget" || entity["current_state"] != "waiting" {
+				t.Fatalf("test.setup_entities root entity = %#v", entity)
+			}
+			if err := assertScenarioJSONEqual("test.setup_entities root fields", entity["fields"], map[string]any{"score": float64(5)}); err != nil {
+				t.Fatal(err)
+			}
+			writeJSONRPCResult(t, w, req.ID, map[string]any{
+				"run_id": setupRunID,
+				"entities": []map[string]any{{
+					"alias":         "widget",
+					"entity_id":     setupEntityID,
+					"flow_instance": "",
+					"entity_type":   "widget",
+					"current_state": "waiting",
+				}},
+			})
+		case eventPublishMethod:
+			if req.Params["event_name"] != "widget.scored" || req.Params["bundle_hash"] != bundleHash || req.Params["run_id"] != setupRunID {
+				t.Fatalf("event.publish root setup params = %#v", req.Params)
+			}
+			if _, ok := req.Params["target"]; ok {
+				t.Fatalf("event.publish root setup target = %#v, want omitted", req.Params["target"])
+			}
+			payload, ok := req.Params["payload"].(map[string]any)
+			if !ok || !numberEquals(payload["delta"], 7) {
+				t.Fatalf("event.publish root setup payload = %#v", req.Params["payload"])
+			}
+			result := eventPublishTestResult(false)
+			result["run_id"] = setupRunID
+			result["event_id"] = "event-root-setup"
+			result["source_event_id"] = ""
+			writeJSONRPCResult(t, w, req.ID, result)
+		case "run.diagnose":
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(setupRunID, true))
+		case "run.trace":
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{scenarioTraceRowForEvent("event-root-setup", "widget.scored")}})
+		case entityGetMethod:
+			if req.Params["entity_id"] != setupEntityID || req.Params["run_id"] != setupRunID {
+				t.Fatalf("entity.get root setup params = %#v", req.Params)
+			}
+			result := validEntityFullResult(setupEntityID)
+			entity := result["entity"].(map[string]any)
+			entity["run_id"] = setupRunID
+			entity["entity_type"] = "widget"
+			entity["current_state"] = "done"
+			result["fields"] = map[string]any{"score": float64(12)}
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:
 			t.Fatalf("unexpected method = %s", req.Method)
@@ -517,6 +631,82 @@ func TestSwarmTestRunsRemainingCurrentPublicOwnerCatalogCompanions(t *testing.T)
 	}
 }
 
+func TestSwarmTestRunsSetupPrestateCatalogCompanions(t *testing.T) {
+	for _, tc := range []struct {
+		tier              string
+		packageName       string
+		wantPositiveEvent bool
+	}{
+		{tier: "tier1-primitives", packageName: "test-clear-gates", wantPositiveEvent: true},
+		{tier: "tier1-primitives", packageName: "test-guard-compound-condition", wantPositiveEvent: true},
+		{tier: "tier1-primitives", packageName: "test-guard-entity-ref", wantPositiveEvent: true},
+		{tier: "tier1-primitives", packageName: "test-on-complete-with-state", wantPositiveEvent: true},
+		{tier: "tier1-primitives", packageName: "test-payload-transform-multi-source", wantPositiveEvent: true},
+		{tier: "tier10-policy-patterns", packageName: "test-policy-counter-escalate", wantPositiveEvent: true},
+		{tier: "tier10-policy-patterns", packageName: "test-policy-multi-guard-partial"},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-all", wantPositiveEvent: true},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-crash-recovery", wantPositiveEvent: true},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-expected-from-entity", wantPositiveEvent: true},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-from-filter", wantPositiveEvent: true},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-idempotent"},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-on-complete-rollback", wantPositiveEvent: true},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-partial"},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-threshold", wantPositiveEvent: true},
+		{tier: "tier2-accumulation", packageName: "test-accumulate-with-compute", wantPositiveEvent: true},
+		{tier: "tier4-cross-entity", packageName: "test-clear-multiple-targets", wantPositiveEvent: true},
+		{tier: "tier4-cross-entity", packageName: "test-clear-state", wantPositiveEvent: true},
+		{tier: "tier6-event-loop", packageName: "test-atomicity-guard-rollback"},
+		{tier: "tier6-event-loop", packageName: "test-guards-pre-handler-state"},
+		{tier: "tier9-composition-patterns", packageName: "test-compose-guard-counter-escalate", wantPositiveEvent: true},
+		{tier: "tier9-composition-patterns", packageName: "test-compose-guard-multi-source", wantPositiveEvent: true},
+	} {
+		t.Run(tc.tier+"/"+tc.packageName, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			setCLIAPITestToken(t, "test-token")
+			contractsPath := filepath.Join(repoRoot(), "tests", tc.tier, tc.packageName)
+			scenarioPath := filepath.Join(contractsPath, "tests", "visible-smoke.yaml")
+			raw, err := os.ReadFile(scenarioPath)
+			if err != nil {
+				t.Fatalf("read scenario: %v", err)
+			}
+			doc, err := parseScenarioDocument(raw)
+			if err != nil {
+				t.Fatalf("parse scenario: %v", err)
+			}
+			if len(doc.Setup.Entities) != 1 {
+				t.Fatalf("scenario setup = %#v, want one public setup entity", doc.Setup.Entities)
+			}
+			if len(doc.Steps) == 0 {
+				t.Fatal("scenario must include at least one publish step")
+			}
+			for _, step := range doc.Steps {
+				if step.Action != "publish" {
+					t.Fatalf("scenario step = %#v, want publish", step)
+				}
+				if step.Target != nil || step.TargetEntityID != nil || step.TargetFlowInstance != nil {
+					t.Fatalf("root setup companion must not use publish target fields: %#v", step)
+				}
+			}
+			if tc.wantPositiveEvent && len(doc.Expect.Events.Include) == 0 {
+				t.Fatal("scenario must include positive emitted-event proof")
+			}
+			if !tc.wantPositiveEvent && len(doc.Expect.Events.Include) != 0 {
+				t.Fatalf("scenario includes events %#v, want no event-output assertion", doc.Expect.Events.Include)
+			}
+			if len(doc.Expect.Events.Exact) != 0 || len(doc.Expect.Events.Ordered) != 0 {
+				t.Fatalf("scenario event expectations = %#v, want include-only", doc.Expect.Events)
+			}
+			if doc.Expect.NoDeadLetters != nil {
+				t.Fatalf("scenario no_dead_letters = %#v, want omitted", *doc.Expect.NoDeadLetters)
+			}
+			if len(doc.Expect.Entities) != 1 || doc.Expect.Entities[0].Ref != "entity" || !doc.Expect.Entities[0].StateSet {
+				t.Fatalf("scenario entity expectations = %#v, want setup ref current_state assertion", doc.Expect.Entities)
+			}
+			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
+		})
+	}
+}
+
 func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string, doc scenarioDocument) {
 	t.Helper()
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
@@ -551,6 +741,9 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 
 	var calls []jsonRPCRequest
 	var publishCalls int
+	activeRunID := "run-1"
+	setupEntityIDs := map[string]string{}
+	setupEntityTypes := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/rpc" {
 			t.Errorf("path = %q, want /v1/rpc", r.URL.Path)
@@ -564,6 +757,59 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case scenarioTestSetupEntitiesMethod:
+			if req.Params["bundle_hash"] != bundleHash {
+				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
+			}
+			runID, _ := req.Params["run_id"].(string)
+			if _, err := uuid.Parse(runID); err != nil {
+				t.Fatalf("test.setup_entities run_id = %#v, want UUID", req.Params["run_id"])
+			}
+			activeRunID = runID
+			entities, ok := req.Params["entities"].([]any)
+			if !ok || len(entities) != len(doc.Setup.Entities) {
+				t.Fatalf("test.setup_entities entities = %#v, want %d rows", req.Params["entities"], len(doc.Setup.Entities))
+			}
+			resultRows := make([]map[string]any, 0, len(entities))
+			for i, raw := range entities {
+				entity, ok := raw.(map[string]any)
+				if !ok {
+					t.Fatalf("test.setup_entities entities[%d] = %#v, want mapping", i, raw)
+				}
+				want := doc.Setup.Entities[i]
+				if entity["alias"] != want.Alias || entity["entity_type"] != want.EntityType {
+					t.Fatalf("test.setup_entities entities[%d] = %#v, want alias %q type %q", i, entity, want.Alias, want.EntityType)
+				}
+				entityID, _ := entity["entity_id"].(string)
+				if _, err := uuid.Parse(entityID); err != nil {
+					t.Fatalf("test.setup_entities entities[%d].entity_id = %#v, want UUID", i, entity["entity_id"])
+				}
+				if strings.TrimSpace(fmt.Sprint(entity["flow_instance"])) == "" {
+					if wantID := runtimeflowidentity.EntityID(runID); entityID != wantID {
+						t.Fatalf("test.setup_entities root entity_id = %q, want %q", entityID, wantID)
+					}
+				}
+				if want.FieldsSet {
+					if err := assertScenarioJSONEqual("test.setup_entities fields", entity["fields"], want.Fields); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if want.GatesSet {
+					if err := assertScenarioJSONEqual("test.setup_entities gates", entity["gates"], want.Gates); err != nil {
+						t.Fatal(err)
+					}
+				}
+				setupEntityIDs[want.Alias] = entityID
+				setupEntityTypes[want.Alias] = want.EntityType
+				resultRows = append(resultRows, map[string]any{
+					"alias":         want.Alias,
+					"entity_id":     entityID,
+					"flow_instance": strings.TrimSpace(fmt.Sprint(entity["flow_instance"])),
+					"entity_type":   want.EntityType,
+					"current_state": strings.TrimSpace(fmt.Sprint(entity["current_state"])),
+				})
+			}
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"run_id": runID, "entities": resultRows})
 		case eventPublishMethod:
 			if publishCalls >= len(doc.Steps) {
 				t.Fatalf("unexpected extra event.publish params = %#v", req.Params)
@@ -574,7 +820,11 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 			if req.Params["event_name"] != step.PublishEvent || req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", req.Params)
 			}
-			if publishCalls == 1 {
+			if len(doc.Setup.Entities) > 0 {
+				if req.Params["run_id"] != activeRunID {
+					t.Fatalf("event.publish[%d] run_id = %#v, want setup run %s; params=%#v", publishCalls, req.Params["run_id"], activeRunID, req.Params)
+				}
+			} else if publishCalls == 1 {
 				if _, ok := req.Params["run_id"]; ok {
 					t.Fatalf("first event.publish unexpectedly sent run_id: %#v", req.Params)
 				}
@@ -582,11 +832,23 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 					t.Fatalf("first event.publish unexpectedly sent source_event_id: %#v", req.Params)
 				}
 			} else {
-				if req.Params["run_id"] != "run-1" {
+				if req.Params["run_id"] != activeRunID {
 					t.Fatalf("event.publish[%d] run_id = %#v, want run-1; params=%#v", publishCalls, req.Params["run_id"], req.Params)
 				}
+			}
+			if publishCalls > 1 {
 				wantSource := fmt.Sprintf("event-%d", publishCalls-1)
 				if step.SourceEventID == nil && req.Params["source_event_id"] != wantSource {
+					t.Fatalf("event.publish[%d] source_event_id = %#v, want %#v; params=%#v", publishCalls, req.Params["source_event_id"], wantSource, req.Params)
+				}
+			}
+			if step.SourceEventID != nil {
+				wantSource := strings.TrimSpace(fmt.Sprint(step.SourceEventID))
+				if wantSource == "" {
+					if _, ok := req.Params["source_event_id"]; ok {
+						t.Fatalf("event.publish[%d] source_event_id = %#v, want omitted", publishCalls, req.Params["source_event_id"])
+					}
+				} else if req.Params["source_event_id"] != wantSource {
 					t.Fatalf("event.publish[%d] source_event_id = %#v, want %#v; params=%#v", publishCalls, req.Params["source_event_id"], wantSource, req.Params)
 				}
 			}
@@ -612,14 +874,17 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 			} else if _, ok := req.Params["emitter"]; ok {
 				t.Fatalf("event.publish unexpectedly sent emitter: %#v", req.Params)
 			}
-			result := eventPublishTestResult(publishCalls == 1)
+			result := eventPublishTestResult(len(doc.Setup.Entities) == 0 && publishCalls == 1)
 			result["event_id"] = eventID
-			if publishCalls > 1 {
-				result["source_event_id"] = fmt.Sprintf("event-%d", publishCalls-1)
+			result["run_id"] = activeRunID
+			if source, ok := req.Params["source_event_id"].(string); ok {
+				result["source_event_id"] = source
+			} else {
+				result["source_event_id"] = ""
 			}
 			writeJSONRPCResult(t, w, req.ID, result)
 		case "run.diagnose":
-			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult("run-1", true))
+			writeJSONRPCResult(t, w, req.ID, scenarioRunDiagnoseTestResult(activeRunID, true))
 		case "run.trace":
 			rows := make([]map[string]any, 0, len(doc.Steps)+len(doc.Expect.Events.Include))
 			for i, step := range doc.Steps {
@@ -630,20 +895,32 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 			}
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": rows})
 		case entityListMethod:
-			if req.Params["run_id"] != "run-1" || req.Params["type"] != entityExpect.EntityType {
+			if req.Params["run_id"] != activeRunID || req.Params["type"] != entityExpect.EntityType {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
+			entity["run_id"] = activeRunID
 			entity["entity_type"] = entityExpect.EntityType
 			entity["current_state"] = currentState
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
-			if req.Params["entity_id"] != "entity-1" || req.Params["run_id"] != "run-1" {
-				t.Fatalf("entity.get params = %#v", req.Params)
+			entityID := "entity-1"
+			entityType := entityExpect.EntityType
+			if entityExpect.Ref != "" {
+				var ok bool
+				entityID, ok = setupEntityIDs[entityExpect.Ref]
+				if !ok {
+					t.Fatalf("entity expectation ref %q missing setup binding", entityExpect.Ref)
+				}
+				entityType = setupEntityTypes[entityExpect.Ref]
 			}
-			result := validEntityFullResult("entity-1")
+			if req.Params["entity_id"] != entityID || req.Params["run_id"] != activeRunID {
+				t.Fatalf("entity.get params = %#v, want run %s entity %s", req.Params, activeRunID, entityID)
+			}
+			result := validEntityFullResult(entityID)
 			entity := result["entity"].(map[string]any)
-			entity["entity_type"] = entityExpect.EntityType
+			entity["run_id"] = activeRunID
+			entity["entity_type"] = entityType
 			entity["current_state"] = currentState
 			result["fields"] = fields
 			result["gates"] = gates
@@ -666,12 +943,18 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	wantMethods := make([]string, 0, len(doc.Steps)*2+4)
+	if len(doc.Setup.Entities) > 0 {
+		wantMethods = append(wantMethods, scenarioTestSetupEntitiesMethod)
+	}
 	for range doc.Steps {
 		wantMethods = append(wantMethods, eventPublishMethod, "run.diagnose")
 	}
 	wantMethods = append(wantMethods, "run.diagnose", "run.trace")
 	if len(doc.Expect.Entities) > 0 {
-		wantMethods = append(wantMethods, entityListMethod, entityGetMethod)
+		if doc.Expect.Entities[0].Ref == "" {
+			wantMethods = append(wantMethods, entityListMethod)
+		}
+		wantMethods = append(wantMethods, entityGetMethod)
 	}
 	assertScenarioTestMethods(t, calls, wantMethods)
 	for _, want := range []string{"scenario ok:", "swarm test ok: scenarios=1"} {
@@ -1383,6 +1666,70 @@ expect:
       current_state: ready
       fields: {product_id: p-1, note: approved}
       gates: {review_ready: false}
+`)
+	return root
+}
+
+func writeScenarioRootSetupFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: scenario-root-setup-fixture
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: scenario-root-setup-fixture
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, done]
+pins:
+  inputs:
+    events: [widget.scored]
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+widget:
+  score: integer
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+widget.scored:
+  swarm:
+    source: external
+  delta: integer
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+scorer:
+  id: scorer
+  execution_type: system_node
+  subscribes_to: [widget.scored]
+  event_handlers:
+    widget.scored:
+      data_accumulation:
+        source_event: widget.scored
+        writes:
+          - target_field: score
+            expression: entity.score + payload.delta
+      advances_to: done
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tests", "root-setup.yaml"), `
+name: root setup and expectation
+setup:
+  entities:
+    - as: widget
+      type: widget
+      current_state: waiting
+      fields: {score: 5}
+steps:
+  - publish: widget.scored
+    payload: {delta: 7}
+expect:
+  entities:
+    - ref: widget
+      current_state: done
+      fields: {score: 12}
 `)
 	return root
 }

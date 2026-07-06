@@ -1,0 +1,17 @@
+name: test-guard-entity-ref setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      level: 5
+steps:
+- publish: check.requested
+  payload: {}
+expect:
+  events:
+    include:
+    - check.passed
+  entities:
+  - ref: entity
+    current_state: done

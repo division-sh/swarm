@@ -12511,7 +12511,11 @@ test_specification:
           identity and recorded seed, validates the authored setup against the
           loaded contract bundle, then submits exactly one idempotent
           `test.setup_entities` request carrying canonical bundle_hash,
-          run_id, and the validated entity rows. The runner MUST NOT write the
+          run_id, and the validated entity rows. Root-flow setup rows use the
+          same canonical root entity identity as same-run root event handling:
+          the root setup entity_id is derived from the scenario run_id. Flow-scoped
+          setup rows use deterministic alias-specific entity_id values and may
+          be consumed by `target` aliases. The runner MUST NOT write the
           database/store directly, call EventBus, create deliveries, infer
           handler outcomes, or expose a generic entity.create/entity.update
           public mutation surface.
@@ -12520,6 +12524,9 @@ test_specification:
             `as` aliases are non-empty and unique within the scenario.
           - >
             `type` must match the primary entity type for the selected flow scope.
+            For legacy root packages with no entities.yaml, root setup may use
+            `type: default` only for state/gate setup; public setup fields still
+            require a declared entity contract field.
           - >
             `current_state`, when supplied, must be a declared state for the selected flow; otherwise the selected flow's
             initial state is used.

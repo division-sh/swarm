@@ -1,0 +1,15 @@
+name: test-clear-state setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: default
+steps:
+- publish: state.clear_requested
+  payload: {}
+expect:
+  events:
+    include:
+    - state.cleared
+  entities:
+  - ref: entity
+    current_state: cleared

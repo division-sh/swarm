@@ -1,0 +1,18 @@
+name: test-compose-guard-counter-escalate setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    current_state: active
+    fields:
+      retry_count: 3
+steps:
+- publish: retry.requested
+  payload: {}
+expect:
+  events:
+    include:
+    - limit.reached
+  entities:
+  - ref: entity
+    current_state: active

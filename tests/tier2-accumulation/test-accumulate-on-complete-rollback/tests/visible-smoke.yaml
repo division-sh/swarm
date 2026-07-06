@@ -1,0 +1,27 @@
+name: test-accumulate-on-complete-rollback setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      expected_count: 3
+steps:
+- publish: score.received
+  payload:
+    score: 80
+- publish: score.received
+  payload:
+    score: 90
+  source_event_id: ''
+- publish: score.received
+  payload:
+    score: 70
+  source_event_id: ''
+expect:
+  events:
+    include:
+    - batch.scored
+    - scores.verified
+  entities:
+  - ref: entity
+    current_state: verified
