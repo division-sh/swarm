@@ -1,0 +1,10 @@
+name: test-agent-emits-to-node visible smoke
+steps:
+  - publish: task.assigned
+    payload: {}
+expect:
+  events:
+    include: [task.acknowledged, task.completed, task.finalized]
+  entities:
+    - type: default
+      current_state: done

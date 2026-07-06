@@ -1,0 +1,8 @@
+name: test-non-agent-replay-fail-closed visible smoke
+steps:
+  - publish: task.assigned
+    payload: {}
+expect:
+  entities:
+    - type: default
+      current_state: pending

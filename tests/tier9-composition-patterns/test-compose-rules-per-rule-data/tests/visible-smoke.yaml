@@ -1,0 +1,16 @@
+name: test-compose-rules-per-rule-data visible smoke
+steps:
+  - publish: conflict.submitted
+    payload:
+      strategy: keep_best
+      value_a: low
+      value_b: high
+expect:
+  events:
+    include: [conflict.resolved]
+  entities:
+    - type: core
+      current_state: resolved
+      fields:
+        resolved_value: high
+        resolution_method: best

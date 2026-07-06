@@ -1,0 +1,10 @@
+name: test-auto-emit-on-create visible smoke
+steps:
+  - publish: flow.created
+    payload: {}
+expect:
+  events:
+    include: [auto.started, auto.processed]
+  entities:
+    - type: default
+      current_state: started

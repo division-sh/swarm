@@ -1,0 +1,20 @@
+name: test-compose-gate-data-advance-emit visible smoke
+steps:
+  - publish: stage.one_done
+    payload:
+      result: pass
+  - publish: stage.two_done
+    payload:
+      result: verified
+expect:
+  events:
+    include: [stage.two_start, stage.complete]
+  entities:
+    - type: core
+      current_state: complete
+      fields:
+        stage_one_result: pass
+        stage_two_result: verified
+      gates:
+        g_stage_one: true
+        g_stage_two: true

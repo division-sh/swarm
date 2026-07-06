@@ -1,0 +1,18 @@
+name: test-compose-gate-chain-three visible smoke
+steps:
+  - publish: step.a_done
+    payload: {}
+  - publish: step.b_done
+    payload: {}
+  - publish: step.c_done
+    payload: {}
+expect:
+  events:
+    include: [release.ready]
+  entities:
+    - type: default
+      current_state: released
+      gates:
+        g_a: true
+        g_b: true
+        g_c: true

@@ -1,0 +1,17 @@
+name: test-compose-rules-fanout-data visible smoke
+steps:
+  - publish: batch.requested
+    payload:
+      mode: parallel
+      items:
+        - id: a
+        - id: b
+        - id: c
+expect:
+  events:
+    include: [batch.dispatched]
+  entities:
+    - type: core
+      current_state: dispatched
+      fields:
+        dispatch_count: 3

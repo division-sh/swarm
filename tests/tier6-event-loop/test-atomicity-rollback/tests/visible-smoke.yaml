@@ -1,0 +1,10 @@
+name: test-atomicity-rollback visible smoke
+steps:
+  - publish: task.submitted
+    payload: {}
+expect:
+  entities:
+    - type: default
+      current_state: pending
+      gates:
+        approval_gate: false

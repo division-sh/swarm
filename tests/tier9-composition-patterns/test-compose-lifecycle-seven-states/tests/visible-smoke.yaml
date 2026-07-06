@@ -1,0 +1,20 @@
+name: test-compose-lifecycle-seven-states visible smoke
+steps:
+  - publish: phase.init
+    payload: {}
+  - publish: phase.activate
+    payload: {}
+  - publish: phase.start
+    payload: {}
+  - publish: phase.stabilize
+    payload: {}
+  - publish: phase.wind_down
+    payload: {}
+  - publish: phase.close
+    payload: {}
+expect:
+  events:
+    include: [lifecycle.complete]
+  entities:
+    - type: default
+      current_state: closed

@@ -1,0 +1,7 @@
+name: test-child-flow-absolute-path visible smoke
+steps:
+  - publish: work.start
+    payload: {}
+expect:
+  events:
+    include: [work.finished]

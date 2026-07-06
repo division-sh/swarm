@@ -1,0 +1,10 @@
+name: test-query-filter visible smoke
+steps:
+  - publish: filter.requested
+    payload: {}
+expect:
+  events:
+    include: [filter.completed]
+  entities:
+    - type: default
+      current_state: filtered

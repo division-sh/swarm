@@ -1,0 +1,9 @@
+name: test-dead-letter visible smoke
+steps:
+  - publish: task.submitted
+    payload:
+      score: 0
+expect:
+  entities:
+    - type: default
+      current_state: pending

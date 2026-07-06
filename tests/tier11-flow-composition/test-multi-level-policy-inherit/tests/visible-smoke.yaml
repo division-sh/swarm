@@ -1,0 +1,11 @@
+name: test-multi-level-policy-inherit visible smoke
+steps:
+  - publish: child/grandchild/grandchild.check
+    payload:
+      score: 65
+expect:
+  events:
+    include: [grandchild.passed]
+  entities:
+    - type: default
+      current_state: approved

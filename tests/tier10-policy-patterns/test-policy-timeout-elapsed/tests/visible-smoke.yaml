@@ -1,0 +1,11 @@
+name: test-policy-timeout-elapsed visible smoke
+steps:
+  - publish: timer.check
+    payload:
+      elapsed_hours: 80
+expect:
+  events:
+    include: [task.timed_out]
+  entities:
+    - type: default
+      current_state: timed_out

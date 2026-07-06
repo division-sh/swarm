@@ -1,0 +1,10 @@
+name: test-wildcard-cross-flow visible smoke
+steps:
+  - publish: flow-alpha/trigger.alpha
+    payload: {}
+expect:
+  events:
+    include: [job.alpha_done]
+  entities:
+    - type: default
+      current_state: done

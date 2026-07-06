@@ -1,0 +1,10 @@
+name: test-cross-flow-subscription visible smoke
+steps:
+  - publish: flow-b/order.submitted
+    payload: {}
+expect:
+  events:
+    include: [order.completed, invoice.created]
+  entities:
+    - type: default
+      current_state: done
