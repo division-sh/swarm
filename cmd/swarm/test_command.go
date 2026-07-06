@@ -15,6 +15,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -1265,14 +1266,18 @@ func (r scenarioRunner) evaluateScenarioSetupFields(evaluator *scenarioExpressio
 	if !ok {
 		return nil, fmt.Errorf("setup.entities[%s].fields must evaluate to a mapping", entity.Alias)
 	}
+	contract := entityruntime.Contract{
+		FlowID:     strings.Trim(strings.TrimSpace(primary.FlowID), "/"),
+		EntityType: strings.TrimSpace(primary.EntityType),
+		Entity:     primary.Contract,
+		Types:      primary.Types,
+	}
 	for field, fieldValue := range fields {
-		decl, ok := primary.Contract.Fields[field]
-		if !ok {
-			return nil, fmt.Errorf("setup.entities[%s].fields.%s is not declared on entity type %s", entity.Alias, field, primary.EntityType)
-		}
-		if err := validateScenarioSetupFieldValue(fieldValue, decl.Type, primary.Types); err != nil {
+		normalized, err := entityruntime.NormalizeFieldValue(contract, field, fieldValue)
+		if err != nil {
 			return nil, fmt.Errorf("setup.entities[%s].fields.%s: %w", entity.Alias, field, err)
 		}
+		fields[field] = normalized
 	}
 	return fields, nil
 }
@@ -1335,130 +1340,6 @@ func (r scenarioRunner) declaredScenarioGateNames(flowID string) map[string]stru
 		}
 	}
 	return out
-}
-
-func validateScenarioSetupFieldValue(value any, typeRef string, catalog runtimecontracts.TypeCatalogDocument) error {
-	return validateScenarioSetupFieldValueDepth(value, strings.TrimSpace(typeRef), catalog, 0)
-}
-
-func validateScenarioSetupFieldValueDepth(value any, typeRef string, catalog runtimecontracts.TypeCatalogDocument, depth int) error {
-	if depth > 16 {
-		return fmt.Errorf("type alias cycle or excessive nesting at %s", typeRef)
-	}
-	if scalar, ok := scenarioSetupScalarDecl(catalog, typeRef); ok {
-		return validateScenarioSetupFieldValueDepth(value, scalar.Base, catalog, depth+1)
-	}
-	if enum, ok := scenarioSetupEnumDecl(catalog, typeRef); ok {
-		text, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("must be string for enum %s", typeRef)
-		}
-		for _, allowed := range enum.Values {
-			if text == allowed {
-				return nil
-			}
-		}
-		return fmt.Errorf("must be one of %s", strings.Join(enum.Values, ", "))
-	}
-	if _, ok := scenarioSetupNamedTypeDecl(catalog, typeRef); ok {
-		if _, ok := value.(map[string]any); !ok {
-			return fmt.Errorf("must be object for %s", typeRef)
-		}
-		return nil
-	}
-	typeRef = strings.TrimSpace(strings.ToLower(typeRef))
-	switch {
-	case typeRef == "", typeRef == "any", typeRef == "json":
-		return nil
-	case typeRef == "text" || typeRef == "string" || typeRef == "uuid" || typeRef == "timestamp":
-		if _, ok := value.(string); !ok {
-			return fmt.Errorf("must be string for %s", typeRef)
-		}
-		if typeRef == "uuid" {
-			if _, err := uuid.Parse(strings.TrimSpace(fmt.Sprint(value))); err != nil {
-				return fmt.Errorf("must be UUID")
-			}
-		}
-	case typeRef == "bool" || typeRef == "boolean":
-		if _, ok := value.(bool); !ok {
-			return fmt.Errorf("must be boolean")
-		}
-	case typeRef == "int" || typeRef == "integer":
-		if !scenarioValueIsInteger(value) {
-			return fmt.Errorf("must be integer")
-		}
-	case typeRef == "number" || typeRef == "numeric" || typeRef == "float" || typeRef == "double":
-		if !scenarioValueIsNumber(value) {
-			return fmt.Errorf("must be number")
-		}
-	case typeRef == "object" || typeRef == "map":
-		if _, ok := value.(map[string]any); !ok {
-			return fmt.Errorf("must be object")
-		}
-	case typeRef == "array" || typeRef == "list" || strings.HasPrefix(typeRef, "list<") || strings.HasSuffix(typeRef, "[]"):
-		if _, ok := value.([]any); !ok {
-			return fmt.Errorf("must be array")
-		}
-	default:
-		return nil
-	}
-	return nil
-}
-
-func scenarioSetupScalarDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.ScalarTypeDecl, bool) {
-	name = strings.TrimSpace(name)
-	if catalog.Scalars == nil || name == "" {
-		return runtimecontracts.ScalarTypeDecl{}, false
-	}
-	if decl, ok := catalog.Scalars[name]; ok {
-		return decl, true
-	}
-	decl, ok := catalog.Scalars[strings.ToLower(name)]
-	return decl, ok
-}
-
-func scenarioSetupEnumDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.EnumTypeDecl, bool) {
-	name = strings.TrimSpace(name)
-	if catalog.Enums == nil || name == "" {
-		return runtimecontracts.EnumTypeDecl{}, false
-	}
-	if decl, ok := catalog.Enums[name]; ok {
-		return decl, true
-	}
-	decl, ok := catalog.Enums[strings.ToLower(name)]
-	return decl, ok
-}
-
-func scenarioSetupNamedTypeDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.NamedTypeDecl, bool) {
-	name = strings.TrimSpace(name)
-	if catalog.Types == nil || name == "" {
-		return runtimecontracts.NamedTypeDecl{}, false
-	}
-	if decl, ok := catalog.Types[name]; ok {
-		return decl, true
-	}
-	decl, ok := catalog.Types[strings.ToLower(name)]
-	return decl, ok
-}
-
-func scenarioValueIsInteger(value any) bool {
-	switch typed := value.(type) {
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return true
-	case float64:
-		return typed == float64(int64(typed))
-	default:
-		return false
-	}
-}
-
-func scenarioValueIsNumber(value any) bool {
-	switch value.(type) {
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64:
-		return true
-	default:
-		return false
-	}
 }
 
 func scenarioFlowLabel(flowID string) string {

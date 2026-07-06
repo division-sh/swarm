@@ -112,6 +112,47 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			wantField: "entities[0].fields.review_score",
 		},
 		{
+			name: "named type undeclared nested key",
+			edit: func(entity map[string]any) {
+				entity["fields"] = map[string]any{
+					"business_brief": map[string]any{
+						"summary": "ok",
+						"extra":   "not-declared",
+					},
+				}
+			},
+			wantField: "entities[0].fields.business_brief",
+		},
+		{
+			name: "named type nested type mismatch",
+			edit: func(entity map[string]any) {
+				entity["fields"] = map[string]any{
+					"business_brief": map[string]any{
+						"summary": 42,
+					},
+				}
+			},
+			wantField: "entities[0].fields.business_brief",
+		},
+		{
+			name: "list field invalid item type",
+			edit: func(entity map[string]any) {
+				entity["fields"] = map[string]any{
+					"feature_list": []any{map[string]any{"name": 42}},
+				}
+			},
+			wantField: "entities[0].fields.feature_list",
+		},
+		{
+			name: "map field invalid value type",
+			edit: func(entity map[string]any) {
+				entity["fields"] = map[string]any{
+					"review_scores": map[string]any{"quality": "not-an-integer"},
+				}
+			},
+			wantField: "entities[0].fields.review_scores",
+		},
+		{
 			name: "undeclared gate",
 			edit: func(entity map[string]any) {
 				entity["gates"] = map[string]any{"missing_gate": true}
@@ -351,6 +392,16 @@ product:
   product_id: text
   note: text
   review_score: integer
+  business_brief: Brief
+  feature_list: list<Feature>
+  review_scores: map[text]integer
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "types.yaml"), `
+types:
+  Brief:
+    summary: text
+  Feature:
+    name: text
 `)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
 opco.product_review_requested:
