@@ -1,6 +1,9 @@
 package eventschema
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidatePayloadAgainstSchema_RejectsUnsupportedSchemaType(t *testing.T) {
 	t.Parallel()
@@ -91,4 +94,82 @@ func TestValidatePayloadAgainstSchema_RejectsCaseVariantEnumValue(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected case-variant enum value to fail")
 	}
+}
+
+func TestValidatePayloadAgainstSchema_EnforcesSchemaRefinements(t *testing.T) {
+	t.Parallel()
+
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"source_ref": map[string]any{
+				"type":      "string",
+				"pattern":   "^[0-9a-f]{40}$",
+				"minLength": 40,
+				"maxLength": 40,
+			},
+			"label": map[string]any{
+				"type":      "string",
+				"minLength": 3,
+			},
+			"files": map[string]any{
+				"type":     "array",
+				"minItems": 1,
+				"items":    map[string]any{"type": "string"},
+			},
+			"score": map[string]any{
+				"type":    "number",
+				"minimum": 0.5,
+				"maximum": 1.0,
+			},
+			"component": map[string]any{"type": "string"},
+			"owner": map[string]any{
+				"type":            "string",
+				"x-swarm-equalTo": "component",
+			},
+		},
+		"required":             []any{"source_ref", "label", "files", "score", "component", "owner"},
+		"additionalProperties": false,
+	}
+
+	valid := map[string]any{
+		"source_ref": "0123456789abcdef0123456789abcdef01234567",
+		"label":      "deploy",
+		"files":      []any{"manifest.yaml"},
+		"score":      0.9,
+		"component":  "deploy",
+		"owner":      "deploy",
+	}
+	if err := ValidatePayloadAgainstSchema(schema, valid); err != nil {
+		t.Fatalf("valid payload rejected: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		mutate  func(map[string]any)
+		wantErr string
+	}{
+		{name: "pattern", mutate: func(p map[string]any) { p["source_ref"] = "not-a-sha" }, wantErr: "pattern"},
+		{name: "length", mutate: func(p map[string]any) { p["label"] = "x" }, wantErr: "length"},
+		{name: "min items", mutate: func(p map[string]any) { p["files"] = []any{} }, wantErr: "length"},
+		{name: "range", mutate: func(p map[string]any) { p["score"] = 1.5 }, wantErr: "<="},
+		{name: "equality", mutate: func(p map[string]any) { p["owner"] = "other" }, wantErr: "must equal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := cloneTestPayload(valid)
+			tc.mutate(payload)
+			err := ValidatePayloadAgainstSchema(schema, payload)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("ValidatePayloadAgainstSchema error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func cloneTestPayload(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

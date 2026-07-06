@@ -2,8 +2,11 @@ package eventschema
 
 import (
 	"fmt"
+	"reflect"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 	"github.com/google/uuid"
@@ -40,6 +43,23 @@ func validateSchemaObject(path string, schema map[string]any, payload map[string
 			return err
 		}
 	}
+	for key, propSchema := range props {
+		target := strings.TrimSpace(asString(propSchema["x-swarm-equalTo"]))
+		if target == "" {
+			continue
+		}
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		other, ok := payload[target]
+		if !ok {
+			return fmt.Errorf("schema validation failed: %s.%s must equal %s.%s, but target is missing", path, key, path, target)
+		}
+		if !reflect.DeepEqual(value, other) {
+			return fmt.Errorf("schema validation failed: %s.%s must equal %s.%s", path, key, path, target)
+		}
+	}
 	return nil
 }
 
@@ -71,6 +91,9 @@ func validateValue(path string, schema map[string]any, value any) error {
 			return fmt.Errorf("schema validation failed: %s must be string", path)
 		}
 		if err := validateStringFormat(path, schema, text); err != nil {
+			return err
+		}
+		if err := validateStringRefinements(path, schema, text); err != nil {
 			return err
 		}
 	case "boolean":
@@ -105,6 +128,9 @@ func validateValue(path string, schema map[string]any, value any) error {
 				}
 			}
 		}
+		if err := validateArrayLength(path, schema, len(arr)); err != nil {
+			return err
+		}
 	case "object":
 		obj, ok := value.(map[string]any)
 		if !ok {
@@ -119,6 +145,44 @@ func validateValue(path string, schema map[string]any, value any) error {
 		}
 	default:
 		return fmt.Errorf("schema validation failed: %s has unsupported schema type %q", path, st)
+	}
+	return nil
+}
+
+func validateStringRefinements(path string, schema map[string]any, value string) error {
+	if pattern := strings.TrimSpace(asString(schema["pattern"])); pattern != "" {
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("schema validation failed: %s has invalid pattern refinement", path)
+		}
+		if !compiled.MatchString(value) {
+			return fmt.Errorf("schema validation failed: %s must match pattern %q", path, pattern)
+		}
+	}
+	length := utf8.RuneCountInString(value)
+	if minRaw, ok := schema["minLength"]; ok {
+		if min, ok := runtimesharedjson.AsFloat64(minRaw); ok && length < int(min) {
+			return fmt.Errorf("schema validation failed: %s length must be >= %d", path, int(min))
+		}
+	}
+	if maxRaw, ok := schema["maxLength"]; ok {
+		if max, ok := runtimesharedjson.AsFloat64(maxRaw); ok && length > int(max) {
+			return fmt.Errorf("schema validation failed: %s length must be <= %d", path, int(max))
+		}
+	}
+	return nil
+}
+
+func validateArrayLength(path string, schema map[string]any, length int) error {
+	if minRaw, ok := schema["minItems"]; ok {
+		if min, ok := runtimesharedjson.AsFloat64(minRaw); ok && length < int(min) {
+			return fmt.Errorf("schema validation failed: %s length must be >= %d", path, int(min))
+		}
+	}
+	if maxRaw, ok := schema["maxItems"]; ok {
+		if max, ok := runtimesharedjson.AsFloat64(maxRaw); ok && length > int(max) {
+			return fmt.Errorf("schema validation failed: %s length must be <= %d", path, int(max))
+		}
 	}
 	return nil
 }

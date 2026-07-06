@@ -49,6 +49,7 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		if description != "" {
 			prop["description"] = description
 		}
+		applySchemaRefinements(prop, field.Refinements)
 		properties[fieldName] = prop
 	}
 	schema := map[string]any{
@@ -527,7 +528,9 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 				continue
 			}
 			spec := named.Fields[fieldName]
-			props[fieldName] = eventSchemaForTypeRefSchema(spec.Type, types, seen)
+			prop := eventSchemaForTypeRefSchema(spec.Type, types, seen)
+			applySchemaRefinements(prop, spec.Refinements)
+			props[fieldName] = prop
 			required = append(required, fieldName)
 		}
 		return map[string]any{
@@ -570,6 +573,49 @@ func eventTypeName(types TypeCatalogDocument, typeRef string) string {
 func eventSchemaForTypeRefSchema(raw string, types TypeCatalogDocument, seen map[string]struct{}) map[string]any {
 	schema, _ := eventSchemaForTypeRef(raw, types, seen)
 	return schema
+}
+
+func applySchemaRefinements(schema map[string]any, refinements SchemaRefinements) {
+	if schema == nil || refinements.Empty() {
+		return
+	}
+	if value := strings.TrimSpace(refinements.Pattern); value != "" {
+		schema["pattern"] = value
+	}
+	if min := refinements.Length.Min; min != nil {
+		switch strings.TrimSpace(asSchemaString(schema["type"])) {
+		case "array":
+			schema["minItems"] = *min
+		default:
+			schema["minLength"] = *min
+		}
+	}
+	if max := refinements.Length.Max; max != nil {
+		switch strings.TrimSpace(asSchemaString(schema["type"])) {
+		case "array":
+			schema["maxItems"] = *max
+		default:
+			schema["maxLength"] = *max
+		}
+	}
+	if min := refinements.Range.Min; min != nil {
+		schema["minimum"] = *min
+	}
+	if max := refinements.Range.Max; max != nil {
+		schema["maximum"] = *max
+	}
+	if value := strings.TrimSpace(refinements.EqualTo); value != "" {
+		schema["x-swarm-equalTo"] = value
+	}
+}
+
+func asSchemaString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
 }
 
 func eventNamedTypeName(types TypeCatalogDocument, typeRef string) (string, bool) {

@@ -179,6 +179,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			errs = append(errs, fmt.Errorf("%w: event %s has multiple authoritative system node owners: %s", ErrMultipleAuthoritativeOwners, strings.TrimSpace(eventType), strings.Join(normalizeStrings(owners), ", ")))
 		}
 	}
+	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
 	if len(errs) > 0 {
 		sort.Slice(errs, func(i, j int) bool {
 			return strings.TrimSpace(errs[i].Error()) < strings.TrimSpace(errs[j].Error())

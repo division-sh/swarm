@@ -284,6 +284,14 @@ contract_formats:
         nested_field:
           type: NamedType
           description: Human-readable annotation
+          pattern: ^[0-9a-f]{40}$
+          length:
+            min: 40
+            max: 40
+          range:
+            min: 0
+            max: 100
+          equal_to: sibling_field
     strict_payload_contract:
       rule: |
         Event payloads are producer-complete only. Every declared
@@ -1059,6 +1067,50 @@ type_system:
     named_types: Composite types with declared inner fields.
     enums: Closed named sets of values.
     lists: Ordered collections of a declared element type.
+  schema_refinements:
+    description: |
+      Declared event payload fields, named-type fields, and entity fields
+      may carry only the closed schema-refinement vocabulary listed here.
+      These refinements extend the shared type/schema owner; they are not a
+      handler-level validation row, not a rule artifact grammar, not CEL, and
+      not a generic JSON Schema drawer. Unsupported refinement keys and
+      malformed refinement declarations are contract-load failures.
+    vocabulary:
+      required_presence: |
+        Declared event payload fields and entity fields remain required by
+        default unless another explicit supported contract form states
+        otherwise. Presence is enforced by the existing event/entity schema
+        owners.
+      pattern: |
+        `pattern: <regular expression>` is allowed only on text/string-like
+        fields. The pattern must compile during contract loading.
+      length: |
+        `length: {min, max}` is allowed only on text/string-like fields and
+        list fields. Text length is character length; list length is item
+        count. At least one bound is required; bounds must be non-negative and
+        `min <= max` when both are present.
+      enum: |
+        Enums remain closed named sets in the shared type system. Field-local
+        enum dialects are not introduced by this slice.
+      range: |
+        `range: {min, max}` is allowed only on integer/numeric fields. At
+        least one bound is required and `min <= max` when both are present.
+      equal_to: |
+        `equal_to: <sibling_field>` declares pure same-object field equality.
+        The target must be a declared sibling field with the same resolved
+        type. Non-equality predicates, provenance checks, external file
+        checks, rule IDs, and failure routing are not schema refinements.
+    runtime_consumption: |
+      Event payload validators, entity materialization/write normalization,
+      and generated entity/tool schemas that derive from the shared
+      type/schema owner MUST consume the same refinement model. A consumer may
+      omit a refinement only when it is a different semantic concept or an
+      explicitly tracked surviving follow-up.
+    validation_row_boundary: |
+      Machine-evaluated validation criteria rows are a later #1714 slice and
+      depend on the #1717 stable-ID criteria artifact grammar. They bind
+      computed validation results only; branch routing remains owned by
+      policy-sheet selection rows.
   field_forms:
     terse: 'field_name: TypeName'
     verbose: |
@@ -1067,6 +1119,14 @@ type_system:
         initial: <value>          # entities only
         immutable: true           # entities only
         description: Human-readable annotation
+        pattern: ^[0-9a-f]{40}$
+        length:
+          min: 40
+          max: 40
+        range:
+          min: 0
+          max: 100
+        equal_to: sibling_field
         _unused_reason: Reason    # entities only; verify suppression for E1
         _unused_reader_reason: Reason # entities only; reader lint suppression for external/operator readout
   restrictions:
@@ -1124,6 +1184,14 @@ entity_contracts:
           immutable: <bool>
           indexed: <bool>
           description: <text>
+          pattern: <regular expression>
+          length:
+            min: <non-negative integer>
+            max: <non-negative integer>
+          range:
+            min: <number>
+            max: <number>
+          equal_to: <sibling_field>
           materialize_from: <node_id>.<accumulator_name>
           project:
             <target_item_field>: source.<source_item_field>

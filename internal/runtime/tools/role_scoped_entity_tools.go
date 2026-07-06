@@ -90,19 +90,24 @@ func roleScopedEntityToolSchemaEntry(contract entityruntime.Contract, spec roleS
 		entry.OutputSchema = roleScopedEntityWholeReadOutputSchema(contract)
 	case roleScopedEntityToolReadField:
 		if decl, err := entityruntime.FieldDecl(contract, spec.Field); err == nil {
-			entry.OutputSchema = entityContractJSONSchema(contract, decl.Type, map[string]struct{}{})
+			entry.OutputSchema = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, false, map[string]struct{}{})
 		}
 	case roleScopedEntityToolSaveField, roleScopedEntityToolUpdatePath:
 		typeRef := ""
+		refinements := runtimecontracts.SchemaRefinements{}
 		if spec.Subpath == "" {
 			if decl, err := entityruntime.FieldDecl(contract, spec.Field); err == nil {
 				typeRef = decl.Type
+				refinements = decl.Refinements
 			}
 		} else if typeRefForSubpath, ok := roleScopedEntitySubpathTypeRef(contract, spec.Field, spec.Subpath); ok {
 			typeRef = typeRefForSubpath
+			if field, err := entityruntime.ResolveFieldPath(contract, spec.Field+"."+spec.Subpath); err == nil {
+				refinements = field.Refinements
+			}
 		}
 		entry.InputSchema = ObjectSchema(map[string]any{
-			"value": entityContractJSONSchema(contract, typeRef, map[string]struct{}{}),
+			"value": entityContractJSONSchemaWithRefinements(contract, typeRef, refinements, false, map[string]struct{}{}),
 		}, "value")
 		entry.OutputSchema = ObjectSchema(map[string]any{
 			"entity_id": map[string]any{"type": "string"},
@@ -121,7 +126,7 @@ func roleScopedEntityWholeReadOutputSchema(contract entityruntime.Contract) map[
 		if err != nil {
 			continue
 		}
-		fieldProps[field] = entityContractJSONSchema(contract, decl.Type, map[string]struct{}{})
+		fieldProps[field] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
 		requiredFields = append(requiredFields, field)
 	}
 	return ObjectSchema(map[string]any{

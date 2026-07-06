@@ -138,6 +138,7 @@ func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 	*s = EventFieldSpec{
 		Type:        parsed.Type,
 		Description: parsed.Description,
+		Refinements: parsed.Refinements,
 	}
 	return nil
 }
