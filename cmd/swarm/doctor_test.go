@@ -617,7 +617,7 @@ func TestDoctorAPIFlagsRequireTargetMode(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeConsumesLocalClaudePreflightBeforeStoreSelection(t *testing.T) {
+func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testing.T) {
 	configureDoctorDockerStub(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -645,8 +645,10 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightBeforeStoreSelection(t *test
 	if !strings.Contains(out.String(), "local_preflight") || !strings.Contains(out.String(), "missing_backend_credential") {
 		t.Fatalf("serve output missing shared local preflight failure:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "not-a-store") || strings.Contains(out.String(), "db_connection") {
-		t.Fatalf("serve reached store selection instead of failing preflight first:\n%s", out.String())
+	for _, want := range []string{"db_connection", "bundle_load", "workspace backend: docker"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("serve output missing preflight ordering proof %q:\n%s", want, out.String())
+		}
 	}
 }
 

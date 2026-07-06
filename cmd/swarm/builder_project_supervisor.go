@@ -96,7 +96,11 @@ func newRuntimeProjectSupervisor(
 			return initializeStateStores(ctx, stores, bundle, false)
 		},
 		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (workspace.Lifecycle, error) {
-			return configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), contractsRoot, source, mountSources, workspaceBackend)
+			decision, err := decideWorkspaceBackend(workspaceBackend, cfg, source)
+			if err != nil {
+				return nil, err
+			}
+			return configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), contractsRoot, source, mountSources, decision)
 		},
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)

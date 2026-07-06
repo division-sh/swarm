@@ -64,11 +64,13 @@ type StoreSQLiteConfig struct {
 }
 
 type WorkspaceConfig struct {
-	DataSource string `yaml:"data_source"`
-	Backend    string `yaml:"backend"`
+	DataSource      string `yaml:"data_source"`
+	Backend         string `yaml:"backend"`
+	AllowExecOnHost bool   `yaml:"allow_exec_on_host"`
 
-	dataSourceSet bool
-	backendSet    bool
+	dataSourceSet      bool
+	backendSet         bool
+	allowExecOnHostSet bool
 }
 
 func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -85,6 +87,8 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 				w.dataSourceSet = true
 			case "backend":
 				w.backendSet = true
+			case "allow_exec_on_host":
+				w.allowExecOnHostSet = true
 			}
 		}
 	}
@@ -97,6 +101,10 @@ func (w WorkspaceConfig) DataSourceConfigured() bool {
 
 func (w WorkspaceConfig) BackendConfigured() bool {
 	return w.backendSet || strings.TrimSpace(w.Backend) != ""
+}
+
+func (w WorkspaceConfig) AllowExecOnHostConfigured() bool {
+	return w.allowExecOnHostSet || w.AllowExecOnHost
 }
 
 type LLMConfig struct {

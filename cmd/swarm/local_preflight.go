@@ -102,7 +102,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		return report.finalize()
 	}
 	report.Backend = strings.TrimSpace(profile.ID)
-	if profile.ID != llmselection.BackendClaudeCLI {
+	if profile.ID != llmselection.BackendClaudeCLI && report.Mode != "doctor" {
 		report.add(localPreflightBackendPrerequisite, "backend_not_claude_cli", localPreflightSeverityInfo, localPreflightStatusSkipped, fmt.Sprintf("backend %q does not require claude_cli local proof prerequisites", profile.ID), "")
 		return report.finalize()
 	}
@@ -120,8 +120,27 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the selected --contracts and --platform-spec paths")
 		return report.finalize()
 	}
+	workspaceBackend, err := decideWorkspaceBackend(req.WorkspaceBackend, req.Config, source)
+	if err != nil {
+		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities")
+		return report.finalize()
+	}
+	status := localPreflightStatusOK
+	severity := localPreflightSeverityInfo
+	code := "workspace_backend_decision"
+	remediation := ""
+	if workspaceBackend.UnsafeHost {
+		severity = localPreflightSeverityWarning
+		code = "workspace_backend_unsafe_host"
+		remediation = "use Docker for container isolation unless this is a trusted local-only run"
+	}
+	report.add(localPreflightWorkspacePrerequisite, code, severity, status, workspaceBackendDecisionDetail(workspaceBackend), remediation)
 	if req.CheckContractSecrets {
 		report.checkContractSecrets(ctx, source, req.ContractSecretSeverity)
+	}
+	if profile.ID != llmselection.BackendClaudeCLI {
+		report.add(localPreflightBackendPrerequisite, "backend_not_claude_cli", localPreflightSeverityInfo, localPreflightStatusSkipped, fmt.Sprintf("backend %q does not require claude_cli local proof prerequisites", profile.ID), "")
+		return report.finalize()
 	}
 	if !sourceDeclaresAgents(source) {
 		report.add(localPreflightBackendPrerequisite, "backend_credential_skipped_agent_free", localPreflightSeverityInfo, localPreflightStatusSkipped, "selected contract source declares no agents; claude_cli backend credential is not required", "")
@@ -150,7 +169,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		}
 		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, message, "")
 	}
-	report.checkWorkspace(ctx, source, contractsRoot, req.MountSources, req.WorkspaceBackend, req.Config.LLM.ClaudeCLI.Command)
+	report.checkWorkspace(ctx, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command)
 	return report.finalize()
 }
 

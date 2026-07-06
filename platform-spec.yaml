@@ -11518,36 +11518,70 @@ workspace_model:
     - mount destination override semantics such as SWARM_WORKSPACE_DATA_MOUNT
   workspace_backend_selection:
     promoted_by: '#1138'
-    implementation_status: implemented_first_slice
+    implementation_status: implemented_capability_driven_first_slice
     canonical_owner: platform-spec.yaml#workspace_model.workspace_backend_selection
     scope: >
-      Defines the workspace backend selector for `swarm serve` boot, dynamic Builder project reload, and selected-contract
-      run-fork lifecycle consumers. The selector chooses either the existing Docker workspace lifecycle or the explicit
-      host local-dev lifecycle; it does not make host execution behavior equivalent to Docker isolation.
+      Defines the capability-derived effective workspace backend requirement for `swarm serve` boot, dynamic Builder project
+      reload, selected-contract run-fork lifecycle consumers, local foreground `swarm run start`, `swarm doctor`, `swarm
+      verify`, `swarm describe`, and the `conversation.fork_chat` sandbox runtime. The loaded contract and effective runtime
+      backend decide whether a workspace is needed, whether host is sufficient, or whether container isolation is required.
+      Operator backend input is a preference or explicit unsafe opt-out; it is not the semantic source of the requirement.
     cli_flag: --workspace-backend <docker|host>
     config_key: workspace.backend
-    env_var: SWARM_WORKSPACE_BACKEND
+    unsafe_config_key: workspace.allow_exec_on_host
+    legacy_env_var: SWARM_WORKSPACE_BACKEND
     source_order:
-    - --workspace-backend
-    - workspace.backend
-    - SWARM_WORKSPACE_BACKEND
-    - docker default
-    default_backend: docker
+    - loaded contract execution capability
+    - --workspace-backend preference / unsafe host opt-out
+    - workspace.backend preference plus workspace.allow_exec_on_host for persistent unsafe host opt-out
+    - SWARM_WORKSPACE_BACKEND legacy preference, not unsafe opt-out authority
+    default_backend: capability-derived
+    capability_classes:
+      none:
+        rule: No declared agents require no workspace lifecycle by default and MUST boot with zero Docker/workspace external dependencies.
+      workspace_write:
+        rule: >
+          Runtime-mediated agents or agents with `native_tools.file_io` but no process-spawning capability use the host
+          lifecycle by default. Host file operations remain scoped by `workspace_execution_target_capability`.
+      exec:
+        rule: >
+          Any agent whose effective backend spawns a local process (`claude_cli`) or that is granted an exec-class capability
+          such as `native_tools.bash` requires Docker by default. The first slice is coarse any-exec => Docker; per-agent
+          backend selection remains split.
+    decision_table:
+      - contents: no declared agents
+        backend: none
+        posture: zero external dependencies unless the operator explicitly requests docker or host for diagnostics/setup
+      - contents: API/runtime-mediated agents with no exec-class tools
+        backend: host
+        posture: default and silent
+      - contents: anything exec-capable
+        backend: docker_required
+        posture: >
+          Docker missing fails closed at the `runtime_context` boot step with doctor-format remediation naming the
+          exec-capable agent/capability. Host is allowed only through explicit loud unsafe opt-out.
     backends:
+      none:
+        behavior: >
+          No workspace lifecycle is constructed. Runtime boot and forkchat wiring MUST NOT require Docker only because the
+          API exposes a potential forkchat executor. If a later API operation reaches a workspace-required path, it fails
+          closed through this owner instead of falling back to Docker, host cwd, or nil workspace behavior.
       docker:
         behavior: >
-          Default workspace backend. Startup preserves the existing Docker fail-closed checks for the configured workspace
+          Required backend for exec-capable bundles unless unsafe host opt-out is accepted, and allowed as an explicit
+          operator preference for non-exec diagnostics/setup. Startup preserves the existing Docker fail-closed checks for the configured workspace
           image, Docker binary availability, Docker network, container creation, mounted `/data`, mounted contracts, and
           managed container lifecycle.
       host:
         behavior: >
-          Explicit local-dev opt-in. Startup consumes the selected `/data` source from
+          Default backend for non-exec agent bundles and explicit local-dev/trusted opt-in where accepted. Startup consumes the selected `/data` source from
           `workspace_model.data_source_authority`, the loaded contracts source, and a platform-managed host workspace root.
           It MUST NOT require Docker, build Docker images, or create containers. It supports trusted/unsafe native command
-          execution only through `workspace_execution_target_capability` after explicit host backend selection and actor
+          execution only through `workspace_execution_target_capability` after explicit unsafe host opt-out and actor
           `native_tools.bash` authorization. Host native command execution is full host-user shell execution and must not be
           command-filtered by the runtime. It MUST fail closed for unsupported execution surfaces until those host execution
-          semantics are explicitly promoted.
+          semantics are explicitly promoted. `workspace.backend: host` alone is insufficient for exec-capable bundles; it
+          must be paired with `workspace.allow_exec_on_host: true` and the runtime must print a loud warning every boot.
         workspace_root:
           env_var: SWARM_WORKSPACE_HOST_ROOT
           default: ~/.swarm/workspaces
@@ -11559,18 +11593,27 @@ workspace_model:
             host workspace root.
     failure_behavior:
     - Unsupported backend names fail closed before runtime construction.
-    - Empty explicit backend sources from the flag, config, or environment fail closed instead of falling through.
+    - Empty explicit backend sources from the flag, config, or legacy environment fail closed instead of falling through.
     - Host backend MUST reject `SWARM_WORKSPACE_VOLUMES_FROM`; the host backend consumes explicit path authorities, not Docker
       volume inheritance.
-    - Host backend MUST fail closed for Claude CLI/provider execution. Host native command execution is supported only as
-      trusted/unsafe explicit host-mode execution through `workspace_execution_target_capability`; unsupported native tool
-      execution MUST still fail closed.
+    - Host backend MUST fail closed for Claude CLI/provider execution unless a future gate promotes that support. Host native
+      command execution is supported only as trusted/unsafe explicit host-mode execution through
+      `workspace_execution_target_capability`; unsupported native tool execution MUST still fail closed.
+    - A legacy environment value such as `SWARM_WORKSPACE_BACKEND=host` MUST NOT act as the unsafe host opt-out for
+      exec-capable bundles.
+    - conversation.fork_chat MUST consume the same decision owner. It MUST NOT preserve implicit primary-workspace
+      inheritance or discover required isolation only by failing inside the LLM process startup path.
     - Docker target failures, missing containers, nil targets, empty targets, unknown backends, and non-host-authorized
       contexts MUST NOT silently fall back to host native command execution.
     consumers:
     - swarm serve boot workspace lifecycle
+    - local foreground `swarm run start` startup through the serve startup owner
     - dynamic Builder project reload workspace lifecycle
     - selected-contract run-fork workspace lifecycle
+    - swarm verify isolation diagnostics
+    - swarm describe isolation diagnostics
+    - swarm doctor local diagnostics
+    - conversation.fork_chat sandbox LLM runtime admission
     split_scope:
     - '#1137 Compose/Postgres onboarding and Compose cleanup'
     - '#1136 broader local onboarding/docs'
@@ -14782,16 +14825,22 @@ cli_specification:
         owner: workspace_model.workspace_backend_selection
         flag: --workspace-backend <docker|host>
         config_key: workspace.backend
-        env_var: SWARM_WORKSPACE_BACKEND
-        default_backend: docker
+        unsafe_config_key: workspace.allow_exec_on_host
+        legacy_env_var: SWARM_WORKSPACE_BACKEND
+        default_backend: capability-derived
         rule: >
-          `swarm serve` MUST resolve workspace backend selection through
-          `workspace_model.workspace_backend_selection` before constructing any workspace lifecycle. The command MUST keep
-          Docker as the default isolation backend and MUST require an explicit selector for the host local-dev backend.
+          `swarm serve` MUST resolve the effective workspace backend requirement through
+          `workspace_model.workspace_backend_selection` after loading the selected contract source and before constructing
+          any workspace lifecycle. No-agent bundles default to no workspace lifecycle, non-exec API/runtime-mediated bundles
+          default to host, and exec-capable bundles require Docker unless the operator takes the explicit loud unsafe host
+          opt-out. `SWARM_WORKSPACE_BACKEND` is a legacy preference input and MUST NOT be the unsafe host opt-out authority.
         consumers:
         - serve boot workspace lifecycle
+        - local foreground run start
         - dynamic Builder project reload workspace lifecycle
         - selected-contract run-fork workspace lifecycle
+        - verify/describe/doctor diagnostics
+        - conversation.fork_chat sandbox LLM runtime admission
       workspace_execution_target_capability:
         promoted_by: '#1213/#1235/#1286/#1356'
         owner: workspace_model.workspace_execution_target_capability
