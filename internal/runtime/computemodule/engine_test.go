@@ -112,6 +112,39 @@ func TestExecuteClassifiesFuelAndOutputCapsAsDeterministic(t *testing.T) {
 	}
 }
 
+func TestExecuteClassifiesAllocatorTrapAsTrap(t *testing.T) {
+	wasm, err := wasmtime.Wat2Wasm(`(module
+  (memory (export "memory") 1 1)
+  (func (export "alloc") (param i32) (result i32)
+    unreachable)
+  (func (export "compute") (param i32 i32) (result i64)
+    i64.const 0)
+)`)
+	if err != nil {
+		t.Fatalf("Wat2Wasm: %v", err)
+	}
+	_, err = Execute(Request{
+		ModuleID:    "trap_alloc",
+		RowID:       "render_bundle",
+		Digest:      digestFixture(wasm),
+		Wasm:        wasm,
+		Input:       []byte(`{}`),
+		Fuel:        10_000,
+		MemoryPages: 1,
+		OutputBytes: 64,
+	})
+	if err == nil {
+		t.Fatal("Execute error = nil, want allocator trap")
+	}
+	var typed *Error
+	if !errors.As(err, &typed) || typed.Code != CodeTrap {
+		t.Fatalf("error = %#v, want code %s", err, CodeTrap)
+	}
+	if !IsDeterministicFailure(err) {
+		t.Fatalf("IsDeterministicFailure(%v) = false", err)
+	}
+}
+
 func TestExecuteRejectsDigestMismatchBeforeExecution(t *testing.T) {
 	wasm := readFixture(t)
 	raw := []byte(`{"component":"api","owner":"platform","language":"go","files":["main.go"]}`)

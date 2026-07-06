@@ -221,9 +221,13 @@ type ExecutionRequest struct {
 	HandlerEventKey string
 	Handler         runtimecontracts.SystemNodeEventHandler
 	State           StateSnapshot
-	ChainDepth      int
-	MaxDepth        int
-	Preview         bool
+	// ExpectedComputeModuleTraces carries prior deterministic module evidence
+	// for supported replay. When present, module execution re-runs and compares
+	// output hash plus fuel consumption against this ordered evidence.
+	ExpectedComputeModuleTraces []ComputeModuleTrace
+	ChainDepth                  int
+	MaxDepth                    int
+	Preview                     bool
 }
 
 type ExecutionContext struct {

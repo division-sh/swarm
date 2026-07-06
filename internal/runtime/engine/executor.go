@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -537,6 +536,11 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			txCtx := WithActionEmitIntentCollector(tx.Context(), &actionIntents)
 			frame := e.newExecutionFrame(contextTx{Tx: tx, ctx: txCtx}, req)
 			if err := e.runSteps(&frame); err != nil {
+				result = frame.result
+				result.FailureClass = ClassifyFailure(err)
+				return err
+			}
+			if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
 				result = frame.result
 				result.FailureClass = ClassifyFailure(err)
 				return err
@@ -1132,23 +1136,82 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if err != nil {
 		return nil, err
 	}
-	var output map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(result.Output))
-	if err := decoder.Decode(&output); err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not JSON object: %w", err)}
+	output, err := decodeComputeModuleOutput(moduleID, rowID, result.Output, module.OutputSchema)
+	if err != nil {
+		return nil, err
 	}
-	if err := eventschema.ValidatePayloadAgainstSchema(module.OutputSchema, output); err != nil {
-		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output schema violation: %w", err)}
-	}
-	frame.result.ComputeModuleTraces = append(frame.result.ComputeModuleTraces, ComputeModuleTrace{
+	trace := ComputeModuleTrace{
 		ModuleID:     moduleID,
 		RowID:        rowID,
 		Digest:       strings.TrimSpace(module.Digest),
 		Engine:       result.Engine,
 		OutputHash:   result.OutputHash,
 		FuelConsumed: result.FuelConsumed,
-	})
+	}
+	if err := verifyComputeModuleReplayTrace(frame, trace); err != nil {
+		return nil, err
+	}
+	frame.result.ComputeModuleTraces = append(frame.result.ComputeModuleTraces, trace)
 	return output, nil
+}
+
+func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[string]any) (map[string]any, error) {
+	var output map[string]any
+	if err := json.Unmarshal(raw, &output); err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not exactly one JSON object: %w", err)}
+	}
+	if output == nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not JSON object")}
+	}
+	if err := eventschema.ValidatePayloadAgainstSchema(schema, output); err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output schema violation: %w", err)}
+	}
+	return output, nil
+}
+
+func verifyComputeModuleReplayTrace(frame *executionFrame, actual ComputeModuleTrace) error {
+	expected := frame.req.ExpectedComputeModuleTraces
+	if len(expected) == 0 {
+		return nil
+	}
+	idx := len(frame.result.ComputeModuleTraces)
+	if idx >= len(expected) {
+		return &computemodule.Error{
+			Code:     computemodule.CodeReplay,
+			ModuleID: actual.ModuleID,
+			RowID:    actual.RowID,
+			Err:      fmt.Errorf("unexpected compute_module trace at replay index %d: module=%s row=%s output_hash=%s fuel=%d", idx, actual.ModuleID, actual.RowID, actual.OutputHash, actual.FuelConsumed),
+		}
+	}
+	want := expected[idx]
+	if strings.TrimSpace(want.ModuleID) != strings.TrimSpace(actual.ModuleID) ||
+		strings.TrimSpace(want.RowID) != strings.TrimSpace(actual.RowID) ||
+		strings.TrimSpace(want.Digest) != strings.TrimSpace(actual.Digest) ||
+		strings.TrimSpace(want.OutputHash) != strings.TrimSpace(actual.OutputHash) ||
+		want.FuelConsumed != actual.FuelConsumed {
+		return &computemodule.Error{
+			Code:     computemodule.CodeReplay,
+			ModuleID: actual.ModuleID,
+			RowID:    actual.RowID,
+			Err: fmt.Errorf("compute_module replay divergence at index %d: expected module=%s row=%s digest=%s output_hash=%s fuel=%d engine=%s; got module=%s row=%s digest=%s output_hash=%s fuel=%d engine=%s",
+				idx,
+				want.ModuleID, want.RowID, want.Digest, want.OutputHash, want.FuelConsumed, want.Engine,
+				actual.ModuleID, actual.RowID, actual.Digest, actual.OutputHash, actual.FuelConsumed, actual.Engine,
+			),
+		}
+	}
+	return nil
+}
+
+func verifyComputeModuleReplayTraceCount(frame executionFrame) error {
+	expected := frame.req.ExpectedComputeModuleTraces
+	if len(expected) == 0 || len(frame.result.ComputeModuleTraces) == len(expected) {
+		return nil
+	}
+	return &computemodule.Error{
+		Code: computemodule.CodeReplay,
+		Err:  fmt.Errorf("compute_module replay trace count mismatch: expected %d trace(s), got %d", len(expected), len(frame.result.ComputeModuleTraces)),
+	}
 }
 
 func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimecontracts.ComputeSpec) (any, error) {
