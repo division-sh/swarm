@@ -62,6 +62,18 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 		t.Fatalf("test.setup_entities conflict data = %#v", data)
 	}
 	assertTestSetupPersistence(t, db, runID, entityID, "waiting", "seeded", true)
+
+	if _, err := db.Exec(`DELETE FROM api_idempotency`); err != nil {
+		t.Fatalf("delete setup api idempotency rows: %v", err)
+	}
+	expiredReplay := rpcCall(t, handler, testSetupBody(runID, entityID, "waiting", "seeded", true, "idem-setup-after-expiry"))
+	if expiredReplay.Error != nil {
+		t.Fatalf("test.setup_entities replay after idempotency expiry error = %#v", expiredReplay.Error)
+	}
+	assertTestSetupPersistence(t, db, runID, entityID, "waiting", "seeded", true)
+	if count := countAPIIdempotencyRows(t, db); count != 1 {
+		t.Fatalf("api_idempotency rows after expired replay = %d, want 1", count)
+	}
 }
 
 func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview.Source) *Handler {
