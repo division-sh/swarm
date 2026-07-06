@@ -765,7 +765,7 @@ steps:
 	if called {
 		t.Fatal("setup API was called for invalid setup field")
 	}
-	if !strings.Contains(stderr.String(), "fields.missing is not declared") {
+	if !strings.Contains(stderr.String(), "fields.missing: undeclared field missing") {
 		t.Fatalf("stderr = %q, want undeclared field failure", stderr.String())
 	}
 }
