@@ -375,32 +375,32 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
-		out := make([]string, 0, len(b.Semantics.Stages))
-		for _, stage := range b.Semantics.Stages {
-			stageID := strings.TrimSpace(stage.ID)
-			if stageID == "" {
-				continue
-			}
-			out = append(out, stageID)
-		}
-		return out
+		return rootSchemaStates(b.RootSchema)
 	}
 	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
 		return append([]string{}, states...)
 	}
 	if flowID != "" && flowID == b.WorkflowName() {
-		out := make([]string, 0, len(b.Semantics.Stages))
-		for _, stage := range b.Semantics.Stages {
-			stageID := strings.TrimSpace(stage.ID)
-			if stageID == "" {
-				continue
-			}
-			out = append(out, stageID)
-		}
-		return out
+		return rootSchemaStates(b.RootSchema)
 	}
 	return nil
 }
+
+func rootSchemaStates(root *FlowSchemaDocument) []string {
+	if root == nil {
+		return nil
+	}
+	out := make([]string, 0, len(root.States))
+	for _, state := range root.States {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		out = append(out, state)
+	}
+	return out
+}
+
 func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
 	if b == nil {
 		return nil
