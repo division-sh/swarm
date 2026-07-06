@@ -170,6 +170,120 @@ func (p *PolicyCriteriaParam) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+func (s *PolicyValidationSet) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy validation set", map[string]struct{}{
+		"classes": {},
+		"inputs":  {},
+		"rules":   {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyValidationSet
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*s = PolicyValidationSet(aux)
+	return nil
+}
+
+func (c *PolicyValidationClass) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy validation class", map[string]struct{}{
+		"disposition": {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyValidationClass
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*c = PolicyValidationClass(aux)
+	return nil
+}
+
+func (r *PolicyValidationRule) UnmarshalYAML(node *yaml.Node) error {
+	if r == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy validation rule", map[string]struct{}{
+		"id":            {},
+		"class":         {},
+		"text":          {},
+		"params":        {},
+		"pin_candidate": {},
+		"check":         {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyValidationRule
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*r = PolicyValidationRule(aux)
+	return nil
+}
+
+func (c *PolicyValidationCheck) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy validation check", map[string]struct{}{
+		"equal": {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyValidationCheck
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*c = PolicyValidationCheck(aux)
+	return nil
+}
+
+func (c *PolicyValidationEqualCheck) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy validation equal check", map[string]struct{}{
+		"left":  {},
+		"right": {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyValidationEqualCheck
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*c = PolicyValidationEqualCheck(aux)
+	return nil
+}
+
+func validateYAMLMappingKeys(node *yaml.Node, context string, allowed map[string]struct{}) error {
+	if node == nil || node.Kind == 0 {
+		return fmt.Errorf("%s must be a mapping", context)
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("%s must be a mapping", context)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("%s unsupported field %q", context, key)
+		}
+	}
+	return nil
+}
+
 func hasYAMLMappingKey(node *yaml.Node, key string) bool {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return false
