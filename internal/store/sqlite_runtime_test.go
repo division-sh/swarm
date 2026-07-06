@@ -1557,6 +1557,77 @@ func TestSQLiteRuntimeStore_TaskAuditEntityScopeSurvivesConversationUpsert(t *te
 	}
 }
 
+func TestSQLiteRuntimeStore_TaskAuditFlowScopeSurvivesConversationUpsert(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	sessionID := uuid.NewString()
+	flowInstance := "review/inst-1"
+
+	if err := store.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "task-agent",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		ScopeKey:       "noncanonical-task-key",
+		RunID:          runID,
+		FlowInstance:   flowInstance,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task flow): %v", err)
+	}
+	if err := store.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "task-agent",
+		ScopeKey:  "snapshot-task-key",
+		RunID:     runID,
+		Mode:      "task",
+		Messages: []runtimellm.Message{
+			{Role: "user", Content: "flow task"},
+			{Role: "assistant", Content: "flow done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task flow): %v", err)
+	}
+
+	var count int
+	var scope, scopeKey, entityID, gotFlowInstance, conversation string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*), COALESCE(MAX(scope), ''), COALESCE(MAX(scope_key), ''),
+		       COALESCE(MAX(entity_id), ''), COALESCE(MAX(flow_instance), ''),
+		       COALESCE(MAX(conversation), '')
+		FROM agent_conversation_audits
+		WHERE session_id = ?
+	`, sessionID).Scan(&count, &scope, &scopeKey, &entityID, &gotFlowInstance, &conversation); err != nil {
+		t.Fatalf("read flow task audit row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit row count = %d, want 1", count)
+	}
+	if scope != "flow" || scopeKey != flowInstance || gotFlowInstance != flowInstance || entityID != "" {
+		t.Fatalf("audit identity scope=%q scope_key=%q entity_id=%q flow_instance=%q, want flow %s", scope, scopeKey, entityID, gotFlowInstance, flowInstance)
+	}
+	if !strings.Contains(conversation, "flow done") {
+		t.Fatalf("conversation = %s, want persisted assistant message", conversation)
+	}
+
+	var linkedTurns int
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM agent_turns
+		WHERE session_id = ? AND runtime_mode = 'task'
+	`, sessionID).Scan(&linkedTurns); err != nil {
+		t.Fatalf("count linked task turns: %v", err)
+	}
+	if linkedTurns != 1 {
+		t.Fatalf("linked task turn count = %d, want 1", linkedTurns)
+	}
+}
+
 func TestSQLiteRuntimeStoreMarkAgentTerminatedCleansRuntimeState(t *testing.T) {
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

@@ -15,7 +15,7 @@ type taskAuditIdentity struct {
 }
 
 func taskAuditIdentityFromTurn(rec runtimellm.AgentTurnRecord) taskAuditIdentity {
-	return newTaskAuditIdentity(rec.EntityID, "", rec.ScopeKey)
+	return newTaskAuditIdentity(rec.EntityID, rec.FlowInstance, rec.ScopeKey)
 }
 
 func taskAuditIdentityFromConversation(rec runtimellm.ConversationRecord) taskAuditIdentity {
