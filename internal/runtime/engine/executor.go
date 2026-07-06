@@ -1171,7 +1171,7 @@ func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[st
 
 func verifyComputeModuleReplayTrace(frame *executionFrame, actual ComputeModuleTrace) error {
 	expected := frame.req.ExpectedComputeModuleTraces
-	if len(expected) == 0 {
+	if expected == nil {
 		return nil
 	}
 	idx := len(frame.result.ComputeModuleTraces)
@@ -1205,7 +1205,7 @@ func verifyComputeModuleReplayTrace(frame *executionFrame, actual ComputeModuleT
 
 func verifyComputeModuleReplayTraceCount(frame executionFrame) error {
 	expected := frame.req.ExpectedComputeModuleTraces
-	if len(expected) == 0 || len(frame.result.ComputeModuleTraces) == len(expected) {
+	if expected == nil || len(frame.result.ComputeModuleTraces) == len(expected) {
 		return nil
 	}
 	return &computemodule.Error{
