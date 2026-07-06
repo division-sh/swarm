@@ -40,6 +40,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		"range":             {},
 		"lookup":            {},
 		"validate":          {},
+		"compute_module":    {},
 		"else":              {},
 		"default":           {},
 		"advances_to":       {},

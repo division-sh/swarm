@@ -70,6 +70,7 @@ const (
 	ComputeOpCount
 	ComputeOpLookup
 	ComputeOpValidate
+	ComputeOpModule
 )
 
 func ParseComputeOperation(text string) (ComputeOperation, error) {
@@ -90,6 +91,8 @@ func ParseComputeOperation(text string) (ComputeOperation, error) {
 		return ComputeOpUnknown, fmt.Errorf("compute operation %q is internal to policy-sheet value rows; author lookup rows under rules", text)
 	case "validate":
 		return ComputeOpUnknown, fmt.Errorf("compute operation %q is internal to policy-sheet value rows; author validate rows under rules", text)
+	case "compute_module":
+		return ComputeOpUnknown, fmt.Errorf("compute operation %q is internal to policy-sheet value rows; author compute_module rows under rules", text)
 	case "":
 		return ComputeOpUnknown, nil
 	default:
@@ -115,6 +118,8 @@ func (o ComputeOperation) String() string {
 		return "lookup"
 	case ComputeOpValidate:
 		return "validate"
+	case ComputeOpModule:
+		return "compute_module"
 	default:
 		return ""
 	}

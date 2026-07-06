@@ -182,6 +182,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
 	errs = append(errs, validateWorkflowCriteriaContracts(bundle)...)
 	errs = append(errs, validateWorkflowPolicyValidationContracts(bundle)...)
+	errs = append(errs, validateWorkflowComputeModuleContracts(bundle)...)
 	if len(errs) > 0 {
 		sort.Slice(errs, func(i, j int) bool {
 			return strings.TrimSpace(errs[i].Error()) < strings.TrimSpace(errs[j].Error())

@@ -1301,7 +1301,7 @@ func mappingIsSingleHandlerRuleEntry(node *yaml.Node) bool {
 	if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
 		return true
 	}
-	if !hasAnyYAMLMappingKey(node, "when", "case", "range", "lookup", "else", "default") {
+	if !hasAnyYAMLMappingKey(node, "when", "case", "range", "lookup", "validate", "compute_module", "else", "default") {
 		return false
 	}
 	return !mappingCanBeKeyedHandlerRules(node)

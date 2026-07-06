@@ -2,7 +2,9 @@ package contracts
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -94,6 +96,60 @@ func TestBundleHashV1AcceptsCurrentPlatformSpec(t *testing.T) {
 	}
 	if !regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`).MatchString(got) {
 		t.Fatalf("BundleHash = %q, want v1 bundle hash shape", got)
+	}
+}
+
+func TestBundleHashV1IncludesPolicyModuleBytes(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	writeBundleHashText(t, filepath.Join(root, "package.yaml"), "name: module-bytes\nversion: \"1.0.0\"\nflows: []\n")
+	modulePath := filepath.Join(root, "modules", "structured_renderer.wasm")
+	raw, err := os.ReadFile(filepath.Join("..", "computemodule", "testdata", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBundleHashBytes(t, modulePath, raw)
+	sum := sha256.Sum256(raw)
+	module := PolicyModule{
+		Path:   "modules/structured_renderer.wasm",
+		ABI:    "core-json-v1",
+		Entry:  "compute",
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"component": map[string]any{"type": "string"}},
+		},
+		OutputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"content": map[string]any{"type": "string"}},
+		},
+		Limits: PolicyModuleLimits{Gas: 1, MemoryPages: 17, OutputBytes: 64},
+	}
+	flow := FlowContractView{
+		Paths: FlowContractPaths{ID: "render", Flow: "render"},
+		Policy: PolicyDocument{Modules: map[string]PolicyModule{
+			"structured_renderer": module,
+		}},
+	}
+	bundle := bundleHashTestBundle(root, DefaultPlatformSpecFile(repo))
+	bundle.FlowTree = FlowTree{
+		Root: &flow,
+		ByID: map[string]*FlowContractView{
+			"render": &flow,
+		},
+	}
+	before, err := BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash before: %v", err)
+	}
+	raw[len(raw)-1] ^= 0xff
+	writeBundleHashBytes(t, modulePath, raw)
+	after, err := BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("BundleHash after: %v", err)
+	}
+	if before == after {
+		t.Fatalf("BundleHash did not change after module byte change: %s", before)
 	}
 }
 

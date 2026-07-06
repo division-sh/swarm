@@ -11,6 +11,7 @@ type PolicyDocument struct {
 	Values     map[string]PolicyValue         `yaml:",inline"`
 	Criteria   map[string]PolicyCriteriaSet   `yaml:"criteria,omitempty"`
 	Validation map[string]PolicyValidationSet `yaml:"validation,omitempty"`
+	Modules    map[string]PolicyModule        `yaml:"modules,omitempty"`
 }
 
 type PolicyValue struct {
@@ -67,6 +68,24 @@ type PolicyValidationEqualCheck struct {
 	Right string `yaml:"right"`
 }
 
+type PolicyModule struct {
+	Path         string             `yaml:"path"`
+	ABI          string             `yaml:"abi"`
+	Entry        string             `yaml:"entry"`
+	Digest       string             `yaml:"digest"`
+	SourcePath   string             `yaml:"source_path"`
+	SourceHash   string             `yaml:"source_hash"`
+	InputSchema  map[string]any     `yaml:"input_schema"`
+	OutputSchema map[string]any     `yaml:"output_schema"`
+	Limits       PolicyModuleLimits `yaml:"limits"`
+}
+
+type PolicyModuleLimits struct {
+	Gas         uint64 `yaml:"gas"`
+	MemoryPages uint32 `yaml:"memory_pages"`
+	OutputBytes int    `yaml:"output_bytes"`
+}
+
 type Tree[T any] struct {
 	Root   *T
 	ByPath map[string]*T
@@ -104,6 +123,7 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 	}
 	criteria := map[string]PolicyCriteriaSet{}
 	validation := map[string]PolicyValidationSet{}
+	modules := map[string]PolicyModule{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
@@ -121,6 +141,12 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 			}
 			continue
 		}
+		if key == "modules" {
+			if err := node.Content[i+1].Decode(&modules); err != nil {
+				return fmt.Errorf("policy modules: %w", err)
+			}
+			continue
+		}
 		var value PolicyValue
 		if err := node.Content[i+1].Decode(&value); err != nil {
 			return err
@@ -130,6 +156,53 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 	d.Values = values
 	d.Criteria = criteria
 	d.Validation = validation
+	d.Modules = modules
+	return nil
+}
+
+func (m *PolicyModule) UnmarshalYAML(node *yaml.Node) error {
+	if m == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy module", map[string]struct{}{
+		"path":          {},
+		"abi":           {},
+		"entry":         {},
+		"digest":        {},
+		"source_path":   {},
+		"source_hash":   {},
+		"input_schema":  {},
+		"output_schema": {},
+		"limits":        {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyModule
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*m = PolicyModule(aux)
+	return nil
+}
+
+func (l *PolicyModuleLimits) UnmarshalYAML(node *yaml.Node) error {
+	if l == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy module limits", map[string]struct{}{
+		"gas":          {},
+		"memory_pages": {},
+		"output_bytes": {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyModuleLimits
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*l = PolicyModuleLimits(aux)
 	return nil
 }
 

@@ -169,6 +169,7 @@ const (
 	PolicySheetRowKindRange    PolicySheetRowKind = "range"
 	PolicySheetRowKindLookup   PolicySheetRowKind = "lookup"
 	PolicySheetRowKindValidate PolicySheetRowKind = "validate"
+	PolicySheetRowKindModule   PolicySheetRowKind = "compute_module"
 	PolicySheetRowKindDefault  PolicySheetRowKind = "default"
 )
 
@@ -182,6 +183,7 @@ type PolicySheetRowMetadata struct {
 	Monotonicity []string
 	Lookup       *ComputeLookupSpec
 	Validation   *ComputeValidationSpec
+	Module       *ComputeModuleSpec
 }
 
 type PolicySheetRangeBound struct {
@@ -321,6 +323,7 @@ type ComputeSpec struct {
 	WeightField string                 `yaml:"weight_field"`
 	Lookup      *ComputeLookupSpec     `yaml:"-"`
 	Validation  *ComputeValidationSpec `yaml:"-"`
+	Module      *ComputeModuleSpec     `yaml:"-"`
 }
 
 type ComputeLookupSpec struct {
@@ -349,6 +352,14 @@ type ComputeLookupLiteral struct {
 type ComputeValidationSpec struct {
 	RowID      string                `yaml:"-"`
 	Set        string                `yaml:"-"`
+	Into       string                `yaml:"-"`
+	Input      map[string]string     `yaml:"-"`
+	InputPaths map[string]paths.Path `yaml:"-"`
+}
+
+type ComputeModuleSpec struct {
+	RowID      string                `yaml:"-"`
+	Module     string                `yaml:"-"`
 	Into       string                `yaml:"-"`
 	Input      map[string]string     `yaml:"-"`
 	InputPaths map[string]paths.Path `yaml:"-"`
@@ -620,6 +631,8 @@ type PolicyValidationClass = flowmodel.PolicyValidationClass
 type PolicyValidationRule = flowmodel.PolicyValidationRule
 type PolicyValidationCheck = flowmodel.PolicyValidationCheck
 type PolicyValidationEqualCheck = flowmodel.PolicyValidationEqualCheck
+type PolicyModule = flowmodel.PolicyModule
+type PolicyModuleLimits = flowmodel.PolicyModuleLimits
 type ContractURIRegistry = flowmodel.URIRegistry
 type ContractURIRef = flowmodel.URIRef
 type ExpressionKind string

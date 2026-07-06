@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -24,6 +26,74 @@ import (
 
 func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+}
+
+func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runtimecontracts.PolicyModule) {
+	t.Helper()
+	root := t.TempDir()
+	raw, err := os.ReadFile(filepath.Join("..", "computemodule", "testdata", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modulePath := filepath.Join(root, "modules", "structured_renderer.wasm")
+	if err := os.MkdirAll(filepath.Dir(modulePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	module := runtimecontracts.PolicyModule{
+		Path:   "modules/structured_renderer.wasm",
+		ABI:    "core-json-v1",
+		Entry:  "compute",
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []any{"component", "owner", "language", "files"},
+			"properties": map[string]any{
+				"component": map[string]any{"type": "string"},
+				"owner":     map[string]any{"type": "string"},
+				"language":  map[string]any{"type": "string"},
+				"files": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+		},
+		OutputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []any{"content", "format", "line_count"},
+			"properties": map[string]any{
+				"content":    map[string]any{"type": "string"},
+				"format":     map[string]any{"type": "string"},
+				"line_count": map[string]any{"type": "integer"},
+			},
+		},
+		Limits: runtimecontracts.PolicyModuleLimits{
+			Gas:         5_000_000,
+			MemoryPages: 17,
+			OutputBytes: 1024,
+		},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "render", Flow: "render"},
+		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
+			"structured_renderer": module,
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &flow,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"render": &flow,
+			},
+		},
+	}
+	return semanticview.Wrap(bundle), module
 }
 
 func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
@@ -1605,6 +1675,116 @@ func TestExecutor_PolicySheetLookupRowFeedsSelectionRow(t *testing.T) {
 	}
 	if got := string(result.EmitIntents[0].Event.Type()); got != "repo.service_template_selected" {
 		t.Fatalf("emit event = %q, want repo.service_template_selected", got)
+	}
+}
+
+func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
+	source, module := sourceWithStructuredRendererModule(t)
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       source,
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`computed.rendered_bundle.format == "yaml"`: func(base BaseContext) (bool, error) {
+			rendered, _ := base.Computed.Raw()["rendered_bundle"].(map[string]any)
+			return rendered["format"] == "yaml", nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	moduleSpec := &runtimecontracts.ComputeModuleSpec{
+		RowID:  "render_bundle",
+		Module: "structured_renderer",
+		Into:   "computed.rendered_bundle",
+		Input: map[string]string{
+			"component": "payload.component",
+			"owner":     "payload.owner",
+			"language":  "payload.language",
+			"files":     "payload.files",
+		},
+		InputPaths: map[string]runtimepaths.Path{
+			"component": runtimepaths.Parse("payload.component"),
+			"owner":     runtimepaths.Parse("payload.owner"),
+			"language":  runtimepaths.Parse("payload.language"),
+			"files":     runtimepaths.Parse("payload.files"),
+		},
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("render-node"),
+		FlowID:   identity.FlowID("render"),
+		Event: eventtest.RootIngress(
+			"evt-1",
+			events.EventType("render.requested"),
+			"",
+			"",
+			mustEncodeJSON(t, map[string]any{
+				"component": "api",
+				"owner":     "platform",
+				"language":  "go",
+				"files":     []any{"main.go", "README.md", "service.yaml"},
+			}),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		),
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					ID:        "render_bundle",
+					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindModule, Module: moduleSpec},
+					Compute: &runtimecontracts.ComputeSpec{
+						Operation: runtimecontracts.ComputeOpModule,
+						StoreAs:   "computed.rendered_bundle",
+						Module:    moduleSpec,
+					},
+				},
+				{
+					ID:        "rendered_yaml",
+					Condition: `computed.rendered_bundle.format == "yaml"`,
+					Emit: runtimecontracts.EmitSpec{Event: "bundle.rendered", Fields: map[string]runtimecontracts.ExpressionValue{
+						"content": runtimecontracts.RefExpression("computed.rendered_bundle.content"),
+					}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	rendered, _ := result.Computed["rendered_bundle"].(map[string]any)
+	content, _ := rendered["content"].(string)
+	for _, want := range []string{"component: api", "owner: platform", "- deploy/service.yaml"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered content missing %q: %s", want, content)
+		}
+	}
+	if got := result.RuleID; got != "rendered_yaml" {
+		t.Fatalf("selected rule = %q, want rendered_yaml", got)
+	}
+	if got := len(result.EmitIntents); got != 1 {
+		t.Fatalf("emit intents = %d, want 1", got)
+	}
+	if got := string(result.EmitIntents[0].Event.Type()); got != "bundle.rendered" {
+		t.Fatalf("emit event = %q, want bundle.rendered", got)
+	}
+	if _, ok := result.StateMutation.Metadata["rendered_bundle"]; ok {
+		t.Fatalf("module result leaked into state mutation metadata: %#v", result.StateMutation.Metadata)
+	}
+	if got := len(result.ComputeModuleTraces); got != 1 {
+		t.Fatalf("module traces = %d, want 1", got)
+	}
+	trace := result.ComputeModuleTraces[0]
+	if trace.ModuleID != "structured_renderer" || trace.RowID != "render_bundle" || trace.Digest != module.Digest || trace.FuelConsumed == 0 || trace.OutputHash == "" || trace.Engine == "" {
+		t.Fatalf("trace = %#v", trace)
 	}
 }
 

@@ -1511,6 +1511,146 @@ policy_validation_contracts:
     marker but does not promote pin declarations.'
   - Non-equality predicates, richer expression/derive rows, criteria packs, prompt-frame validation, compute/WASM validation,
     and file-backed validation sets are separate gates.
+compute_module_contracts:
+  status: merge_bearing_runtime_behavior
+  implementation_slice: '#1669'
+  description: |
+    Flow-local `modules:` declarations inside policy.yaml define precompiled
+    deterministic Wasm compute modules. Policy-sheet `compute_module` value rows
+    instantiate those declarations, map explicit handler context inputs into the
+    module, and bind the validated JSON object result under computed.*. This is
+    the supported PR1 surface for pure algorithmic deterministic work that
+    cannot be represented by lookup, validation, selection, or simple
+    arithmetic/derive rows.
+  policy_section:
+    location: flow policy.yaml only
+    field: modules
+    owner: flow-owned PolicyDocument.Modules
+    shape: |
+      modules:
+        <module_id>:
+          path: modules/<name>.wasm
+          abi: core-json-v1
+          entry: compute
+          digest: sha256:<64 lowercase hex>
+          source_path: optional/source/path
+          source_hash: optional-source-hash
+          input_schema:
+            type: object
+            properties: {...}
+          output_schema:
+            type: object
+            properties: {...}
+          limits:
+            gas: <positive integer>
+            memory_pages: <positive integer>
+            output_bytes: <positive integer>
+    rules:
+    - '`modules:` is a closed typed policy section. It is decoded separately from generic PolicyDocument.Values and MUST NOT
+      appear as a generic policy expression object or prompt variable.'
+    - Module declarations are flow-local in this slice. Root/project modules, shared module packs, source compilation,
+      public build tooling, artifact repositories, and remote module loading are separate gates.
+    - Module IDs are short stable identifiers. A row references a module by short ID, not by filesystem path.
+    - Module bytes MUST live inside the owning contracts root and MUST be regular files. Ambient filesystem lookup,
+      symlinks, out-of-tree paths, network fetches, and runtime-generated module bytes fail closed.
+    - The declared digest MUST be `sha256:<64 lowercase hex>` and MUST match the bundle-pinned module bytes before
+      execution. Optional source provenance is metadata only in this slice.
+  abi:
+    name: core-json-v1
+    entrypoint: '`entry` MUST be `compute`.'
+    exports:
+    - '`memory` linear memory export'
+    - '`alloc(i32) -> i32` allocator used by the host to copy canonical JSON input bytes into guest memory'
+    - '`compute(i32, i32) -> i64` entrypoint receiving input pointer/length and returning output pointer/length packed in
+      the high/low 32-bit halves'
+    imports: |
+      Author modules MUST declare zero imports. WASI, filesystem, network, clock,
+      random, process, and other host capabilities are not available. Platform
+      instrumentation used by a future build pipeline is not an author-declared
+      host capability and is outside this slice.
+    deterministic_features: |
+      Runtime configuration MUST disable nondeterministic or unapproved features
+      including threads, SIMD, memory64, and multi-memory. Deterministic core
+      features needed by the compiled fixture ABI, such as bulk memory and
+      reference types, may be enabled only when they do not introduce host
+      capability or nondeterministic execution.
+    encoding: |
+      Input and output are canonical JSON objects validated against the declared
+      schemas. Float/numeric I/O schemas are forbidden in PR1; authors must use
+      integer, boolean, text/string, arrays, and objects, or scaled decimals as
+      integers. Output bytes are untrusted until decoded and validated on every
+      invocation.
+  policy_sheet_compute_module_rows:
+    field: compute_module
+    location: handler.rules value row
+    shape: |
+      rules:
+        - id: render_file_bundle
+          compute_module:
+            module: structured_renderer
+            input:
+              component: payload.component
+              owner: payload.owner
+              files: payload.files
+            into: computed.rendered_bundle
+    lowering: |
+      `compute_module:` rows lower to the compute-owned internal module
+      execution operation. They run in the value/compute phase before selection
+      rows and bind only computed.*. Public `compute.operation: compute_module`
+      is forbidden; `compute_module` is not a standalone handler field and does
+      not overload the existing compute primitive vocabulary.
+    input_roots: '`compute_module.input` values must be simple explicit paths rooted in payload, entity, event, or computed.'
+    target_namespace: '`compute_module.into` MUST be a simple explicit computed.* path. Entity persistence is forbidden for
+      module outputs unless a separate declared data write explicitly persists the value under its own owner.'
+    side_effects: |
+      A module row cannot emit, advance state, execute action/activity, fan_out,
+      data_accumulation, access files, perform I/O, or persist entity state.
+    boundary: |
+      Lookup-like finite tables, validation predicates, selection dispatch,
+      simple arithmetic/expression derivation, durable external work, and
+      orchestration remain owned by their respective row families or future
+      gates. compute_module is for algorithmic work such as bounded iteration,
+      aggregation, parsing, and deterministic structured rendering.
+    dead_binding: '`compute_module.into` bindings must be consumed by a supported downstream condition, emit field, activity
+      input, fan_out, or expression in the same handler; unconsumed bindings fail boot verification.'
+  runtime_execution:
+    owner: internal/runtime/computemodule adapter behind the compute runtime owner
+    engine_boundary: |
+      The Wasm engine is an implementation detail behind an internal adapter.
+      The semantic owners are policy.modules, compute_module rows, the ABI
+      contract, and bundle identity. Engine version is recorded in traces and
+      replay evidence but does not define authoring semantics.
+    deterministic_failures: |
+      Compile/ABI/import rejection, digest mismatch, trap/unreachable, gas/fuel
+      exhaustion, memory limit, output-size limit, output bounds, and output
+      schema violation are deterministic no-retry failures with typed
+      diagnostics carrying module ID and row ID.
+    trace_and_replay: |
+      Runtime traces record module ID, row ID, declared digest, engine version,
+      output hash, and fuel/gas consumed. Replay re-executes deterministic
+      modules and compares recorded evidence; divergence is a typed replay
+      failure, not silent acceptance.
+  bundle_identity:
+    rule: |
+      Module bytes referenced by policy.modules are part of the bundle contract
+      preimage and fingerprint. A bundle hash that omits module bytes is not a
+      valid v1 identity for a bundle containing compute modules.
+  static_verification:
+    checks:
+    - typed policy.modules shape and flow-local placement
+    - module path containment, regular-file loading, Wasm magic, and digest match
+    - supported ABI exports and zero author imports
+    - deterministic capability/resource limits
+    - object input/output schemas and PR1 float/numeric schema rejection
+    - compute_module row module resolution and exact input mapping coverage
+    - computed.* target namespace and cross-source binding uniqueness
+    - dead module-output binding detection
+    - bundle hash/fingerprint inclusion of module bytes
+  split_boundaries:
+  - '#1670 owns public build/source tooling and any instrumentation pipeline.'
+  - Declarative lookup, validation, selection, and future derive rows remain preferred when they can express the work.
+  - Durable activities, orchestration, timers, joins, loops, schedules, host imports, WASI, filesystem/network access,
+    shared module packs, source compilation, and file-backed module inputs are separate gates.
 runtime_enforcement:
   description: |
     Wave 1 adds authoritative behavioral rules on top of the existing
@@ -1904,6 +2044,24 @@ handler_specification:
             source values, and malformed rules are deterministic no-retry
             failures. Equality mismatches produce a computed validation result
             with stable rule-ID violations and do not retry.
+        compute_module:
+          status: internal_lowering_only
+          description: |
+            `compute_module` is the compute-owned internal operation produced by
+            policy-sheet compute_module value rows. It is not a public
+            `compute.operation` authoring value. Public YAML must author
+            deterministic Wasm value derivation as a `rules[*].compute_module`
+            policy-sheet row referencing a flow policy.modules declaration. The
+            lowered compute plan reads explicit context roots, executes the
+            declared precompiled core-json-v1 module with deterministic limits,
+            validates the JSON object result, and writes the result to a
+            turn-scoped computed.* binding.
+          public_authoring: 'forbidden; `compute.operation: compute_module` fails closed.'
+          failure_disposition: |
+            Module compile/ABI/import rejection, digest mismatch,
+            trap/unreachable, gas/fuel exhaustion, memory limit, output-size
+            limit, output bounds, and output schema violation are deterministic
+            no-retry failures naming module ID and row ID.
         weighted_average:
           description: Compute a weighted average across tiers of accumulated items.
           required:
@@ -2186,6 +2344,13 @@ handler_specification:
           signature, lowers to the compute-owned internal validate operation, binds `{valid, violations}` under
           computed.validation.*, and runs before selection rows consume the result. It cannot emit, advance state,
           execute action/activity, fan_out, data_accumulation, or public compute.
+        compute_module: >-
+          object — first-class policy-sheet value row for deterministic precompiled Wasm modules declared in flow
+          policy.modules. Public shape is `{module: <module_id>, input: {<input_name>: <payload|entity|event|computed path>},
+          into: computed.<name>}`. The row maps execution context roots into the module's declared input schema, lowers to
+          the compute-owned internal compute_module operation, validates the module output object against the declared output
+          schema, binds the object under computed.*, and runs before selection rows consume the result. It cannot emit,
+          advance state, execute action/activity, fan_out, data_accumulation, perform I/O, access files, or public compute.
         else: boolean true — explicit default row. Lowers to the ordinary else selected branch.
         default: boolean true — alias for else, used when the authoring intent is an explicit policy-sheet default row.
         emit: string or object — rule-local event to emit, or an eventless object with fields only when participating in
@@ -2210,19 +2375,20 @@ handler_specification:
           - runtime-only table, switch, lookup, threshold, or range interpreters
       policy_sheet_value_rows:
         scope: Value rows in this slice support `lookup`, a finite inline exact-match table whose right-hand side is
-          a scalar value, and `validate`, a machine-evaluated policy.validation row that binds a typed validation result.
+          a scalar value; `validate`, a machine-evaluated policy.validation row that binds a typed validation result; and
+          `compute_module`, a deterministic precompiled Wasm module row that binds a validated JSON object result.
           Arithmetic/expression derivation, file-backed tables, temporal rows, join rows, loop rows, collection rows, and
           schedule rows are separate gates.
-        ownership: The policy sheet is the authoring construct. Lookup and validate rows lower to the compute owner; they
-          do not create a second runtime table/validation interpreter and do not make public `compute.lookup` or
-          `compute.validate` authorable.
+        ownership: The policy sheet is the authoring construct. Lookup, validate, and compute_module rows lower to the
+          compute owner; they do not create second runtime table/validation/Wasm interpreters and do not make public
+          `compute.lookup`, `compute.validate`, or `compute.compute_module` authorable.
         ordering: The sheet is not a sequential program. Row types lower into their declared runtime phases. Lookup value
-          rows and validate value rows run in compute phase before branch selection; selection rows then read computed.*.
-          Selection outcomes are not values and may not be consumed by value rows.
+          rows, validate value rows, and compute_module value rows run in compute phase before branch selection; selection
+          rows then read computed.*. Selection outcomes are not values and may not be consumed by value rows.
         target_namespace: lookup.into MUST be an explicit simple computed.* path. validate.into MUST be an explicit simple
-          computed.validation.* path. Entity persistence is forbidden for derived lookup values and validation results;
-          computed.* is turn-scoped and is not written to entity_state unless a separate declared data write explicitly
-          persists a value under its own owner.
+          computed.validation.* path. compute_module.into MUST be an explicit simple computed.* path. Entity persistence is
+          forbidden for derived lookup values, validation results, and module outputs; computed.* is turn-scoped and is not
+          written to entity_state unless a separate declared data write explicitly persists a value under its own owner.
         matching: lookup.on entries MUST use explicit payload.* roots in this slice. Matching is exact typed equality through
           one canonicalization path shared by duplicate-key detection and runtime matching. Key literals are type-checked
           against declared payload field schemas; the string "1" and the number 1 are different keys.
@@ -2236,8 +2402,13 @@ handler_specification:
           validate rows reference flow policy.validation sets, map exactly the declared typed inputs, evaluate only Slice B
           equal checks, and bind `{valid, violations}`. Invalid-result routing is expressed by ordinary selection rows that
           consume computed.validation.* and emit events declared by the validation set class dispositions.
-        dead_binding: lookup.into and validate.into bindings must be consumed by a supported downstream condition, emit field,
-          activity input, fan_out, or expression in the same handler; unconsumed bindings fail boot verification.
+        compute_module_rows: >-
+          compute_module rows reference flow policy.modules declarations, map exactly the declared object input fields, execute
+          only precompiled core-json-v1 Wasm with zero author imports and deterministic limits, validate object output, and bind
+          computed.*. Module bytes are bundle-pinned and included in bundle identity.
+        dead_binding: lookup.into, validate.into, and compute_module.into bindings must be consumed by a supported downstream
+          condition, emit field, activity input, fan_out, or expression in the same handler; unconsumed bindings fail boot
+          verification.
       emit_template_specialization:
         syntax: A rules handler may declare handler-level emit as the template, with `emit.event` and optional shared
           `emit.from` / `emit.fields`. Each rule then declares `emit.fields` and may declare the same `emit.from` without
@@ -2633,13 +2804,14 @@ handler_specification:
           computed.* in rule conditions and expression-value surfaces after the value has been produced by the handler
           dependency graph.'
         populated_by: 'compute.store_as targets under computed.*, policy-sheet lookup value rows lowering to internal
-          compute lookup plans, and policy-sheet validate value rows lowering to internal compute validation plans.'
+          compute lookup plans, policy-sheet validate value rows lowering to internal compute validation plans, and
+          policy-sheet compute_module value rows lowering to internal deterministic module execution plans.'
         persistence_model: 'Read/write handler context only. computed.* is not persisted entity state, not event payload,
           and not replay authority unless a separate declared owner explicitly writes a computed value to a durable surface.'
         available_in: 'rules.condition, emit.fields CEL expressions, mailbox/action expression values, activity inputs,
           fan_out inputs, and query_entities scoped operands when the runtime context contains the value.'
-        not_available_as: 'lookup.into may write computed.*; validate.into may write computed.validation.*; entity.* durable
-          cache fallback for lookup or validation values is forbidden.'
+        not_available_as: 'lookup.into may write computed.*; validate.into may write computed.validation.*; compute_module.into
+          may write computed.*; entity.* durable cache fallback for lookup, validation, or module values is forbidden.'
       payload:
         resolves_to: 'The inbound event payload. payload.X reads the X field from the triggering event''s
           JSONB payload.'
@@ -2656,7 +2828,8 @@ handler_specification:
       policy:
         resolves_to: 'The merged policy context. policy.X reads the X key from the flow''s policy.yaml
           (or root policy.yaml if not overridden at flow level), excluding typed policy sections such
-          as criteria:. policy.criteria is not a generic expression root.'
+          as criteria:, validation:, and modules:. policy.criteria, policy.validation, and policy.modules are not generic
+          expression roots.'
     boot_validation:
       description: 'The platform MUST validate entity field references at boot against the declared entity contract.
         Declared entity fields are always readable; the boot check is declaration and type resolution, not sparse-field
@@ -2709,7 +2882,7 @@ handler_specification:
   - 'filter → reduce: pruned items available before aggregation'
   - 'reduce → count: aggregated result available before counting'
   - 'count → compute: all list processing complete before computation'
-  - 'compute → emit-site selection: computed values written before rule/on_complete/timeout selection evaluates'
+  - 'compute → emit-site selection: computed values from compute, lookup, validate, and compute_module value rows are written before rule/on_complete/timeout selection evaluates'
   - 'emit-site selection → advances_to: the selected rule/on_complete/timeout advances_to overrides handler-level advances_to when present; otherwise handler-level advances_to is the default'
   - 'emit-site selection → sets_gate: sets_gate is handler-level only; selected rule/on_complete/timeout entries do not declare or override sets_gate'
   - 'emit-site selection → data_accumulation: selected rule/on_complete/timeout data_accumulation supplements handler-level data_accumulation in the same transaction; selected entry writes run before handler-level writes'
@@ -9686,6 +9859,10 @@ multi_bundle_persistence:
           agents.yaml, tools.yaml, and policy.yaml when present.
         flow_prompts: every non-ignored regular file under each flow prompts/
         flow_data: every non-ignored regular file under each flow data/ as raw bytes
+        flow_policy_modules: >
+          For each flow policy.yaml modules declaration, include the referenced module bytes as raw bytes under their
+          canonical bundle-relative label. The declared module digest is checked against the same bytes; omitting module
+          bytes from bundle_hash or bundle_fingerprint is invalid for bundles containing compute_module rows.
         excluded_inputs:
           - verification gates, tooling locks, generated caches, build outputs, database DDL, runtime state, and host absolute paths
           - files outside the contracts root, except the effective platform spec under the fixed platform label

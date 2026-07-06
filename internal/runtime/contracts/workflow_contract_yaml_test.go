@@ -911,6 +911,58 @@ rules:
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_LowersPolicySheetComputeModuleValueRows(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+rules:
+  - id: render_bundle
+    compute_module:
+      module: structured_renderer
+      input:
+        component: payload.component
+        owner: payload.owner
+        language: payload.language
+        files: payload.files
+      into: computed.rendered_bundle
+  - id: emit_rendered_bundle
+    when: computed.rendered_bundle.format == "yaml"
+    emit: bundle.rendered
+  - id: fallback
+    default: true
+    emit: bundle.render_failed
+`), &handler); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if got, want := len(handler.Rules), 3; got != want {
+		t.Fatalf("rules len = %d, want %d", got, want)
+	}
+	moduleRule := handler.Rules[0]
+	if got := moduleRule.PolicyRow.Kind; got != PolicySheetRowKindModule {
+		t.Fatalf("compute_module PolicyRow.Kind = %q, want compute_module", got)
+	}
+	if moduleRule.Compute == nil {
+		t.Fatal("compute_module row Compute = nil")
+	}
+	if got := moduleRule.Compute.Operation; got != ComputeOpModule {
+		t.Fatalf("compute_module Compute.Operation = %q, want compute_module", got)
+	}
+	if got := moduleRule.Compute.StoreAs; got != "computed.rendered_bundle" {
+		t.Fatalf("compute_module StoreAs = %q, want computed.rendered_bundle", got)
+	}
+	if moduleRule.Compute.Module == nil {
+		t.Fatal("compute_module Compute.Module = nil")
+	}
+	if got := moduleRule.Compute.Module.Module; got != "structured_renderer" {
+		t.Fatalf("compute_module module = %q, want structured_renderer", got)
+	}
+	if got := moduleRule.Compute.Module.Input["component"]; got != "payload.component" {
+		t.Fatalf("compute_module input component = %q, want payload.component", got)
+	}
+	if got := handler.Rules[1].Condition; got != `computed.rendered_bundle.format == "yaml"` {
+		t.Fatalf("consumer condition = %q", got)
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_PreservesPolicyRowWordsAsRuleIDsInKeyedMap(t *testing.T) {
 	var handler SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
@@ -1204,6 +1256,33 @@ rules:
 			contains: "cannot declare branch outputs",
 		},
 		{
+			name: "compute module into entity",
+			body: `
+rules:
+  - id: bad_module
+    compute_module:
+      module: structured_renderer
+      input:
+        component: payload.component
+      into: entity.rendered_bundle
+`,
+			contains: "computed.*",
+		},
+		{
+			name: "compute module branch output",
+			body: `
+rules:
+  - id: bad_module_branch
+    compute_module:
+      module: structured_renderer
+      input:
+        component: payload.component
+      into: computed.rendered_bundle
+    emit: bundle.rendered
+`,
+			contains: "cannot declare branch outputs",
+		},
+		{
 			name: "public compute lookup",
 			body: `
 compute:
@@ -1218,6 +1297,15 @@ compute:
 compute:
   operation: validate
   store_as: computed.validation.deploy_manifest
+`,
+			contains: "internal to policy-sheet value rows",
+		},
+		{
+			name: "public compute module",
+			body: `
+compute:
+  operation: compute_module
+  store_as: computed.rendered_bundle
 `,
 			contains: "internal to policy-sheet value rows",
 		},

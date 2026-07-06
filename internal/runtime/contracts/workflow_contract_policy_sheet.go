@@ -16,7 +16,7 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		return nil
 	}
 	rowNodes := map[string]*yaml.Node{}
-	for _, key := range []string{"when", "case", "range", "lookup", "validate", "else", "default"} {
+	for _, key := range []string{"when", "case", "range", "lookup", "validate", "compute_module", "else", "default"} {
 		if value := yamlMappingValueNode(node, key); value != nil {
 			rowNodes[key] = value
 		}
@@ -78,6 +78,17 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		}
 		rule.Compute = compute
 		rule.PolicyRow = metadata
+	case rowNodes["compute_module"] != nil:
+		metadata, compute, err := decodePolicySheetComputeModuleRow(rowNodes["compute_module"], strings.TrimSpace(rule.ID))
+		if err != nil {
+			return err
+		}
+		if !rule.Emit.Empty() || strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) != "" ||
+			!rule.Activity.Empty() || rule.DataAccumulation.HasWrites() || rule.FanOut != nil || rule.Compute != nil {
+			return fmt.Errorf("POLICY-SHEET-ROW: compute_module row %q derives a value only and cannot declare branch outputs", strings.TrimSpace(rule.ID))
+		}
+		rule.Compute = compute
+		rule.PolicyRow = metadata
 	case rowNodes["else"] != nil:
 		if err := requirePolicySheetBoolTrue(rowNodes["else"], "else"); err != nil {
 			return err
@@ -92,6 +103,96 @@ func lowerPolicySheetRuleNode(node *yaml.Node, rule *HandlerRuleEntry) error {
 		rule.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
 	}
 	return nil
+}
+
+func decodePolicySheetComputeModuleRow(node *yaml.Node, rowID string) (PolicySheetRowMetadata, *ComputeSpec, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return PolicySheetRowMetadata{}, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module row must be a mapping")
+	}
+	if err := validatePolicySheetMappingKeys(node, "compute_module", map[string]struct{}{"module": {}, "input": {}, "into": {}}); err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	module, err := decodePolicySheetScalarString(yamlMappingValueNode(node, "module"), "compute_module.module")
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	if !isPolicySheetPathSegment(module) {
+		return PolicySheetRowMetadata{}, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.module %q must be a short module name", strings.TrimSpace(module))
+	}
+	into, err := decodePolicySheetScalarString(yamlMappingValueNode(node, "into"), "compute_module.into")
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	if err := validatePolicySheetComputeModuleInto(into); err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	input, inputPaths, err := decodePolicySheetComputeModuleInput(yamlMappingValueNode(node, "input"))
+	if err != nil {
+		return PolicySheetRowMetadata{}, nil, err
+	}
+	spec := ComputeModuleSpec{
+		RowID:      strings.TrimSpace(rowID),
+		Module:     strings.TrimSpace(module),
+		Into:       strings.TrimSpace(into),
+		Input:      input,
+		InputPaths: inputPaths,
+	}
+	compute := &ComputeSpec{
+		Operation: ComputeOpModule,
+		StoreAs:   strings.TrimSpace(into),
+		Module:    &spec,
+	}
+	metadata := PolicySheetRowMetadata{
+		Kind:   PolicySheetRowKindModule,
+		Module: &spec,
+	}
+	return metadata, compute, nil
+}
+
+func validatePolicySheetComputeModuleInto(into string) error {
+	parsed := paths.Parse(into)
+	if parsed.Root != paths.RootComputed || len(parsed.Segments) == 0 {
+		return fmt.Errorf("POLICY-SHEET-ROW: compute_module.into %q must target computed.*", strings.TrimSpace(into))
+	}
+	for _, segment := range parsed.Segments {
+		if !isPolicySheetPathSegment(segment) {
+			return fmt.Errorf("POLICY-SHEET-ROW: compute_module.into %q must be a simple computed.* path", strings.TrimSpace(into))
+		}
+	}
+	return nil
+}
+
+func decodePolicySheetComputeModuleInput(node *yaml.Node) (map[string]string, map[string]paths.Path, error) {
+	if node == nil || node.Kind == 0 {
+		return nil, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.input is required")
+	}
+	if node.Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.input must be a mapping from module input name to explicit root path")
+	}
+	out := map[string]string{}
+	parsed := map[string]paths.Path{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		name := strings.TrimSpace(node.Content[i].Value)
+		if !isPolicySheetPathSegment(name) {
+			return nil, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.input key %q must be a simple input name", name)
+		}
+		value, err := decodePolicySheetScalarString(node.Content[i+1], "compute_module.input."+name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := validatePolicySheetPath(value, "compute_module.input."+name, []string{"payload", "entity", "event", "computed"}); err != nil {
+			return nil, nil, err
+		}
+		if _, exists := out[name]; exists {
+			return nil, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.input declares duplicate key %q", name)
+		}
+		out[name] = strings.TrimSpace(value)
+		parsed[name] = paths.Parse(value)
+	}
+	if len(out) == 0 {
+		return nil, nil, fmt.Errorf("POLICY-SHEET-ROW: compute_module.input requires at least one input mapping")
+	}
+	return out, parsed, nil
 }
 
 func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecodeContext) error {
