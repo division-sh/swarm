@@ -37,6 +37,28 @@ func TestValidateWorkflowComputeModuleContractsRejectsDigestMismatchAndFloats(t 
 	}
 }
 
+func TestResolvePolicyModulePathRejectsSymlink(t *testing.T) {
+	bundle, module := computeModuleValidationBundle(t)
+	modulePath := filepath.Join(bundle.Paths.ContractsRoot, filepath.FromSlash(module.Path))
+	outside := filepath.Join(t.TempDir(), "external.wasm")
+	if err := os.WriteFile(outside, []byte("\x00asm"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(modulePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, modulePath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err := ResolvePolicyModulePath(bundle, module)
+	if err == nil {
+		t.Fatal("ResolvePolicyModulePath error = nil, want symlink rejection")
+	}
+	if !strings.Contains(err.Error(), "symlinks are not allowed") {
+		t.Fatalf("ResolvePolicyModulePath error = %v, want symlink rejection", err)
+	}
+}
+
 func TestValidatePolicySheetComputeModuleRowRequiresDeclaredInputs(t *testing.T) {
 	_, module := computeModuleValidationBundle(t)
 	policy := PolicyDocument{Modules: map[string]PolicyModule{"structured_renderer": module}}
