@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(testSetupValidationBundle(t))
 	handler := testSetupHandler(t, pg, source)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -76,6 +77,92 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	}
 }
 
+func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
+	cases := []struct {
+		name      string
+		edit      func(map[string]any)
+		wantField string
+	}{
+		{
+			name: "undeclared entity type",
+			edit: func(entity map[string]any) {
+				entity["entity_type"] = "unknown"
+			},
+			wantField: "entities[0].entity_type",
+		},
+		{
+			name: "undeclared current state",
+			edit: func(entity map[string]any) {
+				entity["current_state"] = "missing"
+			},
+			wantField: "entities[0].current_state",
+		},
+		{
+			name: "undeclared field",
+			edit: func(entity map[string]any) {
+				entity["fields"] = map[string]any{"missing": "value"}
+			},
+			wantField: "entities[0].fields.missing",
+		},
+		{
+			name: "field type mismatch",
+			edit: func(entity map[string]any) {
+				entity["fields"] = map[string]any{"review_score": "not-an-integer"}
+			},
+			wantField: "entities[0].fields.review_score",
+		},
+		{
+			name: "undeclared gate",
+			edit: func(entity map[string]any) {
+				entity["gates"] = map[string]any{"missing_gate": true}
+			},
+			wantField: "entities[0].gates.missing_gate",
+		},
+		{
+			name: "non boolean gate",
+			edit: func(entity map[string]any) {
+				entity["gates"] = map[string]any{"review_ready": "yes"}
+			},
+			wantField: "entities[0].gates.review_ready",
+		},
+		{
+			name: "flow entity mismatch",
+			edit: func(entity map[string]any) {
+				entity["flow_instance"] = "secondary"
+			},
+			wantField: "entities[0].entity_type",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &store.PostgresStore{DB: db}
+			handler := testSetupHandler(t, pg, semanticview.Wrap(testSetupValidationBundle(t)))
+			entity := validTestSetupEntity(uuid.NewString(), "waiting", "seeded", true)
+			tc.edit(entity)
+			resp := rpcCall(t, handler, testSetupBodyWithEntity(uuid.NewString(), "idem-invalid-"+tc.name, entity))
+			if resp.Error == nil {
+				t.Fatal("test.setup_entities invalid setup error = nil")
+			}
+			if resp.Error.Code != codeInvalidParams {
+				t.Fatalf("test.setup_entities invalid setup code = %d, want %d data=%#v", resp.Error.Code, codeInvalidParams, resp.Error.Data)
+			}
+			data := asMap(t, resp.Error.Data)
+			details := asMap(t, data["details"])
+			if details["field"] != tc.wantField {
+				t.Fatalf("test.setup_entities invalid field = %#v, want %s; details=%#v", details["field"], tc.wantField, details)
+			}
+			if count := countAPIIdempotencyRows(t, db); count != 0 {
+				t.Fatalf("api_idempotency rows after invalid setup = %d, want 0", count)
+			}
+			if count := countTestSetupEntityRows(t, db); count != 0 {
+				t.Fatalf("entity_state rows after invalid setup = %d, want 0", count)
+			}
+		})
+	}
+}
+
 func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview.Source) *Handler {
 	t.Helper()
 	return testHandler(t, Options{
@@ -101,16 +188,42 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 }
 
 func testSetupBody(runID, entityID, currentState, note string, reviewReady bool, idempotencyKey string) string {
-	return fmt.Sprintf(
-		`{"jsonrpc":"2.0","id":"setup","method":"test.setup_entities","params":{"bundle_hash":%q,"run_id":%q,"idempotency_key":%q,"entities":[{"alias":"subject","entity_id":%q,"flow_instance":"operating","entity_type":"product","current_state":%q,"fields":{"note":%q},"gates":{"review_ready":%t}}]}}`,
-		runStartTestBundleHash,
-		runID,
-		idempotencyKey,
-		entityID,
-		currentState,
-		note,
-		reviewReady,
-	)
+	return testSetupBodyWithEntity(runID, idempotencyKey, validTestSetupEntity(entityID, currentState, note, reviewReady))
+}
+
+func testSetupBodyWithEntity(runID, idempotencyKey string, entity map[string]any) string {
+	body := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "setup",
+		"method":  testSetupEntitiesMethod,
+		"params": map[string]any{
+			"bundle_hash":     runStartTestBundleHash,
+			"run_id":          runID,
+			"idempotency_key": idempotencyKey,
+			"entities":        []any{entity},
+		},
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+func validTestSetupEntity(entityID, currentState, note string, reviewReady bool) map[string]any {
+	return map[string]any{
+		"alias":         "subject",
+		"entity_id":     entityID,
+		"flow_instance": "operating",
+		"entity_type":   "product",
+		"current_state": currentState,
+		"fields": map[string]any{
+			"note": note,
+		},
+		"gates": map[string]any{
+			"review_ready": reviewReady,
+		},
+	}
 }
 
 func assertTestSetupPersistence(t *testing.T, db *sql.DB, runID, entityID, currentState, note string, reviewReady bool) {
@@ -172,4 +285,114 @@ func assertTestSetupPersistence(t *testing.T, db *sql.DB, runID, entityID, curre
 	if decoded["note"] != note {
 		t.Fatalf("decoded setup fields = %#v, want note %q", decoded, note)
 	}
+}
+
+func countTestSetupEntityRows(t *testing.T, db *sql.DB) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state`).Scan(&count); err != nil {
+		t.Fatalf("count entity_state rows: %v", err)
+	}
+	return count
+}
+
+func testSetupValidationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: review
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: operating
+    flow: operating
+    mode: static
+  - id: secondary
+    flow: secondary
+    mode: static
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: review
+initial_state: new
+terminal_states: [done]
+states: [new, done]
+pins:
+  inputs:
+    events: [scan.requested]
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "entities.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "events.yaml"), `
+scan.requested:
+  swarm:
+    source: external
+  topic: text
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+scan-orchestrator:
+  id: scan-orchestrator
+  execution_type: system_node
+  subscribes_to: [scan.requested]
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "schema.yaml"), `
+name: operating
+mode: static
+initial_state: initializing
+terminal_states: [ready]
+states: [initializing, waiting, ready]
+pins:
+  inputs:
+    events: [opco.product_review_requested]
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "entities.yaml"), `
+product:
+  product_id: text
+  note: text
+  review_score: integer
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "events.yaml"), `
+opco.product_review_requested:
+  swarm:
+    source: external
+  note: text
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "nodes.yaml"), `
+reviewer:
+  id: reviewer
+  execution_type: system_node
+  subscribes_to: [opco.product_review_requested]
+  gate_state:
+    gates: [review_ready]
+  event_handlers:
+    opco.product_review_requested:
+      sets_gate: review_ready
+      advances_to: ready
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "policy.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "tools.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "operating", "agents.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "schema.yaml"), `
+name: secondary
+mode: static
+initial_state: open
+terminal_states: [closed]
+states: [open, closed]
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "entities.yaml"), `
+ticket:
+  ticket_id: text
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "events.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "nodes.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "policy.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "tools.yaml"), `{}`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "secondary", "agents.yaml"), `{}`)
+	repoRoot := runCompletionRepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return bundle
 }

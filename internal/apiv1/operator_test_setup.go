@@ -7,7 +7,10 @@ import (
 	"strings"
 	"time"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/google/uuid"
 )
 
 const testSetupEntitiesMethod = "test.setup_entities"
@@ -74,6 +77,9 @@ func executeTestSetupEntities(ctx context.Context, req Request, opts OperatorRea
 		}
 		if selectedOpts.TestSetup == nil {
 			return store.APIIdempotencyCompletion{}, fmt.Errorf("test setup store is required")
+		}
+		if err := validateTestSetupEntitiesAgainstBundle(selectedOpts.Source, request); err != nil {
+			return store.APIIdempotencyCompletion{}, err
 		}
 		result, err := selectedOpts.TestSetup.SetupScenarioEntities(ctx, request)
 		if err != nil {
@@ -232,4 +238,260 @@ func testSetupEntitiesAPIResult(result store.ScenarioSetupResult) testSetupEntit
 		})
 	}
 	return out
+}
+
+func validateTestSetupEntitiesAgainstBundle(source semanticview.Source, request store.ScenarioSetupRequest) error {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return NewInvalidParamsError(map[string]any{
+			"field":  "bundle_hash",
+			"reason": "test.setup_entities requires a loaded contract bundle source",
+		})
+	}
+	for i, entity := range request.Entities {
+		if err := validateTestSetupEntityAgainstBundle(bundle, entity, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, entity store.ScenarioSetupEntityRequest, i int) error {
+	flowID := strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
+	fieldPrefix := fmt.Sprintf("entities[%d]", i)
+	primary, err := bundle.ResolveFlowPrimaryEntity(flowID)
+	if err != nil {
+		return NewInvalidParamsError(map[string]any{
+			"field":  fieldPrefix + ".flow_instance",
+			"reason": err.Error(),
+		})
+	}
+	if strings.TrimSpace(entity.EntityType) != strings.TrimSpace(primary.EntityType) {
+		return NewInvalidParamsError(map[string]any{
+			"field":         fieldPrefix + ".entity_type",
+			"reason":        "must match the primary entity type for the selected flow",
+			"flow_instance": flowID,
+			"declared_type": primary.EntityType,
+			"provided_type": entity.EntityType,
+		})
+	}
+	currentState := strings.TrimSpace(entity.CurrentState)
+	if currentState == "" || !testSetupStringSliceContains(bundle.FlowStates(flowID), currentState) {
+		return NewInvalidParamsError(map[string]any{
+			"field":         fieldPrefix + ".current_state",
+			"reason":        "must be a declared state for the selected flow",
+			"flow_instance": flowID,
+			"state":         currentState,
+		})
+	}
+	if err := validateTestSetupFieldsAgainstBundle(primary, entity.Fields, fieldPrefix); err != nil {
+		return err
+	}
+	if err := validateTestSetupGatesAgainstBundle(bundle, flowID, entity.Gates, fieldPrefix); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateTestSetupFieldsAgainstBundle(primary runtimecontracts.PrimaryEntityContract, fields map[string]any, fieldPrefix string) error {
+	for field, value := range fields {
+		decl, ok := primary.Contract.Fields[field]
+		if !ok {
+			return NewInvalidParamsError(map[string]any{
+				"field":       fieldPrefix + ".fields." + field,
+				"reason":      "is not declared on the selected entity type",
+				"entity_type": primary.EntityType,
+			})
+		}
+		if err := validateTestSetupFieldValue(value, decl.Type, primary.Types); err != nil {
+			return NewInvalidParamsError(map[string]any{
+				"field":       fieldPrefix + ".fields." + field,
+				"reason":      err.Error(),
+				"entity_type": primary.EntityType,
+				"type":        decl.Type,
+			})
+		}
+	}
+	return nil
+}
+
+func validateTestSetupGatesAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, flowID string, gates map[string]bool, fieldPrefix string) error {
+	declared := declaredTestSetupGateNames(bundle, flowID)
+	for gate := range gates {
+		if _, ok := declared[gate]; !ok {
+			return NewInvalidParamsError(map[string]any{
+				"field":         fieldPrefix + ".gates." + gate,
+				"reason":        "is not declared for the selected flow",
+				"flow_instance": flowID,
+			})
+		}
+	}
+	return nil
+}
+
+func declaredTestSetupGateNames(bundle *runtimecontracts.WorkflowContractBundle, flowID string) map[string]struct{} {
+	flowID = strings.Trim(strings.TrimSpace(flowID), "/")
+	out := map[string]struct{}{}
+	for nodeID, node := range bundle.Nodes {
+		source, ok := bundle.NodeContractSource(nodeID)
+		if !ok || strings.Trim(strings.TrimSpace(source.FlowID), "/") != flowID {
+			continue
+		}
+		for _, gate := range node.GateState.Gates {
+			if name := strings.TrimSpace(gate.Name); name != "" {
+				out[name] = struct{}{}
+			}
+		}
+	}
+	for _, transition := range bundle.DerivedHandlerTransitions() {
+		if strings.Trim(strings.TrimSpace(transition.FlowID), "/") != flowID {
+			continue
+		}
+		if transition.SetsGate != nil {
+			if name := strings.TrimSpace(transition.SetsGate.Name); name != "" {
+				out[name] = struct{}{}
+			}
+		}
+		for _, gate := range transition.ClearGates {
+			gate = strings.TrimSpace(gate)
+			if gate != "" && gate != "*" {
+				out[gate] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func validateTestSetupFieldValue(value any, typeRef string, catalog runtimecontracts.TypeCatalogDocument) error {
+	return validateTestSetupFieldValueDepth(value, strings.TrimSpace(typeRef), catalog, 0)
+}
+
+func validateTestSetupFieldValueDepth(value any, typeRef string, catalog runtimecontracts.TypeCatalogDocument, depth int) error {
+	if depth > 16 {
+		return fmt.Errorf("type alias cycle or excessive nesting at %s", typeRef)
+	}
+	if scalar, ok := testSetupScalarDecl(catalog, typeRef); ok {
+		return validateTestSetupFieldValueDepth(value, scalar.Base, catalog, depth+1)
+	}
+	if enum, ok := testSetupEnumDecl(catalog, typeRef); ok {
+		text, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("must be string for enum %s", typeRef)
+		}
+		for _, allowed := range enum.Values {
+			if text == allowed {
+				return nil
+			}
+		}
+		return fmt.Errorf("must be one of %s", strings.Join(enum.Values, ", "))
+	}
+	if _, ok := testSetupNamedTypeDecl(catalog, typeRef); ok {
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("must be object for %s", typeRef)
+		}
+		return nil
+	}
+	typeRef = strings.TrimSpace(strings.ToLower(typeRef))
+	switch {
+	case typeRef == "", typeRef == "any", typeRef == "json":
+		return nil
+	case typeRef == "text" || typeRef == "string" || typeRef == "uuid" || typeRef == "timestamp":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("must be string for %s", typeRef)
+		}
+		if typeRef == "uuid" {
+			if _, err := uuid.Parse(strings.TrimSpace(fmt.Sprint(value))); err != nil {
+				return fmt.Errorf("must be UUID")
+			}
+		}
+	case typeRef == "bool" || typeRef == "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("must be boolean")
+		}
+	case typeRef == "int" || typeRef == "integer":
+		if !testSetupValueIsInteger(value) {
+			return fmt.Errorf("must be integer")
+		}
+	case typeRef == "number" || typeRef == "numeric" || typeRef == "float" || typeRef == "double":
+		if !testSetupValueIsNumber(value) {
+			return fmt.Errorf("must be number")
+		}
+	case typeRef == "object" || typeRef == "map":
+		if _, ok := value.(map[string]any); !ok {
+			return fmt.Errorf("must be object")
+		}
+	case typeRef == "array" || typeRef == "list" || strings.HasPrefix(typeRef, "list<") || strings.HasSuffix(typeRef, "[]"):
+		if _, ok := value.([]any); !ok {
+			return fmt.Errorf("must be array")
+		}
+	default:
+		return nil
+	}
+	return nil
+}
+
+func testSetupScalarDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.ScalarTypeDecl, bool) {
+	name = strings.TrimSpace(name)
+	if catalog.Scalars == nil || name == "" {
+		return runtimecontracts.ScalarTypeDecl{}, false
+	}
+	if decl, ok := catalog.Scalars[name]; ok {
+		return decl, true
+	}
+	decl, ok := catalog.Scalars[strings.ToLower(name)]
+	return decl, ok
+}
+
+func testSetupEnumDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.EnumTypeDecl, bool) {
+	name = strings.TrimSpace(name)
+	if catalog.Enums == nil || name == "" {
+		return runtimecontracts.EnumTypeDecl{}, false
+	}
+	if decl, ok := catalog.Enums[name]; ok {
+		return decl, true
+	}
+	decl, ok := catalog.Enums[strings.ToLower(name)]
+	return decl, ok
+}
+
+func testSetupNamedTypeDecl(catalog runtimecontracts.TypeCatalogDocument, name string) (runtimecontracts.NamedTypeDecl, bool) {
+	name = strings.TrimSpace(name)
+	if catalog.Types == nil || name == "" {
+		return runtimecontracts.NamedTypeDecl{}, false
+	}
+	if decl, ok := catalog.Types[name]; ok {
+		return decl, true
+	}
+	decl, ok := catalog.Types[strings.ToLower(name)]
+	return decl, ok
+}
+
+func testSetupValueIsInteger(value any) bool {
+	switch typed := value.(type) {
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return true
+	case float64:
+		return typed == float64(int64(typed))
+	default:
+		return false
+	}
+}
+
+func testSetupValueIsNumber(value any) bool {
+	switch value.(type) {
+	case int, int8, int16, int32, int64, uint, uint16, uint32, uint64, float32, float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func testSetupStringSliceContains(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
 }
