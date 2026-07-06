@@ -228,6 +228,7 @@ var bootCheckRegistry = []Check{
 	{ID: "handler_field_compliance", Severity: "error", Run: checkHandlerFieldCompliance},
 	{ID: policySheetLookupCheckID, Severity: SeverityHardInvalidity, Run: checkPolicySheetLookupValueRows},
 	{ID: policySheetValidationCheckID, Severity: SeverityHardInvalidity, Run: checkPolicySheetValidationValueRows},
+	{ID: computeModuleCheckID, Severity: SeverityHardInvalidity, Run: checkComputeModuleValueRows},
 	{ID: "tool_resolution", Severity: "warning", Run: checkToolResolution},
 	{ID: "required_mcp_tool_availability", Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
 	{ID: "platform_tool_usage_hints", Severity: SeverityHardInvalidity, Run: checkPlatformToolUsageHints},

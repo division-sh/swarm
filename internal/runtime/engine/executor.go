@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/accprojection"
+	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -20,6 +22,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -990,7 +993,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 func (e *Executor) stepCompute(frame *executionFrame) error {
 	if frame.rule != nil {
 		spec := frame.rule.Compute
-		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup || spec.Operation == runtimecontracts.ComputeOpValidate {
+		if spec == nil || spec.Operation == runtimecontracts.ComputeOpLookup || spec.Operation == runtimecontracts.ComputeOpValidate || spec.Operation == runtimecontracts.ComputeOpModule {
 			return nil
 		}
 		return e.executeComputeSpec(frame, spec)
@@ -1002,7 +1005,9 @@ func (e *Executor) stepCompute(frame *executionFrame) error {
 	}
 	for idx := range frame.req.Handler.Rules {
 		rule := &frame.req.Handler.Rules[idx]
-		if (rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindLookup && rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindValidate) || rule.Compute == nil {
+		if (rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindLookup &&
+			rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindValidate &&
+			rule.PolicyRow.Kind != runtimecontracts.PolicySheetRowKindModule) || rule.Compute == nil {
 			continue
 		}
 		if err := e.executeComputeSpec(frame, rule.Compute); err != nil {
@@ -1026,6 +1031,8 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 		value, err = computeLookupValue(e.currentContext(frame), spec)
 	case runtimecontracts.ComputeOpValidate:
 		value, err = e.computeValidationValue(frame, spec)
+	case runtimecontracts.ComputeOpModule:
+		value, err = e.computeModuleValue(frame, spec)
 	default:
 		value, err = computeValue(acc, frame.payload, spec)
 	}
@@ -1059,6 +1066,89 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	frame.result.StateMutation.SetMetadata("computed", value)
 	return nil
+}
+
+func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontracts.ComputeSpec) (any, error) {
+	if spec == nil || spec.Module == nil {
+		return nil, ErrNotImplemented
+	}
+	plan := spec.Module
+	rowID := strings.TrimSpace(plan.RowID)
+	if rowID == "" {
+		rowID = strings.TrimSpace(spec.StoreAs)
+	}
+	moduleID := strings.TrimSpace(plan.Module)
+	bundle, ok := semanticview.Bundle(e.deps.Source)
+	if !ok || bundle == nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("semantic source is not a workflow contract bundle")}
+	}
+	policy := bundle.ResolvedPolicyForFlow(frame.req.FlowID.String())
+	module, ok := policy.Modules[moduleID]
+	if !ok {
+		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unknown module %q", moduleID)}
+	}
+	current := e.currentContext(frame)
+	inputs := map[string]any{}
+	for name, rawPath := range plan.Input {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		path, ok := plan.InputPaths[name]
+		if !ok {
+			path = paths.Parse(rawPath)
+		}
+		if path.IsZero() {
+			return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input.%s has no mapped source path", name)}
+		}
+		value, exists := current.Lookup(path)
+		if !exists {
+			return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input.%s source %s is missing", name, path.String())}
+		}
+		inputs[name] = value
+	}
+	if err := eventschema.ValidatePayloadAgainstSchema(module.InputSchema, inputs); err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input schema violation: %w", err)}
+	}
+	inputBytes, err := json.Marshal(inputs)
+	if err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
+	}
+	wasmBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
+	if err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: err}
+	}
+	result, err := computemodule.Execute(computemodule.Request{
+		ModuleID:    moduleID,
+		RowID:       rowID,
+		Digest:      strings.TrimSpace(module.Digest),
+		Entry:       strings.TrimSpace(module.Entry),
+		Wasm:        wasmBytes,
+		Input:       inputBytes,
+		Fuel:        module.Limits.Gas,
+		MemoryPages: module.Limits.MemoryPages,
+		OutputBytes: module.Limits.OutputBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var output map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(result.Output))
+	if err := decoder.Decode(&output); err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output is not JSON object: %w", err)}
+	}
+	if err := eventschema.ValidatePayloadAgainstSchema(module.OutputSchema, output); err != nil {
+		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("output schema violation: %w", err)}
+	}
+	frame.result.ComputeModuleTraces = append(frame.result.ComputeModuleTraces, ComputeModuleTrace{
+		ModuleID:     moduleID,
+		RowID:        rowID,
+		Digest:       strings.TrimSpace(module.Digest),
+		Engine:       result.Engine,
+		OutputHash:   result.OutputHash,
+		FuelConsumed: result.FuelConsumed,
+	})
+	return output, nil
 }
 
 func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimecontracts.ComputeSpec) (any, error) {
@@ -2311,7 +2401,9 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry) (*runtimecontracts.HandlerRuleEntry, error) {
 	for idx := range rules {
 		rule := &rules[idx]
-		if rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindLookup || rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindValidate {
+		if rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindLookup ||
+			rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindValidate ||
+			rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindModule {
 			continue
 		}
 		condition := strings.TrimSpace(rule.Condition)

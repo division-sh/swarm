@@ -1,6 +1,10 @@
 package engine
 
-import "context"
+import (
+	"context"
+
+	"github.com/division-sh/swarm/internal/runtime/computemodule"
+)
 
 type PersistedEffects struct {
 	StateMutation StateMutation
@@ -28,6 +32,9 @@ func ClassifyFailure(err error) FailureClass {
 		ErrEmitPayloadContractViolation:
 		return FailureLogic
 	default:
+		if computemodule.IsDeterministicFailure(err) {
+			return FailureLogic
+		}
 		return FailureTransient
 	}
 }

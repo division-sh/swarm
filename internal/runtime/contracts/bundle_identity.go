@@ -157,6 +157,15 @@ func bundleIdentityEntries(bundle *WorkflowContractBundle) ([]bundleIdentityEntr
 			return nil, err
 		}
 	}
+	for _, flow := range bundle.FlowViews() {
+		for _, moduleID := range sortedPolicyModuleNames(flow.Policy.Modules) {
+			path, err := ResolvePolicyModulePath(bundle, flow.Policy.Modules[moduleID])
+			if err != nil {
+				return nil, fmt.Errorf("policy module %s: %w", moduleID, err)
+			}
+			addFile(path)
+		}
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].Label == entries[j].Label {
 			return entries[i].Path < entries[j].Path

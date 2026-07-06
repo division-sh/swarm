@@ -40,6 +40,9 @@ func ResolvePolicyByID[T any](
 	if out.Validation == nil {
 		out.Validation = map[string]PolicyValidationSet{}
 	}
+	if out.Modules == nil {
+		out.Modules = map[string]PolicyModule{}
+	}
 	if tree.Root == nil {
 		return out
 	}
@@ -72,6 +75,13 @@ func ResolvePolicyByID[T any](
 				continue
 			}
 			out.Validation[key] = clonePolicyValidationSet(value)
+		}
+		for key, value := range policy(view).Modules {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			out.Modules[key] = clonePolicyModule(value)
 		}
 	}
 	return out

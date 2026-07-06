@@ -174,6 +174,9 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 			}
 		}
 	}
+	if err := builder.addPolicyModuleFiles(bundle); err != nil {
+		return nil, err
+	}
 
 	sort.Slice(builder.entries, func(i, j int) bool {
 		return builder.entries[i].Label < builder.entries[j].Label
@@ -208,6 +211,25 @@ func (b *bundleHashEntryBuilder) addFlow(flow FlowContractPaths) error {
 		return err
 	}
 	return b.addRecursiveDir(flow.DataDir, bundleHashRaw)
+}
+
+func (b *bundleHashEntryBuilder) addPolicyModuleFiles(bundle *WorkflowContractBundle) error {
+	if bundle == nil {
+		return nil
+	}
+	for _, flow := range bundle.FlowViews() {
+		for _, moduleID := range sortedPolicyModuleNames(flow.Policy.Modules) {
+			module := flow.Policy.Modules[moduleID]
+			path, err := ResolvePolicyModulePath(bundle, module)
+			if err != nil {
+				return fmt.Errorf("policy module %s: %w", moduleID, err)
+			}
+			if err := b.addOptionalBundleFile(path, bundleHashRaw); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (b *bundleHashEntryBuilder) addRequiredPlatformSpec(path string) error {

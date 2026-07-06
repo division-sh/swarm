@@ -393,6 +393,16 @@ func mergePolicyValues(dst *runtimecontracts.PolicyDocument, src runtimecontract
 		}
 		dst.Validation[key] = clonePolicyValidationSet(value)
 	}
+	if dst.Modules == nil {
+		dst.Modules = map[string]runtimecontracts.PolicyModule{}
+	}
+	for key, value := range src.Modules {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		dst.Modules[key] = clonePolicyModule(value)
+	}
 }
 
 func deletePolicyValueAtPath(doc *runtimecontracts.PolicyDocument, path string) {
@@ -445,6 +455,7 @@ func clonePolicyDocument(in runtimecontracts.PolicyDocument) runtimecontracts.Po
 		Values:     map[string]runtimecontracts.PolicyValue{},
 		Criteria:   map[string]runtimecontracts.PolicyCriteriaSet{},
 		Validation: map[string]runtimecontracts.PolicyValidationSet{},
+		Modules:    map[string]runtimecontracts.PolicyModule{},
 	}
 	for key, value := range in.Values {
 		key = strings.TrimSpace(key)
@@ -467,7 +478,32 @@ func clonePolicyDocument(in runtimecontracts.PolicyDocument) runtimecontracts.Po
 		}
 		out.Validation[key] = clonePolicyValidationSet(value)
 	}
+	for key, value := range in.Modules {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out.Modules[key] = clonePolicyModule(value)
+	}
 	return out
+}
+
+func clonePolicyModule(in runtimecontracts.PolicyModule) runtimecontracts.PolicyModule {
+	return runtimecontracts.PolicyModule{
+		Path:         strings.TrimSpace(in.Path),
+		ABI:          strings.TrimSpace(in.ABI),
+		Entry:        strings.TrimSpace(in.Entry),
+		Digest:       strings.TrimSpace(in.Digest),
+		SourcePath:   strings.TrimSpace(in.SourcePath),
+		SourceHash:   strings.TrimSpace(in.SourceHash),
+		InputSchema:  cloneAnyMap(in.InputSchema),
+		OutputSchema: cloneAnyMap(in.OutputSchema),
+		Limits: runtimecontracts.PolicyModuleLimits{
+			Gas:         in.Limits.Gas,
+			MemoryPages: in.Limits.MemoryPages,
+			OutputBytes: in.Limits.OutputBytes,
+		},
+	}
 }
 
 func clonePolicyCriteriaSet(in runtimecontracts.PolicyCriteriaSet) runtimecontracts.PolicyCriteriaSet {
@@ -572,6 +608,17 @@ func clonePolicyValidationEqualCheck(in *runtimecontracts.PolicyValidationEqualC
 	}
 }
 
+func cloneAnyMap(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneAny(value)
+	}
+	return out
+}
+
 func cloneAny(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
@@ -602,6 +649,7 @@ func emptyPolicyDocument() runtimecontracts.PolicyDocument {
 		Values:     map[string]runtimecontracts.PolicyValue{},
 		Criteria:   map[string]runtimecontracts.PolicyCriteriaSet{},
 		Validation: map[string]runtimecontracts.PolicyValidationSet{},
+		Modules:    map[string]runtimecontracts.PolicyModule{},
 	}
 }
 

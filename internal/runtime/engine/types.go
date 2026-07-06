@@ -422,9 +422,19 @@ type ExecutionResult struct {
 	TimerIntents                     []TimerIntent
 	EmitIntents                      []EmitIntent
 	ActivityIntents                  []ActivityIntent
+	ComputeModuleTraces              []ComputeModuleTrace
 	DeadLetterIntents                []EmitIntent
 	ChainDepth                       int
 	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics
+}
+
+type ComputeModuleTrace struct {
+	ModuleID     string
+	RowID        string
+	Digest       string
+	Engine       string
+	OutputHash   string
+	FuelConsumed uint64
 }
 
 func (r ExecutionResult) ComputedBucket() values.Bucket {
