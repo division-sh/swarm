@@ -1893,8 +1893,10 @@ handler_specification:
           prove structural ordering and non-overlap. Literal ranges are checked for absolute overlap.
         lookup: >-
           object — first-class policy-sheet value row for finite tuple/key-to-value mapping. Public shape is
-          `{on: [<explicit root path>, ...], entries: [{key: [<scalar>, ...], value: <scalar>}], into: computed.<name>,
-          default: fail}`. Single-key rows may author a scalar `key`; tuple rows use list keys. Entries are inline only
+          `{on: [payload.<field>, ...], entries: [{key: [<scalar>, ...], value: <scalar>}], into: computed.<name>,
+          default: fail}`. `lookup.on` supports explicit `payload.*` roots only in this slice; entity, policy, event, and
+          computed lookup keys require a later schema/domain verifier before they can be promoted. Single-key rows may author
+          a scalar `key`; tuple rows use list keys. Entries are inline only
           in this slice. Lookup rows bind a value and do not select a branch, emit, advance state, execute action/activity,
           fan_out, data_accumulation, or public compute. The row lowers to the compute-owned internal lookup operation
           and runs before selection rows consume computed.*.
@@ -1932,9 +1934,9 @@ handler_specification:
         target_namespace: lookup.into MUST be an explicit simple computed.* path. Entity persistence is forbidden for
           derived lookup values; computed.* is turn-scoped and is not written to entity_state unless a separate declared
           data write explicitly persists a value under its own owner.
-        matching: lookup.on entries MUST use explicit roots. Matching is exact typed equality through one canonicalization
-          path shared by duplicate-key detection and runtime matching. Key literals are type-checked against known root
-          schemas; the string "1" and the number 1 are different keys.
+        matching: lookup.on entries MUST use explicit payload.* roots in this slice. Matching is exact typed equality through
+          one canonicalization path shared by duplicate-key detection and runtime matching. Key literals are type-checked
+          against declared payload field schemas; the string "1" and the number 1 are different keys.
         default_and_exhaustiveness: >-
           Closed domains may omit `default: fail` only when boot verification proves exhaustive table coverage. Any open or
           unknown domain component requires `default: fail`.

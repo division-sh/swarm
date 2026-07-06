@@ -308,7 +308,7 @@ func decodePolicySheetLookupOn(node *yaml.Node) ([]string, error) {
 		return nil, fmt.Errorf("POLICY-SHEET-ROW: lookup.on requires at least one explicit root path")
 	}
 	for _, selector := range on {
-		if err := validatePolicySheetPath(selector, "lookup.on", []string{"payload", "entity", "policy", "event"}); err != nil {
+		if err := validatePolicySheetPath(selector, "lookup.on", []string{"payload"}); err != nil {
 			return nil, err
 		}
 	}
