@@ -1,0 +1,19 @@
+name: test-guard-compound-condition setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      priority: high
+steps:
+- publish: check.requested
+  payload:
+    score: 60
+    override: false
+expect:
+  events:
+    include:
+    - check.passed
+  entities:
+  - ref: entity
+    current_state: done

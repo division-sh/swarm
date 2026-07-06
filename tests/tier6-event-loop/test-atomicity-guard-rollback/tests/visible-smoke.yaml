@@ -1,0 +1,23 @@
+name: test-atomicity-guard-rollback setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    current_state: pending
+    fields:
+      status: not_ready
+      counter: 0
+    gates:
+      g_processed: false
+steps:
+- publish: process.requested
+  payload: {}
+expect:
+  entities:
+  - ref: entity
+    current_state: pending
+    fields:
+      status: not_ready
+      counter: 0
+    gates:
+      g_processed: false

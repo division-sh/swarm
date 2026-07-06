@@ -15,6 +15,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/google/cel-go/cel"
@@ -1103,6 +1104,13 @@ func scenarioUUID(seed, label string) string {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed+"\x00"+label)).String()
 }
 
+func scenarioSetupEntityID(seed, runID string, entity evaluatedScenarioSetupEntity) string {
+	if strings.TrimSpace(entity.FlowID) == "" {
+		return runtimeflowidentity.EntityID(runID)
+	}
+	return scenarioUUID(seed, "setup.entity."+entity.Alias)
+}
+
 func (r scenarioRunner) runInvalidVariants(file scenarioTestFile, doc scenarioDocument, evaluator *scenarioExpressionEvaluator) error {
 	baseStep, err := invalidBasePublishStep(doc.Invalid.Base)
 	if err != nil {
@@ -1161,7 +1169,7 @@ func (r scenarioRunner) runScenarioSetup(ctx context.Context, file scenarioTestF
 		if err != nil {
 			return scenarioTestValidationError{err: err}
 		}
-		entityID := scenarioUUID(evaluator.seed, "setup.entity."+evaluated.Alias)
+		entityID := scenarioSetupEntityID(evaluator.seed, runID, evaluated)
 		entities = append(entities, map[string]any{
 			"alias":         evaluated.Alias,
 			"entity_id":     entityID,
@@ -1213,7 +1221,7 @@ func (r scenarioRunner) evaluateScenarioSetupEntity(file scenarioTestFile, evalu
 		}
 		flowID = strings.Trim(optionalScenarioString(value), "/")
 	}
-	primary, err := r.bundle.ResolveFlowPrimaryEntity(flowID)
+	primary, err := r.bundle.ResolveTestSetupPrimaryEntity(flowID, entity.EntityType)
 	if err != nil {
 		return evaluatedScenarioSetupEntity{}, fmt.Errorf("setup.entities[%s].flow: %w", entity.Alias, err)
 	}

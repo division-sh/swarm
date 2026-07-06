@@ -259,7 +259,7 @@ func validateTestSetupEntitiesAgainstBundle(source semanticview.Source, request 
 func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContractBundle, entity store.ScenarioSetupEntityRequest, i int) error {
 	flowID := strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
 	fieldPrefix := fmt.Sprintf("entities[%d]", i)
-	primary, err := bundle.ResolveFlowPrimaryEntity(flowID)
+	primary, err := bundle.ResolveTestSetupPrimaryEntity(flowID, entity.EntityType)
 	if err != nil {
 		return NewInvalidParamsError(map[string]any{
 			"field":  fieldPrefix + ".flow_instance",

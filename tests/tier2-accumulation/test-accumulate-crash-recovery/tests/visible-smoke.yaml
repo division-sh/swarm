@@ -1,0 +1,26 @@
+name: test-accumulate-crash-recovery setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      expected_count: 3
+steps:
+- publish: item.arrived
+  payload:
+    item_id: a
+- publish: item.arrived
+  payload:
+    item_id: b
+  source_event_id: ''
+- publish: item.arrived
+  payload:
+    item_id: c
+  source_event_id: ''
+expect:
+  events:
+    include:
+    - collection.done
+  entities:
+  - ref: entity
+    current_state: complete

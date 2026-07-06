@@ -600,6 +600,22 @@ func (b *WorkflowContractBundle) ResolveRootPrimaryEntity() (PrimaryEntityContra
 	return resolvePrimaryEntityContract("", entity, b.RootEntities, b.RootTypeCatalog())
 }
 
+func (b *WorkflowContractBundle) ResolveTestSetupPrimaryEntity(flowID, entityType string) (PrimaryEntityContract, error) {
+	primary, err := b.ResolveFlowPrimaryEntity(flowID)
+	if err == nil {
+		return primary, nil
+	}
+	if strings.TrimSpace(flowID) == "" && strings.TrimSpace(entityType) == "default" && len(b.RootEntities) == 0 {
+		return PrimaryEntityContract{
+			FlowID:     "",
+			EntityType: "default",
+			Contract:   EntityContract{Fields: map[string]EntityFieldDecl{}},
+			Types:      b.RootTypeCatalog(),
+		}, nil
+	}
+	return PrimaryEntityContract{}, err
+}
+
 func resolvePrimaryEntityContract(flowID, declared string, entities EntityContractsDocument, types TypeCatalogDocument) (PrimaryEntityContract, error) {
 	flowID = strings.TrimSpace(flowID)
 	declared = strings.TrimSpace(declared)

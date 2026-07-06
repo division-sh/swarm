@@ -358,6 +358,9 @@ func (b *WorkflowContractBundle) FlowInitialStage(flowID string) string {
 		return ""
 	}
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		return b.WorkflowInitialStage()
+	}
 	if initial := strings.TrimSpace(b.Semantics.FlowInitial[flowID]); initial != "" {
 		return initial
 	}
@@ -371,6 +374,17 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		out := make([]string, 0, len(b.Semantics.Stages))
+		for _, stage := range b.Semantics.Stages {
+			stageID := strings.TrimSpace(stage.ID)
+			if stageID == "" {
+				continue
+			}
+			out = append(out, stageID)
+		}
+		return out
+	}
 	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
 		return append([]string{}, states...)
 	}

@@ -1,0 +1,21 @@
+name: test-compose-guard-multi-source setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    fields:
+      depth: 2
+      child_count: 1
+      flag_count: 0
+steps:
+- publish: candidate.submitted
+  payload:
+    name: unique-item
+    score: 55
+expect:
+  events:
+    include:
+    - candidate.accepted
+  entities:
+  - ref: entity
+    current_state: accepted

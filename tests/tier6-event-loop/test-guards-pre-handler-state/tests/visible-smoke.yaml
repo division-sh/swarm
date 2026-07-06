@@ -1,0 +1,17 @@
+name: test-guards-pre-handler-state setup visible smoke
+setup:
+  entities:
+  - as: entity
+    type: core
+    current_state: active
+    fields:
+      counter: 5
+steps:
+- publish: process.requested
+  payload: {}
+expect:
+  entities:
+  - ref: entity
+    current_state: active
+    fields:
+      counter: 5
