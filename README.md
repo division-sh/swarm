@@ -233,8 +233,10 @@ swarm secrets set sendgrid_api_key --stdin
 swarm secrets check --contracts ./contracts
 ```
 
-Set `SWARM_ARTIFACT_ROOT` to a writable host path if your machine can't write
-the default `/var/lib/swarm/artifacts` (needed for `artifact_repo_commit`).
+If a flow uses `artifact_repo_commit`, the runtime artifact root must resolve to
+a writable runtime-private host path. The authoritative storage rules are in
+`platform-spec.yaml#runtime_storage.artifact_root`; do not put runtime storage
+settings in repo `.env` files.
 
 ```bash
 go build ./cmd/swarm
