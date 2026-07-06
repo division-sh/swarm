@@ -117,8 +117,14 @@ func (r *BundlePromptResolver) undeliverableCriteriaRefsForAgent(cfg models.Agen
 
 func generatedCriteriaPromptSection(bundle *WorkflowContractBundle, source ContractItemSource, entry AgentRegistryEntry, cfg models.AgentConfig, prompt string) (string, error) {
 	refs := normalizeStrings(entry.Criteria)
-	if len(refs) == 0 {
-		refs = normalizeStrings(cfg.Criteria)
+	runtimeRefs := normalizeStrings(cfg.Criteria)
+	if len(runtimeRefs) > 0 {
+		switch {
+		case len(refs) == 0:
+			return "", fmt.Errorf("criteria delivery requires contract agent criteria; runtime criteria refs are not authoritative: %s", strings.Join(runtimeRefs, ", "))
+		case !sameStringSet(refs, runtimeRefs):
+			return "", fmt.Errorf("criteria delivery runtime refs must match contract agent criteria; contract refs: %s; runtime refs: %s", strings.Join(refs, ", "), strings.Join(runtimeRefs, ", "))
+		}
 	}
 	if len(refs) == 0 {
 		return prompt, nil
