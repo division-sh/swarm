@@ -324,7 +324,7 @@ func newSupervisorForLoadProjectFailureTest(
 	bundle := testBuilderSupervisorBundle(t)
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
-	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), workspaceMountSources{}, workspaceBackendSelection{Backend: defaultWorkspaceBackend, Source: "default"}, nil, nil, "", nil, nil, nil)
+	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), workspaceMountSources{}, workspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, "", nil, nil, nil)
 	supervisor.dev = true
 	supervisor.loadWorkflow = func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {

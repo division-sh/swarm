@@ -2083,8 +2083,8 @@ func TestResolveWorkspaceBackendPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve workspace backend default: %v", err)
 	}
-	if result.Backend != workspace.BackendDocker || result.Source != "default" {
-		t.Fatalf("default result = %#v, want docker default", result)
+	if result.Backend != "" || result.Source != "capability-derived" || result.PreferenceExplicit {
+		t.Fatalf("default preference result = %#v, want capability-derived no explicit backend", result)
 	}
 }
 
@@ -2319,10 +2319,14 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 				Scope                string   `yaml:"scope"`
 				CLIFlag              string   `yaml:"cli_flag"`
 				ConfigKey            string   `yaml:"config_key"`
-				EnvVar               string   `yaml:"env_var"`
+				UnsafeConfigKey      string   `yaml:"unsafe_config_key"`
+				LegacyEnvVar         string   `yaml:"legacy_env_var"`
 				SourceOrder          []string `yaml:"source_order"`
 				DefaultBackend       string   `yaml:"default_backend"`
-				Backends             map[string]struct {
+				CapabilityClasses    map[string]struct {
+					Rule string `yaml:"rule"`
+				} `yaml:"capability_classes"`
+				Backends map[string]struct {
 					Behavior      string `yaml:"behavior"`
 					WorkspaceRoot struct {
 						EnvVar  string `yaml:"env_var"`
@@ -2339,13 +2343,14 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 			CommandCatalog struct {
 				Serve struct {
 					WorkspaceBackendSelection struct {
-						PromotedBy     string   `yaml:"promoted_by"`
-						Owner          string   `yaml:"owner"`
-						Flag           string   `yaml:"flag"`
-						ConfigKey      string   `yaml:"config_key"`
-						EnvVar         string   `yaml:"env_var"`
-						DefaultBackend string   `yaml:"default_backend"`
-						Consumers      []string `yaml:"consumers"`
+						PromotedBy      string   `yaml:"promoted_by"`
+						Owner           string   `yaml:"owner"`
+						Flag            string   `yaml:"flag"`
+						ConfigKey       string   `yaml:"config_key"`
+						UnsafeConfigKey string   `yaml:"unsafe_config_key"`
+						LegacyEnvVar    string   `yaml:"legacy_env_var"`
+						DefaultBackend  string   `yaml:"default_backend"`
+						Consumers       []string `yaml:"consumers"`
 					} `yaml:"workspace_backend_selection"`
 				} `yaml:"serve"`
 			} `yaml:"command_catalog"`
@@ -2359,29 +2364,38 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 		t.Fatalf("parse platform spec: %v", err)
 	}
 	authority := spec.WorkspaceModel.WorkspaceBackendSelection
-	if strings.TrimSpace(authority.PromotedBy) != "#1138" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_first_slice" {
+	if strings.TrimSpace(authority.PromotedBy) != "#1138" || strings.TrimSpace(authority.ImplementationStatus) != "implemented_capability_driven_first_slice" {
 		t.Fatalf("workspace backend authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.CanonicalOwner, "workspace_model.workspace_backend_selection") {
 		t.Fatalf("workspace backend canonical owner = %q", authority.CanonicalOwner)
 	}
-	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.EnvVar != envWorkspaceBackend {
+	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.UnsafeConfigKey != "workspace.allow_exec_on_host" || authority.LegacyEnvVar != envWorkspaceBackend {
 		t.Fatalf("workspace backend selectors = %#v", authority)
 	}
-	for _, want := range []string{"--workspace-backend", "workspace.backend", envWorkspaceBackend, "docker default"} {
+	for _, want := range []string{"loaded contract execution capability", "--workspace-backend", "workspace.backend", envWorkspaceBackend} {
 		if !stringSliceContains(authority.SourceOrder, want) {
 			t.Fatalf("workspace backend order missing %q: %#v", want, authority.SourceOrder)
 		}
 	}
-	if authority.DefaultBackend != workspace.BackendDocker {
-		t.Fatalf("workspace backend default = %q, want docker", authority.DefaultBackend)
+	if authority.DefaultBackend != "capability-derived" {
+		t.Fatalf("workspace backend default = %q, want capability-derived", authority.DefaultBackend)
+	}
+	for _, want := range []string{"none", "workspace_write", "exec"} {
+		if _, ok := authority.CapabilityClasses[want]; !ok {
+			t.Fatalf("workspace backend capability class %q missing: %#v", want, authority.CapabilityClasses)
+		}
+	}
+	noneBackend, ok := authority.Backends[workspaceBackendNone]
+	if !ok || !strings.Contains(noneBackend.Behavior, "No workspace lifecycle") || !strings.Contains(noneBackend.Behavior, "forkchat") {
+		t.Fatalf("none backend spec missing no-workspace forkchat behavior: %#v", authority.Backends)
 	}
 	dockerBackend, ok := authority.Backends[workspace.BackendDocker]
-	if !ok || !strings.Contains(dockerBackend.Behavior, "Docker fail-closed") || !strings.Contains(dockerBackend.Behavior, "configured workspace image") {
+	if !ok || !strings.Contains(dockerBackend.Behavior, "exec-capable") || !strings.Contains(dockerBackend.Behavior, "configured workspace image") {
 		t.Fatalf("docker backend spec missing default fail-closed behavior: %#v", authority.Backends)
 	}
 	hostBackend, ok := authority.Backends[workspace.BackendHost]
-	if !ok || !strings.Contains(hostBackend.Behavior, "Explicit local-dev opt-in") || !strings.Contains(hostBackend.Behavior, "MUST NOT require Docker") {
+	if !ok || !strings.Contains(hostBackend.Behavior, "workspace.allow_exec_on_host") || !strings.Contains(hostBackend.Behavior, "MUST NOT require Docker") {
 		t.Fatalf("host backend spec missing local-dev no-Docker behavior: %#v", authority.Backends)
 	}
 	if hostBackend.WorkspaceRoot.EnvVar != workspace.EnvHostWorkspaceRoot || hostBackend.WorkspaceRoot.Default != "~/.swarm/workspaces" {
@@ -2392,12 +2406,12 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 			t.Fatalf("host workspace root rule missing %q:\n%s", want, hostBackend.WorkspaceRoot.Rule)
 		}
 	}
-	for _, want := range []string{"Unsupported backend", "Empty explicit backend", "SWARM_WORKSPACE_VOLUMES_FROM", "Claude CLI", "native tool execution"} {
+	for _, want := range []string{"Unsupported backend", "Empty explicit backend", "SWARM_WORKSPACE_VOLUMES_FROM", "Claude CLI", "SWARM_WORKSPACE_BACKEND=host", "conversation.fork_chat", "native command execution"} {
 		if !joinedContains(authority.FailureBehavior, want) {
 			t.Fatalf("workspace backend failure behavior missing %q: %#v", want, authority.FailureBehavior)
 		}
 	}
-	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
+	for _, want := range []string{"serve boot", "run start", "Builder project reload", "selected-contract run-fork", "swarm verify", "swarm describe", "swarm doctor", "conversation.fork_chat"} {
 		if !joinedContains(authority.Consumers, want) {
 			t.Fatalf("workspace backend consumers missing %q: %#v", want, authority.Consumers)
 		}
@@ -2411,10 +2425,10 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if command.PromotedBy != "#1138" || command.Owner != "workspace_model.workspace_backend_selection" || command.Flag != "--workspace-backend <docker|host>" {
 		t.Fatalf("serve command workspace backend authority = %#v", command)
 	}
-	if command.ConfigKey != "workspace.backend" || command.EnvVar != envWorkspaceBackend || command.DefaultBackend != workspace.BackendDocker {
+	if command.ConfigKey != "workspace.backend" || command.UnsafeConfigKey != "workspace.allow_exec_on_host" || command.LegacyEnvVar != envWorkspaceBackend || command.DefaultBackend != "capability-derived" {
 		t.Fatalf("serve command workspace backend selectors = %#v", command)
 	}
-	for _, want := range []string{"serve boot", "Builder project reload", "selected-contract run-fork"} {
+	for _, want := range []string{"serve boot", "run start", "Builder project reload", "selected-contract run-fork", "verify/describe/doctor", "conversation.fork_chat"} {
 		if !joinedContains(command.Consumers, want) {
 			t.Fatalf("serve command workspace backend consumers missing %q: %#v", want, command.Consumers)
 		}
@@ -6202,6 +6216,36 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 	}
 	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "docker is not available") {
 		t.Fatalf("host workspace serve output shows Docker dependency despite host backend:\n%s", serve.outputString())
+	}
+}
+
+func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
+	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
+
+	serve := startServeRuntimeTestProcess(t, serveOptions{
+		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
+		DataSource:           t.TempDir(),
+		PlatformSpecPath:     defaultPlatformSpecPath,
+		StoreMode:            storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:        "127.0.0.1:0",
+		MCPListenAddr:        "127.0.0.1:0",
+		SelfCheck:            true,
+		RequireBundleMatch:   false,
+		ShutdownGrace:        runtimepkg.DefaultShutdownGrace,
+		Verbose:              true,
+		NoRequireBundleMatch: true,
+	})
+	serve.waitForReadyLine()
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("runServeRuntime code = %d\noutput:\n%s", code, serve.outputString())
+	}
+	if !strings.Contains(serve.outputString(), "workspace backend: none") {
+		t.Fatalf("serve output missing no-workspace decision:\n%s", serve.outputString())
+	}
+	if strings.Contains(serve.outputString(), "workspace image") || strings.Contains(serve.outputString(), "docker is not available") {
+		t.Fatalf("no-agent serve output shows Docker dependency despite no-workspace decision:\n%s", serve.outputString())
 	}
 }
 

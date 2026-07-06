@@ -92,6 +92,8 @@ type serveStartupRecoveryContainers struct {
 	lifecycle serveWorkspaceLifecycle
 }
 
+type noWorkspaceStartupRecoveryContainers struct{}
+
 func (s serveStartupRecoveryContainers) ManagedContainers(ctx context.Context) ([]runtimestartuprecovery.ManagedContainer, error) {
 	if s.lifecycle == nil {
 		return nil, fmt.Errorf("workspace lifecycle is not configured")
@@ -116,6 +118,14 @@ func (s serveStartupRecoveryContainers) StopManagedContainer(ctx context.Context
 		return fmt.Errorf("workspace lifecycle is not configured")
 	}
 	return s.lifecycle.StopManagedContainer(ctx, name)
+}
+
+func (noWorkspaceStartupRecoveryContainers) ManagedContainers(context.Context) ([]runtimestartuprecovery.ManagedContainer, error) {
+	return nil, nil
+}
+
+func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context, string) error {
+	return fmt.Errorf("workspace lifecycle is not configured")
 }
 
 type storeBundle struct {
@@ -380,6 +390,7 @@ type serveRuntimeBundleContext struct {
 	stateStoreSummary string
 	bundleSourceFact  runtimecorrelation.BundleSourceFact
 	bootIdentity      runtimecontracts.BundleIdentity
+	workspaceBackend  workspaceBackendSelection
 	workspaces        serveWorkspaceLifecycle
 	validation        runtime.WorkflowContractValidationResult
 	runtime           *runtime.Runtime
@@ -410,7 +421,6 @@ type serveRuntimeBundleContextRequest struct {
 func defaultServeOptions() serveOptions {
 	return serveOptions{
 		StoreMode:          storebackend.ActiveDefaultBackend().String(),
-		WorkspaceBackend:   defaultWorkspaceBackend,
 		APIListenAddr:      defaultAPIListenAddr,
 		MCPListenAddr:      defaultMCPListenAddr,
 		ShutdownGrace:      runtime.DefaultShutdownGrace,
@@ -681,7 +691,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
-	if workspaces == nil {
+	if workspaces == nil && !req.WorkspaceBackend.NoWorkspace {
 		return serveRuntimeBundleContext{}, fmt.Errorf("workspace lifecycle is not configured")
 	}
 	if req.RequireBundleScopeName {
@@ -689,14 +699,16 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 			scoper.SetBundleScope(bundleSourceFact.BundleHash)
 		}
 	}
-	if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
-		return serveRuntimeBundleContext{}, fmt.Errorf("validate workspaces: %w", err)
-	}
-	if err := workspaces.EnsurePrereqs(req.Ctx); err != nil {
-		return serveRuntimeBundleContext{}, fmt.Errorf("prepare workspaces: %w", err)
-	}
-	if err := workspaces.EnsureSystemWorkspaces(req.Ctx); err != nil {
-		return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
+	if workspaces != nil {
+		if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
+			return serveRuntimeBundleContext{}, fmt.Errorf("validate workspaces: %w", err)
+		}
+		if err := workspaces.EnsurePrereqs(req.Ctx); err != nil {
+			return serveRuntimeBundleContext{}, fmt.Errorf("prepare workspaces: %w", err)
+		}
+		if err := workspaces.EnsureSystemWorkspaces(req.Ctx); err != nil {
+			return serveRuntimeBundleContext{}, fmt.Errorf("ensure system workspaces: %w", err)
+		}
 	}
 	validationOpts := runtime.DefaultWorkflowContractValidationOptions(req.Credentials)
 	validationOpts.ManagedCredentials = req.ManagedCredentials
@@ -747,6 +759,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		stateStoreSummary: stateStoreSummary,
 		bundleSourceFact:  bundleSourceFact,
 		bootIdentity:      bootIdentity,
+		workspaceBackend:  req.WorkspaceBackend,
 		workspaces:        workspaces,
 		validation:        validation,
 		runtime:           rt,
@@ -851,23 +864,11 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	mountSources := localState.MountSources
-	workspaceBackend, err := resolveWorkspaceBackend(opts.WorkspaceBackend, opts.WorkspaceBackendSet, cfg)
+	workspaceBackendPreference, err := resolveWorkspaceBackend(opts.WorkspaceBackend, opts.WorkspaceBackendSet, cfg)
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("resolve workspace backend: %v", err)
 		return 1
-	}
-	if shouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackend, mountSources)
-		if preflight.HasBlockers() {
-			detail := preflight.BlockerSummary()
-			reporter.emit(2, "local_preflight", "FAILED", detail)
-			if opts.Output != nil {
-				writeLocalPreflightText(opts.Output, preflight)
-			}
-			log.Printf("local claude_cli preflight failed: %s", detail)
-			return 3
-		}
 	}
 	storeSelection := localState.StoreSelection
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
@@ -915,6 +916,25 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	source := loadedBundle.source
 	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	reporter.emit(4, "bundle_load", "ok", serveBootBundleLoadDetail(serveRuntimeBundleIdentitiesDetail(loadedBundles), source))
+	primaryWorkspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, source)
+	if err != nil {
+		reporter.emit(5, "runtime_context", "FAILED", err.Error())
+		log.Printf("resolve workspace backend decision: %v", err)
+		return 3
+	}
+	logWorkspaceBackendDecision(opts.Output, primaryWorkspaceBackend)
+	if shouldRunServeLocalClaudeCLIPreflight(opts) {
+		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources)
+		if preflight.HasBlockers() {
+			detail := preflight.BlockerSummary()
+			reporter.emit(5, "local_preflight", "FAILED", detail)
+			if opts.Output != nil {
+				writeLocalPreflightText(opts.Output, preflight)
+			}
+			log.Printf("local claude_cli preflight failed: %s", detail)
+			return 3
+		}
+	}
 	if err := validateServeMultiContextToolGatewayAdmission(cfg, loadedBundles); err != nil {
 		reporter.emit(5, "runtime_context", "FAILED", err.Error())
 		log.Printf("validate multi-context tool gateway admission: %v", err)
@@ -942,19 +962,19 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if recoveryStore := storeFacade.startupRecoveryStore(); recoveryStore != nil {
-		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), loadedBundle.contractsRoot, source, mountSources, workspaceBackend)
+		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), loadedBundle.contractsRoot, source, mountSources, primaryWorkspaceBackend)
 		if err != nil {
 			slog.Error("configure recovery workspaces", "error", err)
 			return 1
 		}
+		recoveryContainers := runtimestartuprecovery.ManagedContainerOwner(serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces})
 		if recoveryWorkspaces == nil {
-			slog.Error("workspace lifecycle is not configured")
-			return 1
+			recoveryContainers = noWorkspaceStartupRecoveryContainers{}
 		}
 		recovery, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
 			AvailabilityReader: recoveryStore,
 			CleanupStore:       recoveryStore,
-			Containers:         serveStartupRecoveryContainers{lifecycle: recoveryWorkspaces},
+			Containers:         recoveryContainers,
 			RequestedAt:        time.Now().UTC(),
 		})
 		if err != nil {
@@ -1026,6 +1046,15 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		if i == 0 {
 			contextToolGatewayBinding = toolGatewayBinding
 		}
+		workspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, loaded.source)
+		if err != nil {
+			reporter.emit(5, "runtime_context", "FAILED", err.Error())
+			slog.Error("resolve workspace backend decision", "bundle_hash", strings.TrimSpace(loaded.bundleSourceFact.BundleHash), "error", err)
+			return 3
+		}
+		if i > 0 {
+			logWorkspaceBackendDecision(opts.Output, workspaceBackend)
+		}
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			Ctx:                     ctx,
 			Stores:                  stores,
@@ -1060,6 +1089,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	contractsRoot := primaryContext.loaded.contractsRoot
 	bootBundleIdentity := primaryContext.bootIdentity
 	workspaces := primaryContext.workspaces
+	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
@@ -1071,7 +1101,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackend, credentialStore, providerCredentialStore, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, contractsRoot, bundle, source, rt, opts.Dev)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is split to RuntimeContextManager Load/Unload work")
 	}
@@ -1123,7 +1153,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		BundleCatalog:          apiStoreCaps.BundleCatalog,
 		BundleDelete:           apiStoreCaps.BundleDelete,
 		ConversationForks:      apiStoreCaps.ConversationForks,
-		ForkChatExecutor:       apiv1.NewLLMForkChatExecutor(forkChatLLM),
+		ForkChatExecutor:       newWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), cfg, primaryWorkspaceBackend),
 		RunBundleContext:       apiStoreCaps.RunBundleContext,
 		TestSetup:              apiStoreCaps.TestSetup,
 		RunForkAvailability:    apiStoreCaps.RunForkAvailability,
@@ -1211,14 +1241,24 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 		_, shutdownErr = supervisor.CloseProjectWithShutdownOptions(ctx, shutdownOpts)
 	}
 	var cleanupErr error
-	if opts.Dev {
-		if workspaces == nil {
-			cleanupErr = fmt.Errorf("dev entity cleanup owner unavailable")
-		} else {
-			_, cleanupErr = workspaces.CleanupDevEntityContainers(ctx)
-		}
+	if opts.Dev && workspaces != nil {
+		_, cleanupErr = workspaces.CleanupDevEntityContainers(ctx)
 	}
 	return errors.Join(shutdownErr, cleanupErr)
+}
+
+func logWorkspaceBackendDecision(out io.Writer, decision workspaceBackendSelection) {
+	detail := workspaceBackendDecisionDetail(decision)
+	log.Print(detail)
+	if out != nil {
+		fmt.Fprintln(out, detail)
+	}
+	if warning := workspaceBackendUnsafeWarning(decision); warning != "" {
+		log.Print(warning)
+		if out != nil {
+			fmt.Fprintln(out, warning)
+		}
+	}
 }
 
 func serveRuntimeContextManager(reader runtime.RunBundleAvailabilityReader, contexts []serveRuntimeBundleContext) (*runtime.RuntimeContextManager, error) {
@@ -1276,10 +1316,11 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 }
 
 type verifyCommandResult struct {
-	OK           bool                  `json:"ok"`
-	Contracts    string                `json:"contracts"`
-	Warnings     []verifyFindingOutput `json:"warnings"`
-	LintEvidence []verifyFindingOutput `json:"lint_evidence"`
+	OK               bool                  `json:"ok"`
+	Contracts        string                `json:"contracts"`
+	WorkspaceBackend string                `json:"workspace_backend"`
+	Warnings         []verifyFindingOutput `json:"warnings"`
+	LintEvidence     []verifyFindingOutput `json:"lint_evidence"`
 }
 
 type verifyFindingOutput struct {
@@ -1351,7 +1392,16 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return 1
 	} else {
-		result, err := verifyBundleResultWithOptions(ctx, semanticview.Wrap(bundle), validationOpts)
+		source := semanticview.Wrap(bundle)
+		workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, source)
+		if err != nil {
+			if errOut != nil {
+				fmt.Fprintf(errOut, "verify failed: resolve workspace backend: %v\n", err)
+			}
+			return 1
+		}
+		workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
+		result, err := verifyBundleResultWithOptions(ctx, source, validationOpts)
 		if err != nil {
 			if errOut != nil {
 				fmt.Fprintf(errOut, "verify failed: %v\n", err)
@@ -1359,16 +1409,18 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 			return 1
 		}
 		output := verifyCommandResult{
-			OK:           true,
-			Contracts:    contractsRoot,
-			Warnings:     verifyFindingOutputs(result.BootReport.Warnings()),
-			LintEvidence: verifyFindingOutputs(result.BootReport.LintEvidence()),
+			OK:               true,
+			Contracts:        contractsRoot,
+			WorkspaceBackend: workspaceBackendDetail,
+			Warnings:         verifyFindingOutputs(result.BootReport.Warnings()),
+			LintEvidence:     verifyFindingOutputs(result.BootReport.LintEvidence()),
 		}
 		if err := renderCLIOutput(out, errOut, opts.output, output, func(_ io.Writer) {
 			writeVerifyFindings(errOut, result.BootReport.Warnings(), false)
 			writeVerifyFindings(errOut, result.BootReport.LintEvidence(), false)
 			if out != nil {
 				fmt.Fprintf(out, "verify ok: contracts=%s\n", contractsRoot)
+				fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
 			}
 		}, func() ([]string, error) {
 			return []string{"ok"}, nil
@@ -1686,7 +1738,14 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaceBackend, err := resolveWorkspaceBackend("", false, cfg)
+		workspaceBackendPreference, err := resolveWorkspaceBackend("", false, cfg)
+		if err != nil {
+			if out != nil {
+				fmt.Fprintf(out, "fork failed: resolve workspace backend: %v\n", err)
+			}
+			return 1
+		}
+		workspaceBackend, err := decideWorkspaceBackend(workspaceBackendPreference, cfg, source)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: resolve workspace backend: %v\n", err)
@@ -3390,9 +3449,11 @@ func configuredWorkspaceLifecycle(db *sql.DB, contractsRoot string, source seman
 func configuredWorkspaceLifecycleForBackend(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 	selected := strings.TrimSpace(backend.Backend)
 	if selected == "" {
-		selected = defaultWorkspaceBackend
+		return nil, fmt.Errorf("workspace backend decision is required")
 	}
 	switch selected {
+	case workspaceBackendNone:
+		return nil, nil
 	case workspace.BackendDocker:
 		return configuredWorkspaceLifecycle(db, contractsRoot, source, mountSources)
 	case workspace.BackendHost:

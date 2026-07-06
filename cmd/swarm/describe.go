@@ -19,6 +19,11 @@ type describeCommandOptions struct {
 	logging          cliLoggingOptions
 }
 
+type describeCommandOutput struct {
+	authoringview.View
+	WorkspaceBackend string `json:"workspace_backend"`
+}
+
 func defaultDescribeCommandOptions() describeCommandOptions {
 	return describeCommandOptions{
 		logging: defaultCLILoggingOptions(),
@@ -92,6 +97,14 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		return 1
 	}
 	source := semanticview.Wrap(bundle)
+	workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, source)
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "describe failed: resolve workspace backend: %v\n", err)
+		}
+		return 1
+	}
+	workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
 	view, err := authoringview.Build(ctx, source, authoringview.BuildOptions{BootReport: &report})
 	if err != nil {
@@ -101,8 +114,12 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		return 1
 	}
 	view.ContractsRoot = contractsRoot
-	if err := renderCLIOutput(out, errOut, opts.output, view, func(w io.Writer) {
-		writeDescribeText(w, view)
+	output := describeCommandOutput{
+		View:             view,
+		WorkspaceBackend: workspaceBackendDetail,
+	}
+	if err := renderCLIOutput(out, errOut, opts.output, output, func(w io.Writer) {
+		writeDescribeText(w, view, workspaceBackendDetail)
 	}, func() ([]string, error) {
 		return describeQuietValues(view), nil
 	}); err != nil {
@@ -111,12 +128,15 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 	return 0
 }
 
-func writeDescribeText(out io.Writer, view authoringview.View) {
+func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendDetail string) {
 	if out == nil {
 		return
 	}
 	fmt.Fprintf(out, "describe: contracts=%s\n", view.ContractsRoot)
 	fmt.Fprintf(out, "source authority: %s\n", view.SourceAuthority)
+	if strings.TrimSpace(workspaceBackendDetail) != "" {
+		fmt.Fprintf(out, "%s\n", workspaceBackendDetail)
+	}
 	if view.Root.PrimaryEntity != nil {
 		fmt.Fprintf(out, "root primary entity: %s\n", view.Root.PrimaryEntity.Type)
 	}
