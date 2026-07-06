@@ -382,6 +382,12 @@ func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, e
 	return normalizeFieldValue(contract, fieldName, value, false)
 }
 
+// FieldPathParticipatesInEquality reports whether an isolated write to path
+// would bypass an equal_to proof owned by the surrounding entity/object.
+func FieldPathParticipatesInEquality(contract Contract, path string) bool {
+	return fieldPathParticipatesInEquality(contract, path)
+}
+
 func normalizeFieldValue(contract Contract, fieldName string, value any, allowEqualityParticipant bool) (any, error) {
 	field, err := ResolveFieldPath(contract, fieldName)
 	if err != nil {
@@ -858,32 +864,34 @@ func fieldPathParticipatesInEquality(contract Contract, path string) bool {
 	if len(segments) == 0 {
 		return false
 	}
-	if len(segments) == 1 {
-		return entityFieldParticipatesInEquality(contract.Entity.Fields, strings.TrimSpace(segments[0]))
-	}
-	currentType := ""
 	root := strings.TrimSpace(segments[0])
-	if decl, ok := contract.Entity.Fields[root]; ok {
-		currentType = strings.TrimSpace(decl.Type)
-	} else {
+	decl, ok := contract.Entity.Fields[root]
+	if !ok {
 		return false
 	}
-	for _, segment := range segments[1 : len(segments)-1] {
+	if entityFieldParticipatesInEquality(contract.Entity.Fields, root) {
+		return true
+	}
+	if len(segments) == 1 {
+		return false
+	}
+	currentType := strings.TrimSpace(decl.Type)
+	for _, segment := range segments[1:] {
 		named, ok := contract.Types.Types[typeName(contract, currentType)]
 		if !ok {
 			return false
 		}
-		spec, ok := named.Fields[strings.TrimSpace(segment)]
+		segment = strings.TrimSpace(segment)
+		if typeFieldParticipatesInEquality(named.Fields, segment) {
+			return true
+		}
+		spec, ok := named.Fields[segment]
 		if !ok {
 			return false
 		}
 		currentType = strings.TrimSpace(spec.Type)
 	}
-	named, ok := contract.Types.Types[typeName(contract, currentType)]
-	if !ok {
-		return false
-	}
-	return typeFieldParticipatesInEquality(named.Fields, strings.TrimSpace(segments[len(segments)-1]))
+	return false
 }
 
 func entityFieldParticipatesInEquality(fields map[string]runtimecontracts.EntityFieldDecl, name string) bool {

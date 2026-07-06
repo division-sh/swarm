@@ -180,6 +180,9 @@ func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.
 		if fieldName == "" {
 			continue
 		}
+		if entityruntime.FieldPathParticipatesInEquality(contract, field) {
+			continue
+		}
 		out["save_"+entityName+"_"+fieldName] = roleScopedEntityToolSpec{
 			Kind:       roleScopedEntityToolSaveField,
 			EntityType: contract.EntityType,
@@ -188,6 +191,9 @@ func roleScopedEntityToolSpecsForActor(source semanticview.Source, actor models.
 		for _, subpath := range roleScopedTopLevelSubpaths(contract, field) {
 			subpathName := roleScopedToolNamePart(subpath)
 			if subpathName == "" {
+				continue
+			}
+			if entityruntime.FieldPathParticipatesInEquality(contract, field+"."+subpath) {
 				continue
 			}
 			out["update_"+entityName+"_"+fieldName+"_"+subpathName] = roleScopedEntityToolSpec{

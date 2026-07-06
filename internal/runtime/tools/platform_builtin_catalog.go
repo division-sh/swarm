@@ -438,7 +438,9 @@ func collectEntityToolWritablePaths(contract entityruntime.Contract, path, typeR
 	}
 	if _, ok := seen[path]; !ok {
 		seen[path] = struct{}{}
-		*out = append(*out, path)
+		if !entityruntime.FieldPathParticipatesInEquality(contract, path) {
+			*out = append(*out, path)
+		}
 	}
 	if !deliveryNamedType(contract, typeRef) {
 		return
