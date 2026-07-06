@@ -714,6 +714,28 @@ func TestClaudeCLIRuntime_PersistConversationIncludesSessionScope(t *testing.T) 
 	}
 }
 
+func TestClaudeCLIRuntime_PersistConversationSuccessDoesNotLogFailure(t *testing.T) {
+	store := &captureConversationStore{}
+	publisher := &eventPublisherStub{}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, store, publisher)
+
+	runtime.persistConversation(context.Background(), &Session{
+		ID:               "session-task",
+		AgentID:          "agent-task",
+		ConversationMode: sessions.RuntimeModeTask.String(),
+		ScopeKey:         "task-scope",
+		Messages:         []Message{{Role: "assistant", Content: "done"}},
+		TurnCount:        1,
+	})
+
+	if store.record.Mode != sessions.RuntimeModeTask.String() || store.record.SessionID != "session-task" {
+		t.Fatalf("stored conversation = %+v, want task session snapshot", store.record)
+	}
+	if len(publisher.runtimeLogs) != 0 {
+		t.Fatalf("runtime log count = %d, want 0 after successful task conversation persistence", len(publisher.runtimeLogs))
+	}
+}
+
 func TestClaudeCLIRuntime_StartSessionLoadsRetryLineage(t *testing.T) {
 	store := &captureConversationStore{
 		load: ConversationRecord{
