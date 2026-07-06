@@ -172,6 +172,16 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 				},
 			},
 		},
+		RootEntities: EntityContractsDocument{
+			"deploy": {
+				Fields: map[string]EntityFieldDecl{
+					"created_at": {
+						Type:        "timestamp",
+						Refinements: SchemaRefinements{Pattern: "^2026-"},
+					},
+				},
+			},
+		},
 	}
 
 	err := validateWorkflowContractBundleLoadConstraints(bundle)
@@ -182,6 +192,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 		"pattern refinement requires string/text type",
 		"equal_to references undeclared sibling field",
 		"length refinement requires string/text or list type",
+		"root entities.deploy.created_at pattern refinement requires string/text type",
 	} {
 		if !contractErrorContains(err, want) {
 			t.Fatalf("load validation error = %v, want %q", err, want)

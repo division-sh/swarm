@@ -331,7 +331,7 @@ func Materialize(contract Contract, provided map[string]any) (map[string]any, er
 			}
 		} else {
 			var err error
-			value, err = NormalizeFieldValue(contract, name, value)
+			value, err = normalizeFieldValue(contract, name, value, true)
 			if err != nil {
 				return nil, err
 			}
@@ -379,9 +379,18 @@ func MaterializeMetadataForFlow(source semanticview.Source, flowID string, metad
 }
 
 func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, error) {
+	return normalizeFieldValue(contract, fieldName, value, false)
+}
+
+func normalizeFieldValue(contract Contract, fieldName string, value any, allowEqualityParticipant bool) (any, error) {
 	field, err := ResolveFieldPath(contract, fieldName)
 	if err != nil {
 		return nil, err
+	}
+	if !allowEqualityParticipant {
+		if fieldPathParticipatesInEquality(contract, strings.TrimSpace(field.Path)) {
+			return nil, fieldTypeError(strings.TrimSpace(field.Path), "cannot be written in isolation because it participates in equal_to")
+		}
 	}
 	normalized, err := normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
 	if err != nil {
@@ -542,11 +551,19 @@ func defaultValue(contract Contract, typeRef string, explicit any) (any, error) 
 		named := contract.Types.Types[typeName(contract, typeRef)]
 		out := make(map[string]any, len(named.Fields))
 		for name, spec := range named.Fields {
+			name = strings.TrimSpace(name)
 			value, err := defaultValue(contract, spec.Type, nil)
 			if err != nil {
 				return nil, err
 			}
-			out[strings.TrimSpace(name)] = value
+			value, err = validateValueRefinements(contract, name, spec.Type, spec.Refinements, value)
+			if err != nil {
+				return nil, err
+			}
+			out[name] = value
+		}
+		if err := validateTypeFieldEqualities(typeName(contract, typeRef), named.Fields, out); err != nil {
+			return nil, err
 		}
 		return out, nil
 	default:
@@ -830,6 +847,79 @@ func validateEqualityValue(context, name, target string, values map[string]any) 
 		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target))
 	}
 	return nil
+}
+
+func fieldPathParticipatesInEquality(contract Contract, path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	segments := strings.Split(path, ".")
+	if len(segments) == 0 {
+		return false
+	}
+	if len(segments) == 1 {
+		return entityFieldParticipatesInEquality(contract.Entity.Fields, strings.TrimSpace(segments[0]))
+	}
+	currentType := ""
+	root := strings.TrimSpace(segments[0])
+	if decl, ok := contract.Entity.Fields[root]; ok {
+		currentType = strings.TrimSpace(decl.Type)
+	} else {
+		return false
+	}
+	for _, segment := range segments[1 : len(segments)-1] {
+		named, ok := contract.Types.Types[typeName(contract, currentType)]
+		if !ok {
+			return false
+		}
+		spec, ok := named.Fields[strings.TrimSpace(segment)]
+		if !ok {
+			return false
+		}
+		currentType = strings.TrimSpace(spec.Type)
+	}
+	named, ok := contract.Types.Types[typeName(contract, currentType)]
+	if !ok {
+		return false
+	}
+	return typeFieldParticipatesInEquality(named.Fields, strings.TrimSpace(segments[len(segments)-1]))
+}
+
+func entityFieldParticipatesInEquality(fields map[string]runtimecontracts.EntityFieldDecl, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for fieldName, field := range fields {
+		fieldName = strings.TrimSpace(fieldName)
+		target := strings.TrimSpace(field.Refinements.EqualTo)
+		if fieldName == name && target != "" {
+			return true
+		}
+		if target == name {
+			return true
+		}
+	}
+	return false
+}
+
+func typeFieldParticipatesInEquality(fields map[string]runtimecontracts.TypeFieldSpec, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	for fieldName, field := range fields {
+		fieldName = strings.TrimSpace(fieldName)
+		target := strings.TrimSpace(field.Refinements.EqualTo)
+		if fieldName == name && target != "" {
+			return true
+		}
+		if target == name {
+			return true
+		}
+	}
+	return false
 }
 
 func leafKind(contract Contract, typeRef string) (string, error) {
