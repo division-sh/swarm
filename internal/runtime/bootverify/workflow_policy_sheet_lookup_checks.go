@@ -254,6 +254,9 @@ func policySheetLookupBindingConsumed(handler runtimecontracts.SystemNodeEventHa
 			return true
 		}
 	}
+	if policySheetLookupEmitFieldsConsume(handler, target) {
+		return true
+	}
 	if policySheetLookupActivityConsumes(handler.Activity, target) {
 		return true
 	}
@@ -269,6 +272,17 @@ func policySheetLookupBindingConsumed(handler runtimecontracts.SystemNodeEventHa
 		}
 		if rule.FanOut != nil && policySheetLookupFanOutConsumes(*rule.FanOut, target) {
 			return true
+		}
+	}
+	return false
+}
+
+func policySheetLookupEmitFieldsConsume(handler runtimecontracts.SystemNodeEventHandler, target string) bool {
+	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
+		for _, expr := range site.Spec.Fields {
+			if policySheetLookupExpressionValueConsumes(expr, target) {
+				return true
+			}
 		}
 	}
 	return false

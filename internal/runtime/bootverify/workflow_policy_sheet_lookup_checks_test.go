@@ -18,6 +18,24 @@ func TestPolicySheetLookupValueRowsAcceptsConsumedDefaultedInlineLookup(t *testi
 	}
 }
 
+func TestPolicySheetLookupValueRowsAcceptsEmitFieldConsumer(t *testing.T) {
+	handler := bootverifyLookupHandler(true, false)
+	handler.Rules = append(handler.Rules, runtimecontracts.HandlerRuleEntry{
+		ID:        "emit_template",
+		Condition: "true",
+		Emit: runtimecontracts.EmitSpec{
+			Event: "repo.service_template_selected",
+			Fields: map[string]runtimecontracts.ExpressionValue{
+				"template_path": runtimecontracts.CELExpression("computed.template_path"),
+			},
+		},
+	})
+	findings := bootverifyLookupFindings(handler)
+	if len(findings) != 0 {
+		t.Fatalf("lookup findings = %#v, want none", findings)
+	}
+}
+
 func TestPolicySheetLookupValueRowsRequiresDefaultForOpenDomains(t *testing.T) {
 	handler := bootverifyLookupHandler(false, true)
 	findings := bootverifyLookupFindings(handler)

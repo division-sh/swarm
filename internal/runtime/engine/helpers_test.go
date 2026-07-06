@@ -628,6 +628,41 @@ func TestComputeLookupValueMatchesExactTuple(t *testing.T) {
 	}
 }
 
+func TestComputeLookupValueMatchesJSONIntegerPayloadToIntKey(t *testing.T) {
+	value, err := computeLookupValue(BaseContext{
+		Payload: values.Wrap(map[string]any{
+			"tier": float64(1),
+		}),
+	}, &runtimecontracts.ComputeSpec{
+		Operation: runtimecontracts.ComputeOpLookup,
+		StoreAs:   "computed.tier_label",
+		Lookup: &runtimecontracts.ComputeLookupSpec{
+			RowID:           "tier_labels",
+			On:              []string{"payload.tier"},
+			OnPaths:         []paths.Path{paths.Parse("payload.tier")},
+			DefaultDeclared: true,
+			DefaultFail:     true,
+			Entries: []runtimecontracts.ComputeLookupEntry{{
+				Key: []runtimecontracts.ComputeLookupLiteral{{
+					Value:     int64(1),
+					Kind:      "int",
+					Canonical: "int:1",
+					Summary:   "1",
+				}},
+				Value:        "gold",
+				ValueKind:    "string",
+				ValueSummary: `"gold"`,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("computeLookupValue JSON integer payload error = %v", err)
+	}
+	if got := value; got != "gold" {
+		t.Fatalf("computeLookupValue = %#v, want gold", got)
+	}
+}
+
 func TestComputeLookupValueMissFailsClosedNoRetry(t *testing.T) {
 	base := BaseContext{
 		Payload: values.Wrap(map[string]any{

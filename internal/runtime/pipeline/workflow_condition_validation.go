@@ -47,7 +47,6 @@ func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {
 		cel.Variable("event", cel.DynType),
 		cel.Variable("payload", cel.DynType),
 		cel.Variable("policy", cel.DynType),
-		cel.Variable("computed", cel.DynType),
 		cel.Function("count_ge",
 			cel.Overload(
 				"count_ge_dyn_dyn",
@@ -56,6 +55,10 @@ func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {
 				cel.FunctionBinding(workflowExpressionCountGE),
 			),
 		),
+	}
+	switch context {
+	case WorkflowConditionContextRule, WorkflowConditionContextOnComplete:
+		options = append(options, cel.Variable("computed", cel.DynType))
 	}
 	switch context {
 	case WorkflowConditionContextOnComplete:
@@ -142,8 +145,11 @@ func workflowConditionRecognizedRoots(context WorkflowConditionContext) []string
 		"entity",
 		"_entity",
 		"policy",
-		"computed",
 		"query_entities",
+	}
+	switch context {
+	case WorkflowConditionContextRule, WorkflowConditionContextOnComplete:
+		roots = append(roots, "computed")
 	}
 	switch context {
 	case WorkflowConditionContextOnComplete:
