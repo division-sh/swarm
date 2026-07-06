@@ -67,20 +67,53 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 
 func criteriaRefsForActor(source semanticview.Source, actor models.AgentConfig) (string, []string) {
 	flowID := strings.TrimSpace(actor.Mode)
-	refs := UniqueNonEmpty(actor.Criteria)
 	if source == nil {
-		return flowID, refs
+		return flowID, UniqueNonEmpty(actor.Criteria)
 	}
-	logicalID, entry, ok := semanticview.ResolveAgentRegistryEntry(source, actor)
-	if ok {
-		if len(refs) == 0 {
-			refs = UniqueNonEmpty(entry.Criteria)
+	entry, contractFlowID, ok := criteriaAgentContractDeclaration(source, actor)
+	if !ok {
+		return flowID, nil
+	}
+	return contractFlowID, UniqueNonEmpty(entry.Criteria)
+}
+
+func criteriaAgentContractDeclaration(source semanticview.Source, actor models.AgentConfig) (runtimecontracts.AgentRegistryEntry, string, bool) {
+	actorID := strings.TrimSpace(actor.ID)
+	if source == nil || actorID == "" {
+		return runtimecontracts.AgentRegistryEntry{}, "", false
+	}
+	type match struct {
+		entry  runtimecontracts.AgentRegistryEntry
+		flowID string
+	}
+	matches := []match{}
+	for _, scope := range source.FlowScopes() {
+		flowID := strings.TrimSpace(scope.ID)
+		if flowID == "" {
+			continue
 		}
-		if src, sourceOK := source.AgentContractSource(logicalID); sourceOK && strings.TrimSpace(src.FlowID) != "" {
-			flowID = strings.TrimSpace(src.FlowID)
+		for _, logicalID := range sortedAgentIDs(scope.Agents) {
+			entry := scope.Agents[logicalID]
+			if !criteriaAgentIdentityMatches(logicalID, entry.ID, actorID) {
+				continue
+			}
+			matches = append(matches, match{entry: entry, flowID: flowID})
 		}
 	}
-	return flowID, refs
+	if len(matches) != 1 {
+		return runtimecontracts.AgentRegistryEntry{}, "", false
+	}
+	return matches[0].entry, matches[0].flowID, true
+}
+
+func criteriaAgentIdentityMatches(logicalID, declaredID, actorID string) bool {
+	logicalID = strings.TrimSpace(logicalID)
+	declaredID = strings.TrimSpace(declaredID)
+	actorID = strings.TrimSpace(actorID)
+	if actorID == "" {
+		return false
+	}
+	return logicalID == actorID || declaredID == actorID
 }
 
 func criteriaCitationIDs(value any) ([]string, error) {
@@ -92,6 +125,9 @@ func criteriaCitationIDs(value any) ([]string, error) {
 		}
 		return []string{id}, nil
 	case []any:
+		if len(typed) == 0 {
+			return nil, fmt.Errorf("criteria citation list must not be empty")
+		}
 		out := make([]string, 0, len(typed))
 		for i, item := range typed {
 			text, ok := item.(string)
@@ -106,6 +142,9 @@ func criteriaCitationIDs(value any) ([]string, error) {
 		}
 		return out, nil
 	case []string:
+		if len(typed) == 0 {
+			return nil, fmt.Errorf("criteria citation list must not be empty")
+		}
 		out := make([]string, 0, len(typed))
 		for i, text := range typed {
 			text = strings.TrimSpace(text)

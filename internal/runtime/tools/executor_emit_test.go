@@ -195,6 +195,13 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 			},
 		},
 		{
+			name: "empty list citation",
+			payload: map[string]any{
+				"cites": []any{},
+			},
+			wantError: "criteria citation list must not be empty",
+		},
+		{
 			name: "unknown id",
 			payload: map[string]any{
 				"cite": "FX-MISSING",
@@ -246,6 +253,16 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 }
 
 func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.AgentConfig) {
+	return criteriaCitationEmitTestExecutorWithAgent(runtimecontracts.AgentRegistryEntry{
+		ID:         "cto-agent",
+		Role:       "cto",
+		Mode:       "task",
+		EmitEvents: []string{"cto.spec_vetoed"},
+		Criteria:   []string{"feasibility_exclusions"},
+	})
+}
+
+func criteriaCitationEmitTestExecutorWithAgent(agent runtimecontracts.AgentRegistryEntry) (*Executor, *publishBusCapture, models.AgentConfig) {
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
 		Policy: runtimecontracts.PolicyDocument{
@@ -266,6 +283,9 @@ func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.A
 					}},
 				},
 			},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"cto-agent": agent,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"cto.spec_vetoed": {
@@ -313,6 +333,36 @@ func criteriaCitationEmitTestExecutor() (*Executor, *publishBusCapture, models.A
 		Criteria:   []string{"feasibility_exclusions"},
 	}
 	return exec, bus, actor
+}
+
+func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
+	exec, bus, actor := criteriaCitationEmitTestExecutorWithAgent(runtimecontracts.AgentRegistryEntry{
+		ID:         "cto-agent",
+		Role:       "cto",
+		Mode:       "task",
+		EmitEvents: []string{"cto.spec_vetoed"},
+	})
+	actor.Criteria = []string{"feasibility_exclusions"}
+
+	_, err := exec.handleEmitTool(context.Background(), actor, "emit_cto_spec_vetoed", map[string]any{
+		"cite": "FX-HARD-01",
+	})
+	if err == nil {
+		t.Fatal("handleEmitTool error = nil, want mutable criteria grant rejection")
+	}
+	runtimeErr, ok := AsRuntimeError(err)
+	if !ok || runtimeErr == nil {
+		t.Fatalf("error = %#v, want runtime error", err)
+	}
+	if runtimeErr.Code != "criteria_citation_validation_failed" {
+		t.Fatalf("runtime error code = %q, want criteria_citation_validation_failed", runtimeErr.Code)
+	}
+	if !strings.Contains(err.Error(), `agent cto-agent does not declare criteria set "feasibility_exclusions"`) {
+		t.Fatalf("handleEmitTool error = %v, want contract-owned criteria rejection", err)
+	}
+	if bus.count != 0 {
+		t.Fatalf("publish count = %d, want 0", bus.count)
+	}
 }
 
 func TestHandleEmitTool_PreservesInboundChildFlowOwnerWithinActorScope(t *testing.T) {
