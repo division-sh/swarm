@@ -45,6 +45,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
@@ -4165,6 +4166,32 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 }
 
 func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *testing.T) {
+	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendDefaultSQLite)
+}
+
+func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing.T) {
+	runServedDynamicAutoEmitBackendProof(t, servedparity.BackendExplicitPostgres)
+}
+
+func TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle(t *testing.T) {
+	scenario := servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle)
+	servedparity.Run(t, scenario, runServedDynamicAutoEmitBackendProof)
+}
+
+func runServedDynamicAutoEmitBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		runServedDynamicAutoEmitSQLiteProof(t)
+	case servedparity.BackendExplicitPostgres:
+		runServedDynamicAutoEmitPostgresProof(t)
+	default:
+		t.Fatalf("unknown served dynamic auto_emit backend %q", backend)
+	}
+}
+
+func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
+	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -4225,7 +4252,8 @@ func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite(t *te
 	runServedDynamicAutoEmitProof(t, endpoint, servedDB, "sqlite", bundleHash, blocked, release, &releaseOnce)
 }
 
-func TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathPostgres(t *testing.T) {
+func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
+	t.Helper()
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -4338,6 +4366,32 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
+	requireServedParitySettlementPostconditions(t, endpoint, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
+}
+
+func requireServedParitySettlementPostconditions(t *testing.T, endpoint, runID string, scenario servedparity.Scenario) {
+	t.Helper()
+	var last diagnosticRunDiagnosisResult
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for time.Now().Before(deadline) {
+		var result diagnosticRunDiagnosisResult
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
+		last = result
+		if result.Run.RunID != runID || result.TestQuiescence == nil {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		counts := servedparity.SettlementCounts{
+			NonTerminalDeliveries: intPointerValue(result.TestQuiescence.ActiveDeliveries),
+			PendingPipelineEvents: intPointerValue(result.TestQuiescence.UnsettledPipelineEvents),
+			UnfiredDueTimers:      intPointerValue(result.TestQuiescence.DueTimers),
+		}
+		if len(servedparity.SettlementPostconditionFailures(scenario, counts)) == 0 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("served parity scenario %s settlement did not quiesce for run %s: %#v", scenario.ID, runID, last.TestQuiescence)
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {

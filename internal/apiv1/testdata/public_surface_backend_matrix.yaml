@@ -20,9 +20,120 @@ active_trackers:
   - kind: github_issue
     issue: 1239
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: github_issue
+    issue: 1386
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
+mutating_api_parity_ledger:
+  - method: bundle.register
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#api_specification.method_catalog
+    proof_refs:
+      - kind: artifact
+        path: platform-spec.yaml
+      - kind: tracker
+        issue: 1386
+        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+    notes: >
+      Catalog upload/register behavior remains a persisted-bundle public mutator
+      outside this served lifecycle first slice.
+  - method: event.publish
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: event_publish_dynamic_auto_emit_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
+    notes: >
+      Shared harness owns backend iteration and generic settlement postconditions
+      for the #1384 dynamic auto_emit served lifecycle regression.
+  - method: event.replay
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: bundle.delete
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: run.fork
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: agent.replay
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: run.start
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: run.stop
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: run.pause
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: run.continue
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: mailbox.approve
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: mailbox.reject
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: mailbox.defer
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: agent.send_directive
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: agent.restart
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: agent.replay_backlog
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: runtime.pause
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: runtime.resume
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: runtime.nuke
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: conversation.fork
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: conversation.fork_chat
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: conversation.fork_delete
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+  - method: test.setup_entities
+    classification: split_with_issue_ref
+    split_issue: 1386
+    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
 rows:
   - id: serve_contracts_default_sqlite
     surface: default SQLite swarm serve --contracts readiness and API availability
@@ -351,6 +462,8 @@ rows:
       - event_deliveries readback owner
     proof_dimensions: [selected_store, real_v1_handler, real_runtime_startup, canonical_store_owner, openrpc_publication, served_mutating_lifecycle]
     proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
       - kind: go_test
         name: TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite
       - kind: go_test
