@@ -1900,12 +1900,25 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 		t.Fatalf("replay traces = %d, want 1", got)
 	}
 
+	zeroExpected := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
+	zeroExpected.ExpectedComputeModuleTraces = []ComputeModuleTrace{}
+	_, err = exec.Execute(context.Background(), zeroExpected)
+	if err == nil {
+		t.Fatal("replay Execute with zero expected traces error = nil, want unexpected trace divergence")
+	}
+	var typed *computemodule.Error
+	if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
+		t.Fatalf("zero expected error = %#v, want code %s", err, computemodule.CodeReplay)
+	}
+	if !strings.Contains(err.Error(), "unexpected compute_module trace") {
+		t.Fatalf("zero expected error = %v, want unexpected trace diagnostic", err)
+	}
+
 	req.ExpectedComputeModuleTraces[0].OutputHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	_, err = exec.Execute(context.Background(), req)
 	if err == nil {
 		t.Fatal("replay Execute error = nil, want divergence")
 	}
-	var typed *computemodule.Error
 	if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
 		t.Fatalf("error = %#v, want code %s", err, computemodule.CodeReplay)
 	}

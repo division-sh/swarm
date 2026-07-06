@@ -1642,8 +1642,10 @@ compute_module_contracts:
       Runtime traces record module ID, row ID, declared digest, engine version,
       output hash, and fuel/gas consumed. Supported replay re-executes module
       rows and compares the recorded output hash and fuel/gas consumed against
-      the replay execution. Divergence is a typed deterministic replay failure,
-      never silent acceptance.
+      the replay execution. Replay mode is explicit: an empty expected trace set
+      means zero module executions are expected, not normal non-replay execution.
+      Divergence is a typed deterministic replay failure, never silent
+      acceptance.
   bundle_identity:
     rule: |
       Module bytes referenced by policy.modules are part of the bundle contract

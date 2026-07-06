@@ -222,8 +222,10 @@ type ExecutionRequest struct {
 	Handler         runtimecontracts.SystemNodeEventHandler
 	State           StateSnapshot
 	// ExpectedComputeModuleTraces carries prior deterministic module evidence
-	// for supported replay. When present, module execution re-runs and compares
-	// output hash plus fuel consumption against this ordered evidence.
+	// for supported replay. Nil means normal execution; a non-nil empty slice
+	// means replay mode with zero expected module executions. When present,
+	// module execution re-runs and compares output hash plus fuel consumption
+	// against this ordered evidence.
 	ExpectedComputeModuleTraces []ComputeModuleTrace
 	ChainDepth                  int
 	MaxDepth                    int
