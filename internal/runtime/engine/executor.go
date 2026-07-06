@@ -1112,7 +1112,7 @@ func (e *Executor) computeValidationValue(frame *executionFrame, spec *runtimeco
 		if !leftOK || !rightOK {
 			return nil, fmt.Errorf("validation_input_no_retry: row %s rule %s references unmapped validation input", rowID, strings.TrimSpace(rule.ID))
 		}
-		if reflect.DeepEqual(left, right) {
+		if validationRuntimeValuesEqual(left, right, set.Inputs[leftName]) {
 			continue
 		}
 		violations = append(violations, map[string]any{
@@ -1157,6 +1157,48 @@ func validationRuntimeValueMatchesType(value any, declared string) bool {
 		return kind == "number" || kind == "int"
 	default:
 		return false
+	}
+}
+
+func validationRuntimeValuesEqual(left, right any, declared string) bool {
+	switch strings.ToLower(strings.TrimSpace(declared)) {
+	case "int", "integer":
+		leftCanonical, leftOK := validationRuntimeIntegralCanonical(left)
+		rightCanonical, rightOK := validationRuntimeIntegralCanonical(right)
+		return leftOK && rightOK && leftCanonical == rightCanonical
+	case "number", "numeric", "float", "double":
+		leftCanonical, leftOK := validationRuntimeNumericCanonical(left)
+		rightCanonical, rightOK := validationRuntimeNumericCanonical(right)
+		return leftOK && rightOK && leftCanonical == rightCanonical
+	default:
+		return reflect.DeepEqual(left, right)
+	}
+}
+
+func validationRuntimeIntegralCanonical(value any) (string, bool) {
+	kind, summary, _, ok := runtimecontracts.CanonicalizeComputeLookupValue(value)
+	if !ok {
+		return "", false
+	}
+	if kind == "int" {
+		return summary, true
+	}
+	if integral, ok := integralLookupFloatSummary(value); ok {
+		return integral, true
+	}
+	return "", false
+}
+
+func validationRuntimeNumericCanonical(value any) (string, bool) {
+	kind, summary, _, ok := runtimecontracts.CanonicalizeComputeLookupValue(value)
+	if !ok {
+		return "", false
+	}
+	switch kind {
+	case "int", "number":
+		return summary, true
+	default:
+		return "", false
 	}
 }
 

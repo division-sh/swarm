@@ -34,6 +34,45 @@ func TestImportBoundaryPolicyResolutionUsesBindingThenPackageDefault(t *testing.
 	}
 }
 
+func TestImportBoundaryPolicyMergePreservesFlowValidationSets(t *testing.T) {
+	pinCandidate := false
+	dst := runtimecontracts.PolicyDocument{}
+	mergePolicyValues(&dst, runtimecontracts.PolicyDocument{Validation: map[string]runtimecontracts.PolicyValidationSet{
+		"deploy_manifest": {
+			Classes: map[string]runtimecontracts.PolicyValidationClass{
+				"invalid": {Disposition: "deploy.manifest_invalid"},
+			},
+			Inputs: map[string]string{
+				"source_ref":          "string",
+				"manifest_source_ref": "string",
+			},
+			Rules: []runtimecontracts.PolicyValidationRule{{
+				ID:           "VR-001",
+				Class:        "invalid",
+				Text:         "Manifest source ref must match request source ref.",
+				PinCandidate: &pinCandidate,
+				Check: runtimecontracts.PolicyValidationCheck{
+					Equal: &runtimecontracts.PolicyValidationEqualCheck{
+						Left:  "input.source_ref",
+						Right: "input.manifest_source_ref",
+					},
+				},
+			}},
+		},
+	}})
+
+	set, ok := dst.Validation["deploy_manifest"]
+	if !ok {
+		t.Fatalf("merged policy missing validation set: %#v", dst.Validation)
+	}
+	if got := set.Classes["invalid"].Disposition; got != "deploy.manifest_invalid" {
+		t.Fatalf("validation invalid disposition = %q, want deploy.manifest_invalid", got)
+	}
+	if got := len(set.Rules); got != 1 {
+		t.Fatalf("validation rules len = %d, want 1", got)
+	}
+}
+
 func TestImportBoundaryPolicyResolutionReportsOwnerForBindingAndPackageDefault(t *testing.T) {
 	source := loadImportBoundaryDependencyFixture(t, importBoundaryDependencyFixtureOptions{
 		policyBind: "        provider.threshold: parent.policy.provider.threshold\n",

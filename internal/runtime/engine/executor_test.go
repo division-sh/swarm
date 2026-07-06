@@ -1732,6 +1732,116 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	}
 }
 
+func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t *testing.T) {
+	pinCandidate := true
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Validation: map[string]runtimecontracts.PolicyValidationSet{
+			"count_match": {
+				Classes: map[string]runtimecontracts.PolicyValidationClass{
+					"invalid": {Disposition: "deploy.count_mismatch"},
+				},
+				Inputs: map[string]string{
+					"payload_count": "number",
+					"entity_count":  "number",
+				},
+				Rules: []runtimecontracts.PolicyValidationRule{{
+					ID:           "VR-COUNT-001",
+					Class:        "invalid",
+					Text:         "Payload count must match entity count.",
+					PinCandidate: &pinCandidate,
+					Check: runtimecontracts.PolicyValidationCheck{
+						Equal: &runtimecontracts.PolicyValidationEqualCheck{
+							Left:  "input.payload_count",
+							Right: "input.entity_count",
+						},
+					},
+				}},
+			},
+		}},
+	})
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       source,
+		StateRepo:    stubStateRepo{},
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, contextualBoolEvaluator{bools: map[string]func(BaseContext) (bool, error){
+		`computed.validation.count_match.valid == true`: func(base BaseContext) (bool, error) {
+			validation, _ := base.Computed.Raw()["validation"].(map[string]any)
+			count, _ := validation["count_match"].(map[string]any)
+			return count["valid"] == true, nil
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	validation := &runtimecontracts.ComputeValidationSpec{
+		RowID: "validate_count",
+		Set:   "count_match",
+		Into:  "computed.validation.count_match",
+		Input: map[string]string{
+			"payload_count": "payload.count",
+			"entity_count":  "entity.expected_count",
+		},
+		InputPaths: map[string]runtimepaths.Path{
+			"payload_count": runtimepaths.Parse("payload.count"),
+			"entity_count":  runtimepaths.Parse("entity.expected_count"),
+		},
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("11111111-1111-1111-1111-111111111111"),
+		NodeID:   identity.NodeID("deploy-node"),
+		Event: eventtest.RootIngress(
+			"evt-1",
+			events.EventType("deploy.requested"),
+			"",
+			"",
+			mustEncodeJSON(t, map[string]any{"count": 1}),
+			0,
+			"",
+			"",
+			events.EventEnvelope{},
+			time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		),
+		State: testStateSnapshot("pending", map[string]any{"expected_count": int(1)}, nil, map[string]map[string]any{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Rules: []runtimecontracts.HandlerRuleEntry{
+				{
+					ID:        "validate_count",
+					PolicyRow: runtimecontracts.PolicySheetRowMetadata{Kind: runtimecontracts.PolicySheetRowKindValidate, Validation: validation},
+					Compute: &runtimecontracts.ComputeSpec{
+						Operation:  runtimecontracts.ComputeOpValidate,
+						StoreAs:    "computed.validation.count_match",
+						Validation: validation,
+					},
+				},
+				{
+					ID:        "valid_count",
+					Condition: `computed.validation.count_match.valid == true`,
+					Emit:      runtimecontracts.EmitSpec{Event: "deploy.count_matched"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	validationResult, _ := result.Computed["validation"].(map[string]any)
+	countResult, _ := validationResult["count_match"].(map[string]any)
+	if got := countResult["valid"]; got != true {
+		t.Fatalf("validation valid = %#v, want true; result %#v", got, countResult)
+	}
+	violations, _ := countResult["violations"].([]any)
+	if len(violations) != 0 {
+		t.Fatalf("violations len = %d, want 0: %#v", len(violations), countResult["violations"])
+	}
+	if got := result.RuleID; got != "valid_count" {
+		t.Fatalf("selected rule = %q, want valid_count", got)
+	}
+}
+
 func TestExecutor_AccumulatorProjectionFailsClosedWhenDeclaredBindingDoesNotResolveAtRuntime(t *testing.T) {
 	source := semanticview.Wrap(loadEngineProjectionFlowBundle(t))
 	exec, err := NewExecutor(RuntimeDependencies{
