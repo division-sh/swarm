@@ -323,6 +323,35 @@ func TestEnrichTurnRecord_UsesCanonicalVisibleToolsForNativeCapabilities(t *test
 	}
 }
 
+func TestEnrichTurnRecord_CarriesInboundFlowInstance(t *testing.T) {
+	ctx := runtimebus.WithInboundEvent(context.Background(), eventtest.RootIngress(
+		"11111111-1111-1111-1111-111111111111",
+		events.EventType("analysis.requested"),
+		"tester",
+		"",
+		nil,
+		0,
+		"run-123",
+		"",
+		events.EventEnvelope{FlowInstance: "review/inst-1"},
+		time.Now(),
+	))
+	rec := enrichTurnRecord(ctx, &Session{
+		ID: "session-1",
+	}, AgentTurnRecord{
+		AgentID:     "analysis-agent",
+		RuntimeMode: sessions.RuntimeModeTask.String(),
+		SessionID:   "session-1",
+	}, nil)
+
+	if rec.FlowInstance != "review/inst-1" {
+		t.Fatalf("flow_instance = %q, want review/inst-1", rec.FlowInstance)
+	}
+	if rec.EntityID != "" {
+		t.Fatalf("entity_id = %q, want empty for flow-only inbound event", rec.EntityID)
+	}
+}
+
 func TestEnrichTurnRecord_FiltersCLIControlToolsFromObservedVisibleTools(t *testing.T) {
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{
 		ID: "analysis-agent",

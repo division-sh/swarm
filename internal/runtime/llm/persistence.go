@@ -17,6 +17,7 @@ type AgentTurnRecord struct {
 	ScopeKey         string
 	RunID            string
 	EntityID         string
+	FlowInstance     string
 	TriggerEventID   string
 	TriggerEventType string
 	AvailableTools   []string
@@ -65,6 +66,9 @@ func enrichTurnRecord(ctx context.Context, s *Session, rec AgentTurnRecord, resp
 		}
 		if strings.TrimSpace(rec.EntityID) == "" {
 			rec.EntityID = strings.TrimSpace(inbound.EntityID())
+		}
+		if strings.TrimSpace(rec.FlowInstance) == "" {
+			rec.FlowInstance = strings.TrimSpace(inbound.FlowInstance())
 		}
 	}
 	if resp != nil && len(rec.ToolCalls) == 0 {

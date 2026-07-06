@@ -5277,6 +5277,91 @@ func TestManagerStore_AppendAgentTurn_TaskEntityScopeSurvivesConversationUpsert(
 	}
 }
 
+func TestManagerStore_AppendAgentTurn_TaskFlowScopeSurvivesConversationUpsert(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	resetAgentSessionsSpecTable(t, ctx, pg)
+	seedSpecAgent(t, ctx, pg, "a1", "", "")
+
+	sessionID := uuid.NewString()
+	flowInstance := "review/inst-1"
+	runID := uuid.NewString()
+	if err := pg.AppendAgentTurn(ctx, runtimellm.AgentTurnRecord{
+		AgentID:        "a1",
+		RuntimeMode:    "task",
+		SessionID:      sessionID,
+		ScopeKey:       "noncanonical-task-key",
+		RunID:          runID,
+		FlowInstance:   flowInstance,
+		RequestPayload: []byte(`{"kind":"task"}`),
+		ResponseRaw:    []byte(`{"ok":true}`),
+		ParseOK:        true,
+		Latency:        5 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("AppendAgentTurn(task flow): %v", err)
+	}
+	if err := pg.UpsertConversation(ctx, runtimellm.ConversationRecord{
+		SessionID: sessionID,
+		AgentID:   "a1",
+		ScopeKey:  "snapshot-task-key",
+		RunID:     runID,
+		Mode:      "task",
+		Messages: []llm.Message{
+			{Role: "user", Content: "flow task"},
+			{Role: "assistant", Content: "flow done"},
+		},
+		TurnCount: 1,
+		Status:    "active",
+	}); err != nil {
+		t.Fatalf("UpsertConversation(task flow): %v", err)
+	}
+
+	var count, turns int
+	var scope, scopeKey, entityID, gotFlowInstance, conversation, persistedRunID string
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(MAX(scope), ''),
+			COALESCE(MAX(scope_key), ''),
+			COALESCE(MAX(entity_id::text), ''),
+			COALESCE(MAX(flow_instance), ''),
+			COALESCE(MAX(conversation::text), ''),
+			COALESCE(MAX(run_id::text), ''),
+			(SELECT COUNT(*) FROM agent_turns WHERE session_id = $1::uuid AND runtime_mode = 'task')
+		FROM agent_conversation_audits
+		WHERE session_id = $1::uuid
+	`, sessionID).Scan(&count, &scope, &scopeKey, &entityID, &gotFlowInstance, &conversation, &persistedRunID, &turns); err != nil {
+		t.Fatalf("read flow task audit row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("audit row count = %d, want 1", count)
+	}
+	if scope != "flow" || scopeKey != flowInstance || gotFlowInstance != flowInstance || entityID != "" {
+		t.Fatalf("audit identity scope=%q scope_key=%q entity_id=%q flow_instance=%q, want flow %s", scope, scopeKey, entityID, gotFlowInstance, flowInstance)
+	}
+	if persistedRunID != "" && persistedRunID != runID {
+		t.Fatalf("audit run_id = %q, want %q or absent when audit run_id capability is unavailable", persistedRunID, runID)
+	}
+	if !strings.Contains(conversation, "flow done") {
+		t.Fatalf("conversation = %s, want persisted assistant message", conversation)
+	}
+	if turns != 1 {
+		t.Fatalf("linked task turn count = %d, want 1", turns)
+	}
+
+	detail, err := pg.LoadOperatorConversation(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadOperatorConversation: %v", err)
+	}
+	if detail.Conversation.Scope != "flow" || detail.Conversation.ScopeKey != flowInstance || detail.Conversation.RuntimeMode != "task" || detail.Conversation.TurnCount != 1 {
+		t.Fatalf("operator conversation summary = %+v, want flow-scoped task audit with one turn", detail.Conversation)
+	}
+	if len(detail.Turns) != 1 {
+		t.Fatalf("operator conversation turns = %d, want 1", len(detail.Turns))
+	}
+}
+
 func TestManagerStore_AppendAgentTurn_TaskDoesNotAdoptLegacySessionRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
