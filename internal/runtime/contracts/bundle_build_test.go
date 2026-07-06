@@ -159,6 +159,25 @@ func TestBuildBundleMaterializationFailsClosedBeforeRuntimeForModuleDrift(t *tes
 	}
 }
 
+func TestBuildBundleMaterializationRejectsOutputInsideHashedRecursiveInput(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeBundleBuildContractsDir(t)
+	outputRoot := filepath.Join(root, "flows", "render", "data", "build-output")
+	if err := os.MkdirAll(filepath.Dir(outputRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: DefaultPlatformSpecFile(repo),
+		OutputRoot:       outputRoot,
+	})
+	if err == nil || !strings.Contains(err.Error(), "hashed recursive input") {
+		t.Fatalf("BuildBundleMaterialization error = %v, want hashed recursive input rejection", err)
+	}
+}
+
 func TestBundleBuildStepRegistryHasOnlyWasmSliceA(t *testing.T) {
 	names := BundleBuildStepNames(nil)
 	if !reflect.DeepEqual(names, []string{bundleBuildStepWasmModules}) {

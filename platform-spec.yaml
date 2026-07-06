@@ -1732,6 +1732,7 @@ bundle_build_materialization:
     - stale source_hash when source_path/source_hash provenance is declared
     - invalid module ABI, schema, resource limits, or unsupported module shape
     - unsupported build-step requirements
+    - output roots or target directories inside hashed recursive inputs such as prompts/ or flow data/
     - materialized directory hash mismatch
   reproducibility:
     rule: |
@@ -10444,7 +10445,7 @@ multi_bundle_persistence:
         copies only bundle contract inputs and referenced module bytes needed to reconstruct that identity, writes
         build-manifest.json as a proof artifact, and emits a build report. It fails closed before runtime for invalid
         contract/module shape, missing module bytes, digest mismatch, stale declared source_hash, unsupported build-step
-        requirements, and materialized hash mismatch. Declared source_path files may be copied for source_hash freshness
+        requirements, output roots inside hashed recursive inputs, and materialized hash mismatch. Declared source_path files may be copied for source_hash freshness
         proof but are not BundleHash identity owners. It MUST NOT call bundle.register, run test scenarios, touch
         store/runtime writers, archive bundles, produce Python snapshots, run Python build steps, or write generated
         bindings.
@@ -16697,8 +16698,8 @@ cli_specification:
       - exact /v1/rpc bundle.list/get/agents calls with only promoted params
       - local swarm bundle build proves command shape `--contracts`, `--output`, and `--report json`; materialized output
         under <output>/<bundle-hash>; build-manifest/report fields; wasm-only Slice A build-step registry; source_hash
-        freshness drift; missing module bytes; schema drift; reproducible identical bundle_hash and hashed materialized
-        content; and no API/store/runtime/register/test calls
+        freshness drift; missing module bytes; schema drift; rejection of outputs under hashed recursive inputs;
+        reproducible identical bundle_hash and hashed materialized content; and no API/store/runtime/register/test calls
       - exact /v1/rpc bundle.register call with only content_yaml, optional data_blob, and optional idempotency_key
       - exact /v1/rpc bundle.delete call with only bundle_hash, optional force, optional dry_run, and optional idempotency_key
       - local directory packaging proves traversal/root escape, symlink fail-closed behavior, ignored file/dir policy, slash-relative NFC paths, duplicate and ASCII case-collision failure, text-vs-every-discovered-flow-data split including empty raw data, deterministic ordering, and no bundle_hash param
