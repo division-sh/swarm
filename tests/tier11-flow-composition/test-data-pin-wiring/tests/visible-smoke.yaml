@@ -6,4 +6,4 @@ steps:
       threshold: "0.8"
 expect:
   events:
-    include: [process.done]
+    include: [processor/process.done]

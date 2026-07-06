@@ -5,7 +5,7 @@ steps:
       score: 55
 expect:
   events:
-    include: [check.passed]
+    include: [child/check.passed]
   entities:
     - type: default
       current_state: approved

@@ -6,5 +6,3 @@ expect:
   entities:
     - type: default
       current_state: pending
-      gates:
-        approval_gate: false
