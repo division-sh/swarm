@@ -1115,6 +1115,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ConversationForks:      apiStoreCaps.ConversationForks,
 		ForkChatExecutor:       apiv1.NewLLMForkChatExecutor(forkChatLLM),
 		RunBundleContext:       apiStoreCaps.RunBundleContext,
+		TestSetup:              apiStoreCaps.TestSetup,
 		RunForkAvailability:    apiStoreCaps.RunForkAvailability,
 		RunFork:                apiStoreCaps.RunFork,
 		AgentControl:           dashboardDynamicAgentControl{supervisor: supervisor},

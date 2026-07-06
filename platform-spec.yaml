@@ -11708,6 +11708,7 @@ test_specification:
         evidence only unless their exact semantics are promoted here.
       consumed_owners:
         expressions: platform-spec.yaml#handler_specification.expression_context
+        setup_pre_state: platform-spec.yaml#api_specification.method_catalog.test.setup_entities
         event_injection: platform-spec.yaml#cli_specification.command_catalog.event_publish and /v1/rpc event.publish
         mailbox_decisions: platform-spec.yaml#api_specification.method_catalog.mailbox.approve/reject/defer
         run_readback: platform-spec.yaml#api_specification.method_catalog.run.get/trace/diagnose
@@ -11738,6 +11739,7 @@ test_specification:
         seed: Optional recorded deterministic seed string for generated helper values. When omitted, the empty seed is
           recorded by implication for v1.
         vars: Optional map of literal values or CEL expressions evaluated once before the first step.
+        setup: Optional setup/pre-state block for deterministic scenario-owned entity rows before the first action step.
         steps: Required non-empty list of scenario actions.
         expect: Optional final assertion block evaluated after the final step reaches test quiescence.
         invalid: Optional table of invalid fixture variants. Each case derives from a base fixture/action and expects a
@@ -11785,13 +11787,67 @@ test_specification:
           Fixture paths are relative to the scenario file unless explicitly
           rooted by the future runner command. Paths must not escape the
           contract package root.
+      setup_pre_state:
+        syntax: >
+          `setup.entities` is an optional non-empty array. Each row declares
+          `as` (scenario-local alias), `type` (entity type), optional `flow`
+          (flow scope, defaulting to the owning flow for flow-local
+          scenarios), optional `current_state`, optional `fields`, and optional
+          `gates`.
+        owner: /v1/rpc test.setup_entities
+        rule: >
+          Setup/pre-state seeds only scenario-owned initial entity rows for the
+          single current scenario run before the first action step. The runner
+          derives deterministic run_id and entity_id values from the scenario
+          identity and recorded seed, validates the authored setup against the
+          loaded contract bundle, then submits exactly one idempotent
+          `test.setup_entities` request carrying canonical bundle_hash,
+          run_id, and the validated entity rows. The runner MUST NOT write the
+          database/store directly, call EventBus, create deliveries, infer
+          handler outcomes, or expose a generic entity.create/entity.update
+          public mutation surface.
+        validation:
+          - >
+            `as` aliases are non-empty and unique within the scenario.
+          - >
+            `type` must match the primary entity type for the selected flow scope.
+          - >
+            `current_state`, when supplied, must be a declared state for the selected flow; otherwise the selected flow's
+            initial state is used.
+          - >
+            every `fields` key must be declared for the selected entity type, and authored values must be type-compatible
+            with the declared contract field type before any API mutation.
+          - >
+            every `gates` key must be declared by the selected flow's gate model or gate-setting handlers, and every gate
+            value must be boolean.
+          - >
+            setup establishes one current scenario run context; multi-run setup and cross-run setup remain unsupported.
+        alias_consumers:
+          publish_target: >
+            A publish step may use `target: <setup-alias>`. The runner resolves
+            the alias to the exact setup entity and sends event.publish `target`
+            with flow_instance/entity_id. Unknown aliases, root-flow aliases
+            that cannot form a flow-scoped event.publish target, and combining
+            alias `target` with explicit `target_flow_instance` or
+            `target_entity_id` fail before API mutation.
+          expect_entity_ref: >
+            An entity expectation may use `ref: <setup-alias>`. The runner
+            resolves the alias to the exact setup entity and reads it through
+            `entity.get` for current_state, fields, and gates assertions.
+            `ref` MUST NOT be combined with `count`.
+        unsupported_forms:
+          - private cataloge2e setup syntax such as trigger.entity, entity_state_before, entity_fields_before, or gates_before
+          - handler_outcome or pipeline-receipt success proof
+          - no-output absence, exact emitted-event counts, causal chains, positive dead-letter details, or flow/template creation
+          - seeded pre-state for live agent sessions, tool calls, faithful scripted backend behavior, or arbitrary runtime/store mutation
     action_steps:
       run_context:
         rule: >
-          A scenario has one current run context. The first mutating publish
-          that creates work records the server-owned run_id. Later publish and
-          mailbox-decision steps use that run_id unless a future spec explicitly
-          promotes multi-run scenarios.
+          A scenario has one current run context. Setup/pre-state may establish
+          the current run context before the first publish. Otherwise, the first
+          mutating publish that creates work records the server-owned run_id.
+          Later publish and mailbox-decision steps use that run_id unless a
+          future spec explicitly promotes multi-run scenarios.
         bundle_scope: >
           For create-new-work publish steps, the runner supplies the canonical
           bundle_hash for the loaded contract package to event.publish. It must
@@ -11807,6 +11863,12 @@ test_specification:
           server-owned EventPublishResult. It must not validate routability,
           persist events, create delivery rows, or call EventBus/store APIs
           directly.
+        setup_alias_target: >
+          Optional `target: <setup-alias>` consumes
+          scenario_document.setup_pre_state.alias_consumers.publish_target and
+          lowers only to event.publish `target`. It is not a payload shortcut
+          and does not authorize payload.entity_id or payload.flow_instance as
+          target authority.
       mailbox_approve:
         syntax: "`mailbox.approve` or `approve_mailbox` as a scenario action alias."
         owner: /v1/rpc mailbox.approve
@@ -11876,10 +11938,17 @@ test_specification:
       entities:
         rule: >
           Entity assertions consume canonical entity read owners. The runner may
-          match by explicit entity id, by current run plus declared entity type
-          plus field predicates, or by a mailbox/event-derived id. Zero or
-          multiple matches fail closed unless the assertion explicitly expects a
-          count.
+          match by explicit setup alias ref, by explicit entity id, by current
+          run plus declared entity type plus field predicates, or by a
+          mailbox/event-derived id. Zero or multiple matches fail closed unless
+          the assertion explicitly expects a count.
+        ref: >
+          `ref: <setup-alias>` resolves through setup_pre_state alias bindings
+          to exactly one setup-created entity and consumes `entity.get` directly
+          with that entity_id and the current scenario run_id. Unknown aliases
+          fail before readback. `ref` MUST NOT be combined with `count`; when
+          `type` is also supplied, it must match the setup binding's entity
+          type.
         current_state: >
           A row with `current_state` is a detail assertion, not a count
           assertion. Expected values consume the scenario literal model, so
@@ -11940,7 +12009,7 @@ test_specification:
     proof_obligations:
       source_authority_pr:
       - platform-spec.yaml contains this section as the canonical runner owner.
-      - The section names consumed owners for CEL, event.publish, mailbox decisions, readback, dead letters, and
+      - The section names consumed owners for CEL, setup/pre-state, event.publish, mailbox decisions, readback, dead letters, and
         test quiescence.
       - The section explicitly rejects ProviderContract/backend activation and arbitrary inline code.
       - The section defines scenario locations, fixture validation, expectation modes, dead-letter windows, and catalog
@@ -11948,6 +12017,7 @@ test_specification:
       later_implementation_pr:
       - Adds the concrete CLI command catalog row and command behavior for `swarm test`.
       - Runs scenarios through public API/runtime owners, with no direct DB/EventBus/mailbox table mutation.
+      - Adds setup/pre-state only through /v1/rpc test.setup_entities when a scenario needs deterministic seeded entities.
       - Proves at least one catalog-derived fixture and one Empire-style deterministic scenario with no live LLM credentials.
       - Runs `go test ./...`.
       split_siblings:
@@ -13653,7 +13723,8 @@ cli_specification:
         scenario-file arguments are always parsed fail-closed. The command loads the selected contract bundle, computes the
         canonical bundle_hash through internal/runtime/contracts.BundleHash, validates fixture payloads through the existing
         event schema owner before mutation, and executes scenario steps only through public v1 RPC owners. `publish` steps
-        call /v1/rpc event.publish; mailbox approve/reject/defer steps locate exactly one pending mailbox item through
+        optionally consume setup/pre-state aliases seeded through /v1/rpc test.setup_entities before calling
+        /v1/rpc event.publish; mailbox approve/reject/defer steps locate exactly one pending mailbox item through
         mailbox.list and then call the matching mailbox decision RPC. The command waits for test quiescence by repeatedly
         reading canonical `run.diagnose` result.test_quiescence until active deliveries, unsettled same-run pipeline receipt
         work, due timers, and active session leases are absent; --timeout is a safety failure bound, not the semantic
@@ -13685,14 +13756,20 @@ cli_specification:
         not_found: 5
         scenario_rejected: 6
       proof_expectations:
+      - setup/pre-state blocks make exactly one idempotent /v1/rpc test.setup_entities call with canonical bundle_hash,
+        deterministic run_id, deterministic entity_id values, validated entity_type/current_state/fields/gates, and no direct
+        DB/store/runtime/EventBus mutation path
       - exact /v1/rpc event.publish calls with event_name, payload, canonical bundle_hash, optional run_id/source_event_id/
         target/emitter/idempotency_key params only; no direct DB/store/runtime/EventBus publish path
+      - setup alias publish targets lower only to event.publish target and fail before mutation when the alias is unknown,
+        root-flow-scoped, or combined with explicit target_flow_instance/target_entity_id
       - mailbox decisions are preceded by mailbox.list and fail closed unless exactly one pending mailbox item matches
       - scenario discovery rejects files outside contracts/tests and contracts/flows/<flow>/tests
       - fixture from paths cannot escape the contract root, set overrides are applied before schema validation, and invalid
         fixture/schema variants fail before mutation
-      - entity current_state, fields, and gates expectations resolve entities through paginated entity.list, fail closed on
-        zero/multiple detail matches, and read canonical detail through entity.get
+      - entity current_state, fields, and gates expectations either resolve setup aliases through entity.get or resolve
+        unmatched rows through paginated entity.list, fail closed on zero/multiple detail matches, and read canonical detail
+        through entity.get
       - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
     workspace_build:
       command: swarm workspace build --backend claude_cli [--image <tag>]
@@ -16202,7 +16279,7 @@ api_specification:
       \ ships) and any future external SDK or third-party tooling. Retired `swarm investigate *` commands are legacy consumers\
       \ only and are not a source for new CLI topology.\n"
   namespaces:
-    description: "Nine canonical owner namespaces. Every concept the API exposes lives in\nexactly one namespace. No overlap.\
+    description: "Ten canonical owner namespaces. Every concept the API exposes lives in\nexactly one namespace. No overlap.\
       \ Two ownership rules locked because\nthey were the source of the prior dual-API spec drift:\n  - conversation.* owns\
       \ sessions, turns, transcripts. agent.* owns\n    agent identity, current status, and control actions only. Reading\n\
       \    a session goes through conversation.*, not agent.*.\n  - event.subscribe is the only canonical event stream. run.subscribe_trace\n\
@@ -16232,6 +16309,9 @@ api_specification:
         streams: none
       runtime:
         owns: runtime control (ingress pause/resume), runtime observability (structured logs, incidents)
+        streams: none
+      test:
+        owns: public deterministic test-runner setup/pre-state mutation helpers only; not product runtime mutation
         streams: none
   conventions:
     error_format:
@@ -16431,6 +16511,7 @@ api_specification:
       - conversation.fork
       - conversation.fork_chat
       - conversation.fork_delete
+      - test.setup_entities
     mailbox:
       status_storage_model: 'The storage table keeps terminal defer decisions as status = decided and decision = deferred.
         v1 read projections expose that row as MailboxStatus deferred. Approval/reject terminal rows remain status = decided
@@ -17435,6 +17516,43 @@ api_specification:
             description: Canonical persisted delivery rows for the published event; empty when the declared event has no subscribers.
             items:
               $ref: '#/components/schemas/EventPublishDelivery'
+      TestSetupEntityResult:
+        type: object
+        additionalProperties: false
+        required:
+        - alias
+        - entity_id
+        - entity_type
+        - current_state
+        properties:
+          alias:
+            type: string
+            minLength: 1
+            description: Scenario-local setup alias authored under setup.entities[].as.
+          entity_id:
+            $ref: '#/components/schemas/OpaqueId'
+          flow_instance:
+            type: string
+            description: Concrete flow instance for flow-scoped setup entities. Omitted for root-flow setup rows.
+          entity_type:
+            type: string
+            minLength: 1
+          current_state:
+            type: string
+            minLength: 1
+      TestSetupEntitiesResult:
+        type: object
+        additionalProperties: false
+        required:
+        - run_id
+        - entities
+        properties:
+          run_id:
+            $ref: '#/components/schemas/OpaqueId'
+          entities:
+            type: array
+            items:
+              $ref: '#/components/schemas/TestSetupEntityResult'
       EventReplayDelivery:
         type: object
         additionalProperties: false
@@ -20245,6 +20363,86 @@ api_specification:
       - RUN_NOT_FOUND
       - EVENT_NOT_FOUND
       - RUN_ALREADY_TERMINAL
+      - IDEMPOTENCY_CONFLICT
+    test.setup_entities:
+      tier: should_have
+      description: >
+        Public deterministic scenario-runner setup/pre-state mutation helper.
+        This method seeds scenario-owned initial entity rows for exactly one
+        scenario run after the runner has validated the authored setup against
+        the loaded contract bundle. It is not a general product/runtime
+        entity.create or entity.update surface, does not publish events, does
+        not create delivery rows, does not infer handler outcomes, and does not
+        accept private cataloge2e setup syntax. The server persists the run
+        row under canonical bundle context and writes the requested initial
+        entity state through the store owner. Scenario-visible verification
+        remains through event.publish, run.diagnose/run.trace, entity.get/list,
+        and other public read owners.
+      scope:
+        required:
+        - write:runs
+      idempotency: per the convention.
+      params:
+      - name: bundle_hash
+        required: true
+        description: Canonical bundle identity for the loaded contract package. Legacy bundle_ref/fingerprint inputs are not accepted.
+        schema:
+          $ref: '#/components/schemas/BundleHash'
+      - name: run_id
+        required: true
+        description: Deterministic scenario run id generated by the public runner before the first action step.
+        schema:
+          $ref: '#/components/schemas/OpaqueId'
+      - name: entities
+        required: true
+        description: Validated scenario setup entity rows. Alias and entity_id must be unique within the request.
+        schema:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - alias
+            - entity_id
+            - entity_type
+            - current_state
+            properties:
+              alias:
+                type: string
+                minLength: 1
+              entity_id:
+                $ref: '#/components/schemas/OpaqueId'
+              flow_instance:
+                type: string
+                description: Concrete flow scope for the setup entity; omitted for root-flow setup rows.
+              entity_type:
+                type: string
+                minLength: 1
+              current_state:
+                type: string
+                minLength: 1
+              fields:
+                type: object
+                additionalProperties: true
+              gates:
+                type: object
+                additionalProperties:
+                  type: boolean
+      - name: idempotency_key
+        required: false
+        schema:
+          type: string
+      result:
+        name: result
+        required: true
+        schema:
+          $ref: '#/components/schemas/TestSetupEntitiesResult'
+      errors:
+      - BUNDLE_MISMATCH
+      - BUNDLE_UNAVAILABLE
+      - BUNDLE_DATA_INTEGRITY_ERROR
+      - UNSUPPORTED_BUNDLE_HASH
       - IDEMPOTENCY_CONFLICT
     event.replay:
       tier: should_have

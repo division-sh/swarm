@@ -17,17 +17,17 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 58 {
-		t.Fatalf("method count = %d, want 58", report.MethodCount)
+	if report.MethodCount != 59 {
+		t.Fatalf("method count = %d, want 59", report.MethodCount)
 	}
-	if report.SchemaCount != 110 {
-		t.Fatalf("schema count = %d, want 110", report.SchemaCount)
+	if report.SchemaCount != 112 {
+		t.Fatalf("schema count = %d, want 112", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 39 {
 		t.Fatalf("error code count = %d, want 39", report.ErrorCodeCount)
 	}
-	if report.MutatingMethodCount != 22 {
-		t.Fatalf("mutating method count = %d, want 22", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 23 {
+		t.Fatalf("mutating method count = %d, want 23", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 4 {
 		t.Fatalf("subscription method count = %d, want 4", report.SubscriptionMethodCnt)
@@ -80,11 +80,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 58 {
-		t.Fatalf("generated OpenRPC methods = %d, want 58", len(doc.Methods))
+	if len(doc.Methods) != 59 {
+		t.Fatalf("generated OpenRPC methods = %d, want 59", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 110 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 110", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 112 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 112", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 39 {
 		t.Fatalf("generated OpenRPC errors = %d, want 39", len(doc.Components.Errors))
@@ -97,6 +97,9 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if _, ok := methods["event.publish"]; !ok {
 		t.Fatal("generated OpenRPC missing event.publish")
+	}
+	if _, ok := methods["test.setup_entities"]; !ok {
+		t.Fatal("generated OpenRPC missing test.setup_entities")
 	}
 	if _, ok := methods["event.replay"]; !ok {
 		t.Fatal("generated OpenRPC missing event.replay")
@@ -160,6 +163,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 		}
 	}
 	for _, schemaName := range []string{"MailboxDecisionSheet", "MailboxEntityContext", "MailboxDownstreamPreview"} {
+		if _, ok := doc.Components.Schemas[schemaName]; !ok {
+			t.Fatalf("generated OpenRPC missing %s", schemaName)
+		}
+	}
+	for _, schemaName := range []string{"TestSetupEntityResult", "TestSetupEntitiesResult"} {
 		if _, ok := doc.Components.Schemas[schemaName]; !ok {
 			t.Fatalf("generated OpenRPC missing %s", schemaName)
 		}

@@ -51,6 +51,7 @@ type selectedAPICapabilities struct {
 	AgentConversations  apiv1.AgentConversationReadStore
 	Observability       apiv1.ObservabilityReadStore
 	RunBundleContext    apiv1.RunBundleContextStore
+	TestSetup           apiv1.TestSetupStore
 	BundleCatalog       apiv1.BundleCatalogReadStore
 	BundleDelete        apiv1.BundleDeleteExecutor
 	ConversationForks   apiv1.ConversationForkLifecycleStore
@@ -165,6 +166,7 @@ func (f selectedRuntimeStoreFacade) runStalledReader() runStalledReadStore {
 
 func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 	runs, entities, agentConversations, observability := f.apiReadStores()
+	testSetup, _ := entities.(apiv1.TestSetupStore)
 	caps := selectedAPICapabilities{
 		Database:           f.pinger(),
 		Runs:               runs,
@@ -172,6 +174,7 @@ func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityReq
 		AgentConversations: agentConversations,
 		Observability:      observability,
 		RunBundleContext:   f.apiRunBundleContextStore(),
+		TestSetup:          testSetup,
 	}
 	if f.stores.APIOptionalCapabilityBuilder == nil {
 		return caps, nil

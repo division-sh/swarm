@@ -239,6 +239,7 @@ func approvedMutatingHTTPRuntimeMethods() []string {
 		"runtime.nuke",
 		"runtime.pause",
 		"runtime.resume",
+		"test.setup_entities",
 	}
 }
 
@@ -255,6 +256,8 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 	otherRunID := "00000000-0000-0000-0000-000000000102"
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
 	forkID := "00000000-0000-0000-0000-000000000301"
+	setupRunID := "00000000-0000-0000-0000-000000000601"
+	setupEntityID := "00000000-0000-0000-0000-000000000602"
 	until := time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano)
 	later := time.Unix(1700007200, 0).UTC().Format(time.RFC3339Nano)
 	return map[string]mutatingHTTPRuntimeFixture{
@@ -392,6 +395,36 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			ResultKeys:                     []string{"ok"},
 			SuccessEffects:                 1,
 		},
+		"test.setup_entities": {
+			Params: map[string]any{
+				"bundle_hash": runStartTestBundleHash,
+				"run_id":      setupRunID,
+				"entities": []any{map[string]any{
+					"alias":         "subject",
+					"entity_id":     setupEntityID,
+					"flow_instance": "operating",
+					"entity_type":   "product",
+					"current_state": "waiting",
+					"fields":        map[string]any{"note": "seeded"},
+					"gates":         map[string]any{"review_ready": true},
+				}},
+			},
+			ConflictParams: map[string]any{
+				"bundle_hash": runStartTestBundleHash,
+				"run_id":      setupRunID,
+				"entities": []any{map[string]any{
+					"alias":         "subject",
+					"entity_id":     setupEntityID,
+					"flow_instance": "operating",
+					"entity_type":   "product",
+					"current_state": "ready",
+					"fields":        map[string]any{"note": "changed"},
+					"gates":         map[string]any{"review_ready": false},
+				}},
+			},
+			ResultKeys:     []string{"run_id", "entities"},
+			SuccessEffects: 1,
+		},
 	}
 }
 
@@ -410,6 +443,23 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 	validEvent := map[string]any{"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
 	legacyOnlyEvent := map[string]any{"bundle_ref": map[string]any{"fingerprint": runStartTestFingerprint}, "event_name": "scan.requested", "payload": map[string]any{"topic": "medicine"}, "idempotency_key": "idem-error"}
 	invalidBundleHashEvent := mergeProbeParams(validEvent, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
+	setupRunID := "00000000-0000-0000-0000-000000000601"
+	setupEntityID := "00000000-0000-0000-0000-000000000602"
+	validSetup := map[string]any{
+		"bundle_hash":     runStartTestBundleHash,
+		"run_id":          setupRunID,
+		"idempotency_key": "idem-error",
+		"entities": []any{map[string]any{
+			"alias":         "subject",
+			"entity_id":     setupEntityID,
+			"flow_instance": "operating",
+			"entity_type":   "product",
+			"current_state": "waiting",
+			"fields":        map[string]any{"note": "seeded"},
+			"gates":         map[string]any{"review_ready": true},
+		}},
+	}
+	invalidBundleHashSetup := mergeProbeParams(validSetup, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
 	forkID := "00000000-0000-0000-0000-000000000301"
 	return []mutatingHTTPRuntimeErrorProbe{
@@ -579,6 +629,15 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 				}},
 			}
 		}}},
+
+		{Method: "test.setup_entities", Params: invalidBundleHashSetup, Code: UnsupportedBundleHashCode},
+		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleUnavailableCode},
+		{Method: "test.setup_entities", Params: mergeProbeParams(validSetup, map[string]any{"bundle_hash": otherBundleHash}), Code: BundleMismatchCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runForkAvailability.rows[setupRunID] = runForkAvailable(setupRunID, runStartTestBundleHash)
+		}}},
+		{Method: "test.setup_entities", Params: validSetup, Code: BundleDataIntegrityErrorCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.runForkAvailability.rows[setupRunID] = runForkDataIntegrity(setupRunID, runStartTestBundleHash)
+		}}},
 	}
 }
 
@@ -687,6 +746,7 @@ type mutatingRuntimeProbeState struct {
 	forks               *fakeConversationForkLifecycleStore
 	nuke                *recordingRuntimeNukeOwners
 	bundleDelete        *recordingBundleDeleteExecutor
+	testSetup           *mutatingProbeTestSetupStore
 	effects             int
 }
 
@@ -718,6 +778,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 	state.observability.events["evt-1"] = mutatingProbeOriginalEvent("evt-1", []string{"agent-a"}, eventReplayStatusDelivered)
 	state.events = &mutatingProbeEventPublisher{state: state}
 	state.runFork = &mutatingProbeRunForkExecutor{state: state}
+	state.testSetup = &mutatingProbeTestSetupStore{state: state}
 	state.runForkAvailability = &recordingRunForkAvailability{
 		rows: map[string]runbundle.Availability{
 			runID:                  runForkAvailable(runID, runStartTestBundleHash),
@@ -858,6 +919,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		ResetCleaner:          recordingRuntimeNukeCleaner{s.nuke},
 		ResetContainers:       recordingRuntimeNukeContainerStopper{s.nuke},
 		BundleDelete:          s.bundleDelete,
+		TestSetup:             s.testSetup,
 		Source:                source,
 		MailboxApprovalRoutes: map[string]string{"review_request": "mailbox.item_decided"},
 		Bundle: runtimecontracts.BundleIdentity{
@@ -1095,6 +1157,32 @@ func (p *mutatingProbeEventPublisher) CheckDirectRecipients(_ context.Context, _
 	}
 	status.Recipients = append([]string(nil), recipients...)
 	return status, nil
+}
+
+type mutatingProbeTestSetupStore struct {
+	state *mutatingRuntimeProbeState
+	err   error
+}
+
+func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, req store.ScenarioSetupRequest) (store.ScenarioSetupResult, error) {
+	if s.err != nil {
+		return store.ScenarioSetupResult{}, s.err
+	}
+	s.state.recordEffect()
+	entities := make([]store.ScenarioSetupEntityResult, 0, len(req.Entities))
+	for _, entity := range req.Entities {
+		entities = append(entities, store.ScenarioSetupEntityResult{
+			Alias:        strings.TrimSpace(entity.Alias),
+			EntityID:     strings.TrimSpace(entity.EntityID),
+			FlowInstance: strings.Trim(strings.TrimSpace(entity.FlowInstance), "/"),
+			EntityType:   strings.TrimSpace(entity.EntityType),
+			CurrentState: strings.TrimSpace(entity.CurrentState),
+		})
+	}
+	return store.ScenarioSetupResult{
+		RunID:    strings.TrimSpace(req.RunID),
+		Entities: entities,
+	}, nil
 }
 
 type mutatingProbeRunForkExecutor struct {
