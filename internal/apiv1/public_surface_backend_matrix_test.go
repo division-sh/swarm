@@ -385,9 +385,24 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			name: "mutating api ledger rejects stale spec ref",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "bundle.register")
+				entry.Classification = "postgres_only_with_spec_ref"
+				entry.Backends = []string{"postgres_only"}
 				entry.SpecRef = "platform-spec.yaml#api_specification.missing_anchor"
 			},
 			want: "ledger method bundle.register spec_ref platform-spec.yaml#api_specification.missing_anchor does not resolve",
+		},
+		{
+			name: "mutating api ledger rejects broad postgres only publication ref",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "bundle.register")
+				entry.Classification = "postgres_only_with_spec_ref"
+				entry.Backends = []string{"postgres_only"}
+				entry.SpecRef = "platform-spec.yaml#api_specification.method_catalog"
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "artifact", Path: "platform-spec.yaml"},
+				}
+			},
+			want: "ledger method bundle.register postgres_only_with_spec_ref spec_ref platform-spec.yaml#api_specification.method_catalog is publication-only, not backend-support authority",
 		},
 		{
 			name: "mutating api ledger rejects stale issue ref",
@@ -714,6 +729,8 @@ func validatePublicSurfaceMutatingAPIParityLedger(root string, entries []publicS
 				problems = append(problems, fmt.Sprintf("%s postgres_only_with_spec_ref missing spec_ref", label))
 			} else if err := publicSurfaceSpecRefExists(root, entry.SpecRef); err != nil {
 				problems = append(problems, fmt.Sprintf("%s spec_ref %s does not resolve: %v", label, entry.SpecRef, err))
+			} else if publicSurfaceSpecRefIsPublicationOnly(entry.SpecRef) {
+				problems = append(problems, fmt.Sprintf("%s postgres_only_with_spec_ref spec_ref %s is publication-only, not backend-support authority", label, entry.SpecRef))
 			}
 		case "split_with_issue_ref":
 			if entry.SplitIssue == 0 {
@@ -852,6 +869,22 @@ func publicSurfaceSpecRefExists(root, specRef string) error {
 		}
 	}
 	return nil
+}
+
+func publicSurfaceSpecRefIsPublicationOnly(specRef string) bool {
+	_, yamlPath, ok := strings.Cut(strings.TrimSpace(specRef), "#")
+	if !ok {
+		return false
+	}
+	switch strings.Trim(strings.TrimSpace(yamlPath), ".") {
+	case "api_specification.method_catalog",
+		"api_specification.conventions",
+		"api_specification.conventions.idempotency",
+		"api_specification.conventions.idempotency.mutating_methods":
+		return true
+	default:
+		return false
+	}
 }
 
 func publicSurfaceLedgerHasTrackerIssue(refs []publicSurfaceProofRef, issue int, activeTrackers map[string]struct{}) bool {

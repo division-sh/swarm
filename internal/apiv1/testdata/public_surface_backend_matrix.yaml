@@ -28,18 +28,17 @@ active_trackers:
     watchlist: operator_surfaces.v1_openrpc_api_conformance
 mutating_api_parity_ledger:
   - method: bundle.register
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
-    spec_ref: platform-spec.yaml#api_specification.method_catalog
+    classification: split_with_issue_ref
+    split_issue: 1386
     proof_refs:
-      - kind: artifact
-        path: platform-spec.yaml
       - kind: tracker
         issue: 1386
         watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
     notes: >
-      Catalog upload/register behavior remains a persisted-bundle public mutator
-      outside this served lifecycle first slice.
+      Catalog upload/register behavior remains a persisted-bundle public mutator.
+      No exact backend-support spec authority currently declares this method
+      intentionally Postgres-only, so it remains a #1386 split tail rather than
+      a closure-bearing postgres_only exclusion.
   - method: event.publish
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
