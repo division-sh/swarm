@@ -13663,7 +13663,11 @@ cli_specification:
               - server_bundle_fingerprint when --server is supplied
             verify:
               fact_owner: local contract verification
-              json_shape: object with ok, contracts, warnings, and lint_evidence
+              json_shape: >
+                object with ok, contracts, workspace_backend, errors, warnings, and lint_evidence. `errors`, `warnings`,
+                and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
+                `severity`, `location`, and `message` fields. `--json` renders this same object for structured boot
+                verification failures with `ok: false` instead of requiring consumers to parse human stderr.
               human_text_streams:
                 stdout: "successful load-bearing `verify ok: contracts=...` result only"
                 stderr: "analyzer diagnostics and advisory findings, rendered with the boot verification surface severity prefixes `ERROR:`, `WARN:`, or `INFO:`"

@@ -72,6 +72,30 @@ func TestCLICommandCatalogRowsDeclareContractBearingGroups(t *testing.T) {
 	}
 }
 
+func TestCLIVerifyJSONShapeIncludesStructuredFailureFindings(t *testing.T) {
+	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
+	commandSupport := mustMappingValue(t, outputContract, "command_support")
+	implemented := mustMappingValue(t, commandSupport, "implemented_output_mode_first_slice")
+	consumers := mustMappingValue(t, implemented, "consumers")
+	verify := mustMappingValue(t, consumers, "verify")
+	jsonShape := mustMappingValue(t, verify, "json_shape")
+
+	for _, want := range []string{
+		"errors",
+		"workspace_backend",
+		"warnings",
+		"lint_evidence",
+		"check_id",
+		"severity",
+		"location",
+		"message",
+		"ok: false",
+		"human stderr",
+	} {
+		assertScalarContains(t, jsonShape, want)
+	}
+}
+
 func TestCLITopologyRevisionV22IsImplementedHistoricalRecord(t *testing.T) {
 	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
 	assertScalarValue(t, mustMappingValue(t, revision, "status"), "implemented_historical_record")
