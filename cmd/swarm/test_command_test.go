@@ -15,6 +15,7 @@ import (
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -702,8 +703,73 @@ func TestSwarmTestRunsSetupPrestateCatalogCompanions(t *testing.T) {
 			if len(doc.Expect.Entities) != 1 || doc.Expect.Entities[0].Ref != "entity" || !doc.Expect.Entities[0].StateSet {
 				t.Fatalf("scenario entity expectations = %#v, want setup ref current_state assertion", doc.Expect.Entities)
 			}
+			assertSetupPrestateVisibleManifestations(t, tc.tier, tc.packageName, contractsPath, doc.Expect.Entities[0])
 			assertSwarmTestScenarioThroughPublicRPC(t, contractsPath, doc)
 		})
+	}
+}
+
+func assertSetupPrestateVisibleManifestations(t *testing.T, tier, packageName, contractsPath string, entityExpect scenarioEntityExpect) {
+	t.Helper()
+	fields, gates := loadCatalogExpectedFieldGateManifestations(t, contractsPath)
+	key := tier + "/" + packageName
+	if override, ok := publicScenarioFieldManifestationOverrides()[key]; ok {
+		fields = override
+	}
+	if split, ok := splitCatalogExpectedGateManifestations()[key]; ok {
+		for gate := range split {
+			delete(gates, gate)
+		}
+	}
+	if len(fields) > 0 {
+		if !entityExpect.FieldsSet {
+			t.Fatalf("%s expected public field manifestations %#v, but companion has no expect.entities.fields", key, fields)
+		}
+		if err := assertScenarioJSONEqual(key+" expect.entities.fields", entityExpect.Fields, fields); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(gates) > 0 {
+		if !entityExpect.GatesSet {
+			t.Fatalf("%s expected public gate manifestations %#v, but companion has no expect.entities.gates", key, gates)
+		}
+		if err := assertScenarioJSONEqual(key+" expect.entities.gates", entityExpect.Gates, gates); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func loadCatalogExpectedFieldGateManifestations(t *testing.T, contractsPath string) (map[string]any, map[string]any) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(contractsPath, "expected.yaml"))
+	if err != nil {
+		t.Fatalf("read expected.yaml: %v", err)
+	}
+	var doc struct {
+		Expected struct {
+			EntityFields map[string]any `yaml:"entity_fields"`
+			Gates        map[string]any `yaml:"gates"`
+		} `yaml:"expected"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse expected.yaml: %v", err)
+	}
+	fields := cloneAnyMap(doc.Expected.EntityFields)
+	gates := cloneAnyMap(doc.Expected.Gates)
+	return fields, gates
+}
+
+func publicScenarioFieldManifestationOverrides() map[string]map[string]any {
+	return map[string]map[string]any{
+		"tier2-accumulation/test-accumulate-with-compute": {"composite": 81},
+	}
+}
+
+func splitCatalogExpectedGateManifestations() map[string]map[string]string {
+	return map[string]map[string]string{
+		"tier1-primitives/test-clear-gates": {
+			"g1_check": "private catalog gate without a declared public gate owner",
+		},
 	}
 }
 
