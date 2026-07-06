@@ -35,6 +35,61 @@ func TestNormalizeFieldValue_AcceptsBuiltInNumberAndJSONTypes(t *testing.T) {
 	}
 }
 
+func TestNormalizeFieldValue_EnforcesSchemaRefinements(t *testing.T) {
+	minLength := 40
+	maxLength := 40
+	minScore := 0.0
+	maxScore := 1.0
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"source_ref": {
+					Type: "text",
+					Refinements: runtimecontracts.SchemaRefinements{
+						Pattern: "^[0-9a-f]{40}$",
+						Length:  runtimecontracts.SchemaLengthRefinement{Min: &minLength, Max: &maxLength},
+					},
+				},
+				"score": {
+					Type:        "number",
+					Refinements: runtimecontracts.SchemaRefinements{Range: runtimecontracts.SchemaRangeRefinement{Min: &minScore, Max: &maxScore}},
+				},
+			},
+		},
+	}
+
+	if _, err := NormalizeFieldValue(contract, "source_ref", "0123456789abcdef0123456789abcdef01234567"); err != nil {
+		t.Fatalf("NormalizeFieldValue(source_ref): %v", err)
+	}
+	if _, err := NormalizeFieldValue(contract, "source_ref", "not-a-sha"); err == nil || !strings.Contains(err.Error(), "pattern") {
+		t.Fatalf("NormalizeFieldValue(source_ref bad) = %v, want pattern failure", err)
+	}
+	if _, err := NormalizeFieldValue(contract, "score", 1.5); err == nil || !strings.Contains(err.Error(), "<=") {
+		t.Fatalf("NormalizeFieldValue(score bad) = %v, want range failure", err)
+	}
+}
+
+func TestMaterialize_EnforcesSchemaRefinementEquality(t *testing.T) {
+	contract := Contract{
+		Entity: runtimecontracts.EntityContract{
+			Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"component": {Type: "text"},
+				"owner": {
+					Type:        "text",
+					Refinements: runtimecontracts.SchemaRefinements{EqualTo: "component"},
+				},
+			},
+		},
+	}
+
+	if _, err := Materialize(contract, map[string]any{"component": "deploy", "owner": "deploy"}); err != nil {
+		t.Fatalf("Materialize matching equality: %v", err)
+	}
+	if _, err := Materialize(contract, map[string]any{"component": "deploy", "owner": "other"}); err == nil || !strings.Contains(err.Error(), "must equal") {
+		t.Fatalf("Materialize mismatched equality = %v, want equality failure", err)
+	}
+}
+
 func TestMaterialize_AcceptsBracketFormListRefs(t *testing.T) {
 	contract := Contract{
 		Entity: runtimecontracts.EntityContract{

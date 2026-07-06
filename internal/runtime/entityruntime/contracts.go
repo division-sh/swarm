@@ -3,9 +3,11 @@ package entityruntime
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -22,10 +24,11 @@ type Contract struct {
 }
 
 type Field struct {
-	Path      string
-	Type      string
-	LeafKind  string
-	FieldDecl runtimecontracts.EntityFieldDecl
+	Path        string
+	Type        string
+	LeafKind    string
+	FieldDecl   runtimecontracts.EntityFieldDecl
+	Refinements runtimecontracts.SchemaRefinements
 }
 
 type WriteTarget struct {
@@ -322,6 +325,10 @@ func Materialize(contract Contract, provided map[string]any) (map[string]any, er
 			if err != nil {
 				return nil, fmt.Errorf("materialize %s: %w", name, err)
 			}
+			value, err = validateValueRefinements(contract, name, decl.Type, decl.Refinements, value)
+			if err != nil {
+				return nil, err
+			}
 		} else {
 			var err error
 			value, err = NormalizeFieldValue(contract, name, value)
@@ -339,6 +346,9 @@ func Materialize(contract Contract, provided map[string]any) (map[string]any, er
 		if _, ok := contract.Entity.Fields[name]; !ok {
 			return nil, fmt.Errorf("undeclared field %s", name)
 		}
+	}
+	if err := validateEntityFieldEqualities("entity", contract.Entity.Fields, out); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -373,7 +383,11 @@ func NormalizeFieldValue(contract Contract, fieldName string, value any) (any, e
 	if err != nil {
 		return nil, err
 	}
-	return normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
+	normalized, err := normalizeValueForType(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), value)
+	if err != nil {
+		return nil, err
+	}
+	return validateValueRefinements(contract, strings.TrimSpace(field.Path), strings.TrimSpace(field.Type), field.Refinements, normalized)
 }
 
 func EntityWritePath(target string) (string, bool, error) {
@@ -443,6 +457,7 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 		return Field{}, err
 	}
 	currentType := strings.TrimSpace(decl.Type)
+	currentRefinements := decl.Refinements
 	for _, segment := range segments[1:] {
 		segment = strings.TrimSpace(segment)
 		if segment == "" {
@@ -457,9 +472,10 @@ func ResolveFieldPath(contract Contract, path string) (Field, error) {
 			return Field{}, fmt.Errorf("undeclared path %s", path)
 		}
 		currentType = strings.TrimSpace(spec.Type)
+		currentRefinements = spec.Refinements
 	}
 	kind := pathKind(contract, currentType)
-	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl}, nil
+	return Field{Path: path, Type: currentType, LeafKind: kind, FieldDecl: decl, Refinements: currentRefinements}, nil
 }
 
 func ResolveLeafField(contract Contract, path string) (Field, error) {
@@ -672,10 +688,18 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 				if err != nil {
 					return nil, err
 				}
+				normalized, err = validateValueRefinements(contract, joinFieldName(fieldName, key), spec.Type, spec.Refinements, normalized)
+				if err != nil {
+					return nil, err
+				}
 				out[key] = normalized
 				continue
 			}
 			defaulted, err := defaultValue(contract, spec.Type, nil)
+			if err != nil {
+				return nil, err
+			}
+			defaulted, err = validateValueRefinements(contract, joinFieldName(fieldName, key), spec.Type, spec.Refinements, defaulted)
 			if err != nil {
 				return nil, err
 			}
@@ -690,10 +714,122 @@ func normalizeValueForType(contract Contract, fieldName, typeRef string, value a
 				return nil, fieldTypeError(joinFieldName(fieldName, key), "is undeclared")
 			}
 		}
+		if err := validateTypeFieldEqualities(fieldName, named.Fields, out); err != nil {
+			return nil, err
+		}
 		return out, nil
 	default:
 		return nil, fieldTypeError(fieldName, "has unsupported type "+typeRef)
 	}
+}
+
+func validateValueRefinements(contract Contract, fieldName, typeRef string, refinements runtimecontracts.SchemaRefinements, value any) (any, error) {
+	if refinements.Empty() {
+		return value, nil
+	}
+	if pattern := strings.TrimSpace(refinements.Pattern); pattern != "" {
+		text, ok := value.(string)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "must be string for pattern refinement")
+		}
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, fieldTypeError(fieldName, "has invalid pattern refinement")
+		}
+		if !compiled.MatchString(text) {
+			return nil, fieldTypeError(fieldName, "must match pattern")
+		}
+	}
+	if !refinements.Length.Empty() {
+		length, ok := refinementLength(value)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "must be string or list for length refinement")
+		}
+		if min := refinements.Length.Min; min != nil && length < *min {
+			return nil, fieldTypeError(fieldName, fmt.Sprintf("length must be >= %d", *min))
+		}
+		if max := refinements.Length.Max; max != nil && length > *max {
+			return nil, fieldTypeError(fieldName, fmt.Sprintf("length must be <= %d", *max))
+		}
+	}
+	if !refinements.Range.Empty() {
+		if !isIntegerType(contract, typeRef) && !isNumericType(contract, typeRef) {
+			return nil, fieldTypeError(fieldName, "must be numeric for range refinement")
+		}
+		number, ok := runtimesharedjson.AsFloat64(value)
+		if !ok {
+			return nil, fieldTypeError(fieldName, "must be numeric for range refinement")
+		}
+		if min := refinements.Range.Min; min != nil && number < *min {
+			return nil, fieldTypeError(fieldName, fmt.Sprintf("must be >= %v", *min))
+		}
+		if max := refinements.Range.Max; max != nil && number > *max {
+			return nil, fieldTypeError(fieldName, fmt.Sprintf("must be <= %v", *max))
+		}
+	}
+	return value, nil
+}
+
+func refinementLength(value any) (int, bool) {
+	switch typed := value.(type) {
+	case string:
+		return utf8.RuneCountInString(typed), true
+	default:
+		items, ok := listValues(value)
+		if !ok {
+			return 0, false
+		}
+		return len(items), true
+	}
+}
+
+func validateEntityFieldEqualities(context string, fields map[string]runtimecontracts.EntityFieldDecl, values map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	for name, field := range fields {
+		name = strings.TrimSpace(name)
+		target := strings.TrimSpace(field.Refinements.EqualTo)
+		if name == "" || target == "" {
+			continue
+		}
+		if err := validateEqualityValue(context, name, target, values); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTypeFieldEqualities(context string, fields map[string]runtimecontracts.TypeFieldSpec, values map[string]any) error {
+	if len(fields) == 0 {
+		return nil
+	}
+	for name, field := range fields {
+		name = strings.TrimSpace(name)
+		target := strings.TrimSpace(field.Refinements.EqualTo)
+		if name == "" || target == "" {
+			continue
+		}
+		if err := validateEqualityValue(context, name, target, values); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEqualityValue(context, name, target string, values map[string]any) error {
+	left, ok := values[name]
+	if !ok {
+		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target)+" but source is missing")
+	}
+	right, ok := values[target]
+	if !ok {
+		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target)+" but target is missing")
+	}
+	if !reflect.DeepEqual(left, right) {
+		return fieldTypeError(joinFieldName(context, name), "must equal "+joinFieldName(context, target))
+	}
+	return nil
 }
 
 func leafKind(contract Contract, typeRef string) (string, error) {

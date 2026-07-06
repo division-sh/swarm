@@ -140,6 +140,66 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsUnsupportedHandlerA
 	}
 }
 
+func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefinements(t *testing.T) {
+	minLength := 1
+	bundle := &WorkflowContractBundle{
+		Events: map[string]EventCatalogEntry{
+			"deploy.requested": {
+				Payload: EventPayloadSpec{
+					Properties: map[string]EventFieldSpec{
+						"score": {
+							Type:        "integer",
+							Refinements: SchemaRefinements{Pattern: "^[0-9]+$"},
+						},
+						"component": {Type: "text"},
+						"owner": {
+							Type:        "text",
+							Refinements: SchemaRefinements{EqualTo: "missing"},
+						},
+					},
+				},
+			},
+		},
+		RootTypes: TypeCatalogDocument{
+			Types: map[string]NamedTypeDecl{
+				"Manifest": {
+					Fields: map[string]TypeFieldSpec{
+						"files": {
+							Type:        "integer",
+							Refinements: SchemaRefinements{Length: SchemaLengthRefinement{Min: &minLength}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil {
+		t.Fatal("expected invalid schema refinements to fail")
+	}
+	for _, want := range []string{
+		"pattern refinement requires string/text type",
+		"equal_to references undeclared sibling field",
+		"length refinement requires string/text or list type",
+	} {
+		if !contractErrorContains(err, want) {
+			t.Fatalf("load validation error = %v, want %q", err, want)
+		}
+	}
+}
+
+func TestEventFieldSpecDecodeRejectsMalformedSchemaRefinement(t *testing.T) {
+	var field EventFieldSpec
+	err := yaml.Unmarshal([]byte(`
+type: text
+pattern: "["
+`), &field)
+	if err == nil || !strings.Contains(err.Error(), "pattern") {
+		t.Fatalf("EventFieldSpec decode error = %v, want pattern failure", err)
+	}
+}
+
 func TestLoadWorkflowContractBundle_PreservesEvidenceTarget(t *testing.T) {
 	bundle := loadCurrentWorkflowBundleForTest(t)
 	for _, node := range bundle.Nodes {

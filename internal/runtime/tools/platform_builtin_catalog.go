@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
@@ -199,7 +200,7 @@ func entityToolSchemaEntriesForContract(contract entityruntime.Contract, readCon
 		if err != nil {
 			continue
 		}
-		fieldProperties[name] = entityContractJSONSchema(contract, decl.Type, map[string]struct{}{})
+		fieldProperties[name] = entityContractJSONSchemaWithRefinements(contract, decl.Type, decl.Refinements, true, map[string]struct{}{})
 	}
 	selectorEnum := make([]any, 0, len(selectableSelectors))
 	for _, name := range selectableSelectors {
@@ -371,7 +372,7 @@ func entityToolReadFilterPropertySchema(contracts []entityruntime.Contract, name
 		if err != nil {
 			continue
 		}
-		return entityContractJSONSchema(contract, field.Type, map[string]struct{}{})
+		return entityContractJSONSchemaWithRefinements(contract, field.Type, field.Refinements, false, map[string]struct{}{})
 	}
 	return map[string]any{}
 }
@@ -532,7 +533,7 @@ func entityContractJSONSchema(contract entityruntime.Contract, typeRef string, s
 		sort.Strings(names)
 		for _, name := range names {
 			spec := named.Fields[name]
-			props[name] = entityContractJSONSchema(contract, spec.Type, seen)
+			props[name] = entityContractJSONSchemaWithRefinements(contract, spec.Type, spec.Refinements, true, seen)
 			required = append(required, name)
 		}
 		delete(seen, typeName)
@@ -541,6 +542,46 @@ func entityContractJSONSchema(contract entityruntime.Contract, typeRef string, s
 		return schema
 	default:
 		return map[string]any{}
+	}
+}
+
+func entityContractJSONSchemaWithRefinements(contract entityruntime.Contract, typeRef string, refinements runtimecontracts.SchemaRefinements, includeEquality bool, seen map[string]struct{}) map[string]any {
+	schema := entityContractJSONSchema(contract, typeRef, seen)
+	applyEntitySchemaRefinements(schema, refinements, includeEquality)
+	return schema
+}
+
+func applyEntitySchemaRefinements(schema map[string]any, refinements runtimecontracts.SchemaRefinements, includeEquality bool) {
+	if len(schema) == 0 || refinements.Empty() {
+		return
+	}
+	if value := strings.TrimSpace(refinements.Pattern); value != "" {
+		schema["pattern"] = value
+	}
+	if min := refinements.Length.Min; min != nil {
+		if strings.TrimSpace(asString(schema["type"])) == "array" {
+			schema["minItems"] = *min
+		} else {
+			schema["minLength"] = *min
+		}
+	}
+	if max := refinements.Length.Max; max != nil {
+		if strings.TrimSpace(asString(schema["type"])) == "array" {
+			schema["maxItems"] = *max
+		} else {
+			schema["maxLength"] = *max
+		}
+	}
+	if min := refinements.Range.Min; min != nil {
+		schema["minimum"] = *min
+	}
+	if max := refinements.Range.Max; max != nil {
+		schema["maximum"] = *max
+	}
+	if includeEquality {
+		if value := strings.TrimSpace(refinements.EqualTo); value != "" {
+			schema["x-swarm-equalTo"] = value
+		}
 	}
 }
 

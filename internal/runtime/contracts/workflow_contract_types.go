@@ -681,8 +681,23 @@ type EventPayloadSpec struct {
 	Required   []string                  `yaml:"required"`
 }
 type EventFieldSpec struct {
-	Type        string `yaml:"type"`
-	Description string `yaml:"description"`
+	Type        string            `yaml:"type"`
+	Description string            `yaml:"description"`
+	Refinements SchemaRefinements `yaml:"-"`
+}
+type SchemaLengthRefinement struct {
+	Min *int `yaml:"min"`
+	Max *int `yaml:"max"`
+}
+type SchemaRangeRefinement struct {
+	Min *float64 `yaml:"min"`
+	Max *float64 `yaml:"max"`
+}
+type SchemaRefinements struct {
+	Pattern string                 `yaml:"pattern"`
+	Length  SchemaLengthRefinement `yaml:"length"`
+	Range   SchemaRangeRefinement  `yaml:"range"`
+	EqualTo string                 `yaml:"equal_to"`
 }
 type SchemaLiteral struct {
 	Node yaml.Node
@@ -793,8 +808,9 @@ type NamedTypeDecl struct {
 }
 
 type TypeFieldSpec struct {
-	Type        string `yaml:"type"`
-	Description string `yaml:"description"`
+	Type        string            `yaml:"type"`
+	Description string            `yaml:"description"`
+	Refinements SchemaRefinements `yaml:"-"`
 }
 
 type EntityContractsDocument map[string]EntityContract
@@ -806,15 +822,16 @@ type EntityContract struct {
 }
 
 type EntityFieldDecl struct {
-	Type               string         `yaml:"type"`
-	Initial            any            `yaml:"initial"`
-	Indexed            bool           `yaml:"indexed"`
-	Immutable          bool           `yaml:"immutable"`
-	Description        string         `yaml:"description"`
-	MaterializeFrom    string         `yaml:"materialize_from"`
-	Project            map[string]any `yaml:"project"`
-	UnusedReason       string         `yaml:"_unused_reason"`
-	UnusedReaderReason string         `yaml:"_unused_reader_reason"`
+	Type               string            `yaml:"type"`
+	Initial            any               `yaml:"initial"`
+	Indexed            bool              `yaml:"indexed"`
+	Immutable          bool              `yaml:"immutable"`
+	Description        string            `yaml:"description"`
+	Refinements        SchemaRefinements `yaml:"-"`
+	MaterializeFrom    string            `yaml:"materialize_from"`
+	Project            map[string]any    `yaml:"project"`
+	UnusedReason       string            `yaml:"_unused_reason"`
+	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }
 type ProjectPackageRef struct {
 	ID      string          `yaml:"id"`

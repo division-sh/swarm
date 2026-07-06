@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -692,6 +693,7 @@ func (f *TypeFieldSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	f.Type = parsed.Type
 	f.Description = parsed.Description
+	f.Refinements = parsed.Refinements
 	return nil
 }
 
@@ -796,6 +798,7 @@ func (f *EntityFieldDecl) UnmarshalYAML(node *yaml.Node) error {
 	f.Indexed = parsed.Indexed
 	f.Immutable = parsed.Immutable
 	f.Description = parsed.Description
+	f.Refinements = parsed.Refinements
 	f.MaterializeFrom = parsed.MaterializeFrom
 	f.Project = parsed.Project
 	f.UnusedReason = parsed.UnusedReason
@@ -838,6 +841,10 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 	allowed := map[string]struct{}{
 		"type":        {},
 		"description": {},
+		"pattern":     {},
+		"length":      {},
+		"range":       {},
+		"equal_to":    {},
 	}
 	if opts.AllowInitial {
 		allowed["initial"] = struct{}{}
@@ -899,6 +906,34 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				return wave1ParsedFieldNode{}, err
 			}
 			field.Description = text
+		case "pattern":
+			pattern, err := decodeSchemaRefinementPattern(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, fmt.Errorf("%s pattern: %w", opts.Context, err)
+			}
+			field.Refinements.Pattern = pattern
+		case "length":
+			length, err := decodeSchemaLengthRefinement(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, fmt.Errorf("%s length: %w", opts.Context, err)
+			}
+			field.Refinements.Length = length
+		case "range":
+			bounds, err := decodeSchemaRangeRefinement(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, fmt.Errorf("%s range: %w", opts.Context, err)
+			}
+			field.Refinements.Range = bounds
+		case "equal_to":
+			target, err := decodeScalarStringNode(value)
+			if err != nil {
+				return wave1ParsedFieldNode{}, err
+			}
+			target = strings.TrimSpace(target)
+			if target == "" {
+				return wave1ParsedFieldNode{}, fmt.Errorf("%s equal_to field is required", opts.Context)
+			}
+			field.Refinements.EqualTo = target
 		case "initial":
 			var initial any
 			if err := value.Decode(&initial); err != nil {
@@ -962,6 +997,115 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 		return wave1ParsedFieldNode{}, fmt.Errorf("%s _unused_reader_reason must be at least 10 characters", opts.Context)
 	}
 	return field, nil
+}
+
+func decodeSchemaRefinementPattern(node *yaml.Node) (string, error) {
+	pattern, err := decodeScalarStringNode(node)
+	if err != nil {
+		return "", err
+	}
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return "", fmt.Errorf("must not be empty")
+	}
+	if _, err := regexp.Compile(pattern); err != nil {
+		return "", fmt.Errorf("must compile as a regular expression: %w", err)
+	}
+	return pattern, nil
+}
+
+func decodeSchemaLengthRefinement(node *yaml.Node) (SchemaLengthRefinement, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return SchemaLengthRefinement{}, fmt.Errorf("must be a mapping with min and/or max")
+	}
+	var out SchemaLengthRefinement
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "min":
+			min, err := decodeIntNode(value)
+			if err != nil {
+				return SchemaLengthRefinement{}, fmt.Errorf("min: %w", err)
+			}
+			out.Min = &min
+		case "max":
+			max, err := decodeIntNode(value)
+			if err != nil {
+				return SchemaLengthRefinement{}, fmt.Errorf("max: %w", err)
+			}
+			out.Max = &max
+		default:
+			return SchemaLengthRefinement{}, fmt.Errorf("UNDEFINED-FIELD: length field %q not in platform spec", key)
+		}
+	}
+	if out.Min == nil && out.Max == nil {
+		return SchemaLengthRefinement{}, fmt.Errorf("must declare min and/or max")
+	}
+	if out.Min != nil && *out.Min < 0 {
+		return SchemaLengthRefinement{}, fmt.Errorf("min must be >= 0")
+	}
+	if out.Max != nil && *out.Max < 0 {
+		return SchemaLengthRefinement{}, fmt.Errorf("max must be >= 0")
+	}
+	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
+		return SchemaLengthRefinement{}, fmt.Errorf("min must be <= max")
+	}
+	return out, nil
+}
+
+func decodeSchemaRangeRefinement(node *yaml.Node) (SchemaRangeRefinement, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return SchemaRangeRefinement{}, fmt.Errorf("must be a mapping with min and/or max")
+	}
+	var out SchemaRangeRefinement
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "min":
+			min, err := decodeFloatNode(value)
+			if err != nil {
+				return SchemaRangeRefinement{}, fmt.Errorf("min: %w", err)
+			}
+			out.Min = &min
+		case "max":
+			max, err := decodeFloatNode(value)
+			if err != nil {
+				return SchemaRangeRefinement{}, fmt.Errorf("max: %w", err)
+			}
+			out.Max = &max
+		default:
+			return SchemaRangeRefinement{}, fmt.Errorf("UNDEFINED-FIELD: range field %q not in platform spec", key)
+		}
+	}
+	if out.Min == nil && out.Max == nil {
+		return SchemaRangeRefinement{}, fmt.Errorf("must declare min and/or max")
+	}
+	if out.Min != nil && out.Max != nil && *out.Min > *out.Max {
+		return SchemaRangeRefinement{}, fmt.Errorf("min must be <= max")
+	}
+	return out, nil
+}
+
+func decodeIntNode(node *yaml.Node) (int, error) {
+	var value int
+	if err := node.Decode(&value); err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+func decodeFloatNode(node *yaml.Node) (float64, error) {
+	var value float64
+	if err := node.Decode(&value); err != nil {
+		return 0, err
+	}
+	return value, nil
 }
 
 func decodeProjectionMapNode(node *yaml.Node) (map[string]any, error) {
@@ -1101,6 +1245,7 @@ type wave1ParsedFieldNode struct {
 	Indexed            bool
 	Immutable          bool
 	Description        string
+	Refinements        SchemaRefinements
 	MaterializeFrom    string
 	Project            map[string]any
 	UnusedReason       string

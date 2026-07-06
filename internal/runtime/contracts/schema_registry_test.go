@@ -49,6 +49,60 @@ func TestEventSchemaRegistryFromCatalog_NormalizesAnnotatedFieldTypes(t *testing
 	}
 }
 
+func TestEventSchemaRegistryFromCatalog_ProjectsSchemaRefinements(t *testing.T) {
+	minLength := 40
+	maxLength := 40
+	minScore := 0.0
+	maxScore := 1.0
+	minFiles := 1
+	schema := eventSchemaFromCatalogEntry("deploy.requested", EventCatalogEntry{
+		Payload: EventPayloadSpec{
+			Properties: map[string]EventFieldSpec{
+				"source_ref": {
+					Type: "text",
+					Refinements: SchemaRefinements{
+						Pattern: "^[0-9a-f]{40}$",
+						Length:  SchemaLengthRefinement{Min: &minLength, Max: &maxLength},
+					},
+				},
+				"source_repo_url": {Type: "text"},
+				"score": {
+					Type:        "numeric",
+					Refinements: SchemaRefinements{Range: SchemaRangeRefinement{Min: &minScore, Max: &maxScore}},
+				},
+				"file_manifest": {
+					Type:        "[text]",
+					Refinements: SchemaRefinements{Length: SchemaLengthRefinement{Min: &minFiles}},
+				},
+				"component": {Type: "text"},
+				"owner": {
+					Type:        "text",
+					Refinements: SchemaRefinements{EqualTo: "component"},
+				},
+			},
+			Required: []string{"source_ref", "source_repo_url", "file_manifest", "score", "component", "owner"},
+		},
+	}, TypeCatalogDocument{})
+
+	props, _ := schema.Schema["properties"].(map[string]any)
+	sourceRef, _ := props["source_ref"].(map[string]any)
+	if sourceRef["pattern"] != "^[0-9a-f]{40}$" || sourceRef["minLength"] != 40 || sourceRef["maxLength"] != 40 {
+		t.Fatalf("source_ref refinements = %#v", sourceRef)
+	}
+	score, _ := props["score"].(map[string]any)
+	if score["minimum"] != 0.0 || score["maximum"] != 1.0 {
+		t.Fatalf("score refinements = %#v", score)
+	}
+	fileManifest, _ := props["file_manifest"].(map[string]any)
+	if fileManifest["minItems"] != 1 {
+		t.Fatalf("file_manifest refinements = %#v", fileManifest)
+	}
+	owner, _ := props["owner"].(map[string]any)
+	if owner["x-swarm-equalTo"] != "component" {
+		t.Fatalf("owner refinements = %#v", owner)
+	}
+}
+
 func TestPlatformEventCatalogImplicitRequiredSkipsNullableFields(t *testing.T) {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(`
