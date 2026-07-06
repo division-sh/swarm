@@ -5889,7 +5889,6 @@ tool_model:
     - manual/declarative webhook registration for configured provider triggers
     - served `/webhooks/{entity}/{provider}` route mounted on the supported API listener
     - selected runtime store wiring through `runtime.Stores.InboundStore`
-    - static built-in provider-trigger manifest loading for selected first-class control providers
     - verified first-party provider-trigger pack loading through the same envelope path future external packs must use
     - provider-specific signature policy and signing-secret lookup
     - provider delivery-id extraction and dedupe-key authority
@@ -5916,9 +5915,10 @@ tool_model:
     pack_envelope_source_authority:
       owner: internal/packs universal envelope plus internal/providertriggers trigger body verifier
       status: >
-        E5 first slice. Provider-trigger packs wrap the frozen provider-trigger manifest vocabulary in a universal pack
-        envelope before registration. The envelope is a trust/admission artifact, not a provider-specific adapter and not a
-        new provider-trigger vocabulary owner. Runtime config declares external provider-trigger pack directories at
+        E5 source-authority path. Provider-trigger packs wrap the frozen provider-trigger manifest vocabulary in a
+        universal pack envelope before registration. The envelope is a trust/admission artifact, not a provider-specific
+        adapter and not a new provider-trigger vocabulary owner. First-party configured-provider manifests are platform
+        packs, not embed-only trust fixtures. Runtime config declares external provider-trigger pack directories at
         `provider_triggers.packs.external_dirs`; `swarm serve` resolves those directories at boot and fails closed before
         runtime construction if any declared pack cannot be verified.
       envelope_fields:
@@ -5959,15 +5959,15 @@ tool_model:
       - parse and validate trigger manifest through `internal/providertriggers`
       - derive trigger capabilities and requires mechanically from the manifest
       - compare declared capabilities/requires to derived values
-      - reject provider-name collisions across built-in controls, first-party packs, and external packs
+      - reject provider-name collisions across first-party packs and external packs
       - register only verified trigger manifests
       trust_tiers: >
         Trust tiers differ by provenance value and by readback/operational policy only. First-party bundled packs and
         future external packs use the identical verifier path. No pack is trusted merely because the platform ships it.
       shadowing_policy: >
-        No provider-name shadowing is allowed in this slice. Any duplicate normalized provider name across built-in control
-        manifests, first-party bundled packs, or external packs fails closed and reports both sources. Explicit override or
-        replacement semantics require a later gated affordance.
+        No provider-name shadowing is allowed in this slice. Any duplicate normalized provider name across first-party
+        bundled packs or external packs fails closed and reports both sources. Explicit override or replacement semantics
+        require a later gated affordance.
       capability_surface: >
         Provider-trigger pack readback renders CAN/CANNOT truth from the verified envelope after derivation/equality checks.
         The first trigger surface includes CAN receive HTTPS at `/webhooks/{entity}/{provider}`, CAN verify the named signing
@@ -5979,10 +5979,10 @@ tool_model:
         A missing deployment binding for a declared signing secret does not reject pack import. Runtime webhook admission
         still fails closed before signature verification, dedupe marker persistence, or event publish when a required
         signing secret is unavailable.
-      first_slice_extraction: >
-        Stripe and Slack provider-trigger manifests are first-party bundled packs loaded through this envelope path. GitHub
-        remains a temporary built-in control for the E5 extraction proof only; that control role is not a permanent built-in
-        exemption.
+      first_party_pack_migration: >
+        GitHub, Slack, Stripe, Twilio, Shopify, Typeform, and Intercom provider-trigger manifests are first-party bundled
+        packs loaded through this envelope path. There is no permanent built-in-control exemption for configured-provider
+        manifests.
       non_goals:
       - provider-trigger manifest vocabulary changes
       - pack signing, remote distribution, ownership transfer, or marketplace trust economics

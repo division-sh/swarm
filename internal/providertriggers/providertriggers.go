@@ -28,7 +28,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed manifests/*.yaml packs/*/pack.yaml packs/*/trigger.yaml
+//go:embed packs/*/pack.yaml packs/*/trigger.yaml
 var builtinManifestFS embed.FS
 
 const (
@@ -137,41 +137,11 @@ func defaultManifestSources() ([]ManifestSource, error) {
 }
 
 func defaultManifestSourcesAndPacks(runningVersion string) ([]ManifestSource, []LoadedPack, error) {
-	manifestSources, err := builtinManifestSources()
-	if err != nil {
-		return nil, nil, err
-	}
 	packSources, loadedPacks, err := loadPackSourcesFS(builtinManifestFS, triggerPackRoot, runningVersion, packs.ProvenancePlatform)
 	if err != nil {
 		return nil, nil, err
 	}
-	return append(manifestSources, packSources...), loadedPacks, nil
-}
-
-func builtinManifestSources() ([]ManifestSource, error) {
-	entries, err := builtinManifestFS.ReadDir("manifests")
-	if err != nil {
-		return nil, err
-	}
-	sources := make([]ManifestSource, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
-		}
-		body, err := builtinManifestFS.ReadFile("manifests/" + entry.Name())
-		if err != nil {
-			return nil, err
-		}
-		manifest, err := ParseManifest(body)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
-		}
-		sources = append(sources, ManifestSource{
-			Manifest: manifest,
-			Source:   "builtin:manifests/" + entry.Name(),
-		})
-	}
-	return sources, nil
+	return packSources, loadedPacks, nil
 }
 
 func NewRegistry(manifests ...Manifest) (*Registry, error) {

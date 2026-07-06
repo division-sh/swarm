@@ -1,0 +1,23 @@
+id: provider.twilio
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: trigger
+manifest_hash: sha256:84e0477d474fb5470012e1cb4cf533dc455e60ceaa42a6c74fc2a78740f0b18f
+provenance:
+  source: platform
+capabilities:
+  can:
+    receive_https_route: /webhooks/{entity}/twilio
+    verify_secret: webhook_signing.twilio
+    emit_events:
+      - inbound.twilio
+    persist_dedupe_markers: true
+  cannot:
+    - emit_undeclared_events
+    - run_code_before_admission
+    - touch_unbound_resources
+requires:
+  secrets:
+    - webhook_signing.twilio
+tests:
+  - providertriggers/twilio

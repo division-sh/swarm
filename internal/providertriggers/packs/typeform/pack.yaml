@@ -1,0 +1,23 @@
+id: provider.typeform
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: trigger
+manifest_hash: sha256:1f857421b6d2081bd29ce3ad6f77f7f6674d152baf39994a4035b995a931dc8f
+provenance:
+  source: platform
+capabilities:
+  can:
+    receive_https_route: /webhooks/{entity}/typeform
+    verify_secret: webhook_signing.typeform
+    emit_events:
+      - inbound.typeform
+    persist_dedupe_markers: true
+  cannot:
+    - emit_undeclared_events
+    - run_code_before_admission
+    - touch_unbound_resources
+requires:
+  secrets:
+    - webhook_signing.typeform
+tests:
+  - providertriggers/typeform

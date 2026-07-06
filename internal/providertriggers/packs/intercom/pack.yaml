@@ -1,0 +1,23 @@
+id: provider.intercom
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: trigger
+manifest_hash: sha256:6d27868fe02eff5a7fbf99c34462d3d9151e468c9592a0015ae94e05ac256243
+provenance:
+  source: platform
+capabilities:
+  can:
+    receive_https_route: /webhooks/{entity}/intercom
+    verify_secret: webhook_signing.intercom
+    emit_events:
+      - inbound.intercom
+    persist_dedupe_markers: true
+  cannot:
+    - emit_undeclared_events
+    - run_code_before_admission
+    - touch_unbound_resources
+requires:
+  secrets:
+    - webhook_signing.intercom
+tests:
+  - providertriggers/intercom

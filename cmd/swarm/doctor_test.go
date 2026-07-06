@@ -109,10 +109,23 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 			t.Fatalf("report missing finding %q: %#v", want, report.Findings)
 		}
 	}
-	for _, want := range []string{"provider_trigger_pack_slack", "provider_trigger_pack_stripe"} {
+	for _, want := range []string{
+		"provider_trigger_pack_github",
+		"provider_trigger_pack_intercom",
+		"provider_trigger_pack_shopify",
+		"provider_trigger_pack_slack",
+		"provider_trigger_pack_stripe",
+		"provider_trigger_pack_twilio",
+		"provider_trigger_pack_typeform",
+	} {
 		if !localPreflightReportHasCode(report, want) {
 			t.Fatalf("report missing provider pack finding %q: %#v", want, report.Findings)
 		}
+	}
+	if !localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CAN receive HTTPS route /webhooks/{entity}/github") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CANNOT emit_undeclared_events") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "requires webhook_signing.github=UNBOUND") {
+		t.Fatalf("github provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
 	if !localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CAN receive HTTPS route /webhooks/{entity}/stripe") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CANNOT emit_undeclared_events") ||
