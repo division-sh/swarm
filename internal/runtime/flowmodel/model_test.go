@@ -114,6 +114,49 @@ criteria:
 	}
 }
 
+func TestPolicyDocumentValidationIsTypedSectionNotGenericValue(t *testing.T) {
+	var doc PolicyDocument
+	if err := yaml.Unmarshal([]byte(`
+threshold: 12
+validation:
+  deploy_manifest:
+    classes:
+      invalid: {disposition: deploy.manifest_invalid}
+    inputs:
+      source_ref: string
+      manifest_source_ref: string
+    rules:
+      - id: VR-001
+        class: invalid
+        text: Manifest source ref must match request source ref.
+        pin_candidate: true
+        check:
+          equal: {left: input.source_ref, right: input.manifest_source_ref}
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
+	}
+
+	if _, ok := doc.Values["validation"]; ok {
+		t.Fatalf("validation leaked into generic policy values: %#v", doc.Values["validation"])
+	}
+	set, ok := doc.Validation["deploy_manifest"]
+	if !ok {
+		t.Fatalf("validation set missing: %#v", doc.Validation)
+	}
+	if got := set.Classes["invalid"].Disposition; got != "deploy.manifest_invalid" {
+		t.Fatalf("invalid disposition = %q, want deploy.manifest_invalid", got)
+	}
+	if got := set.Inputs["source_ref"]; got != "string" {
+		t.Fatalf("input source_ref type = %q, want string", got)
+	}
+	if len(set.Rules) != 1 || set.Rules[0].ID != "VR-001" {
+		t.Fatalf("rules = %#v, want VR-001", set.Rules)
+	}
+	if set.Rules[0].PinCandidate == nil || !*set.Rules[0].PinCandidate {
+		t.Fatalf("pin_candidate = %#v, want true", set.Rules[0].PinCandidate)
+	}
+}
+
 func TestResolvePolicyByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 	root := &testNode{
 		ID: "root",
@@ -175,6 +218,107 @@ func TestResolvePolicyByID_MergesCriteriaAlongAncestorChain(t *testing.T) {
 	}
 	if gotID := got.Criteria["shared"].Rules[0].ID; gotID != "CHILD-SHARED" {
 		t.Fatalf("shared criteria rule = %q, want child override", gotID)
+	}
+}
+
+func TestResolvePolicyByID_MergesValidationAlongAncestorChain(t *testing.T) {
+	falseValue := false
+	trueValue := true
+	root := &testNode{
+		ID: "root",
+		Policy: PolicyDocument{
+			Validation: map[string]PolicyValidationSet{
+				"root_set": {
+					Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "root.invalid"}},
+					Inputs:  map[string]string{"left": "string", "right": "string"},
+					Rules: []PolicyValidationRule{{
+						ID:           "ROOT-1",
+						Class:        "invalid",
+						Text:         "Root validation.",
+						PinCandidate: &falseValue,
+						Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+					}},
+				},
+				"shared": {
+					Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "root.shared_invalid"}},
+					Inputs:  map[string]string{"left": "string", "right": "string"},
+					Rules: []PolicyValidationRule{{
+						ID:           "ROOT-SHARED",
+						Class:        "invalid",
+						Text:         "Root shared.",
+						PinCandidate: &falseValue,
+						Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+					}},
+				},
+			},
+		},
+		Children: []testNode{{
+			ID: "child",
+			Policy: PolicyDocument{
+				Validation: map[string]PolicyValidationSet{
+					"child_set": {
+						Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "child.invalid"}},
+						Inputs:  map[string]string{"left": "string", "right": "string"},
+						Rules: []PolicyValidationRule{{
+							ID:           "CHILD-1",
+							Class:        "invalid",
+							Text:         "Child validation.",
+							PinCandidate: &trueValue,
+							Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+						}},
+					},
+					"shared": {
+						Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "child.shared_invalid"}},
+						Inputs:  map[string]string{"left": "string", "right": "string"},
+						Rules: []PolicyValidationRule{{
+							ID:           "CHILD-SHARED",
+							Class:        "invalid",
+							Text:         "Child shared.",
+							PinCandidate: &trueValue,
+							Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+						}},
+					},
+				},
+			},
+		}},
+	}
+	tree := Tree[testNode]{
+		Root: root,
+		ByID: map[string]*testNode{
+			"root":  root,
+			"child": &root.Children[0],
+		},
+	}
+	base := PolicyDocument{Validation: map[string]PolicyValidationSet{
+		"base_set": {
+			Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "base.invalid"}},
+			Inputs:  map[string]string{"left": "string", "right": "string"},
+			Rules: []PolicyValidationRule{{
+				ID:           "BASE-1",
+				Class:        "invalid",
+				Text:         "Base validation.",
+				PinCandidate: &falseValue,
+				Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.left", Right: "input.right"}},
+			}},
+		},
+	}}
+
+	got := ResolvePolicyByID(
+		base,
+		tree,
+		"child",
+		func(node *testNode) string { return node.ID },
+		func(node *testNode) PolicyDocument { return node.Policy },
+		testChildren,
+	)
+
+	for _, name := range []string{"base_set", "root_set", "child_set", "shared"} {
+		if _, ok := got.Validation[name]; !ok {
+			t.Fatalf("merged validation missing %q: %#v", name, got.Validation)
+		}
+	}
+	if gotID := got.Validation["shared"].Rules[0].ID; gotID != "CHILD-SHARED" {
+		t.Fatalf("shared validation rule = %q, want child override", gotID)
 	}
 }
 

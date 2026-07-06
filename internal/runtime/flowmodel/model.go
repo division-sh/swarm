@@ -8,8 +8,9 @@ import (
 )
 
 type PolicyDocument struct {
-	Values   map[string]PolicyValue       `yaml:",inline"`
-	Criteria map[string]PolicyCriteriaSet `yaml:"criteria,omitempty"`
+	Values     map[string]PolicyValue         `yaml:",inline"`
+	Criteria   map[string]PolicyCriteriaSet   `yaml:"criteria,omitempty"`
+	Validation map[string]PolicyValidationSet `yaml:"validation,omitempty"`
 }
 
 type PolicyValue struct {
@@ -36,6 +37,34 @@ type PolicyCriteriaRule struct {
 
 type PolicyCriteriaParam struct {
 	Value any
+}
+
+type PolicyValidationSet struct {
+	Classes map[string]PolicyValidationClass `yaml:"classes"`
+	Inputs  map[string]string                `yaml:"inputs"`
+	Rules   []PolicyValidationRule           `yaml:"rules"`
+}
+
+type PolicyValidationClass struct {
+	Disposition string `yaml:"disposition"`
+}
+
+type PolicyValidationRule struct {
+	ID           string                         `yaml:"id"`
+	Class        string                         `yaml:"class"`
+	Text         string                         `yaml:"text"`
+	Params       map[string]PolicyCriteriaParam `yaml:"params"`
+	PinCandidate *bool                          `yaml:"pin_candidate"`
+	Check        PolicyValidationCheck          `yaml:"check"`
+}
+
+type PolicyValidationCheck struct {
+	Equal *PolicyValidationEqualCheck `yaml:"equal"`
+}
+
+type PolicyValidationEqualCheck struct {
+	Left  string `yaml:"left"`
+	Right string `yaml:"right"`
 }
 
 type Tree[T any] struct {
@@ -74,6 +103,7 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("policy document must be a mapping")
 	}
 	criteria := map[string]PolicyCriteriaSet{}
+	validation := map[string]PolicyValidationSet{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
@@ -85,6 +115,12 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 			}
 			continue
 		}
+		if key == "validation" {
+			if err := node.Content[i+1].Decode(&validation); err != nil {
+				return fmt.Errorf("policy validation: %w", err)
+			}
+			continue
+		}
 		var value PolicyValue
 		if err := node.Content[i+1].Decode(&value); err != nil {
 			return err
@@ -93,6 +129,7 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 	}
 	d.Values = values
 	d.Criteria = criteria
+	d.Validation = validation
 	return nil
 }
 

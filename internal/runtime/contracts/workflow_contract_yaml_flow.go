@@ -39,6 +39,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		"case":              {},
 		"range":             {},
 		"lookup":            {},
+		"validate":          {},
 		"else":              {},
 		"default":           {},
 		"advances_to":       {},
@@ -63,7 +64,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is not a standalone row type; use rules when/case/range selection rows or split value lookup to compute", key)
 		case "policy":
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q would create a second policy-sheet authoring owner; enhance rules in place", key)
-		case "temporal", "join", "loop", "collection", "schedule", "validate":
+		case "temporal", "join", "loop", "collection", "schedule":
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is outside the #1713 selection-row scope", key)
 		}
 		if _, ok := allowed[key]; !ok {

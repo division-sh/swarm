@@ -164,11 +164,12 @@ type HandlerRuleEntry struct {
 type PolicySheetRowKind string
 
 const (
-	PolicySheetRowKindWhen    PolicySheetRowKind = "when"
-	PolicySheetRowKindCase    PolicySheetRowKind = "case"
-	PolicySheetRowKindRange   PolicySheetRowKind = "range"
-	PolicySheetRowKindLookup  PolicySheetRowKind = "lookup"
-	PolicySheetRowKindDefault PolicySheetRowKind = "default"
+	PolicySheetRowKindWhen     PolicySheetRowKind = "when"
+	PolicySheetRowKindCase     PolicySheetRowKind = "case"
+	PolicySheetRowKindRange    PolicySheetRowKind = "range"
+	PolicySheetRowKindLookup   PolicySheetRowKind = "lookup"
+	PolicySheetRowKindValidate PolicySheetRowKind = "validate"
+	PolicySheetRowKindDefault  PolicySheetRowKind = "default"
 )
 
 type PolicySheetRowMetadata struct {
@@ -180,6 +181,7 @@ type PolicySheetRowMetadata struct {
 	RangeUpper   PolicySheetRangeBound
 	Monotonicity []string
 	Lookup       *ComputeLookupSpec
+	Validation   *ComputeValidationSpec
 }
 
 type PolicySheetRangeBound struct {
@@ -309,15 +311,16 @@ type AccumulateSpec struct {
 	OnTimeout    *HandlerRuleEntry    `yaml:"on_timeout"`
 }
 type ComputeSpec struct {
-	Operation   ComputeOperation   `yaml:"operation"`
-	Tiers       []ComputeTier      `yaml:"tiers"`
-	Keys        ComputeKeyConfig   `yaml:"keys"`
-	Params      map[string]any     `yaml:"params"`
-	StoreAs     string             `yaml:"store_as"`
-	Description string             `yaml:"description"`
-	ValueField  string             `yaml:"value_field"`
-	WeightField string             `yaml:"weight_field"`
-	Lookup      *ComputeLookupSpec `yaml:"-"`
+	Operation   ComputeOperation       `yaml:"operation"`
+	Tiers       []ComputeTier          `yaml:"tiers"`
+	Keys        ComputeKeyConfig       `yaml:"keys"`
+	Params      map[string]any         `yaml:"params"`
+	StoreAs     string                 `yaml:"store_as"`
+	Description string                 `yaml:"description"`
+	ValueField  string                 `yaml:"value_field"`
+	WeightField string                 `yaml:"weight_field"`
+	Lookup      *ComputeLookupSpec     `yaml:"-"`
+	Validation  *ComputeValidationSpec `yaml:"-"`
 }
 
 type ComputeLookupSpec struct {
@@ -342,6 +345,15 @@ type ComputeLookupLiteral struct {
 	Canonical string `yaml:"-"`
 	Summary   string `yaml:"-"`
 }
+
+type ComputeValidationSpec struct {
+	RowID      string                `yaml:"-"`
+	Set        string                `yaml:"-"`
+	Into       string                `yaml:"-"`
+	Input      map[string]string     `yaml:"-"`
+	InputPaths map[string]paths.Path `yaml:"-"`
+}
+
 type ComputeTier struct {
 	Dimensions []string `yaml:"dimensions"`
 	Weight     float64  `yaml:"weight"`
@@ -603,6 +615,11 @@ type PolicyCriteriaSet = flowmodel.PolicyCriteriaSet
 type PolicyCriteriaClass = flowmodel.PolicyCriteriaClass
 type PolicyCriteriaRule = flowmodel.PolicyCriteriaRule
 type PolicyCriteriaParam = flowmodel.PolicyCriteriaParam
+type PolicyValidationSet = flowmodel.PolicyValidationSet
+type PolicyValidationClass = flowmodel.PolicyValidationClass
+type PolicyValidationRule = flowmodel.PolicyValidationRule
+type PolicyValidationCheck = flowmodel.PolicyValidationCheck
+type PolicyValidationEqualCheck = flowmodel.PolicyValidationEqualCheck
 type ContractURIRegistry = flowmodel.URIRegistry
 type ContractURIRef = flowmodel.URIRef
 type ExpressionKind string

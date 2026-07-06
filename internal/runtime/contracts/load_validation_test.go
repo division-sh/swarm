@@ -200,6 +200,133 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsInvalidSchemaRefine
 	}
 }
 
+func TestValidateWorkflowContractBundleLoadConstraintsRejectsMalformedPolicyValidationSet(t *testing.T) {
+	pinCandidate := true
+	flow := &FlowContractView{
+		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
+			"deploy_manifest": {
+				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
+				Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "number"},
+				Rules: []PolicyValidationRule{{
+					ID:           "VR-001",
+					Class:        "invalid",
+					Text:         "Manifest source ref must match request source ref.",
+					PinCandidate: &pinCandidate,
+					Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
+				}},
+			},
+		}},
+	}
+	bundle := &WorkflowContractBundle{
+		FlowSchemas: map[string]FlowSchemaDocument{"deploy": {}},
+		FlowTree: FlowTree{
+			Root: flow,
+			ByID: map[string]*FlowContractView{
+				"deploy": flow,
+			},
+		},
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil || !contractErrorContains(err, "compares input.source_ref type string with input.manifest_source_ref type number") {
+		t.Fatalf("load validation error = %v, want validation input type mismatch", err)
+	}
+}
+
+func TestValidateWorkflowContractBundleLoadConstraintsRequiresPolicyValidationPinCandidate(t *testing.T) {
+	flow := &FlowContractView{
+		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
+			"deploy_manifest": {
+				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
+				Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "string"},
+				Rules: []PolicyValidationRule{{
+					ID:    "VR-001",
+					Class: "invalid",
+					Text:  "Manifest source ref must match request source ref.",
+					Check: PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
+				}},
+			},
+		}},
+	}
+	bundle := &WorkflowContractBundle{
+		FlowSchemas: map[string]FlowSchemaDocument{"deploy": {}},
+		FlowTree: FlowTree{
+			Root: flow,
+			ByID: map[string]*FlowContractView{
+				"deploy": flow,
+			},
+		},
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil || !contractErrorContains(err, "pin_candidate must be explicitly true or false") {
+		t.Fatalf("load validation error = %v, want missing pin_candidate", err)
+	}
+}
+
+func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapDeclaredInputs(t *testing.T) {
+	pinCandidate := true
+	validation := &ComputeValidationSpec{
+		RowID: "validate_manifest",
+		Set:   "deploy_manifest",
+		Into:  "computed.validation.deploy_manifest",
+		Input: map[string]string{
+			"source_ref": "payload.source_ref",
+		},
+	}
+	flow := &FlowContractView{
+		Paths: FlowContractPaths{ID: "deploy", Flow: "deploy"},
+		Policy: PolicyDocument{Validation: map[string]PolicyValidationSet{
+			"deploy_manifest": {
+				Classes: map[string]PolicyValidationClass{"invalid": {Disposition: "deploy.manifest_invalid"}},
+				Inputs:  map[string]string{"source_ref": "string", "manifest_source_ref": "string"},
+				Rules: []PolicyValidationRule{{
+					ID:           "VR-001",
+					Class:        "invalid",
+					Text:         "Manifest source ref must match request source ref.",
+					PinCandidate: &pinCandidate,
+					Check:        PolicyValidationCheck{Equal: &PolicyValidationEqualCheck{Left: "input.source_ref", Right: "input.manifest_source_ref"}},
+				}},
+			},
+		}},
+	}
+	bundle := &WorkflowContractBundle{
+		FlowSchemas: map[string]FlowSchemaDocument{"deploy": {}},
+		FlowTree: FlowTree{
+			Root: flow,
+			ByID: map[string]*FlowContractView{
+				"deploy": flow,
+			},
+		},
+		nodeSources: map[string]ContractItemSource{"deploy_node": {FlowID: "deploy"}},
+		Nodes: map[string]SystemNodeContract{
+			"deploy_node": {
+				ID: "deploy_node",
+				EventHandlers: map[string]SystemNodeEventHandler{
+					"deploy.requested": {
+						Rules: []HandlerRuleEntry{{
+							ID:        "validate_manifest",
+							PolicyRow: PolicySheetRowMetadata{Kind: PolicySheetRowKindValidate, Validation: validation},
+							Compute: &ComputeSpec{
+								Operation:  ComputeOpValidate,
+								StoreAs:    "computed.validation.deploy_manifest",
+								Validation: validation,
+							},
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	err := validateWorkflowContractBundleLoadConstraints(bundle)
+	if err == nil || !contractErrorContains(err, `validate.input missing required set input "manifest_source_ref"`) {
+		t.Fatalf("load validation error = %v, want missing validate input", err)
+	}
+}
+
 func TestEventFieldSpecDecodeRejectsMalformedSchemaRefinement(t *testing.T) {
 	var field EventFieldSpec
 	err := yaml.Unmarshal([]byte(`
