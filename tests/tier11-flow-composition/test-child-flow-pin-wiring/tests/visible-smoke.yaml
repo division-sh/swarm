@@ -4,4 +4,4 @@ steps:
     payload: {}
 expect:
   events:
-    include: [work.requested, work.completed]
+    include: [work.requested, child/work.completed]

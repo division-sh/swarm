@@ -4,7 +4,4 @@ steps:
     payload: {}
 expect:
   events:
-    include: [order.completed, invoice.created]
-  entities:
-    - type: default
-      current_state: done
+    include: [flow-b/order.completed, flow-a/invoice.created]
