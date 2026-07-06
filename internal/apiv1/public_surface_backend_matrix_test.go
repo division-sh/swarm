@@ -36,10 +36,11 @@ type publicSurfaceMatrixSource struct {
 }
 
 type publicSurfaceMatrixPolicy struct {
-	ClosureLevel                string `yaml:"closure_level"`
-	ClaimsParentClosure         bool   `yaml:"claims_parent_closure"`
-	NamedFullConformanceCommand string `yaml:"named_full_conformance_command"`
-	RequiredSmokePolicy         string `yaml:"required_smoke_policy"`
+	ClosureLevel                          string `yaml:"closure_level"`
+	ClaimsParentClosure                   bool   `yaml:"claims_parent_closure"`
+	NamedFullConformanceCommand           string `yaml:"named_full_conformance_command"`
+	RequiredSmokePolicy                   string `yaml:"required_smoke_policy"`
+	MutatingAPIParityClassificationPolicy string `yaml:"mutating_api_parity_classification_policy"`
 }
 
 type publicSurfaceMatrixRow struct {
@@ -68,15 +69,17 @@ type publicSurfaceProofRef struct {
 }
 
 type publicSurfaceMutatingAPIParityEntry struct {
-	Method           string                  `yaml:"method"`
-	Classification   string                  `yaml:"classification"`
-	Backends         []string                `yaml:"backends,omitempty"`
-	Scenario         string                  `yaml:"scenario,omitempty"`
-	SpecRef          string                  `yaml:"spec_ref,omitempty"`
-	SplitIssue       int                     `yaml:"split_issue,omitempty"`
-	UnsupportedIssue int                     `yaml:"unsupported_issue,omitempty"`
-	ProofRefs        []publicSurfaceProofRef `yaml:"proof_refs"`
-	Notes            string                  `yaml:"notes,omitempty"`
+	Method            string                  `yaml:"method"`
+	Classification    string                  `yaml:"classification"`
+	Backends          []string                `yaml:"backends,omitempty"`
+	Scenario          string                  `yaml:"scenario,omitempty"`
+	CoveredByMethod   string                  `yaml:"covered_by_method,omitempty"`
+	CoveredByScenario string                  `yaml:"covered_by_scenario,omitempty"`
+	SpecRef           string                  `yaml:"spec_ref,omitempty"`
+	SplitIssue        int                     `yaml:"split_issue,omitempty"`
+	UnsupportedIssue  int                     `yaml:"unsupported_issue,omitempty"`
+	ProofRefs         []publicSurfaceProofRef `yaml:"proof_refs"`
+	Notes             string                  `yaml:"notes,omitempty"`
 }
 
 type publicSurfaceValidationContext struct {
@@ -435,6 +438,62 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			},
 			want: "ledger method event.publish dual_backend_served_proof backends = [default_sqlite], want [default_sqlite explicit_postgres]",
 		},
+		{
+			name: "mutating api ledger rejects transitive coverage without covered method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
+				entry.Classification = "covered_transitively"
+				entry.Backends = []string{"default_sqlite", "explicit_postgres"}
+				entry.CoveredByMethod = ""
+				entry.CoveredByScenario = "event_publish_dynamic_auto_emit_lifecycle"
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle"},
+				}
+			},
+			want: "ledger method run.start covered_transitively missing covered_by_method",
+		},
+		{
+			name: "mutating api ledger rejects transitive coverage without scenario",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
+				entry.Classification = "covered_transitively"
+				entry.Backends = []string{"default_sqlite", "explicit_postgres"}
+				entry.CoveredByMethod = "event.publish"
+				entry.CoveredByScenario = ""
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle"},
+				}
+			},
+			want: "ledger method run.start covered_transitively missing covered_by_scenario",
+		},
+		{
+			name: "mutating api ledger rejects transitive coverage over split method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
+				entry.Classification = "covered_transitively"
+				entry.Backends = []string{"default_sqlite", "explicit_postgres"}
+				entry.CoveredByMethod = "event.replay"
+				entry.CoveredByScenario = "event_publish_dynamic_auto_emit_lifecycle"
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle"},
+				}
+			},
+			want: "ledger method run.start covered_by_method event.replay classification = \"split_with_issue_ref\", want dual_backend_served_proof",
+		},
+		{
+			name: "mutating api ledger rejects transitive coverage with wrong scenario method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
+				entry.Classification = "covered_transitively"
+				entry.Backends = []string{"default_sqlite", "explicit_postgres"}
+				entry.CoveredByMethod = "run.start"
+				entry.CoveredByScenario = "event_publish_dynamic_auto_emit_lifecycle"
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle"},
+				}
+			},
+			want: "ledger method run.start covered_by_method must differ from method",
+		},
 	}
 
 	for _, tc := range tests {
@@ -721,6 +780,8 @@ func validatePublicSurfaceMutatingAPIParityLedger(root string, entries []publicS
 		switch entry.Classification {
 		case "dual_backend_served_proof":
 			problems = append(problems, validatePublicSurfaceMutatingLedgerDualProof(label, entry, ctx)...)
+		case "covered_transitively":
+			problems = append(problems, validatePublicSurfaceMutatingLedgerTransitiveCoverage(label, entry, entries, ctx)...)
 		case "postgres_only_with_spec_ref":
 			if !publicSurfaceSameStringSet(entry.Backends, []string{"postgres_only"}) {
 				problems = append(problems, fmt.Sprintf("%s postgres_only_with_spec_ref backends = %v, want [postgres_only]", label, publicSurfaceSortedStrings(entry.Backends)))
@@ -837,6 +898,82 @@ func validatePublicSurfaceMutatingLedgerDualProof(label string, entry publicSurf
 		if ref.Kind == "go_test" && ref.Name != scenario.TestName {
 			problems = append(problems, fmt.Sprintf("%s dual_backend_served_proof go_test proof_ref %s is not the served parity harness test %s", label, ref.Name, scenario.TestName))
 		}
+	}
+	return problems
+}
+
+func validatePublicSurfaceMutatingLedgerTransitiveCoverage(label string, entry publicSurfaceMutatingAPIParityEntry, entries []publicSurfaceMutatingAPIParityEntry, ctx publicSurfaceValidationContext) []string {
+	var problems []string
+	if !publicSurfaceSameStringSet(entry.Backends, []string{"default_sqlite", "explicit_postgres"}) {
+		problems = append(problems, fmt.Sprintf("%s covered_transitively backends = %v, want [default_sqlite explicit_postgres]", label, publicSurfaceSortedStrings(entry.Backends)))
+	}
+	coveredByMethod := strings.TrimSpace(entry.CoveredByMethod)
+	if coveredByMethod == "" {
+		problems = append(problems, fmt.Sprintf("%s covered_transitively missing covered_by_method", label))
+	}
+	if coveredByMethod == strings.TrimSpace(entry.Method) {
+		problems = append(problems, fmt.Sprintf("%s covered_by_method must differ from method", label))
+	}
+	if coveredByMethod != "" {
+		if _, ok := ctx.mutatingAPIMethods[coveredByMethod]; !ok {
+			problems = append(problems, fmt.Sprintf("%s covered_by_method %s is not declared in platform idempotency mutating_methods", label, coveredByMethod))
+		}
+		if _, ok := ctx.apiMethods[coveredByMethod]; !ok {
+			problems = append(problems, fmt.Sprintf("%s covered_by_method %s missing from platform method_catalog", label, coveredByMethod))
+		}
+		if _, ok := ctx.openRPCMethods[coveredByMethod]; !ok {
+			problems = append(problems, fmt.Sprintf("%s covered_by_method %s missing from generated openrpc.json", label, coveredByMethod))
+		}
+		coveredEntry, ok := publicSurfaceMutatingLedgerEntry(entries, coveredByMethod)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s covered_by_method %s missing from mutating api parity ledger", label, coveredByMethod))
+		} else if coveredEntry.Classification != "dual_backend_served_proof" {
+			problems = append(problems, fmt.Sprintf("%s covered_by_method %s classification = %q, want dual_backend_served_proof", label, coveredByMethod, coveredEntry.Classification))
+		}
+	}
+	coveredByScenario := strings.TrimSpace(entry.CoveredByScenario)
+	if coveredByScenario == "" {
+		problems = append(problems, fmt.Sprintf("%s covered_transitively missing covered_by_scenario", label))
+		return problems
+	}
+	if coveredEntry, ok := publicSurfaceMutatingLedgerEntry(entries, coveredByMethod); ok &&
+		coveredEntry.Classification == "dual_backend_served_proof" &&
+		strings.TrimSpace(coveredEntry.Scenario) != coveredByScenario {
+		problems = append(problems, fmt.Sprintf("%s covered_by_scenario %s does not match covered_by_method %s scenario %s", label, coveredByScenario, coveredByMethod, coveredEntry.Scenario))
+	}
+	scenario, ok := ctx.servedScenarios[coveredByScenario]
+	if !ok {
+		problems = append(problems, fmt.Sprintf("%s covered_transitively covered_by_scenario %s is not registered in served parity harness", label, coveredByScenario))
+		return problems
+	}
+	if scenario.APIMethod != coveredByMethod {
+		problems = append(problems, fmt.Sprintf("%s covered_by_scenario %s api_method = %s, want covered_by_method %s", label, scenario.ID, scenario.APIMethod, coveredByMethod))
+	}
+	for _, backend := range servedparity.RequiredBackends {
+		if !publicSurfaceScenarioHasBackend(scenario, backend) {
+			problems = append(problems, fmt.Sprintf("%s covered_by_scenario %s missing backend %s", label, scenario.ID, backend))
+		}
+	}
+	for _, postcondition := range []servedparity.Postcondition{
+		servedparity.PostconditionNoNonTerminalDeliveries,
+		servedparity.PostconditionNoPendingPipelineEvents,
+		servedparity.PostconditionNoUnfiredDueTimers,
+	} {
+		if !publicSurfaceScenarioHasPostcondition(scenario, postcondition) {
+			problems = append(problems, fmt.Sprintf("%s covered_by_scenario %s missing postcondition %s", label, scenario.ID, postcondition))
+		}
+	}
+	if !publicSurfaceHasGoTestProof(entry.ProofRefs, scenario.TestName) {
+		problems = append(problems, fmt.Sprintf("%s covered_transitively missing served parity harness go_test proof_ref %s", label, scenario.TestName))
+	}
+	for _, ref := range entry.ProofRefs {
+		if ref.Kind == "go_test" && ref.Name != scenario.TestName {
+			problems = append(problems, fmt.Sprintf("%s covered_transitively go_test proof_ref %s is not the covered served parity harness test %s", label, ref.Name, scenario.TestName))
+		}
+	}
+	notes := strings.TrimSpace(entry.Notes)
+	if !strings.Contains(notes, "Deprecated wrapper") || (coveredByMethod != "" && !strings.Contains(notes, coveredByMethod)) {
+		problems = append(problems, fmt.Sprintf("%s covered_transitively notes must justify deprecated wrapper coverage through %s", label, coveredByMethod))
 	}
 	return problems
 }
@@ -1077,6 +1214,12 @@ func validatePublicSurfacePolicy(policy publicSurfaceMatrixPolicy) []string {
 	}
 	if strings.TrimSpace(policy.RequiredSmokePolicy) == "" {
 		problems = append(problems, "policy required_smoke_policy missing")
+	}
+	classificationPolicy := strings.TrimSpace(policy.MutatingAPIParityClassificationPolicy)
+	if classificationPolicy == "" {
+		problems = append(problems, "policy mutating_api_parity_classification_policy missing")
+	} else if !strings.Contains(classificationPolicy, "covered_transitively") || !strings.Contains(strings.ToLower(classificationPolicy), "deprecated wrapper") {
+		problems = append(problems, "policy mutating_api_parity_classification_policy must document covered_transitively deprecated wrapper handling")
 	}
 	return problems
 }
@@ -1328,6 +1471,15 @@ func publicSurfaceMutatingLedgerEntryByMethod(t *testing.T, matrix *publicSurfac
 	return nil
 }
 
+func publicSurfaceMutatingLedgerEntry(entries []publicSurfaceMutatingAPIParityEntry, method string) (publicSurfaceMutatingAPIParityEntry, bool) {
+	for _, entry := range entries {
+		if entry.Method == method {
+			return entry, true
+		}
+	}
+	return publicSurfaceMutatingAPIParityEntry{}, false
+}
+
 func publicSurfaceProblemsContain(problems []string, want string) bool {
 	for _, problem := range problems {
 		if strings.Contains(problem, want) {
@@ -1550,6 +1702,7 @@ func allowedPublicSurfaceClassifications() map[string]struct{} {
 func allowedPublicSurfaceMutatingLedgerClassifications() map[string]struct{} {
 	return complianceStringSet([]string{
 		"dual_backend_served_proof",
+		"covered_transitively",
 		"postgres_only_with_spec_ref",
 		"unsupported_with_issue_ref",
 		"split_with_issue_ref",

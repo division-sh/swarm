@@ -16,6 +16,14 @@ policy:
     public surfaces. The matrix composes existing selected-store, real v1 handler,
     and CLI exact-method proofs instead of expanding every surface into a backend
     Cartesian product.
+  mutating_api_parity_classification_policy: >
+    Every mutating public method must be classified as direct
+    dual_backend_served_proof, covered_transitively, postgres_only_with_spec_ref,
+    unsupported_with_issue_ref, or split_with_issue_ref. Deprecated wrapper
+    methods whose behavior is inherited from a directly proven mutating method
+    use covered_transitively and must name the covered method, covered harness
+    scenario, and live proof refs; this classification must not be used as a
+    generic bypass for methods with independent backend-sensitive behavior.
 active_trackers:
   - kind: github_issue
     issue: 1239
@@ -66,9 +74,18 @@ mutating_api_parity_ledger:
     split_issue: 1386
     proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
   - method: run.start
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: covered_transitively
+    backends: [default_sqlite, explicit_postgres]
+    covered_by_method: event.publish
+    covered_by_scenario: event_publish_dynamic_auto_emit_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle
+    notes: >
+      Deprecated wrapper over event.publish. The wrapper delegates to the
+      canonical event-publication owner, and served dual-backend parity is
+      covered transitively by the event.publish servedparity scenario rather
+      than by a dedicated wrapper scenario.
   - method: run.stop
     classification: split_with_issue_ref
     split_issue: 1386
