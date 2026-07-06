@@ -10402,6 +10402,130 @@ runtime_storage:
       validation MUST fail closed before git writes.
     - Product contracts and agents MUST NOT rely on the raw host path. The stable product surface remains the opaque
       `swarm-artifact://repos/<repo_id>` URL plus immutable commit ref.
+environment_source_authority:
+  workspace_monitor_artifact_debug_slice:
+    promoted_by: '#1640'
+    parent_tracker: '#1600'
+    implementation_status: classification_spec_lock_only
+    canonical_owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
+    scope: >
+      Merge-bearing classification authority for the retained #1640 first slice: workspace Docker/host environment sources,
+      local workspace image/bootstrap knobs, runtime-private artifact and monitor roots, prompt/spec helper path overrides,
+      and debug/test environment toggles. This owner records the current source-authority disposition and public-doc quarantine
+      for those envs. It does not implement unknown-env guarding, typed env delegation, doctor env reporting, generated-boundary
+      enforcement, or parent-wide accepted-set ownership; those are split to #1731.
+    classification_rule: >
+      Every env listed here is either governed by an existing typed owner, retained as first-slice production bootstrap /
+      deployment plumbing, retained as internal developer helper source, quarantined as debug/test-only, or explicitly governed
+      by another owner. Public docs and templates MUST NOT present these envs as normal setup. A future migration may move any
+      retained env into typed config or typed delegation only through a later gate; #1640 does not create env-over-config
+      precedence or dual semantic ownership.
+    classifications:
+      existing_config_owned_workspace_sources:
+        disposition: existing_config_owned_env_source
+        owner: workspace_model.data_source_authority and workspace_model.workspace_backend_selection
+        env_vars:
+        - SWARM_WORKSPACE_DATA_SOURCE
+        - SWARM_WORKSPACE_BACKEND
+        rule: >
+          These envs already have canonical owners and source order. #1640 classifies them for the retained workspace env
+          inventory only; any removal, typed delegation, or accepted-set guard behavior belongs to #1731 or a later child.
+      production_bootstrap_or_deployment_plumbing:
+        disposition: keep_env_first_slice_bootstrap_or_deployment_plumbing
+        owner: workspace_model.runtime_image_packaging, workspace_model.local_workspace_image_build_authority, workspace_model.data_source_authority, workspace_model.workspace_backend_selection, and workspace lifecycle config construction
+        env_vars:
+        - SWARM_DOCKER_BIN
+        - SWARM_WORKSPACE_IMAGE
+        - SWARM_WORKSPACE_HOST_ROOT
+        - SWARM_WORKSPACE_VOLUMES_FROM
+        - SWARM_WORKSPACE_NETWORK
+        - SWARM_WORKSPACE_DATA_MOUNT
+        - SWARM_WORKSPACE_CONTRACTS_SOURCE
+        - SWARM_WORKSPACE_CONTRACTS_MOUNT
+        rule: >
+          These envs remain live first-slice workspace/bootstrap inputs because current local Docker/host workspace lifecycle
+          consumers read them before a single typed workspace runtime config owner exists. `SWARM_DOCKER_BIN` is production
+          host-tool bootstrap/plumbing, not debug/test. `SWARM_WORKSPACE_IMAGE` is the current local workspace image selector
+          consumed by startup and `swarm workspace build`. Mount/network/volumes envs are deployment plumbing and MUST NOT be
+          advertised as ordinary project setup. Promotion to typed config or typed env delegation is split to #1731 or later
+          accepted migration children.
+      internal_workspace_lifecycle_names:
+        disposition: keep_env_first_slice_internal_runtime_plumbing
+        owner: internal/runtime/workspace Docker lifecycle configuration
+        env_vars:
+        - SWARM_SCAFFOLD_CONTAINER
+        - SWARM_SCAFFOLD_WORKDIR
+        - SWARM_SCAFFOLD_VOLUME
+        - SWARM_SYSTEM_CONTAINER
+        - SWARM_SYSTEM_WORKDIR
+        - SWARM_SYSTEM_ENTITIES_VOLUME
+        - SWARM_SYSTEM_NGINX_VOLUME
+        - SWARM_SYSTEM_SYSTEMD_VOLUME
+        - SWARM_ENTITY_CONTAINER_PREFIX
+        - SWARM_ENTITY_WORKDIR
+        rule: >
+          These are internal local Docker lifecycle naming/workdir knobs. They are not product contract fields, public setup
+          guidance, or proof that container identity is semantically configurable by agents. They remain implementation
+          plumbing until a later typed deployment-config owner promotes or removes them.
+      runtime_private_storage_and_observability:
+        disposition: keep_env_first_slice_runtime_private_storage_or_observability
+        owner: runtime_storage.artifact_root and runtime monitor sink
+        env_vars:
+        - SWARM_ARTIFACT_ROOT
+        - SWARM_MONITOR_DIR
+        rule: >
+          `SWARM_ARTIFACT_ROOT` remains the current spec-listed runtime-private artifact root override for local-git artifact
+          storage, but public docs MUST NOT teach repo `.env` or ambient shell exports as normal setup. `SWARM_MONITOR_DIR`
+          remains an observability/debug monitor log root until a later config/state-dir owner is promoted. Neither path may be
+          agent-visible workspace data.
+      internal_prompt_and_spec_helpers:
+        disposition: keep_env_first_slice_internal_developer_helper
+        owner: prompt/spec helper path resolvers
+        env_vars:
+        - SWARM_PROMPTS_DIR
+        - SWARM_AGENT_CONFIG_MAP_FILE
+        - SWARM_VERIFICATION_GATES_FILE
+        - SWARM_TOOLING_LOCK_FILE
+        rule: >
+          These envs are internal developer/helper path overrides for prompt and auxiliary spec files. Installed-binary runtime
+          behavior MUST NOT depend on old source-checkout helper paths becoming public configuration. Public docs/templates
+          MUST NOT advertise them as normal setup.
+      debug_and_test_quarantine:
+        disposition: keep_env_first_slice_debug_or_test_quarantine
+        owner: runtime debug/test harnesses
+        env_vars:
+        - SWARM_SQL_DEBUG
+        - SWARM_BOOT_WARNINGS_FATAL
+        - SWARM_EMIT_SCHEMA_STRICT
+        - SWARM_CATALOG_E2E_DEBUG
+        - SWARM_TEST_POSTGRES_DSN
+        - SWARM_TEST_POSTGRES_TEMPLATE_CLEANUP
+        - SWARM_TEST_POSTGRES_TEMPLATE_PARENT_PID
+        - SWARM_TEST_POSTGRES_TEMPLATE_ADMIN_DSN
+        - SWARM_TEST_POSTGRES_TEMPLATE_NAME
+        env_prefixes:
+        - SWARM_TEST_
+        rule: >
+          Debug and test envs are not production/user setup. They may remain for tests, CI, and narrow developer diagnostics in
+          this first slice, but public docs/templates MUST NOT advertise them. If any becomes production behavior, a later gate
+          must promote a typed flag/config owner instead of relying on ambient env.
+      governed_outside_1640:
+        disposition: governed_by_existing_owner_or_split
+        owner: cli_specification.foundations.cli_logging_policy and #1731
+        env_vars:
+        - SWARM_LOG_LEVEL
+        rule: >
+          `SWARM_LOG_LEVEL` is not a universal CLI env source and remains governed by
+          cli_specification.foundations.cli_logging_policy. Parent-wide accepted-set, typed env delegation, doctor env reporting,
+          generated-boundary env closure, and unknown-env guard behavior are split to #1731.
+    public_doc_quarantine:
+      rule: >
+        Public repository setup docs and `.env.example` MUST NOT include assignment examples or normal-setup instructions for
+        the envs classified by this owner. Internal test/debug documentation may mention a quarantined env only when the
+        surrounding text clearly scopes it to tests, CI, or developer diagnostics.
+    split_siblings:
+    - '#1731 repo-wide SWARM env accepted-set guard, typed delegation schema, doctor env reporting, generated-boundary env closure, and unknown-env guard'
+    - '#1600 parent residual env-source-authority closeout'
 workspace_model:
   description: Defines the filesystem contract for agent sessions. The platform provides three standard mount points and a
     scoping model. Products define workspace classes that map agent roles to specific scope configurations. If a product declares
