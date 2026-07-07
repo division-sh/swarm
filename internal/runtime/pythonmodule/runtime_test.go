@@ -102,6 +102,46 @@ func TestValidateSourceRejectsBuiltinEscape(t *testing.T) {
 	assertComputeModuleCode(t, err, computemodule.CodeDeniedCapability)
 }
 
+func TestExecuteWASIBoundaryWithRecoveredImports(t *testing.T) {
+	t.Setenv("SWARM_PYTHON_BOUNDARY_HOST_ENV", "must-not-leak")
+	source := []byte(`import json
+import operator
+
+def handle(input):
+    full_builtins = operator.attrgetter("__globals__")(json.loads)["__builtins__"]
+    os = full_builtins["__import__"]("os")
+    time = full_builtins["__import__"]("time")
+    random = full_builtins["__import__"]("random")
+    return {
+        "env": sorted(os.environ.keys()),
+        "random": random.random(),
+        "root": sorted(os.listdir("/")),
+        "time": time.time(),
+    }
+`)
+	first := executeBoundaryProbe(t, source)
+	second := executeBoundaryProbe(t, source)
+	if string(first.Output) != string(second.Output) {
+		t.Fatalf("boundary probe output drifted:\nfirst=%s\nsecond=%s", first.Output, second.Output)
+	}
+	var output map[string]any
+	if err := json.Unmarshal(first.Output, &output); err != nil {
+		t.Fatalf("decode boundary output: %v", err)
+	}
+	if got, want := strings.Join(jsonStringSlice(t, output["root"]), ","), "LICENSE,lib,python.wasm"; got != want {
+		t.Fatalf("root = %s, want embedded interpreter root only", got)
+	}
+	if got, want := strings.Join(jsonStringSlice(t, output["env"]), ","), "PYTHONHASHSEED,PYTHONHOME,PYTHONNOUSERSITE,PYTHONPATH"; got != want {
+		t.Fatalf("env = %s, want fixed runtime env only", got)
+	}
+	if got, _ := output["time"].(float64); got != 0 {
+		t.Fatalf("time = %v, want deterministic zero clock", output["time"])
+	}
+	if output["random"] == nil {
+		t.Fatalf("random missing from boundary output: %#v", output)
+	}
+}
+
 func TestExtractArtifactIgnoresPredictableStaleCache(t *testing.T) {
 	digestHex := strings.TrimPrefix(InterpreterDigest, "sha256:")
 	predictable := filepath.Join(os.TempDir(), "swarm-"+Interpreter+"-"+digestHex[:16])
@@ -127,6 +167,42 @@ func TestExtractArtifactIgnoresPredictableStaleCache(t *testing.T) {
 	if string(raw) == "poisoned" {
 		t.Fatalf("extractArtifact returned stale poisoned python.wasm")
 	}
+}
+
+func executeBoundaryProbe(t *testing.T, source []byte) Result {
+	t.Helper()
+	result, err := Execute(Request{
+		ModuleID:    "boundary_probe",
+		RowID:       "boundary_probe",
+		Digest:      digestSource(source),
+		Entry:       DefaultEntry,
+		Source:      source,
+		Input:       []byte(`{}`),
+		Fuel:        3_000_000_000,
+		MemoryPages: 8192,
+		OutputBytes: 4096,
+	})
+	if err != nil {
+		t.Fatalf("Execute boundary probe: %v", err)
+	}
+	return result
+}
+
+func jsonStringSlice(t *testing.T, value any) []string {
+	t.Helper()
+	list, ok := value.([]any)
+	if !ok {
+		t.Fatalf("value = %#v, want JSON array", value)
+	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		text, ok := item.(string)
+		if !ok {
+			t.Fatalf("array item = %#v, want string", item)
+		}
+		out = append(out, text)
+	}
+	return out
 }
 
 func TestExecuteClassifiesExceptionOutputCapAndFuel(t *testing.T) {

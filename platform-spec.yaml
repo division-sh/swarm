@@ -1622,11 +1622,26 @@ compute_module_contracts:
         remain blocked until a promoted in-process snapshot API or embedded
         Wizer path exists.
       sandbox: |
-        v1 is stdlib pure-compute only. Host filesystem, network, clock/random,
-        subprocess, threads, third-party packages, generated bindings, and
-        ambient environment access are not supported. The platform sets
-        `PYTHONHASHSEED=0`, does not inherit host env, and frames denied
-        capability and user exceptions as typed deterministic diagnostics.
+        v1 is stdlib pure-compute only. The load-bearing capability boundary is
+        the platform-owned WASI/process configuration, not CPython source
+        rewriting, AST lint, or builtins filtering. Source lint may reject direct
+        unsupported imports and obvious denied names early for author feedback,
+        but it is non-authoritative and non-security-bearing.
+
+        Python modules run with a fixed runtime environment containing only
+        `PYTHONHOME`, `PYTHONPATH`, `PYTHONHASHSEED`, and `PYTHONNOUSERSITE`;
+        host/user environment variables MUST NOT be inherited. The only
+        filesystem mount is the embedded CPython-WASI interpreter artifact,
+        mounted read-only at `/` so the interpreter can import its standard
+        library. Host, project, user, and working-directory filesystems are not
+        mounted. Network, subprocess, threads, third-party packages, generated
+        bindings, and ambient host capabilities are not supported.
+
+        Author-reachable WASI clock and random imports MUST be deterministic in
+        this slice. The host shadows `clock_time_get` with a zero clock and
+        `random_get` with deterministic bytes; real wall-clock and host entropy
+        are not exposed even if author code recovers unrestricted CPython
+        imports through reflection.
     deterministic_features: |
       Runtime configuration MUST disable nondeterministic or unapproved features
       including threads, SIMD, memory64, and multi-memory. Deterministic core
@@ -1696,8 +1711,10 @@ compute_module_contracts:
       Compile/ABI/import rejection, digest mismatch, trap/unreachable, gas/fuel
       exhaustion, memory limit, output-size limit, output bounds, and output
       schema violation are deterministic no-retry failures with typed
-      diagnostics carrying module ID and row ID. Python denied-capability and
-      framed user-exception failures are the same deterministic no-retry class.
+      diagnostics carrying module ID and row ID. Python direct-lint
+      denied-capability failures and framed user-exception failures are the same
+      deterministic no-retry class; the runtime boundary does not rely on that
+      lint to deny host filesystem, inherited environment, clock, or entropy.
     trace_and_replay: |
       Runtime traces record module ID, row ID, declared digest, engine version,
       output hash, and fuel/gas consumed. Python traces additionally record
@@ -1722,7 +1739,7 @@ compute_module_contracts:
     - typed policy.modules shape and flow-local placement
     - module path containment, regular-file loading, kind-specific byte/source digest match
     - supported Wasm ABI exports and zero author imports
-    - supported Python ABI, source syntax/callable validation, embedded runtime identity, and denied capability checks
+    - supported Python ABI, source syntax/callable validation, embedded runtime identity, direct denied-capability lint, and deterministic WASI boundary checks
     - deterministic capability/resource limits
     - object input/output schemas and PR1 float/numeric schema rejection
     - compute_module row module resolution and exact input mapping coverage
@@ -1732,7 +1749,8 @@ compute_module_contracts:
   split_boundaries:
   - '#1670 owns public build/source tooling and any instrumentation pipeline.'
   - Declarative lookup, validation, selection, and future derive rows remain preferred when they can express the work.
-  - Durable activities, orchestration, timers, joins, loops, schedules, host imports, WASI, filesystem/network access,
+  - Durable activities, orchestration, timers, joins, loops, schedules, host imports, WASI capabilities beyond the fixed
+    Python interpreter mount and deterministic clock/random stubs, filesystem/network access beyond that read-only mount,
     shared module packs, source compilation, and file-backed module inputs are separate gates.
 bundle_build_materialization:
   status: merge_bearing_build_surface
