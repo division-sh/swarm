@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -58,6 +59,7 @@ type PipelineCoordinator struct {
 	timerScheduleStore      SchedulePersistence
 	mailboxMaterializer     MailboxWriteMaterializationStore
 	eventReceiptsCapability func(context.Context) (bool, error)
+	credentials             runtimecredentials.Store
 	artifactRoot            string
 	bundleFingerprint       string
 
@@ -79,6 +81,7 @@ type PipelineCoordinatorOptions struct {
 	TimerScheduleStore               SchedulePersistence
 	MailboxMaterializer              MailboxWriteMaterializationStore
 	EventReceiptsCapability          func(context.Context) (bool, error)
+	Credentials                      runtimecredentials.Store
 	ArtifactRoot                     string
 	BundleFingerprint                string
 	TestEntityStateHook              func(entityID, state string)
@@ -98,6 +101,10 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 	if workflowStore == nil {
 		workflowStore = NewWorkflowInstanceStore(db)
 	}
+	credentials := opts.Credentials
+	if credentials == nil {
+		credentials = runtimecredentials.NewEnvStore()
+	}
 	return &PipelineCoordinator{
 		bus:                              bus,
 		db:                               db,
@@ -110,6 +117,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		timerScheduleStore:               opts.TimerScheduleStore,
 		mailboxMaterializer:              opts.MailboxMaterializer,
 		eventReceiptsCapability:          opts.EventReceiptsCapability,
+		credentials:                      credentials,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
 		testEntityStateHook:              opts.TestEntityStateHook,

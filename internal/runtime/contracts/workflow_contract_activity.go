@@ -46,7 +46,7 @@ const (
 
 func SupportedActivityEffectClass(effectClass ActivityEffectClass) bool {
 	switch effectClass {
-	case ActivityEffectClassReadOnly:
+	case ActivityEffectClassReadOnly, ActivityEffectClassNonIdempotentWrite:
 		return true
 	default:
 		return false

@@ -22,8 +22,8 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 29 {
-		t.Fatalf("platform table plan count = %d, want 29", len(platformPlans))
+	if len(platformPlans) != 30 {
+		t.Fatalf("platform table plan count = %d, want 30", len(platformPlans))
 	}
 	entityPlans, err := GenerateEntityTableDDLs(runtimecontracts.EntitySchema{
 		Groups: []runtimecontracts.EntitySchemaGroup{{
@@ -86,6 +86,9 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	}
 	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
 		t.Fatalf("entity_state capability = %s run_id=%v", caps.EntityState, caps.EntityRunID)
+	}
+	if caps.Activity.Attempts != SchemaFlavorCanonical {
+		t.Fatalf("activity attempts capability = %s", caps.Activity.Attempts)
 	}
 	if caps.Events.Log != SchemaFlavorCanonical || !caps.Events.LogRunID || !caps.Events.LogIdempotencyKey || !caps.Events.LogRouteIdentity {
 		t.Fatalf("event log capabilities = %+v", caps.Events)
@@ -485,6 +488,7 @@ func platformTableNamesForSQLiteSchemaTest() []string {
 	return []string{
 		"bundles",
 		"events",
+		"activity_attempts",
 		"run_fork_selected_contract_bindings",
 		"run_fork_selected_contract_executions",
 		"run_fork_selected_contract_branch_divergences",

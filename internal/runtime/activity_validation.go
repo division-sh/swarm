@@ -131,18 +131,21 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 	if len(tool.ResponseMapping) > 0 {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses response_mapping; activity HTTP response mapping is split until the activity dispatcher consumes the HTTP tool response-mapping owner", context, toolID))
 	}
-	if len(tool.Credentials) > 0 || tool.ManagedCredential != nil {
-		errs = append(errs, fmt.Errorf("%s: tool %q uses credentials; credentialed activity HTTP execution is split until activity credential authority is specified", context, toolID))
-	}
 	effectClass := runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)
 	if effectClass == "" {
-		errs = append(errs, fmt.Errorf("%s: tool %q must declare effect_class; the Stage 1 executable value is read_only", context, toolID))
+		errs = append(errs, fmt.Errorf("%s: tool %q must declare effect_class; executable Stage 1 values are read_only and non_idempotent_write on the activity journal path", context, toolID))
 	} else if effectClass == runtimecontracts.ActivityEffectClassLongRunning {
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class long_running is split to later durable resume/cancel support", context, toolID))
-	} else if effectClass == runtimecontracts.ActivityEffectClassIdempotentWrite || effectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is split until the activity runtime owns stable attempt/result journaling and idempotency execution", context, toolID, effectClass))
+	} else if effectClass == runtimecontracts.ActivityEffectClassIdempotentWrite {
+		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is split until idempotency execution ownership is specified and implemented", context, toolID, effectClass))
 	} else if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, tool.EffectClass))
+	}
+	if tool.ManagedCredential != nil {
+		errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is split until OAuth/token lifecycle ownership is specified", context, toolID))
+	}
+	if len(tool.Credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		errs = append(errs, fmt.Errorf("%s: tool %q uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write authored HTTP activities", context, toolID))
 	}
 	errs = append(errs, validateActivityInputAgainstToolSchema(context, activity, tool.InputSchema)...)
 	site := runtimecontracts.ActivitySite{

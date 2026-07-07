@@ -428,7 +428,7 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 			return `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
 		}
 		return `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-	case "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "events", "runs":
+	case "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "events", "runs":
 		if mode == "count" {
 			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
 		}

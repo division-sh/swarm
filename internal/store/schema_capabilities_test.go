@@ -40,6 +40,12 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"outcome", "reason_code", "state_before", "state_after", "side_effects",
 		"duration_ms", "idempotency_key", "processed_at",
 	)
+	addColumns("activity_attempts",
+		"request_event_id", "run_id", "source_event_id", "parent_event_id", "entity_id", "flow_instance",
+		"node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status",
+		"success_event", "failure_event", "result_event_id", "result_event_type", "result_payload",
+		"error", "input_hash", "started_at", "completed_at", "updated_at",
+	)
 	addColumns("entity_state",
 		"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name",
 		"current_state", "gates", "fields", "accumulator", "revision",
@@ -96,6 +102,9 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	}
 	if caps.EntityState != SchemaFlavorCanonical || !caps.EntityRunID {
 		t.Fatalf("entity_state caps = %+v run_id=%v", caps.EntityState, caps.EntityRunID)
+	}
+	if caps.Activity.Attempts != SchemaFlavorCanonical {
+		t.Fatalf("activity attempts flavor = %s", caps.Activity.Attempts)
 	}
 	if caps.Conversations.Sessions != SchemaFlavorCanonical || !caps.Conversations.SessionRunID {
 		t.Fatalf("session caps = %+v", caps.Conversations)

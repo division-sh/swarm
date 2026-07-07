@@ -493,6 +493,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			TimerScheduleStore:               stores.ScheduleStore,
 			MailboxMaterializer:              stores.MailboxMaterializer,
 			EventReceiptsCapability:          boot.EventReceiptCapability,
+			Credentials:                      rt.Credentials,
 			ArtifactRoot:                     artifactRoot,
 			BundleFingerprint:                opts.BundleFingerprint,
 			TestEntityStateHook:              opts.TestEntityStateHook,

@@ -201,42 +201,68 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 	}
 }
 
-func TestValidateWorkflowContractSurface_DurableActivityWriteEffectClassesFailClosed(t *testing.T) {
-	for _, effectClass := range []runtimecontracts.ActivityEffectClass{
-		runtimecontracts.ActivityEffectClassIdempotentWrite,
-		runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-	} {
-		t.Run(string(effectClass), func(t *testing.T) {
-			bundle := testRuntimeWorkflowValidationBundle()
-			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-				"source_scrape": {
-					HandlerType: "http",
-					EffectClass: string(effectClass),
-					InputSchema: runtimecontracts.ToolInputSchema{
-						Type: "object",
-					},
-					HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
+func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitted(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"source_scrape": {
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+			Credentials: []string{"provider_token"},
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object",
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
 				},
-			}
-			bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-				"scanner": {
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-						"source.requested": {
-							Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
-						},
-					},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want non_idempotent_write admitted", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClosed(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"source_scrape": {
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassIdempotentWrite),
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type: "object",
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"scanner": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"source.requested": {
+					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
 				},
-			}
-			_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
-				CheckMCPReachable:              false,
-				StrictEmitSchemas:              false,
-				FatalToolImplementationWarning: false,
-				FatalBootWarnings:              false,
-			})
-			if err == nil || !strings.Contains(err.Error(), "stable attempt/result journaling and idempotency execution") {
-				t.Fatalf("ValidateWorkflowContractSurface error = %v, want write effect fail-closed", err)
-			}
-		})
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "idempotency execution ownership") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want idempotent_write fail-closed", err)
 	}
 }
 
@@ -342,6 +368,21 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 				tool.RateLimitMaxWait = "0s"
 			},
 			errContains: "uses rate_limit",
+		},
+		{
+			name: "read only static credentials",
+			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
+				tool.Credentials = []string{"provider_token"}
+			},
+			errContains: "static credential activity HTTP execution is supported only for non_idempotent_write",
+		},
+		{
+			name: "managed credentials",
+			mutateTool: func(tool *runtimecontracts.ToolSchemaEntry) {
+				tool.EffectClass = string(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
+				tool.ManagedCredential = &runtimecontracts.ManagedCredentialRef{Key: "provider_oauth"}
+			},
+			errContains: "uses managed_credential",
 		},
 	}
 	for _, tc := range cases {
