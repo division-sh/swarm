@@ -136,20 +136,19 @@ func Execute(req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	output, err := json.Marshal(wire.Output)
+	output, err := computemodule.CanonicalJSONBytes(wire.Output)
 	if err != nil {
 		return Result{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output cannot be encoded as JSON object: %w", err)}
 	}
 	if req.OutputBytes > 0 && len(output) > req.OutputBytes {
 		return Result{}, &computemodule.Error{Code: computemodule.CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output %d bytes exceeds cap %d", len(output), req.OutputBytes)}
 	}
-	sum := sha256.Sum256(output)
 	identity := RuntimeIdentity()
 	return Result{
 		Output:         output,
 		FuelConsumed:   wire.FuelConsumed,
 		Engine:         identity.Engine,
-		OutputHash:     "sha256:" + hex.EncodeToString(sum[:]),
+		OutputHash:     computemodule.HashBytes(output),
 		Interpreter:    identity.Interpreter,
 		InterpreterSHA: identity.InterpreterDigest,
 		SnapshotHash:   identity.SnapshotDigest,

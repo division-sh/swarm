@@ -2015,6 +2015,10 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 	if got := len(replayed.ComputeModuleTraces); got != 1 {
 		t.Fatalf("replay traces = %d, want 1", got)
 	}
+	req.ExpectedComputeModuleTraces[0].FuelConsumed++
+	if _, err := exec.Execute(context.Background(), req); err != nil {
+		t.Fatalf("python replay with fuel evidence drift error = %v, want fuel evidence-only acceptance", err)
+	}
 	req.ExpectedComputeModuleTraces[0].SourceHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	_, err = exec.Execute(context.Background(), req)
 	if err == nil {
@@ -2034,7 +2038,8 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
     return {"content": "ok", "format": "yaml", "line_count": "three"}
 `))
 	exec := newStructuredRendererExecutor(t, source)
-	_, err := exec.Execute(context.Background(), structuredRendererExecutionRequest(t, pythonRendererModuleSpec()))
+	req := structuredRendererExecutionRequest(t, pythonRendererModuleSpec())
+	result, err := exec.Execute(context.Background(), req)
 	if err == nil {
 		t.Fatal("Execute error = nil, want output schema violation")
 	}
@@ -2044,6 +2049,32 @@ func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "output schema violation") {
 		t.Fatalf("error = %v, want output schema diagnostic", err)
+	}
+	if got := len(result.ComputeModuleTraces); got != 1 {
+		t.Fatalf("failure traces = %d, want 1", got)
+	}
+	trace := result.ComputeModuleTraces[0]
+	if trace.Outcome != computemodule.ReplayOutcomeFailure || trace.ErrorCode != string(computemodule.CodeABI) || trace.OutputHash != "" {
+		t.Fatalf("failure trace = %#v, want ABI failure outcome without output hash", trace)
+	}
+	req.ExpectedComputeModuleTraces = append([]ComputeModuleTrace(nil), result.ComputeModuleTraces...)
+	_, err = exec.Execute(context.Background(), req)
+	if err == nil {
+		t.Fatal("replay Execute error = nil, want reproduced deterministic failure")
+	}
+	if !errors.As(err, &typed) || typed.Code != computemodule.CodeABI {
+		t.Fatalf("replay error = %#v, want original deterministic code %s", err, computemodule.CodeABI)
+	}
+	req.ExpectedComputeModuleTraces[0].ErrorCode = string(computemodule.CodeTrap)
+	_, err = exec.Execute(context.Background(), req)
+	if err == nil {
+		t.Fatal("replay Execute error = nil, want error-code divergence")
+	}
+	if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
+		t.Fatalf("error-code divergence = %#v, want replay code", err)
+	}
+	if typed.Finding == nil || typed.Finding.Kind != computemodule.ReplayFindingResultDivergence || typed.Finding.Field != "error_code" {
+		t.Fatalf("finding = %#v, want result divergence on error_code", typed.Finding)
 	}
 }
 
@@ -2091,8 +2122,94 @@ func TestExecutor_ComputeModuleReplayTraceComparison(t *testing.T) {
 	if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
 		t.Fatalf("error = %#v, want code %s", err, computemodule.CodeReplay)
 	}
+	if typed.Finding == nil || typed.Finding.Kind != computemodule.ReplayFindingResultDivergence || typed.Finding.Field != "output_hash" {
+		t.Fatalf("finding = %#v, want result divergence on output_hash", typed.Finding)
+	}
 	if !strings.Contains(err.Error(), "output_hash") {
 		t.Fatalf("error = %v, want output hash diagnostic", err)
+	}
+}
+
+func TestExecutor_ComputeModuleReplayEnvelopeClassifiesDivergenceKinds(t *testing.T) {
+	source, _ := sourceWithStructuredRendererModule(t)
+	exec := newStructuredRendererExecutor(t, source)
+	req := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
+	first, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("initial Execute error: %v", err)
+	}
+	if got := len(first.ComputeModuleTraces); got != 1 {
+		t.Fatalf("initial traces = %d, want 1", got)
+	}
+	base := first.ComputeModuleTraces[0]
+	if base.InputHash == "" || base.ABI != computemodule.ABI || base.Entry != computemodule.DefaultEntry || base.Limits.Fuel == 0 || base.Arch == "" || base.Outcome != computemodule.ReplayOutcomeSuccess {
+		t.Fatalf("base envelope missing replay identity: %#v", base)
+	}
+	tests := []struct {
+		name      string
+		mutate    func(*ComputeModuleTrace)
+		wantKind  computemodule.ReplayFindingKind
+		wantField string
+	}{
+		{
+			name: "identity_input_hash",
+			mutate: func(trace *ComputeModuleTrace) {
+				trace.InputHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+			},
+			wantKind:  computemodule.ReplayFindingIdentityDivergence,
+			wantField: "input_hash",
+		},
+		{
+			name: "unsupported_engine_profile",
+			mutate: func(trace *ComputeModuleTrace) {
+				trace.Engine = "wasmtime-go:v0.unsupported"
+			},
+			wantKind:  computemodule.ReplayFindingUnsupportedProfile,
+			wantField: "engine",
+		},
+		{
+			name: "unsupported_arch_profile",
+			mutate: func(trace *ComputeModuleTrace) {
+				trace.Arch = "unsupported-arch"
+			},
+			wantKind:  computemodule.ReplayFindingUnsupportedProfile,
+			wantField: "arch",
+		},
+		{
+			name: "result_output_hash",
+			mutate: func(trace *ComputeModuleTrace) {
+				trace.OutputHash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+			},
+			wantKind:  computemodule.ReplayFindingResultDivergence,
+			wantField: "output_hash",
+		},
+		{
+			name: "resource_fuel",
+			mutate: func(trace *ComputeModuleTrace) {
+				trace.FuelConsumed++
+			},
+			wantKind:  computemodule.ReplayFindingResourceDivergence,
+			wantField: "fuel_consumed",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			replayReq := structuredRendererExecutionRequest(t, structuredRendererModuleSpec())
+			trace := base
+			tc.mutate(&trace)
+			replayReq.ExpectedComputeModuleTraces = []ComputeModuleTrace{trace}
+			_, err := exec.Execute(context.Background(), replayReq)
+			if err == nil {
+				t.Fatal("replay Execute error = nil, want replay finding")
+			}
+			var typed *computemodule.Error
+			if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
+				t.Fatalf("error = %#v, want code %s", err, computemodule.CodeReplay)
+			}
+			if typed.Finding == nil || typed.Finding.Kind != tc.wantKind || typed.Finding.Field != tc.wantField {
+				t.Fatalf("finding = %#v, want %s on %s", typed.Finding, tc.wantKind, tc.wantField)
+			}
+		})
 	}
 }
 

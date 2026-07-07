@@ -1717,19 +1717,48 @@ compute_module_contracts:
       deterministic no-retry class; the runtime boundary does not rely on that
       lint to deny host filesystem, inherited environment, clock, or entropy.
     trace_and_replay: |
-      Runtime traces record module ID, row ID, declared digest, engine version,
-      output hash, and fuel/gas consumed. Python traces additionally record
-      interpreter version, interpreter digest, harness ABI, snapshot identity,
-      and source hash. Supported replay re-executes module rows and compares the
-      recorded output hash plus identity fields against replay execution. Wasm
-      replay also compares fuel exactly. Python fuel is retained as evidence but
-      not exact divergence-bearing in this slice because CPython-WASI startup
-      under wasmtime fuel can vary across identical invocations by small
-      implementation-accounting deltas; exact Python fuel divergence detection
-      remains split until the release-time snapshot/gas envelope is stabilized.
+      Runtime compute-module replay evidence is a typed
+      `swarm.compute_module.replay.v1` envelope, not an engine-local helper.
+      Each envelope records module ID, row ID, kind, ABI, entrypoint, declared
+      digest, source hash when applicable, canonical input hash, outcome
+      (`success` or `failure`), output hash for success, deterministic error
+      code for failure, fuel/gas consumed, declared limits, engine version,
+      architecture, and Python interpreter/interpreter-digest/harness/snapshot
+      identity when kind is `python`.
+
+      Input and output hashes MUST be computed over canonical JSON so map order
+      or incidental serialization does not create false replay divergence.
+      Diagnostic text is not semantic replay identity. For failed executions,
+      the deterministic error code is the replay outcome.
+
+      Supported replay re-executes module rows and compares envelopes in this
+      order:
+      1. Identity fields (module, row, kind, ABI, entry, digest, source hash,
+         input hash, declared limits, and Python interpreter/harness/snapshot
+         identity) must match. Mismatch is `identity_divergence`.
+      2. Engine/architecture profile must match. Mismatch is
+         `unsupported_profile`, not nondeterminism, because the replay ruler
+         changed.
+      3. Semantic outcome must match. Success compares output hash; failure
+         compares deterministic error code. Mismatch is fatal
+         `result_divergence`.
+      4. Wasm replay compares fuel exactly under a matching profile. Mismatch
+         is `resource_envelope_divergence`. Python fuel is retained as evidence
+         but is not divergence-bearing in this slice because CPython-WASI
+         startup under wasmtime fuel can vary across identical invocations by
+         small implementation-accounting deltas; exact Python fuel divergence
+         detection remains split until the release-time snapshot/gas envelope
+         is stabilized.
+
       Replay mode is explicit: an empty expected trace set means zero module
-      executions are expected, not normal non-replay execution. Divergence is a
-      typed deterministic replay failure, never silent acceptance.
+      executions are expected, not normal non-replay execution. Runtime logs may
+      carry persisted replay envelopes under action
+      `compute_module_replay_evidence`; those logs are carriers/readback
+      consumers only and do not become the semantic owner. Divergence diagnostics
+      MUST be typed, include the finding kind and field, include module/row IDs
+      and hashes only, and avoid raw input/output dumps. True result divergence
+      is a fatal deterministic replay failure; identity/profile mismatch is
+      fail-closed unsupported/incompatible replay.
   bundle_identity:
     rule: |
       Module bytes referenced by policy.modules are part of the bundle contract

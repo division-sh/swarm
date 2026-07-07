@@ -253,6 +253,9 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
+	if !preview {
+		logComputeModuleReplayEvidence(ctx, pc.bus, nodeID, triggerCtx.Event, result.ComputeModuleTraces)
+	}
 	if handler.CreateEntity && result.StateMutation.StateCarrier.Metadata == nil {
 		result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(stateSnapshot.StateCarrier.Metadata)
 	}
