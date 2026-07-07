@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -80,6 +82,51 @@ func TestValidateSourceRejectsDeniedCapability(t *testing.T) {
 		OutputBytes: 1024,
 	})
 	assertComputeModuleCode(t, err, computemodule.CodeDeniedCapability)
+}
+
+func TestValidateSourceRejectsBuiltinEscape(t *testing.T) {
+	source := []byte(`def handle(input):
+    os = __builtins__["__import__"].__globals__["builtins"].__import__("os")
+    return {"cwd": os.getcwd()}
+`)
+	err := ValidateSource(Request{
+		ModuleID:    "bad",
+		RowID:       "policy.modules.bad",
+		Digest:      digestSource(source),
+		Entry:       DefaultEntry,
+		Source:      source,
+		Fuel:        2_000_000_000,
+		MemoryPages: 8192,
+		OutputBytes: 1024,
+	})
+	assertComputeModuleCode(t, err, computemodule.CodeDeniedCapability)
+}
+
+func TestExtractArtifactIgnoresPredictableStaleCache(t *testing.T) {
+	digestHex := strings.TrimPrefix(InterpreterDigest, "sha256:")
+	predictable := filepath.Join(os.TempDir(), "swarm-"+Interpreter+"-"+digestHex[:16])
+	if err := os.MkdirAll(predictable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(predictable) })
+	if err := os.WriteFile(filepath.Join(predictable, pythonWasmPath), []byte("poisoned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := extractArtifact()
+	if err != nil {
+		t.Fatalf("extractArtifact: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if dir == predictable {
+		t.Fatalf("extractArtifact reused predictable stale cache %s", dir)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, pythonWasmPath))
+	if err != nil {
+		t.Fatalf("read extracted python.wasm: %v", err)
+	}
+	if string(raw) == "poisoned" {
+		t.Fatalf("extractArtifact returned stale poisoned python.wasm")
+	}
 }
 
 func TestExecuteClassifiesExceptionOutputCapAndFuel(t *testing.T) {

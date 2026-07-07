@@ -334,15 +334,16 @@ func extractArtifact() (string, error) {
 	if actual != InterpreterDigest {
 		return "", fmt.Errorf("embedded CPython-WASI artifact digest %s does not match declared %s", actual, InterpreterDigest)
 	}
-	dir := filepath.Join(os.TempDir(), "swarm-"+Interpreter+"-"+hex.EncodeToString(sum[:8]))
-	if _, err := os.Stat(filepath.Join(dir, pythonWasmPath)); err == nil {
-		return dir, nil
-	}
-	tmp := dir + ".tmp"
-	_ = os.RemoveAll(tmp)
-	if err := os.MkdirAll(tmp, artifactCachePerm); err != nil {
+	dir, err := os.MkdirTemp("", "swarm-"+Interpreter+"-")
+	if err != nil {
 		return "", err
 	}
+	success := false
+	defer func() {
+		if !success {
+			_ = os.RemoveAll(dir)
+		}
+	}()
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
 		return "", err
@@ -350,49 +351,38 @@ func extractArtifact() (string, error) {
 	for _, file := range reader.File {
 		name := filepath.Clean(filepath.FromSlash(file.Name))
 		if name == "." || name == "" || strings.HasPrefix(name, ".."+string(filepath.Separator)) || filepath.IsAbs(name) {
-			_ = os.RemoveAll(tmp)
 			return "", fmt.Errorf("embedded CPython-WASI artifact contains unsafe path %q", file.Name)
 		}
-		target := filepath.Join(tmp, name)
+		target := filepath.Join(dir, name)
 		if file.FileInfo().IsDir() {
 			if err := os.MkdirAll(target, artifactCachePerm); err != nil {
-				_ = os.RemoveAll(tmp)
 				return "", err
 			}
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(target), artifactCachePerm); err != nil {
-			_ = os.RemoveAll(tmp)
 			return "", err
 		}
 		src, err := file.Open()
 		if err != nil {
-			_ = os.RemoveAll(tmp)
 			return "", err
 		}
 		dst, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, artifactFilePerm)
 		if err != nil {
 			src.Close()
-			_ = os.RemoveAll(tmp)
 			return "", err
 		}
 		_, copyErr := io.Copy(dst, src)
 		closeErr := dst.Close()
 		src.Close()
 		if copyErr != nil {
-			_ = os.RemoveAll(tmp)
 			return "", copyErr
 		}
 		if closeErr != nil {
-			_ = os.RemoveAll(tmp)
 			return "", closeErr
 		}
 	}
-	_ = os.RemoveAll(dir)
-	if err := os.Rename(tmp, dir); err != nil {
-		_ = os.RemoveAll(tmp)
-		return "", err
-	}
+	success = true
 	return dir, nil
 }
 
@@ -435,7 +425,7 @@ COMPILE_CODE = "compute_module_compile"
 ABI_CODE = "compute_module_abi"
 EXCEPTION_CODE = "compute_module_python_exception"
 ALLOWED_IMPORTS = {"json", "re", "collections", "itertools", "functools", "operator", "string", "textwrap", "decimal"}
-DENIED_NAMES = {"open", "eval", "exec", "compile", "__import__", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr", "help", "breakpoint"}
+DENIED_NAMES = {"open", "eval", "exec", "compile", "__import__", "__builtins__", "globals", "locals", "vars", "dir", "getattr", "setattr", "delattr", "help", "breakpoint"}
 SAFE_BUILTIN_NAMES = {
     "abs", "all", "any", "bool", "dict", "enumerate", "filter", "float", "int", "isinstance",
     "len", "list", "map", "max", "min", "pow", "range", "reversed", "round", "set", "slice",
@@ -464,6 +454,10 @@ def check_tree(tree):
                     return DENIED_CODE, "import %s is not available to python compute modules" % name, getattr(node, "lineno", 0)
         if isinstance(node, ast.Name) and node.id in DENIED_NAMES:
             return DENIED_CODE, "%s is not available to python compute modules" % node.id, getattr(node, "lineno", 0)
+        if isinstance(node, ast.Name) and node.id.startswith("__"):
+            return DENIED_CODE, "%s is not available to python compute modules" % node.id, getattr(node, "lineno", 0)
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return DENIED_CODE, "%s is not available to python compute modules" % node.attr, getattr(node, "lineno", 0)
     return "", "", 0
 
 def limited_import(name, globals=None, locals=None, fromlist=(), level=0):
