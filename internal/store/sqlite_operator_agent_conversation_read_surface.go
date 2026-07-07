@@ -254,6 +254,10 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 		where = append(where, `(conversations.updated_at < ? OR (conversations.updated_at = ? AND conversations.session_id > ?))`)
 		args = append(args, updatedAt.UTC(), updatedAt.UTC(), cursor.SessionID)
 	}
+	turnBlocksExpr := "'[]'"
+	if caps.Conversations.TurnBlocks {
+		turnBlocksExpr = "COALESCE(latest_turn.turn_blocks, '[]')"
+	}
 	args = append(args, opts.Limit+1)
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
 		SELECT
@@ -271,7 +275,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 			COALESCE(latest_turn.turn_id, ''),
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.parse_ok, 0),
-			COALESCE(latest_turn.turn_blocks, '[]'),
+			%s AS turn_blocks,
 			conversations.started_at,
 			conversations.ended_at,
 			conversations.updated_at
@@ -289,7 +293,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) ListOperatorConversations(c
 		WHERE %s
 		ORDER BY conversations.updated_at DESC, conversations.session_id ASC
 		LIMIT ?
-	`, strings.Join(sources, "\nUNION ALL\n"), strings.Join(where, " AND ")), args...)
+	`, turnBlocksExpr, strings.Join(sources, "\nUNION ALL\n"), strings.Join(where, " AND ")), args...)
 	if err != nil {
 		return OperatorConversationListResult{}, operatorConversationReadQueryError("list sqlite operator conversations", err)
 	}
