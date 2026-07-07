@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"embed"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,8 @@ const (
 	artifactFilePerm    = 0o644
 	wasmPageSize        = 64 * 1024
 	defaultValidateFuel = 2_000_000_000
+	wasiErrnoSuccess    = int32(0)
+	wasiErrnoFault      = int32(21)
 )
 
 //go:embed testdata/python-3.13.14-wasi_sdk-24.zip
@@ -233,7 +236,11 @@ func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWire
 	}
 	store.SetWasi(wasi)
 	linker := wasmtime.NewLinker(engine)
+	linker.AllowShadowing(true)
 	if err := linker.DefineWasi(); err != nil {
+		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+	}
+	if err := defineDeterministicWASI(linker); err != nil {
 		return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 	}
 	instance, err := linker.Instantiate(store, module)
@@ -268,6 +275,44 @@ func runHarness(req Request, envelope harnessEnvelope, fuel uint64) (harnessWire
 		return harnessWireResult{}, classifyPythonCallError(req, computemodule.CodeTrap, fmt.Errorf("%w; stderr=%s", callErr, strings.TrimSpace(string(stderr))))
 	}
 	return harnessWireResult{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("python harness emitted invalid response stdout=%q stderr=%q", strings.TrimSpace(string(stdout)), strings.TrimSpace(string(stderr)))}
+}
+
+func defineDeterministicWASI(linker *wasmtime.Linker) error {
+	if err := linker.FuncWrap("wasi_snapshot_preview1", "random_get", deterministicRandomGet); err != nil {
+		return err
+	}
+	return linker.FuncWrap("wasi_snapshot_preview1", "clock_time_get", deterministicClockTimeGet)
+}
+
+func deterministicRandomGet(caller *wasmtime.Caller, ptr int32, length int32) int32 {
+	data, ok := callerMemoryData(caller)
+	if !ok || ptr < 0 || length < 0 || int64(ptr)+int64(length) > int64(len(data)) {
+		return wasiErrnoFault
+	}
+	for idx := int32(0); idx < length; idx++ {
+		data[int(ptr+idx)] = 0
+	}
+	return wasiErrnoSuccess
+}
+
+func deterministicClockTimeGet(caller *wasmtime.Caller, _ int32, _ int64, resultPtr int32) int32 {
+	data, ok := callerMemoryData(caller)
+	if !ok || resultPtr < 0 || int64(resultPtr)+8 > int64(len(data)) {
+		return wasiErrnoFault
+	}
+	binary.LittleEndian.PutUint64(data[int(resultPtr):int(resultPtr)+8], 0)
+	return wasiErrnoSuccess
+}
+
+func callerMemoryData(caller *wasmtime.Caller) ([]byte, bool) {
+	if caller == nil {
+		return nil, false
+	}
+	ext := caller.GetExport("memory")
+	if ext == nil || ext.Memory() == nil {
+		return nil, false
+	}
+	return ext.Memory().UnsafeData(caller), true
 }
 
 func harnessError(req Request, wire harnessWireResult) error {
