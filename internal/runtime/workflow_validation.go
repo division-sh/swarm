@@ -7,6 +7,7 @@ import (
 
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -25,6 +26,7 @@ type WorkflowContractValidationOptions struct {
 	ValidateLLMModelResolution     bool
 	LLMProfile                     llmselection.Profile
 	ModelAliases                   llmselection.ModelAliases
+	HarnessInjections              []runtimecontracts.FlowInputProducerInjection
 }
 
 type WorkflowContractValidationResult struct {
@@ -61,6 +63,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		ValidateModelResolution: opts.ValidateLLMModelResolution,
 		LLMProfile:              opts.LLMProfile,
 		ModelAliases:            opts.ModelAliases,
+		HarnessInjections:       opts.HarnessInjections,
 	})
 	if result.BootReport.HasErrors() {
 		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))

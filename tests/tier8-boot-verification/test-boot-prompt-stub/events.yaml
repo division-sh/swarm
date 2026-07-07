@@ -1,4 +1,8 @@
 task.requested:
+  swarm:
+    source: external
   task_type: string
 task.completed:
+  swarm:
+    consumer: external
   result: string

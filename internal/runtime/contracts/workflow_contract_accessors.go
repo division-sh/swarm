@@ -581,51 +581,8 @@ func (b *WorkflowContractBundle) FlowHasOutputEvent(flowID, eventType string) bo
 	return b.flowEventScope(flowID).HasOutput(eventType)
 }
 func (b *WorkflowContractBundle) ResolveFlowInputAutoWire(targetFlowID, eventType string) FlowInputAutoWireResolution {
-	targetFlowID = strings.TrimSpace(targetFlowID)
 	eventType = eventidentity.Normalize(eventType)
-	if b == nil || targetFlowID == "" || eventType == "" || !b.FlowHasInputEvent(targetFlowID, eventType) {
-		return FlowInputAutoWireResolution{EventType: eventType}
-	}
-
-	out := FlowInputAutoWireResolution{EventType: eventType}
-	seenPatterns := make(map[string]struct{})
-	appendPattern := func(value string) {
-		value = eventidentity.Normalize(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seenPatterns[value]; ok {
-			return
-		}
-		seenPatterns[value] = struct{}{}
-		out.Patterns = append(out.Patterns, value)
-	}
-
-	for _, view := range b.ProjectViews() {
-		if _, ok := view.Events[eventType]; ok {
-			appendPattern(eventType)
-		}
-	}
-
-	seenFlows := make(map[string]struct{})
-	for _, view := range b.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.ID)
-		if flowID == "" || flowID == targetFlowID || !b.FlowHasOutputEvent(flowID, eventType) {
-			continue
-		}
-		if _, ok := seenFlows[flowID]; ok {
-			continue
-		}
-		seenFlows[flowID] = struct{}{}
-		out.ProducerFlows = append(out.ProducerFlows, flowID)
-	}
-
-	sort.Strings(out.ProducerFlows)
-	if len(out.ProducerFlows) == 1 {
-		appendPattern(b.ResolveFlowEventReference(out.ProducerFlows[0], eventType))
-	}
-	sort.Strings(out.Patterns)
-	return out
+	return FlowInputAutoWireResolution{EventType: eventType}
 }
 func (b *WorkflowContractBundle) FlowInputProducerPatterns(targetFlowID, eventType string) []string {
 	return append([]string{}, b.ResolveFlowInputAutoWire(targetFlowID, eventType).Patterns...)

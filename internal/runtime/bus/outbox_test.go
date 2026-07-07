@@ -210,6 +210,33 @@ func (interceptingTestHandler) Intercept(_ context.Context, evt events.Event) (b
 	)}, nil
 }
 
+type recordingDeliveryRouteInterceptor struct {
+	mu     sync.Mutex
+	routes []events.DeliveryRoute
+}
+
+func (*recordingDeliveryRouteInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, error) {
+	return true, nil, nil
+}
+
+func (r *recordingDeliveryRouteInterceptor) InterceptDeliveryRoute(_ context.Context, _ events.Event, route events.DeliveryRoute) (bool, []events.Event, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.routes = append(r.routes, route.Normalized())
+	return false, nil, nil
+}
+
+func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, got := range events.NormalizeDeliveryRoutes(r.routes) {
+		if got.SubscriberType == route.SubscriberType && got.SubscriberID == route.SubscriberID && got.Target.Normalized() == route.Target.Normalized() {
+			return true
+		}
+	}
+	return false
+}
+
 func TestEngineDispatcherCollectsEmitIntentsWithChainDepth(t *testing.T) {
 	eb, err := runtimebus.NewEventBus(runtimebus.InMemoryEventStore{})
 	if err != nil {
@@ -810,6 +837,67 @@ func TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedMan
 	if got := evt.EntityID(); got != "ent-1" {
 		t.Fatalf("agent event entity_id = %q, want ent-1", got)
 	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestEngineOutboxAndDispatcher_RoutesPendingInternalDeliveriesToRouteInterceptors(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectCommit()
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	store := &directRecipientTransactionalStore{}
+	interceptor := &recordingDeliveryRouteInterceptor{}
+	eb, err := runtimebus.NewEventBusWithOptions(store, runtimebus.EventBusOptions{
+		Interceptors: []runtimebus.EventInterceptor{interceptor},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	internalCh := eb.SubscribeInternal("workflow-runtime", events.EventType("custom.emitted"))
+	defer eb.Unsubscribe("workflow-runtime")
+
+	intent := runtimeengine.EmitIntent{
+		Event: eventtest.RootIngress(
+			"evt-pending-internal-route",
+			events.EventType("custom.emitted"),
+			"",
+			"",
+			[]byte(`{"entity_id":"ent-1"}`),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+			time.Now().UTC(),
+		),
+	}
+	txctx := runtimepipeline.WithPipelineSQLTxContext(context.Background(), tx)
+	if err := eb.EngineOutbox().WriteOutbox(txctx, []runtimeengine.EmitIntent{intent}); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("WriteOutbox: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if err := eb.EngineDispatcher().DispatchPostCommit(context.Background(), []runtimeengine.EmitIntent{intent}); err != nil {
+		t.Fatalf("DispatchPostCommit: %v", err)
+	}
+	wantRoute := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "workflow-runtime"}
+	if !interceptor.seen(wantRoute) {
+		t.Fatalf("delivery route interceptor did not receive pending internal route %#v", wantRoute)
+	}
+	requireNoBusEvent(t, internalCh, "route-intercepted pending internal event")
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

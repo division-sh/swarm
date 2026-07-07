@@ -677,10 +677,21 @@ func routeFlowInputHasExternalProducer(source semanticview.Source, flowID, event
 	if source == nil {
 		return false
 	}
-	if semanticview.ImportBoundaryInputAliasRequired(source, flowID, eventType) {
+	resolution := semanticview.ResolveFlowInputProducer(source, flowID, eventType)
+	switch {
+	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress):
 		return true
+	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress):
+		return true
+	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect):
+		return true
+	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection):
+		return true
+	case resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerPlatformSource):
+		return true
+	default:
+		return false
 	}
-	return len(source.ResolveFlowInputAutoWire(flowID, eventType).Patterns) > 0
 }
 
 func routeFlowInputHasLoweredConnectReceiver(source semanticview.Source, flowID, eventType string) bool {

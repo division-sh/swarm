@@ -191,8 +191,9 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		d.bus.logDispatchQueued(ctx, reason, intent.Event, len(intent.Recipients), len(intent.Recipients) > 0, false)
 		return true, nil
 	}
+	deliveryRoutes := d.bus.deliveryRoutesForPostCommitIntent(ctx, intent.Event.ID())
 	if intent.Recipients == nil {
-		passthrough, deferred, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, d.bus.deliveryRoutesForEvent(ctx, intent.Event.ID()))
+		passthrough, deferred, err := d.bus.runInterceptorsForDeliveryRoutes(ctx, intent.Event, deliveryRoutes)
 		if err != nil {
 			return false, err
 		}
@@ -202,6 +203,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 			}
 		}
 		if !passthrough {
+			d.bus.clearPendingInternalDeliveryRoutes(intent.Event.ID())
 			return false, nil
 		}
 	}
@@ -212,9 +214,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		}
 		return false, err
 	}
-	deliveryRoutes := d.bus.deliveryRoutesForEvent(ctx, intent.Event.ID())
 	pendingInternalRoutes := d.bus.pendingInternalDeliveryRoutes(intent.Event.ID())
-	deliveryRoutes = events.NormalizeDeliveryRoutes(append(deliveryRoutes, pendingInternalRoutes...))
 	if len(recipients) > 0 {
 		deliveryRoutes = events.NormalizeDeliveryRoutes(append(deliveryRoutes, deliveryRoutesFromTargetMap(recipients, "agent", d.bus.deliveryTargetsForEvent(ctx, intent.Event.ID()))...))
 	}
@@ -256,6 +256,12 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 	}, "", 0)
 	return false, nil
+}
+
+func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, eventID string) []events.DeliveryRoute {
+	persistedRoutes := eb.deliveryRoutesForEvent(ctx, eventID)
+	pendingInternalRoutes := eb.pendingInternalDeliveryRoutes(eventID)
+	return events.NormalizeDeliveryRoutes(append(persistedRoutes, pendingInternalRoutes...))
 }
 
 func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {

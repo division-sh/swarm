@@ -803,11 +803,11 @@ func TestEventBusPublish_TargetedDynamicFlowFixtureRouteTableNodePersistsSemanti
 		}
 		return false
 	}
-	if !hasRoute("work.assign") {
-		t.Fatalf("materialized routes = %#v, want task-handler local work.assign route; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
+	if !hasRoute("worker/w-001/work.assign") {
+		t.Fatalf("materialized routes = %#v, want task-handler instance-scoped work.assign route; node entries=%v", materialized, sortedStringKeys(bundle.NodeEntries()))
 	}
-	if hasRoute("worker/w-001/work.assign") {
-		t.Fatalf("materialized routes = %#v, want no selected receiver-carrier route for unrelated target-route fixture", materialized)
+	if subscriberListContainsRouteSource(eb.RouteTable().Resolve("worker/w-001/work.assign"), "task-handler", "worker/w-001", "receiver_carrier") {
+		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", eb.RouteTable().Resolve("worker/w-001/work.assign"))
 	}
 	if resolved := eb.RouteTable().Resolve("worker/w-001/work.assign"); subscriberListContainsRouteSource(resolved, "task-handler", "worker/w-001", "receiver_carrier") {
 		t.Fatalf("Resolve(worker/w-001/work.assign) = %#v, want no receiver_carrier route for unrelated target-route fixture", resolved)

@@ -40,7 +40,7 @@ func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 	}
 }
 
-func TestResolveFlowInputAutoWire_ReturnsScopedProducerForUniquePinMatch(t *testing.T) {
+func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t *testing.T) {
 	producer := FlowContractView{
 		Paths: FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: FlowSchemaDocument{
@@ -71,15 +71,15 @@ func TestResolveFlowInputAutoWire_ReturnsScopedProducerForUniquePinMatch(t *test
 	}
 
 	resolution := bundle.ResolveFlowInputAutoWire("consumer", "scan.requested")
-	if got, want := resolution.ProducerFlows, []string{"producer"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("ProducerFlows = %#v, want %#v", got, want)
+	if len(resolution.ProducerFlows) != 0 {
+		t.Fatalf("ProducerFlows = %#v, want none for retired sibling auto-wire", resolution.ProducerFlows)
 	}
-	if got, want := resolution.Patterns, []string{"producer/scan.requested"}; len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("Patterns = %#v, want %#v", got, want)
+	if len(resolution.Patterns) != 0 {
+		t.Fatalf("Patterns = %#v, want none for retired sibling auto-wire", resolution.Patterns)
 	}
 }
 
-func TestResolveFlowInputAutoWire_FailsClosedOnAmbiguousPinMatch(t *testing.T) {
+func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(t *testing.T) {
 	producerA := FlowContractView{
 		Paths: FlowContractPaths{ID: "producer_a", Flow: "producer_a"},
 		Schema: FlowSchemaDocument{
@@ -120,10 +120,10 @@ func TestResolveFlowInputAutoWire_FailsClosedOnAmbiguousPinMatch(t *testing.T) {
 	}
 
 	resolution := bundle.ResolveFlowInputAutoWire("consumer", "ticket.ready")
-	if got, want := resolution.ProducerFlows, []string{"producer_a", "producer_b"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("ProducerFlows = %#v, want %#v", got, want)
+	if len(resolution.ProducerFlows) != 0 {
+		t.Fatalf("ProducerFlows = %#v, want none for retired sibling auto-wire", resolution.ProducerFlows)
 	}
 	if len(resolution.Patterns) != 0 {
-		t.Fatalf("Patterns = %#v, want none for ambiguous auto-wire", resolution.Patterns)
+		t.Fatalf("Patterns = %#v, want none for retired sibling auto-wire", resolution.Patterns)
 	}
 }

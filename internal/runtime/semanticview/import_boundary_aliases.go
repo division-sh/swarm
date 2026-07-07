@@ -65,29 +65,7 @@ func ImportBoundaryFlowSites(scope ProjectScope) []ImportBoundaryFlowSite {
 }
 
 func ResolveFlowInputAutoWire(source Source, targetFlowID, eventType string) runtimecontracts.FlowInputAutoWireResolution {
-	targetFlowID = strings.TrimSpace(targetFlowID)
-	eventType = eventidentity.Normalize(eventType)
-	if source == nil || targetFlowID == "" || eventType == "" || !source.FlowHasInputEvent(targetFlowID, eventType) {
-		return runtimecontracts.FlowInputAutoWireResolution{EventType: eventType}
-	}
-	if importRequiresInput(source, targetFlowID, eventType) {
-		out := runtimecontracts.FlowInputAutoWireResolution{EventType: eventType}
-		seen := map[string]struct{}{}
-		for _, alias := range ImportBoundaryInputAliases(source, targetFlowID, eventType) {
-			pattern := eventidentity.Normalize(alias.EventPattern)
-			if pattern == "" {
-				continue
-			}
-			if _, ok := seen[pattern]; ok {
-				continue
-			}
-			seen[pattern] = struct{}{}
-			out.Patterns = append(out.Patterns, pattern)
-		}
-		sort.Strings(out.Patterns)
-		return out
-	}
-	return rawResolveFlowInputAutoWire(source, targetFlowID, eventType)
+	return ResolveFlowInputProducer(source, targetFlowID, eventType).AutoWireResolution()
 }
 
 func FlowInputProducerPatterns(source Source, targetFlowID, eventType string) []string {
@@ -405,51 +383,6 @@ func importRequiresInput(source Source, flowID, eventType string) bool {
 		}
 	}
 	return false
-}
-
-func rawResolveFlowInputAutoWire(source Source, targetFlowID, eventType string) runtimecontracts.FlowInputAutoWireResolution {
-	if bundle, ok := Bundle(source); ok && bundle != nil {
-		return bundle.ResolveFlowInputAutoWire(targetFlowID, eventType)
-	}
-	out := runtimecontracts.FlowInputAutoWireResolution{EventType: eventidentity.Normalize(eventType)}
-	if source == nil || targetFlowID == "" || out.EventType == "" || !source.FlowHasInputEvent(targetFlowID, out.EventType) {
-		return out
-	}
-	seenPatterns := map[string]struct{}{}
-	appendPattern := func(value string) {
-		value = eventidentity.Normalize(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seenPatterns[value]; ok {
-			return
-		}
-		seenPatterns[value] = struct{}{}
-		out.Patterns = append(out.Patterns, value)
-	}
-	for _, scope := range source.ProjectScopes() {
-		if _, ok := scope.Events[out.EventType]; ok {
-			appendPattern(out.EventType)
-		}
-	}
-	seenFlows := map[string]struct{}{}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" || flowID == targetFlowID || !source.FlowHasOutputEvent(flowID, out.EventType) {
-			continue
-		}
-		if _, ok := seenFlows[flowID]; ok {
-			continue
-		}
-		seenFlows[flowID] = struct{}{}
-		out.ProducerFlows = append(out.ProducerFlows, flowID)
-	}
-	sort.Strings(out.ProducerFlows)
-	if len(out.ProducerFlows) == 1 {
-		appendPattern(importBoundaryFlowEventReference(source, out.ProducerFlows[0], out.EventType))
-	}
-	sort.Strings(out.Patterns)
-	return out
 }
 
 func importBoundaryScopeIndexes(source Source) (map[string]ProjectScope, map[string][]FlowScope) {

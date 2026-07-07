@@ -64,8 +64,6 @@ func (c *checkerContext) inputPinWiring() []Finding {
 	}
 	c.inputPinLoaded = true
 
-	flowScopedNodes, flowScopedAgents := inputPinRootParticipants(c.source)
-
 	for flowID := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
 		if flowID == "" {
@@ -76,14 +74,23 @@ func (c *checkerContext) inputPinWiring() []Finding {
 			if eventType == "" {
 				continue
 			}
-			producerPaths := c.inputPinProducerPaths(flowID, eventType, flowScopedNodes, flowScopedAgents)
-			if producerPaths.hasAny() {
+			producerProof := c.inputPinProducerSourceProof(flowID, eventType)
+			if producerProof.hasAmbiguousBoundary() {
+				c.inputPinFindings = append(c.inputPinFindings, Finding{
+					CheckID:  "input_pin_wiring",
+					Severity: "warning",
+					Message:  producerProof.ambiguousMessage(flowID, eventType),
+					Location: flowID,
+				})
+				continue
+			}
+			if producerProof.hasAny() {
 				continue
 			}
 			c.inputPinFindings = append(c.inputPinFindings, Finding{
 				CheckID:  "input_pin_wiring",
 				Severity: "warning",
-				Message:  producerPaths.message(flowID, eventType),
+				Message:  producerProof.message(flowID, eventType),
 				Location: flowID,
 			})
 		}
@@ -92,313 +99,88 @@ func (c *checkerContext) inputPinWiring() []Finding {
 	return c.inputPinFindings
 }
 
-type inputPinProducerPaths struct {
-	parentConnect        string
-	siblingFlowOutputPin string
-	rootAgentEmit        string
-	rootNodeHandlerEmit  string
-	platformEventCatalog string
-	externalSource       string
-	sameFlowTimer        string
+type inputPinProducerSourceProof struct {
+	resolution runtimecontracts.FlowInputProducerResolution
 }
 
-func (p inputPinProducerPaths) hasAny() bool {
-	for _, detail := range []string{
-		p.parentConnect,
-		p.siblingFlowOutputPin,
-		p.rootAgentEmit,
-		p.rootNodeHandlerEmit,
-		p.platformEventCatalog,
-		p.externalSource,
-		p.sameFlowTimer,
-	} {
-		if !strings.HasPrefix(strings.TrimSpace(detail), "not ") {
-			return true
-		}
-	}
-	return false
+func (p inputPinProducerSourceProof) hasAny() bool {
+	return p.resolution.HasEvidence()
 }
 
-func (p inputPinProducerPaths) message(flowID, eventType string) string {
+func (p inputPinProducerSourceProof) hasAmbiguousBoundary() bool {
+	return p.resolution.HasAmbiguousBoundaryEvidence()
+}
+
+func (p inputPinProducerSourceProof) message(flowID, eventType string) string {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	return fmt.Sprintf(
-		"Flow %s declares input pin event %s but no producer path was found in the authored bundle.\n\nChecked producer paths:\n- Parent connect: %s\n- Sibling flow output pin: %s\n- Root agent emit_events: %s\n- Root node handler emits: %s\n- Platform event catalog: %s\n- External source metadata (swarm.source): %s\n- Same-flow timer declaration: %s\n\nFix one of:\n- Add a parent package.yaml connect entry to this input pin\n- Add %s to a producing flow's pins.outputs.events\n- Add %s to a root agent's emit_events\n- Add swarm.source: external to %s's events.yaml entry if produced externally",
+		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle.\n\nChecked producer source classes:\n- Boundary external ingress: %s\n- Intrinsic ingress input pin: %s\n- Parent connect: %s\n- Explicit harness injection: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a parent package.yaml connect entry to this input pin\n- Mark the input event pin with source: external only when it is true external ingress\n- Register an explicit harness injection for validation-only fixtures\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing",
 		flowID,
 		eventType,
-		p.parentConnect,
-		p.siblingFlowOutputPin,
-		p.rootAgentEmit,
-		p.rootNodeHandlerEmit,
-		p.platformEventCatalog,
-		p.externalSource,
-		p.sameFlowTimer,
-		eventType,
-		eventType,
-		eventType,
+		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress),
+		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress),
+		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryParentConnect),
+		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection),
+		p.detailsForKind(runtimecontracts.FlowInputProducerPlatformSource),
+		p.detailsForKind(runtimecontracts.FlowInputProducerInternalTopology),
 	)
 }
 
-func inputPinRootParticipants(source semanticview.Source) (map[string]struct{}, map[string]struct{}) {
-	flowScopedNodes := map[string]struct{}{}
-	flowScopedAgents := map[string]struct{}{}
-	if source == nil {
-		return flowScopedNodes, flowScopedAgents
-	}
-	for _, scope := range source.FlowScopes() {
-		for nodeID := range scope.Nodes {
-			nodeID = strings.TrimSpace(nodeID)
-			if nodeID != "" {
-				flowScopedNodes[nodeID] = struct{}{}
-			}
-		}
-		for agentID := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			if agentID != "" {
-				flowScopedAgents[agentID] = struct{}{}
-			}
-		}
-	}
-	return flowScopedNodes, flowScopedAgents
+func (p inputPinProducerSourceProof) ambiguousMessage(flowID, eventType string) string {
+	return fmt.Sprintf(
+		"Flow %s declares input pin event %s with multiple boundary producer sources: %s. Choose one boundary source so routing cannot infer authority from overlapping ingress mechanisms.",
+		strings.TrimSpace(flowID),
+		strings.TrimSpace(eventType),
+		p.boundaryDetails(),
+	)
 }
 
-func (c *checkerContext) inputPinProducerPaths(flowID, eventType string, flowScopedNodes, flowScopedAgents map[string]struct{}) inputPinProducerPaths {
-	localEvent := eventidentity.Normalize(eventType)
-	canonicalEvent := eventidentity.Normalize(c.source.ResolveFlowEventReference(flowID, eventType))
-	return inputPinProducerPaths{
-		parentConnect:        c.inputPinParentConnectPath(flowID, localEvent),
-		siblingFlowOutputPin: c.inputPinSiblingFlowOutputPath(flowID, localEvent),
-		rootAgentEmit:        c.inputPinRootAgentPath(localEvent, canonicalEvent, flowScopedAgents),
-		rootNodeHandlerEmit:  c.inputPinRootNodeHandlerPath(localEvent, canonicalEvent, flowScopedNodes),
-		platformEventCatalog: inputPinPlatformEventPath(c.source.PlatformSpec(), localEvent),
-		externalSource:       c.inputPinExternalSourcePath(flowID, eventType),
-		sameFlowTimer:        c.inputPinSameFlowTimerPath(flowID, eventType, canonicalEvent),
-	}
-}
-
-func (c *checkerContext) inputPinParentConnectPath(flowID, localEvent string) string {
-	for _, pin := range c.source.FlowInputEventPins(flowID) {
-		if eventidentity.Normalize(pin.EventType()) != localEvent && eventidentity.Normalize(pin.PinName()) != localEvent {
+func (p inputPinProducerSourceProof) detailsForKind(kind string) string {
+	details := make([]string, 0)
+	for _, evidence := range p.resolution.Evidence {
+		if strings.TrimSpace(evidence.Kind) != kind {
 			continue
 		}
-		connects := c.source.CompositionConnectsTo(flowID, pin.PinName())
-		if len(connects) == 0 {
-			return "not found"
+		detail := strings.TrimSpace(evidence.Detail)
+		if detail == "" {
+			detail = strings.TrimSpace(evidence.EventType)
 		}
-		refs := make([]string, 0, len(connects))
-		for _, connect := range connects {
-			refs = append(refs, strings.TrimSpace(connect.From))
-		}
-		sort.Strings(refs)
-		return fmt.Sprintf("found via parent connect from %s", strings.Join(refs, ", "))
-	}
-	return "not found"
-}
-
-func (c *checkerContext) inputPinSiblingFlowOutputPath(flowID, localEvent string) string {
-	aliases := semanticview.ImportBoundaryInputAliases(c.source, flowID, localEvent)
-	if len(aliases) > 0 {
-		patterns := make([]string, 0, len(aliases))
-		for _, alias := range aliases {
-			if pattern := eventidentity.Normalize(alias.EventPattern); pattern != "" {
-				patterns = append(patterns, pattern)
-			}
-		}
-		sort.Strings(patterns)
-		if len(patterns) > 0 {
-			return fmt.Sprintf("found via %s", strings.Join(patterns, ", "))
+		if detail != "" {
+			details = append(details, detail)
 		}
 	}
-	if semanticview.ImportBoundaryInputAliasRequired(c.source, flowID, localEvent) {
+	if len(details) == 0 {
 		return "not found"
 	}
-	matches := map[string]struct{}{}
-	for otherFlowID := range c.source.FlowSchemaEntries() {
-		otherFlowID = strings.TrimSpace(otherFlowID)
-		if otherFlowID == "" || otherFlowID == strings.TrimSpace(flowID) {
-			continue
-		}
-		for _, output := range c.source.FlowOutputEvents(otherFlowID) {
-			if eventidentity.Normalize(output) == localEvent {
-				matches[otherFlowID] = struct{}{}
-				break
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return "not found"
-	}
-	flows := sortedSetKeysLocal(matches)
-	if len(flows) == 1 {
-		return fmt.Sprintf("found in flow %s", flows[0])
-	}
-	return fmt.Sprintf("found in flows %s", strings.Join(flows, ", "))
+	sort.Strings(details)
+	return strings.Join(details, ", ")
 }
 
-func (c *checkerContext) inputPinRootAgentPath(localEvent, canonicalEvent string, flowScopedAgents map[string]struct{}) string {
-	matches := map[string]struct{}{}
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
+func (p inputPinProducerSourceProof) boundaryDetails() string {
+	details := make([]string, 0)
+	for _, evidence := range p.resolution.BoundaryEvidence() {
+		detail := strings.TrimSpace(evidence.Detail)
+		if detail == "" {
+			detail = strings.TrimSpace(evidence.Kind)
 		}
-		if _, ok := flowScopedAgents[agentID]; ok {
-			continue
-		}
-		for _, emitted := range agent.EmitEvents {
-			if inputPinRootProducerMatches(c.source, localEvent, canonicalEvent, emitted) {
-				matches[agentID] = struct{}{}
-				break
-			}
+		if detail != "" {
+			details = append(details, detail)
 		}
 	}
-	if len(matches) == 0 {
-		return "not found"
+	if len(details) == 0 {
+		return "none"
 	}
-	agents := sortedSetKeysLocal(matches)
-	if len(agents) == 1 {
-		return fmt.Sprintf("found on agent %s", agents[0])
-	}
-	return fmt.Sprintf("found on agents %s", strings.Join(agents, ", "))
+	sort.Strings(details)
+	return strings.Join(details, ", ")
 }
 
-func (c *checkerContext) inputPinRootNodeHandlerPath(localEvent, canonicalEvent string, flowScopedNodes map[string]struct{}) string {
-	matches := map[string]struct{}{}
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
-			continue
-		}
-		if _, ok := flowScopedNodes[nodeID]; ok {
-			continue
-		}
-		for handlerEvent, handler := range node.EventHandlers {
-			for _, emitted := range handlerEmits(handler) {
-				if inputPinRootProducerMatches(c.source, localEvent, canonicalEvent, emitted) {
-					matches[fmt.Sprintf("%s handler %s", nodeID, strings.TrimSpace(handlerEvent))] = struct{}{}
-					break
-				}
-			}
-		}
+func (c *checkerContext) inputPinProducerSourceProof(flowID, eventType string) inputPinProducerSourceProof {
+	return inputPinProducerSourceProof{
+		resolution: semanticview.ResolveFlowInputProducerWithOptions(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
+			HarnessInjections: c.opts.HarnessInjections,
+		}),
 	}
-	if len(matches) == 0 {
-		return "not found"
-	}
-	handlers := sortedSetKeysLocal(matches)
-	if len(handlers) == 1 {
-		return fmt.Sprintf("found on %s", handlers[0])
-	}
-	return fmt.Sprintf("found on %s", strings.Join(handlers, ", "))
-}
-
-func inputPinPlatformEventPath(platform runtimecontracts.PlatformSpecDocument, localEvent string) string {
-	if runtimecontracts.PlatformEventCatalogContains(platform, localEvent) {
-		return "matched"
-	}
-	return "not matched"
-}
-
-func (c *checkerContext) inputPinExternalSourcePath(flowID, eventType string) string {
-	bundle, ok := semanticview.Bundle(c.source)
-	if !ok || bundle == nil {
-		return "not found"
-	}
-	if entry, ok := inputPinRootEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.SwarmSource()) {
-		return "found"
-	}
-	if entry, ok := inputPinFlowEventEntry(bundle, flowID, eventType); ok && inputPinExternalSourceMatch(entry.SwarmSource()) {
-		return "found"
-	}
-	return "not found"
-}
-
-func inputPinExternalSourceMatch(source string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "external")
-}
-
-func inputPinRootEventEntry(bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string) (runtimecontracts.EventCatalogEntry, bool) {
-	if bundle == nil {
-		return runtimecontracts.EventCatalogEntry{}, false
-	}
-	for _, candidate := range []string{
-		eventidentity.Normalize(eventType),
-		eventidentity.Normalize(bundle.ResolveFlowEventReference(flowID, eventType)),
-	} {
-		if candidate == "" {
-			continue
-		}
-		if entry, ok := bundle.Events[candidate]; ok {
-			return entry, true
-		}
-	}
-	return runtimecontracts.EventCatalogEntry{}, false
-}
-
-func inputPinFlowEventEntry(bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string) (runtimecontracts.EventCatalogEntry, bool) {
-	if bundle == nil {
-		return runtimecontracts.EventCatalogEntry{}, false
-	}
-	flowView, ok := bundle.FlowViewByID(flowID)
-	if !ok || flowView == nil {
-		return runtimecontracts.EventCatalogEntry{}, false
-	}
-	candidate := eventidentity.Normalize(eventType)
-	if candidate == "" {
-		return runtimecontracts.EventCatalogEntry{}, false
-	}
-	if entry, ok := flowView.Events[candidate]; ok {
-		return entry, true
-	}
-	return runtimecontracts.EventCatalogEntry{}, false
-}
-
-func (c *checkerContext) inputPinSameFlowTimerPath(flowID, eventType, canonicalEvent string) string {
-	matches := map[string]struct{}{}
-	for _, timer := range c.source.WorkflowTimers() {
-		if strings.TrimSpace(timer.FlowID) != strings.TrimSpace(flowID) {
-			continue
-		}
-		if !inputPinTimerMatches(c.source, flowID, eventType, canonicalEvent, timer.Event) {
-			continue
-		}
-		label := fmt.Sprintf("node %s", strings.TrimSpace(timer.NodeID))
-		if timerID := strings.TrimSpace(timer.ID); timerID != "" {
-			label = fmt.Sprintf("%s timer %s", label, timerID)
-		}
-		matches[label] = struct{}{}
-	}
-	if len(matches) == 0 {
-		return "not found"
-	}
-	timers := sortedSetKeysLocal(matches)
-	if len(timers) == 1 {
-		return fmt.Sprintf("found on %s", timers[0])
-	}
-	return fmt.Sprintf("found on %s", strings.Join(timers, ", "))
-}
-
-func inputPinRootProducerMatches(source semanticview.Source, localEvent, canonicalEvent, candidate string) bool {
-	candidate = eventidentity.Normalize(candidate)
-	if candidate == "" {
-		return false
-	}
-	if candidate == localEvent {
-		return true
-	}
-	if canonicalEvent == "" || source == nil {
-		return false
-	}
-	return eventidentity.Normalize(source.ResolveFlowEventReference("", candidate)) == canonicalEvent
-}
-
-func inputPinTimerMatches(source semanticview.Source, flowID, eventType, canonicalEvent, candidate string) bool {
-	if source == nil {
-		return false
-	}
-	if canonicalEvent != "" && eventidentity.Normalize(source.ResolveFlowEventReference(flowID, candidate)) == canonicalEvent {
-		return true
-	}
-	return eventidentity.Normalize(candidate) == eventidentity.Normalize(eventType)
 }
 
 func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
@@ -416,20 +198,16 @@ func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
 			if eventType == "" {
 				continue
 			}
-			producers := c.source.ResolveFlowInputAutoWire(flowID, eventType).ProducerFlows
-			if len(producers) <= 1 {
-				continue
-			}
-			if compositionConnectsToInput(c.source, flowID, eventType) {
-				continue
-			}
-			if flowHasScopedInputEscapeHatch(c.source, flowID, eventType) {
+			resolution := semanticview.ResolveFlowInputProducerWithOptions(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
+				HarnessInjections: c.opts.HarnessInjections,
+			})
+			if !resolution.HasAmbiguousBoundaryEvidence() {
 				continue
 			}
 			c.crossFlowPinAmbiguityFindings = append(c.crossFlowPinAmbiguityFindings, Finding{
 				CheckID:  "cross_flow_pin_ambiguity_validation",
 				Severity: "error",
-				Message:  fmt.Sprintf("flow %s input pin %s is ambiguous across producer flows %s; add an explicit scoped subscription escape hatch", flowID, eventType, strings.Join(producers, ", ")),
+				Message:  fmt.Sprintf("flow %s input pin %s is ambiguous across boundary producer sources %s; choose one boundary source", flowID, eventType, inputPinProducerSourceProof{resolution: resolution}.boundaryDetails()),
 				Location: flowID,
 			})
 		}

@@ -690,7 +690,9 @@ terminal_states: [done]
 states: [idle, done]
 pins:
   inputs:
-    events: [task.assigned]
+    events:
+      - name: task.assigned
+        source: external
     reads: [priority]
   outputs:
     events: []

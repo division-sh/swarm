@@ -103,6 +103,75 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchPersistsSingletonConta
 	assertNoFinalFlowInstanceAuthoringContainedWorkflowInstance(t, db, workflowStore, ctx, "coordinator/lead-42")
 }
 
+func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInputConnectEvent(t *testing.T) {
+	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
+	source := semanticview.Wrap(bundle)
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pc, workflowStore := newFinalFlowInstanceAuthoringPipelineCoordinator(t, db, bundle, source)
+	ctx := testPipelineCoordinatorRunContext(t, pc)
+	instanceID := "ti-account-42"
+	flowInstance := finalflowinstanceauthoring.TemplateFlowID + "/" + instanceID
+	entityID := FlowInstanceEntityID(flowInstance)
+	if err := workflowStore.Create(ctx, WorkflowInstance{
+		InstanceID:      instanceID,
+		StorageRef:      flowInstance,
+		WorkflowName:    finalflowinstanceauthoring.TemplateFlowID,
+		WorkflowVersion: bundle.WorkflowVersion(),
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"entity_id":   entityID,
+			"flow_path":   flowInstance,
+			"instance_id": instanceID,
+			"account_id":  "acct-42",
+		},
+	}); err != nil {
+		t.Fatalf("seed account_case workflow instance: %v", err)
+	}
+
+	target := events.RouteIdentity{
+		FlowID:       finalflowinstanceauthoring.TemplateFlowID,
+		FlowInstance: flowInstance,
+		EntityID:     entityID,
+	}
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType(finalflowinstanceauthoring.ProducerFlowID+"/"+finalflowinstanceauthoring.ProducerOutput),
+		finalflowinstanceauthoring.ProducerFlowID,
+		"",
+		json.RawMessage(`{"source_account_id":"acct-42","score":"91","decision":"approved"}`),
+		0,
+		testPipelineRunID,
+		"",
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, target),
+		time.Now().UTC(),
+	)
+	seedFinalFlowInstanceAuthoringEvent(t, db, ctx, evt)
+	seedFinalFlowInstanceAuthoringNodeDelivery(t, db, ctx, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, target)
+
+	handled, err := pc.dispatchWorkflowNodeEventResult(ctx, evt)
+	if err != nil {
+		t.Fatalf("dispatchWorkflowNodeEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("dispatchWorkflowNodeEventResult handled = false, want account_case handler delivery")
+	}
+	loaded, ok, err := workflowStore.Load(ctx, entityID)
+	if err != nil {
+		t.Fatalf("workflowStore.Load(%s): %v", entityID, err)
+	}
+	if !ok {
+		t.Fatalf("workflowStore.Load(%s) ok=false", entityID)
+	}
+	if loaded.WorkflowName != finalflowinstanceauthoring.TemplateFlowID || loaded.CurrentState != "reviewed" {
+		t.Fatalf("loaded account_case = storage:%q workflow:%q state:%q, want account_case/reviewed", loaded.StorageRef, loaded.WorkflowName, loaded.CurrentState)
+	}
+	if loaded.Metadata["account_id"] != "acct-42" || loaded.Metadata["score"] != "91" || loaded.Metadata["decision"] != "approved" {
+		t.Fatalf("loaded account_case metadata = %#v, want account_id/score/decision from routed payload", loaded.Metadata)
+	}
+	assertFinalFlowInstanceAuthoringDeliveryStatus(t, db, evt.ID(), finalflowinstanceauthoring.TemplateNodeID, "delivered")
+}
+
 func TestFinalFlowInstanceAuthoringFixturePipelineRejectsContainedItemDeliveryTarget(t *testing.T) {
 	bundle := finalflowinstanceauthoring.LoadBundle(t, finalflowinstanceauthoring.Options{})
 	source := semanticview.Wrap(bundle)

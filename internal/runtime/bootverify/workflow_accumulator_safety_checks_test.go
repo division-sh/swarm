@@ -133,7 +133,7 @@ func TestRun_FailsClosedForAccumulatorInputWithoutProducerPath(t *testing.T) {
 		t.Fatalf("expected %s error, got %#v", checkIDAccumulatorInputProducer, report.Errors())
 	}
 	if !reportContains(report.Errors(), checkIDAccumulatorInputProducer, "Parent connect: not found") ||
-		!reportContains(report.Errors(), checkIDAccumulatorInputProducer, "Same-flow node handler emits: not found") {
+		!reportContains(report.Errors(), checkIDAccumulatorInputProducer, "Internal topology producer: not found") {
 		t.Fatalf("expected producer path audit details, got %#v", report.Errors())
 	}
 }

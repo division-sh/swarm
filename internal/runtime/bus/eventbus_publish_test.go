@@ -2069,7 +2069,7 @@ func TestEventBusPublish_HumanTaskEventsRouteBySubscriptionOnly(t *testing.T) {
 	requireNoBusEvent(t, ch, "human task event without subscription")
 }
 
-func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.T) {
+func TestEventBusPublish_DoesNotLogRoutedRecipientForRetiredSiblingAutoWire(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -2146,17 +2146,8 @@ func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.
 			}
 		}
 	}
-	if len(routed) == 0 || routed[0]["id"] != "scan-orchestrator" {
-		t.Fatalf("routed_recipients = %#v, want scan-orchestrator", detail["routed_recipients"])
-	}
-	if got := routed[0]["matched_pattern"]; got != "producer/scan.requested" {
-		t.Fatalf("matched_pattern = %#v, want producer/scan.requested", got)
-	}
-	if got := routed[0]["route_source"]; got != "pin_auto_wire" {
-		t.Fatalf("route_source = %#v, want pin_auto_wire", got)
-	}
-	if got := routed[0]["localized_event"]; got != "scan.requested" {
-		t.Fatalf("localized_event = %#v, want scan.requested", got)
+	if len(routed) != 0 {
+		t.Fatalf("routed_recipients = %#v, want none for retired sibling auto-wire", detail["routed_recipients"])
 	}
 	subs, _ := detail["subscription_recipients"].([]string)
 	if len(subs) == 0 {
@@ -2174,7 +2165,7 @@ func TestEventBusPublish_LogsRoutedAndSubscribedRecipientsSeparately(t *testing.
 	}
 }
 
-func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
+func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -2229,14 +2220,8 @@ func TestEventBusPublish_RecordsPublishDiagnosticsInTurnRecorder(t *testing.T) {
 	if diags[0].EventType != "producer/scan.requested" {
 		t.Fatalf("event_type = %q", diags[0].EventType)
 	}
-	if len(diags[0].RoutedRecipients) != 1 {
-		t.Fatalf("routed_recipients = %#v", diags[0].RoutedRecipients)
-	}
-	if diags[0].RoutedRecipients[0].RouteSource != "pin_auto_wire" {
-		t.Fatalf("route_source = %q", diags[0].RoutedRecipients[0].RouteSource)
-	}
-	if diags[0].RoutedRecipients[0].LocalizedEvent != "scan.requested" {
-		t.Fatalf("localized_event = %q", diags[0].RoutedRecipients[0].LocalizedEvent)
+	if len(diags[0].RoutedRecipients) != 0 {
+		t.Fatalf("routed_recipients = %#v, want none for retired sibling auto-wire", diags[0].RoutedRecipients)
 	}
 }
 

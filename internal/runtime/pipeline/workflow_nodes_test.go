@@ -13,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-func TestWorkflowFlowInputProducerAliases_IncludeProducerScopedAlias(t *testing.T) {
+func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -50,15 +50,12 @@ func TestWorkflowFlowInputProducerAliases_IncludeProducerScopedAlias(t *testing.
 	}
 
 	aliases := workflowFlowInputProducerAliases(semanticview.Wrap(bundle), "discovery", "scan.requested")
-	for _, candidate := range aliases {
-		if candidate == "producer/scan.requested" {
-			return
-		}
+	if len(aliases) != 0 {
+		t.Fatalf("aliases = %#v, want none for retired sibling auto-wire", aliases)
 	}
-	t.Fatalf("aliases = %#v, want producer/scan.requested", aliases)
 }
 
-func TestWorkflowFlowInputProducerAliases_AutoWireCrossFlowInputPinsToProducerScopedEvent(t *testing.T) {
+func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProducerScopedEvent(t *testing.T) {
 	scoring := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -95,12 +92,9 @@ func TestWorkflowFlowInputProducerAliases_AutoWireCrossFlowInputPinsToProducerSc
 	}
 
 	aliases := workflowFlowInputProducerAliases(semanticview.Wrap(bundle), "validation", "vertical.shortlisted")
-	for _, alias := range aliases {
-		if alias == "scoring/vertical.shortlisted" {
-			return
-		}
+	if len(aliases) != 0 {
+		t.Fatalf("aliases = %#v, want none for retired sibling auto-wire", aliases)
 	}
-	t.Fatalf("aliases = %#v, want scoring/vertical.shortlisted", aliases)
 }
 
 func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T) {
@@ -117,7 +111,7 @@ func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T
 	}
 }
 
-func TestLoadWorkflowNodes_UsesHandlerKeysForCrossFlowPinAutoWire(t *testing.T) {
+func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -183,10 +177,12 @@ func TestLoadWorkflowNodes_UsesHandlerKeysForCrossFlowPinAutoWire(t *testing.T) 
 	}
 	for _, subscription := range nodes[0].Subscriptions {
 		if string(subscription) == "producer/scan.requested" {
-			return
+			t.Fatalf("Subscriptions = %#v, want no retired sibling auto-wire alias", nodes[0].Subscriptions)
 		}
 	}
-	t.Fatalf("Subscriptions = %#v, want producer/scan.requested", nodes[0].Subscriptions)
+	if !workflowNodeHasSubscriptionForTest(nodes[0], "scan.requested") {
+		t.Fatalf("Subscriptions = %#v, want local scan.requested", nodes[0].Subscriptions)
+	}
 }
 
 func TestLoadWorkflowNodes_UsesEffectiveFactsForMinimizedSystemNode(t *testing.T) {
@@ -290,6 +286,64 @@ func TestLoadWorkflowNodes_UsesImportBoundaryOutputAliasForWildcardParentSubscri
 	}
 	if got := resolved.HandlerEventKey; got != "parent.lead_enriched" {
 		t.Fatalf("handler event key = %q, want parent.lead_enriched", got)
+	}
+}
+
+func TestWorkflowNodeHandlerResolution_LocalizesProducerScopedEventThroughTargetRoute(t *testing.T) {
+	accountCase := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "account_case", Flow: "account_case"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Mode: "template",
+			Pins: runtimecontracts.FlowPins{
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
+					Name:  "account_ready",
+					Event: "account.ready",
+				}}},
+			},
+		},
+		Path: "account_case",
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"account-case-worker": {
+				ID:           "account-case-worker",
+				SubscribesTo: []string{"account.ready"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"account.ready": {},
+				},
+			},
+		},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{accountCase}}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"account-case-worker": {
+					"account.ready": {},
+				},
+			},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"account_case": &root.Children[0],
+			},
+		},
+	})
+	evt := eventtest.RootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
+	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
+		FlowID:       "account_case",
+		FlowInstance: "account_case/ti-1",
+		EntityID:     "entity-1",
+	})
+	if got := workflowNodeTargetRouteLocalEventType("account_case", "account_case", []string{"account.ready"}, "intake/account.ready", evt.TargetRoute()); got != "account.ready" {
+		t.Fatalf("target-route localized event = %q, want account.ready", got)
+	}
+
+	resolved := workflowNodeEventHandlerResolutionForDelivery(source, "account-case-worker", evt)
+	if !resolved.Matched {
+		t.Fatal("expected account-case-worker handler to resolve through target route")
+	}
+	if got := resolved.HandlerEventKey; got != "account.ready" {
+		t.Fatalf("handler event key = %q, want account.ready", got)
 	}
 }
 

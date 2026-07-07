@@ -123,7 +123,7 @@ func workflowNodePolicyForDelivery(source semanticview.Source, node WorkflowNode
 			return policy, true
 		}
 	}
-	return WorkflowEventPolicy{}, false
+	return deriveWorkflowEventPolicy(source, resolved.HandlerEventKey, strings.TrimSpace(resolved.Handler.AdvancesTo) != ""), true
 }
 
 func workflowNodePolicyForEventType(policies map[string]WorkflowEventPolicy, eventType string) (WorkflowEventPolicy, bool) {
@@ -279,11 +279,14 @@ func workflowNodeConcreteInstanceLocalEventType(source semanticview.Source, node
 	if staticFlowPath == "" {
 		staticFlowPath = flowID
 	}
-	if !eventTypeBelongsToNodeStaticFlow(rawEventType, staticFlowPath) {
-		return ""
-	}
 	handlerKeys := workflowNodeHandlerEventKeys(source, nodeID)
 	if len(handlerKeys) == 0 {
+		return ""
+	}
+	if localized := workflowNodeTargetRouteLocalEventType(flowID, staticFlowPath, handlerKeys, rawEventType, evt.TargetRoute()); localized != "" {
+		return localized
+	}
+	if !eventTypeBelongsToNodeStaticFlow(rawEventType, staticFlowPath) {
 		return ""
 	}
 	for _, flowInstance := range workflowNodeConcreteReceiverScopes(evt) {
@@ -300,6 +303,28 @@ func workflowNodeConcreteInstanceLocalEventType(source semanticview.Source, node
 	}
 	remainder := strings.TrimPrefix(rawEventType, staticFlowPath+"/")
 	if !strings.Contains(remainder, "/") {
+		return ""
+	}
+	for _, key := range handlerKeys {
+		key = eventidentity.Normalize(key)
+		if key != "" && strings.HasSuffix(rawEventType, "/"+key) {
+			return key
+		}
+	}
+	return ""
+}
+
+func workflowNodeTargetRouteLocalEventType(flowID, staticFlowPath string, handlerKeys []string, rawEventType string, target events.RouteIdentity) string {
+	target = target.Normalized()
+	flowID = eventidentity.Normalize(flowID)
+	staticFlowPath = eventidentity.Normalize(staticFlowPath)
+	rawEventType = eventidentity.Normalize(rawEventType)
+	if flowID == "" || staticFlowPath == "" || rawEventType == "" || len(handlerKeys) == 0 {
+		return ""
+	}
+	targetFlowID := eventidentity.Normalize(target.FlowID)
+	targetFlowInstance := eventidentity.Normalize(target.FlowInstance)
+	if targetFlowID != flowID && (targetFlowInstance == "" || !strings.HasPrefix(targetFlowInstance, staticFlowPath+"/")) {
 		return ""
 	}
 	for _, key := range handlerKeys {

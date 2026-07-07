@@ -102,15 +102,15 @@ func TestFormatSurfaceFindingUsesTypedDiagnosticRendering(t *testing.T) {
 		CheckID:     "input_pin_wiring",
 		Severity:    SeveritySemanticDriftWarn,
 		Location:    "flow.items",
-		Message:     "no producer path was found in the authored bundle",
-		Remediation: "connect a producer or mark the event external",
+		Message:     "no accepted producer source was found in the authored bundle",
+		Remediation: "connect a producer or declare a valid source",
 		Evidence:    []string{"pin: receive"},
 	}
 
 	rendered := FormatSurfaceFinding(warning, false)
 	for _, want := range []string{
-		"[WARN] input_pin_wiring @ flow.items: no producer path was found in the authored bundle",
-		"  remediation: connect a producer or mark the event external",
+		"[WARN] input_pin_wiring @ flow.items: no accepted producer source was found in the authored bundle",
+		"  remediation: connect a producer or declare a valid source",
 		"  evidence:\n    - pin: receive",
 	} {
 		if !strings.Contains(rendered, want) {
@@ -4206,14 +4206,24 @@ func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
 
 func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-	entry := bundle.Events["task.feedback"]
-	entry.Swarm.Source = "external"
-	bundle.Events["task.feedback"] = entry
+	markFlowInputPinSource(t, bundle, "child", "task.feedback", "external")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
 	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
 		t.Fatalf("unexpected input_pin_wiring warning for external input, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnForHarnessInjectedInputPinWithoutEmitter(t *testing.T) {
+	source := loadTier8Fixture(t, "test-boot-missing-pin")
+
+	report := Run(context.Background(), source, Options{
+		HarnessInjections: []runtimecontracts.FlowInputProducerInjection{{FlowID: "child", EventType: "task.feedback"}},
+	})
+
+	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring warning for harness-injected input, got %#v", report.Warnings())
 	}
 }
 
@@ -5995,13 +6005,28 @@ func TestRun_AllowsTemplateFlowInputPinHandlersWithoutCreateEntity(t *testing.T)
 	}
 }
 
-func TestRun_ReportsCrossFlowPinAmbiguityWithoutEscapeHatch(t *testing.T) {
+func TestRun_DoesNotReportCrossFlowPinAmbiguityForSiblingOutputs(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
+	if reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "ticket.ready") {
+		t.Fatalf("unexpected cross_flow_pin_ambiguity_validation error for retired sibling-output inference, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testing.T) {
+	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
+	markFlowInputPinSource(t, bundle, "child", "task.feedback", "external")
+	bundle.Semantics.CompositionConnects = append(bundle.Semantics.CompositionConnects, runtimecontracts.FlowPackageConnect{
+		From: ".task.feedback",
+		To:   "child.task.feedback",
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "cross_flow_pin_ambiguity_validation", "task.feedback") {
 		t.Fatalf("expected cross_flow_pin_ambiguity_validation error, got %#v", report.Errors())
 	}
 }
@@ -7268,6 +7293,12 @@ flows:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	for _, flowID := range []string{"external_consumer", "plain_consumer"} {
+		eventPin := "      - ticket.ready"
+		if flowID == "external_consumer" {
+			eventPin = `
+      - name: ticket.ready
+        source: external`
+		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
 name: `+flowID+`
 initial_state: idle
@@ -7276,18 +7307,14 @@ states: [idle, done]
 pins:
   inputs:
     events:
-      - ticket.ready
+`+eventPin+`
   outputs:
     events: []
 `)
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
 		entry := "ticket.ready:\n  payload:\n    entity_id: string\n"
-		if flowID == "external_consumer" {
-			entry = "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n  entity_id: string\n"
-		} else {
-			entry = "ticket.ready:\n  entity_id: string\n"
-		}
+		entry = "ticket.ready:\n  entity_id: string\n"
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), entry)
 	}
 
@@ -8098,6 +8125,104 @@ func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContr
 			}
 		}
 		bundle.Semantics.FlowInputs[flowID] = inputs
+	}
+	renameFlowInputPinEvent(t, bundle, flowID, oldEventType, newEventType)
+}
+
+func markFlowInputPinSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType, source string) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	ensureFlowInputEventPins(&flowView.Schema.Pins.Inputs)
+	for idx := range flowView.Schema.Pins.Inputs.EventPins {
+		if strings.TrimSpace(flowView.Schema.Pins.Inputs.EventPins[idx].EventType()) == strings.TrimSpace(eventType) {
+			flowView.Schema.Pins.Inputs.EventPins[idx].Source = source
+		}
+	}
+	if schema, ok := bundle.FlowSchemas[flowID]; ok {
+		ensureFlowInputEventPins(&schema.Pins.Inputs)
+		for idx := range schema.Pins.Inputs.EventPins {
+			if strings.TrimSpace(schema.Pins.Inputs.EventPins[idx].EventType()) == strings.TrimSpace(eventType) {
+				schema.Pins.Inputs.EventPins[idx].Source = source
+			}
+		}
+		bundle.FlowSchemas[flowID] = schema
+	}
+	ensureSemanticFlowInputPins(bundle, flowID)
+	for idx := range bundle.Semantics.FlowInputEventPins[flowID] {
+		if strings.TrimSpace(bundle.Semantics.FlowInputEventPins[flowID][idx].EventType()) == strings.TrimSpace(eventType) {
+			bundle.Semantics.FlowInputEventPins[flowID][idx].Source = source
+		}
+	}
+}
+
+func renameFlowInputPinEvent(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, oldEventType, newEventType string) {
+	t.Helper()
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	renameFlowInputPins(&flowView.Schema.Pins.Inputs, oldEventType, newEventType)
+	if schema, ok := bundle.FlowSchemas[flowID]; ok {
+		renameFlowInputPins(&schema.Pins.Inputs, oldEventType, newEventType)
+		bundle.FlowSchemas[flowID] = schema
+	}
+	ensureSemanticFlowInputPins(bundle, flowID)
+	for idx := range bundle.Semantics.FlowInputEventPins[flowID] {
+		if strings.TrimSpace(bundle.Semantics.FlowInputEventPins[flowID][idx].EventType()) == strings.TrimSpace(oldEventType) {
+			bundle.Semantics.FlowInputEventPins[flowID][idx].Name = newEventType
+			bundle.Semantics.FlowInputEventPins[flowID][idx].Event = newEventType
+		}
+	}
+}
+
+func renameFlowInputPins(pins *runtimecontracts.FlowInputPins, oldEventType, newEventType string) {
+	if pins == nil {
+		return
+	}
+	for idx, eventType := range pins.Events {
+		if strings.TrimSpace(eventType) == strings.TrimSpace(oldEventType) {
+			pins.Events[idx] = newEventType
+		}
+	}
+	ensureFlowInputEventPins(pins)
+	for idx := range pins.EventPins {
+		if strings.TrimSpace(pins.EventPins[idx].EventType()) == strings.TrimSpace(oldEventType) {
+			pins.EventPins[idx].Name = newEventType
+			pins.EventPins[idx].Event = newEventType
+		}
+	}
+}
+
+func ensureSemanticFlowInputPins(bundle *runtimecontracts.WorkflowContractBundle, flowID string) {
+	if bundle.Semantics.FlowInputEventPins == nil {
+		bundle.Semantics.FlowInputEventPins = map[string][]runtimecontracts.FlowInputEventPin{}
+	}
+	if len(bundle.Semantics.FlowInputEventPins[flowID]) == 0 {
+		inputs := bundle.Semantics.FlowInputs[flowID]
+		pins := make([]runtimecontracts.FlowInputEventPin, 0, len(inputs))
+		for _, eventType := range inputs {
+			eventType = strings.TrimSpace(eventType)
+			if eventType != "" {
+				pins = append(pins, runtimecontracts.FlowInputEventPin{Name: eventType, Event: eventType})
+			}
+		}
+		bundle.Semantics.FlowInputEventPins[flowID] = pins
+	}
+}
+
+func ensureFlowInputEventPins(pins *runtimecontracts.FlowInputPins) {
+	if pins == nil || len(pins.EventPins) > 0 {
+		return
+	}
+	pins.EventPins = make([]runtimecontracts.FlowInputEventPin, 0, len(pins.Events))
+	for _, eventType := range pins.Events {
+		eventType = strings.TrimSpace(eventType)
+		if eventType != "" {
+			pins.EventPins = append(pins.EventPins, runtimecontracts.FlowInputEventPin{Name: eventType, Event: eventType})
+		}
 	}
 }
 
