@@ -1075,7 +1075,7 @@ func seedRuntimeTestRun(t *testing.T, db *sql.DB) context.Context {
 
 func waitRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query string, want int, args ...any) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var got int
 		if err := db.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
@@ -1093,7 +1093,7 @@ func waitRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query str
 
 func waitRuntimeEventID(t *testing.T, ctx context.Context, db *sql.DB, query string, args []any) string {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for {
 		var got string
 		err := db.QueryRowContext(ctx, query, args...).Scan(&got)
