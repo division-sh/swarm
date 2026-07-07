@@ -132,8 +132,9 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 0)
 
 	restarted := newActivityBoringFullFlowCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL, true)
-	request := fixture.bus.outboxIntent(0)
-	handled, err = restarted.pc.handleEventResult(ctx, request.Event)
+	request := loadActivityBoringPersistedEvent(t, fixture.db, activityBoringStorePostgres, activityRequestEventID(expected))
+	assertActivityBoringPersistedRequestMatches(t, request, expected)
+	handled, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("restart supported activity request handleEventResult: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultComplet
 	}
 	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 1)
 
-	handled, err = restarted.pc.handleEventResult(ctx, request.Event)
+	handled, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("duplicate post-restart supported request handleEventResult: %v", err)
 	}
@@ -268,8 +269,9 @@ func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t 
 	assertActivityBoringRuntimeLogAction(t, fixture.bus, "intent_persisted")
 
 	restarted := newActivityBoringCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL)
-	request := fixture.bus.outboxIntent(0)
-	handled, err := restarted.pc.handleEventResult(ctx, request.Event)
+	request := loadActivityBoringPersistedEvent(t, fixture.db, activityBoringStorePostgres, requestID)
+	assertActivityBoringPersistedRequestMatches(t, request, intent)
+	handled, err := restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("restart handleEventResult: %v", err)
 	}
@@ -281,7 +283,7 @@ func TestActivityBoringProofCrashAfterIntentBeforeResultCompletesOncePostgres(t 
 	}
 	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, resultID, 1)
 
-	handled, err = restarted.pc.handleEventResult(ctx, request.Event)
+	handled, err = restarted.pc.handleEventResult(ctx, request)
 	if err != nil {
 		t.Fatalf("duplicate post-restart handleEventResult: %v", err)
 	}
@@ -963,6 +965,88 @@ func assertActivityBoringEventCount(t *testing.T, db *sql.DB, kind activityBorin
 	}
 	if got != want {
 		t.Fatalf("event %s count = %d, want %d", eventID, got, want)
+	}
+}
+
+func loadActivityBoringPersistedEvent(t *testing.T, db *sql.DB, kind activityBoringStoreKind, eventID string) events.Event {
+	t.Helper()
+	if kind != activityBoringStorePostgres {
+		t.Fatalf("persisted crash readback proof requires Postgres, got %s", kind)
+	}
+	var (
+		id            string
+		runID         string
+		eventName     string
+		entityID      string
+		flowInstance  string
+		scope         string
+		payload       string
+		chainDepth    int
+		producedBy    string
+		sourceEventID string
+		createdAt     time.Time
+	)
+	if err := db.QueryRow(`
+		SELECT
+			event_id::text,
+			COALESCE(run_id::text, ''),
+			event_name,
+			COALESCE(entity_id::text, ''),
+			COALESCE(flow_instance, ''),
+			COALESCE(scope, ''),
+			payload::text,
+			COALESCE(chain_depth, 0),
+			COALESCE(produced_by, ''),
+			COALESCE(source_event_id::text, ''),
+			created_at
+		FROM events
+		WHERE event_id = $1::uuid
+	`, eventID).Scan(&id, &runID, &eventName, &entityID, &flowInstance, &scope, &payload, &chainDepth, &producedBy, &sourceEventID, &createdAt); err != nil {
+		t.Fatalf("load persisted event %s: %v", eventID, err)
+	}
+	envelope := events.EventEnvelope{
+		EntityID:     entityID,
+		FlowInstance: flowInstance,
+		Scope:        events.EventScope(scope),
+	}
+	return eventtest.PersistedProjection(
+		id,
+		events.EventType(eventName),
+		producedBy,
+		"",
+		json.RawMessage(payload),
+		chainDepth,
+		runID,
+		sourceEventID,
+		envelope,
+		createdAt,
+	)
+}
+
+func assertActivityBoringPersistedRequestMatches(t *testing.T, evt events.Event, want runtimeengine.ActivityIntent) {
+	t.Helper()
+	want = want.Normalized()
+	if evt.Type() != activityRequestEventType {
+		t.Fatalf("persisted event type = %s, want %s", evt.Type(), activityRequestEventType)
+	}
+	if evt.ID() != activityRequestEventID(want) {
+		t.Fatalf("persisted request id = %s, want %s", evt.ID(), activityRequestEventID(want))
+	}
+	if evt.RunID() != want.SourceRunID {
+		t.Fatalf("persisted request run_id = %s, want %s", evt.RunID(), want.SourceRunID)
+	}
+	if evt.EntityID() != want.EntityID.String() {
+		t.Fatalf("persisted request entity_id = %s, want %s", evt.EntityID(), want.EntityID.String())
+	}
+	got, err := activityIntentFromRequestEvent(evt)
+	if err != nil {
+		t.Fatalf("decode persisted activity request %s: %v", evt.ID(), err)
+	}
+	if activityRequestEventID(got) != activityRequestEventID(want) {
+		t.Fatalf("decoded persisted request identity = %s, want %s", activityRequestEventID(got), activityRequestEventID(want))
+	}
+	if got.Tool != want.Tool || got.ActivityID != want.ActivityID || got.SuccessEvent != want.SuccessEvent || got.FailureEvent != want.FailureEvent {
+		t.Fatalf("decoded persisted request mismatch: got=%#v want=%#v", got, want)
 	}
 }
 
