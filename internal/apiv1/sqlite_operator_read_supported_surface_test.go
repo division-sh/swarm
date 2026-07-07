@@ -89,6 +89,63 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 }
 
+func TestSQLiteConversationListSupportsLegacyTurnsWithoutTurnBlocks(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	if _, err := sqliteStore.DB.ExecContext(ctx, `ALTER TABLE agent_turns DROP COLUMN turn_blocks`); err != nil {
+		t.Fatalf("drop optional turn_blocks column: %v", err)
+	}
+	if _, err := sqliteStore.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("refresh sqlite schema capabilities: %v", err)
+	}
+	agentID := "agent-legacy-turns"
+	sessionID := uuid.NewString()
+	runID := uuid.NewString()
+	base := time.Date(2026, 7, 7, 13, 0, 0, 0, time.UTC)
+
+	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, agentID)
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base.Add(-time.Hour)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, entity_id, flow_instance, scope_key, scope,
+			conversation, turn_count, runtime_mode, runtime_state, status, created_at, updated_at
+		) VALUES (
+			?, ?, ?, NULL, 'flow/legacy-turns', 'global', 'global',
+			'[{"role":"assistant","content":"ready"}]', 1, 'session', '{}', 'active', ?, ?
+		)
+	`, sessionID, runID, agentID, base.Add(-5*time.Minute), base); err != nil {
+		t.Fatalf("seed sqlite session: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO agent_turns (
+			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
+			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
+			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, error, created_at
+		) VALUES (
+			?, ?, ?, ?, 'session', 'global', NULL,
+			?, 'operator.read', 'task-legacy-turns', '[]', '[]',
+			'[]', '{}', '[]', '[]',
+			'{}', '{}', 1, 10, 0, '', ?
+		)
+	`, uuid.NewString(), runID, agentID, sessionID, uuid.NewString(), base); err != nil {
+		t.Fatalf("seed sqlite legacy turn: %v", err)
+	}
+
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			AgentConversations: sqliteStore,
+		}),
+	})
+	resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"conversation.list","method":"conversation.list","params":{}}`)
+	if resp.Error != nil {
+		t.Fatalf("conversation.list sqlite legacy turn_blocks error = %#v", resp.Error)
+	}
+}
+
 func TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
