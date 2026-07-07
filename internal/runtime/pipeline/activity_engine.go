@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -163,13 +164,24 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	var terminal ActivityAttemptRecord
 	if err != nil {
 		redacted := runtimemanagedcredentials.RedactString(err.Error(), prepared.secrets...)
-		payload := activityFailurePayload(intent, fmt.Errorf("%s", redacted))
-		terminal = started.withTerminal(ActivityAttemptStatusFailed, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, redacted)
+		cause := fmt.Errorf("%s", redacted)
+		status := ActivityAttemptStatusFailed
+		if activityHTTPOutcomeUncertain(err) {
+			status = ActivityAttemptStatusUncertain
+			cause = fmt.Errorf("activity non_idempotent_write provider outcome is uncertain after dispatch: %s", redacted)
+		}
+		payload := activityFailurePayload(intent, cause)
+		terminal = started.withTerminal(status, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, cause.Error())
 	} else {
 		payload := activitySuccessPayload(intent, result)
 		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, "")
 	}
-	stored, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+	var stored ActivityAttemptRecord
+	if terminal.Status == ActivityAttemptStatusUncertain {
+		stored, err = d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, terminal)
+	} else {
+		stored, err = d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+	}
 	if err != nil {
 		return err
 	}
@@ -517,12 +529,12 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 	}
 	resp, err := prepared.client.Do(req)
 	if err != nil {
-		return nil, redactActivityError(err, prepared.secrets)
+		return nil, activityHTTPUncertainError{err: redactActivityError(err, prepared.secrets)}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, redactActivityError(err, prepared.secrets)
+		return nil, activityHTTPUncertainError{err: redactActivityError(err, prepared.secrets)}
 	}
 	parsed := parseHTTPActivityResponse(raw)
 	parsed = runtimemanagedcredentials.RedactValue(parsed, prepared.secrets...)
@@ -530,6 +542,26 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 		return nil, fmt.Errorf("activity http tool %s returned status %d: %s", prepared.toolName, resp.StatusCode, strings.TrimSpace(asString(parsed)))
 	}
 	return parsed, nil
+}
+
+type activityHTTPUncertainError struct {
+	err error
+}
+
+func (e activityHTTPUncertainError) Error() string {
+	if e.err == nil {
+		return "activity http outcome uncertain"
+	}
+	return e.err.Error()
+}
+
+func (e activityHTTPUncertainError) Unwrap() error {
+	return e.err
+}
+
+func activityHTTPOutcomeUncertain(err error) bool {
+	var target activityHTTPUncertainError
+	return errors.As(err, &target)
 }
 
 func parseHTTPActivityResponse(raw []byte) any {
