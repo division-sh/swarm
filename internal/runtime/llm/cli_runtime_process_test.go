@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -239,5 +240,25 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_PropagatesWorkspaceWrit
 	_, err := runtime.PersistOversizedToolResultRelay(ctx, &Session{ID: "sess-1"}, "sql_execute", []byte(`{"blob":"hello"}`))
 	if err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("PersistOversizedToolResultRelay err = %v, want permission denied", err)
+	}
+}
+
+func TestEffectiveCLITimeoutForConfigIgnoresRetiredEnvAndPreservesActorFloor(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_TIMEOUT_SECONDS", "1")
+	cfg := &config.Config{}
+	cfg.LLM.ClaudeCLI.Timeout = 45 * time.Second
+
+	if got := effectiveCLITimeoutForConfig(context.Background(), cfg); got != 45*time.Second {
+		t.Fatalf("timeout without actor = %v, want config timeout", got)
+	}
+
+	globalActorCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "global-agent"})
+	if got := effectiveCLITimeoutForConfig(globalActorCtx, cfg); got != 300*time.Second {
+		t.Fatalf("timeout for global/no-entity actor = %v, want floor", got)
+	}
+
+	entityActorCtx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "entity-agent", EntityID: "customer-1"})
+	if got := effectiveCLITimeoutForConfig(entityActorCtx, cfg); got != 45*time.Second {
+		t.Fatalf("timeout for entity actor = %v, want config timeout", got)
 	}
 }

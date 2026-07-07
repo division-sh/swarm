@@ -562,6 +562,56 @@ func TestSwarmEnvGuardBlocksGeneratedBoundaryParentEnv(t *testing.T) {
 	}
 }
 
+func TestSwarmEnvGuardBlocksRetiredRuntimeLLMConfigEnv(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    []string
+		notWant []string
+	}{
+		{name: "SWARM_RUNTIME_RECOVERY_ON_STARTUP", value: "true", want: []string{"env/known_retired: SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"}},
+		{name: "SWARM_LLM_SESSION_LOCK_TTL", value: "1s", want: []string{"env/known_retired: SWARM_LLM_SESSION_LOCK_TTL", "llm.session.lock_ttl"}},
+		{name: "SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", value: "2", want: []string{"env/known_retired: SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "llm.session.rotate_after_turns"}},
+		{name: "SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", value: "2", want: []string{"env/known_retired: SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "llm.session.rotate_on_parse_failures"}},
+		{name: "SWARM_CLAUDE_API_MAX_RETRIES", value: "7", want: []string{"env/known_retired: SWARM_CLAUDE_API_MAX_RETRIES", "llm.claude_api.max_retries"}},
+		{name: "SWARM_CLAUDE_API_RETRY_BACKOFF", value: "7s", want: []string{"env/known_retired: SWARM_CLAUDE_API_RETRY_BACKOFF", "llm.claude_api.retry_backoff"}},
+		{name: "SWARM_CLAUDE_CLI_COMMAND", value: "false", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_COMMAND", "llm.claude_cli.command"}},
+		{name: "SWARM_CLAUDE_CLI_TIMEOUT", value: "1s", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"}},
+		{name: "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", value: "bad", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"}},
+		{name: "SWARM_CLAUDE_TIMEOUT_SECONDS", value: "1", want: []string{"env/known_retired: SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"}},
+		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_RETRIES", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.retries"}},
+		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.no_session_persistence"}},
+		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_USE_TMUX", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.use_tmux"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			t.Setenv(tc.name, tc.value)
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+				"serve",
+				"--api-listen-addr", "127.0.0.1:0",
+				"--mcp-listen-addr", "127.0.0.1:0",
+			}, &stdout, &stderr, defaultRootCommandOptions())
+			if code != cliExitValidation {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+			}
+			output := stdout.String() + stderr.String()
+			for _, want := range tc.want {
+				if !strings.Contains(output, want) {
+					t.Fatalf("output missing %q:\n%s", want, output)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(output, notWant) {
+					t.Fatalf("output contains fake replacement %q:\n%s", notWant, output)
+				}
+			}
+		})
+	}
+}
+
 func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
@@ -709,6 +759,10 @@ func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
 		"SWARM_RUNTIME_MAX_CONCURRENT_AGENTS",
 		"SWARM_OPENAI_COMPATIBLE_BASE_URL",
 		"SWARM_OPENAI_COMPATIBLE_DEFAULT_MODEL",
+		"SWARM_RUNTIME_RECOVERY_ON_STARTUP",
+		"SWARM_CLAUDE_CLI_TIMEOUT",
+		"SWARM_CLAUDE_TIMEOUT_SECONDS",
+		"SWARM_CLAUDE_CLI_RETRIES",
 	}
 	for _, envName := range cases {
 		t.Run(envName, func(t *testing.T) {
@@ -737,6 +791,15 @@ func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
 				t.Fatalf("doctor target report OK=true, want env blocker: %#v", report)
 			}
 			assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
+			if envName == "SWARM_CLAUDE_CLI_RETRIES" {
+				finding := findDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
+				if !strings.Contains(finding.Message, "no supported replacement") || !strings.Contains(finding.Message, "#1803") {
+					t.Fatalf("retired inert finding message = %q, want #1803/no replacement", finding.Message)
+				}
+				if strings.Contains(finding.Message+finding.Remediation, "llm.claude_cli.retries") {
+					t.Fatalf("retired inert finding advertises fake replacement: %#v", finding)
+				}
+			}
 		})
 	}
 }
@@ -803,12 +866,18 @@ func assertLocalPreflightFinding(t *testing.T, report localPreflightReport, cate
 
 func assertDoctorTargetEnvFinding(t *testing.T, report doctorTargetReport, code, messagePart string) {
 	t.Helper()
+	_ = findDoctorTargetEnvFinding(t, report, code, messagePart)
+}
+
+func findDoctorTargetEnvFinding(t *testing.T, report doctorTargetReport, code, messagePart string) localPreflightFinding {
+	t.Helper()
 	for _, finding := range report.Env {
 		if finding.Category == localPreflightEnvPrerequisite && finding.Code == code && strings.Contains(finding.Message, messagePart) {
-			return
+			return finding
 		}
 	}
 	t.Fatalf("missing target env finding code=%s message containing %q: %#v", code, messagePart, report.Env)
+	return localPreflightFinding{}
 }
 
 func assertNoDotEnvLoadFailure(t testing.TB, output string) {
