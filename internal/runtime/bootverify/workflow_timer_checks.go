@@ -390,7 +390,10 @@ func (c *checkerContext) timerTriggerEventProduced(timer runtimecontracts.Workfl
 	if c.source == nil {
 		return false
 	}
-	if timerEventProducedByPlatform(c.source, ref) || eventProducedExternallyLocal(ref.Entry) {
+	if resolution, ok := c.resolveDeclaredInputProducerSource(strings.TrimSpace(timer.FlowID), ref.Authored); ok {
+		return resolution.HasEvidence()
+	}
+	if timerEventProducedByPlatform(c.source, ref) || nonInputEventMetadataProducerSource(ref.Entry) {
 		return true
 	}
 	emittedRefs := timerLifecycleEmittedEventRefs(c.source, strings.TrimSpace(timer.ID))

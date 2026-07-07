@@ -22,8 +22,8 @@ func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
 	if reportContains(report.Errors(), "pin_target_resolution", "deploy.done") {
 		t.Fatalf("parent connect should satisfy output pin target proof, got %#v", report.Errors())
 	}
-	if reportContains(report.Warnings(), "input_pin_wiring", "deploy.completed") {
-		t.Fatalf("parent connect should satisfy input pin wiring proof, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "deploy.completed") {
+		t.Fatalf("parent connect should satisfy input pin wiring proof, got %#v", report.Errors())
 	}
 }
 

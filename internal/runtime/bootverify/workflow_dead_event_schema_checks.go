@@ -62,7 +62,7 @@ func (c *checkerContext) deadEventSchema() []Finding {
 			CheckID:  "semantic_drift_dead_event_schema",
 			Severity: "warning",
 			Message: fmt.Sprintf(
-				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- External source metadata (swarm.source): %s\n- External consumer metadata (swarm.consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add swarm.source: external or swarm.consumer: ... to document the external role.",
+				"Event %s declared in %s has no active role in the authored bundle.\n\nChecked usage sites:\n- Handler emits: %d\n- Handler subscribes: %d\n- Agent emit_events: %d\n- Agent subscriptions: %d\n- Timer fire/start/cancel references: %d\n- Resolver-backed input source or non-input source metadata: %s\n- External consumer metadata (swarm.consumer): %s\n- Fan-out emit: %d\n- Auto-emit-on-create: %s\n- Parent connect outputs: %d\n- Parent connect inputs: %d\n\nIf this event is no longer used, remove it from %s.\nIf it is used by an external system, add input-pin source: external for true ingress, a parent connect, a harness injection, or non-input swarm.source/swarm.consumer metadata as appropriate.",
 				decl.Canonical,
 				fileLabel,
 				usage.handlerEmits,
@@ -141,7 +141,7 @@ type deadEventDeclaration struct {
 
 func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) deadEventSchemaUsage {
 	usage := deadEventSchemaUsage{
-		externalSource:   deadEventExternalSource(decl.Entry),
+		externalSource:   c.deadEventSourceRole(decl),
 		externalConsumer: deadEventExternalConsumer(decl.Entry),
 	}
 
@@ -370,8 +370,11 @@ func deadEventSameScope(a, b string) bool {
 	return strings.TrimSpace(a) == strings.TrimSpace(b)
 }
 
-func deadEventExternalSource(entry runtimecontracts.EventCatalogEntry) bool {
-	return eventMetadataExternalOrPlatformSource(entry.SwarmSource())
+func (c *checkerContext) deadEventSourceRole(decl deadEventDeclaration) bool {
+	if resolution, ok := c.resolveDeclaredInputProducerSource(decl.FlowID, decl.Canonical); ok {
+		return resolution.HasEvidence()
+	}
+	return nonInputEventMetadataProducerSource(decl.Entry)
 }
 
 func deadEventExternalConsumer(entry runtimecontracts.EventCatalogEntry) bool {

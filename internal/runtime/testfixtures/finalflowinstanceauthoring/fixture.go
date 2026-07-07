@@ -171,6 +171,7 @@ pins:
     events:
       - name: request_received
         event: request.received
+        source: external
   outputs:
     events:
       - name: account_ready
@@ -313,6 +314,7 @@ pins:
     events:
       - name: lead_observed
         event: lead.observed
+        source: external
   outputs:
     events: []
 `)

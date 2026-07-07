@@ -567,7 +567,7 @@ func TestRun_MapsEventNoProducerToNamedWarning(t *testing.T) {
 	if report.HasErrors() {
 		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
 	}
-	if !reportContains(report.Warnings(), "event_producer_exists", "task.requested") {
+	if !reportContains(report.Warnings(), "event_producer_exists", "ghost.event") {
 		t.Fatalf("expected event_producer_exists warning, got %#v", report.Warnings())
 	}
 }
@@ -590,7 +590,7 @@ func TestRun_MapsDeadDeclaredEventSchemaToNamedWarning(t *testing.T) {
 	for _, want := range []string{
 		"has no active role in the authored bundle",
 		"Handler emits: 0",
-		"External source metadata (swarm.source): no",
+		"Resolver-backed input source or non-input source metadata: no",
 	} {
 		if !reportContains(report.Warnings(), "semantic_drift_dead_event_schema", want) {
 			t.Fatalf("expected semantic_drift_dead_event_schema warning containing %q, got %#v", want, report.Warnings())
@@ -1177,11 +1177,11 @@ func TestRun_PromptRefSatisfiesPromptExistsWarning(t *testing.T) {
 	}
 }
 
-func TestEventProducedExternallyLocal_AllowsAnnotatedSourceText(t *testing.T) {
+func TestNonInputEventMetadataProducerSource_AllowsAnnotatedSourceText(t *testing.T) {
 	t.Parallel()
 
 	entry := runtimecontracts.EventCatalogEntry{Swarm: runtimecontracts.EventSwarmMetadata{Source: "platform (timer system)"}}
-	if !eventProducedExternallyLocal(entry) {
+	if !nonInputEventMetadataProducerSource(entry) {
 		t.Fatal("expected platform source annotation to count as externally produced")
 	}
 }
@@ -4194,36 +4194,38 @@ func setGuardEscalationForBootverifyTest(bundle *runtimecontracts.WorkflowContra
 	bundle.Semantics.NodeHandlers["test-node"]["check.requested"] = handler
 }
 
-func TestRun_ReportsInputPinWiringWarning(t *testing.T) {
+func TestRun_ReportsInputPinWiringHardInvalidity(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-missing-pin")
 
 	report := Run(context.Background(), source, Options{})
 
-	if !reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("expected input_pin_wiring warning, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") ||
+		!reportContains(report.Errors(), "input_pin_wiring", "Expected a producer proof for input pin target child.task.feedback") ||
+		!reportContains(report.Errors(), "input_pin_wiring", "Do not rely on events.yaml swarm.source") {
+		t.Fatalf("expected input_pin_wiring hard invalidity, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForExternalInputPinWithoutEmitter(t *testing.T) {
+func TestRun_DoesNotErrorForExternalInputPinWithoutEmitter(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	markFlowInputPinSource(t, bundle, "child", "task.feedback", "external")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring warning for external input, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring error for external input, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForHarnessInjectedInputPinWithoutEmitter(t *testing.T) {
+func TestRun_DoesNotErrorForHarnessInjectedInputPinWithoutEmitter(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-missing-pin")
 
 	report := Run(context.Background(), source, Options{
 		HarnessInjections: []runtimecontracts.FlowInputProducerInjection{{FlowID: "child", EventType: "task.feedback"}},
 	})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring warning for harness-injected input, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring error for harness-injected input, got %#v", report.Errors())
 	}
 }
 
@@ -4235,9 +4237,9 @@ func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
 
 	var (
 		externalCleared bool
-		plainWarned     bool
+		plainErrored    bool
 	)
-	for _, finding := range report.Warnings() {
+	for _, finding := range report.Errors() {
 		if finding.CheckID != "input_pin_wiring" || !strings.Contains(finding.Message, "ticket.ready") {
 			continue
 		}
@@ -4245,30 +4247,30 @@ func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
 		case "external_consumer":
 			externalCleared = true
 		case "plain_consumer":
-			plainWarned = true
+			plainErrored = true
 		}
 	}
 	if externalCleared {
-		t.Fatalf("unexpected input_pin_wiring warning for external_consumer, got %#v", report.Warnings())
+		t.Fatalf("unexpected input_pin_wiring error for external_consumer, got %#v", report.Errors())
 	}
-	if !plainWarned {
-		t.Fatalf("expected input_pin_wiring warning for plain_consumer, got %#v", report.Warnings())
+	if !plainErrored {
+		t.Fatalf("expected input_pin_wiring error for plain_consumer, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
+func TestRun_DoesNotErrorForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	bundle.Semantics.FlowOutputs["producer_b"] = nil
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "ticket.ready") {
-		t.Fatalf("unexpected input_pin_wiring warning for sibling output pin proof, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "ticket.ready") {
+		t.Fatalf("unexpected input_pin_wiring error for sibling output pin proof, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForRootAgentEmitInputProducerPath(t *testing.T) {
+func TestRun_DoesNotErrorForRootAgentEmitInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Agents["lifecycle-coordinator"] = runtimecontracts.AgentRegistryEntry{
 		ID:         "lifecycle-coordinator",
@@ -4277,12 +4279,12 @@ func TestRun_DoesNotWarnForRootAgentEmitInputProducerPath(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring warning for root agent emit proof, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring error for root agent emit proof, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
+func TestRun_DoesNotErrorForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	node := bundle.Nodes["dispatcher"]
 	node.EventHandlers["task.requested"] = runtimecontracts.SystemNodeEventHandler{
@@ -4293,12 +4295,12 @@ func TestRun_DoesNotWarnForRootNodeHandlerEmitInputProducerPath(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring warning for root handler emit proof, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring error for root handler emit proof, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForPlatformEventCatalogInputProducerPath(t *testing.T) {
+func TestRun_DoesNotErrorForPlatformEventCatalogInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
 		"platform.runtime_log": {},
@@ -4311,12 +4313,12 @@ func TestRun_DoesNotWarnForPlatformEventCatalogInputProducerPath(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "platform.runtime_log") {
-		t.Fatalf("unexpected input_pin_wiring warning for platform event proof, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "platform.runtime_log") {
+		t.Fatalf("unexpected input_pin_wiring error for platform event proof, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotWarnForSameFlowTimerInputProducerPath(t *testing.T) {
+func TestRun_DoesNotErrorForSameFlowTimerInputProducerPath(t *testing.T) {
 	bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
 	node := bundle.Nodes["worker"]
 	node.Timers = append(node.Timers, runtimecontracts.WorkflowTimerContract{
@@ -4335,12 +4337,12 @@ func TestRun_DoesNotWarnForSameFlowTimerInputProducerPath(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-		t.Fatalf("unexpected input_pin_wiring warning for same-flow timer proof, got %#v", report.Warnings())
+	if reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+		t.Fatalf("unexpected input_pin_wiring error for same-flow timer proof, got %#v", report.Errors())
 	}
 }
 
-func TestRun_DoesNotUseProducesOrPlannedAsInputProducerPathProof(t *testing.T) {
+func TestRun_DoesNotUseEventMetadataAsInputProducerPathProof(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
@@ -4363,6 +4365,14 @@ func TestRun_DoesNotUseProducesOrPlannedAsInputProducerPathProof(t *testing.T) {
 				bundle.Events["task.feedback"] = entry
 			},
 		},
+		{
+			name: "event metadata source external",
+			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
+				entry := bundle.Events["task.feedback"]
+				entry.Swarm.Source = "external"
+				bundle.Events["task.feedback"] = entry
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -4372,8 +4382,8 @@ func TestRun_DoesNotUseProducesOrPlannedAsInputProducerPathProof(t *testing.T) {
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-			if !reportContains(report.Warnings(), "input_pin_wiring", "task.feedback") {
-				t.Fatalf("expected input_pin_wiring warning for %s, got %#v", tc.name, report.Warnings())
+			if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
+				t.Fatalf("expected input_pin_wiring error for %s, got %#v", tc.name, report.Errors())
 			}
 		})
 	}
@@ -5039,7 +5049,12 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	}}
 	writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
 
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{
+		HarnessInjections: []runtimecontracts.FlowInputProducerInjection{
+			{FlowID: "child", EventType: "task.assigned"},
+			{FlowID: "child", EventType: "task.feedback"},
+		},
+	})
 
 	if report.HasErrors() {
 		t.Fatalf("unexpected rule-condition errors, got %#v", report.Errors())

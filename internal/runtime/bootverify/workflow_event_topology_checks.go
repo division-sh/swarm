@@ -168,7 +168,14 @@ func (c *checkerContext) eventWarnings() []Finding {
 		if runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), ref.Canonical) {
 			continue
 		}
-		if eventProducedExternallyLocal(ref.Entry) || strings.EqualFold(strings.TrimSpace(ref.Entry.SwarmStatus()), "planned") {
+		if resolution, ok := c.resolveDeclaredInputProducerSource(ref.FlowID, ref.Authored); ok {
+			if resolution.HasEvidence() {
+				continue
+			}
+		} else if nonInputEventMetadataProducerSource(ref.Entry) {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(ref.Entry.SwarmStatus()), "planned") {
 			continue
 		}
 		c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -265,14 +272,6 @@ func eventRefProducedLocal(source semanticview.Source, ref semanticview.FlowEven
 
 func eventHasExternalConsumerLocal(entry runtimecontracts.EventCatalogEntry) bool {
 	return len(entry.SwarmConsumer()) > 0
-}
-
-func eventProducedExternallyLocal(entry runtimecontracts.EventCatalogEntry) bool {
-	if len(entry.SwarmProducer()) > 0 {
-		return true
-	}
-	source := strings.ToLower(strings.TrimSpace(entry.SwarmSource()))
-	return strings.HasPrefix(source, "external") || strings.HasPrefix(source, "platform")
 }
 
 func (c *checkerContext) eventCycleDetection() []Finding {
