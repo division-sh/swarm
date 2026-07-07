@@ -11932,8 +11932,8 @@ configuration_source_authority:
             session.rotate_after_turns: project_safe
             session.rotate_on_parse_failures: project_safe
             provider_limits: project_safe
-            claude_api.default_model: project_safe
-            claude_api.haiku_model: project_safe
+            claude_api.default_model: split_unsupported
+            claude_api.haiku_model: split_unsupported
             claude_api.max_retries: project_safe
             claude_api.retry_backoff: project_safe
             claude_cli.command: elevated
@@ -11943,10 +11943,15 @@ configuration_source_authority:
             claude_cli.no_session_persistence: split_unsupported
             claude_cli.use_tmux: project_safe
             openai_compatible.base_url: elevated
-            openai_compatible.default_model: project_safe
-            openai_compatible.low_cost_model: project_safe
+            openai_compatible.default_model: split_unsupported
+            openai_compatible.low_cost_model: split_unsupported
             openai_responses.base_url: elevated
           owner: engine.agent_session_management.llm_provider_selection_config_authority
+          retired_model_selection_keys: >
+            `llm.claude_api.default_model`, `llm.claude_api.haiku_model`,
+            `llm.openai_compatible.default_model`, and `llm.openai_compatible.low_cost_model`
+            are retired model-selection inputs. Unified config migration MUST keep rejecting them with guidance to use
+            `llm.models`; this spec does not re-admit them as accepted project-safe keys.
         provider_triggers:
           trust: project_contained_path_or_elevated
           keys:
@@ -11962,15 +11967,15 @@ configuration_source_authority:
             global_monthly_cap: project_safe
             per_entity_monthly_cap: project_safe
             system_monthly_cap: project_safe
+            human_tasks.max_tasks_per_week: project_safe
+            human_tasks.budget_reset: project_safe
+            human_tasks.auto_expire_hours: project_safe
+            human_tasks.categories_enabled: project_safe
           owner: config extensions budget owner, to be promoted by parser migration child
-        human_tasks:
-          trust: project_safe
-          keys:
-            max_tasks_per_week: project_safe
-            budget_reset: project_safe
-            auto_expire_hours: project_safe
-            categories_enabled: project_safe
-          owner: config extensions human-tasks owner, to be promoted by parser migration child
+          nested_shape: >
+            Human task budget controls remain under `budget.human_tasks`, matching the implemented
+            `BudgetConfig.HumanTasks` shape. A separate top-level `human_tasks` section is not part of the unified
+            schema unless a future migration explicitly promotes and gates that shape.
         sharding:
           trust: split_unsupported
           keys:
@@ -12054,7 +12059,8 @@ configuration_source_authority:
       runtime_config_loader: consumed_by_unified_owner_implementation_split
       executable_adjacent_config_yaml: invalid_ambient_reader_removal_split
       provider_triggers_packs_external_dirs: consumed_by_unified_owner
-      budget_and_human_tasks_inline_extensions: consumed_by_unified_owner_code_migration_split
+      budget_human_tasks_inline_extension: consumed_by_unified_owner_code_migration_split
+      llm_retired_model_selection_keys: split_unsupported_retired_use_llm.models
       sharding_inline_extension: split_unsupported_retired
       context_descriptors: different_semantic_owner_local_target_context_registry
       token_and_secret_material: different_semantic_owner_secret_or_token_file_reference_only
