@@ -118,10 +118,11 @@ func TestBuildBundleMaterializationRejectsSourceProofReservedArtifactCollision(t
 	repo := repoRootForContractsTest(t)
 	root := writeBundleBuildContractsDir(t)
 	sourceBytes := []byte("declared source proof that must not be overwritten\n")
-	writeBundleHashBytes(t, filepath.Join(root, bundleBuildManifestPath), sourceBytes)
+	sourcePath := "BUILD-MANIFEST.JSON"
+	writeBundleHashBytes(t, filepath.Join(root, sourcePath), sourceBytes)
 	sum := sha256.Sum256(sourceBytes)
 	policy := bundleBuildPolicyYAML(t, root, "sha256:"+hex.EncodeToString(sum[:]))
-	policy = strings.Replace(policy, "source_path: src/structured_renderer.rs", "source_path: "+bundleBuildManifestPath, 1)
+	policy = strings.Replace(policy, "source_path: src/structured_renderer.rs", "source_path: "+sourcePath, 1)
 	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), policy)
 
 	_, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
@@ -130,8 +131,50 @@ func TestBuildBundleMaterializationRejectsSourceProofReservedArtifactCollision(t
 		PlatformSpecPath: DefaultPlatformSpecFile(repo),
 		OutputRoot:       filepath.Join(t.TempDir(), "build"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "collides with generated bundle build artifact") {
+	if err == nil || !strings.Contains(err.Error(), "reserved generated bundle build artifact path") {
 		t.Fatalf("BuildBundleMaterialization error = %v, want reserved artifact collision", err)
+	}
+}
+
+func TestBuildBundleMaterializationRejectsModuleByteReservedArtifactCollision(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeBundleBuildContractsDir(t)
+	modulePath := "Build-Manifest.Json"
+	raw, err := os.ReadFile(filepath.Join(root, "modules", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBundleHashBytes(t, filepath.Join(root, modulePath), raw)
+	policy := bundleBuildPolicyYAML(t, root, bundleBuildSourceHash(t, root))
+	policy = strings.Replace(policy, "path: modules/structured_renderer.wasm", "path: "+modulePath, 1)
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), policy)
+
+	_, err = BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: DefaultPlatformSpecFile(repo),
+		OutputRoot:       filepath.Join(t.TempDir(), "build"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "reserved generated bundle build artifact path") {
+		t.Fatalf("BuildBundleMaterialization error = %v, want reserved artifact collision", err)
+	}
+}
+
+func TestBundleBuildReservedArtifactPathRejectsCaseVariants(t *testing.T) {
+	for _, tc := range []struct {
+		label string
+		path  string
+	}{
+		{label: "bundle build input", path: "BUILD-MANIFEST.JSON"},
+		{label: "policy module path", path: "Build-Manifest.Json"},
+		{label: "policy module source_path", path: "./build-manifest.json"},
+	} {
+		t.Run(tc.label, func(t *testing.T) {
+			err := validateBundleBuildReservedArtifactPath(tc.label, tc.path)
+			if err == nil || !strings.Contains(err.Error(), "reserved generated bundle build artifact path") {
+				t.Fatalf("validateBundleBuildReservedArtifactPath(%q, %q) = %v, want reserved artifact collision", tc.label, tc.path, err)
+			}
+		})
 	}
 }
 
