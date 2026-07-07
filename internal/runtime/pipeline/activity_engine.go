@@ -849,14 +849,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 func (d pipelineActivityDispatcher) publishExistingActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent, rec ActivityAttemptRecord) error {
 	rec = rec.normalized()
 	if rec.Status == ActivityAttemptStatusStarted {
-		cause := fmt.Errorf("activity non_idempotent_write attempt %s already started; automatic provider re-dispatch is blocked because the outcome is uncertain", rec.RequestEventID)
-		payload := activityFailurePayload(intent, cause)
-		uncertain := rec.withTerminal(ActivityAttemptStatusUncertain, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, cause.Error())
-		stored, err := d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, uncertain)
-		if err != nil {
-			return err
-		}
-		return d.publishJournaledActivityResult(ctx, intent, stored)
+		return nil
 	}
 	return d.publishJournaledActivityResult(ctx, intent, rec)
 }

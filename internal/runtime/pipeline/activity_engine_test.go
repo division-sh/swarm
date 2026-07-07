@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -477,7 +478,7 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	}
 }
 
-func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatch(t *testing.T) {
+func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizing(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -526,11 +527,100 @@ func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatch(t *testin
 	if err != nil {
 		t.Fatalf("LoadActivityAttempt: %v", err)
 	}
-	if !ok || rec.Status != ActivityAttemptStatusUncertain {
-		t.Fatalf("journal status = (%v, %q), want uncertain", ok, rec.Status)
+	if !ok || rec.Status != ActivityAttemptStatusStarted {
+		t.Fatalf("journal status = (%v, %q), want started", ok, rec.Status)
 	}
-	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
-		t.Fatalf("publishes = %#v, want one failure event from uncertain journal", bus.publishes)
+	if len(bus.publishes) != 0 {
+		t.Fatalf("publishes = %#v, want started duplicate to wait for the in-flight owner", bus.publishes)
+	}
+}
+
+func TestPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResult(t *testing.T) {
+	ctx := context.Background()
+	runID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	entityID := uuid.NewString()
+	var calls atomic.Int32
+	var released atomic.Bool
+	providerEntered := make(chan struct{})
+	releaseProvider := make(chan struct{})
+	release := func() {
+		if released.CompareAndSwap(false, true) {
+			close(releaseProvider)
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(providerEntered)
+		}
+		<-releaseProvider
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+	defer release()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"provider_write": {
+				HandlerType:  "http",
+				EffectClass:  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+				OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+				HTTP:         &runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL},
+			},
+		},
+	})
+	bus := &recordingPipelineBus{}
+	db, store := newSQLiteActivityJournalStore(t, ctx)
+	seedActivityRun(t, db, true, runID)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module:        staticSemanticWorkflowModule{source: source},
+		WorkflowStore: store,
+	})
+	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := pc.handleEventResult(ctx, request.Event)
+		firstDone <- err
+	}()
+	<-providerEntered
+
+	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+		t.Fatalf("duplicate handleEventResult: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls after duplicate = %d, want exactly one in-flight dispatch", got)
+	}
+	rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil {
+		t.Fatalf("LoadActivityAttempt before release: %v", err)
+	}
+	if !ok || rec.Status != ActivityAttemptStatusStarted {
+		t.Fatalf("journal before release = (%v, %q), want started", ok, rec.Status)
+	}
+	if len(bus.publishes) != 0 {
+		t.Fatalf("publishes before release = %#v, want duplicate to avoid terminalizing active attempt", bus.publishes)
+	}
+
+	release()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first handleEventResult: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("provider calls after success = %d, want exactly one dispatch", got)
+	}
+	rec, ok, err = store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil {
+		t.Fatalf("LoadActivityAttempt after release: %v", err)
+	}
+	if !ok || rec.Status != ActivityAttemptStatusSucceeded {
+		t.Fatalf("journal after release = (%v, %q), want succeeded", ok, rec.Status)
+	}
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.SuccessEvent) {
+		t.Fatalf("publishes after release = %#v, want one success event", bus.publishes)
 	}
 }
 
