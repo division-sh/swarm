@@ -75,14 +75,26 @@ func TestValidationIssueFromFindingCopiesRemediationAndEvidence(t *testing.T) {
 	}
 }
 
-func TestValidationIssueFromFindingPreservesCredentialSuggestion(t *testing.T) {
-	issue := validationIssueFromFinding(runtimebootverify.Finding{
+func TestValidationIssueFromFindingPreservesCredentialSuggestionForNormalizedWarning(t *testing.T) {
+	report := runtimebootverify.Report{}
+	report.Add(runtimebootverify.Finding{
 		CheckID:     "credential_key_exists",
 		Severity:    "warning",
 		Message:     "credential missing",
 		Remediation: "store the credential",
 	})
+	if len(report.Findings) != 1 {
+		t.Fatalf("findings = %#v, want one normalized finding", report.Findings)
+	}
+	finding := report.Findings[0]
+	if finding.Severity != runtimebootverify.SeveritySemanticDriftWarn {
+		t.Fatalf("severity = %q, want normalized warning severity", finding.Severity)
+	}
+	if !validationFindingIsWarning(finding) {
+		t.Fatalf("normalized warning was not classified as Builder warning: %#v", finding)
+	}
 
+	issue := validationIssueFromFinding(finding)
 	if issue.Remediation != "store the credential" {
 		t.Fatalf("remediation = %q", issue.Remediation)
 	}

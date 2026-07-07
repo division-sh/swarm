@@ -66,7 +66,7 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 	})
 	for _, finding := range report.Findings {
 		issue := validationIssueFromFinding(finding)
-		if finding.Severity == "warning" {
+		if validationFindingIsWarning(finding) {
 			result.Warnings = append(result.Warnings, issue)
 			continue
 		}
@@ -89,10 +89,14 @@ func validationIssueFromFinding(finding runtimebootverify.Finding) ValidationIss
 		Remediation: finding.Remediation,
 		Evidence:    append([]string(nil), finding.Evidence...),
 	}
-	if finding.CheckID == "credential_key_exists" && finding.Severity == "warning" {
+	if finding.CheckID == "credential_key_exists" && validationFindingIsWarning(finding) {
 		issue.Suggestion = "set the secret with swarm secrets set before executing dependent tools"
 	}
 	return issue
+}
+
+func validationFindingIsWarning(finding runtimebootverify.Finding) bool {
+	return finding.Severity == runtimebootverify.SeveritySemanticDriftWarn
 }
 
 func (h *handler) legacyBuilderListEntities(ctx context.Context) ([]store.OperatorEntitySummary, error) {
