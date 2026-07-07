@@ -23,6 +23,7 @@ data/*
 # Generated artifacts
 coverage
 test-results/
+.swarm/
 internal/dashboard/ui/node_modules
 internal/dashboard/ui/dist
 /empire
