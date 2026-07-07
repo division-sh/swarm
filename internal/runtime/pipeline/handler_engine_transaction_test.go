@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -128,6 +129,61 @@ func (b *recordingPipelineBus) runtimeLogEntries() []RuntimeLogEntry {
 	out := make([]RuntimeLogEntry, len(b.runtimeLogs))
 	copy(out, b.runtimeLogs)
 	return out
+}
+
+func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
+	bus := &recordingPipelineBus{}
+	evt := eventtest.PersistedProjection(
+		"evt-1",
+		events.EventType("render.requested"),
+		"tester",
+		"",
+		json.RawMessage(`{"component":"api"}`),
+		0,
+		"",
+		"",
+		events.EventEnvelope{EntityID: "ent-1"},
+		time.Now().UTC(),
+	)
+	trace := runtimeengine.ComputeModuleTrace{
+		ModuleID:     "structured_renderer",
+		RowID:        "render_bundle",
+		Kind:         "wasm",
+		ABI:          computemodule.ABI,
+		Entry:        computemodule.DefaultEntry,
+		Digest:       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		InputHash:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Outcome:      computemodule.ReplayOutcomeSuccess,
+		OutputHash:   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		FuelConsumed: 7,
+		Limits: computemodule.ReplayLimits{
+			Fuel:        100,
+			MemoryPages: 17,
+			OutputBytes: 1024,
+		},
+		Engine: "wasmtime-go:v46.0.0",
+		Arch:   "arm64",
+	}
+	logComputeModuleReplayEvidence(context.Background(), bus, "renderer", evt, []runtimeengine.ComputeModuleTrace{trace})
+	logs := bus.runtimeLogEntries()
+	if len(logs) != 1 {
+		t.Fatalf("runtime logs = %#v, want one replay evidence carrier", logs)
+	}
+	entry := logs[0]
+	if entry.Component != "compute_module" || entry.Action != computemodule.ReplayEvidenceAction || entry.EventID != "evt-1" || entry.EntityID != "ent-1" {
+		t.Fatalf("runtime log entry = %#v, want compute_module replay action/event/entity", entry)
+	}
+	detail, ok := entry.Detail.(map[string]any)
+	if !ok {
+		t.Fatalf("detail = %#v, want map", entry.Detail)
+	}
+	envelopes, err := computemodule.DecodeReplayEvidenceDetail(detail)
+	if err != nil {
+		t.Fatalf("DecodeReplayEvidenceDetail: %v", err)
+	}
+	if len(envelopes) != 1 || envelopes[0].Normalized() != trace.Normalized() {
+		t.Fatalf("decoded envelopes = %#v, want %#v", envelopes, trace.Normalized())
+	}
 }
 
 func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {

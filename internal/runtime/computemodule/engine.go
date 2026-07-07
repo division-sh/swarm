@@ -72,6 +72,7 @@ type Error struct {
 	Code     Code
 	ModuleID string
 	RowID    string
+	Finding  *ReplayFinding
 	Err      error
 }
 
@@ -82,6 +83,18 @@ func (e *Error) Error() string {
 	}
 	if strings.TrimSpace(e.RowID) != "" {
 		parts = append(parts, "row="+strings.TrimSpace(e.RowID))
+	}
+	if e.Finding != nil {
+		finding := e.Finding.Normalized()
+		if finding.Kind != "" {
+			parts = append(parts, "finding="+string(finding.Kind))
+		}
+		if finding.Field != "" {
+			parts = append(parts, "field="+finding.Field)
+		}
+		if finding.Remediation != "" {
+			parts = append(parts, "remediation="+finding.Remediation)
+		}
 	}
 	if e.Err != nil {
 		parts = append(parts, e.Err.Error())
@@ -229,12 +242,15 @@ func Execute(req Request) (Result, error) {
 	if remaining, err := store.GetFuel(); err == nil && remaining <= req.Fuel {
 		fuelConsumed = req.Fuel - remaining
 	}
-	sum := sha256.Sum256(output)
+	outputHash, err := CanonicalJSONHashRaw(output)
+	if err != nil {
+		return Result{}, &Error{Code: CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output is not canonical JSON: %w", err)}
+	}
 	return Result{
 		Output:       output,
 		FuelConsumed: fuelConsumed,
 		Engine:       EngineVersion(),
-		OutputHash:   "sha256:" + hex.EncodeToString(sum[:]),
+		OutputHash:   outputHash,
 	}, nil
 }
 

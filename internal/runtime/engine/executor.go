@@ -538,6 +538,15 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 			frame := e.newExecutionFrame(contextTx{Tx: tx, ctx: txCtx}, req)
 			if err := e.runSteps(&frame); err != nil {
 				result = frame.result
+				var moduleErr *computemodule.Error
+				if errors.As(err, &moduleErr) && moduleErr.Code == computemodule.CodeReplay {
+					result.FailureClass = ClassifyFailure(err)
+					return err
+				}
+				if replayErr := verifyComputeModuleReplayTraceCount(frame); replayErr != nil {
+					result.FailureClass = ClassifyFailure(replayErr)
+					return replayErr
+				}
 				result.FailureClass = ClassifyFailure(err)
 				return err
 			}
@@ -1115,7 +1124,7 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if err := eventschema.ValidatePayloadAgainstSchema(module.InputSchema, inputs); err != nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("input schema violation: %w", err)}
 	}
-	inputBytes, err := json.Marshal(inputs)
+	inputBytes, err := computemodule.CanonicalJSONBytes(inputs)
 	if err != nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
 	}
@@ -1127,20 +1136,50 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if kind == "" {
 		kind = "wasm"
 	}
+	abi := strings.TrimSpace(module.ABI)
+	entry := strings.TrimSpace(module.Entry)
+	switch kind {
+	case pythonmodule.Kind:
+		if abi == "" {
+			abi = pythonmodule.ABI
+		}
+		if entry == "" {
+			entry = pythonmodule.DefaultEntry
+		}
+	default:
+		if abi == "" {
+			abi = computemodule.ABI
+		}
+		if entry == "" {
+			entry = computemodule.DefaultEntry
+		}
+	}
 	trace := ComputeModuleTrace{
-		ModuleID: moduleID,
-		RowID:    rowID,
-		Kind:     kind,
-		Digest:   strings.TrimSpace(module.Digest),
+		ModuleID:   moduleID,
+		RowID:      rowID,
+		Kind:       kind,
+		ABI:        abi,
+		Entry:      entry,
+		Digest:     strings.TrimSpace(module.Digest),
+		SourceHash: strings.TrimSpace(module.SourceHash),
+		InputHash:  computemodule.HashBytes(inputBytes),
+		Outcome:    computemodule.ReplayOutcomeSuccess,
+		Arch:       computemodule.CurrentArch(),
+		Limits: computemodule.ReplayLimits{
+			Fuel:        module.Limits.Gas,
+			MemoryPages: module.Limits.MemoryPages,
+			OutputBytes: module.Limits.OutputBytes,
+		},
 	}
 	var rawOutput []byte
 	switch kind {
 	case "wasm":
+		trace.Engine = computemodule.EngineVersion()
 		result, err := computemodule.Execute(computemodule.Request{
 			ModuleID:    moduleID,
 			RowID:       rowID,
 			Digest:      strings.TrimSpace(module.Digest),
-			Entry:       strings.TrimSpace(module.Entry),
+			Entry:       entry,
 			Wasm:        moduleBytes,
 			Input:       inputBytes,
 			Fuel:        module.Limits.Gas,
@@ -1148,18 +1187,24 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 			OutputBytes: module.Limits.OutputBytes,
 		})
 		if err != nil {
-			return nil, err
+			return nil, e.recordComputeModuleFailure(frame, trace, err)
 		}
 		rawOutput = result.Output
 		trace.Engine = result.Engine
-		trace.OutputHash = result.OutputHash
 		trace.FuelConsumed = result.FuelConsumed
 	case pythonmodule.Kind:
+		identity := pythonmodule.RuntimeIdentity()
+		trace.Engine = identity.Engine
+		trace.Interpreter = identity.Interpreter
+		trace.InterpreterDigest = identity.InterpreterDigest
+		trace.SnapshotDigest = identity.SnapshotDigest
+		trace.HarnessABI = identity.HarnessABI
+		trace.SourceHash = computemodule.HashBytes(moduleBytes)
 		result, err := pythonmodule.Execute(pythonmodule.Request{
 			ModuleID:    moduleID,
 			RowID:       rowID,
 			Digest:      strings.TrimSpace(module.Digest),
-			Entry:       strings.TrimSpace(module.Entry),
+			Entry:       entry,
 			Source:      moduleBytes,
 			Input:       inputBytes,
 			Fuel:        module.Limits.Gas,
@@ -1167,11 +1212,10 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 			OutputBytes: module.Limits.OutputBytes,
 		})
 		if err != nil {
-			return nil, err
+			return nil, e.recordComputeModuleFailure(frame, trace, err)
 		}
 		rawOutput = result.Output
 		trace.Engine = result.Engine
-		trace.OutputHash = result.OutputHash
 		trace.FuelConsumed = result.FuelConsumed
 		trace.Interpreter = result.Interpreter
 		trace.InterpreterDigest = result.InterpreterSHA
@@ -1183,13 +1227,43 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	}
 	output, err := decodeComputeModuleOutput(moduleID, rowID, rawOutput, module.OutputSchema)
 	if err != nil {
-		return nil, err
+		return nil, e.recordComputeModuleFailure(frame, trace, err)
 	}
+	outputHash, err := computemodule.CanonicalJSONHash(output)
+	if err != nil {
+		return nil, e.recordComputeModuleFailure(frame, trace, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err})
+	}
+	trace.OutputHash = outputHash
 	if err := verifyComputeModuleReplayTrace(frame, trace); err != nil {
 		return nil, err
 	}
-	frame.result.ComputeModuleTraces = append(frame.result.ComputeModuleTraces, trace)
+	frame.result.ComputeModuleTraces = append(frame.result.ComputeModuleTraces, trace.Normalized())
 	return output, nil
+}
+
+func (e *Executor) recordComputeModuleFailure(frame *executionFrame, trace ComputeModuleTrace, cause error) error {
+	if frame == nil {
+		return cause
+	}
+	trace = trace.Normalized()
+	trace.Outcome = computemodule.ReplayOutcomeFailure
+	trace.OutputHash = ""
+	trace.ErrorCode = string(computemodule.CodeABI)
+	var typed *computemodule.Error
+	if errors.As(cause, &typed) {
+		trace.ErrorCode = string(typed.Code)
+		if strings.TrimSpace(trace.ModuleID) == "" {
+			trace.ModuleID = strings.TrimSpace(typed.ModuleID)
+		}
+		if strings.TrimSpace(trace.RowID) == "" {
+			trace.RowID = strings.TrimSpace(typed.RowID)
+		}
+	}
+	if err := verifyComputeModuleReplayTrace(frame, trace); err != nil {
+		return err
+	}
+	frame.result.ComputeModuleTraces = append(frame.result.ComputeModuleTraces, trace.Normalized())
+	return cause
 }
 
 func decodeComputeModuleOutput(moduleID, rowID string, raw []byte, schema map[string]any) (map[string]any, error) {
@@ -1213,34 +1287,38 @@ func verifyComputeModuleReplayTrace(frame *executionFrame, actual ComputeModuleT
 	}
 	idx := len(frame.result.ComputeModuleTraces)
 	if idx >= len(expected) {
+		finding := computemodule.ReplayFinding{
+			Schema:      computemodule.ReplayEvidenceSchema,
+			Kind:        computemodule.ReplayFindingIdentityDivergence,
+			Field:       "trace_count",
+			ModuleID:    actual.ModuleID,
+			RowID:       actual.RowID,
+			Actual:      fmt.Sprint(idx + 1),
+			Expected:    fmt.Sprint(len(expected)),
+			Message:     "compute_module replay unexpected trace",
+			Remediation: "replay with matching persisted compute_module trace count and order",
+		}.Normalized()
 		return &computemodule.Error{
 			Code:     computemodule.CodeReplay,
 			ModuleID: actual.ModuleID,
 			RowID:    actual.RowID,
-			Err:      fmt.Errorf("unexpected compute_module trace at replay index %d: module=%s row=%s output_hash=%s fuel=%d", idx, actual.ModuleID, actual.RowID, actual.OutputHash, actual.FuelConsumed),
+			Finding:  &finding,
+			Err:      fmt.Errorf("unexpected compute_module trace at replay index %d: module=%s row=%s outcome=%s output_hash=%s error_code=%s fuel=%d", idx, actual.ModuleID, actual.RowID, actual.Outcome, actual.OutputHash, actual.ErrorCode, actual.FuelConsumed),
 		}
 	}
 	want := expected[idx]
-	compareFuel := strings.TrimSpace(actual.Kind) != pythonmodule.Kind
-	if strings.TrimSpace(want.ModuleID) != strings.TrimSpace(actual.ModuleID) ||
-		strings.TrimSpace(want.RowID) != strings.TrimSpace(actual.RowID) ||
-		strings.TrimSpace(want.Kind) != strings.TrimSpace(actual.Kind) ||
-		strings.TrimSpace(want.Digest) != strings.TrimSpace(actual.Digest) ||
-		strings.TrimSpace(want.Interpreter) != strings.TrimSpace(actual.Interpreter) ||
-		strings.TrimSpace(want.InterpreterDigest) != strings.TrimSpace(actual.InterpreterDigest) ||
-		strings.TrimSpace(want.SnapshotDigest) != strings.TrimSpace(actual.SnapshotDigest) ||
-		strings.TrimSpace(want.HarnessABI) != strings.TrimSpace(actual.HarnessABI) ||
-		strings.TrimSpace(want.SourceHash) != strings.TrimSpace(actual.SourceHash) ||
-		strings.TrimSpace(want.OutputHash) != strings.TrimSpace(actual.OutputHash) ||
-		(compareFuel && want.FuelConsumed != actual.FuelConsumed) {
+	if finding := computemodule.CompareReplayEnvelopes(want, actual); finding != nil {
 		return &computemodule.Error{
 			Code:     computemodule.CodeReplay,
 			ModuleID: actual.ModuleID,
 			RowID:    actual.RowID,
-			Err: fmt.Errorf("compute_module replay divergence at index %d: expected module=%s row=%s kind=%s digest=%s interpreter=%s interpreter_digest=%s snapshot_digest=%s harness_abi=%s source_hash=%s output_hash=%s fuel=%d engine=%s; got module=%s row=%s kind=%s digest=%s interpreter=%s interpreter_digest=%s snapshot_digest=%s harness_abi=%s source_hash=%s output_hash=%s fuel=%d engine=%s",
+			Finding:  finding,
+			Err: fmt.Errorf("compute_module replay %s at index %d field=%s: expected module=%s row=%s kind=%s abi=%s entry=%s digest=%s input_hash=%s interpreter=%s interpreter_digest=%s snapshot_digest=%s harness_abi=%s source_hash=%s outcome=%s output_hash=%s error_code=%s fuel=%d fuel_limit=%d memory_pages=%d output_bytes=%d engine=%s arch=%s; got module=%s row=%s kind=%s abi=%s entry=%s digest=%s input_hash=%s interpreter=%s interpreter_digest=%s snapshot_digest=%s harness_abi=%s source_hash=%s outcome=%s output_hash=%s error_code=%s fuel=%d fuel_limit=%d memory_pages=%d output_bytes=%d engine=%s arch=%s",
+				finding.Kind,
 				idx,
-				want.ModuleID, want.RowID, want.Kind, want.Digest, want.Interpreter, want.InterpreterDigest, want.SnapshotDigest, want.HarnessABI, want.SourceHash, want.OutputHash, want.FuelConsumed, want.Engine,
-				actual.ModuleID, actual.RowID, actual.Kind, actual.Digest, actual.Interpreter, actual.InterpreterDigest, actual.SnapshotDigest, actual.HarnessABI, actual.SourceHash, actual.OutputHash, actual.FuelConsumed, actual.Engine,
+				finding.Field,
+				want.ModuleID, want.RowID, want.Kind, want.ABI, want.Entry, want.Digest, want.InputHash, want.Interpreter, want.InterpreterDigest, want.SnapshotDigest, want.HarnessABI, want.SourceHash, want.Outcome, want.OutputHash, want.ErrorCode, want.FuelConsumed, want.Limits.Fuel, want.Limits.MemoryPages, want.Limits.OutputBytes, want.Engine, want.Arch,
+				actual.ModuleID, actual.RowID, actual.Kind, actual.ABI, actual.Entry, actual.Digest, actual.InputHash, actual.Interpreter, actual.InterpreterDigest, actual.SnapshotDigest, actual.HarnessABI, actual.SourceHash, actual.Outcome, actual.OutputHash, actual.ErrorCode, actual.FuelConsumed, actual.Limits.Fuel, actual.Limits.MemoryPages, actual.Limits.OutputBytes, actual.Engine, actual.Arch,
 			),
 		}
 	}
@@ -1252,9 +1330,19 @@ func verifyComputeModuleReplayTraceCount(frame executionFrame) error {
 	if expected == nil || len(frame.result.ComputeModuleTraces) == len(expected) {
 		return nil
 	}
+	finding := computemodule.ReplayFinding{
+		Schema:      computemodule.ReplayEvidenceSchema,
+		Kind:        computemodule.ReplayFindingIdentityDivergence,
+		Field:       "trace_count",
+		Expected:    fmt.Sprint(len(expected)),
+		Actual:      fmt.Sprint(len(frame.result.ComputeModuleTraces)),
+		Message:     "compute_module replay trace count mismatch",
+		Remediation: "replay with matching persisted compute_module trace count and order",
+	}.Normalized()
 	return &computemodule.Error{
-		Code: computemodule.CodeReplay,
-		Err:  fmt.Errorf("compute_module replay trace count mismatch: expected %d trace(s), got %d", len(expected), len(frame.result.ComputeModuleTraces)),
+		Code:    computemodule.CodeReplay,
+		Finding: &finding,
+		Err:     fmt.Errorf("compute_module replay trace count mismatch: expected %d trace(s), got %d", len(expected), len(frame.result.ComputeModuleTraces)),
 	}
 }
 

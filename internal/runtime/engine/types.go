@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
@@ -224,8 +225,8 @@ type ExecutionRequest struct {
 	// ExpectedComputeModuleTraces carries prior deterministic module evidence
 	// for supported replay. Nil means normal execution; a non-nil empty slice
 	// means replay mode with zero expected module executions. When present,
-	// module execution re-runs and compares output hash plus fuel consumption
-	// against this ordered evidence.
+	// module execution re-runs and compares identity/profile, semantic
+	// outcome, and resource evidence against this ordered evidence.
 	ExpectedComputeModuleTraces []ComputeModuleTrace
 	ChainDepth                  int
 	MaxDepth                    int
@@ -434,20 +435,7 @@ type ExecutionResult struct {
 	AccumulatorCompletionDiagnostics AccumulatorCompletionDiagnostics
 }
 
-type ComputeModuleTrace struct {
-	ModuleID          string
-	RowID             string
-	Kind              string
-	Digest            string
-	Engine            string
-	OutputHash        string
-	FuelConsumed      uint64
-	Interpreter       string
-	InterpreterDigest string
-	SnapshotDigest    string
-	HarnessABI        string
-	SourceHash        string
-}
+type ComputeModuleTrace = computemodule.ReplayEnvelope
 
 func (r ExecutionResult) ComputedBucket() values.Bucket {
 	return values.Wrap(r.Computed)

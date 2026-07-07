@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -75,6 +76,66 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 	}
 	if sourceEventID != subjectEventID {
 		t.Fatalf("sqlite source_event_id = %q, want %q", sourceEventID, subjectEventID)
+	}
+}
+
+func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES (?, 'running', ?)
+	`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+
+	envelope := computemodule.ReplayEnvelope{
+		ModuleID:     "structured_renderer",
+		RowID:        "render_bundle",
+		Kind:         "wasm",
+		ABI:          computemodule.ABI,
+		Entry:        computemodule.DefaultEntry,
+		Digest:       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		InputHash:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Outcome:      computemodule.ReplayOutcomeSuccess,
+		OutputHash:   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		FuelConsumed: 42,
+		Limits: computemodule.ReplayLimits{
+			Fuel:        1_000,
+			MemoryPages: 17,
+			OutputBytes: 1024,
+		},
+		Engine: "wasmtime-go:v46.0.0",
+		Arch:   "arm64",
+	}
+	logger := runtimepkg.NewRuntimeLogger(store)
+	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level:     "info",
+		Message:   "Compute module replay evidence recorded",
+		Component: "compute_module",
+		Action:    computemodule.ReplayEvidenceAction,
+		Detail:    computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope}),
+	}); err != nil {
+		t.Fatalf("RuntimeLogger.Log: %v", err)
+	}
+	loaded, err := store.LoadComputeModuleReplayEvidence(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadComputeModuleReplayEvidence: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded replay evidence = %#v, want one envelope", loaded)
+	}
+	if loaded[0].Normalized() != envelope.Normalized() {
+		t.Fatalf("loaded envelope = %#v, want %#v", loaded[0].Normalized(), envelope.Normalized())
+	}
+
+	actual := loaded[0]
+	actual.OutputHash = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+	finding := computemodule.CompareReplayEnvelopes(loaded[0], actual)
+	if finding == nil || finding.Kind != computemodule.ReplayFindingResultDivergence || finding.Field != "output_hash" {
+		t.Fatalf("planted divergence finding = %#v, want result divergence on output_hash", finding)
 	}
 }
 
