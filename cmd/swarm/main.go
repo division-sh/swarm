@@ -246,6 +246,17 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 	}
 }
 
+func selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore *store.SQLiteRuntimeStore) selectedAPIOptionalCapabilityBuilder {
+	if sqliteStore == nil {
+		return nil
+	}
+	return func(selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+		return selectedAPICapabilities{
+			BundleCatalog: sqliteStore,
+		}, nil
+	}
+}
+
 func selectedPostgresRunForkExecutionFunc(pg *store.PostgresStore) apiv1.SelectedContractRunForkExecutionFunc {
 	if pg == nil {
 		return nil
@@ -2691,7 +2702,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			return storeBundle{}, err
 		}
 		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-		return storeBundle{
+		bundle := storeBundle{
 			SQLDB:                       sqliteStore.DB,
 			Database:                    sqlDBPinger{db: sqliteStore.DB},
 			RuntimeLogStore:             sqliteStore,
@@ -2719,9 +2730,12 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			RunQuiescenceStore:          sqliteStore,
 			RunReadStore:                sqliteStore,
 			EntityReadStore:             sqliteStore,
+			AgentConversationReadStore:  sqliteStore,
 			RunBundleContextStore:       sqliteStore,
 			RunStalledReader:            sqliteStore,
-		}, nil
+		}
+		bundle.APIOptionalCapabilityBuilder = selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore)
+		return bundle, nil
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
 	}
