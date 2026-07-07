@@ -91,25 +91,7 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 		t.Fatalf("seed sqlite run: %v", err)
 	}
 
-	envelope := computemodule.ReplayEnvelope{
-		ModuleID:     "structured_renderer",
-		RowID:        "render_bundle",
-		Kind:         "wasm",
-		ABI:          computemodule.ABI,
-		Entry:        computemodule.DefaultEntry,
-		Digest:       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		InputHash:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		Outcome:      computemodule.ReplayOutcomeSuccess,
-		OutputHash:   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-		FuelConsumed: 42,
-		Limits: computemodule.ReplayLimits{
-			Fuel:        1_000,
-			MemoryPages: 17,
-			OutputBytes: 1024,
-		},
-		Engine: "wasmtime-go:v46.0.0",
-		Arch:   "arm64",
-	}
+	envelope := computeModuleReplayEvidenceTestEnvelope()
 	logger := runtimepkg.NewRuntimeLogger(store)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
@@ -136,6 +118,75 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	finding := computemodule.CompareReplayEnvelopes(loaded[0], actual)
 	if finding == nil || finding.Kind != computemodule.ReplayFindingResultDivergence || finding.Field != "output_hash" {
 		t.Fatalf("planted divergence finding = %#v, want result divergence on output_hash", finding)
+	}
+}
+
+func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
+	ctx := context.Background()
+	_, db, cleanup := testutil.StartPostgres(t)
+	defer cleanup()
+	pg := &PostgresStore{DB: db}
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities: %v", err)
+	}
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', NOW())
+	`, runID); err != nil {
+		t.Fatalf("seed postgres run: %v", err)
+	}
+	envelope := computeModuleReplayEvidenceTestEnvelope()
+	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
+	detail["component"] = "compute_module"
+	detail["action"] = computemodule.ReplayEvidenceAction
+	payload, err := json.Marshal(map[string]any{
+		"log_level": "info",
+		"message":   "Compute module replay evidence recorded",
+		"details":   detail,
+	})
+	if err != nil {
+		t.Fatalf("marshal runtime log payload: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (
+			event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at
+		)
+		VALUES (gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global', $2::jsonb, 'runtime', 'platform', NOW())
+	`, runID, string(payload)); err != nil {
+		t.Fatalf("seed postgres runtime log: %v", err)
+	}
+	loaded, err := pg.LoadComputeModuleReplayEvidence(ctx, runID)
+	if err != nil {
+		t.Fatalf("LoadComputeModuleReplayEvidence postgres: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("loaded postgres replay evidence = %#v, want one envelope", loaded)
+	}
+	if loaded[0].Normalized() != envelope.Normalized() {
+		t.Fatalf("loaded postgres envelope = %#v, want %#v", loaded[0].Normalized(), envelope.Normalized())
+	}
+}
+
+func computeModuleReplayEvidenceTestEnvelope() computemodule.ReplayEnvelope {
+	return computemodule.ReplayEnvelope{
+		ModuleID:     "structured_renderer",
+		RowID:        "render_bundle",
+		Kind:         "wasm",
+		ABI:          computemodule.ABI,
+		Entry:        computemodule.DefaultEntry,
+		Digest:       "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		InputHash:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Outcome:      computemodule.ReplayOutcomeSuccess,
+		OutputHash:   "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		FuelConsumed: 42,
+		Limits: computemodule.ReplayLimits{
+			Fuel:        1_000,
+			MemoryPages: 17,
+			OutputBytes: 1024,
+		},
+		Engine: "wasmtime-go:v46.0.0",
+		Arch:   "arm64",
 	}
 }
 
