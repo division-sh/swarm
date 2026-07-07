@@ -3,6 +3,7 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,7 +16,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -110,12 +114,15 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if !runtimecontracts.SupportedActivityEffectClass(toolEffectClass) {
 		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %q effect_class %q is not executable in Stage 1", intent.Tool, toolEffectClass))
 	}
+	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return d.executeNonIdempotentActivityIntent(ctx, intent, tool)
+	}
 	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptIntent := intent
 		attemptIntent.Attempt = attempt
-		result, err := executeActivityHTTPTool(ctx, client, attemptIntent, tool)
+		result, err := d.executeActivityHTTPTool(ctx, client, attemptIntent, tool)
 		if err == nil {
 			return d.publishActivitySuccess(ctx, attemptIntent, result)
 		}
@@ -129,6 +136,44 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	failureIntent := intent
 	failureIntent.Attempt = maxAttempts
 	return d.publishActivityFailure(ctx, failureIntent, lastErr)
+}
+
+func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) error {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.Enabled() {
+		return d.publishActivityFailure(ctx, intent, fmt.Errorf("activity tool %s effect_class non_idempotent_write requires the activity_attempts journal", intent.Tool))
+	}
+	client := d.client
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	intent.Attempt = 1
+	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
+	if err != nil {
+		return d.publishActivityFailure(ctx, intent, err)
+	}
+	startRecord := activityAttemptStartRecord(intent, prepared.inputHash)
+	started, inserted, err := d.coordinator.workflowStore.StartActivityAttempt(ctx, startRecord)
+	if err != nil {
+		return d.publishActivityFailure(ctx, intent, err)
+	}
+	if !inserted {
+		return d.publishExistingActivityAttempt(ctx, intent, started)
+	}
+	result, err := executePreparedActivityHTTPTool(ctx, prepared)
+	var terminal ActivityAttemptRecord
+	if err != nil {
+		redacted := runtimemanagedcredentials.RedactString(err.Error(), prepared.secrets...)
+		payload := activityFailurePayload(intent, fmt.Errorf("%s", redacted))
+		terminal = started.withTerminal(ActivityAttemptStatusFailed, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, redacted)
+	} else {
+		payload := activitySuccessPayload(intent, result)
+		terminal = started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, "")
+	}
+	stored, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+	if err != nil {
+		return err
+	}
+	return d.publishJournaledActivityResult(ctx, intent, stored)
 }
 
 func (pc *PipelineCoordinator) handleActivityRequestEvent(ctx context.Context, evt events.Event) (bool, error) {
@@ -351,76 +396,138 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	return intent, nil
 }
 
-func executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
-	if tool.HTTP == nil {
-		return nil, fmt.Errorf("activity tool %s is missing http block", intent.Tool)
-	}
-	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
-		return nil, fmt.Errorf("activity tool %s uses rate_limit; activity HTTP rate-limit admission is not admitted in Stage 1", intent.Tool)
-	}
-	if len(tool.ResponseMapping) > 0 {
-		return nil, fmt.Errorf("activity tool %s uses response_mapping; activity HTTP response mapping is not admitted in Stage 1", intent.Tool)
-	}
-	if len(tool.Credentials) > 0 || tool.ManagedCredential != nil {
-		return nil, fmt.Errorf("activity tool %s uses credentials; credentialed activity HTTP execution is not admitted in Stage 1", intent.Tool)
-	}
-	env := map[string]any{"input": cloneStringAnyMap(intent.Input)}
-	url, err := resolveActivityHTTPURLTemplate(tool.HTTP.URL, env)
+type preparedActivityHTTPTool struct {
+	toolName  string
+	method    string
+	url       string
+	headers   http.Header
+	body      []byte
+	timeout   time.Duration
+	client    *http.Client
+	secrets   []string
+	inputHash string
+}
+
+func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
+	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
 	if err != nil {
 		return nil, err
 	}
+	return executePreparedActivityHTTPTool(ctx, prepared)
+}
+
+func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (preparedActivityHTTPTool, error) {
+	if tool.HTTP == nil {
+		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s is missing http block", intent.Tool)
+	}
+	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
+		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses rate_limit; activity HTTP rate-limit admission is not admitted in Stage 1", intent.Tool)
+	}
+	if len(tool.ResponseMapping) > 0 {
+		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses response_mapping; activity HTTP response mapping is not admitted in Stage 1", intent.Tool)
+	}
+	if tool.ManagedCredential != nil {
+		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses managed_credential; managed credential activity HTTP execution is not admitted in Stage 1", intent.Tool)
+	}
+	credentials := map[string]any{}
+	secrets := []string{}
+	if len(tool.Credentials) > 0 {
+		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+			return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write activities", intent.Tool)
+		}
+		resolved, secretValues, err := d.resolveActivityToolCredentials(ctx, intent, tool.Credentials)
+		if err != nil {
+			return preparedActivityHTTPTool{}, err
+		}
+		credentials = resolved
+		secrets = secretValues
+	}
+	input := cloneStringAnyMap(intent.Input)
+	env := map[string]any{"input": input, "credentials": credentials}
+	url, err := resolveActivityHTTPURLTemplate(tool.HTTP.URL, env)
+	if err != nil {
+		return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
+	}
 	url = strings.TrimSpace(url)
 	if url == "" {
-		return nil, fmt.Errorf("activity tool %s resolved an empty url", intent.Tool)
+		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s resolved an empty url", intent.Tool)
 	}
-	var body io.Reader
+	var body []byte
 	if tool.HTTP.Body != nil {
 		resolvedBody, err := resolveActivityTemplateTree(tool.HTTP.Body, env)
 		if err != nil {
-			return nil, err
+			return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
 		}
 		raw, err := json.Marshal(resolvedBody)
 		if err != nil {
-			return nil, err
+			return preparedActivityHTTPTool{}, err
 		}
-		body = bytes.NewReader(raw)
+		body = raw
 	}
 	method := strings.ToUpper(strings.TrimSpace(tool.HTTP.Method))
 	if method == "" {
 		method = http.MethodGet
 	}
-	reqCtx := ctx
-	cancel := func() {}
+	timeout := 30 * time.Second
 	if tool.HTTP.TimeoutSeconds > 0 {
-		reqCtx, cancel = context.WithTimeout(ctx, time.Duration(tool.HTTP.TimeoutSeconds)*time.Second)
+		timeout = time.Duration(tool.HTTP.TimeoutSeconds) * time.Second
 	}
-	defer cancel()
-	req, err := http.NewRequestWithContext(reqCtx, method, url, body)
-	if err != nil {
-		return nil, err
-	}
+	headers := make(http.Header, len(tool.HTTP.Headers))
 	for key, value := range tool.HTTP.Headers {
 		resolved, err := resolveActivityTemplateString(value, env)
 		if err != nil {
-			return nil, err
+			return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
 		}
-		req.Header.Set(strings.TrimSpace(key), strings.TrimSpace(resolved))
+		headers.Set(strings.TrimSpace(key), strings.TrimSpace(resolved))
 	}
-	if body != nil && strings.TrimSpace(req.Header.Get("Content-Type")) == "" {
-		req.Header.Set("Content-Type", "application/json")
+	if len(body) > 0 && strings.TrimSpace(headers.Get("Content-Type")) == "" {
+		headers.Set("Content-Type", "application/json")
 	}
-	resp, err := client.Do(req)
+	if client == nil {
+		client = &http.Client{Timeout: timeout}
+	}
+	return preparedActivityHTTPTool{
+		toolName:  intent.Tool,
+		method:    method,
+		url:       url,
+		headers:   headers,
+		body:      body,
+		timeout:   timeout,
+		client:    client,
+		secrets:   secrets,
+		inputHash: activityInputHash(input),
+	}, nil
+}
+
+func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActivityHTTPTool) (any, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, prepared.timeout)
+	defer cancel()
+	var body io.Reader
+	if len(prepared.body) > 0 {
+		body = bytes.NewReader(prepared.body)
+	}
+	req, err := http.NewRequestWithContext(reqCtx, prepared.method, prepared.url, body)
 	if err != nil {
-		return nil, err
+		return nil, redactActivityError(err, prepared.secrets)
+	}
+	for key, values := range prepared.headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	resp, err := prepared.client.Do(req)
+	if err != nil {
+		return nil, redactActivityError(err, prepared.secrets)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, redactActivityError(err, prepared.secrets)
 	}
 	parsed := parseHTTPActivityResponse(raw)
+	parsed = runtimemanagedcredentials.RedactValue(parsed, prepared.secrets...)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("activity http tool %s returned status %d: %s", intent.Tool, resp.StatusCode, strings.TrimSpace(asString(parsed)))
+		return nil, fmt.Errorf("activity http tool %s returned status %d: %s", prepared.toolName, resp.StatusCode, strings.TrimSpace(asString(parsed)))
 	}
 	return parsed, nil
 }
@@ -434,6 +541,54 @@ func parseHTTPActivityResponse(raw []byte) any {
 		return string(raw)
 	}
 	return out
+}
+
+func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.Context, intent runtimeengine.ActivityIntent, keys []string) (map[string]any, []string, error) {
+	out := make(map[string]any, len(keys))
+	secrets := make([]string, 0, len(keys))
+	store := runtimecredentials.Store(nil)
+	if d.coordinator != nil {
+		store = d.coordinator.credentials
+	}
+	if store == nil {
+		return nil, nil, fmt.Errorf("credential store is not configured")
+	}
+	source := semanticview.Source(nil)
+	if d.coordinator != nil {
+		source = d.coordinator.SemanticSource()
+	}
+	flowID := intent.FlowID.String()
+	for _, key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
+		if mapped && strings.TrimSpace(storeKey) == "" {
+			return nil, nil, fmt.Errorf("credential %q is not declared and bound for imported package flow %s", key, flowID)
+		}
+		storeKey = strings.TrimSpace(storeKey)
+		if storeKey == "" {
+			return nil, nil, fmt.Errorf("credential %q does not resolve to a deployment credential key", key)
+		}
+		value, ok, err := store.Get(ctx, storeKey)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
+			return nil, nil, fmt.Errorf("missing credential %q", storeKey)
+		}
+		out[key] = value
+		secrets = append(secrets, value)
+	}
+	return out, secrets, nil
+}
+
+func redactActivityError(err error, secrets []string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), secrets...))
 }
 
 func resolveActivityTemplateTree(value any, env map[string]any) (any, error) {
@@ -591,34 +746,48 @@ func activityHTTPURLTemplateValueHasSchemeAuthority(value string) bool {
 }
 
 func (d pipelineActivityDispatcher) publishActivitySuccess(ctx context.Context, intent runtimeengine.ActivityIntent, result any) error {
-	payload := map[string]any{
+	return d.publishActivityResult(ctx, intent, intent.SuccessEvent, activitySuccessPayload(intent, result))
+}
+
+func activitySuccessPayload(intent runtimeengine.ActivityIntent, result any) map[string]any {
+	return map[string]any{
 		"activity_id":  intent.ActivityID,
 		"tool":         intent.Tool,
 		"effect_class": string(intent.EffectClass),
 		"attempt":      intent.Attempt,
 		"result":       result,
 	}
-	return d.publishActivityResult(ctx, intent, intent.SuccessEvent, payload)
 }
 
 func (d pipelineActivityDispatcher) publishActivityFailure(ctx context.Context, intent runtimeengine.ActivityIntent, cause error) error {
-	payload := map[string]any{
+	return d.publishActivityResult(ctx, intent, intent.FailureEvent, activityFailurePayload(intent, cause))
+}
+
+func activityFailurePayload(intent runtimeengine.ActivityIntent, cause error) map[string]any {
+	errText := ""
+	if cause != nil {
+		errText = strings.TrimSpace(cause.Error())
+	}
+	return map[string]any{
 		"activity_id":  intent.ActivityID,
 		"tool":         intent.Tool,
 		"effect_class": string(intent.EffectClass),
 		"attempt":      intent.Attempt,
-		"error":        strings.TrimSpace(cause.Error()),
+		"error":        errText,
 	}
-	return d.publishActivityResult(ctx, intent, intent.FailureEvent, payload)
 }
 
 func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent, eventType string, payload map[string]any) error {
+	return d.publishActivityResultWithID(ctx, intent, activityResultEventID(intent, eventType), eventType, payload)
+}
+
+func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 	evt := events.NewChildEventWithLineage(
-		activityResultEventID(intent, eventType),
+		eventID,
 		events.EventType(eventType),
 		intent.NodeID.String(),
 		intent.SourceTaskID,
@@ -643,4 +812,69 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 		return nil
 	}
 	return d.coordinator.bus.Publish(ctx, evt)
+}
+
+func (d pipelineActivityDispatcher) publishExistingActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent, rec ActivityAttemptRecord) error {
+	rec = rec.normalized()
+	if rec.Status == ActivityAttemptStatusStarted {
+		cause := fmt.Errorf("activity non_idempotent_write attempt %s already started; automatic provider re-dispatch is blocked because the outcome is uncertain", rec.RequestEventID)
+		payload := activityFailurePayload(intent, cause)
+		uncertain := rec.withTerminal(ActivityAttemptStatusUncertain, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, payload, cause.Error())
+		stored, err := d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, uncertain)
+		if err != nil {
+			return err
+		}
+		return d.publishJournaledActivityResult(ctx, intent, stored)
+	}
+	return d.publishJournaledActivityResult(ctx, intent, rec)
+}
+
+func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent, rec ActivityAttemptRecord) error {
+	rec = rec.normalized()
+	if rec.ResultEventID == "" || rec.ResultEventType == "" || rec.ResultPayload == nil {
+		return fmt.Errorf("activity attempt %s has no terminal journal result", rec.RequestEventID)
+	}
+	intent.Attempt = rec.Attempt
+	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload)
+}
+
+func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash string) ActivityAttemptRecord {
+	intent = intent.Normalized()
+	return ActivityAttemptRecord{
+		RequestEventID:  activityRequestEventID(intent),
+		RunID:           intent.SourceRunID,
+		SourceEventID:   intent.SourceEventID,
+		ParentEventID:   intent.ParentEventID,
+		EntityID:        intent.EntityID.String(),
+		FlowInstance:    intent.FlowID.String(),
+		NodeID:          intent.NodeID.String(),
+		HandlerEventKey: intent.HandlerEventKey,
+		ActivityID:      intent.ActivityID,
+		Tool:            intent.Tool,
+		EffectClass:     string(intent.EffectClass),
+		Attempt:         1,
+		Status:          ActivityAttemptStatusStarted,
+		SuccessEvent:    intent.SuccessEvent,
+		FailureEvent:    intent.FailureEvent,
+		InputHash:       inputHash,
+	}
+}
+
+func (rec ActivityAttemptRecord) withTerminal(status, eventID, eventType string, payload map[string]any, errText string) ActivityAttemptRecord {
+	rec = rec.normalized()
+	rec.Status = status
+	rec.ResultEventID = strings.TrimSpace(eventID)
+	rec.ResultEventType = strings.TrimSpace(eventType)
+	rec.ResultPayload = cloneStringAnyMap(payload)
+	rec.Error = strings.TrimSpace(errText)
+	return rec
+}
+
+func activityInputHash(input map[string]any) string {
+	raw, err := json.Marshal(input)
+	if err != nil {
+		raw = []byte(fmt.Sprintf("%#v", input))
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("sha256:%x", sum[:])
 }

@@ -104,7 +104,7 @@ func TestActivityEffectClassDefaults(t *testing.T) {
 			maxAttempts: 1,
 			backoff:     "none",
 			forkPolicy:  ActivityForkRequireConfirmation,
-			supported:   false,
+			supported:   true,
 		},
 		{
 			name:        "long running split",

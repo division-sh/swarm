@@ -51,12 +51,17 @@ type ConversationSchemaCapabilities struct {
 
 type StoreSchemaCapabilities struct {
 	Agents        SchemaFlavor
+	Activity      ActivitySchemaCapabilities
 	EntityState   SchemaFlavor
 	Schedules     SchemaFlavor
 	Mailbox       SchemaFlavor
 	Events        EventSchemaCapabilities
 	Conversations ConversationSchemaCapabilities
 	EntityRunID   bool
+}
+
+type ActivitySchemaCapabilities struct {
+	Attempts SchemaFlavor
 }
 
 type schemaColumnCatalog struct {
@@ -179,6 +184,17 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		},
 	)
 	caps.EntityRunID = catalog.hasColumns("entity_state", "run_id")
+	caps.Activity = ActivitySchemaCapabilities{
+		Attempts: detectSchemaFlavor(catalog, "activity_attempts",
+			[]string{
+				"request_event_id", "run_id", "activity_id", "tool", "effect_class",
+				"attempt", "status", "success_event", "failure_event", "result_event_id",
+				"result_event_type", "result_payload", "error", "input_hash",
+				"started_at", "completed_at", "updated_at",
+			},
+			nil,
+		),
+	}
 
 	caps.Events = EventSchemaCapabilities{
 		Log: detectSchemaFlavor(catalog, "events",

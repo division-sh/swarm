@@ -2898,17 +2898,24 @@ handler_specification:
           activity call; diagnostic runtime_log rows are non-authoritative. Generated result event ids are stable for the
           request identity and generated result event type.
       supported_tool_sources:
-        authored_http_tools: Required Stage 1 supported surface for read_only activity execution. The tool must be declared
-          in tools.yaml, resolve to handler_type http, include an http block, and declare effect_class read_only. HTTP tools
-          using credentials, managed_credential, response_mapping, rate_limit, or rate_limit_max_wait are not admitted to
-          activities in Stage 1; those subfeatures require later owner consumption before activity execution may claim them.
+        authored_http_tools: Required Stage 1 supported surface for read_only activity execution and for non_idempotent_write
+          activity execution when the activity_attempts journal owns provider-attempt truth. The tool must be declared in
+          tools.yaml, resolve to handler_type http, and include an http block. read_only tools may retry under the read-only
+          retry policy. non_idempotent_write tools must insert activity_attempts.started before outbound dispatch, must not
+          automatically retry or re-dispatch once an attempt may have reached the provider, and may consume static
+          credentials through the existing credential-store/import-boundary owner. Missing static credentials fail before
+          provider dispatch. HTTP tools using managed_credential, response_mapping, rate_limit, or rate_limit_max_wait are
+          not admitted to activities in Stage 1; those subfeatures require later owner consumption before activity execution
+          may claim them.
         platform_builtin: Not callable from activity in Stage 1; fail closed. This includes `artifact_repo_commit`, which
           remains action-owned under `handler_fields.action.valid_values.artifact_repo_commit` until a separately gated
           write-effect activity migration preserves that action's artifact safety and idempotency guarantees.
         mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classes are not authoritative; an
           authored registration-site override is required in a future slice before MCP tools can be activity-callable.
         native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
-        credentialed_http_tools: Split until activity credential authority is specified; fail closed.
+        credentialed_http_tools: Static credentials are admitted only for authored HTTP non_idempotent_write activities and
+          only through the existing credential-store/import-boundary owner. Static credential values must not appear in logs,
+          result payloads, readback, capability output, or errors. Managed credentials/OAuth remain split and fail closed.
       effect_classes:
         read_only:
           retry_default: max_attempts 3, exponential backoff
@@ -2919,8 +2926,12 @@ handler_specification:
           retry_default: max_attempts 2, exponential backoff
           fork_default: reuse_recorded_result
         non_idempotent_write:
-          stage_1_execution: Not executable in Stage 1; split until stable activity attempt/result journaling and idempotency
-            execution ownership are specified and implemented.
+          stage_1_execution: Executable only for authored HTTP tools, with optional static credentials, when the
+            activity_attempts journal is available. The runtime must resolve static credentials before provider dispatch,
+            insert the started attempt row before outbound dispatch, update the row with succeeded, failed, or uncertain
+            terminal state after the outcome, and consume the row on duplicate/redelivered request events before deciding
+            whether dispatch is allowed. Any existing started, uncertain, succeeded, or failed row blocks automatic provider
+            re-dispatch.
           retry_default: max_attempts 1, no retry
           fork_default: require_manual_confirmation
         long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.
@@ -6754,9 +6765,9 @@ tool_model:
       description: string — human-readable description of what the tool does
     common_optional_fields:
       handler_type: string — platform_builtin | mcp | http. Default http.
-      effect_class: string — required when the tool is callable from a handler activity. The only executable Stage 1 value
-        is read_only. idempotent_write and non_idempotent_write are reserved until activity attempt/result journaling and
-        idempotency execution ownership are specified and implemented; long_running is reserved for a later durable
+      effect_class: string — required when the tool is callable from a handler activity. Executable Stage 1 values are
+        read_only and non_idempotent_write on the authored HTTP activity_attempts journal path. idempotent_write is reserved
+        until idempotency execution ownership is specified and implemented; long_running is reserved for a later durable
         resume/cancel slice.
       input_schema: object — parameter names and types the tool accepts
       output_schema: object — field names and types the tool returns
@@ -8407,6 +8418,7 @@ platform_tables:
         - run_fork_selected_contract_route_recoveries
         - run_fork_selected_contract_bindings
       delete_by_run_id:
+        - activity_attempts
         - agent_turns
         - agent_sessions
         - entity_mutations
@@ -8463,6 +8475,18 @@ platform_tables:
         \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,\n    INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,\n    INDEX idx_events_global (event_name,\
         \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
         \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+    activity_attempts:
+      description: 'Durable attempt/result journal for executable non-idempotent activity calls. A platform.activity_requested
+        event is the request owner; this table is the provider-attempt truth owner after the request is admitted. The
+        runtime must insert the started row before outbound provider dispatch, update the row with the canonical terminal
+        result after the dispatch outcome, and consume the row on request redelivery/replay/restart before deciding whether
+        a provider call may occur. For non_idempotent_write activities, any existing started, uncertain, succeeded, or
+        failed row blocks automatic provider re-dispatch. Generated result events are published from this journaled terminal
+        state. Static credentials are resolved through the existing credential-store/import-boundary owner before the started
+        row is inserted; missing credentials therefore fail before provider dispatch and do not create an attempt row.
+        Managed credentials/OAuth, response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and
+        long_running remain split/fail-closed.'
+      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    error             TEXT,\n    input_hash        TEXT NOT NULL,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND error IS NULL AND completed_at IS NULL) OR (status IN ('succeeded', 'failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
