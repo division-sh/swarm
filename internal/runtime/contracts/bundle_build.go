@@ -20,7 +20,7 @@ const (
 )
 
 var bundleBuildReservedArtifactPaths = map[string]string{
-	bundleBuildManifestPath: "build manifest",
+	asciiFoldBundleHashLabel(bundleBuildManifestPath): bundleBuildManifestPath,
 }
 
 type BundleBuildRequest struct {
@@ -524,8 +524,8 @@ func validateBundleBuildReservedArtifactPath(label, rel string) error {
 	if clean == "." || clean == "" {
 		return nil
 	}
-	if artifact, reserved := bundleBuildReservedArtifactPaths[clean]; reserved {
-		return fmt.Errorf("%s %q collides with generated bundle build artifact %q", label, rel, artifact)
+	if artifact, reserved := bundleBuildReservedArtifactPaths[asciiFoldBundleHashLabel(clean)]; reserved {
+		return fmt.Errorf("%s %q collides with reserved generated bundle build artifact path %q", label, rel, artifact)
 	}
 	return nil
 }
