@@ -11302,9 +11302,10 @@ environment_source_authority:
     typed_delegation:
       rule: >
         Typed delegation is schema-visible and exact. A config field may name one concrete env variable only when that field's
-        schema explicitly supports env delegation. Guard admission MUST use the same supported runtime config source classes
-        as runtime loading, including explicit `--config` and executable-adjacent `config.yaml`. Arbitrary string
-        interpolation such as `${VAR}` is not accepted.
+        schema explicitly supports env delegation. The final config source classes are owned by
+        configuration_source_authority.unified_swarm_config; executable-adjacent `config.yaml` is superseded ambient
+        file authority and MUST NOT be treated as a final typed-delegation source. Arbitrary string interpolation such
+        as `${VAR}` is not accepted.
       first_slice_fields:
       - database.password_env
     generated_boundary:
@@ -11804,6 +11805,287 @@ environment_source_authority:
     split_siblings:
     - '#1731 repo-wide SWARM env accepted-set guard, typed delegation schema, doctor env reporting, generated-boundary env closure, and unknown-env guard'
     - '#1600 parent residual env-source-authority closeout'
+configuration_source_authority:
+  unified_swarm_config:
+    promoted_by: '#1804'
+    parent_trackers:
+    - '#1801'
+    - '#1600'
+    related_trackers:
+    - '#1731'
+    - '#1748'
+    implementation_status: spec_lock_only
+    canonical_owner: platform-spec.yaml#configuration_source_authority.unified_swarm_config
+    scope: >
+      Merge-bearing authority for the unified `swarm.yaml` configuration model. This owner defines the final
+      schema sections, source layers, trust tiers, source precedence, strict/old-shape handling, deep-merge and
+      provenance semantics, and #1600 env-drain destinations. It is a spec lock only: parser/discovery implementation,
+      old reader deletion, examples migration, provider-trigger runtime behavior changes, sharding runtime promotion,
+      and seeded env-row shrinkage remain split to later children.
+    invariant: >
+      Swarm configuration is explicit, typed, and provenance-bearing. Environment variables are never a normal
+      precedence layer; they are accepted only as the `SWARM_CONFIG` config-file locator/replacement, as a
+      schema-declared exact env delegation field, as a seeded #1600 migration row, as a test quarantine row, or as a
+      generated child-process boundary row. File config may name secret/token sources, but MUST NOT store inline
+      secret values.
+    source_precedence:
+      order:
+      - flags
+      - explicit_config
+      - local_operator_config
+      - project_config
+      - user_global_config
+      - built_in_defaults
+      rules:
+        flags: >
+          Invocation-scoped flags win for the semantic owner they target. Inline secret values remain forbidden; flags
+          may name files or other non-argv secret sources only where the owning section allows it.
+        explicit_config: >
+          A global `--config <path>` selects a full-trust unified `swarm.yaml` file. `SWARM_CONFIG`, when non-empty and
+          no `--config` flag is supplied, is only a bootstrap locator/replacement for a config file; it never injects
+          individual values or creates env-over-config precedence.
+        local_operator_config: >
+          A gitignored `.swarm/swarm.yaml` under the current project root is the local operator layer. It may set
+          runtime behavior and local overrides but not connection/auth values or other explicitly elevated keys.
+        project_config: >
+          A checked-in `./swarm.yaml` is the low-trust project layer. It may set only project-safe runtime behavior.
+          It cannot set connection/auth keys, non-loopback or wildcard listener binds, serve token files,
+          `workspace.allow_exec_on_host`, or absolute/outside-project path references.
+        user_global_config: >
+          `${XDG_CONFIG_HOME:-$HOME/.config}/swarm/swarm.yaml` is full-trust user-global config. It replaces the
+          current flat `config.yaml` target after the parser/discovery migration child.
+        built_in_defaults: >
+          Built-in defaults are lowest precedence and must remain explicit in the consuming owner. Defaults do not
+          authorize ambient repo, executable-adjacent, env, or source-checkout discovery.
+    trust_tiers:
+      full:
+        sources:
+        - flags
+        - explicit_config
+        - user_global_config
+        may_set: any non-secret config key accepted by that key's semantic owner
+      medium:
+        sources:
+        - local_operator_config
+        may_set: runtime behavior, local paths, and local overrides except connection/auth and explicitly elevated keys
+      low:
+        sources:
+        - project_config
+        may_set: project-safe runtime behavior only
+    key_trust_classes:
+      project_safe: May be set by project config.
+      elevated: Requires flags, explicit config, user-global config, or an allowed local-operator key.
+      secret_reference: May reference a token file, secret key, secret file, or explicit env delegation; inline secret values are rejected.
+      project_contained_path: Project config may set only relative paths that remain under the canonical project root after clean/eval checks.
+      split_unsupported: Known config-looking seam that remains invalid or split until a later gate promotes it.
+    schema:
+      strict_unknown_keys: fail_closed
+      env_interpolation: rejected
+      sections:
+        connection:
+          trust: elevated
+          keys:
+            api_server: elevated
+            api_token_file: secret_reference
+          owner: cli_specification.foundations.api_connection_auth_config_precedence
+          notes: >
+            Connection config is an elevated file-config input. Live project/selected context descriptors remain a
+            separate target authority and are not demoted into ordinary file-layer precedence.
+        serve:
+          trust: elevated_for_public_listener_or_auth
+          keys:
+            api_listen_addr: elevated_when_non_loopback_or_wildcard
+            mcp_listen_addr: elevated_when_non_loopback_or_wildcard
+            api_token_file: secret_reference
+          owner: cli_specification.command_catalog.serve.listener_topology_v2_1
+        runtime:
+          trust: project_safe_unless_key_is_marked_elevated
+          keys:
+            max_concurrent_agents: split_unsupported
+            event_poll_interval: split_unsupported
+            recovery_on_startup: project_safe
+          owner: runtime_storage.runtime_store_backend_selection
+        store:
+          trust: elevated
+          keys:
+            backend: elevated
+            sqlite.path: project_contained_path_or_elevated
+          owner: runtime_storage.runtime_store_backend_selection
+        database:
+          trust: elevated
+          keys:
+            host: elevated
+            port: elevated
+            name: elevated
+            user: elevated
+            sslmode: elevated
+            pool_size: elevated
+            password: rejected_inline_secret
+            password_secret_key: secret_reference
+            password_file: secret_reference
+            password_env: schema_declared_env_delegation
+          owner: runtime_storage.runtime_store_backend_selection.postgres_connection_details
+        workspace:
+          trust: project_safe_unless_key_is_marked_elevated
+          keys:
+            data_source: project_contained_path_or_elevated
+            backend: project_safe
+            allow_exec_on_host: elevated
+          owner: workspace_model.workspace_backend_selection
+        llm:
+          trust: project_safe_unless_key_is_marked_elevated
+          keys:
+            backend: project_safe
+            runtime_mode: split_unsupported
+            models: project_safe
+            session.lock_ttl: project_safe
+            session.rotate_after_turns: project_safe
+            session.rotate_on_parse_failures: project_safe
+            provider_limits: project_safe
+            claude_api.default_model: project_safe
+            claude_api.haiku_model: project_safe
+            claude_api.max_retries: project_safe
+            claude_api.retry_backoff: project_safe
+            claude_cli.command: elevated
+            claude_cli.timeout: project_safe
+            claude_cli.output_format: project_safe
+            claude_cli.retries: project_safe
+            claude_cli.no_session_persistence: split_unsupported
+            claude_cli.use_tmux: project_safe
+            openai_compatible.base_url: elevated
+            openai_compatible.default_model: project_safe
+            openai_compatible.low_cost_model: project_safe
+            openai_responses.base_url: elevated
+          owner: engine.agent_session_management.llm_provider_selection_config_authority
+        provider_triggers:
+          trust: project_contained_path_or_elevated
+          keys:
+            packs.external_dirs: project_contained_path_or_elevated
+          owner: contract_formats.configured_provider_triggers
+          path_rule: >
+            Project config may name only project-contained relative directories. Absolute paths, parent escapes,
+            symlink escapes, or paths outside the canonical project root are elevated and require local-operator,
+            user-global, explicit config, or a future promoted flag.
+        budget:
+          trust: project_safe
+          keys:
+            global_monthly_cap: project_safe
+            per_entity_monthly_cap: project_safe
+            system_monthly_cap: project_safe
+          owner: config extensions budget owner, to be promoted by parser migration child
+        human_tasks:
+          trust: project_safe
+          keys:
+            max_tasks_per_week: project_safe
+            budget_reset: project_safe
+            auto_expire_hours: project_safe
+            categories_enabled: project_safe
+          owner: config extensions human-tasks owner, to be promoted by parser migration child
+        sharding:
+          trust: split_unsupported
+          keys:
+            '*': split_unsupported
+          owner: split_runtime_sharding_owner_required
+          rule: >
+            Current code rejects `sharding` with `sharding extension is unsupported: no runtime path consumes it`.
+            #1804 does not promote sharding runtime behavior.
+        paths:
+          trust: project_contained_path_or_elevated
+          keys:
+            swarm_dir: elevated
+            contracts_path: project_contained_path_or_elevated
+            platform_spec_path: elevated
+            prompts_dir: project_contained_path_or_elevated
+            artifact_root: elevated
+            monitor_dir: elevated
+            agent_config_map_file: project_contained_path_or_elevated
+            verification_gates_file: project_contained_path_or_elevated
+            tooling_lock_file: project_contained_path_or_elevated
+          owner: contract/platform path owners, runtime_storage.artifact_root, and #1600 helper-path drains
+    merge_semantics:
+      rule: >
+        Layers deep-merge key-by-key by section. Implementations MUST track presence separately from zero values so
+        omitted means inherit lower-precedence value while explicit false, zero, empty list, or empty string are
+        validated as deliberate values by the owning key.
+      provenance: >
+        The unified parser must retain source layer, source path, line/column when available, and trust-class result for
+        every accepted or blocked key so `swarm doctor` can explain the effective config.
+    old_shape_and_unknown_key_policy:
+      unknown_keys: fail_closed_with_key_path_and_source
+      flat_cli_shape: >
+        Top-level flat CLI keys such as `api_server`, `api_token_file`, `serve_api_listen_addr`, and
+        `serve_api_token_file` are old-shape evidence outside their unified sections and must fail closed with
+        migration guidance.
+      runtime_config_shape: >
+        Runtime section keys that remain canonical may be valid as a subset of unified `swarm.yaml`; old command-local
+        runtime config discovery and executable-adjacent `config.yaml` remain superseded sources and must fail closed
+        or route through migration guidance when the parser/discovery child lands.
+      executable_adjacent_config_yaml: >
+        Executable-adjacent `config.yaml` is ambient file authority and is not part of the unified discovery model.
+        Removal is split but must be atomic with the parser/discovery implementation.
+    doctor_provenance:
+      command: swarm doctor
+      requirements:
+      - list loaded config files and layers in precedence order
+      - show per-key provenance for effective values
+      - show blocked keys with source path, trust-tier reason, and remediation
+      - show old-shape diagnostics with migration guidance
+      - render despite config/env blockers where possible and exit nonzero when blockers exist
+    env_drain:
+      rule: >
+        Every seeded #1600 env row must drain to either a unified typed key in this owner or a terminal secret/token-file
+        owner. Direct env readers are not proof of configuration ownership; each migration child must shrink the seeded
+        accepted set or explicitly leave a tracked residual row.
+      examples:
+        SWARM_API_LISTEN_ADDR: serve.api_listen_addr
+        SWARM_MCP_LISTEN_ADDR: serve.mcp_listen_addr
+        SWARM_CONTRACTS_PATH: paths.contracts_path or --contracts
+        SWARM_STORE_BACKEND: store.backend
+        SWARM_SQLITE_PATH: store.sqlite.path
+        SWARM_DB_HOST: database.host
+        SWARM_DB_PORT: database.port
+        SWARM_DB_NAME: database.name
+        SWARM_DB_USER: database.user
+        SWARM_DB_SSLMODE: database.sslmode
+        SWARM_DB_POOL_SIZE: database.pool_size
+        SWARM_WORKSPACE_DATA_SOURCE: workspace.data_source
+        SWARM_WORKSPACE_BACKEND: workspace.backend
+        SWARM_WORKSPACE_IMAGE: workspace.image, pending workspace schema child
+        SWARM_ARTIFACT_ROOT: paths.artifact_root
+        SWARM_MONITOR_DIR: paths.monitor_dir
+        SWARM_PROMPTS_DIR: paths.prompts_dir
+        SWARM_AGENT_CONFIG_MAP_FILE: paths.agent_config_map_file
+        SWARM_VERIFICATION_GATES_FILE: paths.verification_gates_file
+        SWARM_CREDENTIALS_FILE: secrets file owner, not inline config secret
+        SWARM_MANAGED_CREDENTIALS_FILE: managed credential store owner, not inline config secret
+    consumer_matrix:
+      flat_cli_config: superseded_by_unified_owner_implementation_split
+      xdg_config_yaml: superseded_by_user_global_swarm_yaml_implementation_split
+      runtime_config_loader: consumed_by_unified_owner_implementation_split
+      executable_adjacent_config_yaml: invalid_ambient_reader_removal_split
+      provider_triggers_packs_external_dirs: consumed_by_unified_owner
+      budget_and_human_tasks_inline_extensions: consumed_by_unified_owner_code_migration_split
+      sharding_inline_extension: split_unsupported_retired
+      context_descriptors: different_semantic_owner_local_target_context_registry
+      token_and_secret_material: different_semantic_owner_secret_or_token_file_reference_only
+      env_accepted_set_seeded_rows: migration_backlog_to_unified_keys_or_secret_owners
+    legacy_spec_commitments_superseded:
+    - owner: cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
+      commitment: root/global --config rejected and XDG flat config.yaml accepted
+      superseded_by: configuration_source_authority.unified_swarm_config
+    - owner: cli_specification.command_catalog.serve.runtime_config_backend_selection
+      commitment: command-local --config plus executable-adjacent config.yaml runtime config discovery
+      superseded_by: configuration_source_authority.unified_swarm_config
+    - owner: cli_specification.command_catalog.serve.listener_topology_v2_1
+      commitment: listener env/config keys as flat CLI config keys
+      superseded_by: configuration_source_authority.unified_swarm_config serve section
+    split_siblings:
+    - '#1801 unified parser and layered discovery implementation'
+    - '#1600 seeded env-row family migrations'
+    - '#1799 paused config-var migration pending this spec lock'
+    - examples/docs cleanup for one `swarm.example.yaml`
+    - runtime sharding behavior promotion, if ever desired
+    - provider-trigger runtime behavior changes, explicitly not part of #1804
 workspace_model:
   description: Defines the filesystem contract for agent sessions. The platform provides three standard mount points and a
     scoping model. Products define workspace classes that map agent roles to specific scope configurations. If a product declares
@@ -14746,6 +15028,11 @@ cli_specification:
             `Authorization: Bearer <token>` and the v1 API handler still validates the bearer value.
       cli_config_file:
         owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
+        unified_config_supersession: >
+          #1804 supersedes this flat CLI config-file model with
+          configuration_source_authority.unified_swarm_config. The current implementation remains until the parser/CLI
+          migration child replaces XDG `config.yaml`, promotes global `--config`, and moves flat keys under
+          `connection`, `serve`, and `paths`.
         accepted_sources:
           environment: SWARM_CONFIG
           xdg_default: '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
@@ -14893,6 +15180,9 @@ cli_specification:
           `SWARM_CONFIG` and the XDG default config path are shared with
           cli_specification.foundations.api_connection_auth_config_precedence. The parser accepts this owner's
           path keys plus API connection/auth keys, while each semantic resolver consumes only its own keys.
+        unified_config_supersession: >
+          #1804 moves `contracts_path` and `platform_spec_path` under the unified config model's `paths` section.
+          This current shared flat parser remains implementation state until the parser/discovery child lands.
         accepted_keys:
           contracts_path: Consumed only by this contract path resolver.
           platform_spec_path: Consumed only by this platform spec path resolver.
@@ -15209,6 +15499,11 @@ cli_specification:
         config_flag: --config <path>
         backend_flag: --backend <anthropic|claude_cli|openai_compatible|openai_responses>
         owner: engine.agent_session_management.llm_provider_selection_config_authority
+        unified_config_supersession: >
+          #1804 supersedes command-local runtime config discovery with
+          configuration_source_authority.unified_swarm_config. Current `--config` and executable-adjacent
+          `config.yaml` loading are implementation state only until the parser/discovery child promotes global
+          `--config`, layered `swarm.yaml`, and executable-adjacent removal atomically.
         rule: >
           `swarm serve` consumes the shared runtime config resolver: explicit --config first, config.yaml beside the
           running binary second when present, built-in/default config last, then --backend overrides config llm.backend.
@@ -15386,6 +15681,10 @@ cli_specification:
           - '`swarm run start` local foreground listener startup.'
           - API client connection/auth configuration such as `--api-server`, context descriptors, and `api_server`.
           - '`swarm serve --config`, which remains command-local runtime configuration.'
+          unified_config_supersession: >
+            #1804 moves serve listener and server API token-file config under
+            configuration_source_authority.unified_swarm_config `serve`. Flat CLI config listener keys and listener
+            env rows remain current implementation/migration state until their #1600 family migration lands.
           source_order:
           - flag
           - environment
