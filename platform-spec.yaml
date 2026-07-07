@@ -5785,6 +5785,35 @@ engine:
         hard-invalidity constructor or have stable/split remediation authority admitted by an AST/lint production-code guard; canonical
         report normalization remains a runtime safety net, not the proof of authoring completeness. The boot sequence runs all checks
         after contract loading and before starting nodes/agents.
+      authoring_guidelines:
+        rule: >-
+          Verifier findings are authored for contract authors, not runtime implementers. Messages name contract elements and
+          authoring concepts, not Go functions, SQL tables, delivery rows, replay markers, or other implementation internals.
+        problem_statement: >-
+          The `message` field states what is wrong and where in author-facing language. It does not carry the fix text by
+          itself; hard-invalidity/error fix text belongs in `remediation`.
+        remediation: >-
+          Remediation is concrete and imperative. Prefer `add ...`, `declare ...`, `remove ...`, or `rename ...`. When more
+          than one valid repair exists, use a `Fix one of:` / `choose one:` shape and list the valid options.
+        evidence: >-
+          Evidence is optional and should appear only when it helps the author understand what was checked or why the finding
+          fired. Evidence should be concise, stable, and author-facing, such as checked producer/source paths or candidate field
+          names; it must not expose internal runtime bookkeeping as semantic authority.
+        gold_standard: >-
+          `internal/runtime/bootverify/workflow_accumulator_safety_checks.go` is the current reference pattern for a
+          high-quality verifier finding: it names the flow/node/handler/event, lists checked producer/source paths, and offers
+          concrete repair options.
+        good_example: >-
+          `Flow <flow> node <node> handler <event> accumulates event <event> but no accepted producer/source path was found ...
+          Fix one of: add an accepted producer path; mark the event external; remove the accumulator.`
+        bad_example: >-
+          `<internal helper> failed: target_required_missing` without an author-facing contract location, no imperative
+          remediation, and no evidence for what was checked.
+        split_boundaries: >-
+          True YAML file/line/path source mapping remains owned by #1746. Routing-specific remediation language and new routing
+          nouns remain owned by #1786 and its routing children. Shared typed rendering and hard/error remediation enforcement are
+          already owned by the verifier diagnostic renderer and AST guard; future renderer-bypass guards belong to the broader CLI
+          output-conformance lane, not this verifier finding authoring guideline.
       always_on: All checks run on every boot. There is no mechanism to disable individual checks. Acknowledged warnings
         (builder feature) are a UI concern, not a runtime concern.
       scope_meaning: per-flow checks run once per flow in the tree. per-node checks run once per node. per-agent checks run
