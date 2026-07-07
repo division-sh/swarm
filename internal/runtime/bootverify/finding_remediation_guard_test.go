@@ -17,28 +17,20 @@ func TestHardInvalidityFindingLiteralsHaveRemediationAuthority(t *testing.T) {
 
 	var problems []string
 	for _, parsed := range files {
-		ast.Inspect(parsed.file, func(node ast.Node) bool {
-			lit, ok := node.(*ast.CompositeLit)
-			if !ok || !isFindingCompositeLiteral(lit) {
-				return true
-			}
-			if len(lit.Elts) == 0 {
-				return true
-			}
+		inspectFindingCompositeLiterals(parsed.file, func(lit *ast.CompositeLit) {
 			fields := findingLiteralFields(lit)
 			if !findingLiteralIsHardInvalidity(fields, constants) {
-				return true
+				return
 			}
 			if exprHasNonEmptyStringAuthority(fields["Remediation"], constants) {
-				return true
+				return
 			}
 			checkID := resolvedFindingCheckID(fields["CheckID"], constants)
 			if findingCheckIDHasCanonicalRemediationAuthority(checkID) {
-				return true
+				return
 			}
 			pos := parsed.fset.Position(lit.Pos())
 			problems = append(problems, fmt.Sprintf("%s:%d: hard/error Finding literal check_id=%q has no local remediation and no approved remediation authority", filepath.Base(pos.Filename), pos.Line, checkID))
-			return true
 		})
 	}
 	if len(problems) > 0 {
@@ -99,8 +91,43 @@ func bootverifyStringConstants(files []parsedBootverifyFile) map[string]string {
 	return out
 }
 
+func inspectFindingCompositeLiterals(node ast.Node, visit func(*ast.CompositeLit)) {
+	ast.Inspect(node, func(node ast.Node) bool {
+		lit, ok := node.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		if isFindingCompositeLiteral(lit) {
+			if len(lit.Elts) > 0 {
+				visit(lit)
+			}
+			return true
+		}
+		if !isFindingSliceOrArrayCompositeLiteral(lit) {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			inner, ok := elt.(*ast.CompositeLit)
+			if !ok || inner.Type != nil || len(inner.Elts) == 0 {
+				continue
+			}
+			visit(inner)
+		}
+		return true
+	})
+}
+
 func isFindingCompositeLiteral(lit *ast.CompositeLit) bool {
-	switch typ := lit.Type.(type) {
+	return isFindingTypeExpr(lit.Type)
+}
+
+func isFindingSliceOrArrayCompositeLiteral(lit *ast.CompositeLit) bool {
+	array, ok := lit.Type.(*ast.ArrayType)
+	return ok && isFindingTypeExpr(array.Elt)
+}
+
+func isFindingTypeExpr(expr ast.Expr) bool {
+	switch typ := expr.(type) {
 	case *ast.Ident:
 		return typ.Name == "Finding"
 	case *ast.SelectorExpr:
