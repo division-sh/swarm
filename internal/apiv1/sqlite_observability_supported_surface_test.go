@@ -14,12 +14,24 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 	ctx := context.Background()
 	fixture := newSQLiteObservabilitySurfaceFixture(t, ctx)
+	assertObservabilityOwnerBacksSupportedAPISurfaces(t, fixture)
+}
+
+func TestPostgresObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
+	ctx := context.Background()
+	fixture := newPostgresObservabilitySurfaceFixture(t, ctx)
+	assertObservabilityOwnerBacksSupportedAPISurfaces(t, fixture)
+}
+
+func assertObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T, fixture observabilitySurfaceFixture) {
+	t.Helper()
 	readOpts := OperatorReadOptions{
 		Now:           func() time.Time { return fixture.now.Add(time.Minute) },
 		Observability: fixture.store,
@@ -62,21 +74,29 @@ func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 		t.Fatalf("runtime.logs source miss rows = %#v, want none", rows)
 	}
 
+	incidents := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"incidents","method":"runtime.incidents","params":{"component":"scheduler","level":"error","limit":10}}`)
+	if incidents.Error != nil {
+		t.Fatalf("runtime.incidents error = %#v", incidents.Error)
+	}
+	if rows, _ := asMap(t, incidents.Result)["incidents"].([]any); len(rows) != 1 || asMap(t, rows[0])["error_code"] != fixture.incidentCode {
+		t.Fatalf("runtime.incidents rows = %#v, want incident %s", asMap(t, incidents.Result)["incidents"], fixture.incidentCode)
+	}
+
 	server := httptest.NewServer(handler)
 	defer server.Close()
-	assertSQLiteSubscriptionNotification(t, server.URL, "event.subscribe", map[string]any{
+	assertObservabilitySubscriptionNotification(t, server.URL, "event.subscribe", map[string]any{
 		"filter": map[string]any{
 			"run_id":     fixture.runID,
 			"event_name": "trace.visible",
 		},
 		"replay_since": fixture.now.Add(-time.Minute).Format(time.RFC3339Nano),
 	}, "event_id", fixture.eventID)
-	assertSQLiteSubscriptionNotification(t, server.URL, "run.subscribe_trace", map[string]any{
+	assertObservabilitySubscriptionNotification(t, server.URL, "run.subscribe_trace", map[string]any{
 		"run_id":       fixture.runID,
 		"filter":       map[string]any{"event_name": []any{"trace.visible"}},
 		"replay_since": fixture.now.Add(-time.Minute).Format(time.RFC3339Nano),
 	}, "event_id", fixture.eventID)
-	logNotification := assertSQLiteSubscriptionNotification(t, server.URL, "runtime.subscribe_logs", map[string]any{
+	logNotification := assertObservabilitySubscriptionNotification(t, server.URL, "runtime.subscribe_logs", map[string]any{
 		"run_id":       fixture.runID,
 		"component":    "scheduler",
 		"level":        "warn",
@@ -86,7 +106,7 @@ func TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T) {
 	if got := logNotification["source"]; got != "runtime" {
 		t.Fatalf("runtime.subscribe_logs source = %#v, want runtime", got)
 	}
-	assertSQLiteSubscriptionNoNotification(t, server.URL, "runtime.subscribe_logs", map[string]any{
+	assertObservabilitySubscriptionNoNotification(t, server.URL, "runtime.subscribe_logs", map[string]any{
 		"run_id":       fixture.runID,
 		"component":    "scheduler",
 		"level":        "warn",
@@ -182,22 +202,46 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	}
 }
 
-type sqliteObservabilitySurfaceFixture struct {
-	store   *storepkg.SQLiteRuntimeStore
-	runID   string
-	eventID string
-	logID   string
-	now     time.Time
+type observabilitySurfaceFixture struct {
+	store        ObservabilityReadStore
+	runID        string
+	eventID      string
+	logID        string
+	incidentCode string
+	now          time.Time
 }
 
-func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sqliteObservabilitySurfaceFixture {
+func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	return newObservabilitySurfaceFixture(t, ctx, sqliteStore)
+}
 
-	now := time.Unix(1700002000, 0).UTC()
+func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
+	t.Helper()
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg := &storepkg.PostgresStore{DB: db}
+	if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
+		t.Fatalf("BindSchemaCapabilities postgres: %v", err)
+	}
+	return newObservabilitySurfaceFixture(t, ctx, pg)
+}
+
+type observabilityFixtureStore interface {
+	ObservabilityReadStore
+	PersistEventWithDeliveries(context.Context, events.Event, []string) error
+	MarkEventDeliveryInProgress(context.Context, string, string, string) error
+	runtimepkg.RuntimeLogPersistence
+}
+
+func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore) observabilitySurfaceFixture {
+	t.Helper()
+
+	now := time.Now().UTC().Add(-2 * time.Minute)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	if err := sqliteStore.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
+	if err := store.PersistEventWithDeliveries(ctx, eventtest.PersistedProjection(eventID,
 
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now),
@@ -205,11 +249,11 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 		[]string{"agent-1"}); err != nil {
 		t.Fatalf("PersistEventWithDeliveries: %v", err)
 	}
-	if err := sqliteStore.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", "session-1"); err != nil {
+	if err := store.MarkEventDeliveryInProgress(ctx, eventID, "agent-1", "session-1"); err != nil {
 		t.Fatalf("MarkEventDeliveryInProgress: %v", err)
 	}
 
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
+	logger := runtimepkg.NewRuntimeLogger(store)
 	logCtx := runtimecorrelation.WithRunID(ctx, runID)
 	if err := logger.Log(logCtx, runtimepkg.RuntimeLogEntry{
 		Level:     "warn",
@@ -218,9 +262,24 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 		Action:    "supported_surface",
 		SessionID: "session-1",
 	}); err != nil {
-		t.Fatalf("RuntimeLogger.Log sqlite runtime log: %v", err)
+		t.Fatalf("RuntimeLogger.Log warning runtime log: %v", err)
 	}
-	logs, err := sqliteStore.ListOperatorRuntimeLogs(ctx, storepkg.OperatorRuntimeLogListOptions{
+	incidentCode := "supported_surface_failed"
+	if err := logger.Log(logCtx, runtimepkg.RuntimeLogEntry{
+		Level:     "error",
+		Message:   "runtime failed",
+		Component: "scheduler",
+		Action:    "supported_surface_failed",
+		SessionID: "session-1",
+		Error:     "boom",
+		Detail: map[string]any{
+			"error":      "boom",
+			"error_code": incidentCode,
+		},
+	}); err != nil {
+		t.Fatalf("RuntimeLogger.Log error runtime log: %v", err)
+	}
+	logs, err := store.ListOperatorRuntimeLogs(ctx, storepkg.OperatorRuntimeLogListOptions{
 		RunID:     runID,
 		Component: "scheduler",
 		Level:     "warn",
@@ -232,17 +291,29 @@ func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) sql
 	if len(logs.Logs) != 1 {
 		t.Fatalf("logger-written runtime logs = %#v, want one", logs.Logs)
 	}
+	incidents, err := store.ListOperatorRuntimeIncidents(ctx, storepkg.OperatorRuntimeIncidentListOptions{
+		Component: "scheduler",
+		Level:     "error",
+		Limit:     10,
+	})
+	if err != nil {
+		t.Fatalf("ListOperatorRuntimeIncidents after logger write: %v", err)
+	}
+	if len(incidents.Incidents) != 1 || incidents.Incidents[0].ErrorCode != incidentCode {
+		t.Fatalf("logger-written runtime incidents = %#v, want %s", incidents.Incidents, incidentCode)
+	}
 
-	return sqliteObservabilitySurfaceFixture{
-		store:   sqliteStore,
-		runID:   runID,
-		eventID: eventID,
-		logID:   logs.Logs[0].LogID,
-		now:     now,
+	return observabilitySurfaceFixture{
+		store:        store,
+		runID:        runID,
+		eventID:      eventID,
+		logID:        logs.Logs[0].LogID,
+		incidentCode: incidentCode,
+		now:          now,
 	}
 }
 
-func assertSQLiteSubscriptionNotification(t *testing.T, serverURL, method string, params map[string]any, key, want string) map[string]any {
+func assertObservabilitySubscriptionNotification(t *testing.T, serverURL, method string, params map[string]any, key, want string) map[string]any {
 	t.Helper()
 	conn := dialTestWS(t, serverURL)
 	defer conn.Close()
@@ -264,7 +335,7 @@ func assertSQLiteSubscriptionNotification(t *testing.T, serverURL, method string
 	return result
 }
 
-func assertSQLiteSubscriptionNoNotification(t *testing.T, serverURL, method string, params map[string]any) {
+func assertObservabilitySubscriptionNoNotification(t *testing.T, serverURL, method string, params map[string]any) {
 	t.Helper()
 	conn := dialTestWS(t, serverURL)
 	defer conn.Close()
