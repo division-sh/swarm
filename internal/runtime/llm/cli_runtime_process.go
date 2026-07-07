@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -249,12 +248,6 @@ func effectiveCLITimeoutForConfig(ctx context.Context, cfg *config.Config) time.
 	if actor, ok := runtimeactors.ActorFromContext(ctx); ok {
 		if strings.TrimSpace(actor.EffectiveEntityID()) == "" && timeout < 300*time.Second {
 			timeout = 300 * time.Second
-		}
-	}
-	// Explicit env override wins (operator emergency control).
-	if raw := strings.TrimSpace(os.Getenv("SWARM_CLAUDE_TIMEOUT_SECONDS")); raw != "" {
-		if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
-			timeout = time.Duration(seconds) * time.Second
 		}
 	}
 	return timeout

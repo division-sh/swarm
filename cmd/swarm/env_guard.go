@@ -554,6 +554,20 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 	retired := func(name, message, remediation string) swarmEnvCatalogEntry {
 		return e(name, swarmEnvCategoryKnownRetired, swarmEnvAuthorityOwner, "retired", message, remediation)
 	}
+	retiredRuntimeConfig := func(name, key string) swarmEnvCatalogEntry {
+		return retired(
+			name,
+			name+" is retired as runtime/LLM environment source; use "+key,
+			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
+		)
+	}
+	retiredUnsupported := func(name string) swarmEnvCatalogEntry {
+		return retired(
+			name,
+			name+" is retired; this Claude CLI control has no supported replacement and is tracked by #1803",
+			"unset "+name+"; no supported replacement exists for this inert/unsupported Claude CLI control",
+		)
+	}
 	testOnly := func(name string) swarmEnvCatalogEntry {
 		return e(name, swarmEnvCategoryTestQuarantine, swarmEnvAuthorityOwner, "test/debug quarantine", "", "")
 	}
@@ -600,21 +614,21 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		seeded("SWARM_SYSTEM_SYSTEMD_VOLUME", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
 		seeded("SWARM_ENTITY_CONTAINER_PREFIX", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
 		seeded("SWARM_ENTITY_WORKDIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_RUNTIME_RECOVERY_ON_STARTUP", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection", "#1600 runtime.recovery_on_startup"),
+		retiredRuntimeConfig("SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"),
 		retired("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS is unsupported inert runtime control", "remove it; no runtime path enforces this control"),
 		retired("SWARM_RUNTIME_EVENT_POLL_INTERVAL", "SWARM_RUNTIME_EVENT_POLL_INTERVAL is unsupported inert runtime control", "remove it; no runtime path enforces this control"),
-		seeded("SWARM_LLM_SESSION_LOCK_TTL", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.session.lock_ttl"),
-		seeded("SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.session.rotate_after_turns"),
-		seeded("SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.session.rotate_on_parse_failures"),
-		seeded("SWARM_CLAUDE_API_MAX_RETRIES", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_api.max_retries"),
-		seeded("SWARM_CLAUDE_API_RETRY_BACKOFF", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_api.retry_backoff"),
-		seeded("SWARM_CLAUDE_CLI_COMMAND", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.command"),
-		seeded("SWARM_CLAUDE_CLI_TIMEOUT", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.timeout"),
-		seeded("SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.output_format"),
-		seeded("SWARM_CLAUDE_CLI_RETRIES", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.retries"),
-		seeded("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.no_session_persistence"),
-		seeded("SWARM_CLAUDE_CLI_USE_TMUX", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.use_tmux"),
-		seeded("SWARM_CLAUDE_TIMEOUT_SECONDS", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.timeout"),
+		retiredRuntimeConfig("SWARM_LLM_SESSION_LOCK_TTL", "llm.session.lock_ttl"),
+		retiredRuntimeConfig("SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "llm.session.rotate_after_turns"),
+		retiredRuntimeConfig("SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "llm.session.rotate_on_parse_failures"),
+		retiredRuntimeConfig("SWARM_CLAUDE_API_MAX_RETRIES", "llm.claude_api.max_retries"),
+		retiredRuntimeConfig("SWARM_CLAUDE_API_RETRY_BACKOFF", "llm.claude_api.retry_backoff"),
+		retiredRuntimeConfig("SWARM_CLAUDE_CLI_COMMAND", "llm.claude_cli.command"),
+		retiredRuntimeConfig("SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"),
+		retiredRuntimeConfig("SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"),
+		retiredUnsupported("SWARM_CLAUDE_CLI_RETRIES"),
+		retiredUnsupported("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE"),
+		retiredUnsupported("SWARM_CLAUDE_CLI_USE_TMUX"),
+		retiredRuntimeConfig("SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"),
 		seeded("SWARM_CLAUDE_PERMISSION_MODE", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.permission_mode"),
 		seeded("SWARM_CLAUDE_BYPASS_PERMISSIONS", "platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority", "#1600 llm.claude_cli.permission_mode"),
 		seeded("SWARM_CLAUDE_USE_MCP", "platform-spec.yaml#cli_specification.foundations.local_tool_gateway_binding", "#1600 typed Claude CLI transport config"),

@@ -11527,9 +11527,9 @@ environment_source_authority:
       owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
       migration: '#1600 workspace lifecycle config'
     - name: SWARM_RUNTIME_RECOVERY_ON_STARTUP
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection
-      migration: '#1600 runtime.recovery_on_startup'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_RUNTIME_MAX_CONCURRENT_AGENTS
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
@@ -11539,53 +11539,53 @@ environment_source_authority:
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
       migration: retired
     - name: SWARM_LLM_SESSION_LOCK_TTL
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.session.lock_ttl'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_LLM_SESSION_ROTATE_AFTER_TURNS
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.session.rotate_after_turns'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.session.rotate_on_parse_failures'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_API_MAX_RETRIES
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_api.max_retries'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_API_RETRY_BACKOFF
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_api.retry_backoff'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_CLI_COMMAND
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.command'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_CLI_TIMEOUT
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.timeout'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_CLI_OUTPUT_FORMAT
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.output_format'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_CLI_RETRIES
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.retries'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.no_session_persistence'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_CLI_USE_TMUX
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.use_tmux'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_TIMEOUT_SECONDS
-      category: seeded_legacy
-      owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
-      migration: '#1600 llm.claude_cli.timeout'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_CLAUDE_PERMISSION_MODE
       category: seeded_legacy
       owner: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority
@@ -12141,7 +12141,7 @@ configuration_source_authority:
     - '#1801 unified parser and layered discovery implementation'
     - '#1803 inert/unsupported Claude CLI config-surface cleanup'
     - '#1600 seeded env-row family migrations'
-    - '#1799 paused config-var migration pending this spec lock'
+    - '#1799 runtime/LLM config-default env-row retirement consumes this owner for final key-path guidance'
     - examples/docs cleanup for one `swarm.example.yaml`
     - runtime sharding behavior promotion, if ever desired
     - provider-trigger runtime behavior changes, explicitly not part of #1804

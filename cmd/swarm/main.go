@@ -2535,7 +2535,7 @@ func defaultRuntimeConfig() (*config.Config, error) {
 	}
 	cfg := &config.Config{
 		Runtime: config.RuntimeConfig{
-			RecoveryOnStartup: envBool("SWARM_RUNTIME_RECOVERY_ON_STARTUP", false),
+			RecoveryOnStartup: false,
 		},
 		Database: config.DatabaseConfig{
 			Host:     envOrDefault("SWARM_DB_HOST", envOrDefault("PGHOST", "127.0.0.1")),
@@ -2548,21 +2548,21 @@ func defaultRuntimeConfig() (*config.Config, error) {
 		LLM: config.LLMConfig{
 			Backend: llmselection.DefaultBackendID(),
 			Session: config.LLMSessionConfig{
-				LockTTL:               envDuration("SWARM_LLM_SESSION_LOCK_TTL", 10*time.Second),
-				RotateAfterTurns:      envInt("SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", 40),
-				RotateOnParseFailures: envInt("SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", 3),
+				LockTTL:               10 * time.Second,
+				RotateAfterTurns:      40,
+				RotateOnParseFailures: 3,
 			},
 			ClaudeAPI: config.ClaudeAPIConfig{
-				MaxRetries:   envInt("SWARM_CLAUDE_API_MAX_RETRIES", 1),
-				RetryBackoff: envDuration("SWARM_CLAUDE_API_RETRY_BACKOFF", 2*time.Second),
+				MaxRetries:   1,
+				RetryBackoff: 2 * time.Second,
 			},
 			ClaudeCLI: config.ClaudeCLIConfig{
-				Command:              envOrDefault("SWARM_CLAUDE_CLI_COMMAND", "claude"),
-				Timeout:              envDuration("SWARM_CLAUDE_CLI_TIMEOUT", time.Hour),
-				OutputFormat:         envOrDefault("SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "stream-json"),
-				Retries:              envInt("SWARM_CLAUDE_CLI_RETRIES", 1),
-				NoSessionPersistence: envBool("SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", false),
-				UseTMux:              envBool("SWARM_CLAUDE_CLI_USE_TMUX", false),
+				Command:              "claude",
+				Timeout:              time.Hour,
+				OutputFormat:         "stream-json",
+				Retries:              1,
+				NoSessionPersistence: false,
+				UseTMux:              false,
 			},
 			OpenAICompatible: config.OpenAICompatibleConfig{},
 		},

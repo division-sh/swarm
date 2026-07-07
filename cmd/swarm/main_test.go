@@ -8920,6 +8920,48 @@ func TestDefaultRuntimeConfig_DoesNotInferLLMBackendFromCredentials(t *testing.T
 	}
 }
 
+func TestDefaultRuntimeConfig_IgnoresRetiredRuntimeLLMConfigEnv(t *testing.T) {
+	for key, value := range map[string]string{
+		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "true",
+		"SWARM_LLM_SESSION_LOCK_TTL":                 "1s",
+		"SWARM_LLM_SESSION_ROTATE_AFTER_TURNS":       "2",
+		"SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES": "2",
+		"SWARM_CLAUDE_API_MAX_RETRIES":               "7",
+		"SWARM_CLAUDE_API_RETRY_BACKOFF":             "7s",
+		"SWARM_CLAUDE_CLI_COMMAND":                   "false",
+		"SWARM_CLAUDE_CLI_TIMEOUT":                   "1s",
+		"SWARM_CLAUDE_CLI_OUTPUT_FORMAT":             "bad",
+		"SWARM_CLAUDE_CLI_RETRIES":                   "7",
+		"SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE":    "true",
+		"SWARM_CLAUDE_CLI_USE_TMUX":                  "true",
+		"SWARM_CLAUDE_TIMEOUT_SECONDS":               "1",
+	} {
+		t.Setenv(key, value)
+	}
+
+	cfg, err := defaultRuntimeConfig()
+	if err != nil {
+		t.Fatalf("defaultRuntimeConfig: %v", err)
+	}
+	if cfg.Runtime.RecoveryOnStartup {
+		t.Fatalf("recovery_on_startup = true, want built-in false")
+	}
+	if cfg.LLM.Session.LockTTL != 10*time.Second || cfg.LLM.Session.RotateAfterTurns != 40 || cfg.LLM.Session.RotateOnParseFailures != 3 {
+		t.Fatalf("session defaults = %#v, want built-ins", cfg.LLM.Session)
+	}
+	if cfg.LLM.ClaudeAPI.MaxRetries != 1 || cfg.LLM.ClaudeAPI.RetryBackoff != 2*time.Second {
+		t.Fatalf("claude_api defaults = %#v, want built-ins", cfg.LLM.ClaudeAPI)
+	}
+	if cfg.LLM.ClaudeCLI.Command != "claude" ||
+		cfg.LLM.ClaudeCLI.Timeout != time.Hour ||
+		cfg.LLM.ClaudeCLI.OutputFormat != "stream-json" ||
+		cfg.LLM.ClaudeCLI.Retries != 1 ||
+		cfg.LLM.ClaudeCLI.NoSessionPersistence ||
+		cfg.LLM.ClaudeCLI.UseTMux {
+		t.Fatalf("claude_cli defaults = %#v, want built-ins", cfg.LLM.ClaudeCLI)
+	}
+}
+
 func TestDefaultRuntimeConfig_RejectsRetiredOpenAICompatibleBaseURLEnv(t *testing.T) {
 	t.Setenv("SWARM_OPENAI_COMPATIBLE_BASE_URL", "https://example.test/v1")
 	cfg, err := defaultRuntimeConfig()
@@ -8928,6 +8970,63 @@ func TestDefaultRuntimeConfig_RejectsRetiredOpenAICompatibleBaseURLEnv(t *testin
 	}
 	if cfg != nil {
 		t.Fatalf("defaultRuntimeConfig cfg = %#v, want nil on retired env", cfg)
+	}
+}
+
+func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *testing.T) {
+	for key, value := range map[string]string{
+		"SWARM_RUNTIME_RECOVERY_ON_STARTUP":          "false",
+		"SWARM_LLM_SESSION_LOCK_TTL":                 "1s",
+		"SWARM_LLM_SESSION_ROTATE_AFTER_TURNS":       "2",
+		"SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES": "2",
+		"SWARM_CLAUDE_API_MAX_RETRIES":               "1",
+		"SWARM_CLAUDE_API_RETRY_BACKOFF":             "1s",
+		"SWARM_CLAUDE_CLI_COMMAND":                   "false",
+		"SWARM_CLAUDE_CLI_TIMEOUT":                   "1s",
+		"SWARM_CLAUDE_CLI_OUTPUT_FORMAT":             "stream-json",
+		"SWARM_CLAUDE_TIMEOUT_SECONDS":               "1",
+	} {
+		t.Setenv(key, value)
+	}
+
+	repo := t.TempDir()
+	configPath := filepath.Join(repo, "runtime.yaml")
+	writeRuntimeConfigText(t, configPath, strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: true",
+		"llm:",
+		"  backend: claude_cli",
+		"  session:",
+		"    lock_ttl: 22s",
+		"    rotate_after_turns: 55",
+		"    rotate_on_parse_failures: 9",
+		"  claude_api:",
+		"    max_retries: 8",
+		"    retry_backoff: 11s",
+		"  claude_cli:",
+		"    command: echo",
+		"    timeout: 44s",
+		"    output_format: json",
+		"    retries: 1",
+		"    no_session_persistence: false",
+	}, "\n")+"\n")
+
+	result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
+	if err != nil {
+		t.Fatalf("loadRuntimeConfigWithOptions: %v", err)
+	}
+	cfg := result.Config
+	if !cfg.Runtime.RecoveryOnStartup {
+		t.Fatalf("runtime.recovery_on_startup = false, want true from config")
+	}
+	if cfg.LLM.Session.LockTTL != 22*time.Second || cfg.LLM.Session.RotateAfterTurns != 55 || cfg.LLM.Session.RotateOnParseFailures != 9 {
+		t.Fatalf("session config = %#v, want typed config values", cfg.LLM.Session)
+	}
+	if cfg.LLM.ClaudeAPI.MaxRetries != 8 || cfg.LLM.ClaudeAPI.RetryBackoff != 11*time.Second {
+		t.Fatalf("claude_api config = %#v, want typed config values", cfg.LLM.ClaudeAPI)
+	}
+	if cfg.LLM.ClaudeCLI.Command != "echo" || cfg.LLM.ClaudeCLI.Timeout != 44*time.Second || cfg.LLM.ClaudeCLI.OutputFormat != "json" {
+		t.Fatalf("claude_cli config = %#v, want typed config values", cfg.LLM.ClaudeCLI)
 	}
 }
 
