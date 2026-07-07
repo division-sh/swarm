@@ -92,19 +92,22 @@ func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *
 	}
 
 	envelope := computeModuleReplayEvidenceTestEnvelope()
+	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
+	detail["node_id"] = "node-a"
 	logger := runtimepkg.NewRuntimeLogger(store)
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
 		Level:     "info",
 		Message:   "Compute module replay evidence recorded",
 		Component: "compute_module",
 		Action:    computemodule.ReplayEvidenceAction,
-		Detail:    computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope}),
+		EventID:   "evt-a",
+		Detail:    detail,
 	}); err != nil {
 		t.Fatalf("RuntimeLogger.Log: %v", err)
 	}
-	loaded, err := store.LoadComputeModuleReplayEvidence(ctx, runID)
+	loaded, err := store.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, "evt-a", "node-a")
 	if err != nil {
-		t.Fatalf("LoadComputeModuleReplayEvidence: %v", err)
+		t.Fatalf("LoadComputeModuleReplayEvidenceForExecution: %v", err)
 	}
 	if len(loaded) != 1 {
 		t.Fatalf("loaded replay evidence = %#v, want one envelope", loaded)
@@ -140,6 +143,8 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
 	detail["component"] = "compute_module"
 	detail["action"] = computemodule.ReplayEvidenceAction
+	detail["event_id"] = "evt-a"
+	detail["node_id"] = "node-a"
 	payload, err := json.Marshal(map[string]any{
 		"log_level": "info",
 		"message":   "Compute module replay evidence recorded",
@@ -156,9 +161,9 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	`, runID, string(payload)); err != nil {
 		t.Fatalf("seed postgres runtime log: %v", err)
 	}
-	loaded, err := pg.LoadComputeModuleReplayEvidence(ctx, runID)
+	loaded, err := pg.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, "evt-a", "node-a")
 	if err != nil {
-		t.Fatalf("LoadComputeModuleReplayEvidence postgres: %v", err)
+		t.Fatalf("LoadComputeModuleReplayEvidenceForExecution postgres: %v", err)
 	}
 	if len(loaded) != 1 {
 		t.Fatalf("loaded postgres replay evidence = %#v, want one envelope", loaded)
