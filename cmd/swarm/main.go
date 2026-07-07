@@ -2642,7 +2642,12 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		if _, err := pg.BindSchemaCapabilities(ctx); err != nil {
 			return storeBundle{}, err
 		}
-		return selectedPostgresStoreBundle(pg, cfg), nil
+		bundle := selectedPostgresStoreBundle(pg, cfg)
+		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
+			closeDB(pg.DB)
+			return storeBundle{}, err
+		}
+		return bundle, nil
 	case storebackend.BackendSQLite:
 		sqliteStore, err := store.NewSQLiteRuntimeStore(selection.SQLitePath)
 		if err != nil {
@@ -2690,6 +2695,10 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			RunStalledReader:            sqliteStore,
 		}
 		bundle.APIOptionalCapabilityBuilder = selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore)
+		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
+			_ = sqliteStore.Close()
+			return storeBundle{}, err
+		}
 		return bundle, nil
 	default:
 		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)

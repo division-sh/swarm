@@ -62,6 +62,11 @@ func selectedStoreFacadeProducerBackendReferences(path, body string) []string {
 			"closeDB(f.stores.SQLDB)",
 			"return f.stores.SQLDB",
 		},
+		filepath.Join("cmd", "swarm", "store_roles.go"): {
+			"var _ selectedConcreteRuntimeStore = (*store.PostgresStore)(nil)",
+			"Name: \"Postgres\"",
+			"Name: \"RuntimeSQLDB\"",
+		},
 	}
 	forbidden := []string{
 		"stores.Postgres",
