@@ -5,19 +5,24 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -366,6 +371,152 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	}
 }
 
+func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool)
+	}{
+		{
+			name: "sqlite",
+			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+				db, store := newSQLiteActivityJournalStore(t, ctx)
+				return db, store, true
+			},
+		},
+		{
+			name: "postgres",
+			setup: func(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore, bool) {
+				_, db, _ := testutil.StartPostgres(t)
+				return db, NewWorkflowInstanceStore(db), false
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, store, sqlite := tc.setup(t, ctx)
+			runTelegramConnectorRoundTripThroughInboundDelivery(t, ctx, db, store, sqlite)
+		})
+	}
+}
+
+func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, ctx context.Context, db *sql.DB, store *WorkflowInstanceStore, sqlite bool) {
+	t.Helper()
+	runID := uuid.NewString()
+	entityID := uuid.NewString()
+	seedActivityRun(t, db, sqlite, runID)
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if got := r.URL.Path; got != "/botprovider-secret/sendMessage" {
+			t.Fatalf("telegram path = %q, want token path sendMessage", got)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.Contains(got, "application/json") {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("ReadAll request body: %v", err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decode Telegram request body %s: %v", raw, err)
+		}
+		if got := asString(body["chat_id"]); got != "42" {
+			t.Fatalf("chat_id = %#v, want 42", body["chat_id"])
+		}
+		if got := asString(body["text"]); got != "reply: hello from telegram" {
+			t.Fatalf("text = %#v, want reply text", body["text"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok": true,
+			"result": map[string]any{
+				"message_id": 99,
+				"chat":       map[string]any{"id": 42},
+				"text":       "reply: hello from telegram",
+			},
+		})
+	}))
+	defer server.Close()
+
+	delivery, inboundEvent := acceptedTelegramInboundDeliveryEvent(t, entityID, runID)
+	chatID, incomingText := telegramInboundChatAndText(t, delivery.Payload)
+	credentialStore := testActivityCredentialStore(t, "telegram_bot_token", "provider-secret")
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": testTelegramConnectorTool(server.URL),
+		},
+	})
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module:        staticSemanticWorkflowModule{source: source},
+		WorkflowStore: store,
+		Credentials:   credentialStore,
+	})
+	intent := testNonIdempotentActivityIntent(runID, inboundEvent.ID(), entityID)
+	intent.Tool = "telegram.send_message"
+	intent.ActivityID = "telegram_send_message"
+	intent.Input = map[string]any{"chat_id": chatID, "text": "reply: " + incomingText}
+	intent.SuccessEvent = "telegram.send_message.succeeded"
+	intent.FailureEvent = "telegram.send_message.failed"
+	intent.SourceTaskID = inboundEvent.TaskID()
+	intent.ParentEventID = inboundEvent.ID()
+	intent.ChainDepth = inboundEvent.ChainDepth()
+	intent = intent.Normalized()
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+
+	handled, err := pc.handleEventResult(ctx, request.Event)
+	if err != nil {
+		t.Fatalf("handleEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("handleEventResult handled = false, want true")
+	}
+	if calls != 1 {
+		t.Fatalf("Telegram calls = %d, want exactly one", calls)
+	}
+	if len(bus.publishes) != 1 {
+		t.Fatalf("published events = %d, want one generated activity result", len(bus.publishes))
+	}
+	resultEvent := bus.publishes[0]
+	if resultEvent.Type() != events.EventType(intent.SuccessEvent) {
+		t.Fatalf("result event type = %q, want %q", resultEvent.Type(), intent.SuccessEvent)
+	}
+	if resultEvent.ParentEventID() != inboundEvent.ID() {
+		t.Fatalf("result parent event id = %q, want inbound event id %q", resultEvent.ParentEventID(), inboundEvent.ID())
+	}
+	if strings.Contains(string(resultEvent.Payload()), "provider-secret") {
+		t.Fatalf("result payload leaked credential: %s", resultEvent.Payload())
+	}
+	rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil {
+		t.Fatalf("LoadActivityAttempt: %v", err)
+	}
+	if !ok || rec.Status != ActivityAttemptStatusSucceeded {
+		t.Fatalf("activity attempt = (%v, %q), want succeeded", ok, rec.Status)
+	}
+
+	handled, err = pc.handleEventResult(ctx, request.Event)
+	if err != nil {
+		t.Fatalf("duplicate handleEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("duplicate handleEventResult handled = false, want true")
+	}
+	if calls != 1 {
+		t.Fatalf("Telegram calls after duplicate = %d, want no redispatch", calls)
+	}
+	if len(bus.publishes) != 2 {
+		t.Fatalf("published events after duplicate = %d, want journaled result replay", len(bus.publishes))
+	}
+	if got, want := bus.publishes[1].ID(), resultEvent.ID(); got != want {
+		t.Fatalf("duplicate result id = %q, want journaled id %q", got, want)
+	}
+}
+
 func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -681,6 +832,61 @@ func TestPipelineActivityRequestMissingCredentialFailsBeforeJournalAndDispatch(t
 	}
 }
 
+func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalAndDispatch(t *testing.T) {
+	ctx := context.Background()
+	runID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	entityID := uuid.NewString()
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"telegram.send_message": testTelegramConnectorTool(server.URL),
+		},
+	})
+	bus := &recordingPipelineBus{}
+	db, store := newSQLiteActivityJournalStore(t, ctx)
+	seedActivityRun(t, db, true, runID)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module:        staticSemanticWorkflowModule{source: source},
+		WorkflowStore: store,
+		Credentials:   testActivityCredentialStore(t, "", ""),
+	})
+	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
+	intent.Tool = "telegram.send_message"
+	intent.ActivityID = "telegram_send_message"
+	intent.Input = map[string]any{"chat_id": "42", "text": "reply"}
+	intent.SuccessEvent = "telegram.send_message.succeeded"
+	intent.FailureEvent = "telegram.send_message.failed"
+	intent = intent.Normalized()
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+	if _, err := pc.handleEventResult(ctx, request.Event); err != nil {
+		t.Fatalf("handleEventResult: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("Telegram calls = %d, want missing token to fail before dispatch", calls)
+	}
+	if _, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent)); err != nil {
+		t.Fatalf("LoadActivityAttempt: %v", err)
+	} else if ok {
+		t.Fatal("activity attempt journal row exists, want missing token to fail before started journal")
+	}
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
+		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
+	}
+	if strings.Contains(string(bus.publishes[0].Payload()), "provider-secret") {
+		t.Fatalf("failure payload leaked credential: %s", bus.publishes[0].Payload())
+	}
+}
+
 func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 	return runtimeengine.ActivityIntent{
 		ActivityID:    "scanner_source_scrape",
@@ -726,6 +932,104 @@ func testActivityCredentialStore(t *testing.T, key, value string) runtimecredent
 		}
 	}
 	return store
+}
+
+func testTelegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
+	return runtimecontracts.ToolSchemaEntry{
+		Category:    "provider_connector",
+		Description: "send Telegram messages",
+		HandlerType: "http",
+		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		Credentials: []string{"telegram_bot_token"},
+		OutputSchema: runtimecontracts.ToolInputSchema{
+			Type: "object",
+		},
+		HTTP: &runtimecontracts.HTTPToolSpec{
+			Method: "POST",
+			URL:    strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage",
+			Body: map[string]any{
+				"chat_id": "{{input.chat_id}}",
+				"text":    "{{input.text}}",
+			},
+		},
+	}
+}
+
+func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) (providertriggers.Delivery, events.Event) {
+	t.Helper()
+	payload := map[string]any{
+		"update_id": float64(123456789),
+		"message": map[string]any{
+			"message_id": float64(7),
+			"chat":       map[string]any{"id": float64(42)},
+			"text":       "hello from telegram",
+		},
+	}
+	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello from telegram"}}`)
+	req := providertriggers.Request{
+		Provider: "telegram",
+		Target: providertriggers.Target{
+			EntityID:      entityID,
+			WebhookSecret: "telegram-secret",
+		},
+		Body:      body,
+		Headers:   make(http.Header),
+		Payload:   payload,
+		Received:  time.Unix(1710000000, 0).UTC(),
+		UserAgent: "telegram-test",
+	}
+	req.Headers.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	delivery, err := providertriggers.DefaultRegistry().Accept(req)
+	if err != nil {
+		t.Fatalf("Accept Telegram inbound delivery: %v", err)
+	}
+	if delivery.EventName != "inbound.telegram" || delivery.ProviderEventID != "123456789" {
+		t.Fatalf("delivery = %+v, want inbound.telegram update", delivery)
+	}
+	raw, err := json.Marshal(delivery.Payload)
+	if err != nil {
+		t.Fatalf("marshal inbound delivery payload: %v", err)
+	}
+	evt := eventtest.RootIngress(
+		uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm:telegram-inbound:"+delivery.ProviderEventID)).String(),
+		delivery.EventName,
+		"telegram",
+		"telegram-update-7",
+		raw,
+		1,
+		runID,
+		"",
+		events.EventEnvelope{
+			EntityID: entityID,
+			Source: events.RouteIdentity{
+				EntityID: entityID,
+			},
+		},
+		time.Unix(1710000000, 0).UTC(),
+	)
+	return delivery, evt
+}
+
+func telegramInboundChatAndText(t *testing.T, payload map[string]any) (string, string) {
+	t.Helper()
+	rawPayload, ok := payload["payload"].(map[string]any)
+	if !ok {
+		t.Fatalf("inbound payload = %#v, want payload object", payload["payload"])
+	}
+	message, ok := rawPayload["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("telegram message = %#v, want object", rawPayload["message"])
+	}
+	chat, ok := message["chat"].(map[string]any)
+	if !ok {
+		t.Fatalf("telegram chat = %#v, want object", message["chat"])
+	}
+	chatID := asString(chat["id"])
+	text := asString(message["text"])
+	if chatID == "" || text == "" {
+		t.Fatalf("telegram chat/text = %q/%q, want non-empty", chatID, text)
+	}
+	return chatID, text
 }
 
 type activityRoundTripFunc func(*http.Request) (*http.Response, error)

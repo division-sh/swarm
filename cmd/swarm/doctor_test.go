@@ -18,20 +18,32 @@ import (
 
 func setDoctorProviderSecret(t *testing.T, key, value string) {
 	t.Helper()
+	setDoctorProviderSecrets(t, map[string]string{key: value})
+}
+
+func setDoctorEmptyProviderSecrets(t *testing.T) {
+	t.Helper()
+	setDoctorProviderSecrets(t, nil)
+}
+
+func setDoctorProviderSecrets(t *testing.T, values map[string]string) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "provider-credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", path)
 	store, err := runtimecredentials.NewFileStore(path)
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	if err := store.Set(context.Background(), key, value); err != nil {
-		t.Fatalf("Set provider credential: %v", err)
+	for key, value := range values {
+		if err := store.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("Set provider credential: %v", err)
+		}
 	}
 }
 
 func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 	configureDoctorDockerStub(t)
-	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "provider-credentials.json"))
+	setDoctorEmptyProviderSecrets(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TEST_DOCKER_IMAGE_MISSING", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -173,6 +185,48 @@ func TestDoctorClaudeCLIPreflightSkipsCredentialForAgentFreeContracts(t *testing
 		if strings.Contains(stdout.String(), forbidden) {
 			t.Fatalf("doctor output contains %q for agent-free source:\n%s", forbidden, stdout.String())
 		}
+	}
+}
+
+func TestDoctorClaudeCLIPreflightReportsTelegramConnectorToolSurface(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	setDoctorProviderSecret(t, "telegram_bot_token", "provider-secret")
+
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), true)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--contracts" {
+			args[i+1] = writeDoctorTelegramConnectorContractsFixture(t)
+			break
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+	}
+	if !localPreflightReportHasCode(report, "provider_connector_telegram_send_message") {
+		t.Fatalf("report missing telegram connector finding: %#v", report.Findings)
+	}
+	for _, want := range []string{
+		"CAN send Telegram messages via api.telegram.org",
+		"CAN lower through platform.activity_requested",
+		"CAN journal non-idempotent attempts in activity_attempts",
+		"CANNOT expose credential values",
+		"requires telegram_bot_token=BOUND",
+	} {
+		if !localPreflightReportFindingContains(report, "provider_connector_telegram_send_message", want) {
+			t.Fatalf("telegram connector finding missing %q: %#v", want, report.Findings)
+		}
+	}
+	if strings.Contains(stdout.String(), "provider-secret") {
+		t.Fatalf("doctor report leaked provider secret:\n%s", stdout.String())
 	}
 }
 
@@ -623,7 +677,7 @@ func TestDoctorAPIFlagsRequireTargetMode(t *testing.T) {
 
 func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testing.T) {
 	configureDoctorDockerStub(t)
-	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "provider-credentials.json"))
+	setDoctorEmptyProviderSecrets(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
@@ -971,6 +1025,37 @@ terminal_states:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	return root
+}
+
+func writeDoctorTelegramConnectorContractsFixture(t *testing.T) string {
+	t.Helper()
+	root := writeDoctorAgentFreeContractsFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
+telegram.send_message:
+  category: provider_connector
+  description: send Telegram messages
+  handler_type: http
+  effect_class: non_idempotent_write
+  credentials:
+    - telegram_bot_token
+  input_schema:
+    type: object
+    required: [chat_id, text]
+    properties:
+      chat_id:
+        type: string
+      text:
+        type: string
+  output_schema:
+    type: object
+  http:
+    method: POST
+    url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage
+    body:
+      chat_id: "{{input.chat_id}}"
+      text: "{{input.text}}"
+`)
 	return root
 }
 

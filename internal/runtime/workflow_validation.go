@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -104,6 +105,10 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	activityErrors := validateDurableActivitySurface(source)
 	if len(activityErrors) > 0 {
 		return result, fmt.Errorf("durable activity validation failed:\n%s", formatValidationErrors(activityErrors))
+	}
+	connectorErrors := providerconnectors.ValidateSource(source)
+	if len(connectorErrors) > 0 {
+		return result, fmt.Errorf("provider connector validation failed:\n%s", formatValidationErrors(connectorErrors))
 	}
 
 	return result, nil

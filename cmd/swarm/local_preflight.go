@@ -121,6 +121,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the selected --contracts and --platform-spec paths")
 		return report.finalize()
 	}
+	appendProviderConnectorToolSurfaceFindings(ctx, &report, source)
 	workspaceBackend, err := decideWorkspaceBackend(req.WorkspaceBackend, req.Config, source)
 	if err != nil {
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities")
