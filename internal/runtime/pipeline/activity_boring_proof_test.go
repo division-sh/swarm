@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -21,6 +23,180 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestActivityBoringProofHandAuthoredFlowDispatchesOutsideTransactionAndReusesRecordedResult(t *testing.T) {
+	for _, tc := range activityBoringStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			var fixture activityBoringFixture
+			entityID := uuid.NewString()
+			inputURL := "https://example.com/source"
+			sourceEvent := newActivityBoringSourceEvent(entityID, testPipelineRunID, inputURL)
+			expected := activityBoringExpectedIntentForSourceEvent(sourceEvent, inputURL)
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if exists, locked := activityBoringEntityLockState(fixture.pc, entityID); !exists || locked {
+					t.Errorf("activity HTTP call entity lock exists=%v locked=%v, want existing unlocked lock", exists, locked)
+				}
+				calls.Add(1)
+				_ = json.NewEncoder(w).Encode(map[string]any{"title": "Example Source"})
+			}))
+			defer server.Close()
+
+			fixture = newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true)
+			seedActivityBoringSourceFlow(t, fixture, tc.kind, sourceEvent)
+			fixture.pc.SetTestWorkflowNodeHandlerStartHook(func(ctx context.Context, nodeID string, evt events.Event) error {
+				if nodeID != "scanner" || evt.ID() != sourceEvent.ID() {
+					return nil
+				}
+				if got := calls.Load(); got != 0 {
+					return errors.New("activity HTTP call happened before the node handler started")
+				}
+				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 0)
+				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 0)
+				return nil
+			})
+			fixture.bus.beforeActivityRequestHandle = func(ctx context.Context, evt events.Event) error {
+				if _, ok := PipelineSQLTxFromContext(ctx); ok {
+					return errors.New("activity request delivered while handler SQL transaction is still active")
+				}
+				if exists, locked := activityBoringEntityLockState(fixture.pc, entityID); !exists || locked {
+					return fmt.Errorf("activity request delivered with entity lock exists=%v locked=%v, want existing unlocked lock", exists, locked)
+				}
+				if got := calls.Load(); got != 0 {
+					return fmt.Errorf("activity HTTP call count before activity request delivery = %d, want 0", got)
+				}
+				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 1)
+				assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 0)
+				return nil
+			}
+
+			ctx := runtimecorrelation.WithRunID(context.Background(), sourceEvent.RunID())
+			handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
+			if err != nil {
+				t.Fatalf("hand-authored source handleEventResult: %v", err)
+			}
+			if !handled {
+				t.Fatal("hand-authored source handleEventResult handled = false, want true")
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("server calls after supported flow = %d, want 1", got)
+			}
+			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityRequestEventID(expected), 1)
+			assertActivityBoringEventCount(t, fixture.db, tc.kind, activityResultEventID(expected, expected.SuccessEvent), 1)
+			assertActivityBoringDeliveryStatus(t, fixture.db, tc.kind, sourceEvent.ID(), "scanner", "delivered")
+
+			request := fixture.bus.outboxIntent(0)
+			handled, err = fixture.pc.handleEventResult(ctx, request.Event)
+			if err != nil {
+				t.Fatalf("duplicate supported activity request handleEventResult: %v", err)
+			}
+			if !handled {
+				t.Fatal("duplicate supported activity request handled = false, want true")
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("server calls after duplicate supported activity request = %d, want recorded result reuse", got)
+			}
+			assertActivityBoringRuntimeLogAction(t, fixture.bus, "result_reused")
+		})
+	}
+}
+
+func TestActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResultCompletesOncePostgres(t *testing.T) {
+	var calls atomic.Int32
+	entityID := uuid.NewString()
+	inputURL := "https://example.com/source"
+	sourceEvent := newActivityBoringSourceEvent(entityID, testPipelineRunID, inputURL)
+	expected := activityBoringExpectedIntentForSourceEvent(sourceEvent, inputURL)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Recovered Source"})
+	}))
+	defer server.Close()
+
+	fixture := newActivityBoringFullFlowFixture(t, activityBoringStorePostgres, server.URL, false)
+	seedActivityBoringSourceFlow(t, fixture, activityBoringStorePostgres, sourceEvent)
+	ctx := runtimecorrelation.WithRunID(context.Background(), sourceEvent.RunID())
+	handled, err := fixture.pc.handleEventResult(ctx, sourceEvent)
+	if err != nil {
+		t.Fatalf("source handleEventResult before crash: %v", err)
+	}
+	if !handled {
+		t.Fatal("source handleEventResult before crash handled = false, want true")
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("server calls after supported request persistence = %d, want 0 before crash recovery", got)
+	}
+	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityRequestEventID(expected), 1)
+	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 0)
+
+	restarted := newActivityBoringFullFlowCoordinator(t, fixture.db, activityBoringStorePostgres, server.URL, true)
+	request := fixture.bus.outboxIntent(0)
+	handled, err = restarted.pc.handleEventResult(ctx, request.Event)
+	if err != nil {
+		t.Fatalf("restart supported activity request handleEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("restart supported activity request handled = false, want true")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("server calls after restart completion = %d, want 1", got)
+	}
+	assertActivityBoringEventCount(t, fixture.db, activityBoringStorePostgres, activityResultEventID(expected, expected.SuccessEvent), 1)
+
+	handled, err = restarted.pc.handleEventResult(ctx, request.Event)
+	if err != nil {
+		t.Fatalf("duplicate post-restart supported request handleEventResult: %v", err)
+	}
+	if !handled {
+		t.Fatal("duplicate post-restart supported request handled = false, want true")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("server calls after duplicate completed supported request = %d, want recorded result reuse", got)
+	}
+}
+
+func TestActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdentity(t *testing.T) {
+	for _, tc := range activityBoringStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			entityID := uuid.NewString()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				_ = json.NewEncoder(w).Encode(map[string]any{"title": "Example Source"})
+			}))
+			defer server.Close()
+
+			fixture := newActivityBoringFullFlowFixture(t, tc.kind, server.URL, true)
+			sourceEvent := newActivityBoringSourceEvent(entityID, uuid.NewString(), "https://example.com/source")
+			forkEvent := newActivityBoringSourceEvent(entityID, uuid.NewString(), "https://example.com/source")
+			sourceExpected := activityBoringExpectedIntentForSourceEvent(sourceEvent, "https://example.com/source")
+			forkExpected := activityBoringExpectedIntentForSourceEvent(forkEvent, "https://example.com/source")
+			if activityRequestEventID(sourceExpected) == activityRequestEventID(forkExpected) {
+				t.Fatal("fork-local hand-authored request identity did not change")
+			}
+
+			for _, evt := range []events.Event{sourceEvent, forkEvent} {
+				seedActivityBoringSourceFlow(t, fixture, tc.kind, evt)
+				ctx := runtimecorrelation.WithRunID(context.Background(), evt.RunID())
+				handled, err := fixture.pc.handleEventResult(ctx, evt)
+				if err != nil {
+					t.Fatalf("hand-authored fork source handleEventResult(%s): %v", evt.RunID(), err)
+				}
+				if !handled {
+					t.Fatalf("hand-authored fork source handleEventResult(%s) handled = false, want true", evt.RunID())
+				}
+			}
+			if got := calls.Load(); got != 2 {
+				t.Fatalf("server calls across source+fork hand-authored read_only execution = %d, want declared reexecute_read call per identity", got)
+			}
+			if activityResultEventID(sourceExpected, sourceExpected.SuccessEvent) == activityResultEventID(forkExpected, forkExpected.SuccessEvent) {
+				t.Fatal("fork-local hand-authored result identity did not change")
+			}
+		})
+	}
+}
 
 func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.T) {
 	for _, tc := range activityBoringStoreCases() {
@@ -289,12 +465,62 @@ func newActivityBoringCoordinator(t *testing.T, db *sql.DB, kind activityBoringS
 	}}
 	store := NewWorkflowInstanceStore(db)
 	if kind == activityBoringStoreSQLite {
-		store = NewSQLiteWorkflowInstanceStore(db)
+		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
 	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
 		Module:        staticSemanticWorkflowModule{source: activityBoringSource(serverURL)},
 		WorkflowStore: store,
 	})
+	return activityBoringFixture{db: db, bus: bus, pc: pc}
+}
+
+func newActivityBoringFullFlowFixture(t *testing.T, kind activityBoringStoreKind, serverURL string, handleActivityRequests bool) activityBoringFixture {
+	t.Helper()
+	switch kind {
+	case activityBoringStoreSQLite:
+		db := newSQLiteWorkflowInstanceStoreTestDB(t)
+		return newActivityBoringFullFlowCoordinator(t, db, kind, serverURL, handleActivityRequests)
+	case activityBoringStorePostgres:
+		_, db, cleanup := testutil.StartPostgres(t)
+		t.Cleanup(cleanup)
+		return newActivityBoringFullFlowCoordinator(t, db, kind, serverURL, handleActivityRequests)
+	default:
+		t.Fatalf("unknown activity boring store kind %q", kind)
+		return activityBoringFixture{}
+	}
+}
+
+func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activityBoringStoreKind, serverURL string, handleActivityRequests bool) activityBoringFixture {
+	t.Helper()
+	bus := &persistingActivityBoringBus{
+		appendEvent: func(ctx context.Context, evt events.Event) error {
+			return appendActivityBoringEvent(ctx, db, kind, evt)
+		},
+		handleActivityRequests: handleActivityRequests,
+	}
+	store := NewWorkflowInstanceStore(db)
+	if kind == activityBoringStoreSQLite {
+		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
+	}
+	bundle := activityBoringFullFlowBundle(serverURL)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module: &previewWorkflowModule{
+			bundle:   bundle,
+			workflow: NewWorkflowDefinition("research", []WorkflowStage{{Name: "pending"}}, nil),
+			workflowNodes: []WorkflowNode{{
+				ID:            "scanner",
+				Subscriptions: []events.EventType{"source.requested"},
+				Produces:      []events.EventType{"research.scanner_source_requested_source_scrape.succeeded", "research.scanner_source_requested_source_scrape.failed"},
+				ExecutionType: runtimecontracts.SystemNodeExecutionType,
+				Policies: map[string]WorkflowEventPolicy{
+					"source.requested": {Consume: true},
+				},
+			}},
+		},
+		WorkflowStore:           store,
+		EventReceiptsCapability: eventReceiptsCapabilityStub{enabled: true}.resolve,
+	})
+	bus.coordinator = pc
 	return activityBoringFixture{db: db, bus: bus, pc: pc}
 }
 
@@ -314,6 +540,154 @@ func activityBoringSource(serverURL string) semanticview.Source {
 			},
 		},
 	})
+}
+
+func activityBoringFullFlowSource(serverURL string) semanticview.Source {
+	return semanticview.Wrap(activityBoringFullFlowBundle(serverURL))
+}
+
+func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowContractBundle {
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Activity: runtimecontracts.ActivitySpec{
+			Tool: "source_scrape",
+			Input: map[string]runtimecontracts.ExpressionValue{
+				"url": runtimecontracts.CELExpression("payload.url"),
+			},
+		},
+	}
+	node := runtimecontracts.SystemNodeContract{
+		ID:            "scanner",
+		ExecutionType: runtimecontracts.SystemNodeExecutionType,
+		SubscribesTo:  []string{"source.requested"},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"source.requested": handler,
+		},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:         "research",
+			PackageKey: "activity-boring-proof",
+			Dir:        "flows/research",
+		},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Name:         "research",
+			InitialState: "pending",
+			States:       []string{"pending"},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"scanner": node,
+		},
+		Path: "research",
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "research",
+			Version:      "v-test",
+			InitialStage: "pending",
+			FlowInitial:  map[string]string{"research": "pending"},
+			FlowStates:   map[string][]string{"research": []string{"pending"}},
+			EventOwners: map[string][]string{
+				"source.requested": {"scanner"},
+			},
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"scanner": {
+					"source.requested": handler,
+				},
+			},
+			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
+				"scanner": {
+					ID:                   "scanner",
+					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
+					RuntimeSubscriptions: []string{"source.requested"},
+					Produces:             []string{"research.scanner_source_requested_source_scrape.succeeded", "research.scanner_source_requested_source_scrape.failed"},
+				},
+			},
+		},
+		FlowTree: runtimecontracts.FlowTree{
+			Root:   &flow,
+			ByPath: map[string]*runtimecontracts.FlowContractView{"research": &flow},
+			ByID:   map[string]*runtimecontracts.FlowContractView{"research": &flow},
+		},
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"source_scrape": {
+				HandlerType: "http",
+				EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+				InputSchema: runtimecontracts.ToolInputSchema{
+					Type:     "object",
+					Required: []string{"url"},
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"url": {Type: "string"},
+					},
+				},
+				OutputSchema: runtimecontracts.ToolInputSchema{
+					Type: "object",
+					Properties: map[string]runtimecontracts.ToolInputSchema{
+						"title": {Type: "string"},
+					},
+				},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "GET",
+					URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
+				},
+			},
+		},
+	}
+}
+
+func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event {
+	if strings.TrimSpace(runID) == "" {
+		runID = testPipelineRunID
+	}
+	return eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("source.requested"),
+		"source",
+		"task-activity-boring-proof",
+		mustJSON(map[string]any{"url": inputURL}),
+		2,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		time.Now().UTC(),
+	)
+}
+
+func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL string) runtimeengine.ActivityIntent {
+	site := runtimecontracts.ActivitySite{
+		FlowID:          "research",
+		NodeID:          "scanner",
+		HandlerEventKey: "source.requested",
+		RuleIndex:       -1,
+		Spec: runtimecontracts.ActivitySpec{
+			Tool: "source_scrape",
+			Input: map[string]runtimecontracts.ExpressionValue{
+				"url": runtimecontracts.CELExpression("payload.url"),
+			},
+		},
+	}
+	resultEvents := runtimecontracts.ActivityResultEventsForSite(site)
+	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
+	return runtimeengine.ActivityIntent{
+		ActivityID:       resultEvents.ActivityID,
+		Tool:             "source_scrape",
+		Input:            map[string]any{"url": inputURL},
+		EffectClass:      runtimecontracts.ActivityEffectClassReadOnly,
+		SuccessEvent:     resultEvents.SuccessEvent,
+		FailureEvent:     resultEvents.FailureEvent,
+		RetryMaxAttempts: defaults.MaxAttempts,
+		RetryBackoff:     defaults.Backoff,
+		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(runtimecontracts.ActivityEffectClassReadOnly),
+		EntityID:         identity.NormalizeEntityID(evt.EntityID()),
+		NodeID:           identity.NormalizeNodeID("scanner"),
+		FlowID:           identity.NormalizeFlowID("research"),
+		HandlerEventKey:  "source.requested",
+		SourceEventID:    evt.ID(),
+		SourceRunID:      evt.RunID(),
+		SourceTaskID:     evt.TaskID(),
+		ParentEventID:    evt.ParentEventID(),
+		ChainDepth:       evt.ChainDepth(),
+		Attempt:          1,
+	}.Normalized()
 }
 
 func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityIntent {
@@ -344,7 +718,10 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 
 type persistingActivityBoringBus struct {
 	recordingPipelineBus
-	appendEvent func(context.Context, events.Event) error
+	appendEvent                 func(context.Context, events.Event) error
+	coordinator                 *PipelineCoordinator
+	handleActivityRequests      bool
+	beforeActivityRequestHandle func(context.Context, events.Event) error
 }
 
 type persistingActivityBoringOutbox struct {
@@ -409,6 +786,20 @@ func (d persistingActivityBoringDispatcher) DispatchPostCommit(ctx context.Conte
 		if err := d.bus.Publish(ctx, intent.Event); err != nil {
 			return err
 		}
+		if d.bus.handleActivityRequests && intent.Event.Type() == activityRequestEventType && d.bus.coordinator != nil {
+			if d.bus.beforeActivityRequestHandle != nil {
+				if err := d.bus.beforeActivityRequestHandle(ctx, intent.Event); err != nil {
+					return err
+				}
+			}
+			handled, err := d.bus.coordinator.handleEventResult(ctx, intent.Event)
+			if err != nil {
+				return err
+			}
+			if !handled {
+				return fmt.Errorf("post-commit activity request %s was not handled", intent.Event.ID())
+			}
+		}
 	}
 	return nil
 }
@@ -416,6 +807,12 @@ func (d persistingActivityBoringDispatcher) DispatchPostCommit(ctx context.Conte
 func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBoringStoreKind, evt events.Event) error {
 	if db == nil {
 		return nil
+	}
+	execer := interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}(db)
+	if tx, ok := PipelineSQLTxFromContext(ctx); ok {
+		execer = tx
 	}
 	runID := strings.TrimSpace(evt.RunID())
 	if runID == "" {
@@ -448,13 +845,13 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 	}
 	switch kind {
 	case activityBoringStoreSQLite:
-		if _, err := db.ExecContext(ctx, `
+		if _, err := execer.ExecContext(ctx, `
 			INSERT OR IGNORE INTO runs (run_id, status, started_at)
 			VALUES (?, 'running', ?)
 		`, runID, createdAt); err != nil {
 			return err
 		}
-		_, err := db.ExecContext(ctx, `
+		_, err := execer.ExecContext(ctx, `
 			INSERT OR IGNORE INTO events (
 				event_id, run_id, event_name, entity_id, flow_instance, scope,
 				payload, chain_depth, produced_by_type, created_at
@@ -463,14 +860,14 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), entityID, flowInstance, scope, payload, evt.ChainDepth(), createdAt)
 		return err
 	case activityBoringStorePostgres:
-		if _, err := db.ExecContext(ctx, `
+		if _, err := execer.ExecContext(ctx, `
 			INSERT INTO runs (run_id, status, started_at)
 			VALUES ($1::uuid, 'running', $2)
 			ON CONFLICT (run_id) DO NOTHING
 		`, runID, createdAt); err != nil {
 			return err
 		}
-		_, err := db.ExecContext(ctx, `
+		_, err := execer.ExecContext(ctx, `
 			INSERT INTO events (
 				event_id, run_id, event_name, entity_id, flow_instance, scope,
 				payload, chain_depth, produced_by_type, created_at
@@ -478,6 +875,69 @@ func appendActivityBoringEvent(ctx context.Context, db *sql.DB, kind activityBor
 			VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7::jsonb, $8, 'platform', $9)
 			ON CONFLICT (event_id) DO NOTHING
 		`, evt.ID(), runID, strings.TrimSpace(string(evt.Type())), entityID, flowInstance, scope, payload, evt.ChainDepth(), createdAt)
+		return err
+	default:
+		return nil
+	}
+}
+
+func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, kind activityBoringStoreKind, evt events.Event) {
+	t.Helper()
+	if fixture.pc == nil || fixture.db == nil {
+		t.Fatal("activity boring source flow fixture requires coordinator and db")
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), evt.RunID())
+	if err := appendActivityBoringEvent(ctx, fixture.db, kind, evt); err != nil {
+		t.Fatalf("seed activity boring source event: %v", err)
+	}
+	if err := seedActivityBoringNodeDelivery(ctx, fixture.db, kind, evt, "scanner"); err != nil {
+		t.Fatalf("seed activity boring node delivery: %v", err)
+	}
+	entityID := strings.TrimSpace(evt.EntityID())
+	if entityID == "" {
+		t.Fatal("activity boring source event requires entity id")
+	}
+	if err := fixture.pc.workflowStore.Upsert(ctx, WorkflowInstance{
+		InstanceID:      entityID,
+		StorageRef:      entityID,
+		WorkflowName:    "research",
+		WorkflowVersion: "v-test",
+		CurrentState:    "pending",
+		Metadata: map[string]any{
+			"entity_id":   entityID,
+			"flow_path":   "research/" + entityID,
+			"instance_id": entityID,
+		},
+	}); err != nil {
+		t.Fatalf("seed activity boring workflow instance: %v", err)
+	}
+}
+
+func seedActivityBoringNodeDelivery(ctx context.Context, db *sql.DB, kind activityBoringStoreKind, evt events.Event, nodeID string) error {
+	if db == nil {
+		return nil
+	}
+	runID := strings.TrimSpace(evt.RunID())
+	if runID == "" {
+		runID = testPipelineRunID
+	}
+	switch kind {
+	case activityBoringStoreSQLite:
+		_, err := db.ExecContext(ctx, `
+			INSERT OR IGNORE INTO event_deliveries (
+				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
+			)
+			VALUES (?, ?, ?, 'node', ?, 'pending', 0, ?)
+		`, uuid.NewString(), runID, evt.ID(), nodeID, time.Now().UTC())
+		return err
+	case activityBoringStorePostgres:
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, created_at
+			)
+			VALUES ($1::uuid, $2::uuid, 'node', $3, 'pending', 0, now())
+			ON CONFLICT DO NOTHING
+		`, runID, evt.ID(), nodeID)
 		return err
 	default:
 		return nil
@@ -504,6 +964,57 @@ func assertActivityBoringEventCount(t *testing.T, db *sql.DB, kind activityBorin
 	if got != want {
 		t.Fatalf("event %s count = %d, want %d", eventID, got, want)
 	}
+}
+
+func assertActivityBoringDeliveryStatus(t *testing.T, db *sql.DB, kind activityBoringStoreKind, eventID, nodeID, want string) {
+	t.Helper()
+	var (
+		got sql.NullString
+		err error
+	)
+	switch kind {
+	case activityBoringStoreSQLite:
+		err = db.QueryRow(`
+			SELECT status
+			FROM event_deliveries
+			WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?
+		`, eventID, nodeID).Scan(&got)
+	case activityBoringStorePostgres:
+		err = db.QueryRow(`
+			SELECT status
+			FROM event_deliveries
+			WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
+		`, eventID, nodeID).Scan(&got)
+	default:
+		t.Fatalf("unknown store kind %q", kind)
+	}
+	if err != nil {
+		t.Fatalf("read delivery status for %s/%s: %v", eventID, nodeID, err)
+	}
+	if !got.Valid || got.String != want {
+		t.Fatalf("delivery status for %s/%s = %q valid=%v, want %q", eventID, nodeID, got.String, got.Valid, want)
+	}
+}
+
+func activityBoringEntityLockState(pc *PipelineCoordinator, entityID string) (exists bool, locked bool) {
+	if pc == nil {
+		return false, false
+	}
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return false, false
+	}
+	pc.entityLockMu.Lock()
+	lock := pc.entityLocks[entityID]
+	pc.entityLockMu.Unlock()
+	if lock == nil {
+		return false, false
+	}
+	if lock.TryLock() {
+		lock.Unlock()
+		return true, false
+	}
+	return true, true
 }
 
 func assertActivityBoringRuntimeLogAction(t *testing.T, bus *persistingActivityBoringBus, action string) {
