@@ -1637,11 +1637,12 @@ compute_module_contracts:
         mounted. Network, subprocess, threads, third-party packages, generated
         bindings, and ambient host capabilities are not supported.
 
-        Author-reachable WASI clock and random imports MUST be deterministic in
-        this slice. The host shadows `clock_time_get` with a zero clock and
-        `random_get` with deterministic bytes; real wall-clock and host entropy
-        are not exposed even if author code recovers unrestricted CPython
-        imports through reflection.
+        Author-reachable WASI clock, random, and timer/sleep imports MUST be
+        deterministic in this slice. The host shadows `clock_time_get` with a
+        zero clock, `random_get` with deterministic bytes, and `poll_oneoff`
+        with a deterministic unsupported-capability result; real wall-clock
+        values, host entropy, and host timer waits are not exposed even if
+        author code recovers unrestricted CPython imports through reflection.
     deterministic_features: |
       Runtime configuration MUST disable nondeterministic or unapproved features
       including threads, SIMD, memory64, and multi-memory. Deterministic core
@@ -1750,8 +1751,8 @@ compute_module_contracts:
   - '#1670 owns public build/source tooling and any instrumentation pipeline.'
   - Declarative lookup, validation, selection, and future derive rows remain preferred when they can express the work.
   - Durable activities, orchestration, timers, joins, loops, schedules, host imports, WASI capabilities beyond the fixed
-    Python interpreter mount and deterministic clock/random stubs, filesystem/network access beyond that read-only mount,
-    shared module packs, source compilation, and file-backed module inputs are separate gates.
+    Python interpreter mount and deterministic clock/random/timer stubs, filesystem/network access beyond that read-only
+    mount, shared module packs, source compilation, and file-backed module inputs are separate gates.
 bundle_build_materialization:
   status: merge_bearing_build_surface
   implementation_slice: '#1670 Slice A + Slice B'

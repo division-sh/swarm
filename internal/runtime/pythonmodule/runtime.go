@@ -35,6 +35,7 @@ const (
 	defaultValidateFuel = 2_000_000_000
 	wasiErrnoSuccess    = int32(0)
 	wasiErrnoFault      = int32(21)
+	wasiErrnoNotSup     = int32(58)
 )
 
 //go:embed testdata/python-3.13.14-wasi_sdk-24.zip
@@ -281,7 +282,10 @@ func defineDeterministicWASI(linker *wasmtime.Linker) error {
 	if err := linker.FuncWrap("wasi_snapshot_preview1", "random_get", deterministicRandomGet); err != nil {
 		return err
 	}
-	return linker.FuncWrap("wasi_snapshot_preview1", "clock_time_get", deterministicClockTimeGet)
+	if err := linker.FuncWrap("wasi_snapshot_preview1", "clock_time_get", deterministicClockTimeGet); err != nil {
+		return err
+	}
+	return linker.FuncWrap("wasi_snapshot_preview1", "poll_oneoff", deterministicPollOneoff)
 }
 
 func deterministicRandomGet(caller *wasmtime.Caller, ptr int32, length int32) int32 {
@@ -302,6 +306,10 @@ func deterministicClockTimeGet(caller *wasmtime.Caller, _ int32, _ int64, result
 	}
 	binary.LittleEndian.PutUint64(data[int(resultPtr):int(resultPtr)+8], 0)
 	return wasiErrnoSuccess
+}
+
+func deterministicPollOneoff(_ *wasmtime.Caller, _ int32, _ int32, _ int32, _ int32) int32 {
+	return wasiErrnoNotSup
 }
 
 func callerMemoryData(caller *wasmtime.Caller) ([]byte, bool) {
