@@ -144,6 +144,17 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	if got := scalarValue(mustMappingValue(t, oldShapePolicy, "unknown_keys")); got != "fail_closed_with_key_path_and_source" {
 		t.Fatalf("unknown key policy = %q", got)
 	}
+	rejectionDiagnostics := mustMappingValue(t, oldShapePolicy, "rejection_diagnostics")
+	for _, key := range []string{"unknown_key", "trust_tier_rejection", "split_unsupported_key"} {
+		if !hasMappingKey(rejectionDiagnostics, key) {
+			t.Fatalf("rejection diagnostic %s missing", key)
+		}
+	}
+	assertContainsScalar(t, mustMappingValue(t, rejectionDiagnostics, "unknown_key"), "unknown config key")
+	assertContainsScalar(t, mustMappingValue(t, rejectionDiagnostics, "trust_tier_rejection"), "not-allowed-here")
+	for _, want := range []string{"recognized but not wired", "not-yet-wired", "MUST NOT be reported as typos or", "trust-tier violations"} {
+		assertContainsScalar(t, mustMappingValue(t, rejectionDiagnostics, "split_unsupported_key"), want)
+	}
 	for _, key := range []string{"flat_cli_shape", "runtime_config_shape", "executable_adjacent_config_yaml"} {
 		if !hasMappingKey(oldShapePolicy, key) {
 			t.Fatalf("old-shape policy %s missing", key)
