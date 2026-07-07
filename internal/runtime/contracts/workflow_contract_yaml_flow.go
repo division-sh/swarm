@@ -267,6 +267,13 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 			if err := value.Decode(&out.Event); err != nil {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin event: %w", err)
 			}
+		case "source":
+			if err := value.Decode(&out.Source); err != nil {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin source: %w", err)
+			}
+			if source := strings.ToLower(strings.TrimSpace(out.Source)); source != "" && source != "external" {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin source must be external")
+			}
 		case "address":
 			var address FlowInputPinAddress
 			if err := value.Decode(&address); err != nil {

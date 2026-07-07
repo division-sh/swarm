@@ -19,8 +19,9 @@ func (p FlowInputEventPin) EventType() string {
 
 func (p FlowInputEventPin) normalized() FlowInputEventPin {
 	out := FlowInputEventPin{
-		Name:  strings.TrimSpace(p.Name),
-		Event: strings.TrimSpace(p.Event),
+		Name:   strings.TrimSpace(p.Name),
+		Event:  strings.TrimSpace(p.Event),
+		Source: strings.ToLower(strings.TrimSpace(p.Source)),
 	}
 	if out.Event == "" {
 		out.Event = out.Name

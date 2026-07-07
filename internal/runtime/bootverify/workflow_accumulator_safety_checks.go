@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const (
@@ -46,7 +47,6 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 	}
 	c.accumulatorSafetyLoaded = true
 
-	flowScopedNodes, flowScopedAgents := inputPinRootParticipants(c.source)
 	for nodeID := range c.source.NodeEntries() {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" {
@@ -93,7 +93,7 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 					),
 				})
 			}
-			producerPaths := c.accumulatorProducerPaths(flowID, eventType, flowScopedNodes, flowScopedAgents)
+			producerPaths := c.accumulatorProducerPaths(flowID, eventType)
 			if producerPaths.hasAny() {
 				continue
 			}
@@ -158,53 +158,35 @@ func accumulatorFlowLabel(flowID string) string {
 }
 
 type accumulatorProducerPaths struct {
-	inputPaths        inputPinProducerPaths
-	sameFlowNodeEmit  string
-	sameFlowAgentEmit string
+	inputProof inputPinProducerSourceProof
 }
 
 func (p accumulatorProducerPaths) hasAny() bool {
-	if p.inputPaths.hasAny() {
-		return true
-	}
-	for _, detail := range []string{
-		p.sameFlowNodeEmit,
-		p.sameFlowAgentEmit,
-	} {
-		if !strings.HasPrefix(strings.TrimSpace(detail), "not ") {
-			return true
-		}
-	}
-	return false
+	return p.inputProof.hasAny()
 }
 
 func (p accumulatorProducerPaths) message(flowID, nodeID, eventType string) string {
 	return fmt.Sprintf(
-		"Flow %s node %s handler %s accumulates event %s but no accepted producer/source path was found in the authored bundle.\n\nChecked producer paths:\n- Parent connect: %s\n- Sibling flow output pin: %s\n- Root agent emit_events: %s\n- Root node handler emits: %s\n- Platform event catalog: %s\n- External source metadata (swarm.source): %s\n- Same-flow timer declaration: %s\n- Same-flow node handler emits: %s\n- Same-flow agent emit_events: %s\n\nFix one of:\n- Add an accepted producer path for %s\n- Add swarm.source: external to %s's events.yaml entry if produced externally\n- Remove the accumulator if the event is not produced",
+		"Flow %s node %s handler %s accumulates event %s but no accepted producer/source path was found in the authored bundle.\n\nChecked producer source classes:\n- Boundary/external source: %s\n- Parent connect: %s\n- Explicit harness injection: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add an accepted producer path for %s\n- Register an explicit harness injection for validation-only fixtures\n- Remove the accumulator if the event is not produced",
 		accumulatorFlowLabel(flowID),
 		strings.TrimSpace(nodeID),
 		strings.TrimSpace(eventType),
 		strings.TrimSpace(eventType),
-		p.inputPaths.parentConnect,
-		p.inputPaths.siblingFlowOutputPin,
-		p.inputPaths.rootAgentEmit,
-		p.inputPaths.rootNodeHandlerEmit,
-		p.inputPaths.platformEventCatalog,
-		p.inputPaths.externalSource,
-		p.inputPaths.sameFlowTimer,
-		p.sameFlowNodeEmit,
-		p.sameFlowAgentEmit,
-		strings.TrimSpace(eventType),
+		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress),
+		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerBoundaryParentConnect),
+		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection),
+		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerPlatformSource),
+		p.inputProof.detailsForKind(runtimecontracts.FlowInputProducerInternalTopology),
 		strings.TrimSpace(eventType),
 	)
 }
 
-func (c *checkerContext) accumulatorProducerPaths(flowID, eventType string, flowScopedNodes, flowScopedAgents map[string]struct{}) accumulatorProducerPaths {
-	inputPaths := c.inputPinProducerPaths(flowID, eventType, flowScopedNodes, flowScopedAgents)
+func (c *checkerContext) accumulatorProducerPaths(flowID, eventType string) accumulatorProducerPaths {
 	return accumulatorProducerPaths{
-		inputPaths:        inputPaths,
-		sameFlowNodeEmit:  c.accumulatorSameFlowNodeEmitPath(flowID, eventType),
-		sameFlowAgentEmit: c.accumulatorSameFlowAgentEmitPath(flowID, eventType),
+		inputProof: inputPinProducerSourceProof{resolution: semanticview.ResolveFlowInputProducerWithOptions(c.source, flowID, eventType, runtimecontracts.FlowInputProducerResolutionOptions{
+			HarnessInjections:  c.opts.HarnessInjections,
+			AllowNonInputEvent: true,
+		})},
 	}
 }
 

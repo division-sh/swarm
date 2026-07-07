@@ -31,6 +31,7 @@ func setDoctorProviderSecret(t *testing.T, key, value string) {
 
 func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 	configureDoctorDockerStub(t)
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "provider-credentials.json"))
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TEST_DOCKER_IMAGE_MISSING", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -625,6 +626,7 @@ func TestDoctorAPIFlagsRequireTargetMode(t *testing.T) {
 
 func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testing.T) {
 	configureDoctorDockerStub(t)
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "provider-credentials.json"))
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")

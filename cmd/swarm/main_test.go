@@ -4550,7 +4550,12 @@ terminal_states: [ready]
 states: [initializing, waiting, ready]
 pins:
   inputs:
-    events: [opco.product_initialization_requested, opco.product_review_requested]
+    events:
+      - name: product_initialization_requested
+        event: opco.product_initialization_requested
+      - name: product_review_requested
+        event: opco.product_review_requested
+        source: external
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
@@ -9666,7 +9671,9 @@ terminal_states: [done]
 states: [idle, done]
 pins:
   inputs:
-    events: [task.assigned]
+    events:
+      - name: task.assigned
+        source: external
     reads: [priority]
   outputs:
     events: []
@@ -9808,7 +9815,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	for _, want := range []string{
 		"verify failed: boot verification blocked by policy-escalated findings:",
 		"[BLOCKER] input_pin_wiring @",
-		"no producer path was found in the authored bundle",
+		"no accepted producer source was found in the authored bundle",
 	} {
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
@@ -9840,7 +9847,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	if len(verifyJSON.Warnings) == 0 {
 		t.Fatalf("verify --json warnings = %#v, want input_pin_wiring", verifyJSON.Warnings)
 	}
-	if !verifyFindingOutputsContain(verifyJSON.Warnings, "input_pin_wiring", "semantic_drift_warning", "no producer path was found in the authored bundle") {
+	if !verifyFindingOutputsContain(verifyJSON.Warnings, "input_pin_wiring", "semantic_drift_warning", "no accepted producer source was found in the authored bundle") {
 		t.Fatalf("verify --json warnings = %#v, want structured input_pin_wiring warning", verifyJSON.Warnings)
 	}
 }
@@ -12615,13 +12622,13 @@ func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
 		t.Fatal("verifyBundle error = nil, want warning-only failure from missing producer path")
 	}
 	for _, want := range []string{
-		"no producer path was found in the authored bundle",
-		"Sibling flow output pin: not found",
-		"Root agent emit_events: not found",
-		"Root node handler emits: not found",
-		"Platform event catalog: not matched",
-		"External source metadata (swarm.source): not found",
-		"Same-flow timer declaration: not found",
+		"no accepted producer source was found in the authored bundle",
+		"Boundary external ingress: not found",
+		"Intrinsic ingress input pin: not found",
+		"Parent connect: not found",
+		"Explicit harness injection: not found",
+		"Platform source: not found",
+		"Internal topology producer: not found",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("verifyBundle error = %v, want substring %q", err, want)

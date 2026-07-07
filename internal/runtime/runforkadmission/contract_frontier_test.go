@@ -314,7 +314,7 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			nodeID: {
 				ID:           nodeID,
-				SubscribesTo: []string{"scan.requested"},
+				SubscribesTo: []string{"producer/scan.requested"},
 			},
 		},
 	}
@@ -323,6 +323,10 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "test-workflow",
 			Version: "v-test",
+			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
+				From: "producer.scan.requested",
+				To:   "consumer.scan.requested",
+			}},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,

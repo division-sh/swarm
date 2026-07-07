@@ -498,6 +498,21 @@ contract_formats:
         flow_model.flow_package.composition_routing and engine.cross_flow_routing for details.
         Explicit scoped subscriptions (e.g., scoring/vertical.shortlisted) remain an escape hatch for
         cases outside the pin/connect interface.'
+      input_source_resolution:
+        canonical_owner: internal/runtime/semanticview.ResolveFlowInputProducer
+        rule: |
+          Flow input producer proof is resolved once through a typed source taxonomy and consumed by boot verification,
+          RouteTable derivation, and workflow-node subscription projection. The accepted proof classes are boundary external
+          ingress, intrinsic input-pin ingress (`source: external` on the input pin), parent connect, explicit harness
+          injection, platform source, and internal topology producer. Internal topology producer proof proves the event is
+          produced inside the authored topology by sibling flow outputs, root/flow agent or node emits, timers, fan_out,
+          or root/flow `auto_emit_on_create`, but it MUST NOT generate producer-scoped auto-wire route patterns.
+          Direct parent connect proof proves the input is satisfied, but concrete delivery authority remains the connect
+          RoutePlan, not a raw subscription fallback.
+        retired_paths: |
+          Unique same-name sibling output-pin inference is retired as producer-pattern authority. `swarm.source: external`
+          on events.yaml is not input-pin producer proof; it remains external metadata for non-input event roles such as
+          dead-event and accumulator producer-source checks.
       delivery_rules:
         owning_node: If a system node subscribes_to the event → that node owns it
         dual_delivery: If a node AND agents subscribe → route to both
@@ -3426,8 +3441,8 @@ engine:
       emit_events: Always local names. The platform externalizes at emission time.
       events_yaml: Always local names. Flow-scoped at load time.
       pins: Always local names. Parent connect binds output pins to receiver input pins for topology; same-name pin matching
-        is only a safe analyzer inference when unambiguous. Target rules materialize concrete instance recipients after
-        connect lowering or explicit escape-hatch targeting.
+        is not route or producer authority. Target rules materialize concrete instance recipients after connect lowering or
+        explicit escape-hatch targeting.
     wildcards:
       description: Pattern matching for subscriptions across flow instances. Wildcards do not override target filtering when event.target or event.target_set is set.
       patterns:
@@ -3568,8 +3583,8 @@ engine:
         as absolute from root. Wildcards expand to matching paths.
     - step: 7
       name: validate_pins
-      action: 'For each flow: required input event pins must be satisfied by parent connect topology, safe unambiguous inference,
-        explicit external source metadata, or another accepted producer path. Pin-declared output emits consume
+      action: 'For each flow: required input event pins must be satisfied by the canonical input-source resolver: parent connect
+        topology, input pin source:external, explicit harness injection, platform source, or internal topology producer. Pin-declared output emits consume
         flow_model.flow_package.composition_routing: lowered parent connect supplies singular event.target or fan-out
         event.target_set route facts; explicit target is only the dynamic escape hatch; structural ParentRoute and eligible
         static-child delivery-entity routing are fallback paths when no lowered connect route applies; broadcast:true is the
@@ -5643,10 +5658,10 @@ engine:
       severity: warning
       scope: per-flow
       trigger: 'A flow''s required input event pin (from schema.yaml pins.inputs.events) has no satisfiable authored producer
-        path on the static verify surface. The warning checks parent package.yaml connect entries, safe same-name sibling
-        flow output-pin inference, root agent emit_events, root node handler emit sites, exact platform_events catalog matches,
-        swarm.source values starting with external, and same-flow timer declarations. It does not use produces or swarm.status:
-        planned as input-pin proof.'
+        source on the static verify surface. The warning consumes internal/runtime/semanticview.ResolveFlowInputProducer
+        evidence: boundary external ingress, intrinsic input-pin source:external, parent connect, explicit harness injection,
+        platform source, and internal topology producer. It does not use unique same-name sibling output-pin inference as
+        producer-pattern authority, events.yaml swarm.source:external as input-pin proof, produces, or swarm.status: planned.'
       when: boot-only
     - id: accumulate_all_bounded_escape
       severity: warning
@@ -5664,10 +5679,11 @@ engine:
       severity: hard_invalidity
       scope: per-handler
       trigger: A handler declares an accumulator over an input event but the authored bundle has no accepted static producer
-        or source path for that event. Accepted paths are parent connect, safe sibling output pin inference, root agent
-        emit_events, root node handler emits, exact platform event catalog matches, swarm.source external metadata, same-flow
-        timers, same-flow node handler emits, and same-flow agent emit_events. produces declarations and swarm.status planned
-        do not satisfy this proof.
+        or source path for that event. This check consumes the same canonical producer-source resolver as input_pin_wiring
+        with non-input producer checking enabled. Accepted proof classes are external event metadata for non-input events,
+        parent connect, explicit harness injection, platform source, and internal topology producer (including handler emits,
+        agent emit_events, flow output pins, and timers). produces declarations and swarm.status planned do not satisfy this
+        proof.
       when: boot-only
     - id: pin_target_resolution
       severity: error
@@ -7595,9 +7611,10 @@ flow_model:
           location: schema.yaml pins.inputs.events
           canonical_form: >
             An input event pin MAY be authored as an object when it needs receiver address resolution:
-            `{name, event, address}`. `name` is the local public input pin name. `event` is the local event
-            identity accepted by the receiver handler. `address` declares how the receiver entity or flow instance
-            is selected for in-topology delivery.
+            `{name, event, source, address}`. `name` is the local public input pin name. `event` is the local event
+            identity accepted by the receiver handler. `source` is optional and currently valid only as `external`,
+            declaring explicit intrinsic external ingress for this input pin. `address` declares how the receiver entity or
+            flow instance is selected for in-topology delivery.
           scalar_form: >
             A scalar input event pin remains valid only for receivers that need no explicit addressed-input descriptor
             routing or where the parent connect/lowering rule supplies a complete receiver route from static topology or
@@ -8173,7 +8190,7 @@ flow_model:
     description: Flows have typed input/output pins, like IC chips in a circuit. The platform validates pin wiring at boot.
     input_event_pins:
       description: Events the flow subscribes to through its public receiver interface. Required pins must be wired by parent
-        connect, a safe analyzer inference, an explicit external source, or another accepted producer path.
+        connect, input pin source:external, explicit harness injection, platform source, or internal topology producer proof.
       required: true
     output_event_pins:
       description: Events the flow emits across its public interface. Optional, but when an emit site emits one of these
@@ -12343,7 +12360,7 @@ static_analyzer:
     - contract_formats.event_schema
     scope:
       description: For every flow input pin event declared in schema.yaml pins.inputs.events, verify that at least one accepted
-        producer path exists in the authored bundle on the static verify surface.
+        producer source exists in the authored bundle through the canonical input-source resolver on the static verify surface.
       applies_to:
       - schema.yaml pins.inputs.events
       excludes:
@@ -12352,25 +12369,27 @@ static_analyzer:
       - multi-hop reachability or liveness
       - produces-based proof
       - swarm.status-based lifecycle suppression
-    accepted_producer_paths:
+    accepted_producer_sources:
+      boundary_external_ingress:
+        rule: A root input pin is externally ingressible by boundary contract.
+      intrinsic_input_pin_ingress:
+        rule: 'A child/template/static flow input pin explicitly declares source: external.'
       parent_connect:
-        rule: Parent package.yaml connect binds a producer output pin to this receiver input pin and lowers to a concrete route plan.
-      sibling_flow_output_pin:
-        rule: Another flow declares the same local event name in schema.yaml pins.outputs.events and the analyzer can prove
-          this is the unique safe inference for parent connect topology.
-      root_agent_emit_events:
-        rule: A root-level agent declares the event in emit_events.
-      root_node_handler_emits:
-        rule: A root-level system node emits the event from handler top-level emit, rules emit, on_complete emit, accumulate.on_timeout
-          emit, or fan_out emit.
-      platform_event_catalog:
-        rule: The input pin event exactly matches a platform_events.catalog key.
-      external_source_annotation:
-        rule: The consuming flow or root event entry for the event has swarm.source beginning with external.
-      same_flow_timer_declaration:
-        rule: A timer declared within the consuming flow fires the same event.
-    rule: Emit warning when none of the accepted producer-path forms are found. The finding message must say no producer path
-      was found in the authored bundle and list the checked producer-path forms.
+        rule: Parent package.yaml connect binds a producer output pin to this receiver input pin and lowers to a concrete RoutePlan.
+      harness_injection:
+        rule: Validation/test harness declares an explicit injected flow/event source.
+      platform_source:
+        rule: The input pin event exactly matches a platform_events.catalog key or accepted platform source proof.
+      internal_topology_producer:
+        rule: Authored handlers, agents, flow output pins, or timers produce the event inside the topology; this proof does not
+          generate producer-scoped route patterns.
+    retired_producer_paths:
+      sibling_flow_output_auto_wire:
+        rule: Unique same-name sibling output pin inference is not producer-pattern authority and MUST NOT create auto-wire aliases.
+      event_swarm_source_external:
+        rule: 'events.yaml swarm.source: external is not input-pin proof. Use input pin source: external for intrinsic ingress.'
+    rule: Emit warning when none of the accepted producer-source forms are found. The finding message must say no accepted producer
+      source was found in the authored bundle and list the checked source classes.
   slice_3a_pin_target_resolution:
     id: pin_target_resolution
     domain: semantic_validity

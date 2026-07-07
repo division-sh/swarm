@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -116,7 +117,160 @@ type FlowInputAutoWireResolution struct {
 	EventType     string
 	Patterns      []string
 	ProducerFlows []string
+	Evidence      []FlowInputProducerEvidence
 }
+
+type FlowInputProducerResolution struct {
+	FlowID    string
+	EventType string
+	Evidence  []FlowInputProducerEvidence
+}
+
+type FlowInputProducerEvidence struct {
+	Kind      string
+	FlowID    string
+	EventType string
+	Pin       string
+	Pattern   string
+	Detail    string
+}
+
+const (
+	FlowInputProducerBoundaryExternalIngress  = "boundary_external_ingress"
+	FlowInputProducerBoundaryIntrinsicIngress = "boundary_intrinsic_ingress"
+	FlowInputProducerBoundaryParentConnect    = "boundary_parent_connect"
+	FlowInputProducerBoundaryHarnessInjection = "boundary_harness_injection"
+	FlowInputProducerPlatformSource           = "platform_source"
+	FlowInputProducerInternalTopology         = "internal_topology_producer"
+	FlowInputProducerMissing                  = "missing"
+	FlowInputProducerAmbiguous                = "ambiguous"
+	FlowInputProducerInvalidContext           = "invalid_context"
+)
+
+type FlowInputProducerResolutionOptions struct {
+	HarnessInjections  []FlowInputProducerInjection
+	AllowNonInputEvent bool
+}
+
+type FlowInputProducerInjection struct {
+	FlowID    string
+	EventType string
+}
+
+func (r FlowInputProducerResolution) HasEvidence() bool {
+	for _, evidence := range r.Evidence {
+		if FlowInputProducerEvidenceKindIsProof(evidence.Kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r FlowInputProducerResolution) HasEvidenceKind(kind string) bool {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return false
+	}
+	for _, evidence := range r.Evidence {
+		if strings.TrimSpace(evidence.Kind) == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func FlowInputProducerEvidenceKindIsProof(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case FlowInputProducerBoundaryExternalIngress,
+		FlowInputProducerBoundaryIntrinsicIngress,
+		FlowInputProducerBoundaryParentConnect,
+		FlowInputProducerBoundaryHarnessInjection,
+		FlowInputProducerPlatformSource,
+		FlowInputProducerInternalTopology:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r FlowInputProducerResolution) BoundaryEvidence() []FlowInputProducerEvidence {
+	out := make([]FlowInputProducerEvidence, 0)
+	for _, evidence := range r.Evidence {
+		switch strings.TrimSpace(evidence.Kind) {
+		case FlowInputProducerBoundaryExternalIngress,
+			FlowInputProducerBoundaryIntrinsicIngress,
+			FlowInputProducerBoundaryParentConnect,
+			FlowInputProducerBoundaryHarnessInjection:
+			out = append(out, evidence)
+		}
+	}
+	return out
+}
+
+func (r FlowInputProducerResolution) HasAmbiguousBoundaryEvidence() bool {
+	seen := map[string]struct{}{}
+	for _, evidence := range r.BoundaryEvidence() {
+		key := strings.TrimSpace(evidence.Kind) + "|" + strings.TrimSpace(evidence.FlowID) + "|" + strings.TrimSpace(evidence.Pin) + "|" + strings.TrimSpace(evidence.EventType)
+		if key == "" {
+			continue
+		}
+		seen[key] = struct{}{}
+	}
+	return len(seen) > 1
+}
+
+func (r FlowInputProducerResolution) ProducerPatterns() []string {
+	seen := map[string]struct{}{}
+	for _, evidence := range r.Evidence {
+		if !FlowInputProducerEvidenceKindIsProof(evidence.Kind) {
+			continue
+		}
+		pattern := strings.TrimSpace(evidence.Pattern)
+		if pattern == "" {
+			continue
+		}
+		seen[pattern] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for pattern := range seen {
+		out = append(out, pattern)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (r FlowInputProducerResolution) ProducerFlows() []string {
+	seen := map[string]struct{}{}
+	for _, evidence := range r.Evidence {
+		if !FlowInputProducerEvidenceKindIsProof(evidence.Kind) {
+			continue
+		}
+		if strings.TrimSpace(evidence.Kind) == FlowInputProducerInternalTopology {
+			continue
+		}
+		flowID := strings.TrimSpace(evidence.FlowID)
+		if flowID == "" {
+			continue
+		}
+		seen[flowID] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for flowID := range seen {
+		out = append(out, flowID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (r FlowInputProducerResolution) AutoWireResolution() FlowInputAutoWireResolution {
+	return FlowInputAutoWireResolution{
+		EventType:     strings.TrimSpace(r.EventType),
+		Patterns:      r.ProducerPatterns(),
+		ProducerFlows: r.ProducerFlows(),
+		Evidence:      append([]FlowInputProducerEvidence{}, r.Evidence...),
+	}
+}
+
 type HandlerTransitionSemantic struct {
 	ID                   string
 	NodeID               string
@@ -1055,6 +1209,7 @@ type FlowOutputPins struct {
 type FlowInputEventPin struct {
 	Name    string               `yaml:"name"`
 	Event   string               `yaml:"event"`
+	Source  string               `yaml:"source"`
 	Address *FlowInputPinAddress `yaml:"address"`
 }
 type FlowOutputEventPin struct {

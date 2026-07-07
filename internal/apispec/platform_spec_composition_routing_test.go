@@ -26,7 +26,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "MUST include `key`")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "fails closed")
 	addressed := mustMappingValue(t, authored, "addressed_input_pin")
-	assertScalarContains(t, mustMappingValue(t, addressed, "canonical_form"), "{name, event, address}")
+	assertScalarContains(t, mustMappingValue(t, addressed, "canonical_form"), "{name, event, source, address}")
 	assertScalarContains(t, mustYAMLPath(t, addressed, "address_fields", "cardinality"), "one and many")
 
 	connect := mustMappingValue(t, authored, "parent_connect")
@@ -221,8 +221,9 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 
 	checks := mustYAMLPath(t, root, "engine", "boot_verification", "checks")
 	inputPinWiring := mustSequenceMappingByScalarField(t, checks, "id", "input_pin_wiring")
-	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "parent package.yaml connect entries")
-	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "safe same-name sibling")
+	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "ResolveFlowInputProducer")
+	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "parent connect")
+	assertScalarContains(t, mustMappingValue(t, inputPinWiring, "trigger"), "unique same-name sibling output-pin inference")
 
 	pinTargetResolution := mustSequenceMappingByScalarField(t, checks, "id", "pin_target_resolution")
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "agent emit_events")

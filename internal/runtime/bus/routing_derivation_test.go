@@ -429,7 +429,7 @@ func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInst
 	}
 }
 
-func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
+func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -468,19 +468,18 @@ func TestDeriveRouteTable_InputPinsAutoWireFromProducerOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("producer/scan.requested")
-	if len(got) != 1 || got[0].ID != "scan-orchestrator" {
-		t.Fatalf("Resolve(producer/scan.requested) = %#v, want scan-orchestrator", got)
+	if got := rt.Resolve("producer/scan.requested"); len(got) != 0 {
+		t.Fatalf("Resolve(producer/scan.requested) = %#v, want none for retired sibling auto-wire", got)
 	}
 	if got := rt.Resolve("scan.requested"); len(got) != 0 {
 		t.Fatalf("Resolve(scan.requested) = %#v, want none", got)
 	}
-	if got := rt.Resolve("discovery/scan.requested"); len(got) != 0 {
-		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want none", got)
+	if got := rt.Resolve("discovery/scan.requested"); len(got) != 1 || got[0].ID != "scan-orchestrator" {
+		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want scan-orchestrator local input route", got)
 	}
 }
 
-func TestDeriveRouteTable_HandlerOnlyInputPinsAutoWireFromProducerOutput(t *testing.T) {
+func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -528,9 +527,12 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsAutoWireFromProducerOutput(t *test
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("producer/scan.requested")
+	if got := rt.Resolve("producer/scan.requested"); len(got) != 0 {
+		t.Fatalf("Resolve(producer/scan.requested) = %#v, want none for retired sibling auto-wire", got)
+	}
+	got := rt.Resolve("consumer/scan.requested")
 	if len(got) != 1 || got[0].ID != "consumer-node" {
-		t.Fatalf("Resolve(producer/scan.requested) = %#v, want consumer-node", got)
+		t.Fatalf("Resolve(consumer/scan.requested) = %#v, want consumer-node local input route", got)
 	}
 }
 

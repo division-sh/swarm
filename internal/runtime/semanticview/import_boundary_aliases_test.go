@@ -15,6 +15,10 @@ func TestImportBoundaryPinAliasesResolveInputAndOutputBindings(t *testing.T) {
 	if got, want := resolution.Patterns, []string{"parent.lead_captured"}; len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("ResolveFlowInputAutoWire patterns = %#v, want %#v", got, want)
 	}
+	proof := runtimecontracts.FlowInputProducerResolution{Evidence: resolution.Evidence}
+	if !proof.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
+		t.Fatalf("ResolveFlowInputAutoWire evidence = %#v, want parent connect", resolution.Evidence)
+	}
 	if !ImportBoundaryInputAliasRequired(source, "worker", "work.requested") {
 		t.Fatal("expected work.requested to require import-boundary input alias")
 	}
