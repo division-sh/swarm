@@ -234,6 +234,81 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 	}
 }
 
+func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": {
+			Category:    "provider_connector",
+			Description: "send Telegram messages",
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+			Credentials: []string{"telegram_bot_token"},
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type:     "object",
+				Required: []string{"chat_id", "text"},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"chat_id": {Type: "string"},
+					"text":    {Type: "string"},
+				},
+			},
+			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+			HTTP: &runtimecontracts.HTTPToolSpec{
+				Method: "POST",
+				URL:    "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage",
+				Body: map[string]any{
+					"chat_id": "{{input.chat_id}}",
+					"text":    "{{input.text}}",
+				},
+			},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"responder": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"inbound.telegram": {
+					Activity: runtimecontracts.ActivitySpec{
+						Tool: "telegram.send_message",
+						Input: map[string]runtimecontracts.ExpressionValue{
+							"chat_id": runtimecontracts.CELExpression("payload.payload.message.chat.id"),
+							"text":    runtimecontracts.CELExpression(`"hello"`),
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Telegram connector admitted", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsupportedShape(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": {
+			Category:    "provider_connector",
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassReadOnly),
+			HTTP:        &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider connector validation failed") || !strings.Contains(err.Error(), "effect_class must be non_idempotent_write") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want provider connector fail-closed", err)
+	}
+}
+
 func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClosed(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{

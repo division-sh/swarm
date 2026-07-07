@@ -6330,6 +6330,30 @@ tool_model:
       \ Domain to check (e.g., example.com)\n  http:\n    method: GET\n    url: \"https://api.domainr.com/v2/status?domain={{input.domain}}\"\
       \n    headers:\n      Authorization: \"Bearer {{credentials.domainr_api_key}}\"\n  response_mapping:\n    available:\
       \ \"{{response.body.status[0].summary}}\"\n  credentials:\n    - domainr_api_key"
+  provider_connector_tools:
+    description: >
+      Stage 1 flow-local outbound provider connectors are authored HTTP tools in tools.yaml, marked with
+      `category: provider_connector`, and executed only through handler `activity` requests. The category is a readback and
+      validation profile, not a new runtime dispatcher: dispatch remains owned by the HTTP activity executor and
+      non-idempotent writes remain owned by `activity_attempts`.
+    canonical_owners:
+      declaration: "tools.yaml ToolSchemaEntry with `category: provider_connector`."
+      execution: "handler `activity` lowering to `platform.activity_requested`."
+      non_idempotent_journal: "`activity_attempts`."
+      credentials: "static credential store keys listed under tool `credentials`."
+      readback: "local preflight/doctor provider connector CAN/CANNOT/BOUND/UNBOUND findings."
+      display: "first CAN action label is derived from the authored tool `description`; if absent, it falls back to normalized `<action> via <Provider>`."
+    stage_1_profile:
+      required:
+      - "tool id MUST use `<provider>.<action>` form."
+      - "`handler_type` MUST resolve to `http` and include an `http` block with explicit `method` and `url`."
+      - "`effect_class` MUST be `non_idempotent_write`."
+      - "at least one static credential key MUST be declared under `credentials`."
+      forbidden:
+      - "`managed_credential`; managed OAuth/token lifecycle is a separate owner."
+      - "`response_mapping`; connector response mapping is split until specified."
+      - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
+      - "direct runtime provider adapter code, connector-pack body/envelope execution, or bespoke connector dispatch."
   credential_store:
     description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
       platform provides a typed interface with a layered resolution model.
@@ -6820,6 +6844,8 @@ tool_model:
     required_fields:
       description: string — human-readable description of what the tool does
     common_optional_fields:
+      category: string — optional semantic profile marker. `provider_connector` means the tool must satisfy
+        tool_model.provider_connector_tools.
       handler_type: string — platform_builtin | mcp | http. Default http.
       effect_class: string — required when the tool is callable from a handler activity. Executable Stage 1 values are
         read_only and non_idempotent_write on the authored HTTP activity_attempts journal path. idempotent_write is reserved
