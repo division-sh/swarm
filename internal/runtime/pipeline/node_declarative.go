@@ -391,10 +391,10 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		Handler:         handler,
 		State:           stateSnapshot,
 	})
+	logComputeModuleReplayEvidence(ctx, e.coordinator.bus, e.nodeID, evt, result.ComputeModuleTraces)
 	if err != nil {
 		return nil, err
 	}
-	logComputeModuleReplayEvidence(ctx, e.coordinator.bus, e.nodeID, evt, result.ComputeModuleTraces)
 	e.coordinator.recordInterceptedEmitDeadLetters(ctx, evt, e.nodeID, &handlerExecutionOutcome{
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
 	})
