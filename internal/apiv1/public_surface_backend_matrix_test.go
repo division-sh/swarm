@@ -62,12 +62,13 @@ type publicSurfaceMatrixRow struct {
 }
 
 type publicSurfaceProofRef struct {
-	Kind      string `yaml:"kind"`
-	Name      string `yaml:"name,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	Issue     int    `yaml:"issue,omitempty"`
-	Watchlist string `yaml:"watchlist,omitempty"`
-	Command   string `yaml:"command,omitempty"`
+	Kind      string   `yaml:"kind"`
+	Name      string   `yaml:"name,omitempty"`
+	Path      string   `yaml:"path,omitempty"`
+	Issue     int      `yaml:"issue,omitempty"`
+	Watchlist string   `yaml:"watchlist,omitempty"`
+	Command   string   `yaml:"command,omitempty"`
+	Backends  []string `yaml:"backends,omitempty"`
 }
 
 type publicSurfaceMutatingAPIParityEntry struct {
@@ -505,10 +506,21 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
 				entry.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "go_test", Name: "TestOpenRPCReadOnlyHTTPRuntimeProbes"},
+					{Kind: "go_test", Name: "TestOpenRPCReadOnlyHTTPRuntimeProbes", Backends: []string{"default_sqlite", "explicit_postgres"}},
 				}
 			},
-			want: "operator-read ledger method agent.list dual_backend_api_proof cannot rely only on adjacent fake-store/protocol probes",
+			want: "operator-read ledger method agent.list dual_backend_api_proof missing default_sqlite backend-scoped selected API proof_ref",
+		},
+		{
+			name: "operator-read api ledger rejects missing postgres-scoped dual proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestSQLiteAgentConversationOwnerBacksSupportedAPISurface", Backends: []string{"default_sqlite"}},
+					{Kind: "go_test", Name: "TestOperatorAgentConversationHandlersExposeReadOwner"},
+				}
+			},
+			want: "operator-read ledger method agent.list dual_backend_api_proof missing explicit_postgres backend-scoped selected API proof_ref",
 		},
 		{
 			name: "operator-read api ledger rejects one backend dual proof",
@@ -1015,8 +1027,10 @@ func validatePublicSurfaceOperatorReadLedgerDualProof(label string, entry public
 	if !publicSurfaceSameStringSet(entry.Backends, []string{"default_sqlite", "explicit_postgres"}) {
 		problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof backends = %v, want [default_sqlite explicit_postgres]", label, publicSurfaceSortedStrings(entry.Backends)))
 	}
-	if !publicSurfaceOperatorReadLedgerHasSelectedBackendProof(entry.ProofRefs) {
-		problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof cannot rely only on adjacent fake-store/protocol probes", label))
+	for _, backend := range []string{"default_sqlite", "explicit_postgres"} {
+		if !publicSurfaceOperatorReadLedgerHasSelectedBackendProof(entry.ProofRefs, backend) {
+			problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof missing %s backend-scoped selected API proof_ref", label, backend))
+		}
 	}
 	return problems
 }
@@ -1030,9 +1044,12 @@ func publicSurfaceOperatorReadLedgerHasGoTestProof(refs []publicSurfaceProofRef)
 	return false
 }
 
-func publicSurfaceOperatorReadLedgerHasSelectedBackendProof(refs []publicSurfaceProofRef) bool {
+func publicSurfaceOperatorReadLedgerHasSelectedBackendProof(refs []publicSurfaceProofRef, backend string) bool {
 	for _, ref := range refs {
 		if ref.Kind != "go_test" {
+			continue
+		}
+		if !publicSurfaceHasValue(ref.Backends, backend) {
 			continue
 		}
 		switch ref.Name {
@@ -1052,6 +1069,11 @@ func validatePublicSurfaceMutatingLedgerProofRefs(root, label string, refs []pub
 		if _, ok := allowedPublicSurfaceProofKinds()[kind]; !ok {
 			problems = append(problems, fmt.Sprintf("%s proof_ref kind %q is not allowed", label, kind))
 			continue
+		}
+		for _, backend := range ref.Backends {
+			if backend != "default_sqlite" && backend != "explicit_postgres" {
+				problems = append(problems, fmt.Sprintf("%s proof_ref backend %q is not allowed", label, backend))
+			}
 		}
 		switch kind {
 		case "go_test":
