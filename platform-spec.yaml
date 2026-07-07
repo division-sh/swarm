@@ -11939,9 +11939,9 @@ configuration_source_authority:
             claude_cli.command: elevated
             claude_cli.timeout: project_safe
             claude_cli.output_format: project_safe
-            claude_cli.retries: project_safe
+            claude_cli.retries: split_unsupported
             claude_cli.no_session_persistence: split_unsupported
-            claude_cli.use_tmux: project_safe
+            claude_cli.use_tmux: split_unsupported
             openai_compatible.base_url: elevated
             openai_compatible.default_model: split_unsupported
             openai_compatible.low_cost_model: split_unsupported
@@ -11952,6 +11952,11 @@ configuration_source_authority:
             `llm.openai_compatible.default_model`, and `llm.openai_compatible.low_cost_model`
             are retired model-selection inputs. Unified config migration MUST keep rejecting them with guidance to use
             `llm.models`; this spec does not re-admit them as accepted project-safe keys.
+          inert_claude_cli_controls: >
+            `llm.claude_cli.retries`, `llm.claude_cli.use_tmux`, and
+            `llm.claude_cli.no_session_persistence` are tracked by #1803 as inert or unsupported Claude CLI config
+            surfaces. Unified config migration MUST NOT accept them as ordinary supported config keys unless a later
+            gate deliberately promotes a real production runtime owner.
         provider_triggers:
           trust: project_contained_path_or_elevated
           keys:
@@ -12075,6 +12080,7 @@ configuration_source_authority:
       provider_triggers_packs_external_dirs: consumed_by_unified_owner
       budget_human_tasks_inline_extension: consumed_by_unified_owner_code_migration_split
       llm_retired_model_selection_keys: split_unsupported_retired_use_llm.models
+      llm_claude_cli_inert_controls: split_unsupported_tracked_by_1803
       sharding_inline_extension: split_unsupported_retired
       context_descriptors: different_semantic_owner_local_target_context_registry
       token_and_secret_material: different_semantic_owner_secret_or_token_file_reference_only
@@ -12091,6 +12097,7 @@ configuration_source_authority:
       superseded_by: configuration_source_authority.unified_swarm_config serve section
     split_siblings:
     - '#1801 unified parser and layered discovery implementation'
+    - '#1803 inert/unsupported Claude CLI config-surface cleanup'
     - '#1600 seeded env-row family migrations'
     - '#1799 paused config-var migration pending this spec lock'
     - examples/docs cleanup for one `swarm.example.yaml`
