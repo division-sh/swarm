@@ -12007,6 +12007,20 @@ configuration_source_authority:
         every accepted or blocked key so `swarm doctor` can explain the effective config.
     old_shape_and_unknown_key_policy:
       unknown_keys: fail_closed_with_key_path_and_source
+      rejection_diagnostics:
+        unknown_key: >
+          Typos or truly unknown keys MUST fail closed with the key path, source path/layer, and nearest-known-key
+          suggestion when available. Message shape: "unknown config key `<path>` in `<source>`; did you mean `<known>`?"
+        trust_tier_rejection: >
+          Keys recognized by the unified schema but forbidden from the source's trust tier MUST fail closed as
+          not-allowed-here, not as unknown. The diagnostic MUST include the key path, source layer, required trust
+          class, and exact remediation such as "move this to .swarm/swarm.yaml, user-global config, explicit --config,
+          or a flag".
+        split_unsupported_key: >
+          Keys classified as `split_unsupported` are recognized but not wired. They MUST fail closed with a distinct
+          not-yet-wired diagnostic that names the key path, owning/split tracker when known, and a current replacement
+          or "no supported replacement" guidance. They MUST NOT be silently ignored and MUST NOT be reported as typos or
+          trust-tier violations.
       flat_cli_shape: >
         Top-level flat CLI keys such as `api_server`, `api_token_file`, `serve_api_listen_addr`, and
         `serve_api_token_file` are old-shape evidence outside their unified sections and must fail closed with
