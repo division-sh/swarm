@@ -503,6 +503,7 @@ seam_families:
       - internal/runtime/manager/runtime_chat_test.go
       - internal/runtime/manager/runtime_reset_test.go
       - internal/runtime/manager/types.go
+      - internal/runtime/pipeline/activity_boring_proof_test.go
       - internal/runtime/pipeline/handler_engine_transaction_test.go
       - internal/runtime/pipeline/internal_subscription_test.go
       - internal/runtime/pipeline/coordinator.go

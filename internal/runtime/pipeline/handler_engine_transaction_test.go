@@ -34,6 +34,7 @@ type recordingPipelineBus struct {
 	outboxIntents []runtimeengine.EmitIntent
 	publishErr    error
 	outboxErr     error
+	runtimeLogErr error
 }
 
 type recordingPipelineDispatcher struct {
@@ -64,7 +65,7 @@ func (b *recordingPipelineBus) LogRuntime(_ context.Context, entry RuntimeLogEnt
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.runtimeLogs = append(b.runtimeLogs, entry)
-	return nil
+	return b.runtimeLogErr
 }
 func (b *recordingPipelineBus) EngineOutbox() runtimeengine.OutboxWriter {
 	return recordingPipelineOutbox{bus: b}

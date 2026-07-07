@@ -100,13 +100,14 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
 		return err
 	} else if ok {
-		return d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
+		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,
 			"effect_class":      string(intent.EffectClass),
 			"result_event_id":   recorded.EventID,
 			"result_event_type": recorded.EventType,
 		})
+		return nil
 	}
 	source := d.coordinator.SemanticSource()
 	if source == nil {
@@ -135,30 +136,26 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		attemptIntent := intent
 		attemptIntent.Attempt = attempt
-		if err := d.logActivityRuntime(ctx, attemptIntent, "attempt_started", map[string]any{
+		d.logActivityRuntime(ctx, attemptIntent, "attempt_started", map[string]any{
 			"activity_id":        attemptIntent.ActivityID,
 			"tool":               attemptIntent.Tool,
 			"effect_class":       string(attemptIntent.EffectClass),
 			"attempt":            attempt,
 			"retry_max_attempts": maxAttempts,
-		}); err != nil {
-			return err
-		}
+		})
 		result, err := d.executeActivityHTTPTool(ctx, client, attemptIntent, tool)
 		if err == nil {
 			return d.publishActivitySuccess(ctx, attemptIntent, result)
 		}
 		lastErr = err
-		if logErr := d.logActivityRuntime(ctx, attemptIntent, "attempt_failed", map[string]any{
+		d.logActivityRuntime(ctx, attemptIntent, "attempt_failed", map[string]any{
 			"activity_id":        attemptIntent.ActivityID,
 			"tool":               attemptIntent.Tool,
 			"effect_class":       string(attemptIntent.EffectClass),
 			"attempt":            attempt,
 			"retry_max_attempts": maxAttempts,
 			"error":              strings.TrimSpace(err.Error()),
-		}); logErr != nil {
-			return logErr
-		}
+		})
 		if attempt < maxAttempts {
 			if err := waitActivityRetryBackoff(ctx, intent.RetryBackoff, attempt); err != nil {
 				return err
@@ -276,16 +273,16 @@ func (d pipelineActivityDispatcher) recordedActivityResult(ctx context.Context, 
 	}
 }
 
-func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, intent runtimeengine.ActivityIntent, action string, detail map[string]any) error {
+func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, intent runtimeengine.ActivityIntent, action string, detail map[string]any) {
 	if d.coordinator == nil || d.coordinator.bus == nil {
-		return nil
+		return
 	}
 	intent = intent.Normalized()
 	if detail == nil {
 		detail = map[string]any{}
 	}
 	detail["request_event_id"] = activityRequestEventID(intent)
-	return d.coordinator.bus.LogRuntime(ctx, RuntimeLogEntry{
+	_ = d.coordinator.bus.LogRuntime(ctx, RuntimeLogEntry{
 		Level:     "info",
 		Component: "activity",
 		Action:    action,
@@ -949,7 +946,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	)
 	if collector, ok := ctx.Value(pipelineEmitCollectorKey{}).(*[]events.Event); ok && collector != nil {
 		*collector = append(*collector, evt)
-		return d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
+		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,
 			"effect_class":      string(intent.EffectClass),
@@ -957,11 +954,12 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 			"result_event_id":   evt.ID(),
 			"result_event_type": string(evt.Type()),
 		})
+		return nil
 	}
 	if err := d.coordinator.bus.Publish(ctx, evt); err != nil {
 		return err
 	}
-	return d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
+	d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 		"activity_id":       intent.ActivityID,
 		"tool":              intent.Tool,
 		"effect_class":      string(intent.EffectClass),
@@ -969,6 +967,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		"result_event_id":   evt.ID(),
 		"result_event_type": string(evt.Type()),
 	})
+	return nil
 }
 
 func (d pipelineActivityDispatcher) publishExistingActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent, rec ActivityAttemptRecord) error {

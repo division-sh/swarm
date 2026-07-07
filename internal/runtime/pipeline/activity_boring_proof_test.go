@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -198,6 +199,38 @@ func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
 			assertActivityBoringRuntimeLogActionCount(t, fixture.bus, "attempt_started", 3)
 			assertActivityBoringRuntimeLogAction(t, fixture.bus, "result_published")
 		})
+	}
+}
+
+func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"title": "Example Source"})
+	}))
+	defer server.Close()
+
+	bus := &recordingPipelineBus{runtimeLogErr: errors.New("runtime log unavailable")}
+	pc := NewPipelineCoordinatorWithOptions(bus, nil, PipelineCoordinatorOptions{
+		Module: staticSemanticWorkflowModule{source: activityBoringSource(server.URL)},
+	})
+	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+	handled, err := pc.handleEventResult(runtimecorrelation.WithRunID(context.Background(), intent.SourceRunID), request.Event)
+	if err != nil {
+		t.Fatalf("handleEventResult with failing runtime log: %v", err)
+	}
+	if !handled {
+		t.Fatal("handleEventResult handled = false, want true")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("server calls = %d, want activity execution despite runtime log failure", got)
+	}
+	if got := bus.publishedCount(); got != 1 {
+		t.Fatalf("published events = %d, want generated result despite runtime log failure", got)
 	}
 }
 
