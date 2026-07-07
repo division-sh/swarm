@@ -22,6 +22,7 @@ import (
 func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
+	tracePrinted := make(chan struct{})
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		expectedToken: apiv1.DefaultLoopbackAPIToken,
 		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
@@ -41,8 +42,12 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 				return map[string]any{"run_id": "run-local", "status": "running"}
 			case "run.get":
 				run := validDiagnosticRunHeader("run-local")
-				run["status"] = "completed"
-				run["ended_at"] = "2026-05-13T10:01:00Z"
+				select {
+				case <-tracePrinted:
+					run["status"] = "completed"
+					run["ended_at"] = "2026-05-13T10:01:00Z"
+				default:
+				}
 				return map[string]any{"run": run}
 			default:
 				t.Fatalf("unexpected method[%d] = %q", callIndex, req.Method)
@@ -74,8 +79,9 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 		return 0
 	}
 
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data", "--platform-spec", "platform.yaml"}, &stdout, &stderr, opts)
+	stdout := &notifyingBuffer{needle: "trace event_id=evt-local", notify: tracePrinted}
+	var stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data", "--platform-spec", "platform.yaml"}, stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
