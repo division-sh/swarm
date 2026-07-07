@@ -14,9 +14,14 @@ import (
 
 const (
 	bundleBuildManifestAPIVersion = "swarm.bundle.build.v1"
+	bundleBuildManifestPath       = "build-manifest.json"
 	bundleBuildStepWasmModules    = "wasm_policy_modules"
 	bundleBuildKindWasm           = "wasm"
 )
+
+var bundleBuildReservedArtifactPaths = map[string]string{
+	bundleBuildManifestPath: "build manifest",
+}
 
 type BundleBuildRequest struct {
 	RepoRoot         string
@@ -196,7 +201,7 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 		Modules:         modules,
 		Inputs:          inputs,
 	}
-	manifestPath := filepath.Join(tmp, "build-manifest.json")
+	manifestPath := filepath.Join(tmp, bundleBuildManifestPath)
 	if err := writeDeterministicJSONFile(manifestPath, manifest); err != nil {
 		return BundleBuildReport{}, fmt.Errorf("write build manifest: %w", err)
 	}
@@ -218,7 +223,7 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 		return BundleBuildReport{}, fmt.Errorf("move bundle build output %s: %w", target, err)
 	}
 	cleanupTmp = false
-	finalManifestPath := filepath.Join(target, "build-manifest.json")
+	finalManifestPath := filepath.Join(target, bundleBuildManifestPath)
 	return BundleBuildReport{
 		APIVersion:      bundleBuildManifestAPIVersion,
 		Status:          "passed",
@@ -288,6 +293,9 @@ func bundleBuildInputs(entries []bundleHashEntry) ([]BundleBuildInput, error) {
 		if !ok {
 			return nil, fmt.Errorf("bundle build input %q is not under bundle/", entry.Label)
 		}
+		if err := validateBundleBuildReservedArtifactPath("bundle build input", rel); err != nil {
+			return nil, err
+		}
 		info, err := os.Stat(entry.Path)
 		if err != nil {
 			return nil, fmt.Errorf("stat bundle build input %s: %w", rel, err)
@@ -311,6 +319,9 @@ func materializeBundleInputs(entries []bundleHashEntry, outputDir string) error 
 		if !ok {
 			return fmt.Errorf("bundle build input %q is not under bundle/", entry.Label)
 		}
+		if err := validateBundleBuildReservedArtifactPath("bundle build input", rel); err != nil {
+			return err
+		}
 		dst := filepath.Join(outputDir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("create materialized input dir %s: %w", filepath.Dir(dst), err)
@@ -331,6 +342,9 @@ func materializeBundleSourceInputs(contractsRoot string, modules []BundleBuildMo
 		sourcePath := strings.TrimSpace(module.SourcePath)
 		if sourcePath == "" {
 			continue
+		}
+		if err := validateBundleBuildReservedArtifactPath("policy module source_path", sourcePath); err != nil {
+			return err
 		}
 		src := filepath.Join(contractsRoot, filepath.FromSlash(sourcePath))
 		dst := filepath.Join(outputDir, filepath.FromSlash(sourcePath))
@@ -364,6 +378,9 @@ func collectBundleBuildModules(bundle *WorkflowContractBundle) ([]BundleBuildMod
 			relPath, err := contractsRootRelativePath(bundle.Paths.ContractsRoot, path)
 			if err != nil {
 				return nil, fmt.Errorf("policy module %s path: %w", moduleID, err)
+			}
+			if err := validateBundleBuildReservedArtifactPath(fmt.Sprintf("policy module %s path", moduleID), relPath); err != nil {
+				return nil, err
 			}
 			sourcePath := strings.TrimSpace(module.SourcePath)
 			sourceHash := strings.TrimSpace(module.SourceHash)
@@ -419,6 +436,9 @@ func verifyPolicyModuleSourceHash(bundle *WorkflowContractBundle, moduleID strin
 	}
 	rel, err := contractsRootRelativePath(bundle.Paths.ContractsRoot, path)
 	if err != nil {
+		return "", "", err
+	}
+	if err := validateBundleBuildReservedArtifactPath(fmt.Sprintf("policy module %s source_path", moduleID), rel); err != nil {
 		return "", "", err
 	}
 	return rel, sourceHash, nil
@@ -497,6 +517,17 @@ func writeDeterministicJSONFile(path string, value any) error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o644)
+}
+
+func validateBundleBuildReservedArtifactPath(label, rel string) error {
+	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(rel))))
+	if clean == "." || clean == "" {
+		return nil
+	}
+	if artifact, reserved := bundleBuildReservedArtifactPaths[clean]; reserved {
+		return fmt.Errorf("%s %q collides with generated bundle build artifact %q", label, rel, artifact)
+	}
+	return nil
 }
 
 func validateBundleBuildOutputOutsideRecursiveInputs(bundle *WorkflowContractBundle, outputRoot, target string) error {

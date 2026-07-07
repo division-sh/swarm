@@ -114,6 +114,27 @@ func TestBuildBundleMaterializationFailsClosedForSourceHashDrift(t *testing.T) {
 	}
 }
 
+func TestBuildBundleMaterializationRejectsSourceProofReservedArtifactCollision(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writeBundleBuildContractsDir(t)
+	sourceBytes := []byte("declared source proof that must not be overwritten\n")
+	writeBundleHashBytes(t, filepath.Join(root, bundleBuildManifestPath), sourceBytes)
+	sum := sha256.Sum256(sourceBytes)
+	policy := bundleBuildPolicyYAML(t, root, "sha256:"+hex.EncodeToString(sum[:]))
+	policy = strings.Replace(policy, "source_path: src/structured_renderer.rs", "source_path: "+bundleBuildManifestPath, 1)
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), policy)
+
+	_, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: DefaultPlatformSpecFile(repo),
+		OutputRoot:       filepath.Join(t.TempDir(), "build"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "collides with generated bundle build artifact") {
+		t.Fatalf("BuildBundleMaterialization error = %v, want reserved artifact collision", err)
+	}
+}
+
 func TestBuildBundleMaterializationFailsClosedBeforeRuntimeForModuleDrift(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	platform := DefaultPlatformSpecFile(repo)
