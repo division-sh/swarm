@@ -109,6 +109,11 @@ type publicSurfaceValidationContext struct {
 	servedScenarios        map[string]servedparity.Scenario
 }
 
+type publicSurfaceSelectedOperatorReadAPIProof struct {
+	Methods  []string
+	Backends []string
+}
+
 type publicSurfaceAPIMethodInfo struct {
 	Deprecated  bool
 	Description string
@@ -521,6 +526,17 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				}
 			},
 			want: "operator-read ledger method agent.list dual_backend_api_proof missing explicit_postgres backend-scoped selected API proof_ref",
+		},
+		{
+			name: "operator-read api ledger rejects backend-labeled store-only dual proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "runtime.logs")
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability", Backends: []string{"default_sqlite"}},
+					{Kind: "go_test", Name: "TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage", Backends: []string{"explicit_postgres"}},
+				}
+			},
+			want: "operator-read ledger method runtime.logs proof_ref TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability scoped to default_sqlite is not a registered selected API proof for method runtime.logs",
 		},
 		{
 			name: "operator-read api ledger rejects one backend dual proof",
@@ -1028,8 +1044,18 @@ func validatePublicSurfaceOperatorReadLedgerDualProof(label string, entry public
 		problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof backends = %v, want [default_sqlite explicit_postgres]", label, publicSurfaceSortedStrings(entry.Backends)))
 	}
 	for _, backend := range []string{"default_sqlite", "explicit_postgres"} {
-		if !publicSurfaceOperatorReadLedgerHasSelectedBackendProof(entry.ProofRefs, backend) {
+		if !publicSurfaceOperatorReadLedgerHasSelectedBackendProof(entry.ProofRefs, entry.Method, backend) {
 			problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof missing %s backend-scoped selected API proof_ref", label, backend))
+		}
+	}
+	for _, ref := range entry.ProofRefs {
+		if ref.Kind != "go_test" || len(ref.Backends) == 0 {
+			continue
+		}
+		for _, backend := range ref.Backends {
+			if !publicSurfaceOperatorReadProofRefCoversMethodBackend(ref, entry.Method, backend) {
+				problems = append(problems, fmt.Sprintf("%s proof_ref %s scoped to %s is not a registered selected API proof for method %s", label, ref.Name, backend, entry.Method))
+			}
 		}
 	}
 	return problems
@@ -1044,22 +1070,129 @@ func publicSurfaceOperatorReadLedgerHasGoTestProof(refs []publicSurfaceProofRef)
 	return false
 }
 
-func publicSurfaceOperatorReadLedgerHasSelectedBackendProof(refs []publicSurfaceProofRef, backend string) bool {
+func publicSurfaceOperatorReadLedgerHasSelectedBackendProof(refs []publicSurfaceProofRef, method, backend string) bool {
 	for _, ref := range refs {
 		if ref.Kind != "go_test" {
 			continue
 		}
-		if !publicSurfaceHasValue(ref.Backends, backend) {
-			continue
-		}
-		switch ref.Name {
-		case "TestOpenRPCReadOnlyHTTPRuntimeProbes", "TestOpenRPCWebSocketRuntimeProbes":
-			continue
-		default:
+		if publicSurfaceOperatorReadProofRefCoversMethodBackend(ref, method, backend) {
 			return true
 		}
 	}
 	return false
+}
+
+func publicSurfaceOperatorReadProofRefCoversMethodBackend(ref publicSurfaceProofRef, method, backend string) bool {
+	if ref.Kind != "go_test" || !publicSurfaceHasValue(ref.Backends, backend) {
+		return false
+	}
+	proof, ok := publicSurfaceSelectedOperatorReadAPIProofs()[strings.TrimSpace(ref.Name)]
+	if !ok {
+		return false
+	}
+	return publicSurfaceHasValue(proof.Backends, backend) && publicSurfaceHasValue(proof.Methods, method)
+}
+
+func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelectedOperatorReadAPIProof {
+	return map[string]publicSurfaceSelectedOperatorReadAPIProof{
+		"TestSQLiteAgentConversationOwnerBacksSupportedAPISurface": {
+			Backends: []string{"default_sqlite"},
+			Methods: []string{
+				"agent.delivery_diagnostics",
+				"agent.diagnose",
+				"agent.get",
+				"agent.list",
+				"conversation.current_for_agent",
+				"conversation.get",
+				"conversation.get_turn",
+				"conversation.list",
+			},
+		},
+		"TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOwner": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"agent.delivery_diagnostics"},
+		},
+		"TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"agent.delivery_lifecycle"},
+		},
+		"TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"agent.delivery_lifecycle"},
+		},
+		"TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"agent.diagnose"},
+		},
+		"TestOperatorAgentReadSurfaceLoadAgentProjectsSessionAndTurnRefs": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"agent.get", "conversation.current_for_agent", "conversation.get", "conversation.get_turn"},
+		},
+		"TestOperatorAgentReadSurfaceListAgentsDoesNotDeriveStatusFromActiveLease": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"agent.list", "conversation.list"},
+		},
+		"TestSQLiteAgentUsageOwnerBacksSupportedAPISurface": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"agent.usage"},
+		},
+		"TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"agent.usage"},
+		},
+		"TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"bundle.agents", "bundle.get", "bundle.list"},
+		},
+		"TestBundleCatalogReadSurfaceListGetAgentsAndCursor": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"bundle.agents", "bundle.get", "bundle.list"},
+		},
+		"TestOperatorEntityHandlersServeContractEntityTypesFromSQLite": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"entity.aggregate", "entity.get", "entity.list"},
+		},
+		"TestOperatorEntityHandlersServeContractEntityTypesFromPostgres": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"entity.aggregate", "entity.get", "entity.list"},
+		},
+		"TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"event.get", "event.list"},
+		},
+		"TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"event.get", "event.list"},
+		},
+		"TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"health.check"},
+		},
+		"TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"health.check"},
+		},
+		"TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"mailbox.get", "mailbox.list"},
+		},
+		"TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"run.diagnose", "run.get", "run.list"},
+		},
+		"TestRunAPIReadSurface_LoadAndListRunHeaders": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"run.diagnose", "run.get", "run.list"},
+		},
+		"TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces": {
+			Backends: []string{"default_sqlite"},
+			Methods:  []string{"run.trace", "runtime.incidents", "runtime.logs"},
+		},
+		"TestPostgresObservabilityOwnerBacksSupportedAPISurfaces": {
+			Backends: []string{"explicit_postgres"},
+			Methods:  []string{"run.trace", "runtime.incidents", "runtime.logs"},
+		},
+	}
 }
 
 func validatePublicSurfaceMutatingLedgerProofRefs(root, label string, refs []publicSurfaceProofRef, ctx publicSurfaceValidationContext, activeTrackers map[string]struct{}) []string {

@@ -395,8 +395,8 @@ operator_read_api_parity_ledger:
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, backends: [default_sqlite]}
-      - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, backends: [explicit_postgres]}
+      - {kind: go_test, name: TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces, backends: [default_sqlite]}
+      - {kind: go_test, name: TestPostgresObservabilityOwnerBacksSupportedAPISurfaces, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: runtime.identity
     classification: different_semantic_concept_with_proof
@@ -409,15 +409,15 @@ operator_read_api_parity_ledger:
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, backends: [default_sqlite]}
-      - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, backends: [explicit_postgres]}
+      - {kind: go_test, name: TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces, backends: [default_sqlite]}
+      - {kind: go_test, name: TestPostgresObservabilityOwnerBacksSupportedAPISurfaces, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: runtime.logs
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
-      - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, backends: [default_sqlite]}
-      - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, backends: [explicit_postgres]}
+      - {kind: go_test, name: TestSQLiteObservabilityOwnerBacksSupportedAPISurfaces, backends: [default_sqlite]}
+      - {kind: go_test, name: TestPostgresObservabilityOwnerBacksSupportedAPISurfaces, backends: [explicit_postgres]}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: runtime.subscribe_logs
     classification: different_semantic_concept_with_proof
