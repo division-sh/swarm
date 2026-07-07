@@ -3828,7 +3828,7 @@ engine:
     backend_ids:
       postgres:
         status: active_supported_runtime_backend
-        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments through flag, runtime config, or deprecated environment fallback.
+        meaning: External Postgres runtime store. Postgres remains explicitly selectable for production and existing operator deployments through flag or typed runtime/unified config only.
       sqlite:
         status: active_local_dev_default_runtime_backend
         meaning: >
@@ -3841,28 +3841,22 @@ engine:
       source_order:
       - flag
       - runtime_config
-      - deprecated_environment
       - rollout_default
       flag:
         command: swarm serve
         name: --store <backend>
       runtime_config:
         backend_key: store.backend
-      deprecated_environment:
-        backend: SWARM_STORE_BACKEND
-        status: deprecated_transition_fallback
-        rule: Environment fallback remains visible for transition only and MUST NOT outrank typed runtime config.
       rollout_default:
         active_no_selection_default: sqlite
         postgres_opt_in_backend: postgres
         rule: >
           No-selection local/dev runtime startup resolves to SQLite. Postgres remains explicitly selectable through
-          --store postgres, store.backend=postgres, or deprecated SWARM_STORE_BACKEND=postgres fallback and remains the
-          production/external backend.
+          --store postgres or store.backend=postgres and remains the production/external backend. SWARM_STORE_BACKEND is
+          a retired environment source and MUST NOT affect backend selection.
     sqlite_path:
       canonical_owner: internal/store/backendselection SQLite path resolver
       runtime_config_key: store.sqlite.path
-      deprecated_environment: SWARM_SQLITE_PATH
       default_authority: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
       project_default_path: .swarm/stores/dev.db
       no_project_default_path: <swarm-dir>/stores/default/dev.db
@@ -3870,8 +3864,8 @@ engine:
       legacy_repo_relative_path: .swarm/dev.db
       source_order:
       - runtime_config
-      - deprecated_environment
       - local_runtime_state_default
+      retired_environment: SWARM_SQLITE_PATH
       lifecycle:
       - Project-local startup whose canonical project root matches the active repo root uses `<project-root>/.swarm/stores/dev.db`.
       - Startup with no project uses `<swarm-dir>/stores/default/dev.db`.
@@ -3881,7 +3875,7 @@ engine:
       - The SQLite file is persistent until the operator deletes it.
       - The runtime must never silently replace the local/dev SQLite store with an in-memory database.
     postgres_connection_details:
-      env_vars:
+      retired_env_vars:
       - SWARM_DB_HOST
       - SWARM_DB_PORT
       - SWARM_DB_NAME
@@ -3894,10 +3888,10 @@ engine:
       - PGUSER
       config_prefix: database.*
       rule: >
-        Existing non-secret SWARM_DB_* / PG* variables and database.* config keys are Postgres connection details after the canonical
-        selector resolves to postgres. They are not generic backend selectors and must not imply backend selection by
-        presence alone. Non-secret connection details are owned by typed runtime config, with environment variables retained
-        only as deprecated transition fallback or deliberate external Postgres compatibility.
+        Non-secret database.* config keys are Postgres connection details after the canonical selector resolves to
+        postgres. They are not generic backend selectors and must not imply backend selection by presence alone.
+        Non-secret connection details are owned by typed runtime/unified config and built-in local defaults only.
+        SWARM_DB_* and implicit PG* variables are retired ambient sources and MUST NOT be read as fallback authority.
     postgres_password_source_authority:
       owner: typed database password resolver consumed before Postgres DSN construction
       config_fields:
@@ -11411,37 +11405,37 @@ environment_source_authority:
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
       migration: retired
     - name: SWARM_STORE_BACKEND
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection
-      migration: '#1637 store.backend'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SQLITE_PATH
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.sqlite_path
-      migration: '#1637 store.sqlite.path'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_HOST
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
-      migration: '#1637 database.host'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_PORT
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
-      migration: '#1637 database.port'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_NAME
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
-      migration: '#1637 database.name'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_USER
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
-      migration: '#1637 database.user'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_SSLMODE
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
-      migration: '#1637 database.sslmode'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_POOL_SIZE
-      category: seeded_legacy
-      owner: platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details
-      migration: '#1637 database.pool_size'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DB_PASSWORD
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
@@ -14830,8 +14824,8 @@ cli_specification:
       store_resolution:
         sqlite_source_order:
         - store.sqlite.path
-        - SWARM_SQLITE_PATH
         - project_default_or_swarm_dir_default
+        retired_environment: SWARM_SQLITE_PATH
         project_default: <project-root>/.swarm/stores/dev.db
         no_project_default: <swarm-dir>/stores/default/dev.db
         borrowed_project_default: <swarm-dir>/stores/projects/<project-key>/dev.db

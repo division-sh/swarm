@@ -12,9 +12,6 @@ const (
 	BackendPostgres Backend = "postgres"
 	BackendSQLite   Backend = "sqlite"
 
-	EnvStoreBackend = "SWARM_STORE_BACKEND"
-	EnvSQLitePath   = "SWARM_SQLITE_PATH"
-
 	ConfigStoreBackendKey = "store.backend"
 	ConfigSQLitePathKey   = "store.sqlite.path"
 
@@ -25,7 +22,6 @@ type Source string
 
 const (
 	SourceFlag            Source = "flag"
-	SourceEnvironment     Source = "environment"
 	SourceRuntimeConfig   Source = "runtime_config"
 	SourceRolloutDefault  Source = "rollout_default"
 	SourceProjectDefault  Source = "project_default"
@@ -38,13 +34,7 @@ type Input struct {
 	FlagBackend    string
 	FlagBackendSet bool
 
-	EnvBackend    string
-	EnvBackendSet bool
-
 	ConfigBackend string
-
-	EnvSQLitePath    string
-	EnvSQLitePathSet bool
 
 	ConfigSQLitePath string
 
@@ -96,9 +86,6 @@ func resolveBackend(in Input) (Backend, Source, error) {
 	case strings.TrimSpace(in.ConfigBackend) != "":
 		backend, err := parseBackend(in.ConfigBackend, SourceRuntimeConfig)
 		return backend, SourceRuntimeConfig, err
-	case in.EnvBackendSet:
-		backend, err := parseBackend(in.EnvBackend, SourceEnvironment)
-		return backend, SourceEnvironment, err
 	default:
 		return ActiveDefaultBackend(), SourceRolloutDefault, nil
 	}
@@ -124,9 +111,6 @@ func resolveSQLitePath(in Input) (string, Source, error) {
 	case strings.TrimSpace(in.ConfigSQLitePath) != "":
 		path, err := normalizeSQLitePath(in.RepoRoot, in.ConfigSQLitePath, SourceRuntimeConfig)
 		return path, SourceRuntimeConfig, err
-	case in.EnvSQLitePathSet:
-		path, err := normalizeSQLitePath(in.RepoRoot, in.EnvSQLitePath, SourceEnvironment)
-		return path, SourceEnvironment, err
 	default:
 		source := in.DefaultSQLitePathSource
 		if source == "" {

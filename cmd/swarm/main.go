@@ -2538,12 +2538,12 @@ func defaultRuntimeConfig() (*config.Config, error) {
 			RecoveryOnStartup: false,
 		},
 		Database: config.DatabaseConfig{
-			Host:     envOrDefault("SWARM_DB_HOST", envOrDefault("PGHOST", "127.0.0.1")),
-			Port:     envInt("SWARM_DB_PORT", envInt("PGPORT", 5432)),
-			Name:     envOrDefault("SWARM_DB_NAME", envOrDefault("PGDATABASE", "swarm")),
-			User:     envOrDefault("SWARM_DB_USER", envOrDefault("PGUSER", "postgres")),
-			SSLMode:  envOrDefault("SWARM_DB_SSLMODE", "disable"),
-			PoolSize: envInt("SWARM_DB_POOL_SIZE", 5),
+			Host:     "127.0.0.1",
+			Port:     5432,
+			Name:     "swarm",
+			User:     "postgres",
+			SSLMode:  "disable",
+			PoolSize: 5,
 		},
 		LLM: config.LLMConfig{
 			Backend: llmselection.DefaultBackendID(),
@@ -2586,51 +2586,6 @@ func rejectUnsupportedRuntimeControlEnv() error {
 	}
 	sort.Strings(unsupported)
 	return fmt.Errorf("unsupported inert runtime controls configured: %s", strings.Join(unsupported, ", "))
-}
-
-func envOrDefault(key, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		return value
-	}
-	return fallback
-}
-
-func envInt(key string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func envDuration(key string, fallback time.Duration) time.Duration {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	value, err := time.ParseDuration(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func envBool(key string, fallback bool) bool {
-	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
-	switch raw {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	case "":
-		return fallback
-	default:
-		return fallback
-	}
 }
 
 func normalizeContractsRoot(path string) (string, error) {

@@ -149,17 +149,11 @@ func resolveRuntimeStoreSelectionWithDefault(repo string, storeMode string, stor
 	if cfg == nil {
 		return storebackend.Selection{}, fmt.Errorf("runtime config is required")
 	}
-	envBackend, envBackendSet := os.LookupEnv(storebackend.EnvStoreBackend)
-	envSQLitePath, envSQLitePathSet := os.LookupEnv(storebackend.EnvSQLitePath)
 	return storebackend.Resolve(storebackend.Input{
 		RepoRoot:                repo,
 		FlagBackend:             storeMode,
 		FlagBackendSet:          storeModeSet,
-		EnvBackend:              envBackend,
-		EnvBackendSet:           envBackendSet,
 		ConfigBackend:           cfg.Store.Backend,
-		EnvSQLitePath:           envSQLitePath,
-		EnvSQLitePathSet:        envSQLitePathSet,
 		ConfigSQLitePath:        cfg.Store.SQLite.Path,
 		DefaultSQLitePath:       defaultSQLitePath,
 		DefaultSQLitePathSource: defaultSQLiteSource,

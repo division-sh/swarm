@@ -3965,7 +3965,6 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -3982,7 +3981,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 		return stores, err
 	}
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
@@ -4030,7 +4029,6 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeServedEventPublishTargetRouteFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4047,7 +4045,7 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 		return stores, err
 	}
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
@@ -4095,7 +4093,6 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeServedEventPublishActiveLoadFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4115,7 +4112,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 		return stores, err
 	}
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
@@ -4195,7 +4192,6 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeServedDynamicAutoEmitFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	blocked := make(chan servedEventPublishPreHandlerProof, 1)
@@ -4218,7 +4214,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 		hook   runtimepipeline.WorkflowNodeHandlerStartHook
 	)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
@@ -6244,9 +6240,8 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(t *testing.T) {
 	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
 	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
-	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
 	dataDir := t.TempDir()
-	configPath := writeServeRuntimeTestConfig(t)
+	configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"))
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:           configPath,
@@ -6275,10 +6270,9 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 
 func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
-	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db")),
 		ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -6306,10 +6300,9 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
 	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
-	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db")),
 		ContractsPath:        writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -6338,11 +6331,10 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 
 func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) {
 	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
-	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "runtime.db"))
 
 	var out lockedBuffer
 	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db")),
 		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -6443,11 +6435,10 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	requireBundleMatch := !dev
 	noRequireBundleMatch := dev
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		APIListenAddr:        "127.0.0.1:0",
@@ -6476,7 +6467,6 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	rootFile := filepath.Join(t.TempDir(), "artifact-root")
 	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
 		t.Fatalf("write unusable artifact root: %v", err)
@@ -6485,7 +6475,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 
 	var out lockedBuffer
 	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            "sqlite",
@@ -6521,7 +6511,6 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStor
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	artifactRoot := t.TempDir()
 	reposFile := filepath.Join(artifactRoot, "repos")
 	if err := os.WriteFile(reposFile, []byte("not a directory"), 0o644); err != nil {
@@ -6531,7 +6520,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStor
 
 	var out lockedBuffer
 	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            "sqlite",
@@ -6568,7 +6557,6 @@ func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	rootFile := filepath.Join(t.TempDir(), "artifact-root")
 	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
 		t.Fatalf("write unusable artifact root: %v", err)
@@ -6576,7 +6564,7 @@ func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *
 	t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:           writeServeRuntimeTestConfig(t),
+		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            "sqlite",
@@ -6603,10 +6591,9 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath)
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	ctx := context.Background()
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ConfigPath:         writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		APIListenAddr:      "127.0.0.1:0",
@@ -8832,12 +8819,7 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 		env string
 		key string
 	}{
-		{"PGHOST", "host"},
-		{"PGPORT", "port"},
-		{"PGDATABASE", "dbname"},
-		{"PGUSER", "user"},
 		{"PGPASSWORD", "password"},
-		{"SWARM_DB_SSLMODE", "sslmode"},
 	} {
 		if value := strings.TrimSpace(values[item.key]); value != "" {
 			t.Setenv(item.env, value)

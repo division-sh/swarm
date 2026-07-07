@@ -89,7 +89,6 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
-	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "must-not-be-used.db"))
 
 	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), true)
 	var stdout, stderr bytes.Buffer
@@ -493,8 +492,6 @@ func TestDoctorTargetConsumesRuntimeConfigStoreAndData(t *testing.T) {
 	repo := writeDoctorTargetRepo(t)
 	sqlitePath := filepath.Join(t.TempDir(), "configured-dev.db")
 	dataDir := filepath.Join(t.TempDir(), "configured-data")
-	t.Setenv(storebackend.EnvStoreBackend, storebackend.BackendPostgres.String())
-	t.Setenv(storebackend.EnvSQLitePath, filepath.Join(t.TempDir(), "env-dev.db"))
 	configPath := writeDoctorTargetRuntimeConfig(t, `
 store:
   backend: sqlite
