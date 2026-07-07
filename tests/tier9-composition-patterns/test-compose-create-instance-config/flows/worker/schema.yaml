@@ -13,6 +13,9 @@ instance_variables:
   owner: Owner
 pins:
   inputs:
-    events: [task.assign]
+    events:
+      - name: task_assign
+        event: task.assign
+        source: external
   outputs:
     events: [task.done]

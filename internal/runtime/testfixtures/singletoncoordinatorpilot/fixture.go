@@ -84,6 +84,7 @@ pins:
     events:
       - name: lead_observed
         event: lead.observed
+        source: external
   outputs:
     events: []
 `)

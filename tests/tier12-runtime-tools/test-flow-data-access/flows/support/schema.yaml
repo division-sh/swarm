@@ -2,4 +2,7 @@ name: support
 mode: static
 pins:
   inputs:
-    events: [support.requested]
+    events:
+      - name: support_requested
+        event: support.requested
+        source: external
