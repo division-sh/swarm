@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -417,6 +418,65 @@ func TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *testing.T) {
+	ctx := context.Background()
+	runID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	entityID := uuid.NewString()
+	var calls int
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"provider_write": {
+				HandlerType:  "http",
+				EffectClass:  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+				OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+				HTTP:         &runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"},
+			},
+		},
+	})
+	bus := &recordingPipelineBus{}
+	db, store := newSQLiteActivityJournalStore(t, ctx)
+	seedActivityRun(t, db, true, runID)
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module:        staticSemanticWorkflowModule{source: source},
+		WorkflowStore: store,
+	})
+	client := &http.Client{Transport: activityRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if got := req.URL.String(); got != "https://provider.test/write" {
+			t.Fatalf("request URL = %q, want provider URL", got)
+		}
+		return nil, fmt.Errorf("connection reset after dispatch")
+	})}
+	dispatcher := pipelineActivityDispatcher{coordinator: pc, client: client}
+	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
+	intent.RetryMaxAttempts = 3
+	if err := dispatcher.executeActivityIntent(ctx, intent); err != nil {
+		t.Fatalf("executeActivityIntent: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("transport calls = %d, want one post-start dispatch attempt", calls)
+	}
+	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
+		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(bus.publishes[0].Payload(), &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	errText := strings.TrimSpace(asString(payload["error"]))
+	if !strings.Contains(errText, "outcome is uncertain") || !strings.Contains(errText, "connection reset after dispatch") {
+		t.Fatalf("failure error = %q, want uncertain transport outcome", errText)
+	}
+	rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil {
+		t.Fatalf("LoadActivityAttempt: %v", err)
+	}
+	if !ok || rec.Status != ActivityAttemptStatusUncertain {
+		t.Fatalf("journal status = (%v, %q), want uncertain", ok, rec.Status)
+	}
+}
+
 func TestPipelineActivityRequestStartedJournalBlocksProviderRedispatch(t *testing.T) {
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -576,6 +636,12 @@ func testActivityCredentialStore(t *testing.T, key, value string) runtimecredent
 		}
 	}
 	return store
+}
+
+type activityRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f activityRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func newSQLiteActivityJournalStore(t *testing.T, ctx context.Context) (*sql.DB, *WorkflowInstanceStore) {
