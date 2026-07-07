@@ -424,7 +424,11 @@ func TestBundleBuildMaterializesContractsAndJSONReport(t *testing.T) {
 	if module := report.Modules[0]; module.ID != "structured_renderer" || module.Kind != "wasm" || module.Path != "modules/structured_renderer.wasm" || module.SourcePath != "src/structured_renderer.rs" || module.SourceHash == "" {
 		t.Fatalf("report module = %#v", module)
 	}
-	if len(report.Steps) != 1 || report.Steps[0].Name != "wasm_policy_modules" || report.Steps[0].Status != "passed" {
+	if len(report.Steps) != 2 ||
+		report.Steps[0].Name != "wasm_policy_modules" ||
+		report.Steps[0].Status != "passed" ||
+		report.Steps[1].Name != "python_policy_modules" ||
+		report.Steps[1].Status != "passed" {
 		t.Fatalf("report steps = %#v", report.Steps)
 	}
 }

@@ -24,16 +24,18 @@ const (
 type Code string
 
 const (
-	CodeCompile      Code = "compute_module_compile"
-	CodeDigest       Code = "compute_module_digest"
-	CodeImport       Code = "compute_module_import"
-	CodeABI          Code = "compute_module_abi"
-	CodeMemory       Code = "compute_module_memory_limit"
-	CodeFuel         Code = "compute_module_fuel_exhausted"
-	CodeTrap         Code = "compute_module_trap"
-	CodeOutputSize   Code = "compute_module_output_size"
-	CodeOutputBounds Code = "compute_module_output_bounds"
-	CodeReplay       Code = "compute_module_replay_divergence"
+	CodeCompile          Code = "compute_module_compile"
+	CodeDigest           Code = "compute_module_digest"
+	CodeImport           Code = "compute_module_import"
+	CodeABI              Code = "compute_module_abi"
+	CodeMemory           Code = "compute_module_memory_limit"
+	CodeFuel             Code = "compute_module_fuel_exhausted"
+	CodeTrap             Code = "compute_module_trap"
+	CodeOutputSize       Code = "compute_module_output_size"
+	CodeOutputBounds     Code = "compute_module_output_bounds"
+	CodeDeniedCapability Code = "compute_module_denied_capability"
+	CodePythonException  Code = "compute_module_python_exception"
+	CodeReplay           Code = "compute_module_replay_divergence"
 )
 
 type ModuleImport struct {

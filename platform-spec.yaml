@@ -1513,14 +1513,15 @@ policy_validation_contracts:
     and file-backed validation sets are separate gates.
 compute_module_contracts:
   status: merge_bearing_runtime_behavior
-  implementation_slice: '#1669'
+  implementation_slice: '#1669 + #1670 Slice B'
   description: |
-    Flow-local `modules:` declarations inside policy.yaml define precompiled
-    deterministic Wasm compute modules. Policy-sheet `compute_module` value rows
-    instantiate those declarations, map explicit handler context inputs into the
-    module, and bind the validated JSON object result under computed.*. This is
-    the supported PR1 surface for pure algorithmic deterministic work that
-    cannot be represented by lookup, validation, selection, or simple
+    Flow-local `modules:` declarations inside policy.yaml define deterministic
+    compute modules. Policy-sheet `compute_module` value rows instantiate those
+    declarations, map explicit handler context inputs into the module, and bind
+    the validated JSON object result under computed.*. Supported kinds are
+    precompiled zero-import Wasm modules and embedded CPython-WASI Python source
+    modules. This is the supported surface for pure algorithmic deterministic
+    work that cannot be represented by lookup, validation, selection, or simple
     arithmetic/derive rows.
   policy_section:
     location: flow policy.yaml only
@@ -1529,6 +1530,7 @@ compute_module_contracts:
     shape: |
       modules:
         <module_id>:
+          kind: wasm              # optional default for existing declarations
           path: modules/<name>.wasm
           abi: core-json-v1
           entry: compute
@@ -1545,6 +1547,23 @@ compute_module_contracts:
             gas: <positive integer>
             memory_pages: <positive integer>
             output_bytes: <positive integer>
+      modules:
+        <module_id>:
+          kind: python
+          path: modules/<name>.py
+          abi: python-json-v1
+          entry: handle
+          digest: sha256:<64 lowercase hex> # source bytes
+          input_schema:
+            type: object
+            properties: {...}
+          output_schema:
+            type: object
+            properties: {...}
+          limits:
+            gas: <positive integer>         # Python-specific fuel profile
+            memory_pages: <positive integer>
+            output_bytes: <positive integer>
     rules:
     - '`modules:` is a closed typed policy section. It is decoded separately from generic PolicyDocument.Values and MUST NOT
       appear as a generic policy expression object or prompt variable.'
@@ -1553,21 +1572,61 @@ compute_module_contracts:
     - Module IDs are short stable identifiers. A row references a module by short ID, not by filesystem path.
     - Module bytes MUST live inside the owning contracts root and MUST be regular files. Ambient filesystem lookup,
       symlinks, out-of-tree paths, network fetches, and runtime-generated module bytes fail closed.
-    - The declared digest MUST be `sha256:<64 lowercase hex>` and MUST match the bundle-pinned module bytes before
-      execution. Optional source provenance is metadata only in this slice.
+    - >
+      The declared digest MUST be `sha256:<64 lowercase hex>` and MUST match the bundle-pinned module bytes before
+      execution. For `kind: wasm`, the bytes are the `.wasm` module. For `kind: python`, the bytes are the Python source.
+    - >
+      `kind` defaults to `wasm` only for existing declarations that omit it. Unknown kinds fail closed. Compatibility
+      fallback beyond that default is forbidden.
+    - >
+      Optional `source_path`/`source_hash` provenance is valid for Wasm only in this slice. Python source authority is
+      `path` plus `digest`; separate source_path/source_hash would create a second source owner and fails closed.
   abi:
-    name: core-json-v1
-    entrypoint: '`entry` MUST be `compute`.'
-    exports:
-    - '`memory` linear memory export'
-    - '`alloc(i32) -> i32` allocator used by the host to copy canonical JSON input bytes into guest memory'
-    - '`compute(i32, i32) -> i64` entrypoint receiving input pointer/length and returning output pointer/length packed in
-      the high/low 32-bit halves'
-    imports: |
-      Author modules MUST declare zero imports. WASI, filesystem, network, clock,
-      random, process, and other host capabilities are not available. Platform
-      instrumentation used by a future build pipeline is not an author-declared
-      host capability and is outside this slice.
+    wasm:
+      name: core-json-v1
+      entrypoint: '`entry` MUST be `compute`.'
+      exports:
+      - '`memory` linear memory export'
+      - '`alloc(i32) -> i32` allocator used by the host to copy canonical JSON input bytes into guest memory'
+      - '`compute(i32, i32) -> i64` entrypoint receiving input pointer/length and returning output pointer/length packed in
+        the high/low 32-bit halves'
+      imports: |
+        Author Wasm modules MUST declare zero imports. WASI, filesystem,
+        network, clock, random, process, and other host capabilities are not
+        available. Platform instrumentation used by a future build pipeline is
+        not an author-declared host capability and is outside this slice.
+    python:
+      name: python-json-v1
+      entrypoint: '`entry` MUST be `handle`.'
+      callable: 'Author source MUST define `def handle(input): return {...}`.'
+      transport: |
+        The platform harness owns JSON input/output transport. Author code
+        receives a Python dict and must return a JSON-object-compatible dict.
+        Authors do not read stdin, write stdout, or manage generated bindings.
+      embedded_artifact: |
+        The interpreter artifact is CPython-WASI 3.13.14 built with WASI SDK 24,
+        pinned as `brettcannon/cpython-wasi-build` v3.13.14
+        `python-3.13.14-wasi_sdk-24.zip`, digest
+        `sha256:a70a750951302744d84746340b4932b80dabad5b153cc3392bcae114b293c060`.
+        No official python.org prebuilt WASI binary exists; this first slice
+        records the artifact as an unofficial-but-canonical community/core-dev
+        build. Self-building CPython-WASI from source in swarm release CI is a
+        hardening follow-up, not a first-slice prerequisite.
+      snapshot_boundary: |
+        The shared bare-interpreter snapshot is a swarm release artifact, not a
+        `swarm bundle build` output. Release CI may use Wizer/WASI SDK offline
+        to produce an embedded initialized interpreter+harness Wasm artifact.
+        User machines, `swarm bundle build`, `swarm test`, runtime execution,
+        and `bundle register` MUST NOT require external Python, Wizer, WASI SDK,
+        shell tools, package managers, or a local toolchain. Per-module snapshots
+        remain blocked until a promoted in-process snapshot API or embedded
+        Wizer path exists.
+      sandbox: |
+        v1 is stdlib pure-compute only. Host filesystem, network, clock/random,
+        subprocess, threads, third-party packages, generated bindings, and
+        ambient environment access are not supported. The platform sets
+        `PYTHONHASHSEED=0`, does not inherit host env, and frames denied
+        capability and user exceptions as typed deterministic diagnostics.
     deterministic_features: |
       Runtime configuration MUST disable nondeterministic or unapproved features
       including threads, SIMD, memory64, and multi-memory. Deterministic core
@@ -1624,7 +1683,7 @@ compute_module_contracts:
     dead_binding: '`compute_module.into` bindings must be consumed by a supported downstream condition, emit field, activity
       input, fan_out, or expression in the same handler; unconsumed bindings fail boot verification.'
   runtime_execution:
-    owner: internal/runtime/computemodule adapter behind the compute runtime owner
+    owner: internal/runtime/computemodule and internal/runtime/pythonmodule adapters behind the compute runtime owner
     engine_boundary: |
       The Wasm engine is an implementation detail behind an internal adapter.
       The semantic owners are policy.modules, compute_module rows, the ABI
@@ -1637,15 +1696,22 @@ compute_module_contracts:
       Compile/ABI/import rejection, digest mismatch, trap/unreachable, gas/fuel
       exhaustion, memory limit, output-size limit, output bounds, and output
       schema violation are deterministic no-retry failures with typed
-      diagnostics carrying module ID and row ID.
+      diagnostics carrying module ID and row ID. Python denied-capability and
+      framed user-exception failures are the same deterministic no-retry class.
     trace_and_replay: |
       Runtime traces record module ID, row ID, declared digest, engine version,
-      output hash, and fuel/gas consumed. Supported replay re-executes module
-      rows and compares the recorded output hash and fuel/gas consumed against
-      the replay execution. Replay mode is explicit: an empty expected trace set
-      means zero module executions are expected, not normal non-replay execution.
-      Divergence is a typed deterministic replay failure, never silent
-      acceptance.
+      output hash, and fuel/gas consumed. Python traces additionally record
+      interpreter version, interpreter digest, harness ABI, snapshot identity,
+      and source hash. Supported replay re-executes module rows and compares the
+      recorded output hash plus identity fields against replay execution. Wasm
+      replay also compares fuel exactly. Python fuel is retained as evidence but
+      not exact divergence-bearing in this slice because CPython-WASI startup
+      under wasmtime fuel can vary across identical invocations by small
+      implementation-accounting deltas; exact Python fuel divergence detection
+      remains split until the release-time snapshot/gas envelope is stabilized.
+      Replay mode is explicit: an empty expected trace set means zero module
+      executions are expected, not normal non-replay execution. Divergence is a
+      typed deterministic replay failure, never silent acceptance.
   bundle_identity:
     rule: |
       Module bytes referenced by policy.modules are part of the bundle contract
@@ -1654,8 +1720,9 @@ compute_module_contracts:
   static_verification:
     checks:
     - typed policy.modules shape and flow-local placement
-    - module path containment, regular-file loading, Wasm magic, and digest match
-    - supported ABI exports and zero author imports
+    - module path containment, regular-file loading, kind-specific byte/source digest match
+    - supported Wasm ABI exports and zero author imports
+    - supported Python ABI, source syntax/callable validation, embedded runtime identity, and denied capability checks
     - deterministic capability/resource limits
     - object input/output schemas and PR1 float/numeric schema rejection
     - compute_module row module resolution and exact input mapping coverage
@@ -1669,17 +1736,17 @@ compute_module_contracts:
     shared module packs, source compilation, and file-backed module inputs are separate gates.
 bundle_build_materialization:
   status: merge_bearing_build_surface
-  implementation_slice: '#1670 Slice A'
+  implementation_slice: '#1670 Slice A + Slice B'
   command: swarm bundle build [--contracts <path>] [--output <path>] [--report json]
   description: |
     `swarm bundle build` is the public materialization owner for local
-    contract bundles before explicit test/register/runtime consumption. Slice A
-    supports the existing precompiled Wasm `policy.modules` lane only. The
-    command loads and validates the selected contracts root, consumes canonical
-    BundleHash identity, writes a materialized contracts directory, and emits a
-    deterministic build report. It does not compile source, rewrite policy
-    digests, register bundles, execute tests, or introduce Python runtime
-    semantics.
+    contract bundles before explicit test/register/runtime consumption. It
+    supports precompiled Wasm policy modules and embedded CPython-WASI Python
+    source modules. The command loads and validates the selected contracts root,
+    consumes canonical BundleHash identity, writes a materialized contracts
+    directory, and emits a deterministic build report. It does not rewrite
+    policy digests, register bundles, execute tests, or create interpreter
+    snapshots.
   artifact_contract:
     directory: .swarm/build/<bundle-hash> by default, or <output>/<bundle-hash> when --output is provided
     contents:
@@ -1693,7 +1760,7 @@ bundle_build_materialization:
       - bundle_hash
       - platform_version
       - spec_version
-      - modules[] with id, flow_id, kind, path, digest, source_path, and source_hash
+      - modules[] with id, flow_id, kind, path, digest, source_path, source_hash, and Python runtime identity fields when applicable
       - inputs[] with canonical bundle labels, slash-relative paths, content policy, and size
       authority: |
         build-manifest.json is not a semantic owner, source of identity, or
@@ -1719,11 +1786,12 @@ bundle_build_materialization:
       hashed contract content.
   build_steps:
     rule: |
-      The implementation exposes an ordered build-step seam. Slice A registers
-      only the existing Wasm policy.modules validation/materialization lane.
-      Python snapshot, archive packaging, watch mode, scaffolding, and source
-      compilation steps are unregistered and unsupported until separately
-      promoted.
+      The implementation exposes an ordered build-step seam. The supported steps
+      are Wasm policy.modules validation/materialization and Python policy
+      module source/ABI/runtime-identity validation. Python interpreter snapshot
+      production is not a bundle-build step; it is a release artifact. Archive
+      packaging, watch mode, scaffolding, source compilation, and per-module
+      snapshots are unregistered and unsupported until separately promoted.
   drift_validation:
     fail_closed_before_runtime:
     - missing contract inputs or module bytes
@@ -1731,6 +1799,7 @@ bundle_build_materialization:
     - module digest mismatch
     - stale source_hash when source_path/source_hash provenance is declared
     - invalid module ABI, schema, resource limits, or unsupported module shape
+    - invalid Python source syntax, missing callable handle, unsupported Python capability, or embedded runtime identity drift
     - unsupported build-step requirements
     - bundle input, module byte, or source_path proof collisions with reserved generated artifact paths such as build-manifest.json, including ASCII case variants
     - output roots or target directories inside hashed recursive inputs such as prompts/ or flow data/
@@ -1743,8 +1812,8 @@ bundle_build_materialization:
   consumer_boundaries:
   - swarm test --contracts remains an explicit contracts-root consumer and MUST NOT auto-build.
   - swarm bundle register --contracts remains a non-hashing upload packager and MUST NOT auto-build or silently become bundle build.
-  - Archive/register transport, `--watch`, `bundle new`, Python `kind`, CPython-WASI snapshots, generated Python bindings,
-    and source instrumentation are separate gates.
+  - Archive/register transport, `--watch`, `bundle new`, CPython-WASI release-pipeline snapshot production, per-module
+    snapshots, generated Python bindings, and source instrumentation are separate gates.
 runtime_enforcement:
   description: |
     Wave 1 adds authoritative behavioral rules on top of the existing
@@ -10438,18 +10507,20 @@ multi_bundle_persistence:
         split until archive format and extraction safety rules are promoted.
     bundle_build_materialization:
       owner: internal/runtime/contracts.BuildBundleMaterialization
-      status: implemented_wasm_slice_a
+      status: implemented_wasm_and_python_slice_b
       cli_consumer: swarm bundle build [--contracts <contracts-directory>] [--output <output-root>] [--report json]
       rule: >
         The bundle build command materializes a local contracts root under <output>/<bundle-hash> (default
         .swarm/build/<bundle-hash>) for explicit consumption. It consumes BundleHash as the canonical identity owner,
-        copies only bundle contract inputs and referenced module bytes needed to reconstruct that identity, writes
+        copies only bundle contract inputs and referenced module bytes/source needed to reconstruct that identity, writes
         build-manifest.json as a proof artifact, and emits a build report. It fails closed before runtime for invalid
-        contract/module shape, missing module bytes, digest mismatch, stale declared source_hash, unsupported build-step
-        requirements, reserved generated-artifact path collisions including case variants, output roots inside hashed recursive inputs, and materialized hash mismatch. Declared source_path files may be copied for source_hash freshness
-        proof but are not BundleHash identity owners. It MUST NOT call bundle.register, run test scenarios, touch
-        store/runtime writers, archive bundles, produce Python snapshots, run Python build steps, or write generated
-        bindings.
+        contract/module shape, missing module bytes/source, digest mismatch, stale declared source_hash, unsupported
+        build-step requirements, invalid Python source/ABI/capability/runtime identity, reserved generated-artifact path
+        collisions including case variants, output roots inside hashed recursive inputs, and materialized hash mismatch.
+        Declared source_path files may be copied for Wasm source_hash freshness proof but are not BundleHash identity
+        owners. Python source uses module path/digest as source authority. It MUST NOT call bundle.register, run test
+        scenarios, touch store/runtime writers, archive bundles, produce Python snapshots, invoke external Python/Wizer/WASI
+        SDK tooling, auto-build for test/register, or write generated bindings.
     modified_commands_planned:
       - swarm serve --bundle-hash <bundle_hash> [--bundle-hash <bundle_hash> ...] (implemented boot-pinned Postgres DB-loaded process mode)
       - swarm serve --dev
@@ -16673,7 +16744,7 @@ cli_specification:
       group: author_validate
       tier: should_have
       implementation_status: implemented_inventory_build_prepared_envelope_directory_register_and_delete
-      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. Local swarm bundle build materialization is implemented by #1670 Slice A and remains distinct from register/test. Prepared-envelope swarm bundle register and local directory swarm bundle register --contracts are implemented over /v1/rpc bundle.register. Destructive swarm bundle delete is implemented over /v1/rpc bundle.delete. Archive packaging remains split; bundle new, watch mode, and Python snapshot/build support remain split until their authorities are promoted.'
+      blocker_state: 'Read-only bundle list/show/agents are implemented by #1023 over /v1/rpc bundle.list/get/agents. Local swarm bundle build materialization is implemented by #1670 Slice A/B for Wasm and embedded Python module validation/materialization and remains distinct from register/test. Prepared-envelope swarm bundle register and local directory swarm bundle register --contracts are implemented over /v1/rpc bundle.register. Destructive swarm bundle delete is implemented over /v1/rpc bundle.delete. Archive packaging remains split; bundle new, watch mode, release-pipeline/per-module Python snapshot production, and generated bindings remain split until their authorities are promoted.'
       owners:
       - multi_bundle_persistence.cli_surface.bundle_commands_supported
       - multi_bundle_persistence.cli_surface.bundle_build_materialization
@@ -16698,8 +16769,9 @@ cli_specification:
       proof_expectations:
       - exact /v1/rpc bundle.list/get/agents calls with only promoted params
       - local swarm bundle build proves command shape `--contracts`, `--output`, and `--report json`; materialized output
-        under <output>/<bundle-hash>; build-manifest/report fields; wasm-only Slice A build-step registry; source_hash
-        freshness drift; case-folded reserved generated-artifact path collisions; missing module bytes; schema drift; rejection of outputs under hashed recursive inputs;
+        under <output>/<bundle-hash>; build-manifest/report fields; Wasm and Python build-step registry; source_hash
+        freshness drift; Python source/ABI/runtime identity validation; case-folded reserved generated-artifact path
+        collisions; missing module bytes/source; schema drift; rejection of outputs under hashed recursive inputs;
         reproducible identical bundle_hash and hashed materialized content; and no API/store/runtime/register/test calls
       - exact /v1/rpc bundle.register call with only content_yaml, optional data_blob, and optional idempotency_key
       - exact /v1/rpc bundle.delete call with only bundle_hash, optional force, optional dry_run, and optional idempotency_key
@@ -16709,7 +16781,7 @@ cli_specification:
       - BUNDLE_NOT_FOUND, BUNDLE_REGISTER_CONFLICT, BUNDLE_HAS_ACTIVE_RUNS, BUNDLE_DELETE_IN_PROGRESS, IDEMPOTENCY_CONFLICT, invalid params, malformed responses, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/hash-owner bundle reads or writes from CLI
       - unpromoted bundle.get alias, bundle new, bundle build --watch, archive register packaging, auto-build in test/register,
-        Python kind/snapshot support, and generated bindings remain absent/unknown until later CLI gates
+        release-pipeline/per-module Python snapshot production, and generated bindings remain absent/unknown until later CLI gates
     run_fork:
       command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]
       group: run_operate

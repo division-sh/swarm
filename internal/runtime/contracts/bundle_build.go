@@ -10,13 +10,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 )
 
 const (
 	bundleBuildManifestAPIVersion = "swarm.bundle.build.v1"
 	bundleBuildManifestPath       = "build-manifest.json"
 	bundleBuildStepWasmModules    = "wasm_policy_modules"
+	bundleBuildStepPythonModules  = "python_policy_modules"
 	bundleBuildKindWasm           = "wasm"
+	bundleBuildKindPython         = pythonmodule.Kind
 )
 
 var bundleBuildReservedArtifactPaths = map[string]string{
@@ -71,13 +75,17 @@ type BundleBuildManifest struct {
 }
 
 type BundleBuildModule struct {
-	ID         string `json:"id"`
-	FlowID     string `json:"flow_id,omitempty"`
-	Kind       string `json:"kind"`
-	Path       string `json:"path"`
-	Digest     string `json:"digest"`
-	SourcePath string `json:"source_path,omitempty"`
-	SourceHash string `json:"source_hash"`
+	ID                string `json:"id"`
+	FlowID            string `json:"flow_id,omitempty"`
+	Kind              string `json:"kind"`
+	Path              string `json:"path"`
+	Digest            string `json:"digest"`
+	SourcePath        string `json:"source_path,omitempty"`
+	SourceHash        string `json:"source_hash"`
+	Interpreter       string `json:"interpreter,omitempty"`
+	InterpreterDigest string `json:"interpreter_digest,omitempty"`
+	SnapshotDigest    string `json:"snapshot_digest,omitempty"`
+	HarnessABI        string `json:"harness_abi,omitempty"`
 }
 
 type BundleBuildInput struct {
@@ -98,7 +106,7 @@ type BundleBuildDiagnostic struct {
 }
 
 func DefaultBundleBuildSteps() []BundleBuildStep {
-	return []BundleBuildStep{wasmPolicyModulesBuildStep{}}
+	return []BundleBuildStep{wasmPolicyModulesBuildStep{}, pythonPolicyModulesBuildStep{}}
 }
 
 func BundleBuildStepNames(steps []BundleBuildStep) []string {
@@ -264,8 +272,39 @@ func (wasmPolicyModulesBuildStep) Run(_ context.Context, ctx *BundleBuildContext
 		return fmt.Errorf("bundle build context is required")
 	}
 	for _, module := range ctx.Modules {
-		if module.Kind != bundleBuildKindWasm {
+		if module.Kind == bundleBuildKindWasm {
+			continue
+		}
+		if module.Kind != bundleBuildKindPython {
 			return fmt.Errorf("unsupported module kind %q for policy module %s", module.Kind, module.ID)
+		}
+	}
+	return nil
+}
+
+type pythonPolicyModulesBuildStep struct{}
+
+func (pythonPolicyModulesBuildStep) Name() string {
+	return bundleBuildStepPythonModules
+}
+
+func (pythonPolicyModulesBuildStep) Run(_ context.Context, ctx *BundleBuildContext) error {
+	if ctx == nil {
+		return fmt.Errorf("bundle build context is required")
+	}
+	identity := pythonmodule.RuntimeIdentity()
+	for _, module := range ctx.Modules {
+		if module.Kind != bundleBuildKindPython {
+			continue
+		}
+		if module.SourcePath == "" || module.SourceHash == "" {
+			return fmt.Errorf("python policy module %s missing source identity", module.ID)
+		}
+		if module.Interpreter != identity.Interpreter ||
+			module.InterpreterDigest != identity.InterpreterDigest ||
+			module.SnapshotDigest != identity.SnapshotDigest ||
+			module.HarnessABI != identity.HarnessABI {
+			return fmt.Errorf("python policy module %s runtime identity drift", module.ID)
 		}
 	}
 	return nil
@@ -384,7 +423,11 @@ func collectBundleBuildModules(bundle *WorkflowContractBundle) ([]BundleBuildMod
 			}
 			sourcePath := strings.TrimSpace(module.SourcePath)
 			sourceHash := strings.TrimSpace(module.SourceHash)
-			if sourcePath != "" || sourceHash != "" {
+			kind := policyModuleKind(module)
+			if kind == bundleBuildKindPython {
+				sourcePath = relPath
+				sourceHash = strings.TrimSpace(module.Digest)
+			} else if sourcePath != "" || sourceHash != "" {
 				sourceRel, verifiedHash, err := verifyPolicyModuleSourceHash(bundle, moduleID, module)
 				if err != nil {
 					return nil, err
@@ -392,15 +435,23 @@ func collectBundleBuildModules(bundle *WorkflowContractBundle) ([]BundleBuildMod
 				sourcePath = sourceRel
 				sourceHash = verifiedHash
 			}
-			modules = append(modules, BundleBuildModule{
+			buildModule := BundleBuildModule{
 				ID:         moduleID,
 				FlowID:     flowID,
-				Kind:       bundleBuildKindWasm,
+				Kind:       kind,
 				Path:       relPath,
 				Digest:     strings.TrimSpace(module.Digest),
 				SourcePath: sourcePath,
 				SourceHash: sourceHash,
-			})
+			}
+			if kind == bundleBuildKindPython {
+				identity := pythonmodule.RuntimeIdentity()
+				buildModule.Interpreter = identity.Interpreter
+				buildModule.InterpreterDigest = identity.InterpreterDigest
+				buildModule.SnapshotDigest = identity.SnapshotDigest
+				buildModule.HarnessABI = identity.HarnessABI
+			}
+			modules = append(modules, buildModule)
 		}
 	}
 	sort.Slice(modules, func(i, j int) bool {

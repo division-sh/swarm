@@ -435,12 +435,18 @@ type ExecutionResult struct {
 }
 
 type ComputeModuleTrace struct {
-	ModuleID     string
-	RowID        string
-	Digest       string
-	Engine       string
-	OutputHash   string
-	FuelConsumed uint64
+	ModuleID          string
+	RowID             string
+	Kind              string
+	Digest            string
+	Engine            string
+	OutputHash        string
+	FuelConsumed      uint64
+	Interpreter       string
+	InterpreterDigest string
+	SnapshotDigest    string
+	HarnessABI        string
+	SourceHash        string
 }
 
 func (r ExecutionResult) ComputedBucket() values.Bucket {

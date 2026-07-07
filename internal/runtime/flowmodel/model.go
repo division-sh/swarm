@@ -69,15 +69,24 @@ type PolicyValidationEqualCheck struct {
 }
 
 type PolicyModule struct {
-	Path         string             `yaml:"path"`
-	ABI          string             `yaml:"abi"`
-	Entry        string             `yaml:"entry"`
-	Digest       string             `yaml:"digest"`
-	SourcePath   string             `yaml:"source_path"`
-	SourceHash   string             `yaml:"source_hash"`
-	InputSchema  map[string]any     `yaml:"input_schema"`
-	OutputSchema map[string]any     `yaml:"output_schema"`
-	Limits       PolicyModuleLimits `yaml:"limits"`
+	Path         string              `yaml:"path"`
+	Kind         string              `yaml:"kind"`
+	ABI          string              `yaml:"abi"`
+	Entry        string              `yaml:"entry"`
+	Digest       string              `yaml:"digest"`
+	SourcePath   string              `yaml:"source_path"`
+	SourceHash   string              `yaml:"source_hash"`
+	Runtime      PolicyModuleRuntime `yaml:"runtime"`
+	InputSchema  map[string]any      `yaml:"input_schema"`
+	OutputSchema map[string]any      `yaml:"output_schema"`
+	Limits       PolicyModuleLimits  `yaml:"limits"`
+}
+
+type PolicyModuleRuntime struct {
+	Interpreter       string `yaml:"interpreter"`
+	InterpreterDigest string `yaml:"interpreter_digest"`
+	SnapshotDigest    string `yaml:"snapshot_digest"`
+	HarnessABI        string `yaml:"harness_abi"`
 }
 
 type PolicyModuleLimits struct {
@@ -166,11 +175,13 @@ func (m *PolicyModule) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if err := validateYAMLMappingKeys(node, "policy module", map[string]struct{}{
 		"path":          {},
+		"kind":          {},
 		"abi":           {},
 		"entry":         {},
 		"digest":        {},
 		"source_path":   {},
 		"source_hash":   {},
+		"runtime":       {},
 		"input_schema":  {},
 		"output_schema": {},
 		"limits":        {},
@@ -183,6 +194,27 @@ func (m *PolicyModule) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*m = PolicyModule(aux)
+	return nil
+}
+
+func (r *PolicyModuleRuntime) UnmarshalYAML(node *yaml.Node) error {
+	if r == nil {
+		return nil
+	}
+	if err := validateYAMLMappingKeys(node, "policy module runtime", map[string]struct{}{
+		"interpreter":        {},
+		"interpreter_digest": {},
+		"snapshot_digest":    {},
+		"harness_abi":        {},
+	}); err != nil {
+		return err
+	}
+	type alias PolicyModuleRuntime
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*r = PolicyModuleRuntime(aux)
 	return nil
 }
 

@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 )
 
 func TestBuildBundleMaterializationWritesReproducibleContractsRoot(t *testing.T) {
@@ -63,7 +65,11 @@ func TestBuildBundleMaterializationWritesReproducibleContractsRoot(t *testing.T)
 	if module.ID != "structured_renderer" || module.Kind != "wasm" || module.Path != "modules/structured_renderer.wasm" || module.SourcePath != "src/structured_renderer.rs" || module.SourceHash == "" {
 		t.Fatalf("manifest module = %#v", module)
 	}
-	if len(reportA.Steps) != 1 || reportA.Steps[0].Name != bundleBuildStepWasmModules || reportA.Steps[0].Status != "passed" {
+	if len(reportA.Steps) != 2 ||
+		reportA.Steps[0].Name != bundleBuildStepWasmModules ||
+		reportA.Steps[0].Status != "passed" ||
+		reportA.Steps[1].Name != bundleBuildStepPythonModules ||
+		reportA.Steps[1].Status != "passed" {
 		t.Fatalf("steps = %#v", reportA.Steps)
 	}
 
@@ -242,15 +248,77 @@ func TestBuildBundleMaterializationRejectsOutputInsideHashedRecursiveInput(t *te
 	}
 }
 
-func TestBundleBuildStepRegistryHasOnlyWasmSliceA(t *testing.T) {
+func TestBundleBuildStepRegistryHasWasmAndPythonSliceB(t *testing.T) {
 	names := BundleBuildStepNames(nil)
-	if !reflect.DeepEqual(names, []string{bundleBuildStepWasmModules}) {
-		t.Fatalf("BundleBuildStepNames(nil) = %#v, want wasm-only slice", names)
+	want := []string{bundleBuildStepWasmModules, bundleBuildStepPythonModules}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("BundleBuildStepNames(nil) = %#v, want %#v", names, want)
 	}
-	for _, name := range names {
-		if strings.Contains(strings.ToLower(name), "python") || strings.Contains(strings.ToLower(name), "snapshot") {
-			t.Fatalf("slice A build step %q must not register python/snapshot support", name)
-		}
+}
+
+func TestBuildBundleMaterializationMaterializesPythonModuleIdentity(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := writePythonBundleBuildContractsDir(t, pythonRendererSource())
+	platform := DefaultPlatformSpecFile(repo)
+
+	report, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+		RepoRoot:         repo,
+		ContractsRoot:    root,
+		PlatformSpecPath: platform,
+		OutputRoot:       filepath.Join(t.TempDir(), "build"),
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleMaterialization: %v", err)
+	}
+	if len(report.Steps) != 2 || report.Steps[0].Name != bundleBuildStepWasmModules || report.Steps[1].Name != bundleBuildStepPythonModules {
+		t.Fatalf("steps = %#v", report.Steps)
+	}
+	var manifest BundleBuildManifest
+	if err := json.Unmarshal([]byte(readBundleBuildFile(t, report.OutputPath, "build-manifest.json")), &manifest); err != nil {
+		t.Fatalf("decode build manifest: %v", err)
+	}
+	if got, want := len(manifest.Modules), 1; got != want {
+		t.Fatalf("manifest modules = %d, want %d", got, want)
+	}
+	module := manifest.Modules[0]
+	if module.ID != "python_renderer" ||
+		module.Kind != pythonmodule.Kind ||
+		module.Path != "modules/python_renderer.py" ||
+		module.SourcePath != "modules/python_renderer.py" ||
+		module.SourceHash != module.Digest ||
+		module.Interpreter != pythonmodule.Interpreter ||
+		module.InterpreterDigest != pythonmodule.InterpreterDigest ||
+		module.SnapshotDigest == "" ||
+		module.HarnessABI != pythonmodule.HarnessABI {
+		t.Fatalf("manifest module = %#v", module)
+	}
+	if _, err := os.Stat(filepath.Join(report.OutputPath, "modules", "python_renderer.py")); err != nil {
+		t.Fatalf("materialized python source missing: %v", err)
+	}
+}
+
+func TestBuildBundleMaterializationFailsClosedForPythonSyntax(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	for _, tc := range []struct {
+		name   string
+		source []byte
+		want   string
+	}{
+		{name: "syntax", source: []byte("def handle(input):\n    return {\n"), want: "compute_module_compile"},
+		{name: "missing_handle", source: []byte("def other(input):\n    return {}\n"), want: "must define callable handle(input)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writePythonBundleBuildContractsDir(t, tc.source)
+			_, err := BuildBundleMaterialization(context.Background(), BundleBuildRequest{
+				RepoRoot:         repo,
+				ContractsRoot:    root,
+				PlatformSpecPath: DefaultPlatformSpecFile(repo),
+				OutputRoot:       filepath.Join(t.TempDir(), "build"),
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("BuildBundleMaterialization error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -278,6 +346,87 @@ terminal_states: [ready]
 	writeBundleHashText(t, filepath.Join(root, "src", "structured_renderer.rs"), "fn compute() {}\n")
 	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), bundleBuildPolicyYAML(t, root, bundleBuildSourceHash(t, root)))
 	return root
+}
+
+func writePythonBundleBuildContractsDir(t *testing.T, source []byte) string {
+	t.Helper()
+	root := t.TempDir()
+	writeBundleHashText(t, filepath.Join(root, "package.yaml"), `name: python-bundle-build-module
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: render
+    flow: render
+`)
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "schema.yaml"), `name: render
+mode: static
+states: [ready]
+initial_state: ready
+terminal_states: [ready]
+`)
+	writeBundleHashBytes(t, filepath.Join(root, "modules", "python_renderer.py"), source)
+	writeBundleHashText(t, filepath.Join(root, "flows", "render", "policy.yaml"), pythonBundleBuildPolicyYAML(source))
+	return root
+}
+
+func pythonBundleBuildPolicyYAML(source []byte) string {
+	sum := sha256.Sum256(source)
+	return `modules:
+  python_renderer:
+    path: modules/python_renderer.py
+    kind: python
+    abi: python-json-v1
+    entry: handle
+    digest: sha256:` + hex.EncodeToString(sum[:]) + `
+    limits:
+      gas: 2500000000
+      memory_pages: 8192
+      output_bytes: 4096
+    input_schema:
+      type: object
+      additionalProperties: false
+      required: [component, owner, language, files]
+      properties:
+        component:
+          type: string
+        owner:
+          type: string
+        language:
+          type: string
+        files:
+          type: array
+          items:
+            type: string
+    output_schema:
+      type: object
+      additionalProperties: false
+      required: [content, format, line_count]
+      properties:
+        content:
+          type: string
+        format:
+          type: string
+        line_count:
+          type: integer
+`
+}
+
+func pythonRendererSource() []byte {
+	return []byte(`def handle(input):
+    lines = [
+        "component: " + input["component"],
+        "owner: " + input["owner"],
+        "language: " + input["language"],
+    ]
+    for name in input["files"]:
+        if name.endswith(".yaml"):
+            lines.append("- deploy/" + name)
+        elif name.endswith(".go"):
+            lines.append("- src/" + name)
+        else:
+            lines.append("- " + name)
+    return {"content": "\n".join(lines), "format": "yaml", "line_count": len(lines)}
+`)
 }
 
 func bundleBuildPolicyYAML(t *testing.T, root, sourceHash string) string {
