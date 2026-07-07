@@ -420,7 +420,7 @@ func TestSwarmEnvGuardBlocksUnknownWithSuggestion(t *testing.T) {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"[BLOCKER] env/unknown_stale: SWARM_WORSKPACE_IMAGE",
+		"[BLOCKER] env/unknown_stale @ SWARM_WORSKPACE_IMAGE:",
 		"did you mean SWARM_WORKSPACE_IMAGE",
 		"unset SWARM_WORSKPACE_IMAGE",
 	} {
@@ -504,7 +504,7 @@ func TestSwarmEnvGuardDoesNotSkipWhenHelpIsCommandData(t *testing.T) {
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 			}
 			for _, want := range []string{
-				"[BLOCKER] env/unknown_stale: SWARM_WORSKPACE_IMAGE",
+				"[BLOCKER] env/unknown_stale @ SWARM_WORSKPACE_IMAGE:",
 				"did you mean SWARM_WORKSPACE_IMAGE",
 			} {
 				if !strings.Contains(stderr.String(), want) {
@@ -529,7 +529,7 @@ func TestSwarmEnvGuardDoesNotSkipVersionServerEqualsTrue(t *testing.T) {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"[BLOCKER] env/unknown_stale: SWARM_WORSKPACE_IMAGE",
+		"[BLOCKER] env/unknown_stale @ SWARM_WORSKPACE_IMAGE:",
 		"did you mean SWARM_WORKSPACE_IMAGE",
 	} {
 		if !strings.Contains(stderr.String(), want) {
@@ -552,7 +552,7 @@ func TestSwarmEnvGuardBlocksGeneratedBoundaryParentEnv(t *testing.T) {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"[BLOCKER] env/generated_boundary: SWARM_TOOL_GATEWAY_URL",
+		"[BLOCKER] env/generated_boundary @ SWARM_TOOL_GATEWAY_URL:",
 		"generated final-boundary env must be injected by Swarm",
 		"unset SWARM_TOOL_GATEWAY_URL",
 	} {
@@ -569,19 +569,19 @@ func TestSwarmEnvGuardBlocksRetiredRuntimeLLMConfigEnv(t *testing.T) {
 		want    []string
 		notWant []string
 	}{
-		{name: "SWARM_RUNTIME_RECOVERY_ON_STARTUP", value: "true", want: []string{"env/known_retired: SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"}},
-		{name: "SWARM_LLM_SESSION_LOCK_TTL", value: "1s", want: []string{"env/known_retired: SWARM_LLM_SESSION_LOCK_TTL", "llm.session.lock_ttl"}},
-		{name: "SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", value: "2", want: []string{"env/known_retired: SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "llm.session.rotate_after_turns"}},
-		{name: "SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", value: "2", want: []string{"env/known_retired: SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "llm.session.rotate_on_parse_failures"}},
-		{name: "SWARM_CLAUDE_API_MAX_RETRIES", value: "7", want: []string{"env/known_retired: SWARM_CLAUDE_API_MAX_RETRIES", "llm.claude_api.max_retries"}},
-		{name: "SWARM_CLAUDE_API_RETRY_BACKOFF", value: "7s", want: []string{"env/known_retired: SWARM_CLAUDE_API_RETRY_BACKOFF", "llm.claude_api.retry_backoff"}},
-		{name: "SWARM_CLAUDE_CLI_COMMAND", value: "false", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_COMMAND", "llm.claude_cli.command"}},
-		{name: "SWARM_CLAUDE_CLI_TIMEOUT", value: "1s", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"}},
-		{name: "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", value: "bad", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"}},
-		{name: "SWARM_CLAUDE_TIMEOUT_SECONDS", value: "1", want: []string{"env/known_retired: SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"}},
-		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_RETRIES", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.retries"}},
-		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.no_session_persistence"}},
-		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/known_retired: SWARM_CLAUDE_CLI_USE_TMUX", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.use_tmux"}},
+		{name: "SWARM_RUNTIME_RECOVERY_ON_STARTUP", value: "true", want: []string{"env/known_retired @ SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"}},
+		{name: "SWARM_LLM_SESSION_LOCK_TTL", value: "1s", want: []string{"env/known_retired @ SWARM_LLM_SESSION_LOCK_TTL", "llm.session.lock_ttl"}},
+		{name: "SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", value: "2", want: []string{"env/known_retired @ SWARM_LLM_SESSION_ROTATE_AFTER_TURNS", "llm.session.rotate_after_turns"}},
+		{name: "SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", value: "2", want: []string{"env/known_retired @ SWARM_LLM_SESSION_ROTATE_ON_PARSE_FAILURES", "llm.session.rotate_on_parse_failures"}},
+		{name: "SWARM_CLAUDE_API_MAX_RETRIES", value: "7", want: []string{"env/known_retired @ SWARM_CLAUDE_API_MAX_RETRIES", "llm.claude_api.max_retries"}},
+		{name: "SWARM_CLAUDE_API_RETRY_BACKOFF", value: "7s", want: []string{"env/known_retired @ SWARM_CLAUDE_API_RETRY_BACKOFF", "llm.claude_api.retry_backoff"}},
+		{name: "SWARM_CLAUDE_CLI_COMMAND", value: "false", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_COMMAND", "llm.claude_cli.command"}},
+		{name: "SWARM_CLAUDE_CLI_TIMEOUT", value: "1s", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"}},
+		{name: "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", value: "bad", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"}},
+		{name: "SWARM_CLAUDE_TIMEOUT_SECONDS", value: "1", want: []string{"env/known_retired @ SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"}},
+		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_RETRIES", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.retries"}},
+		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.no_session_persistence"}},
+		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_USE_TMUX", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.use_tmux"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

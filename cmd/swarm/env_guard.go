@@ -1,12 +1,12 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"gopkg.in/yaml.v3"
 )
 
@@ -63,15 +63,19 @@ func (e swarmEnvGuardError) Error() string {
 }
 
 func formatSwarmEnvFinding(finding swarmEnvFinding) string {
-	severity := strings.ToUpper(strings.TrimSpace(finding.Severity))
-	if severity == "" {
-		severity = "INFO"
+	severity := runtimebootverify.SeverityLintEvidence
+	if strings.EqualFold(finding.Severity, "blocker") {
+		severity = runtimebootverify.SeverityHardInvalidity
+	} else if strings.EqualFold(finding.Severity, "warning") {
+		severity = runtimebootverify.SeveritySemanticDriftWarn
 	}
-	line := fmt.Sprintf("[%s] env/%s: %s - %s", severity, finding.Category, finding.Name, finding.Message)
-	if remediation := strings.TrimSpace(finding.Remediation); remediation != "" {
-		line += "\n  remediation: " + remediation
-	}
-	return line
+	return runtimebootverify.FormatTypedDiagnosticFinding(runtimebootverify.TypedDiagnosticFinding{
+		CheckID:     "env/" + strings.TrimSpace(string(finding.Category)),
+		Severity:    severity,
+		Location:    strings.TrimSpace(finding.Name),
+		Message:     strings.TrimSpace(finding.Message),
+		Remediation: strings.TrimSpace(finding.Remediation),
+	}, false)
 }
 
 func validateSwarmEnvForCommand(args []string, repoRoot string) error {

@@ -232,8 +232,8 @@ func TestCLIRuntimeStateCommandsRequireSharedAPITokenBeforeRequest(t *testing.T)
 				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 			}
 			for _, want := range []string{
-				"env/known_retired: SWARM_BUILDER_AUTH_TOKEN",
-				"env/known_retired: SWARM_OPERATOR_AUTH_TOKEN",
+				"env/known_retired @ SWARM_BUILDER_AUTH_TOKEN:",
+				"env/known_retired @ SWARM_OPERATOR_AUTH_TOKEN:",
 				"not accepted as API auth fallback",
 			} {
 				if !strings.Contains(stderr.String(), want) {
