@@ -1754,13 +1754,14 @@ compute_module_contracts:
       executions are expected, not normal non-replay execution. Runtime logs may
       carry persisted replay envelopes under action
       `compute_module_replay_evidence`; supported persisted replay loaders read
-      those envelopes and feed them into the same expected-trace execution path
-      used by in-memory replay. Runtime logs and store rows are carriers only
-      and do not become the semantic owner. Divergence diagnostics MUST be
-      typed, include the finding kind and field, include module/row IDs and
-      hashes only, and avoid raw input/output dumps. True result divergence is a
-      fatal deterministic replay failure; identity/profile mismatch is
-      fail-closed unsupported/incompatible replay.
+      those envelopes for the replayed execution identity, scoped at minimum by
+      run id, source event id, and node id, and feed them into the same
+      expected-trace execution path used by in-memory replay. Runtime logs and
+      store rows are carriers only and do not become the semantic owner.
+      Divergence diagnostics MUST be typed, include the finding kind and field,
+      include module/row IDs and hashes only, and avoid raw input/output dumps.
+      True result divergence is a fatal deterministic replay failure;
+      identity/profile mismatch is fail-closed unsupported/incompatible replay.
   bundle_identity:
     rule: |
       Module bytes referenced by policy.modules are part of the bundle contract

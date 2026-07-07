@@ -50,17 +50,20 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 		t.Fatalf("initial traces = %#v, want one", first.ComputeModuleTraces)
 	}
 
+	unrelated := first.ComputeModuleTraces[0]
+	unrelated.ModuleID = "unrelated_renderer"
+	persistComputeModuleReplayEvidenceForExecution(t, ctx, sqliteStore, "evt-unrelated", "other-node", unrelated)
+
 	persisted := first.ComputeModuleTraces[0]
 	persisted.OutputHash = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
-	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
-		Level:     "info",
-		Message:   "Compute module replay evidence recorded",
-		Component: "compute_module",
-		Action:    computemodule.ReplayEvidenceAction,
-		Detail:    computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{persisted}),
-	}); err != nil {
-		t.Fatalf("RuntimeLogger.Log persisted replay evidence: %v", err)
+	persistComputeModuleReplayEvidenceForExecution(t, ctx, sqliteStore, req.Event.ID(), string(req.NodeID), persisted)
+
+	loaded, err := sqliteStore.LoadComputeModuleReplayEvidenceForExecution(ctx, runID, req.Event.ID(), string(req.NodeID))
+	if err != nil {
+		t.Fatalf("LoadComputeModuleReplayEvidenceForExecution: %v", err)
+	}
+	if len(loaded) != 1 || loaded[0].Normalized() != persisted.Normalized() {
+		t.Fatalf("scoped replay evidence = %#v, want only matching envelope %#v", loaded, persisted.Normalized())
 	}
 
 	_, err = exec.ExecuteWithPersistedComputeModuleReplayEvidence(ctx, sqliteStore, runID, req)
@@ -75,6 +78,23 @@ func TestExecuteWithPersistedComputeModuleReplayEvidenceLoadsAndFailsClosedOnSto
 		moduleErr.Finding.Kind != computemodule.ReplayFindingResultDivergence ||
 		moduleErr.Finding.Field != "output_hash" {
 		t.Fatalf("persisted replay finding = %#v, want result divergence on output_hash", moduleErr.Finding)
+	}
+}
+
+func persistComputeModuleReplayEvidenceForExecution(t *testing.T, ctx context.Context, sqliteStore *store.SQLiteRuntimeStore, eventID, nodeID string, envelope computemodule.ReplayEnvelope) {
+	t.Helper()
+	detail := computemodule.NewReplayEvidenceDetail([]computemodule.ReplayEnvelope{envelope})
+	detail["node_id"] = nodeID
+	logger := runtimepkg.NewRuntimeLogger(sqliteStore)
+	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
+		Level:     "info",
+		Message:   "Compute module replay evidence recorded",
+		Component: "compute_module",
+		Action:    computemodule.ReplayEvidenceAction,
+		EventID:   eventID,
+		Detail:    detail,
+	}); err != nil {
+		t.Fatalf("RuntimeLogger.Log persisted replay evidence: %v", err)
 	}
 }
 
