@@ -3892,6 +3892,8 @@ engine:
         postgres. They are not generic backend selectors and must not imply backend selection by presence alone.
         Non-secret connection details are owned by typed runtime/unified config and built-in local defaults only.
         SWARM_DB_* and implicit PG* variables are retired ambient sources and MUST NOT be read as fallback authority.
+        Postgres DSN construction MUST emit canonical host, port, dbname, sslmode, and user keywords from typed config
+        or built-in defaults so lib/pq cannot fill omitted non-secret fields from PG* environment variables.
     postgres_password_source_authority:
       owner: typed database password resolver consumed before Postgres DSN construction
       config_fields:

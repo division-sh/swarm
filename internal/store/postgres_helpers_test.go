@@ -80,6 +80,35 @@ func TestDSNFromConfigQuotesKeywordValues(t *testing.T) {
 	}
 }
 
+func TestDSNFromConfigPinsDefaultNonSecretKeywordsAgainstPGEnv(t *testing.T) {
+	t.Setenv("PGHOST", "env-host")
+	t.Setenv("PGPORT", "15432")
+	t.Setenv("PGDATABASE", "env-db")
+	t.Setenv("PGUSER", "env-user")
+	t.Setenv("PGSSLMODE", "require")
+
+	dsn := DSNFromConfig(config.DatabaseConfig{}, "secret")
+	for _, want := range []string{
+		`host='127.0.0.1'`,
+		"port=5432",
+		`dbname='swarm'`,
+		`sslmode='disable'`,
+		`user='postgres'`,
+	} {
+		if !strings.Contains(dsn, want) {
+			t.Fatalf("DSNFromConfig() = %q, want pinned default keyword %q", dsn, want)
+		}
+	}
+	for _, notWant := range []string{"env-host", "15432", "env-db", "env-user", "require"} {
+		if strings.Contains(dsn, notWant) {
+			t.Fatalf("DSNFromConfig() = %q, leaked PG env value %q", dsn, notWant)
+		}
+	}
+	if _, err := pq.NewConnector(dsn); err != nil {
+		t.Fatalf("pq.NewConnector(%q): %v", dsn, err)
+	}
+}
+
 func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()

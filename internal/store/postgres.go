@@ -30,18 +30,32 @@ type PostgresStore struct {
 type EventPayloadValidator func(eventType string, payload []byte) error
 
 func DSNFromConfig(cfg config.DatabaseConfig, password string) string {
-	sslMode := cfg.SSLMode
+	host := strings.TrimSpace(cfg.Host)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := cfg.Port
+	if port == 0 {
+		port = 5432
+	}
+	name := strings.TrimSpace(cfg.Name)
+	if name == "" {
+		name = "swarm"
+	}
+	sslMode := strings.TrimSpace(cfg.SSLMode)
 	if sslMode == "" {
 		sslMode = "disable"
 	}
-	parts := []string{
-		postgresKeywordParam("host", cfg.Host),
-		fmt.Sprintf("port=%d", cfg.Port),
-		postgresKeywordParam("dbname", cfg.Name),
-		postgresKeywordParam("sslmode", sslMode),
+	user := strings.TrimSpace(cfg.User)
+	if user == "" {
+		user = "postgres"
 	}
-	if cfg.User != "" {
-		parts = append(parts, postgresKeywordParam("user", cfg.User))
+	parts := []string{
+		postgresKeywordParam("host", host),
+		fmt.Sprintf("port=%d", port),
+		postgresKeywordParam("dbname", name),
+		postgresKeywordParam("sslmode", sslMode),
+		postgresKeywordParam("user", user),
 	}
 	if password != "" {
 		parts = append(parts, postgresKeywordParam("password", password))
