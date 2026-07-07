@@ -9895,7 +9895,7 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
-	root := writeVerifyMissingPinWarningFixture(t)
+	root := filepath.Join(repoRoot(), "tests", "tier8-boot-verification", "test-boot-state-machine-unreachable")
 	var stdout, stderr bytes.Buffer
 	code := runVerifyCommandWithContractsOutputForTest(
 		context.Background(),
@@ -9913,8 +9913,8 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	errText := stderr.String()
 	for _, want := range []string{
 		"verify failed: boot verification blocked by policy-escalated findings:",
-		"[BLOCKER] input_pin_wiring @",
-		"no accepted producer source was found in the authored bundle",
+		"[BLOCKER] semantic_drift_unreachable_state @",
+		"declares state review but no transition path",
 	} {
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
@@ -9944,10 +9944,10 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 		t.Fatalf("verify --json errors = %#v, want warning-only structured failure", verifyJSON.Errors)
 	}
 	if len(verifyJSON.Warnings) == 0 {
-		t.Fatalf("verify --json warnings = %#v, want input_pin_wiring", verifyJSON.Warnings)
+		t.Fatalf("verify --json warnings = %#v, want semantic_drift_unreachable_state", verifyJSON.Warnings)
 	}
-	if !verifyFindingOutputsContain(verifyJSON.Warnings, "input_pin_wiring", "semantic_drift_warning", "no accepted producer source was found in the authored bundle") {
-		t.Fatalf("verify --json warnings = %#v, want structured input_pin_wiring warning", verifyJSON.Warnings)
+	if !verifyFindingOutputsContain(verifyJSON.Warnings, "semantic_drift_unreachable_state", "semantic_drift_warning", "declares state review but no transition path") {
+		t.Fatalf("verify --json warnings = %#v, want structured semantic_drift_unreachable_state warning", verifyJSON.Warnings)
 	}
 }
 
@@ -12713,12 +12713,12 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 	}
 }
 
-func TestVerifyBundle_InputPinProducerPathReturnsWarningSurface(t *testing.T) {
+func TestVerifyBundle_InputPinProducerPathReturnsHardInvaliditySurface(t *testing.T) {
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	err := verifyBundle(context.Background(), semanticview.Wrap(loadWorkflowValidationBundleAt(t, writeVerifyMissingPinWarningFixture(t))))
 	if err == nil {
-		t.Fatal("verifyBundle error = nil, want warning-only failure from missing producer path")
+		t.Fatal("verifyBundle error = nil, want hard invalidity from missing producer path")
 	}
 	for _, want := range []string{
 		"no accepted producer source was found in the authored bundle",

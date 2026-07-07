@@ -77,10 +77,12 @@ func (c *checkerContext) inputPinWiring() []Finding {
 			producerProof := c.inputPinProducerSourceProof(flowID, eventType)
 			if producerProof.hasAmbiguousBoundary() {
 				c.inputPinFindings = append(c.inputPinFindings, Finding{
-					CheckID:  "input_pin_wiring",
-					Severity: "warning",
-					Message:  producerProof.ambiguousMessage(flowID, eventType),
-					Location: flowID,
+					CheckID:     "input_pin_wiring",
+					Severity:    SeverityHardInvalidity,
+					Message:     producerProof.ambiguousMessage(flowID, eventType),
+					Location:    flowID,
+					Remediation: "Choose exactly one boundary producer source for this input pin; do not let routing infer authority from overlapping ingress mechanisms.",
+					Evidence:    producerProof.evidence(),
 				})
 				continue
 			}
@@ -88,10 +90,12 @@ func (c *checkerContext) inputPinWiring() []Finding {
 				continue
 			}
 			c.inputPinFindings = append(c.inputPinFindings, Finding{
-				CheckID:  "input_pin_wiring",
-				Severity: "warning",
-				Message:  producerProof.message(flowID, eventType),
-				Location: flowID,
+				CheckID:     "input_pin_wiring",
+				Severity:    SeverityHardInvalidity,
+				Message:     producerProof.message(flowID, eventType, c.inputPinTargetRefs(flowID, eventType)),
+				Location:    flowID,
+				Remediation: producerProof.remediation(flowID, eventType, c.inputPinTargetRefs(flowID, eventType)),
+				Evidence:    producerProof.evidence(),
 			})
 		}
 	}
@@ -111,20 +115,47 @@ func (p inputPinProducerSourceProof) hasAmbiguousBoundary() bool {
 	return p.resolution.HasAmbiguousBoundaryEvidence()
 }
 
-func (p inputPinProducerSourceProof) message(flowID, eventType string) string {
+func (p inputPinProducerSourceProof) message(flowID, eventType, targetRefs string) string {
 	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
+	targetRefs = strings.TrimSpace(targetRefs)
 	return fmt.Sprintf(
-		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle.\n\nChecked producer source classes:\n- Boundary external ingress: %s\n- Intrinsic ingress input pin: %s\n- Parent connect: %s\n- Explicit harness injection: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a parent package.yaml connect entry to this input pin\n- Mark the input event pin with source: external only when it is true external ingress\n- Register an explicit harness injection for validation-only fixtures\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing",
+		"Flow %s declares input pin event %s but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target %s.\n\nChecked producer source classes:\n- Boundary external ingress: %s\n- Intrinsic ingress input pin: %s\n- Parent connect: %s\n- Explicit harness injection: %s\n- Platform source: %s\n- Internal topology producer: %s\n\nFix one of:\n- Add a parent package.yaml connect entry into %s\n- Mark the input event pin with source: external only when it is true intrinsic/external ingress\n- Register an explicit harness injection for validation-only fixtures\n- Use a platform-owned event if this is platform-produced\n- Produce the event through the intra-flow topology, or remove the input pin if it is not boundary-facing\n\nDo not rely on events.yaml swarm.source as input-pin producer proof; event-level source metadata is non-input compatibility/documentation only.",
 		flowID,
 		eventType,
+		targetRefs,
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress),
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress),
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryParentConnect),
 		p.detailsForKind(runtimecontracts.FlowInputProducerBoundaryHarnessInjection),
 		p.detailsForKind(runtimecontracts.FlowInputProducerPlatformSource),
 		p.detailsForKind(runtimecontracts.FlowInputProducerInternalTopology),
+		targetRefs,
 	)
+}
+
+func (p inputPinProducerSourceProof) remediation(flowID, eventType, targetRefs string) string {
+	targetRefs = strings.TrimSpace(targetRefs)
+	if targetRefs == "" {
+		targetRefs = inputPinTargetRef(flowID, eventType)
+	}
+	return fmt.Sprintf("Provide one resolver-backed producer source: parent connect into %s, input-pin source: external for true ingress, explicit harness injection, platform-owned source, or internal topology production.", targetRefs)
+}
+
+func (p inputPinProducerSourceProof) evidence() []string {
+	evidence := make([]string, 0, len(p.resolution.Evidence)+1)
+	evidence = append(evidence, "events.yaml swarm.source is not input-pin producer proof")
+	for _, item := range p.resolution.Evidence {
+		detail := strings.TrimSpace(item.Detail)
+		if detail == "" {
+			detail = strings.TrimSpace(item.EventType)
+		}
+		if detail == "" {
+			detail = strings.TrimSpace(item.Kind)
+		}
+		evidence = append(evidence, fmt.Sprintf("%s: %s", strings.TrimSpace(item.Kind), detail))
+	}
+	return evidence
 }
 
 func (p inputPinProducerSourceProof) ambiguousMessage(flowID, eventType string) string {
@@ -181,6 +212,44 @@ func (c *checkerContext) inputPinProducerSourceProof(flowID, eventType string) i
 			HarnessInjections: c.opts.HarnessInjections,
 		}),
 	}
+}
+
+func (c *checkerContext) inputPinTargetRefs(flowID, eventType string) string {
+	if c.source == nil {
+		return inputPinTargetRef(flowID, eventType)
+	}
+	refs := make([]string, 0)
+	for _, pin := range c.source.FlowInputEventPins(flowID) {
+		if !inputEventMatches(c.source, flowID, pin.EventType(), eventType) &&
+			!inputEventMatches(c.source, flowID, pin.PinName(), eventType) {
+			continue
+		}
+		pinName := strings.TrimSpace(pin.PinName())
+		if pinName == "" {
+			pinName = strings.TrimSpace(pin.EventType())
+		}
+		if pinName == "" {
+			continue
+		}
+		refs = append(refs, inputPinTargetRef(flowID, pinName))
+	}
+	if len(refs) == 0 {
+		refs = append(refs, inputPinTargetRef(flowID, eventType))
+	}
+	sort.Strings(refs)
+	return strings.Join(refs, ", ")
+}
+
+func inputPinTargetRef(flowID, pinName string) string {
+	flowID = strings.TrimSpace(flowID)
+	pinName = strings.TrimSpace(pinName)
+	if flowID == "" {
+		return pinName
+	}
+	if pinName == "" {
+		return flowID
+	}
+	return flowID + "." + pinName
 }
 
 func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {

@@ -86,6 +86,7 @@ pins:
     events:
       - name: intake_received
         event: intake.received
+        source: external
   outputs:
     events:
       - name: validation_requested

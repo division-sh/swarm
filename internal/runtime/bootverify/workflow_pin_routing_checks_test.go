@@ -921,7 +921,10 @@ states: [pending, done]
 terminal_states: [done]
 pins:
   inputs:
-    events: [deploy.requested]
+    events:
+      - name: deploy_requested
+        event: deploy.requested
+        source: external
   outputs:
     events:
       - name: deploy_done
@@ -939,8 +942,6 @@ producer_request:
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
 deploy.requested:
-  swarm:
-    source: external
   vertical_id: string
 deploy.done:
   vertical_id: string
@@ -1031,6 +1032,9 @@ func writeSelectEntityDemotionConsumerFlow(t *testing.T, root string, opts selec
         event: deploy.done
 `
 	}
+	if opts.external {
+		inputPin = strings.Replace(inputPin, "        event: deploy.done\n", "        event: deploy.done\n        source: external\n", 1)
+	}
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
 name: consumer
 mode: `+consumerMode+`
@@ -1044,15 +1048,9 @@ pins:
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	externalSource := ""
-	if opts.external {
-		externalSource = `  swarm:
-    source: external (operator webhook)
-`
-	}
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
 deploy.done:
-`+externalSource+`  vertical_id: string
+  vertical_id: string
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
 deployment:

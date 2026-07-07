@@ -33,7 +33,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 		if connectedOutput {
 			continue
 		}
-		if site.Spec.Target.Normalized().Kind == runtimecontracts.EmitTargetKindSender && pinRoutingEventExternalSource(c.source, site.FlowID, site.HandlerEvent) {
+		if site.Spec.Target.Normalized().Kind == runtimecontracts.EmitTargetKindSender && c.pinRoutingEventExternalSource(site.FlowID, site.HandlerEvent) {
 			findings = append(findings, pinTargetFinding(site, "target_sender_empty_source"))
 		}
 	}
@@ -72,7 +72,7 @@ func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
 				if !hasSelect && !hasSelectOrCreate {
 					continue
 				}
-				if pinRoutingEventExternalSource(c.source, flowID, eventType) {
+				if c.pinRoutingEventExternalSource(flowID, eventType) {
 					continue
 				}
 				if !pinRoutingAllKnownProducersTargeted(c.source, flowID, eventType) {
@@ -124,7 +124,7 @@ func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
 				if handler.CreateEntity || (handler.SelectEntity != nil && !handler.SelectEntity.Empty()) || (handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty()) {
 					continue
 				}
-				if !pinRoutingEventExternalSource(c.source, flowID, eventType) {
+				if !c.pinRoutingEventExternalSource(flowID, eventType) {
 					continue
 				}
 				findings = append(findings, Finding{
@@ -274,36 +274,19 @@ func pinRoutingStructuralParentRouteEligible(source semanticview.Source, flowID 
 	return strings.Contains(path, "/")
 }
 
-func pinRoutingEventExternalSource(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
+func (c *checkerContext) pinRoutingEventExternalSource(flowID, eventType string) bool {
+	if c.source == nil {
 		return false
 	}
 	eventType = eventidentity.Normalize(eventType)
 	if eventType == "" {
 		return false
 	}
-	if scope, ok := source.FlowScopeByID(flowID); ok {
-		if entry, ok := scope.Events[eventType]; ok && pinRoutingEventEntryExternalSource(entry) {
-			return true
-		}
-		if canonical := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType)); canonical != "" {
-			for local, entry := range scope.Events {
-				if eventidentity.Normalize(source.ResolveFlowEventReference(flowID, local)) == canonical && pinRoutingEventEntryExternalSource(entry) {
-					return true
-				}
-			}
-		}
+	if resolution, ok := c.resolveDeclaredInputProducerSource(flowID, eventType); ok {
+		return inputProducerSourceIsExternalNoTarget(resolution)
 	}
-	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	if pinRoutingEventEntryExternalSource(proof.Entry) {
-		return true
-	}
-	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, eventType)
-	return ok && pinRoutingEventEntryExternalSource(entry)
-}
-
-func pinRoutingEventEntryExternalSource(entry runtimecontracts.EventCatalogEntry) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(entry.SwarmSource())), "external")
+	entry, _, ok := c.source.ResolveFlowEventCatalogEntry(flowID, eventType)
+	return ok && nonInputEventMetadataProducerSource(entry)
 }
 
 func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eventType string) bool {

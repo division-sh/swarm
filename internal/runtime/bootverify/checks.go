@@ -270,7 +270,7 @@ var bootCheckRegistry = []Check{
 	{ID: "flow_package_wildcard_observe_grant", Severity: SeverityHardInvalidity, Run: checkFlowPackageWildcardObserveGrant},
 	{ID: "output_pin_key_carries_validation", Severity: "error", Run: checkOutputPinKeyCarriesValidation},
 	{ID: "composition_connect_validation", Severity: "error", Run: checkCompositionConnectValidation},
-	{ID: "input_pin_wiring", Severity: "warning", Run: checkInputPinWiring},
+	{ID: "input_pin_wiring", Severity: SeverityHardInvalidity, Run: checkInputPinWiring},
 	{ID: "pin_target_resolution", Severity: "error", Run: checkPinTargetResolution},
 	{ID: "redundant_in_topology_select_entity", Severity: SeverityHardInvalidity, Run: checkRedundantInTopologySelectEntity},
 	{ID: "missing_external_select_entity", Severity: "error", Run: checkMissingExternalSelectEntity},

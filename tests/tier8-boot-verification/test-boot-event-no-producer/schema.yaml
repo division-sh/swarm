@@ -3,6 +3,6 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [task.requested, ghost.event]
+    events: [task.requested]
   outputs:
     events: [task.completed]
