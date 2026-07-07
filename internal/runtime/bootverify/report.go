@@ -38,15 +38,30 @@ const (
 
 var stableHardInvalidityRemediation = map[string]string{
 	"agent_permission_validation":             "Grant the required agent permission or remove the unauthorized tool/action from the contract.",
+	"agent_prompt_lint_structural":            "Fix the agent prompt lint declaration so it uses supported structural fields, or remove the unsupported prompt lint entry.",
+	"accumulator_entity_projection":           "Fix the accumulator projection so it writes declared entity fields through the supported accumulator projection shape.",
+	"accumulator_input_producer_path":         "Add an accepted producer/source path for the accumulated input event or change the accumulator to consume an event that has one.",
+	"accumulator_timeout_requires_timeout_ms": "Add a positive timeout_ms for timeout completion mode or change the accumulator completion mode.",
+	"compute_module_value_rows":               "Fix the compute module value rows so each referenced module and value shape is declared consistently.",
 	"condition_expression_validation":         "Fix the condition expression so it references declared fields and uses supported CEL syntax.",
+	"condition_payload_alignment":             "Fix condition input references so they read declared payload fields for the triggering event.",
+	"config_from_payload_alignment":           "Fix config_from_payload references so they read declared payload fields for the triggering event.",
+	"contained_state_operation_compliance":    "Fix contained state operations so they target declared contained-state fields through supported syntax.",
+	"credential_key_exists":                   "Configure the required credential or fix access to the credential store used by verifier credential checks.",
 	"data_accumulation_expression_validation": "Fix the data_accumulation expression so it references declared fields and uses supported CEL syntax.",
+	"dialect_compliance":                      "Replace the unsupported contract dialect form with the promoted platform-spec shape or remove it.",
 	"emit_field_expression_validation":        "Fix the emit field expression so it references declared fields and uses supported CEL syntax.",
 	"entity_write_target_compliance":          "Update the entity write target to a declared writable entity field or remove the invalid write.",
+	"entity_writer_coverage":                  "Add a supported writer for each required entity field or remove/relax the field requirement in the contract.",
+	"event_cycle_detection":                   "Break the event cycle by changing one handler emission, transition, or subscription so the static event graph is acyclic.",
+	"event_runtime_wiring_validation":         "Add the missing runtime handler/owner for the event or remove the event transition that requires runtime handling.",
+	"expression_field_reference_validation":   "Fix the expression field reference so it uses the supported namespace and declared field path.",
 	"event_metadata_authority":                "Move platform-owned event metadata out of authored business payload declarations.",
 	"flow_boundary_create_entity_validation":  "Fix the cross-flow create_entity declaration so it preserves the receiving flow boundary.",
 	"flow_data_access_validation":             "Use the supported flow data access form for the referenced field or remove the unsupported access.",
 	"flow_package_dependency_binding":         "Declare the required imported package binding or remove the unresolved dependency reference.",
 	"flow_package_import_completeness":        "Complete the imported package dependency binding or remove the incomplete import.",
+	"flow_package_wildcard_observe_grant":     "Replace wildcard observe grants with explicit package dependency grants for each observed event.",
 	"gate_schema_validation":                  "Fix the gate declaration so it uses supported gate fields and value types.",
 	"generated_tool_schema_closure":           "Fix the generated tool schema inputs/outputs so they close over declared contract types.",
 	"handler_field_compliance":                "Move the unsupported handler field to its promoted location or remove it.",
@@ -55,10 +70,14 @@ var stableHardInvalidityRemediation = map[string]string{
 	"managed_credential_state":                "Configure the required managed credential or remove the dependency that requires it.",
 	"missing_external_select_entity":          "Add an explicit select_entity/select_or_create_entity for the external input or make the event topology in-flow.",
 	"native_tools_valid":                      "Fix the native tool declaration so it references a supported runtime tool surface.",
+	"node_state_schema_typed_counterpart":     "Add the typed node-state counterpart required by the schema or remove the unsupported jsonb-only state field.",
+	"output_pin_key_carries_validation":       "Declare the output pin key/carries fields and ensure every authored emit site populates those payload fields.",
 	"payload_field_coverage":                  "Populate every required emitted payload field or make the target event schema optional where appropriate.",
 	"platform_namespace_violation":            "Rename authored business fields away from platform-reserved namespace roots.",
 	"platform_version_compatibility":          "Update the contract platform_version range or run with a compatible Swarm platform version.",
 	"policy_conflict_detection":               "Resolve the conflicting policy declarations so only one authoritative value remains.",
+	"policy_sheet_lookup_value_rows":          "Fix the policy sheet lookup value rows so each lookup key and target value is declared consistently.",
+	"policy_sheet_validation_value_rows":      "Fix the policy sheet validation value rows so each row matches the declared policy sheet schema.",
 	"primary_entity_validation":               "Declare a valid primary entity or remove the stateful surface that requires one.",
 	"prompt_exists":                           "Add the referenced prompt file or update the agent prompt_ref.",
 	"redundant_in_topology_select_entity":     "Remove redundant select_entity/select_or_create_entity from an in-topology handler.",
@@ -66,6 +85,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"required_agents_match":                   "Update required agent declarations so subscriptions and emitted events match the contract topology.",
 	"required_mcp_tool_availability":          "Expose the required MCP tool from the configured server or update the agent tool requirement.",
 	"select_entity_validation":                "Fix the select_entity/select_or_create_entity declaration so it uses supported source and target fields.",
+	"semantic_drift_payload_completeness":     "Populate every required payload field for emitted events or update the event schema to match the emitted payload.",
 	"single_node_per_event":                   "Ensure only one system node owns the exact event handler or split the event ownership.",
 	"singleton_coordinator_validation":        "Fix the singleton coordinator declaration so it names supported contained state fields.",
 	"state_machine_coherence":                 "Fix the state machine declarations so initial, terminal, and transition states are declared consistently.",
@@ -128,7 +148,7 @@ func WithEvidence(evidence ...string) FindingOption {
 	}
 }
 
-func NewFinding(checkID, severity, location, message string, opts ...FindingOption) Finding {
+func newFinding(checkID, severity, location, message string, opts ...FindingOption) Finding {
 	f := Finding{
 		CheckID:  checkID,
 		Severity: severity,
@@ -144,7 +164,7 @@ func NewFinding(checkID, severity, location, message string, opts ...FindingOpti
 }
 
 func NewHardInvalidityFinding(checkID, location, message, remediation string, evidence ...string) Finding {
-	return NewFinding(checkID, SeverityHardInvalidity, location, message, WithRemediation(remediation), WithEvidence(evidence...))
+	return newFinding(checkID, SeverityHardInvalidity, location, message, WithRemediation(remediation), WithEvidence(evidence...))
 }
 
 type Report struct {

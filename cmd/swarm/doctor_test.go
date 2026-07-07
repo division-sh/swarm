@@ -293,11 +293,11 @@ func TestDoctorClaudeCLIPreflightBlocksGeneratedGatewayParentEnv(t *testing.T) {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
-		"[BLOCKER] env/generated_boundary: SWARM_TOOL_GATEWAY_URL",
-		"[BLOCKER] env/generated_boundary: SWARM_TOOL_GATEWAY_CONTAINER_URL",
-		"[BLOCKER] env/known_retired: SWARM_TOOL_GATEWAY_TOKEN",
-		"[WARNING] gateway_prerequisite/swarm_tool_gateway_url_retired",
-		"[WARNING] gateway_prerequisite/swarm_tool_gateway_container_url_retired",
+		"[BLOCKER] env/generated_boundary @ doctor: SWARM_TOOL_GATEWAY_URL",
+		"[BLOCKER] env/generated_boundary @ doctor: SWARM_TOOL_GATEWAY_CONTAINER_URL",
+		"[BLOCKER] env/known_retired @ doctor: SWARM_TOOL_GATEWAY_TOKEN",
+		"[WARN] gateway_prerequisite/swarm_tool_gateway_url_retired @ doctor:",
+		"[WARN] gateway_prerequisite/swarm_tool_gateway_container_url_retired @ doctor:",
 		"SWARM_TOOL_GATEWAY_URL is retired and not accepted as gateway endpoint configuration",
 		"unset SWARM_TOOL_GATEWAY_URL; local serve/run derives the gateway binding from the bound MCP listener and ignores this retired URL",
 	} {
@@ -764,8 +764,10 @@ func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 	if !strings.Contains(doctor.Owner, "local_target_resolution_authority") {
 		t.Fatalf("doctor command catalog missing target owner: %#v", doctor)
 	}
-	if !strings.Contains(doctor.Behavior, "without starting runtime") || !strings.Contains(doctor.Behavior, "DB state") || !strings.Contains(doctor.Behavior, "--target") {
-		t.Fatalf("doctor behavior missing runtime/DB boundary: %s", doctor.Behavior)
+	for _, want := range []string{"without starting runtime", "DB state", "--target", "shared typed diagnostic list renderer", "[BLOCKER]", "existing doctor/preflight report shape"} {
+		if !strings.Contains(doctor.Behavior, want) {
+			t.Fatalf("doctor behavior missing %q: %s", want, doctor.Behavior)
+		}
 	}
 }
 

@@ -662,10 +662,7 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	if len(report.Env) > 0 {
 		fmt.Fprintln(out, "env:")
 		for _, finding := range report.Env {
-			fmt.Fprintf(out, "[%s] %s/%s: %s\n", strings.ToUpper(string(finding.Severity)), finding.Category, finding.Code, finding.Message)
-			if finding.Remediation != "" {
-				fmt.Fprintf(out, "  remediation: %s\n", finding.Remediation)
-			}
+			fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
 		}
 	}
 	fmt.Fprintf(out, "swarm_dir: %s (source: %s)\n", report.SwarmDir.Path, report.SwarmDir.Source)

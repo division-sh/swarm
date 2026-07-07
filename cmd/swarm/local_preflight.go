@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -372,10 +373,40 @@ func writeLocalPreflightText(out io.Writer, report localPreflightReport) {
 	}
 	fmt.Fprintf(out, "claude_cli preflight: %s\n", status)
 	for _, finding := range report.Findings {
-		fmt.Fprintf(out, "[%s] %s/%s: %s\n", strings.ToUpper(string(finding.Severity)), finding.Category, finding.Code, finding.Message)
-		if finding.Remediation != "" {
-			fmt.Fprintf(out, "  remediation: %s\n", finding.Remediation)
+		fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
+	}
+}
+
+func formatLocalPreflightFinding(mode string, finding localPreflightFinding) string {
+	checkID := strings.TrimSpace(string(finding.Category))
+	if code := strings.TrimSpace(finding.Code); code != "" {
+		if checkID != "" {
+			checkID += "/"
 		}
+		checkID += code
+	}
+	location := strings.TrimSpace(mode)
+	if location == "" {
+		location = "local_preflight"
+	}
+	severity, blocking := localPreflightTypedSeverity(finding.Severity)
+	return runtimebootverify.FormatTypedDiagnosticFinding(runtimebootverify.TypedDiagnosticFinding{
+		CheckID:     checkID,
+		Severity:    severity,
+		Location:    location,
+		Message:     strings.TrimSpace(finding.Message),
+		Remediation: strings.TrimSpace(finding.Remediation),
+	}, blocking)
+}
+
+func localPreflightTypedSeverity(severity localPreflightSeverity) (string, bool) {
+	switch severity {
+	case localPreflightSeverityBlocker:
+		return runtimebootverify.SeverityHardInvalidity, false
+	case localPreflightSeverityWarning:
+		return runtimebootverify.SeveritySemanticDriftWarn, false
+	default:
+		return runtimebootverify.SeverityLintEvidence, false
 	}
 }
 

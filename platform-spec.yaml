@@ -5781,9 +5781,10 @@ engine:
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
-        optional remediation. Hard-invalidity/error findings must carry remediation by construction or through the canonical
-        report normalization path, except for explicitly split/gate-recorded unsettled remediation language. The boot sequence runs
-        all checks after contract loading and before starting nodes/agents.
+        optional remediation. Hard-invalidity/error findings must carry remediation by construction through the remediation-bearing
+        hard-invalidity constructor or have stable/split remediation authority admitted by an AST/lint production-code guard; canonical
+        report normalization remains a runtime safety net, not the proof of authoring completeness. The boot sequence runs all checks
+        after contract loading and before starting nodes/agents.
       always_on: All checks run on every boot. There is no mechanism to disable individual checks. Acknowledged warnings
         (builder feature) are a UI concern, not a runtime concern.
       scope_meaning: per-flow checks run once per flow in the tree. per-node checks run once per node. per-agent checks run
@@ -15389,7 +15390,9 @@ cli_specification:
         owner. `--target` is a separate fast local-target diagnostic mode owned by
         cli_specification.foundations.local_target_resolution_authority; it reports Swarm-dir, project-root, API target,
         pending context/identity facts, current store/data facts, command classes, and split siblings without backend
-        preflight or local state writes. JSON output is supported for scripts.
+        preflight or local state writes. Human typed findings render through the shared typed diagnostic list renderer
+        as `[BLOCKER]`, `[WARN]`, or `[INFO]` lines with remediation when present. JSON output is supported for scripts
+        and remains the existing doctor/preflight report shape.
       split_scope:
       - workspace image build
       - local API connection discovery files
