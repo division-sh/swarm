@@ -15,44 +15,17 @@ func TestResolveBackendSourcePrecedence(t *testing.T) {
 		src  Source
 	}{
 		{
-			name: "flag beats environment and config",
+			name: "flag beats config",
 			in: Input{
 				RepoRoot:                repo,
 				FlagBackend:             "sqlite",
 				FlagBackendSet:          true,
-				EnvBackend:              "postgres",
-				EnvBackendSet:           true,
 				ConfigBackend:           "postgres",
 				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
 				DefaultSQLitePathSource: SourceRolloutDefault,
 			},
 			want: BackendSQLite,
 			src:  SourceFlag,
-		},
-		{
-			name: "runtime config beats environment",
-			in: Input{
-				RepoRoot:                repo,
-				EnvBackend:              "sqlite",
-				EnvBackendSet:           true,
-				ConfigBackend:           "postgres",
-				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
-				DefaultSQLitePathSource: SourceRolloutDefault,
-			},
-			want: BackendPostgres,
-			src:  SourceRuntimeConfig,
-		},
-		{
-			name: "environment fallback beats rollout default",
-			in: Input{
-				RepoRoot:                repo,
-				EnvBackend:              "sqlite",
-				EnvBackendSet:           true,
-				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
-				DefaultSQLitePathSource: SourceRolloutDefault,
-			},
-			want: BackendSQLite,
-			src:  SourceEnvironment,
 		},
 		{
 			name: "runtime config beats rollout default",
@@ -90,7 +63,7 @@ func TestResolveBackendSourcePrecedence(t *testing.T) {
 }
 
 func TestResolveRejectsInvalidSelectedBackend(t *testing.T) {
-	_, err := Resolve(Input{EnvBackend: "mysql", EnvBackendSet: true})
+	_, err := Resolve(Input{ConfigBackend: "mysql"})
 	if err == nil {
 		t.Fatal("Resolve unexpectedly accepted invalid backend")
 	}
@@ -113,20 +86,6 @@ func TestResolveIgnoresInvalidLowerPriorityConfigBackend(t *testing.T) {
 	}
 }
 
-func TestResolveIgnoresInvalidLowerPriorityEnvironmentBackend(t *testing.T) {
-	got, err := Resolve(Input{
-		EnvBackend:    "mysql",
-		EnvBackendSet: true,
-		ConfigBackend: "postgres",
-	})
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if got.Backend != BackendPostgres || got.BackendSource != SourceRuntimeConfig {
-		t.Fatalf("selection = %#v, want config-selected postgres", got)
-	}
-}
-
 func TestResolveSQLitePathSources(t *testing.T) {
 	repo := t.TempDir()
 	tests := []struct {
@@ -135,35 +94,6 @@ func TestResolveSQLitePathSources(t *testing.T) {
 		want string
 		src  Source
 	}{
-		{
-			name: "config path beats env path",
-			in: Input{
-				RepoRoot:                repo,
-				FlagBackend:             "sqlite",
-				FlagBackendSet:          true,
-				EnvSQLitePath:           "env/dev.db",
-				EnvSQLitePathSet:        true,
-				ConfigSQLitePath:        "config/dev.db",
-				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
-				DefaultSQLitePathSource: SourceRolloutDefault,
-			},
-			want: filepath.Join(repo, "config", "dev.db"),
-			src:  SourceRuntimeConfig,
-		},
-		{
-			name: "env path fallback beats default",
-			in: Input{
-				RepoRoot:                repo,
-				FlagBackend:             "sqlite",
-				FlagBackendSet:          true,
-				EnvSQLitePath:           "env/dev.db",
-				EnvSQLitePathSet:        true,
-				DefaultSQLitePath:       filepath.Join(repo, "default.db"),
-				DefaultSQLitePathSource: SourceRolloutDefault,
-			},
-			want: filepath.Join(repo, "env", "dev.db"),
-			src:  SourceEnvironment,
-		},
 		{
 			name: "config path beats default",
 			in: Input{
@@ -203,17 +133,15 @@ func TestResolveSQLitePathSources(t *testing.T) {
 	}
 }
 
-func TestResolveRejectsEmptyExplicitSQLitePath(t *testing.T) {
+func TestResolveRejectsEmptyDefaultSQLitePath(t *testing.T) {
 	_, err := Resolve(Input{
-		FlagBackend:      "sqlite",
-		FlagBackendSet:   true,
-		EnvSQLitePath:    " ",
-		EnvSQLitePathSet: true,
+		FlagBackend:    "sqlite",
+		FlagBackendSet: true,
 	})
 	if err == nil {
-		t.Fatal("Resolve unexpectedly accepted empty explicit SQLite path")
+		t.Fatal("Resolve unexpectedly accepted empty default SQLite path")
 	}
-	if !strings.Contains(err.Error(), "sqlite path from environment must be non-empty") {
+	if !strings.Contains(err.Error(), "sqlite path from rollout_default must be non-empty") {
 		t.Fatalf("error = %v, want empty path guidance", err)
 	}
 }

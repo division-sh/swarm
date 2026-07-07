@@ -565,6 +565,13 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
 		)
 	}
+	retiredStoreDatabaseConfig := func(name, key string) swarmEnvCatalogEntry {
+		return retired(
+			name,
+			name+" is retired as store/database environment source; use "+key,
+			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
+		)
+	}
 	retiredUnsupported := func(name string) swarmEnvCatalogEntry {
 		return retired(
 			name,
@@ -589,14 +596,14 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		retired("SWARM_PLATFORM_SPEC_PATH", "SWARM_PLATFORM_SPEC_PATH is not promoted", "use --platform-spec or config platform_spec_path where supported"),
 		retired("SWARM_DIR", "SWARM_DIR is not promoted as state directory authority", "use --swarm-dir or config swarm_dir"),
 		retired("SWARM_HOME", "SWARM_HOME is not promoted as state directory authority", "use --swarm-dir or config swarm_dir"),
-		seeded("SWARM_STORE_BACKEND", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection", "#1637 store.backend"),
-		seeded("SWARM_SQLITE_PATH", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.sqlite_path", "#1637 store.sqlite.path"),
-		seeded("SWARM_DB_HOST", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details", "#1637 database.host"),
-		seeded("SWARM_DB_PORT", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details", "#1637 database.port"),
-		seeded("SWARM_DB_NAME", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details", "#1637 database.name"),
-		seeded("SWARM_DB_USER", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details", "#1637 database.user"),
-		seeded("SWARM_DB_SSLMODE", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details", "#1637 database.sslmode"),
-		seeded("SWARM_DB_POOL_SIZE", "platform-spec.yaml#runtime_storage.runtime_store_backend_selection.postgres_connection_details", "#1637 database.pool_size"),
+		retiredStoreDatabaseConfig("SWARM_STORE_BACKEND", "--store or store.backend"),
+		retiredStoreDatabaseConfig("SWARM_SQLITE_PATH", "store.sqlite.path"),
+		retiredStoreDatabaseConfig("SWARM_DB_HOST", "database.host"),
+		retiredStoreDatabaseConfig("SWARM_DB_PORT", "database.port"),
+		retiredStoreDatabaseConfig("SWARM_DB_NAME", "database.name"),
+		retiredStoreDatabaseConfig("SWARM_DB_USER", "database.user"),
+		retiredStoreDatabaseConfig("SWARM_DB_SSLMODE", "database.sslmode"),
+		retiredStoreDatabaseConfig("SWARM_DB_POOL_SIZE", "database.pool_size"),
 		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in the runtime config"),
 		seeded("SWARM_WORKSPACE_DATA_SOURCE", "platform-spec.yaml#workspace_model.data_source_authority", "#1600 workspace.data_source"),
 		seeded("SWARM_WORKSPACE_BACKEND", "platform-spec.yaml#workspace_model.workspace_backend_selection", "#1600 workspace.backend"),

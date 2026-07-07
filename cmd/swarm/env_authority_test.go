@@ -612,6 +612,45 @@ func TestSwarmEnvGuardBlocksRetiredRuntimeLLMConfigEnv(t *testing.T) {
 	}
 }
 
+func TestSwarmEnvGuardBlocksRetiredStoreDatabaseConfigEnv(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  []string
+	}{
+		{name: "SWARM_STORE_BACKEND", value: "postgres", want: []string{"env/known_retired: SWARM_STORE_BACKEND", "--store or store.backend"}},
+		{name: "SWARM_SQLITE_PATH", value: "dev.db", want: []string{"env/known_retired: SWARM_SQLITE_PATH", "store.sqlite.path"}},
+		{name: "SWARM_DB_HOST", value: "db.example.test", want: []string{"env/known_retired: SWARM_DB_HOST", "database.host"}},
+		{name: "SWARM_DB_PORT", value: "15432", want: []string{"env/known_retired: SWARM_DB_PORT", "database.port"}},
+		{name: "SWARM_DB_NAME", value: "swarm_test", want: []string{"env/known_retired: SWARM_DB_NAME", "database.name"}},
+		{name: "SWARM_DB_USER", value: "swarm_user", want: []string{"env/known_retired: SWARM_DB_USER", "database.user"}},
+		{name: "SWARM_DB_SSLMODE", value: "require", want: []string{"env/known_retired: SWARM_DB_SSLMODE", "database.sslmode"}},
+		{name: "SWARM_DB_POOL_SIZE", value: "9", want: []string{"env/known_retired: SWARM_DB_POOL_SIZE", "database.pool_size"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			t.Setenv(tc.name, tc.value)
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+				"serve",
+				"--api-listen-addr", "127.0.0.1:0",
+				"--mcp-listen-addr", "127.0.0.1:0",
+			}, &stdout, &stderr, defaultRootCommandOptions())
+			if code != cliExitValidation {
+				t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+			}
+			output := stdout.String() + stderr.String()
+			for _, want := range tc.want {
+				if !strings.Contains(output, want) {
+					t.Fatalf("output missing %q:\n%s", want, output)
+				}
+			}
+		})
+	}
+}
+
 func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
@@ -763,6 +802,14 @@ func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
 		"SWARM_CLAUDE_CLI_TIMEOUT",
 		"SWARM_CLAUDE_TIMEOUT_SECONDS",
 		"SWARM_CLAUDE_CLI_RETRIES",
+		"SWARM_STORE_BACKEND",
+		"SWARM_SQLITE_PATH",
+		"SWARM_DB_HOST",
+		"SWARM_DB_PORT",
+		"SWARM_DB_NAME",
+		"SWARM_DB_USER",
+		"SWARM_DB_SSLMODE",
+		"SWARM_DB_POOL_SIZE",
 	}
 	for _, envName := range cases {
 		t.Run(envName, func(t *testing.T) {

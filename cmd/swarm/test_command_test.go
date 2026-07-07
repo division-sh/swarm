@@ -1363,10 +1363,9 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-	t.Setenv(storebackend.EnvSQLitePath, sqlitePath)
 	contractsPath := writeScenarioRunnerFixture(t)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
-		ConfigPath:              writeServeRuntimeTestConfig(t),
+		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
