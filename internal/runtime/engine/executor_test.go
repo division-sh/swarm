@@ -21,6 +21,7 @@ import (
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
@@ -97,6 +98,91 @@ func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runt
 	return semanticview.Wrap(bundle), module
 }
 
+func sourceWithPythonRendererModule(t *testing.T) (semanticview.Source, runtimecontracts.PolicyModule) {
+	t.Helper()
+	source := []byte(`def handle(input):
+    lines = [
+        "component: " + input["component"],
+        "owner: " + input["owner"],
+        "language: " + input["language"],
+    ]
+    for name in input["files"]:
+        if name.endswith(".yaml"):
+            lines.append("- deploy/" + name)
+        elif name.endswith(".go"):
+            lines.append("- src/" + name)
+        else:
+            lines.append("- " + name)
+    return {"content": "\n".join(lines), "format": "yaml", "line_count": len(lines)}
+`)
+	return sourceWithPythonRendererSource(t, source)
+}
+
+func sourceWithPythonRendererSource(t *testing.T, source []byte) (semanticview.Source, runtimecontracts.PolicyModule) {
+	t.Helper()
+	root := t.TempDir()
+	modulePath := filepath.Join(root, "modules", "python_renderer.py")
+	if err := os.MkdirAll(filepath.Dir(modulePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modulePath, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(source)
+	module := runtimecontracts.PolicyModule{
+		Path:   "modules/python_renderer.py",
+		Kind:   pythonmodule.Kind,
+		ABI:    pythonmodule.ABI,
+		Entry:  pythonmodule.DefaultEntry,
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []any{"component", "owner", "language", "files"},
+			"properties": map[string]any{
+				"component": map[string]any{"type": "string"},
+				"owner":     map[string]any{"type": "string"},
+				"language":  map[string]any{"type": "string"},
+				"files": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+		},
+		OutputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []any{"content", "format", "line_count"},
+			"properties": map[string]any{
+				"content":    map[string]any{"type": "string"},
+				"format":     map[string]any{"type": "string"},
+				"line_count": map[string]any{"type": "integer"},
+			},
+		},
+		Limits: runtimecontracts.PolicyModuleLimits{
+			Gas:         2_500_000_000,
+			MemoryPages: 8192,
+			OutputBytes: 4096,
+		},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "render", Flow: "render"},
+		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
+			"python_renderer": module,
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &flow,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"render": &flow,
+			},
+		},
+	}
+	return semanticview.Wrap(bundle), module
+}
+
 func newStructuredRendererExecutor(t *testing.T, source semanticview.Source) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{
@@ -137,6 +223,12 @@ func structuredRendererModuleSpec() *runtimecontracts.ComputeModuleSpec {
 			"files":     runtimepaths.Parse("payload.files"),
 		},
 	}
+}
+
+func pythonRendererModuleSpec() *runtimecontracts.ComputeModuleSpec {
+	spec := structuredRendererModuleSpec()
+	spec.Module = "python_renderer"
+	return spec
 }
 
 func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontracts.ComputeModuleSpec) ExecutionRequest {
@@ -1875,6 +1967,83 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 	trace := result.ComputeModuleTraces[0]
 	if trace.ModuleID != "structured_renderer" || trace.RowID != "render_bundle" || trace.Digest != module.Digest || trace.FuelConsumed == 0 || trace.OutputHash == "" || trace.Engine == "" {
 		t.Fatalf("trace = %#v", trace)
+	}
+}
+
+func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
+	source, module := sourceWithPythonRendererModule(t)
+	exec := newStructuredRendererExecutor(t, source)
+	req := structuredRendererExecutionRequest(t, pythonRendererModuleSpec())
+	result, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	rendered, _ := result.Computed["rendered_bundle"].(map[string]any)
+	content, _ := rendered["content"].(string)
+	for _, want := range []string{"component: api", "owner: platform", "- src/main.go", "- deploy/service.yaml"} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("rendered content missing %q: %s", want, content)
+		}
+	}
+	if got := result.RuleID; got != "rendered_yaml" {
+		t.Fatalf("selected rule = %q, want rendered_yaml", got)
+	}
+	if got := len(result.ComputeModuleTraces); got != 1 {
+		t.Fatalf("module traces = %d, want 1", got)
+	}
+	trace := result.ComputeModuleTraces[0]
+	if trace.ModuleID != "python_renderer" ||
+		trace.RowID != "render_bundle" ||
+		trace.Kind != pythonmodule.Kind ||
+		trace.Digest != module.Digest ||
+		trace.Interpreter != pythonmodule.Interpreter ||
+		trace.InterpreterDigest != pythonmodule.InterpreterDigest ||
+		trace.SnapshotDigest == "" ||
+		trace.HarnessABI != pythonmodule.HarnessABI ||
+		trace.SourceHash != module.Digest ||
+		trace.FuelConsumed == 0 ||
+		trace.OutputHash == "" ||
+		trace.Engine == "" {
+		t.Fatalf("trace = %#v", trace)
+	}
+
+	req.ExpectedComputeModuleTraces = append([]ComputeModuleTrace(nil), result.ComputeModuleTraces...)
+	replayed, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("replay Execute with matching trace error: %v", err)
+	}
+	if got := len(replayed.ComputeModuleTraces); got != 1 {
+		t.Fatalf("replay traces = %d, want 1", got)
+	}
+	req.ExpectedComputeModuleTraces[0].SourceHash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	_, err = exec.Execute(context.Background(), req)
+	if err == nil {
+		t.Fatal("replay Execute error = nil, want source hash divergence")
+	}
+	var typed *computemodule.Error
+	if !errors.As(err, &typed) || typed.Code != computemodule.CodeReplay {
+		t.Fatalf("error = %#v, want code %s", err, computemodule.CodeReplay)
+	}
+	if !strings.Contains(err.Error(), "source_hash") {
+		t.Fatalf("error = %v, want source hash diagnostic", err)
+	}
+}
+
+func TestExecutor_PythonModuleOutputSchemaFailureStopsBeforeEmit(t *testing.T) {
+	source, _ := sourceWithPythonRendererSource(t, []byte(`def handle(input):
+    return {"content": "ok", "format": "yaml", "line_count": "three"}
+`))
+	exec := newStructuredRendererExecutor(t, source)
+	_, err := exec.Execute(context.Background(), structuredRendererExecutionRequest(t, pythonRendererModuleSpec()))
+	if err == nil {
+		t.Fatal("Execute error = nil, want output schema violation")
+	}
+	var typed *computemodule.Error
+	if !errors.As(err, &typed) || typed.Code != computemodule.CodeABI {
+		t.Fatalf("error = %#v, want code %s", err, computemodule.CodeABI)
+	}
+	if !strings.Contains(err.Error(), "output schema violation") {
+		t.Fatalf("error = %v, want output schema diagnostic", err)
 	}
 }
 

@@ -42,12 +42,19 @@ func ClonePolicyDocument(in PolicyDocument) PolicyDocument {
 
 func clonePolicyModule(in PolicyModule) PolicyModule {
 	return PolicyModule{
-		Path:         strings.TrimSpace(in.Path),
-		ABI:          strings.TrimSpace(in.ABI),
-		Entry:        strings.TrimSpace(in.Entry),
-		Digest:       strings.TrimSpace(in.Digest),
-		SourcePath:   strings.TrimSpace(in.SourcePath),
-		SourceHash:   strings.TrimSpace(in.SourceHash),
+		Path:       strings.TrimSpace(in.Path),
+		Kind:       strings.TrimSpace(in.Kind),
+		ABI:        strings.TrimSpace(in.ABI),
+		Entry:      strings.TrimSpace(in.Entry),
+		Digest:     strings.TrimSpace(in.Digest),
+		SourcePath: strings.TrimSpace(in.SourcePath),
+		SourceHash: strings.TrimSpace(in.SourceHash),
+		Runtime: PolicyModuleRuntime{
+			Interpreter:       strings.TrimSpace(in.Runtime.Interpreter),
+			InterpreterDigest: strings.TrimSpace(in.Runtime.InterpreterDigest),
+			SnapshotDigest:    strings.TrimSpace(in.Runtime.SnapshotDigest),
+			HarnessABI:        strings.TrimSpace(in.Runtime.HarnessABI),
+		},
 		InputSchema:  clonePolicyModuleSchema(in.InputSchema),
 		OutputSchema: clonePolicyModuleSchema(in.OutputSchema),
 		Limits: PolicyModuleLimits{

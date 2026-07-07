@@ -9,9 +9,16 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 )
 
 var computeModuleDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+const (
+	policyModuleKindWasm   = "wasm"
+	policyModuleKindPython = pythonmodule.Kind
+	policyModuleWasmABI    = "core-json-v1"
+)
 
 func validateWorkflowComputeModuleContracts(bundle *WorkflowContractBundle) []error {
 	if bundle == nil {
@@ -58,12 +65,7 @@ func validatePolicyModuleDeclaration(bundle *WorkflowContractBundle, context, mo
 	if strings.TrimSpace(module.Path) == "" {
 		errs = append(errs, fmt.Errorf("%w: %s path is required", ErrInvalidField, context))
 	}
-	if abi := strings.TrimSpace(module.ABI); abi != "core-json-v1" {
-		errs = append(errs, fmt.Errorf("%w: %s abi must be core-json-v1, got %q", ErrInvalidField, context, abi))
-	}
-	if entry := strings.TrimSpace(module.Entry); entry != "compute" {
-		errs = append(errs, fmt.Errorf("%w: %s entry must be compute, got %q", ErrInvalidField, context, entry))
-	}
+	kind := policyModuleKind(module)
 	if digest := strings.TrimSpace(module.Digest); !computeModuleDigestPattern.MatchString(digest) {
 		errs = append(errs, fmt.Errorf("%w: %s digest must be sha256:<64 lowercase hex>", ErrInvalidField, context))
 	}
@@ -91,6 +93,25 @@ func validatePolicyModuleDeclaration(bundle *WorkflowContractBundle, context, mo
 		errs = append(errs, fmt.Errorf("%w: %s %v", ErrInvalidField, context, readErr))
 		return errs
 	}
+	switch kind {
+	case policyModuleKindWasm:
+		errs = append(errs, validateWasmPolicyModuleDeclaration(context, module, raw)...)
+	case policyModuleKindPython:
+		errs = append(errs, validatePythonPolicyModuleDeclaration(context, moduleID, module, raw)...)
+	default:
+		errs = append(errs, fmt.Errorf("%w: %s kind must be wasm or python, got %q", ErrInvalidField, context, strings.TrimSpace(module.Kind)))
+	}
+	return errs
+}
+
+func validateWasmPolicyModuleDeclaration(context string, module PolicyModule, raw []byte) []error {
+	errs := []error{}
+	if abi := strings.TrimSpace(module.ABI); abi != policyModuleWasmABI {
+		errs = append(errs, fmt.Errorf("%w: %s abi must be %s for wasm modules, got %q", ErrInvalidField, context, policyModuleWasmABI, abi))
+	}
+	if entry := strings.TrimSpace(module.Entry); entry != "compute" {
+		errs = append(errs, fmt.Errorf("%w: %s entry must be compute for wasm modules, got %q", ErrInvalidField, context, entry))
+	}
 	if len(raw) < 4 || string(raw[:4]) != "\x00asm" {
 		errs = append(errs, fmt.Errorf("%w: %s path must point to a WebAssembly module", ErrInvalidField, context))
 	}
@@ -100,6 +121,66 @@ func validatePolicyModuleDeclaration(bundle *WorkflowContractBundle, context, mo
 		errs = append(errs, fmt.Errorf("%w: %s digest %s does not match module bytes %s", ErrInvalidField, context, strings.TrimSpace(module.Digest), actual))
 	}
 	return errs
+}
+
+func validatePythonPolicyModuleDeclaration(context, moduleID string, module PolicyModule, raw []byte) []error {
+	errs := []error{}
+	if abi := strings.TrimSpace(module.ABI); abi != pythonmodule.ABI {
+		errs = append(errs, fmt.Errorf("%w: %s abi must be %s for python modules, got %q", ErrInvalidField, context, pythonmodule.ABI, abi))
+	}
+	if entry := strings.TrimSpace(module.Entry); entry != pythonmodule.DefaultEntry {
+		errs = append(errs, fmt.Errorf("%w: %s entry must be %s for python modules, got %q", ErrInvalidField, context, pythonmodule.DefaultEntry, entry))
+	}
+	if strings.TrimSpace(module.SourcePath) != "" || strings.TrimSpace(module.SourceHash) != "" {
+		errs = append(errs, fmt.Errorf("%w: %s python modules use path/digest as source authority; source_path/source_hash are invalid", ErrInvalidField, context))
+	}
+	identity := pythonmodule.RuntimeIdentity()
+	if runtime := module.Runtime; strings.TrimSpace(runtime.Interpreter) != "" ||
+		strings.TrimSpace(runtime.InterpreterDigest) != "" ||
+		strings.TrimSpace(runtime.SnapshotDigest) != "" ||
+		strings.TrimSpace(runtime.HarnessABI) != "" {
+		if strings.TrimSpace(runtime.Interpreter) != identity.Interpreter {
+			errs = append(errs, fmt.Errorf("%w: %s runtime.interpreter must be %s", ErrInvalidField, context, identity.Interpreter))
+		}
+		if strings.TrimSpace(runtime.InterpreterDigest) != identity.InterpreterDigest {
+			errs = append(errs, fmt.Errorf("%w: %s runtime.interpreter_digest must be %s", ErrInvalidField, context, identity.InterpreterDigest))
+		}
+		if strings.TrimSpace(runtime.SnapshotDigest) != identity.SnapshotDigest {
+			errs = append(errs, fmt.Errorf("%w: %s runtime.snapshot_digest must be %s", ErrInvalidField, context, identity.SnapshotDigest))
+		}
+		if strings.TrimSpace(runtime.HarnessABI) != identity.HarnessABI {
+			errs = append(errs, fmt.Errorf("%w: %s runtime.harness_abi must be %s", ErrInvalidField, context, identity.HarnessABI))
+		}
+	}
+	sum := sha256.Sum256(raw)
+	actual := "sha256:" + hex.EncodeToString(sum[:])
+	if strings.TrimSpace(module.Digest) != "" && strings.TrimSpace(module.Digest) != actual {
+		errs = append(errs, fmt.Errorf("%w: %s digest %s does not match python source bytes %s", ErrInvalidField, context, strings.TrimSpace(module.Digest), actual))
+	}
+	if len(errs) > 0 {
+		return errs
+	}
+	if err := pythonmodule.ValidateSource(pythonmodule.Request{
+		ModuleID:    moduleID,
+		RowID:       "policy.modules." + moduleID,
+		Digest:      strings.TrimSpace(module.Digest),
+		Entry:       strings.TrimSpace(module.Entry),
+		Source:      raw,
+		Fuel:        module.Limits.Gas,
+		MemoryPages: module.Limits.MemoryPages,
+		OutputBytes: module.Limits.OutputBytes,
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("%w: %s %v", ErrInvalidField, context, err))
+	}
+	return errs
+}
+
+func policyModuleKind(module PolicyModule) string {
+	kind := strings.TrimSpace(module.Kind)
+	if kind == "" {
+		return policyModuleKindWasm
+	}
+	return kind
 }
 
 func validateComputeModuleSchema(context string, schema map[string]any) []error {

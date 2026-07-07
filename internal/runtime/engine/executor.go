@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -1118,35 +1119,71 @@ func (e *Executor) computeModuleValue(frame *executionFrame, spec *runtimecontra
 	if err != nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: moduleID, RowID: rowID, Err: err}
 	}
-	wasmBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
+	moduleBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
 	if err != nil {
 		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: err}
 	}
-	result, err := computemodule.Execute(computemodule.Request{
-		ModuleID:    moduleID,
-		RowID:       rowID,
-		Digest:      strings.TrimSpace(module.Digest),
-		Entry:       strings.TrimSpace(module.Entry),
-		Wasm:        wasmBytes,
-		Input:       inputBytes,
-		Fuel:        module.Limits.Gas,
-		MemoryPages: module.Limits.MemoryPages,
-		OutputBytes: module.Limits.OutputBytes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	output, err := decodeComputeModuleOutput(moduleID, rowID, result.Output, module.OutputSchema)
-	if err != nil {
-		return nil, err
+	kind := strings.TrimSpace(module.Kind)
+	if kind == "" {
+		kind = "wasm"
 	}
 	trace := ComputeModuleTrace{
-		ModuleID:     moduleID,
-		RowID:        rowID,
-		Digest:       strings.TrimSpace(module.Digest),
-		Engine:       result.Engine,
-		OutputHash:   result.OutputHash,
-		FuelConsumed: result.FuelConsumed,
+		ModuleID: moduleID,
+		RowID:    rowID,
+		Kind:     kind,
+		Digest:   strings.TrimSpace(module.Digest),
+	}
+	var rawOutput []byte
+	switch kind {
+	case "wasm":
+		result, err := computemodule.Execute(computemodule.Request{
+			ModuleID:    moduleID,
+			RowID:       rowID,
+			Digest:      strings.TrimSpace(module.Digest),
+			Entry:       strings.TrimSpace(module.Entry),
+			Wasm:        moduleBytes,
+			Input:       inputBytes,
+			Fuel:        module.Limits.Gas,
+			MemoryPages: module.Limits.MemoryPages,
+			OutputBytes: module.Limits.OutputBytes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		rawOutput = result.Output
+		trace.Engine = result.Engine
+		trace.OutputHash = result.OutputHash
+		trace.FuelConsumed = result.FuelConsumed
+	case pythonmodule.Kind:
+		result, err := pythonmodule.Execute(pythonmodule.Request{
+			ModuleID:    moduleID,
+			RowID:       rowID,
+			Digest:      strings.TrimSpace(module.Digest),
+			Entry:       strings.TrimSpace(module.Entry),
+			Source:      moduleBytes,
+			Input:       inputBytes,
+			Fuel:        module.Limits.Gas,
+			MemoryPages: module.Limits.MemoryPages,
+			OutputBytes: module.Limits.OutputBytes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		rawOutput = result.Output
+		trace.Engine = result.Engine
+		trace.OutputHash = result.OutputHash
+		trace.FuelConsumed = result.FuelConsumed
+		trace.Interpreter = result.Interpreter
+		trace.InterpreterDigest = result.InterpreterSHA
+		trace.SnapshotDigest = result.SnapshotHash
+		trace.HarnessABI = result.HarnessABI
+		trace.SourceHash = result.SourceHash
+	default:
+		return nil, &computemodule.Error{Code: computemodule.CodeCompile, ModuleID: moduleID, RowID: rowID, Err: fmt.Errorf("unsupported module kind %q", kind)}
+	}
+	output, err := decodeComputeModuleOutput(moduleID, rowID, rawOutput, module.OutputSchema)
+	if err != nil {
+		return nil, err
 	}
 	if err := verifyComputeModuleReplayTrace(frame, trace); err != nil {
 		return nil, err
@@ -1184,19 +1221,26 @@ func verifyComputeModuleReplayTrace(frame *executionFrame, actual ComputeModuleT
 		}
 	}
 	want := expected[idx]
+	compareFuel := strings.TrimSpace(actual.Kind) != pythonmodule.Kind
 	if strings.TrimSpace(want.ModuleID) != strings.TrimSpace(actual.ModuleID) ||
 		strings.TrimSpace(want.RowID) != strings.TrimSpace(actual.RowID) ||
+		strings.TrimSpace(want.Kind) != strings.TrimSpace(actual.Kind) ||
 		strings.TrimSpace(want.Digest) != strings.TrimSpace(actual.Digest) ||
+		strings.TrimSpace(want.Interpreter) != strings.TrimSpace(actual.Interpreter) ||
+		strings.TrimSpace(want.InterpreterDigest) != strings.TrimSpace(actual.InterpreterDigest) ||
+		strings.TrimSpace(want.SnapshotDigest) != strings.TrimSpace(actual.SnapshotDigest) ||
+		strings.TrimSpace(want.HarnessABI) != strings.TrimSpace(actual.HarnessABI) ||
+		strings.TrimSpace(want.SourceHash) != strings.TrimSpace(actual.SourceHash) ||
 		strings.TrimSpace(want.OutputHash) != strings.TrimSpace(actual.OutputHash) ||
-		want.FuelConsumed != actual.FuelConsumed {
+		(compareFuel && want.FuelConsumed != actual.FuelConsumed) {
 		return &computemodule.Error{
 			Code:     computemodule.CodeReplay,
 			ModuleID: actual.ModuleID,
 			RowID:    actual.RowID,
-			Err: fmt.Errorf("compute_module replay divergence at index %d: expected module=%s row=%s digest=%s output_hash=%s fuel=%d engine=%s; got module=%s row=%s digest=%s output_hash=%s fuel=%d engine=%s",
+			Err: fmt.Errorf("compute_module replay divergence at index %d: expected module=%s row=%s kind=%s digest=%s interpreter=%s interpreter_digest=%s snapshot_digest=%s harness_abi=%s source_hash=%s output_hash=%s fuel=%d engine=%s; got module=%s row=%s kind=%s digest=%s interpreter=%s interpreter_digest=%s snapshot_digest=%s harness_abi=%s source_hash=%s output_hash=%s fuel=%d engine=%s",
 				idx,
-				want.ModuleID, want.RowID, want.Digest, want.OutputHash, want.FuelConsumed, want.Engine,
-				actual.ModuleID, actual.RowID, actual.Digest, actual.OutputHash, actual.FuelConsumed, actual.Engine,
+				want.ModuleID, want.RowID, want.Kind, want.Digest, want.Interpreter, want.InterpreterDigest, want.SnapshotDigest, want.HarnessABI, want.SourceHash, want.OutputHash, want.FuelConsumed, want.Engine,
+				actual.ModuleID, actual.RowID, actual.Kind, actual.Digest, actual.Interpreter, actual.InterpreterDigest, actual.SnapshotDigest, actual.HarnessABI, actual.SourceHash, actual.OutputHash, actual.FuelConsumed, actual.Engine,
 			),
 		}
 	}
