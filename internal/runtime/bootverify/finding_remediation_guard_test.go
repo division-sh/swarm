@@ -38,6 +38,27 @@ func TestHardInvalidityFindingLiteralsHaveRemediationAuthority(t *testing.T) {
 	}
 }
 
+func TestDynamicSeverityFindingLiteralsFailClosed(t *testing.T) {
+	lit := parseSingleFindingLiteral(t, `package bootverify
+
+func example(severity string) Finding {
+	return Finding{
+		CheckID: "missing_dynamic_authority",
+		Severity: severity,
+		Message: "dynamic severity must not bypass hard-invalidity remediation authority",
+		Location: "global",
+	}
+}
+`)
+	fields := findingLiteralFields(lit)
+	if !findingLiteralIsHardInvalidity(fields, nil) {
+		t.Fatalf("dynamic severity Finding literal should be treated as potential hard invalidity")
+	}
+	if findingCheckIDHasCanonicalRemediationAuthority(resolvedFindingCheckID(fields["CheckID"], nil)) {
+		t.Fatalf("test fixture unexpectedly has canonical remediation authority")
+	}
+}
+
 type parsedBootverifyFile struct {
 	fset *token.FileSet
 	file *ast.File
@@ -89,6 +110,23 @@ func bootverifyStringConstants(files []parsedBootverifyFile) map[string]string {
 		}
 	}
 	return out
+}
+
+func parseSingleFindingLiteral(t *testing.T, src string) *ast.CompositeLit {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "fixture.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	var findings []*ast.CompositeLit
+	inspectFindingCompositeLiterals(file, func(lit *ast.CompositeLit) {
+		findings = append(findings, lit)
+	})
+	if len(findings) != 1 {
+		t.Fatalf("finding literals = %d, want 1", len(findings))
+	}
+	return findings[0]
 }
 
 func inspectFindingCompositeLiterals(node ast.Node, visit func(*ast.CompositeLit)) {
@@ -156,7 +194,7 @@ func findingLiteralFields(lit *ast.CompositeLit) map[string]ast.Expr {
 func findingLiteralIsHardInvalidity(fields map[string]ast.Expr, constants map[string]string) bool {
 	raw, ok := stringValue(fields["Severity"], constants)
 	if !ok {
-		return fields["Severity"] == nil
+		return true
 	}
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case "", legacySeverityError, SeverityHardInvalidity:

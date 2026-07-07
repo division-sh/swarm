@@ -73,6 +73,7 @@ var stableHardInvalidityRemediation = map[string]string{
 	"node_state_schema_typed_counterpart":     "Add the typed node-state counterpart required by the schema or remove the unsupported jsonb-only state field.",
 	"output_pin_key_carries_validation":       "Declare the output pin key/carries fields and ensure every authored emit site populates those payload fields.",
 	"payload_field_coverage":                  "Populate every required emitted payload field or make the target event schema optional where appropriate.",
+	"platform_tool_usage_hints":               "Fix platform tool usage hints so every referenced tool exists and every required usage hint is declared.",
 	"platform_namespace_violation":            "Rename authored business fields away from platform-reserved namespace roots.",
 	"platform_version_compatibility":          "Update the contract platform_version range or run with a compatible Swarm platform version.",
 	"policy_conflict_detection":               "Resolve the conflicting policy declarations so only one authoritative value remains.",
@@ -148,23 +149,15 @@ func WithEvidence(evidence ...string) FindingOption {
 	}
 }
 
-func newFinding(checkID, severity, location, message string, opts ...FindingOption) Finding {
-	f := Finding{
-		CheckID:  checkID,
-		Severity: severity,
-		Location: location,
-		Message:  message,
-	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&f)
-		}
-	}
-	return f
-}
-
 func NewHardInvalidityFinding(checkID, location, message, remediation string, evidence ...string) Finding {
-	return newFinding(checkID, SeverityHardInvalidity, location, message, WithRemediation(remediation), WithEvidence(evidence...))
+	return Finding{
+		CheckID:     checkID,
+		Severity:    SeverityHardInvalidity,
+		Location:    location,
+		Message:     message,
+		Remediation: remediation,
+		Evidence:    evidence,
+	}
 }
 
 type Report struct {
