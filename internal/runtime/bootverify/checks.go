@@ -401,8 +401,8 @@ func (c *checkerContext) promptSchemaGuard() []Finding {
 	}
 	for _, finding := range findings {
 		c.promptSchemaGuardFindings = append(c.promptSchemaGuardFindings, Finding{
-			CheckID:  strings.TrimSpace(finding.CheckID),
-			Severity: finding.Severity,
+			CheckID:  "agent_prompt_lint_structural",
+			Severity: SeverityHardInvalidity,
 			Message:  strings.TrimSpace(finding.Message),
 			Location: strings.TrimSpace(finding.Location),
 		})
