@@ -618,14 +618,14 @@ func TestSwarmEnvGuardBlocksRetiredStoreDatabaseConfigEnv(t *testing.T) {
 		value string
 		want  []string
 	}{
-		{name: "SWARM_STORE_BACKEND", value: "postgres", want: []string{"env/known_retired: SWARM_STORE_BACKEND", "--store or store.backend"}},
-		{name: "SWARM_SQLITE_PATH", value: "dev.db", want: []string{"env/known_retired: SWARM_SQLITE_PATH", "store.sqlite.path"}},
-		{name: "SWARM_DB_HOST", value: "db.example.test", want: []string{"env/known_retired: SWARM_DB_HOST", "database.host"}},
-		{name: "SWARM_DB_PORT", value: "15432", want: []string{"env/known_retired: SWARM_DB_PORT", "database.port"}},
-		{name: "SWARM_DB_NAME", value: "swarm_test", want: []string{"env/known_retired: SWARM_DB_NAME", "database.name"}},
-		{name: "SWARM_DB_USER", value: "swarm_user", want: []string{"env/known_retired: SWARM_DB_USER", "database.user"}},
-		{name: "SWARM_DB_SSLMODE", value: "require", want: []string{"env/known_retired: SWARM_DB_SSLMODE", "database.sslmode"}},
-		{name: "SWARM_DB_POOL_SIZE", value: "9", want: []string{"env/known_retired: SWARM_DB_POOL_SIZE", "database.pool_size"}},
+		{name: "SWARM_STORE_BACKEND", value: "postgres", want: []string{"env/known_retired", "SWARM_STORE_BACKEND", "--store or store.backend"}},
+		{name: "SWARM_SQLITE_PATH", value: "dev.db", want: []string{"env/known_retired", "SWARM_SQLITE_PATH", "store.sqlite.path"}},
+		{name: "SWARM_DB_HOST", value: "db.example.test", want: []string{"env/known_retired", "SWARM_DB_HOST", "database.host"}},
+		{name: "SWARM_DB_PORT", value: "15432", want: []string{"env/known_retired", "SWARM_DB_PORT", "database.port"}},
+		{name: "SWARM_DB_NAME", value: "swarm_test", want: []string{"env/known_retired", "SWARM_DB_NAME", "database.name"}},
+		{name: "SWARM_DB_USER", value: "swarm_user", want: []string{"env/known_retired", "SWARM_DB_USER", "database.user"}},
+		{name: "SWARM_DB_SSLMODE", value: "require", want: []string{"env/known_retired", "SWARM_DB_SSLMODE", "database.sslmode"}},
+		{name: "SWARM_DB_POOL_SIZE", value: "9", want: []string{"env/known_retired", "SWARM_DB_POOL_SIZE", "database.pool_size"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
