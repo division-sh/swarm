@@ -16,6 +16,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
@@ -411,7 +412,7 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
 	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil {
+	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || stores.PipelineStore == nil || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.ScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.TurnStore == nil || stores.StartupOwnership == nil || stores.AgentConversationReadStore == nil {
 		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
 	}
 	if stores.Postgres != nil {
@@ -422,6 +423,30 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 	if _, ok := stores.ObservabilityStore.(apiv1.EntityReadStore); !ok {
 		t.Fatalf("sqlite ObservabilityStore = %T, want selected entity read store for entity.*", stores.ObservabilityStore)
+	}
+	apiCaps, err := stores.facade().apiCapabilities(selectedAPICapabilityRequest{})
+	if err != nil {
+		t.Fatalf("sqlite apiCapabilities: %v", err)
+	}
+	if apiCaps.AgentConversations == nil {
+		t.Fatal("sqlite apiCapabilities missing AgentConversations pure operator-read owner")
+	}
+	if apiCaps.BundleCatalog == nil {
+		t.Fatal("sqlite apiCapabilities missing BundleCatalog pure operator-read owner")
+	}
+	classifiedOut := map[string]any{
+		"ConversationForks":   apiCaps.ConversationForks,
+		"BundleDelete":        apiCaps.BundleDelete,
+		"RunForkAvailability": apiCaps.RunForkAvailability,
+		"RunFork":             apiCaps.RunFork,
+		"ResetCoordinator":    apiCaps.ResetCoordinator,
+		"ResetQuiescer":       apiCaps.ResetQuiescer,
+		"ResetCleaner":        apiCaps.ResetCleaner,
+	}
+	for name, capability := range classifiedOut {
+		if capability != nil {
+			t.Fatalf("sqlite optional capability %s = %T, want nil classified split/postgres-only capability", name, capability)
+		}
 	}
 	runtimeStores := stores.runtimeStores()
 	if runtimeStores.SQLDB != nil {
@@ -480,6 +505,96 @@ func TestBuildStoresSQLiteSelectsRunBundleContextForServedEventPublish(t *testin
 	}
 	if got := stores.facade().apiRunBundleContextStore(); got == nil || got != runBundleContext {
 		t.Fatalf("selected API run bundle context = %T, want sqlite selected owner %T", got, runBundleContext)
+	}
+}
+
+func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *testing.T) {
+	ctx := context.Background()
+	sqliteStores, err := buildStores(ctx, storebackend.Selection{
+		Backend:          storebackend.BackendSQLite,
+		BackendSource:    storebackend.SourceFlag,
+		SQLitePath:       filepath.Join(t.TempDir(), "dev.db"),
+		SQLitePathSource: storebackend.SourceRolloutDefault,
+	}, &config.Config{})
+	if err != nil {
+		t.Fatalf("buildStores(sqlite): %v", err)
+	}
+	t.Cleanup(func() { closeDB(sqliteStores.SQLDB) })
+
+	postgresStores := selectedPostgresStoreBundle(&store.PostgresStore{}, &config.Config{})
+	postgresCaps, err := postgresStores.facade().apiCapabilities(selectedAPICapabilityRequest{})
+	if err != nil {
+		t.Fatalf("postgres apiCapabilities: %v", err)
+	}
+	sqliteCaps, err := sqliteStores.facade().apiCapabilities(selectedAPICapabilityRequest{})
+	if err != nil {
+		t.Fatalf("sqlite apiCapabilities: %v", err)
+	}
+
+	pureOperatorReads := map[string]struct {
+		postgres any
+		sqlite   any
+	}{
+		"AgentConversations": {postgres: postgresCaps.AgentConversations, sqlite: sqliteCaps.AgentConversations},
+		"BundleCatalog":      {postgres: postgresCaps.BundleCatalog, sqlite: sqliteCaps.BundleCatalog},
+	}
+	for name, caps := range pureOperatorReads {
+		if caps.postgres == nil {
+			t.Fatalf("postgres pure operator-read capability %s unexpectedly nil; parity guard lost its baseline", name)
+		}
+		if caps.sqlite == nil {
+			t.Fatalf("sqlite pure operator-read capability %s nil while postgres wires it; wire SQLite or classify explicitly", name)
+		}
+	}
+
+	classifiedSQLiteOmissions := map[string]struct {
+		postgres any
+		sqlite   any
+		reason   string
+	}{
+		"ConversationForks": {
+			postgres: postgresCaps.ConversationForks,
+			sqlite:   sqliteCaps.ConversationForks,
+			reason:   "mixed read/write lifecycle capability; split to #1783 before SQLite promotion",
+		},
+		"BundleDelete": {
+			postgres: postgresCaps.BundleDelete,
+			sqlite:   sqliteCaps.BundleDelete,
+			reason:   "mutating/destructive bundle capability, not pure operator read",
+		},
+		"RunForkAvailability": {
+			postgres: postgresCaps.RunForkAvailability,
+			sqlite:   sqliteCaps.RunForkAvailability,
+			reason:   "run.fork availability/execution product seam split from operator reads",
+		},
+		"RunFork": {
+			postgres: postgresCaps.RunFork,
+			sqlite:   sqliteCaps.RunFork,
+			reason:   "run.fork execution product seam split from operator reads",
+		},
+		"ResetCoordinator": {
+			postgres: postgresCaps.ResetCoordinator,
+			sqlite:   sqliteCaps.ResetCoordinator,
+			reason:   "destructive reset capability split from operator reads",
+		},
+		"ResetQuiescer": {
+			postgres: postgresCaps.ResetQuiescer,
+			sqlite:   sqliteCaps.ResetQuiescer,
+			reason:   "destructive reset capability split from operator reads",
+		},
+		"ResetCleaner": {
+			postgres: postgresCaps.ResetCleaner,
+			sqlite:   sqliteCaps.ResetCleaner,
+			reason:   "destructive reset capability split from operator reads",
+		},
+	}
+	for name, caps := range classifiedSQLiteOmissions {
+		if caps.postgres == nil {
+			t.Fatalf("classified optional capability %s no longer has a postgres baseline; update #1782 construction-parity guard classification: %s", name, caps.reason)
+		}
+		if caps.sqlite != nil {
+			t.Fatalf("sqlite optional capability %s = %T, want nil until separately gated: %s", name, caps.sqlite, caps.reason)
+		}
 	}
 }
 
