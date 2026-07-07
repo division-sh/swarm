@@ -101,13 +101,15 @@ type WSEventFrame struct {
 }
 
 type ValidationIssue struct {
-	CheckID    string `json:"check_id"`
-	Severity   string `json:"severity"`
-	Message    string `json:"message"`
-	FlowPath   string `json:"flow_path,omitempty"`
-	NodeID     string `json:"node_id,omitempty"`
-	AgentID    string `json:"agent_id,omitempty"`
-	Suggestion string `json:"suggestion,omitempty"`
+	CheckID     string   `json:"check_id"`
+	Severity    string   `json:"severity"`
+	Message     string   `json:"message"`
+	Remediation string   `json:"remediation,omitempty"`
+	Evidence    []string `json:"evidence,omitempty"`
+	FlowPath    string   `json:"flow_path,omitempty"`
+	NodeID      string   `json:"node_id,omitempty"`
+	AgentID     string   `json:"agent_id,omitempty"`
+	Suggestion  string   `json:"suggestion,omitempty"`
 }
 
 type ValidationSummary struct {

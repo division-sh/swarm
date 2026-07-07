@@ -1325,10 +1325,12 @@ type verifyCommandResult struct {
 }
 
 type verifyFindingOutput struct {
-	CheckID  string `json:"check_id"`
-	Severity string `json:"severity"`
-	Location string `json:"location"`
-	Message  string `json:"message"`
+	CheckID     string   `json:"check_id"`
+	Severity    string   `json:"severity"`
+	Location    string   `json:"location"`
+	Message     string   `json:"message"`
+	Remediation string   `json:"remediation,omitempty"`
+	Evidence    []string `json:"evidence,omitempty"`
 }
 
 type verifyCommandOptions struct {
@@ -1470,11 +1472,26 @@ func verifyFindingOutputs(findings []runtimebootverify.Finding) []verifyFindingO
 	out := make([]verifyFindingOutput, 0, len(findings))
 	for _, finding := range findings {
 		out = append(out, verifyFindingOutput{
-			CheckID:  strings.TrimSpace(finding.CheckID),
-			Severity: strings.TrimSpace(finding.Severity),
-			Location: strings.TrimSpace(finding.Location),
-			Message:  strings.TrimSpace(finding.Message),
+			CheckID:     strings.TrimSpace(finding.CheckID),
+			Severity:    strings.TrimSpace(finding.Severity),
+			Location:    strings.TrimSpace(finding.Location),
+			Message:     strings.TrimSpace(finding.Message),
+			Remediation: strings.TrimSpace(finding.Remediation),
+			Evidence:    trimmedStringSlice(finding.Evidence),
 		})
+	}
+	return out
+}
+
+func trimmedStringSlice(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
 	}
 	return out
 }

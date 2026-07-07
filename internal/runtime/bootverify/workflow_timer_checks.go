@@ -75,6 +75,11 @@ func (c *checkerContext) timerValidation() []Finding {
 				Severity: "error",
 				Message:  fmt.Sprintf("timer %s start_on boot does not support cancel_on %s", timer.ID, cancelTrigger.String()),
 				Location: strings.TrimSpace(timer.ID),
+				Evidence: []string{
+					fmt.Sprintf("timer: %s", strings.TrimSpace(timer.ID)),
+					fmt.Sprintf("start_on: %s", strings.TrimSpace(timer.StartOn)),
+					fmt.Sprintf("cancel_on: %s", strings.TrimSpace(timer.CancelOn)),
+				},
 			})
 		} else {
 			c.validateTimerTrigger(timer, "cancel_on", cancelTrigger)

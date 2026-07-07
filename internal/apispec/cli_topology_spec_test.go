@@ -89,10 +89,23 @@ func TestCLIVerifyJSONShapeIncludesStructuredFailureFindings(t *testing.T) {
 		"severity",
 		"location",
 		"message",
+		"remediation",
+		"evidence",
 		"ok: false",
 		"human stderr",
 	} {
 		assertScalarContains(t, jsonShape, want)
+	}
+
+	humanStreams := mustMappingValue(t, verify, "human_text_streams")
+	for _, want := range []string{
+		"[BLOCKER]",
+		"[WARN]",
+		"[INFO]",
+		"ERROR:",
+		"WARNING:",
+	} {
+		assertScalarContains(t, mustMappingValue(t, humanStreams, "stderr"), want)
 	}
 }
 

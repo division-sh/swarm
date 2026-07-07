@@ -32,6 +32,108 @@ func TestRun_MapsMissingToolToToolResolutionWarning(t *testing.T) {
 	}
 }
 
+func TestReportAddBackfillsHardInvalidityRemediationAndEvidence(t *testing.T) {
+	var report Report
+	report.Add(Finding{
+		CheckID:  "timer_validation",
+		Severity: SeverityHardInvalidity,
+		Location: "node.reminder",
+		Message:  "start_on boot does not support cancel_on state:done",
+		Evidence: []string{"  timer id: reminder  ", "", "cancel_on: state:done"},
+	})
+
+	errors := report.Errors()
+	if len(errors) != 1 {
+		t.Fatalf("errors = %#v, want one hard invalidity", errors)
+	}
+	got := errors[0]
+	if got.Remediation == "" {
+		t.Fatalf("remediation was not backfilled: %#v", got)
+	}
+	if !strings.Contains(got.Remediation, "timer") {
+		t.Fatalf("remediation = %q, want timer-specific stable remediation", got.Remediation)
+	}
+	if len(got.Evidence) != 2 || got.Evidence[0] != "timer id: reminder" || got.Evidence[1] != "cancel_on: state:done" {
+		t.Fatalf("evidence = %#v, want trimmed non-empty evidence", got.Evidence)
+	}
+}
+
+func TestReportAddUsesGenericRemediationForRoutingSplitChecks(t *testing.T) {
+	var report Report
+	report.Add(Finding{
+		CheckID:  "pin_target_resolution",
+		Severity: SeverityHardInvalidity,
+		Location: "producer",
+		Message:  "pin target is unresolved",
+	})
+
+	errors := report.Errors()
+	if len(errors) != 1 {
+		t.Fatalf("errors = %#v, want one hard invalidity", errors)
+	}
+	got := errors[0].Remediation
+	if got != "Fix or remove the invalid routing declaration identified by this finding, then rerun `swarm verify`." {
+		t.Fatalf("remediation = %q, want generic routing split remediation", got)
+	}
+}
+
+func TestNewHardInvalidityFindingCarriesRequiredActionFields(t *testing.T) {
+	finding := NewHardInvalidityFinding(
+		"workflow_contract_validation",
+		"global",
+		"semantic source is not configured",
+		"fix the selected contract source",
+		"contracts path: /tmp/missing",
+	)
+
+	if finding.Severity != SeverityHardInvalidity {
+		t.Fatalf("severity = %q, want %q", finding.Severity, SeverityHardInvalidity)
+	}
+	if finding.Remediation != "fix the selected contract source" {
+		t.Fatalf("remediation = %q", finding.Remediation)
+	}
+	if len(finding.Evidence) != 1 || finding.Evidence[0] != "contracts path: /tmp/missing" {
+		t.Fatalf("evidence = %#v", finding.Evidence)
+	}
+}
+
+func TestFormatSurfaceFindingUsesTypedDiagnosticRendering(t *testing.T) {
+	warning := Finding{
+		CheckID:     "input_pin_wiring",
+		Severity:    SeveritySemanticDriftWarn,
+		Location:    "flow.items",
+		Message:     "no producer path was found in the authored bundle",
+		Remediation: "connect a producer or mark the event external",
+		Evidence:    []string{"pin: receive"},
+	}
+
+	rendered := FormatSurfaceFinding(warning, false)
+	for _, want := range []string{
+		"[WARN] input_pin_wiring @ flow.items: no producer path was found in the authored bundle",
+		"  remediation: connect a producer or mark the event external",
+		"  evidence:\n    - pin: receive",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered warning missing %q:\n%s", want, rendered)
+		}
+	}
+
+	blocking := FormatSurfaceFinding(warning, true)
+	if !strings.HasPrefix(blocking, "[BLOCKER] input_pin_wiring @ flow.items:") {
+		t.Fatalf("blocking warning rendered as %q, want BLOCKER tag", blocking)
+	}
+
+	info := FormatSurfaceFinding(Finding{
+		CheckID:  "entity_reader_coverage",
+		Severity: SeverityLintEvidence,
+		Location: "root",
+		Message:  "field has no internal reader coverage",
+	}, false)
+	if !strings.HasPrefix(info, "[INFO] entity_reader_coverage @ root:") {
+		t.Fatalf("info rendered as %q, want INFO tag", info)
+	}
+}
+
 func TestRun_DoesNotWarnForBuiltinRuntimeToolReference(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	bundle.Platform.Platform.Name = "swarm"

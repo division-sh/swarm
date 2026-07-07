@@ -52,6 +52,64 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 	}
 }
 
+func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
+	contractsRoot := writeVerifyBootTimerCommandFixture(t, "state:done")
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe",
+		"--contracts", contractsRoot,
+		"--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var output describeCommandOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode describe json: %v\n%s", err, stdout.String())
+	}
+	if len(output.Diagnostics) == 0 {
+		t.Fatalf("describe diagnostics = %#v, want timer_validation", output.Diagnostics)
+	}
+	var timerDiagnostic *authoringview.DiagnosticView
+	for i := range output.Diagnostics {
+		if output.Diagnostics[i].CheckID == "timer_validation" {
+			timerDiagnostic = &output.Diagnostics[i]
+			break
+		}
+	}
+	if timerDiagnostic == nil {
+		t.Fatalf("describe diagnostics = %#v, want timer_validation", output.Diagnostics)
+	}
+	if strings.TrimSpace(timerDiagnostic.Remediation) == "" {
+		t.Fatalf("timer diagnostic missing remediation: %#v", *timerDiagnostic)
+	}
+	if len(timerDiagnostic.Evidence) == 0 || !strings.Contains(strings.Join(timerDiagnostic.Evidence, "\n"), "cancel_on: state:done") {
+		t.Fatalf("timer diagnostic evidence = %#v, want cancel_on evidence", timerDiagnostic.Evidence)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe",
+		"--contracts", contractsRoot,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{
+		"[BLOCKER] timer_validation @",
+		"remediation:",
+		"evidence:",
+		"cancel_on: state:done",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("describe text missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
 	contractsRoot := writeDescribeDefaultedTemplatePolicyContracts(t)
 	var stdout, stderr bytes.Buffer

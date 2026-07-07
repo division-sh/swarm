@@ -9586,7 +9586,7 @@ func TestRunVerifyCommand_SurfacesLintEvidence(t *testing.T) {
 		t.Fatalf("verify stdout contains advisory diagnostics:\n%s", out)
 	}
 	errText := stderr.String()
-	if !strings.Contains(errText, "INFO: entity_reader_coverage [root] flow root entity_type case declares field untouched with no detected internal reader coverage") {
+	if !strings.Contains(errText, "[INFO] entity_reader_coverage @ root: flow root entity_type case declares field untouched with no detected internal reader coverage") {
 		t.Fatalf("verify stderr missing lint evidence:\n%s", errText)
 	}
 	if strings.Contains(errText, "lint_evidence:") {
@@ -9744,8 +9744,9 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	errText := stderr.String()
 	for _, want := range []string{
 		"verify failed: boot verification failed:",
-		"ERROR: timer_validation",
+		"[BLOCKER] timer_validation @",
 		"start_on boot does not support cancel_on state:done",
+		"remediation:",
 	} {
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
@@ -9777,6 +9778,12 @@ func TestRunVerifyCommand_RejectsBootTimerWithCancelOn(t *testing.T) {
 	if got := verifyJSON.Errors[0]; got.CheckID != "timer_validation" || got.Severity != "hard_invalidity" || !strings.Contains(got.Message, "start_on boot does not support cancel_on state:done") {
 		t.Fatalf("verify --json first error = %#v, want structured timer_validation hard invalidity", got)
 	}
+	if strings.TrimSpace(verifyJSON.Errors[0].Remediation) == "" {
+		t.Fatalf("verify --json first error missing remediation: %#v", verifyJSON.Errors[0])
+	}
+	if len(verifyJSON.Errors[0].Evidence) == 0 || !strings.Contains(strings.Join(verifyJSON.Errors[0].Evidence, "\n"), "cancel_on: state:done") {
+		t.Fatalf("verify --json first error evidence = %#v, want timer cancel_on evidence", verifyJSON.Errors[0].Evidence)
+	}
 }
 
 func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.T) {
@@ -9800,7 +9807,7 @@ func TestRunVerifyCommand_EscalatedWarningUsesBlockingAnalyzerOutput(t *testing.
 	errText := stderr.String()
 	for _, want := range []string{
 		"verify failed: boot verification blocked by policy-escalated findings:",
-		"ERROR: input_pin_wiring",
+		"[BLOCKER] input_pin_wiring @",
 		"no producer path was found in the authored bundle",
 	} {
 		if !strings.Contains(errText, want) {
@@ -10110,7 +10117,7 @@ Use save_entity_field for `+"`business_brief`"+`.
 	errText := stderr.String()
 	for _, want := range []string{
 		"verify failed: boot verification failed:",
-		"ERROR: entity_writer_coverage",
+		"[BLOCKER] entity_writer_coverage @",
 		"business_brief",
 	} {
 		if !strings.Contains(errText, want) {
@@ -10307,7 +10314,7 @@ func TestRunVerifyCommand_WarnsForAccumulateAllWithoutBoundedEscape(t *testing.T
 		t.Fatalf("verify stdout missing success marker:\n%s", out)
 	}
 	errText := stderr.String()
-	if !strings.Contains(errText, "WARN: accumulate_all_bounded_escape") ||
+	if !strings.Contains(errText, "[WARN] accumulate_all_bounded_escape @") ||
 		!strings.Contains(errText, "without a bounded timeout escape") {
 		t.Fatalf("verify stderr missing accumulator bounded-escape warning:\n%s", errText)
 	}
@@ -10333,8 +10340,9 @@ func TestRunVerifyCommand_FailsForAccumulateTimeoutWithoutTimeoutMS(t *testing.T
 	errText := stderr.String()
 	for _, want := range []string{
 		"verify failed: boot verification failed:",
-		"ERROR: accumulator_timeout_requires_timeout_ms",
+		"[BLOCKER] accumulator_timeout_requires_timeout_ms @",
 		"without positive timeout_ms",
+		"remediation:",
 	} {
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)
@@ -10362,8 +10370,9 @@ func TestRunVerifyCommand_FailsForAccumulatorInputWithoutProducerPath(t *testing
 	errText := stderr.String()
 	for _, want := range []string{
 		"verify failed: boot verification failed:",
-		"ERROR: accumulator_input_producer_path",
+		"[BLOCKER] accumulator_input_producer_path @",
 		"no accepted producer/source path",
+		"remediation:",
 	} {
 		if !strings.Contains(errText, want) {
 			t.Fatalf("verify stderr missing %q:\n%s", want, errText)

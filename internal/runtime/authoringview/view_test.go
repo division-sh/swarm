@@ -69,6 +69,30 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	}
 }
 
+func TestBuildDiagnosticsPreservesRemediationAndEvidence(t *testing.T) {
+	report := runtimebootverify.Report{}
+	report.Add(runtimebootverify.Finding{
+		CheckID:     "timer_validation",
+		Severity:    runtimebootverify.SeverityHardInvalidity,
+		Location:    "reminder",
+		Message:     "timer reminder start_on boot does not support cancel_on state:done",
+		Remediation: "remove cancel_on from boot timer",
+		Evidence:    []string{" timer: reminder ", "", "cancel_on: state:done"},
+	})
+
+	diagnostics := buildDiagnostics(nil, &report)
+	if len(diagnostics) != 1 {
+		t.Fatalf("diagnostics = %#v, want one", diagnostics)
+	}
+	got := diagnostics[0]
+	if got.Remediation != "remove cancel_on from boot timer" {
+		t.Fatalf("remediation = %q", got.Remediation)
+	}
+	if len(got.Evidence) != 2 || got.Evidence[0] != "timer: reminder" || got.Evidence[1] != "cancel_on: state:done" {
+		t.Fatalf("evidence = %#v", got.Evidence)
+	}
+}
+
 func TestBuildShowsDefaultedTemplateInstancePolicies(t *testing.T) {
 	source := loadDefaultedTemplatePolicySource(t)
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
