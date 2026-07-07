@@ -138,7 +138,7 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			}
 			source, err := loadSecretsSource(cmd, repo, opts.contractsPath, opts.platformSpecPath, opts.missing)
 			if err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
 			providerRequirements, err := loadSecretsProviderRequirements(repo, source)
 			if err != nil {
@@ -183,7 +183,7 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 			}
 			source, err := loadSecretsSource(cmd, repo, opts.contractsPath, opts.platformSpecPath, true)
 			if err != nil {
-				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
 			providerRequirements, err := loadSecretsProviderRequirements(repo, source)
 			if err != nil {

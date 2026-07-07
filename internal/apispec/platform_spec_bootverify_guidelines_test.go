@@ -10,6 +10,7 @@ func TestPlatformSpecVerifierFindingAuthoringGuidelines(t *testing.T) {
 	guidelines := mustMappingValue(t, implementationNotes, "authoring_guidelines")
 
 	for _, key := range []string{
+		"shared_diagnostic_convention",
 		"rule",
 		"problem_statement",
 		"remediation",
@@ -24,6 +25,8 @@ func TestPlatformSpecVerifierFindingAuthoringGuidelines(t *testing.T) {
 		}
 	}
 
+	assertScalarContains(t, mustMappingValue(t, guidelines, "shared_diagnostic_convention"), "cli_specification.foundations.output_contract.diagnostic_convention")
+	assertScalarContains(t, mustMappingValue(t, guidelines, "shared_diagnostic_convention"), "verifier-specific authoring guidance")
 	assertScalarContains(t, mustMappingValue(t, guidelines, "rule"), "contract authors")
 	assertScalarContains(t, mustMappingValue(t, guidelines, "rule"), "not Go functions")
 	assertScalarContains(t, mustMappingValue(t, guidelines, "rule"), "internal GitHub issue/tracker numbers")

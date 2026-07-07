@@ -109,6 +109,54 @@ func TestCLIVerifyJSONShapeIncludesStructuredFailureFindings(t *testing.T) {
 	}
 }
 
+func TestCLIDiagnosticConventionPromotedToOutputContract(t *testing.T) {
+	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
+	convention := mustMappingValue(t, outputContract, "diagnostic_convention")
+
+	assertScalarValue(t, mustMappingValue(t, convention, "promoted_by"), "#1812")
+	assertScalarValue(t, mustMappingValue(t, convention, "canonical_owner"), "platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention")
+	assertScalarContains(t, mustMappingValue(t, convention, "scope"), "user-facing CLI diagnostic text")
+	assertScalarContains(t, mustMappingValue(t, convention, "scope"), "does not by itself sweep existing strings")
+
+	surface := mustMappingValue(t, convention, "user_facing_surface")
+	assertScalarContains(t, mustMappingValue(t, surface, "human_text"), "stdout/stderr")
+	assertScalarContains(t, mustMappingValue(t, surface, "public_diagnostic_json_fields"), "`message`")
+	assertScalarContains(t, mustMappingValue(t, surface, "public_diagnostic_json_fields"), "`remediation`")
+	assertScalarContains(t, mustMappingValue(t, surface, "public_diagnostic_json_fields"), "diagnostic `detail`")
+	assertScalarContains(t, mustMappingValue(t, surface, "internal_metadata_exemption"), "implementation trackers")
+
+	severity := mustMappingValue(t, convention, "severity_vocabulary")
+	assertScalarContains(t, mustMappingValue(t, severity, "command_outcome_failures"), "ERROR:")
+	assertScalarContains(t, mustMappingValue(t, severity, "command_outcome_failures"), "WARNING:")
+	assertScalarContains(t, mustMappingValue(t, severity, "typed_finding_lists"), "[BLOCKER]")
+	assertScalarContains(t, mustMappingValue(t, severity, "typed_finding_lists"), "[WARN]")
+	assertScalarContains(t, mustMappingValue(t, severity, "typed_finding_lists"), "[INFO]")
+	assertScalarContains(t, mustMappingValue(t, severity, "typed_finding_lists"), "engine.boot_verification.severity_behavior.surface_fatality.text_rendering")
+
+	rules := mustMappingValue(t, convention, "diagnostic_content_rules")
+	assertScalarContains(t, mustMappingValue(t, rules, "translate_never_dump"), "Raw Go errors")
+	assertScalarContains(t, mustMappingValue(t, rules, "author_facing_terms"), "test-only")
+	assertScalarContains(t, mustMappingValue(t, rules, "no_internal_issue_or_tracker_refs"), "must not reference internal GitHub issue numbers")
+	assertScalarContains(t, mustMappingValue(t, rules, "structure"), "first line")
+	assertScalarContains(t, mustMappingValue(t, rules, "remediation"), "actionable remediation")
+	assertScalarContains(t, mustMappingValue(t, rules, "evidence"), "user-facing")
+
+	exitCodes := mustMappingValue(t, convention, "exit_code_taxonomy")
+	assertScalarValue(t, mustMappingValue(t, exitCodes, "success"), "0")
+	assertScalarValue(t, mustMappingValue(t, exitCodes, "unexpected_or_internal_failure"), "1")
+	assertScalarValue(t, mustMappingValue(t, exitCodes, "usage_argument_configuration_or_contract_validation_before_runtime_action"), "2")
+	assertScalarValue(t, mustMappingValue(t, exitCodes, "transport_api_or_runtime_state_failure"), "3")
+	assertScalarValue(t, mustMappingValue(t, exitCodes, "authentication_or_authorization_failure"), "4")
+	assertScalarValue(t, mustMappingValue(t, exitCodes, "addressed_resource_not_found"), "5")
+	assertScalarContains(t, mustMappingValue(t, exitCodes, "explicit_exception_rule"), "explicit command row")
+
+	examples := mustMappingValue(t, convention, "examples")
+	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "good"), "ERROR: cannot reach the Swarm runtime")
+	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "good"), "[BLOCKER] accumulator_input_producer_path")
+	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "bad"), "v1 RPC request failed")
+	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "bad"), "test_quiescence_ready")
+}
+
 func TestCLITopologyRevisionV22IsImplementedHistoricalRecord(t *testing.T) {
 	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
 	assertScalarValue(t, mustMappingValue(t, revision, "status"), "implemented_historical_record")
@@ -287,4 +335,17 @@ func TestCLITopologySpellingsAndRowAnnotationsAgree(t *testing.T) {
 			t.Errorf("no superseded spelling covers %q; got %s", want, fmt.Sprintf("%v", currents))
 		}
 	}
+}
+
+func assertSequenceContainsSubstring(t *testing.T, node *yaml.Node, want string) {
+	t.Helper()
+	if node == nil || node.Kind != yaml.SequenceNode {
+		t.Fatalf("node kind = %d, want sequence", nodeKind(node))
+	}
+	for _, item := range node.Content {
+		if strings.Contains(scalarValue(item), want) {
+			return
+		}
+	}
+	t.Fatalf("sequence missing substring %q", want)
 }
