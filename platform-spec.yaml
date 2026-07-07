@@ -5787,14 +5787,17 @@ engine:
         after contract loading and before starting nodes/agents.
       authoring_guidelines:
         rule: >-
-          Verifier findings are authored for contract authors, not runtime implementers. Messages name contract elements and
-          authoring concepts, not Go functions, SQL tables, delivery rows, replay markers, or other implementation internals.
+          A verifier finding names where in the contract, what is wrong, and how to fix it. Verifier findings are authored for
+          contract authors, not runtime implementers. Messages name contract elements and authoring concepts, not Go functions,
+          SQL tables, delivery rows, replay markers, internal GitHub issue/tracker numbers, or other implementation internals.
+          User-facing diagnostics must not reference internal issue numbers or trackers; state the constraint in plain
+          author-facing terms, and use a public docs URL if a pointer is warranted.
         problem_statement: >-
           The `message` field states what is wrong and where in author-facing language. It does not carry the fix text by
           itself; hard-invalidity/error fix text belongs in `remediation`.
         remediation: >-
           Remediation is concrete and imperative. Prefer `add ...`, `declare ...`, `remove ...`, or `rename ...`. When more
-          than one valid repair exists, use a `Fix one of:` / `choose one:` shape and list the valid options.
+          than one valid repair exists, use a `Fix one of:` shape and list the valid options.
         evidence: >-
           Evidence is optional and should appear only when it helps the author understand what was checked or why the finding
           fired. Evidence should be concise, stable, and author-facing, such as checked producer/source paths or candidate field
@@ -5807,8 +5810,8 @@ engine:
           `Flow <flow> node <node> handler <event> accumulates event <event> but no accepted producer/source path was found ...
           Fix one of: add an accepted producer path; mark the event external; remove the accumulator.`
         bad_example: >-
-          `<internal helper> failed: target_required_missing` without an author-facing contract location, no imperative
-          remediation, and no evidence for what was checked.
+          `<internal helper> failed: target_required_missing` with no author-facing contract location, no imperative
+          remediation, no evidence for what was checked.
         split_boundaries: >-
           True YAML file/line/path source mapping remains owned by #1746. Routing-specific remediation language and new routing
           nouns remain owned by #1786 and its routing children. Shared typed rendering and hard/error remediation enforcement are
