@@ -94,6 +94,7 @@ pins:
     events:
       - name: batch_classify_completed
         event: batch.classify.completed
+        source: external
   outputs:
 `+coordinatorOutputPinYAML(opts))
 	writeFile(t, filepath.Join(root, "flows", "coordinator", "policy.yaml"), "{}\n")
