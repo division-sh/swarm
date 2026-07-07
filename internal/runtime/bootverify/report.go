@@ -13,10 +13,12 @@ import (
 )
 
 type Finding struct {
-	CheckID  string
-	Severity string
-	Message  string
-	Location string
+	CheckID     string
+	Severity    string
+	Message     string
+	Location    string
+	Remediation string
+	Evidence    []string
 }
 
 const (
@@ -29,10 +31,121 @@ const (
 )
 
 const (
-	FindingSurfaceLevelError = "ERROR"
-	FindingSurfaceLevelWarn  = "WARN"
-	FindingSurfaceLevelInfo  = "INFO"
+	FindingSurfaceLevelBlocker = "BLOCKER"
+	FindingSurfaceLevelWarn    = "WARN"
+	FindingSurfaceLevelInfo    = "INFO"
 )
+
+var stableHardInvalidityRemediation = map[string]string{
+	"agent_permission_validation":             "Grant the required agent permission or remove the unauthorized tool/action from the contract.",
+	"condition_expression_validation":         "Fix the condition expression so it references declared fields and uses supported CEL syntax.",
+	"data_accumulation_expression_validation": "Fix the data_accumulation expression so it references declared fields and uses supported CEL syntax.",
+	"emit_field_expression_validation":        "Fix the emit field expression so it references declared fields and uses supported CEL syntax.",
+	"entity_write_target_compliance":          "Update the entity write target to a declared writable entity field or remove the invalid write.",
+	"event_metadata_authority":                "Move platform-owned event metadata out of authored business payload declarations.",
+	"flow_boundary_create_entity_validation":  "Fix the cross-flow create_entity declaration so it preserves the receiving flow boundary.",
+	"flow_data_access_validation":             "Use the supported flow data access form for the referenced field or remove the unsupported access.",
+	"flow_package_dependency_binding":         "Declare the required imported package binding or remove the unresolved dependency reference.",
+	"flow_package_import_completeness":        "Complete the imported package dependency binding or remove the incomplete import.",
+	"gate_schema_validation":                  "Fix the gate declaration so it uses supported gate fields and value types.",
+	"generated_tool_schema_closure":           "Fix the generated tool schema inputs/outputs so they close over declared contract types.",
+	"handler_field_compliance":                "Move the unsupported handler field to its promoted location or remove it.",
+	"impl.platform_metadata_validation":       "Remove authored declarations that conflict with platform-owned metadata.",
+	"invalid_field_detection":                 "Remove unsupported fields or replace them with the promoted contract field supported by the spec.",
+	"managed_credential_state":                "Configure the required managed credential or remove the dependency that requires it.",
+	"missing_external_select_entity":          "Add an explicit select_entity/select_or_create_entity for the external input or make the event topology in-flow.",
+	"native_tools_valid":                      "Fix the native tool declaration so it references a supported runtime tool surface.",
+	"payload_field_coverage":                  "Populate every required emitted payload field or make the target event schema optional where appropriate.",
+	"platform_namespace_violation":            "Rename authored business fields away from platform-reserved namespace roots.",
+	"platform_version_compatibility":          "Update the contract platform_version range or run with a compatible Swarm platform version.",
+	"policy_conflict_detection":               "Resolve the conflicting policy declarations so only one authoritative value remains.",
+	"primary_entity_validation":               "Declare a valid primary entity or remove the stateful surface that requires one.",
+	"prompt_exists":                           "Add the referenced prompt file or update the agent prompt_ref.",
+	"redundant_in_topology_select_entity":     "Remove redundant select_entity/select_or_create_entity from an in-topology handler.",
+	"reply_lineage_missing":                   "Add the required reply lineage metadata or remove the reply-mode handler contract.",
+	"required_agents_match":                   "Update required agent declarations so subscriptions and emitted events match the contract topology.",
+	"required_mcp_tool_availability":          "Expose the required MCP tool from the configured server or update the agent tool requirement.",
+	"select_entity_validation":                "Fix the select_entity/select_or_create_entity declaration so it uses supported source and target fields.",
+	"single_node_per_event":                   "Ensure only one system node owns the exact event handler or split the event ownership.",
+	"singleton_coordinator_validation":        "Fix the singleton coordinator declaration so it names supported contained state fields.",
+	"state_machine_coherence":                 "Fix the state machine declarations so initial, terminal, and transition states are declared consistently.",
+	"template_instance_validation":            "Fix the template instance declaration so instance keys and policies are valid.",
+	"timer_validation":                        "Use only supported timer start_on/cancel_on forms and ensure referenced states/events are declared and reachable.",
+	"transition_ownership_validation":         "Move the transition owner to the handler that owns the triggering event or change the transition.",
+	"transition_reference_validation":         "Fix transition references so all events and states are declared and reachable.",
+	"workflow_contract_validation":            "Fix the contract source/load error named by the message, then rerun `swarm verify`.",
+	"workspace_class_exists":                  "Declare the referenced workspace class or update the agent workspace_class.",
+	"write_pin_ownership_validation":          "Fix write pin ownership so the writer and target field share the supported owner boundary.",
+}
+
+var routingRemediationSplitCheckIDs = map[string]struct{}{
+	"composition_connect_validation":         {},
+	"connect_key_adapter_cardinality":        {},
+	"connect_key_adapter_duplicate_source":   {},
+	"connect_key_adapter_duplicate_target":   {},
+	"connect_key_adapter_invalid":            {},
+	"connect_key_adapter_missing_source":     {},
+	"connect_key_adapter_missing_target":     {},
+	"connect_key_adapter_partial":            {},
+	"connect_key_adapter_source_missing":     {},
+	"connect_key_adapter_target_missing":     {},
+	"connect_key_adapter_unsupported":        {},
+	"connect_map_unknown_address_key":        {},
+	"cross_flow_pin_ambiguity_validation":    {},
+	"flow_package_pin_bind_alias_validation": {},
+	"input_pin_wiring":                       {},
+	"instance_key_mismatch":                  {},
+	"key_types_incompatible":                 {},
+	"output_carries_address_key":             {},
+	"output_carries_instance_key":            {},
+	"output_key_missing":                     {},
+	"pin_target_resolution":                  {},
+	"producer_flow_missing":                  {},
+	"producer_output_pin_missing":            {},
+	"producer_reference_invalid":             {},
+	"receiver_address_rule_invalid":          {},
+	"receiver_address_rule_missing":          {},
+	"receiver_flow_missing":                  {},
+	"receiver_input_pin_missing":             {},
+	"receiver_instance_key_invalid":          {},
+	"receiver_instance_key_unavailable":      {},
+	"receiver_reference_invalid":             {},
+	"receiver_root_unsupported":              {},
+	"receiver_route_key_missing":             {},
+}
+
+type FindingOption func(*Finding)
+
+func WithRemediation(remediation string) FindingOption {
+	return func(f *Finding) {
+		f.Remediation = remediation
+	}
+}
+
+func WithEvidence(evidence ...string) FindingOption {
+	return func(f *Finding) {
+		f.Evidence = append(f.Evidence, evidence...)
+	}
+}
+
+func NewFinding(checkID, severity, location, message string, opts ...FindingOption) Finding {
+	f := Finding{
+		CheckID:  checkID,
+		Severity: severity,
+		Location: location,
+		Message:  message,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&f)
+		}
+	}
+	return f
+}
+
+func NewHardInvalidityFinding(checkID, location, message, remediation string, evidence ...string) Finding {
+	return NewFinding(checkID, SeverityHardInvalidity, location, message, WithRemediation(remediation), WithEvidence(evidence...))
+}
 
 type Report struct {
 	Findings []Finding
@@ -82,6 +195,11 @@ func (r *Report) Add(f Finding) {
 	f.Severity = normalizeFindingSeverity(f.Severity)
 	f.Message = strings.TrimSpace(f.Message)
 	f.Location = strings.TrimSpace(f.Location)
+	f.Remediation = strings.TrimSpace(f.Remediation)
+	f.Evidence = normalizeFindingEvidence(f.Evidence)
+	if findingRequiresRemediation(f) && f.Remediation == "" {
+		f.Remediation = defaultRemediationForFinding(f)
+	}
 	r.Findings = append(r.Findings, f)
 }
 
@@ -199,27 +317,95 @@ func FindingSurfaceLevel(f Finding, blocking bool) string {
 
 func SurfaceLevelForSeverity(severity string, blocking bool) string {
 	if blocking {
-		return FindingSurfaceLevelError
+		return FindingSurfaceLevelBlocker
 	}
 	switch normalizeFindingSeverity(severity) {
 	case SeverityHardInvalidity:
-		return FindingSurfaceLevelError
+		return FindingSurfaceLevelBlocker
 	case SeveritySemanticDriftWarn:
 		return FindingSurfaceLevelWarn
 	case SeverityAuditAnalysis, SeverityLintEvidence:
 		return FindingSurfaceLevelInfo
 	default:
-		return FindingSurfaceLevelError
+		return FindingSurfaceLevelBlocker
 	}
 }
 
 func FormatSurfaceFinding(f Finding, blocking bool) string {
-	return fmt.Sprintf("%s: %s [%s] %s",
-		FindingSurfaceLevel(f, blocking),
-		strings.TrimSpace(f.CheckID),
-		strings.TrimSpace(f.Location),
+	return FormatTypedDiagnosticFinding(TypedDiagnosticFinding{
+		CheckID:     f.CheckID,
+		Severity:    f.Severity,
+		Location:    f.Location,
+		Message:     f.Message,
+		Remediation: f.Remediation,
+		Evidence:    f.Evidence,
+	}, blocking)
+}
+
+type TypedDiagnosticFinding struct {
+	CheckID     string
+	Severity    string
+	Location    string
+	Message     string
+	Remediation string
+	Evidence    []string
+}
+
+func FormatTypedDiagnosticFinding(f TypedDiagnosticFinding, blocking bool) string {
+	checkID := strings.TrimSpace(f.CheckID)
+	if checkID == "" {
+		checkID = "workflow_contract_validation"
+	}
+	location := strings.TrimSpace(f.Location)
+	if location == "" {
+		location = "global"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] %s @ %s: %s",
+		SurfaceLevelForSeverity(f.Severity, blocking),
+		checkID,
+		location,
 		strings.TrimSpace(f.Message),
 	)
+	if remediation := strings.TrimSpace(f.Remediation); remediation != "" {
+		fmt.Fprintf(&b, "\n  remediation: %s", remediation)
+	}
+	evidence := normalizeFindingEvidence(f.Evidence)
+	if len(evidence) > 0 {
+		b.WriteString("\n  evidence:")
+		for _, item := range evidence {
+			fmt.Fprintf(&b, "\n    - %s", item)
+		}
+	}
+	return b.String()
+}
+
+func normalizeFindingEvidence(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func findingRequiresRemediation(f Finding) bool {
+	return normalizeFindingSeverity(f.Severity) == SeverityHardInvalidity
+}
+
+func defaultRemediationForFinding(f Finding) string {
+	checkID := strings.TrimSpace(f.CheckID)
+	if _, split := routingRemediationSplitCheckIDs[checkID]; split {
+		return "Fix or remove the invalid routing declaration identified by this finding, then rerun `swarm verify`."
+	}
+	if remediation := stableHardInvalidityRemediation[checkID]; remediation != "" {
+		return remediation
+	}
+	return "Fix or remove the invalid contract declaration identified by this finding, then rerun `swarm verify`."
 }
 
 func locationFromMessage(message string) string {

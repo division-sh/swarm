@@ -65,14 +65,7 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 		CheckMCPReachable: true,
 	})
 	for _, finding := range report.Findings {
-		issue := ValidationIssue{
-			CheckID:  finding.CheckID,
-			Severity: finding.Severity,
-			Message:  finding.Message,
-		}
-		if finding.CheckID == "credential_key_exists" && finding.Severity == "warning" {
-			issue.Suggestion = "set the secret with swarm secrets set before executing dependent tools"
-		}
+		issue := validationIssueFromFinding(finding)
 		if finding.Severity == "warning" {
 			result.Warnings = append(result.Warnings, issue)
 			continue
@@ -86,6 +79,20 @@ func (h *handler) runFullValidation(_ context.Context) ValidationResult {
 	result.Summary.Warnings = len(result.Warnings)
 	result.Summary.DurationMS = time.Since(startedAt).Milliseconds()
 	return result
+}
+
+func validationIssueFromFinding(finding runtimebootverify.Finding) ValidationIssue {
+	issue := ValidationIssue{
+		CheckID:     finding.CheckID,
+		Severity:    finding.Severity,
+		Message:     finding.Message,
+		Remediation: finding.Remediation,
+		Evidence:    append([]string(nil), finding.Evidence...),
+	}
+	if finding.CheckID == "credential_key_exists" && finding.Severity == "warning" {
+		issue.Suggestion = "set the secret with swarm secrets set before executing dependent tools"
+	}
+	return issue
 }
 
 func (h *handler) legacyBuilderListEntities(ctx context.Context) ([]store.OperatorEntitySummary, error) {

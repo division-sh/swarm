@@ -5716,13 +5716,20 @@ engine:
       description: Analyzer finding severity and supported-surface fatality are separate concepts. A finding keeps its
         canonical severity for JSON/scriptable consumers even when a strict policy makes the current surface block.
       strict_warning_escalation: When strict startup or verify warning escalation is enabled, warning-level analyzer findings
-        may block startup or `swarm verify`. Human-readable output must render those findings as blocking/error-level surface
+        may block startup or `swarm verify`. Human-readable typed diagnostic lists must render those findings as blocking surface
         failures, not as non-fatal warnings.
       text_rendering:
-        error_or_blocking: Human text lines for hard invalidities, errors, and policy-escalated warning findings use an
-          `ERROR:` prefix.
-        non_blocking_warning: Human text lines for non-blocking warning-level findings use a `WARN:` prefix.
-        informational: Human text lines for audit/informational lint evidence use an `INFO:` prefix.
+        typed_finding_list: >-
+          Human text lines for typed analyzer finding lists render `[BLOCKER] check_id @ location: message`,
+          `[WARN] check_id @ location: message`, or `[INFO] check_id @ location: message`. `remediation:` renders on an
+          indented continuation line when present. `evidence:` renders only when present and useful.
+        command_outcome_failures: >-
+          Single command-outcome failures that are not typed analyzer finding lists continue to use
+          the CLI command-outcome prefixes such as `ERROR:` or `WARNING:`.
+        error_or_blocking: Hard invalidities, errors, and policy-escalated warning findings in typed diagnostic lists use
+          `[BLOCKER]`.
+        non_blocking_warning: Non-blocking warning-level findings in typed diagnostic lists use `[WARN]`.
+        informational: Audit/informational lint evidence in typed diagnostic lists uses `[INFO]`.
       stream_contract:
         stdout: Successful load-bearing command result only, such as `verify ok` for human output, the single JSON document
           for `--json`, or `ok` for `--quiet`.
@@ -5730,7 +5737,9 @@ engine:
     check_count: 43 primary checks plus 3 supplemental checks
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
-        finding has the check ID, severity, message, and location (flow, node, agent, or event name). The boot sequence runs
+        finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
+        optional remediation. Hard-invalidity/error findings must carry remediation by construction or through the canonical
+        report normalization path, except for explicitly split/gate-recorded unsettled remediation language. The boot sequence runs
         all checks after contract loading and before starting nodes/agents.
       always_on: All checks run on every boot. There is no mechanism to disable individual checks. Acknowledged warnings
         (builder feature) are a UI concern, not a runtime concern.
@@ -7307,9 +7316,10 @@ flow_model:
           and retired static multi-entity diagnostics without becoming a new
           semantic owner or reimplementing verifier/runtime decisions.
         source_location_rule: >
-          Diagnostics in the expanded view must carry check_id plus authored
-          YAML file or other stable authored location derived from contract
-          bundle source metadata.
+          Diagnostics in the expanded view must carry check_id, message,
+          remediation/evidence when available from the verifier finding owner,
+          plus authored YAML file or other stable authored location derived from
+          contract bundle source metadata.
         non_authoritative_paths:
         - CLI-local verifier decisions
         - API-local verifier decisions
@@ -14064,11 +14074,12 @@ cli_specification:
               json_shape: >
                 object with ok, contracts, workspace_backend, errors, warnings, and lint_evidence. `errors`, `warnings`,
                 and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
-                `severity`, `location`, and `message` fields. `--json` renders this same object for structured boot
+                `severity`, `location`, and `message` fields plus optional additive `remediation` and `evidence` fields.
+                Existing fields are stable and MUST NOT be renamed; `message` remains the problem text. `--json` renders this same object for structured boot
                 verification failures with `ok: false` instead of requiring consumers to parse human stderr.
               human_text_streams:
                 stdout: "successful load-bearing `verify ok: contracts=...` result only"
-                stderr: "analyzer diagnostics and advisory findings, rendered with the boot verification surface severity prefixes `ERROR:`, `WARN:`, or `INFO:`"
+                stderr: "analyzer diagnostics and advisory findings rendered as typed diagnostic lists with `[BLOCKER]`, `[WARN]`, or `[INFO]`; single command-outcome failures still use `ERROR:`/`WARNING:`"
               quiet_values:
               - ok
             health:

@@ -171,7 +171,19 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 	if len(view.Diagnostics) > 0 {
 		fmt.Fprintln(out, "diagnostics:")
 		for _, diagnostic := range view.Diagnostics {
-			fmt.Fprintf(out, "  - [%s] %s %s: %s\n", diagnostic.Severity, diagnostic.CheckID, diagnostic.AuthoredLocation, diagnostic.Message)
+			location := strings.TrimSpace(diagnostic.AuthoredLocation)
+			if location == "" {
+				location = strings.TrimSpace(diagnostic.Location)
+			}
+			rendered := runtimebootverify.FormatTypedDiagnosticFinding(runtimebootverify.TypedDiagnosticFinding{
+				CheckID:     diagnostic.CheckID,
+				Severity:    diagnostic.Severity,
+				Location:    location,
+				Message:     diagnostic.Message,
+				Remediation: diagnostic.Remediation,
+				Evidence:    diagnostic.Evidence,
+			}, false)
+			fmt.Fprintf(out, "  - %s\n", strings.ReplaceAll(rendered, "\n", "\n    "))
 		}
 	}
 }
