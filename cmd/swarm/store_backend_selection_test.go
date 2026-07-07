@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -448,6 +450,9 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 			t.Fatalf("sqlite optional capability %s = %T, want nil classified split/postgres-only capability", name, capability)
 		}
 	}
+	if apiCaps.RuntimeContexts != nil {
+		t.Fatalf("sqlite optional capability RuntimeContexts = %T, want nil classified split/postgres-only capability", apiCaps.RuntimeContexts)
+	}
 	runtimeStores := stores.runtimeStores()
 	if runtimeStores.SQLDB != nil {
 		t.Fatalf("sqlite runtimeStores SQLDB = %#v, want nil raw runtime SQL handle", runtimeStores.SQLDB)
@@ -531,70 +536,108 @@ func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *
 		t.Fatalf("sqlite apiCapabilities: %v", err)
 	}
 
-	pureOperatorReads := map[string]struct {
-		postgres any
-		sqlite   any
-	}{
-		"AgentConversations": {postgres: postgresCaps.AgentConversations, sqlite: sqliteCaps.AgentConversations},
-		"BundleCatalog":      {postgres: postgresCaps.BundleCatalog, sqlite: sqliteCaps.BundleCatalog},
-	}
-	for name, caps := range pureOperatorReads {
-		if caps.postgres == nil {
-			t.Fatalf("postgres pure operator-read capability %s unexpectedly nil; parity guard lost its baseline", name)
+	ledger := selectedOperatorReadConstructionCapabilityLedger()
+	seen := map[string]struct{}{}
+	for _, entry := range ledger {
+		if entry.Reason == "" {
+			t.Fatalf("selected operator-read construction capability %s missing classification reason", entry.Name)
 		}
-		if caps.sqlite == nil {
-			t.Fatalf("sqlite pure operator-read capability %s nil while postgres wires it; wire SQLite or classify explicitly", name)
+		if _, exists := seen[entry.Name]; exists {
+			t.Fatalf("selected operator-read construction capability %s appears more than once in classification ledger", entry.Name)
+		}
+		seen[entry.Name] = struct{}{}
+		postgresValue, ok := selectedAPICapabilityField(postgresCaps, entry.Name)
+		if !ok {
+			t.Fatalf("selected operator-read construction capability ledger names unknown field %s", entry.Name)
+		}
+		sqliteValue, _ := selectedAPICapabilityField(sqliteCaps, entry.Name)
+		postgresConfigured := selectedAPICapabilityConfigured(postgresValue)
+		sqliteConfigured := selectedAPICapabilityConfigured(sqliteValue)
+		switch entry.Classification {
+		case "wired_both":
+			if !postgresConfigured {
+				t.Fatalf("postgres selected operator-read capability %s unexpectedly nil; parity guard lost its baseline", entry.Name)
+			}
+			if !sqliteConfigured {
+				t.Fatalf("sqlite selected operator-read capability %s nil while postgres wires it; wire SQLite or classify explicitly: %s", entry.Name, entry.Reason)
+			}
+		case "split_with_issue_ref", "different_semantic_concept_with_proof":
+			if entry.Issue == 0 {
+				t.Fatalf("selected operator-read construction capability %s classification %s missing issue", entry.Name, entry.Classification)
+			}
+			if entry.RequiresPostgresBaseline && !postgresConfigured {
+				t.Fatalf("classified optional capability %s no longer has a postgres baseline; update construction-parity classification: %s", entry.Name, entry.Reason)
+			}
+			if sqliteConfigured {
+				t.Fatalf("sqlite optional capability %s is configured; keep it classified until separately gated: %s", entry.Name, entry.Reason)
+			}
+		default:
+			t.Fatalf("selected operator-read construction capability %s has unsupported classification %q", entry.Name, entry.Classification)
 		}
 	}
+	for _, field := range selectedAPICapabilityFieldNames() {
+		if _, ok := seen[field]; !ok {
+			t.Fatalf("selected operator-read construction capability ledger missing field %s", field)
+		}
+	}
+}
 
-	classifiedSQLiteOmissions := map[string]struct {
-		postgres any
-		sqlite   any
-		reason   string
-	}{
-		"ConversationForks": {
-			postgres: postgresCaps.ConversationForks,
-			sqlite:   sqliteCaps.ConversationForks,
-			reason:   "mixed read/write lifecycle capability; split to #1783 before SQLite promotion",
-		},
-		"BundleDelete": {
-			postgres: postgresCaps.BundleDelete,
-			sqlite:   sqliteCaps.BundleDelete,
-			reason:   "mutating/destructive bundle capability, not pure operator read",
-		},
-		"RunForkAvailability": {
-			postgres: postgresCaps.RunForkAvailability,
-			sqlite:   sqliteCaps.RunForkAvailability,
-			reason:   "run.fork availability/execution product seam split from operator reads",
-		},
-		"RunFork": {
-			postgres: postgresCaps.RunFork,
-			sqlite:   sqliteCaps.RunFork,
-			reason:   "run.fork execution product seam split from operator reads",
-		},
-		"ResetCoordinator": {
-			postgres: postgresCaps.ResetCoordinator,
-			sqlite:   sqliteCaps.ResetCoordinator,
-			reason:   "destructive reset capability split from operator reads",
-		},
-		"ResetQuiescer": {
-			postgres: postgresCaps.ResetQuiescer,
-			sqlite:   sqliteCaps.ResetQuiescer,
-			reason:   "destructive reset capability split from operator reads",
-		},
-		"ResetCleaner": {
-			postgres: postgresCaps.ResetCleaner,
-			sqlite:   sqliteCaps.ResetCleaner,
-			reason:   "destructive reset capability split from operator reads",
-		},
+type selectedOperatorReadConstructionCapabilityEntry struct {
+	Name                     string
+	Classification           string
+	Issue                    int
+	RequiresPostgresBaseline bool
+	Reason                   string
+}
+
+func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadConstructionCapabilityEntry {
+	return []selectedOperatorReadConstructionCapabilityEntry{
+		{Name: "Database", Classification: "wired_both", Reason: "health.check/readiness pinger is selected on SQLite and Postgres"},
+		{Name: "Runs", Classification: "wired_both", Reason: "run.get/list/diagnose read owner is backend-neutral selected-store surface"},
+		{Name: "Entities", Classification: "wired_both", Reason: "entity.get/list/aggregate read owner is backend-neutral selected-store surface"},
+		{Name: "AgentConversations", Classification: "wired_both", Reason: "agent and conversation read owner was promoted by #1782/#1805"},
+		{Name: "Observability", Classification: "wired_both", Reason: "event/runtime log/run trace read owner is backend-neutral selected-store surface"},
+		{Name: "RunBundleContext", Classification: "wired_both", Reason: "served event.publish follow-up read context is required on both selected stores"},
+		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},
+		{Name: "BundleCatalog", Classification: "wired_both", Reason: "bundle.list/get/agents read owner was promoted by #1782/#1805"},
+		{Name: "BundleDelete", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "bundle.delete is a mutating/destructive bundle lifecycle capability, not operator-read parity"},
+		{Name: "ConversationForks", Classification: "split_with_issue_ref", Issue: 1783, RequiresPostgresBaseline: true, Reason: "ConversationForkLifecycleStore mixes fork_list/view reads with fork/fork_chat/fork_delete mutations and needs interface segregation"},
+		{Name: "RunForkAvailability", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "run.fork availability is a product/mutating lifecycle seam split from operator reads"},
+		{Name: "RunFork", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "run.fork execution is a product/mutating lifecycle seam split from operator reads"},
+		{Name: "RuntimeContexts", Classification: "split_with_issue_ref", Issue: 1239, Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},
+		{Name: "ResetCoordinator", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset coordinator remains split from operator-read parity"},
+		{Name: "ResetQuiescer", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset quiescer remains split from operator-read parity"},
+		{Name: "ResetCleaner", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset cleaner remains split from operator-read parity"},
 	}
-	for name, caps := range classifiedSQLiteOmissions {
-		if caps.postgres == nil {
-			t.Fatalf("classified optional capability %s no longer has a postgres baseline; update #1782 construction-parity guard classification: %s", name, caps.reason)
-		}
-		if caps.sqlite != nil {
-			t.Fatalf("sqlite optional capability %s = %T, want nil until separately gated: %s", name, caps.sqlite, caps.reason)
-		}
+}
+
+func selectedAPICapabilityFieldNames() []string {
+	typ := reflect.TypeOf(selectedAPICapabilities{})
+	out := make([]string, 0, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		out = append(out, typ.Field(i).Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func selectedAPICapabilityField(caps selectedAPICapabilities, name string) (reflect.Value, bool) {
+	value := reflect.ValueOf(caps).FieldByName(name)
+	if !value.IsValid() {
+		return reflect.Value{}, false
+	}
+	return value, true
+}
+
+func selectedAPICapabilityConfigured(value reflect.Value) bool {
+	if !value.IsValid() {
+		return false
+	}
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return !value.IsNil()
+	default:
+		return !value.IsZero()
 	}
 }
 

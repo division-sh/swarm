@@ -18,15 +18,16 @@ import (
 const publicSurfaceBackendMatrixPath = "internal/apiv1/testdata/public_surface_backend_matrix.yaml"
 
 type publicSurfaceBackendMatrix struct {
-	Version        int                                   `yaml:"version"`
-	Kind           string                                `yaml:"kind"`
-	Issue          int                                   `yaml:"issue"`
-	IssueRole      string                                `yaml:"issue_role"`
-	Source         publicSurfaceMatrixSource             `yaml:"source"`
-	Policy         publicSurfaceMatrixPolicy             `yaml:"policy"`
-	ActiveTrackers []complianceActiveTracker             `yaml:"active_trackers"`
-	MutatingLedger []publicSurfaceMutatingAPIParityEntry `yaml:"mutating_api_parity_ledger"`
-	Rows           []publicSurfaceMatrixRow              `yaml:"rows"`
+	Version            int                                       `yaml:"version"`
+	Kind               string                                    `yaml:"kind"`
+	Issue              int                                       `yaml:"issue"`
+	IssueRole          string                                    `yaml:"issue_role"`
+	Source             publicSurfaceMatrixSource                 `yaml:"source"`
+	Policy             publicSurfaceMatrixPolicy                 `yaml:"policy"`
+	ActiveTrackers     []complianceActiveTracker                 `yaml:"active_trackers"`
+	MutatingLedger     []publicSurfaceMutatingAPIParityEntry     `yaml:"mutating_api_parity_ledger"`
+	OperatorReadLedger []publicSurfaceOperatorReadAPIParityEntry `yaml:"operator_read_api_parity_ledger"`
+	Rows               []publicSurfaceMatrixRow                  `yaml:"rows"`
 }
 
 type publicSurfaceMatrixSource struct {
@@ -36,11 +37,12 @@ type publicSurfaceMatrixSource struct {
 }
 
 type publicSurfaceMatrixPolicy struct {
-	ClosureLevel                          string `yaml:"closure_level"`
-	ClaimsParentClosure                   bool   `yaml:"claims_parent_closure"`
-	NamedFullConformanceCommand           string `yaml:"named_full_conformance_command"`
-	RequiredSmokePolicy                   string `yaml:"required_smoke_policy"`
-	MutatingAPIParityClassificationPolicy string `yaml:"mutating_api_parity_classification_policy"`
+	ClosureLevel                              string `yaml:"closure_level"`
+	ClaimsParentClosure                       bool   `yaml:"claims_parent_closure"`
+	NamedFullConformanceCommand               string `yaml:"named_full_conformance_command"`
+	RequiredSmokePolicy                       string `yaml:"required_smoke_policy"`
+	MutatingAPIParityClassificationPolicy     string `yaml:"mutating_api_parity_classification_policy"`
+	OperatorReadAPIParityClassificationPolicy string `yaml:"operator_read_api_parity_classification_policy"`
 }
 
 type publicSurfaceMatrixRow struct {
@@ -82,15 +84,28 @@ type publicSurfaceMutatingAPIParityEntry struct {
 	Notes             string                  `yaml:"notes,omitempty"`
 }
 
+type publicSurfaceOperatorReadAPIParityEntry struct {
+	Method           string                  `yaml:"method"`
+	Classification   string                  `yaml:"classification"`
+	Backends         []string                `yaml:"backends,omitempty"`
+	SpecRef          string                  `yaml:"spec_ref,omitempty"`
+	SplitIssue       int                     `yaml:"split_issue,omitempty"`
+	UnsupportedIssue int                     `yaml:"unsupported_issue,omitempty"`
+	ProofRefs        []publicSurfaceProofRef `yaml:"proof_refs"`
+	Notes            string                  `yaml:"notes,omitempty"`
+}
+
 type publicSurfaceValidationContext struct {
-	apiMethods           map[string]struct{}
-	apiMethodInfo        map[string]publicSurfaceAPIMethodInfo
-	mutatingAPIMethods   map[string]struct{}
-	openRPCMethods       map[string]struct{}
-	openRPCMatrixMethods map[string]struct{}
-	cliCommands          map[string]struct{}
-	goTests              map[string]string
-	servedScenarios      map[string]servedparity.Scenario
+	apiMethods             map[string]struct{}
+	apiMethodInfo          map[string]publicSurfaceAPIMethodInfo
+	mutatingAPIMethods     map[string]struct{}
+	operatorReadAPIMethods map[string]struct{}
+	openRPCMethods         map[string]struct{}
+	openRPCMatrixMethods   map[string]struct{}
+	openRPCMatrixTransport map[string]string
+	cliCommands            map[string]struct{}
+	goTests                map[string]string
+	servedScenarios        map[string]servedparity.Scenario
 }
 
 type publicSurfaceAPIMethodInfo struct {
@@ -445,6 +460,65 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			want: "ledger method event.publish dual_backend_served_proof backends = [default_sqlite], want [default_sqlite explicit_postgres]",
 		},
 		{
+			name: "operator-read api ledger rejects unclassified method",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				matrix.OperatorReadLedger = publicSurfaceOperatorReadLedgerExcept(matrix.OperatorReadLedger, "agent.list")
+			},
+			want: "operator-read api parity ledger missing method agent.list",
+		},
+		{
+			name: "operator-read api ledger rejects stale split issue ref",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "conversation.fork_list")
+				entry.SplitIssue = 999999
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "tracker", Issue: 999999, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
+				}
+			},
+			want: "operator-read ledger method conversation.fork_list split issue #999999 is not active",
+		},
+		{
+			name: "operator-read api ledger rejects stale spec ref",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
+				entry.Classification = "postgres_only_with_spec_ref"
+				entry.Backends = []string{"postgres_only"}
+				entry.SpecRef = "platform-spec.yaml#api_specification.missing_operator_read_anchor"
+			},
+			want: "operator-read ledger method agent.list spec_ref platform-spec.yaml#api_specification.missing_operator_read_anchor does not resolve",
+		},
+		{
+			name: "operator-read api ledger rejects broad postgres only publication ref",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
+				entry.Classification = "postgres_only_with_spec_ref"
+				entry.Backends = []string{"postgres_only"}
+				entry.SpecRef = "platform-spec.yaml#api_specification.method_catalog"
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "artifact", Path: "platform-spec.yaml"},
+				}
+			},
+			want: "operator-read ledger method agent.list postgres_only_with_spec_ref spec_ref platform-spec.yaml#api_specification.method_catalog is publication-only, not backend-support authority",
+		},
+		{
+			name: "operator-read api ledger rejects fake-store-only dual proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestOpenRPCReadOnlyHTTPRuntimeProbes"},
+				}
+			},
+			want: "operator-read ledger method agent.list dual_backend_api_proof cannot rely only on adjacent fake-store/protocol probes",
+		},
+		{
+			name: "operator-read api ledger rejects one backend dual proof",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceOperatorReadLedgerEntryByMethod(t, matrix, "agent.list")
+				entry.Backends = []string{"default_sqlite"}
+			},
+			want: "operator-read ledger method agent.list dual_backend_api_proof backends = [default_sqlite], want [default_sqlite explicit_postgres]",
+		},
+		{
 			name: "mutating api ledger rejects transitive coverage without covered method",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
@@ -566,24 +640,36 @@ func newPublicSurfaceValidationContext(t *testing.T, root string) publicSurfaceV
 	for _, method := range api.Conventions.Idempotency.MutatingMethods {
 		mutatingAPIMethods[strings.TrimSpace(method)] = struct{}{}
 	}
+	operatorReadAPIMethods := map[string]struct{}{}
+	for method := range apiMethods {
+		if _, mutating := mutatingAPIMethods[method]; mutating {
+			continue
+		}
+		operatorReadAPIMethods[method] = struct{}{}
+	}
 	openRPCMethods := map[string]struct{}{}
 	for _, method := range doc.Methods {
 		openRPCMethods[strings.TrimSpace(method.Name)] = struct{}{}
 	}
 	openRPCMatrixMethods := map[string]struct{}{}
+	openRPCMatrixTransport := map[string]string{}
 	for _, row := range openRPCMatrix.Methods {
-		openRPCMatrixMethods[strings.TrimSpace(row.Method)] = struct{}{}
+		method := strings.TrimSpace(row.Method)
+		openRPCMatrixMethods[method] = struct{}{}
+		openRPCMatrixTransport[method] = strings.TrimSpace(row.Transport)
 	}
 
 	return publicSurfaceValidationContext{
-		apiMethods:           apiMethods,
-		apiMethodInfo:        apiMethodInfo,
-		mutatingAPIMethods:   mutatingAPIMethods,
-		openRPCMethods:       openRPCMethods,
-		openRPCMatrixMethods: openRPCMatrixMethods,
-		cliCommands:          loadPublicSurfaceCLICommands(t, root),
-		goTests:              goTests,
-		servedScenarios:      loadPublicSurfaceServedParityScenarios(),
+		apiMethods:             apiMethods,
+		apiMethodInfo:          apiMethodInfo,
+		mutatingAPIMethods:     mutatingAPIMethods,
+		operatorReadAPIMethods: operatorReadAPIMethods,
+		openRPCMethods:         openRPCMethods,
+		openRPCMatrixMethods:   openRPCMatrixMethods,
+		openRPCMatrixTransport: openRPCMatrixTransport,
+		cliCommands:            loadPublicSurfaceCLICommands(t, root),
+		goTests:                goTests,
+		servedScenarios:        loadPublicSurfaceServedParityScenarios(),
 	}
 }
 
@@ -638,6 +724,9 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1386, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
 		problems = append(problems, "active_trackers missing #1386 runtime_store_backend_default_and_sqlite_portability")
 	}
+	if _, ok := activeTrackers[trackerKey(1783, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
+		problems = append(problems, "active_trackers missing #1783 runtime_store_backend_default_and_sqlite_portability")
+	}
 	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability")
 	}
@@ -648,6 +737,7 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")
 	}
 	problems = append(problems, validatePublicSurfaceMutatingAPIParityLedger(root, matrix.MutatingLedger, ctx, activeTrackers)...)
+	problems = append(problems, validatePublicSurfaceOperatorReadAPIParityLedger(root, matrix.OperatorReadLedger, ctx, activeTrackers)...)
 
 	rowsByID := map[string]publicSurfaceMatrixRow{}
 	requiredRows := requiredPublicSurfaceRows()
@@ -841,6 +931,118 @@ func validatePublicSurfaceMutatingAPIParityLedger(root string, entries []publicS
 		}
 	}
 	return problems
+}
+
+func validatePublicSurfaceOperatorReadAPIParityLedger(root string, entries []publicSurfaceOperatorReadAPIParityEntry, ctx publicSurfaceValidationContext, activeTrackers map[string]struct{}) []string {
+	var problems []string
+	if len(entries) == 0 {
+		return []string{"operator-read api parity ledger is required"}
+	}
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		method := strings.TrimSpace(entry.Method)
+		label := fmt.Sprintf("operator-read ledger method %s", method)
+		if method == "" {
+			problems = append(problems, "operator-read api parity ledger entry missing method")
+			continue
+		}
+		if _, exists := seen[method]; exists {
+			problems = append(problems, fmt.Sprintf("%s appears more than once", label))
+		}
+		seen[method] = struct{}{}
+		if _, ok := ctx.operatorReadAPIMethods[method]; !ok {
+			problems = append(problems, fmt.Sprintf("%s is not a non-mutating platform method_catalog method", label))
+		}
+		if _, ok := ctx.apiMethods[method]; !ok {
+			problems = append(problems, fmt.Sprintf("%s missing from platform method_catalog", label))
+		}
+		if _, ok := ctx.openRPCMethods[method]; !ok {
+			problems = append(problems, fmt.Sprintf("%s missing from generated openrpc.json", label))
+		}
+		if len(entry.ProofRefs) == 0 {
+			problems = append(problems, fmt.Sprintf("%s missing proof_refs", label))
+		}
+		problems = append(problems, validatePublicSurfaceMutatingLedgerProofRefs(root, label, entry.ProofRefs, ctx, activeTrackers)...)
+		if _, ok := allowedPublicSurfaceOperatorReadLedgerClassifications()[entry.Classification]; !ok {
+			problems = append(problems, fmt.Sprintf("%s classification %q is not allowed", label, entry.Classification))
+			continue
+		}
+		switch entry.Classification {
+		case "dual_backend_api_proof":
+			problems = append(problems, validatePublicSurfaceOperatorReadLedgerDualProof(label, entry)...)
+		case "different_semantic_concept_with_proof":
+			if !publicSurfaceOperatorReadLedgerHasGoTestProof(entry.ProofRefs) {
+				problems = append(problems, fmt.Sprintf("%s different_semantic_concept_with_proof requires executable go_test proof_ref", label))
+			}
+			if transport := ctx.openRPCMatrixTransport[method]; transport == "http" && !strings.Contains(strings.ToLower(entry.Notes), "non-store") && !strings.Contains(strings.ToLower(entry.Notes), "static") {
+				problems = append(problems, fmt.Sprintf("%s different_semantic_concept_with_proof over HTTP method requires notes naming non-store/static reason", label))
+			}
+		case "postgres_only_with_spec_ref":
+			if !publicSurfaceSameStringSet(entry.Backends, []string{"postgres_only"}) {
+				problems = append(problems, fmt.Sprintf("%s postgres_only_with_spec_ref backends = %v, want [postgres_only]", label, publicSurfaceSortedStrings(entry.Backends)))
+			}
+			if strings.TrimSpace(entry.SpecRef) == "" {
+				problems = append(problems, fmt.Sprintf("%s postgres_only_with_spec_ref missing spec_ref", label))
+			} else if err := publicSurfaceSpecRefExists(root, entry.SpecRef); err != nil {
+				problems = append(problems, fmt.Sprintf("%s spec_ref %s does not resolve: %v", label, entry.SpecRef, err))
+			} else if publicSurfaceSpecRefIsPublicationOnly(entry.SpecRef) {
+				problems = append(problems, fmt.Sprintf("%s postgres_only_with_spec_ref spec_ref %s is publication-only, not backend-support authority", label, entry.SpecRef))
+			}
+		case "split_with_issue_ref":
+			if entry.SplitIssue == 0 {
+				problems = append(problems, fmt.Sprintf("%s split_with_issue_ref missing split_issue", label))
+			} else if !publicSurfaceLedgerHasTrackerIssue(entry.ProofRefs, entry.SplitIssue, activeTrackers) {
+				problems = append(problems, fmt.Sprintf("%s split issue #%d is not active", label, entry.SplitIssue))
+			}
+		case "unsupported_with_issue_ref":
+			if entry.UnsupportedIssue == 0 {
+				problems = append(problems, fmt.Sprintf("%s unsupported_with_issue_ref missing unsupported_issue", label))
+			} else if !publicSurfaceLedgerHasTrackerIssue(entry.ProofRefs, entry.UnsupportedIssue, activeTrackers) {
+				problems = append(problems, fmt.Sprintf("%s unsupported issue #%d is not active", label, entry.UnsupportedIssue))
+			}
+		}
+	}
+	for method := range ctx.operatorReadAPIMethods {
+		if _, ok := seen[method]; !ok {
+			problems = append(problems, fmt.Sprintf("operator-read api parity ledger missing method %s", method))
+		}
+	}
+	return problems
+}
+
+func validatePublicSurfaceOperatorReadLedgerDualProof(label string, entry publicSurfaceOperatorReadAPIParityEntry) []string {
+	var problems []string
+	if !publicSurfaceSameStringSet(entry.Backends, []string{"default_sqlite", "explicit_postgres"}) {
+		problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof backends = %v, want [default_sqlite explicit_postgres]", label, publicSurfaceSortedStrings(entry.Backends)))
+	}
+	if !publicSurfaceOperatorReadLedgerHasSelectedBackendProof(entry.ProofRefs) {
+		problems = append(problems, fmt.Sprintf("%s dual_backend_api_proof cannot rely only on adjacent fake-store/protocol probes", label))
+	}
+	return problems
+}
+
+func publicSurfaceOperatorReadLedgerHasGoTestProof(refs []publicSurfaceProofRef) bool {
+	for _, ref := range refs {
+		if ref.Kind == "go_test" && strings.TrimSpace(ref.Name) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func publicSurfaceOperatorReadLedgerHasSelectedBackendProof(refs []publicSurfaceProofRef) bool {
+	for _, ref := range refs {
+		if ref.Kind != "go_test" {
+			continue
+		}
+		switch ref.Name {
+		case "TestOpenRPCReadOnlyHTTPRuntimeProbes", "TestOpenRPCWebSocketRuntimeProbes":
+			continue
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 func validatePublicSurfaceMutatingLedgerProofRefs(root, label string, refs []publicSurfaceProofRef, ctx publicSurfaceValidationContext, activeTrackers map[string]struct{}) []string {
@@ -1259,6 +1461,12 @@ func validatePublicSurfacePolicy(policy publicSurfaceMatrixPolicy) []string {
 	} else if !strings.Contains(classificationPolicy, "covered_transitively") || !strings.Contains(strings.ToLower(classificationPolicy), "deprecated wrapper") {
 		problems = append(problems, "policy mutating_api_parity_classification_policy must document covered_transitively deprecated wrapper handling")
 	}
+	operatorReadPolicy := strings.TrimSpace(policy.OperatorReadAPIParityClassificationPolicy)
+	if operatorReadPolicy == "" {
+		problems = append(problems, "policy operator_read_api_parity_classification_policy missing")
+	} else if !strings.Contains(operatorReadPolicy, "dual_backend_api_proof") || !strings.Contains(operatorReadPolicy, "fake-store") || !strings.Contains(operatorReadPolicy, "different_semantic_concept_with_proof") {
+		problems = append(problems, "policy operator_read_api_parity_classification_policy must document dual backend proof, fake-store exclusion, and different concept classification")
+	}
 	return problems
 }
 
@@ -1509,6 +1717,17 @@ func publicSurfaceMutatingLedgerEntryByMethod(t *testing.T, matrix *publicSurfac
 	return nil
 }
 
+func publicSurfaceOperatorReadLedgerEntryByMethod(t *testing.T, matrix *publicSurfaceBackendMatrix, method string) *publicSurfaceOperatorReadAPIParityEntry {
+	t.Helper()
+	for i := range matrix.OperatorReadLedger {
+		if matrix.OperatorReadLedger[i].Method == method {
+			return &matrix.OperatorReadLedger[i]
+		}
+	}
+	t.Fatalf("operator-read api parity ledger method %s not found", method)
+	return nil
+}
+
 func publicSurfaceMutatingLedgerEntry(entries []publicSurfaceMutatingAPIParityEntry, method string) (publicSurfaceMutatingAPIParityEntry, bool) {
 	for _, entry := range entries {
 		if entry.Method == method {
@@ -1683,6 +1902,17 @@ func publicSurfaceMutatingLedgerExcept(entries []publicSurfaceMutatingAPIParityE
 	return out
 }
 
+func publicSurfaceOperatorReadLedgerExcept(entries []publicSurfaceOperatorReadAPIParityEntry, remove string) []publicSurfaceOperatorReadAPIParityEntry {
+	out := entries[:0]
+	for _, entry := range entries {
+		if entry.Method == remove {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 func publicSurfaceSameStringSet(actual, want []string) bool {
 	actualSorted := publicSurfaceSortedStrings(actual)
 	wantSorted := publicSurfaceSortedStrings(want)
@@ -1741,6 +1971,16 @@ func allowedPublicSurfaceMutatingLedgerClassifications() map[string]struct{} {
 	return complianceStringSet([]string{
 		"dual_backend_served_proof",
 		"covered_transitively",
+		"postgres_only_with_spec_ref",
+		"unsupported_with_issue_ref",
+		"split_with_issue_ref",
+	})
+}
+
+func allowedPublicSurfaceOperatorReadLedgerClassifications() map[string]struct{} {
+	return complianceStringSet([]string{
+		"dual_backend_api_proof",
+		"different_semantic_concept_with_proof",
 		"postgres_only_with_spec_ref",
 		"unsupported_with_issue_ref",
 		"split_with_issue_ref",

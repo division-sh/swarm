@@ -24,12 +24,23 @@ policy:
     use covered_transitively and must name the covered method, covered harness
     scenario, and live proof refs; this classification must not be used as a
     generic bypass for methods with independent backend-sensitive behavior.
+  operator_read_api_parity_classification_policy: >
+    Every non-mutating public method must be classified as dual_backend_api_proof,
+    postgres_only_with_spec_ref, unsupported_with_issue_ref, split_with_issue_ref,
+    or different_semantic_concept_with_proof. Dual-backend read proof must include
+    selected-backend public-surface evidence for default SQLite and explicit
+    Postgres; fake-store OpenRPC probes and store-unit tests alone do not count
+    as selected-backend parity proof. Non-HTTP subscription/protocol methods must
+    be classified explicitly rather than omitted.
 active_trackers:
   - kind: github_issue
     issue: 1239
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: github_issue
     issue: 1386
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: github_issue
+    issue: 1783
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
@@ -150,6 +161,263 @@ mutating_api_parity_ledger:
     classification: split_with_issue_ref
     split_issue: 1386
     proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+operator_read_api_parity_ledger:
+  - method: agent.delivery_diagnostics
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: agent.delivery_lifecycle
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres}
+      - {kind: go_test, name: TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: agent.diagnose
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentDiagnosisUsesSelectedOwners}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: agent.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: agent.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: agent.usage
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated}
+      - {kind: go_test, name: TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: bundle.agents
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorBundleCatalogHandlersExposeStoreOwner}
+      - {kind: go_test, name: TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestBundleCatalogReadSurfaceListGetAgentsAndCursor}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: bundle.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorBundleCatalogHandlersExposeStoreOwner}
+      - {kind: go_test, name: TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestBundleCatalogReadSurfaceListGetAgentsAndCursor}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: bundle.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorBundleCatalogHandlersExposeStoreOwner}
+      - {kind: go_test, name: TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestBundleCatalogReadSurfaceListGetAgentsAndCursor}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: conversation.current_for_agent
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: conversation.fork_list
+    classification: split_with_issue_ref
+    split_issue: 1783
+    proof_refs:
+      - {kind: tracker, issue: 1783, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+    notes: >
+      Current ConversationForkLifecycleStore also carries fork/fork_chat/fork_delete
+      mutations; read promotion requires #1783 interface segregation first.
+  - method: conversation.fork_view
+    classification: split_with_issue_ref
+    split_issue: 1783
+    proof_refs:
+      - {kind: tracker, issue: 1783, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+    notes: >
+      Current ConversationForkLifecycleStore also carries fork/fork_chat/fork_delete
+      mutations; read promotion requires #1783 interface segregation first.
+  - method: conversation.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: conversation.get_turn
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: conversation.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorAgentConversationHandlersExposeReadOwner}
+      - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}
+      - {kind: go_test, name: TestOperatorConversationQuerySourcesRunIDCapabilityMatrix}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: entity.aggregate
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromSQLite}
+      - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres}
+      - {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}
+  - method: entity.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromSQLite}
+      - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres}
+      - {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}
+  - method: entity.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromSQLite}
+      - {kind: go_test, name: TestOperatorEntityHandlersServeContractEntityTypesFromPostgres}
+      - {kind: go_test, name: TestOperatorEntityHandlersExposeEntityNativeReads}
+  - method: event.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows}
+      - {kind: go_test, name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock}
+      - {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: event.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle}
+      - {kind: go_test, name: TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock}
+      - {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: event.subscribe
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}
+    notes: WebSocket subscription/protocol surface, not an operator-read store capability.
+  - method: health.check
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore}
+      - {kind: go_test, name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: health.ping
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+    notes: Static non-store liveness method; no selected operator-read store is involved.
+  - method: health.subscribe
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}
+    notes: WebSocket subscription/protocol surface, not an operator-read store capability.
+  - method: mailbox.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: mailbox.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: rpc.unsubscribe
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}
+    notes: WebSocket control/protocol surface, not an operator-read store capability.
+  - method: run.diagnose
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence}
+      - {kind: go_test, name: TestRunAPIReadSurface_LoadAndListRunHeaders}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: run.get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence}
+      - {kind: go_test, name: TestRunAPIReadSurface_LoadAndListRunHeaders}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: run.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence}
+      - {kind: go_test, name: TestRunAPIReadSurface_LoadAndListRunHeaders}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: run.subscribe_trace
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}
+      - {kind: go_test, name: TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound}
+    notes: WebSocket subscription/protocol surface, not an HTTP operator-read method.
+  - method: run.trace
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability}
+      - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: runtime.identity
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+    notes: Static non-store runtime identity method; no selected operator-read store is involved.
+  - method: runtime.incidents
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability}
+      - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: runtime.logs
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability}
+      - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage}
+      - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
+  - method: runtime.subscribe_logs
+    classification: different_semantic_concept_with_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}
+      - {kind: go_test, name: TestHandlerWebSocketRuntimeSubscribeLogsUsesOwnerFiltersAndReplay}
+    notes: WebSocket subscription/protocol surface, not an HTTP operator-read method.
 rows:
   - id: serve_contracts_default_sqlite
     surface: default SQLite swarm serve --contracts readiness and API availability
