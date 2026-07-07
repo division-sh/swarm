@@ -84,12 +84,18 @@ type publicSurfaceMutatingAPIParityEntry struct {
 
 type publicSurfaceValidationContext struct {
 	apiMethods           map[string]struct{}
+	apiMethodInfo        map[string]publicSurfaceAPIMethodInfo
 	mutatingAPIMethods   map[string]struct{}
 	openRPCMethods       map[string]struct{}
 	openRPCMatrixMethods map[string]struct{}
 	cliCommands          map[string]struct{}
 	goTests              map[string]string
 	servedScenarios      map[string]servedparity.Scenario
+}
+
+type publicSurfaceAPIMethodInfo struct {
+	Deprecated  bool
+	Description string
 }
 
 func TestPublicSurfaceBackendMatrixCoversSelectedBackendRows(t *testing.T) {
@@ -494,6 +500,22 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			},
 			want: "ledger method run.start covered_by_method must differ from method",
 		},
+		{
+			name: "mutating api ledger rejects transitive coverage for non-deprecated mutator",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.stop")
+				entry.Classification = "covered_transitively"
+				entry.Backends = []string{"default_sqlite", "explicit_postgres"}
+				entry.CoveredByMethod = "event.publish"
+				entry.CoveredByScenario = "event_publish_dynamic_auto_emit_lifecycle"
+				entry.SplitIssue = 0
+				entry.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "go_test", Name: "TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle"},
+				}
+				entry.Notes = "Deprecated wrapper over event.publish."
+			},
+			want: "ledger method run.stop covered_transitively requires deprecated method_catalog entry",
+		},
 	}
 
 	for _, tc := range tests {
@@ -532,8 +554,13 @@ func newPublicSurfaceValidationContext(t *testing.T, root string) publicSurfaceV
 	}
 
 	apiMethods := map[string]struct{}{}
-	for name := range api.MethodCatalog {
+	apiMethodInfo := map[string]publicSurfaceAPIMethodInfo{}
+	for name, method := range api.MethodCatalog {
 		apiMethods[name] = struct{}{}
+		apiMethodInfo[name] = publicSurfaceAPIMethodInfo{
+			Deprecated:  method.Deprecated,
+			Description: method.Description,
+		}
 	}
 	mutatingAPIMethods := map[string]struct{}{}
 	for _, method := range api.Conventions.Idempotency.MutatingMethods {
@@ -550,6 +577,7 @@ func newPublicSurfaceValidationContext(t *testing.T, root string) publicSurfaceV
 
 	return publicSurfaceValidationContext{
 		apiMethods:           apiMethods,
+		apiMethodInfo:        apiMethodInfo,
 		mutatingAPIMethods:   mutatingAPIMethods,
 		openRPCMethods:       openRPCMethods,
 		openRPCMatrixMethods: openRPCMatrixMethods,
@@ -914,6 +942,14 @@ func validatePublicSurfaceMutatingLedgerTransitiveCoverage(label string, entry p
 	if coveredByMethod == strings.TrimSpace(entry.Method) {
 		problems = append(problems, fmt.Sprintf("%s covered_by_method must differ from method", label))
 	}
+	if methodInfo, ok := ctx.apiMethodInfo[strings.TrimSpace(entry.Method)]; ok {
+		if !methodInfo.Deprecated {
+			problems = append(problems, fmt.Sprintf("%s covered_transitively requires deprecated method_catalog entry", label))
+		}
+		if coveredByMethod != "" && !publicSurfaceMethodCatalogDeclaresDeprecatedWrapper(methodInfo, coveredByMethod) {
+			problems = append(problems, fmt.Sprintf("%s method_catalog description must declare deprecated wrapper coverage through %s", label, coveredByMethod))
+		}
+	}
 	if coveredByMethod != "" {
 		if _, ok := ctx.mutatingAPIMethods[coveredByMethod]; !ok {
 			problems = append(problems, fmt.Sprintf("%s covered_by_method %s is not declared in platform idempotency mutating_methods", label, coveredByMethod))
@@ -971,11 +1007,13 @@ func validatePublicSurfaceMutatingLedgerTransitiveCoverage(label string, entry p
 			problems = append(problems, fmt.Sprintf("%s covered_transitively go_test proof_ref %s is not the covered served parity harness test %s", label, ref.Name, scenario.TestName))
 		}
 	}
-	notes := strings.TrimSpace(entry.Notes)
-	if !strings.Contains(notes, "Deprecated wrapper") || (coveredByMethod != "" && !strings.Contains(notes, coveredByMethod)) {
-		problems = append(problems, fmt.Sprintf("%s covered_transitively notes must justify deprecated wrapper coverage through %s", label, coveredByMethod))
-	}
 	return problems
+}
+
+func publicSurfaceMethodCatalogDeclaresDeprecatedWrapper(method publicSurfaceAPIMethodInfo, coveredByMethod string) bool {
+	description := strings.ToLower(method.Description)
+	return strings.Contains(description, "deprecated wrapper") &&
+		strings.Contains(method.Description, coveredByMethod)
 }
 
 func publicSurfaceSpecRefExists(root, specRef string) error {
