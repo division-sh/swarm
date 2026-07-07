@@ -1232,9 +1232,9 @@ func (r *sqliteOperatorAgentConversationReadSurface) assertAgentDeadLetterDelive
 		  AND d.subscriber_id = ?
 		  AND d.status = 'dead_letter'
 		  AND NOT EXISTS (
-		  	SELECT 1
-		  	FROM dead_letters dl
-		  	WHERE dl.original_event_id = d.event_id
+			SELECT 1
+			FROM dead_letters dl
+			WHERE dl.original_event_id = d.event_id
 		  )
 		ORDER BY COALESCE(d.delivered_at, d.created_at) DESC, d.delivery_id DESC
 		LIMIT 1
