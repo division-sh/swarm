@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -103,11 +104,11 @@ func validateComputeModuleValueRow(source semanticview.Source, ref computeModule
 		if !hasBundle || bundle == nil {
 			findings = append(findings, computeModuleFinding(ref, "compute_module boot verification requires a workflow contract bundle source"))
 		} else {
-			bytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
+			moduleBytes, _, err := runtimecontracts.PolicyModuleBytes(bundle, module)
 			if err != nil {
 				findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("module bytes unavailable: %v", err)))
-			} else if err := computemodule.ValidateCoreJSONModule(bytes, module.Entry, module.Limits.MemoryPages); err != nil {
-				findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("module ABI/import validation failed: %v", err)))
+			} else if err := validateComputeModuleArtifact(ref, moduleID, module, moduleBytes); err != nil {
+				findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("module validation failed: %v", err)))
 			}
 		}
 	}
@@ -115,4 +116,32 @@ func validateComputeModuleValueRow(source semanticview.Source, ref computeModule
 		findings = append(findings, computeModuleFinding(ref, fmt.Sprintf("compute_module.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", storeAs)))
 	}
 	return findings
+}
+
+func validateComputeModuleArtifact(ref computeModuleRef, moduleID string, module runtimecontracts.PolicyModule, moduleBytes []byte) error {
+	switch computeModuleKind(module) {
+	case "wasm":
+		return computemodule.ValidateCoreJSONModule(moduleBytes, module.Entry, module.Limits.MemoryPages)
+	case pythonmodule.Kind:
+		return pythonmodule.ValidateSource(pythonmodule.Request{
+			ModuleID:    moduleID,
+			RowID:       ref.RowLabel(),
+			Digest:      strings.TrimSpace(module.Digest),
+			Entry:       strings.TrimSpace(module.Entry),
+			Source:      moduleBytes,
+			Fuel:        module.Limits.Gas,
+			MemoryPages: module.Limits.MemoryPages,
+			OutputBytes: module.Limits.OutputBytes,
+		})
+	default:
+		return fmt.Errorf("unsupported module kind %q", strings.TrimSpace(module.Kind))
+	}
+}
+
+func computeModuleKind(module runtimecontracts.PolicyModule) string {
+	kind := strings.TrimSpace(module.Kind)
+	if kind == "" {
+		return "wasm"
+	}
+	return kind
 }

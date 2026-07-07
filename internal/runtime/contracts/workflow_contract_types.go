@@ -632,6 +632,7 @@ type PolicyValidationRule = flowmodel.PolicyValidationRule
 type PolicyValidationCheck = flowmodel.PolicyValidationCheck
 type PolicyValidationEqualCheck = flowmodel.PolicyValidationEqualCheck
 type PolicyModule = flowmodel.PolicyModule
+type PolicyModuleRuntime = flowmodel.PolicyModuleRuntime
 type PolicyModuleLimits = flowmodel.PolicyModuleLimits
 type ContractURIRegistry = flowmodel.URIRegistry
 type ContractURIRef = flowmodel.URIRef
