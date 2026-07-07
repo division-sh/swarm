@@ -110,6 +110,23 @@ func TestDescribeCommandDiagnosticsCarryRemediationAndEvidence(t *testing.T) {
 	}
 }
 
+func TestDescribeMissingContractsIsValidationExit(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"describe"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitValidation {
+		t.Fatalf("describe missing contracts code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("describe missing contracts stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "describe failed: resolve contracts: contracts path is required") {
+		t.Fatalf("describe missing contracts stderr = %q", got)
+	}
+}
+
 func TestDescribeCommandRendersDefaultedTemplateInstancePolicies(t *testing.T) {
 	contractsRoot := writeDescribeDefaultedTemplatePolicyContracts(t)
 	var stdout, stderr bytes.Buffer

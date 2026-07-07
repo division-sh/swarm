@@ -5777,6 +5777,10 @@ engine:
         may block startup or `swarm verify`. Human-readable typed diagnostic lists must render those findings as blocking surface
         failures, not as non-fatal warnings.
       text_rendering:
+        shared_diagnostic_convention: >-
+          Typed analyzer finding lists consume `cli_specification.foundations.output_contract.diagnostic_convention`
+          for the global user-facing diagnostic rules. This section owns only the analyzer finding severity/fatality
+          mapping and typed-list rendering details.
         typed_finding_list: >-
           Human text lines for typed analyzer finding lists render `[BLOCKER] check_id @ location: message`,
           `[WARN] check_id @ location: message`, or `[INFO] check_id @ location: message`. `remediation:` renders on an
@@ -5801,6 +5805,10 @@ engine:
         report normalization remains a runtime safety net, not the proof of authoring completeness. The boot sequence runs all checks
         after contract loading and before starting nodes/agents.
       authoring_guidelines:
+        shared_diagnostic_convention: >-
+          Verifier findings consume `cli_specification.foundations.output_contract.diagnostic_convention` for common
+          user-facing diagnostic rules. This section adds verifier-specific authoring guidance, examples, and the
+          current gold-standard implementation reference.
         rule: >-
           A verifier finding names where in the contract, what is wrong, and how to fix it. Verifier findings are authored for
           contract authors, not runtime implementers. Messages name contract elements and authoring concepts, not Go functions,
@@ -14314,10 +14322,11 @@ cli_specification:
       canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract
       future_runtime_owner: cmd/swarm shared output-mode/color policy renderer
       scope: >
-        Merge-bearing CLI v2 authority for successful command output mode selection and shared rendering.
-        This contract covers default text, `--json`, streaming NDJSON, `--quiet`, successful-output color
-        control, stdout/stderr separation, command exceptions, and downstream implementation obligations. It does
-        not implement CLI flags or renderer code by itself.
+        Merge-bearing CLI v2 authority for successful command output mode selection, shared rendering, and
+        user-facing diagnostic conventions. This contract covers default text, `--json`, streaming NDJSON,
+        `--quiet`, successful-output color control, stdout/stderr separation, diagnostic severity vocabulary,
+        diagnostic message/remediation structure, exit-code taxonomy, command exceptions, and downstream
+        implementation obligations. It does not implement CLI flags or renderer code by itself.
       mode_selection:
         default_mode: default_text
         explicit_modes:
@@ -14377,6 +14386,83 @@ cli_specification:
         validation failures, auth failures, transport/API failures, and diagnostics render to stderr under
         cli_specification.foundations.error_channel_and_exit_code_contract. `--json` and `--quiet` do not change
         error exit-code classification and do not create JSON error bodies in this first promoted contract.
+      diagnostic_convention:
+        promoted_by: '#1812'
+        canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention
+        scope: >
+          Shared source authority for user-facing CLI diagnostic text and public diagnostic/remediation JSON fields.
+          This convention is consumed by single command-outcome failures, typed finding lists, verify/doctor
+          diagnostics, and command-specific diagnostic fields. It establishes author/operator-facing wording and
+          classification rules; it does not by itself sweep existing strings or implement renderer route-through
+          guards.
+        user_facing_surface:
+          human_text: >
+            CLI stdout/stderr text whose purpose is to tell a user what happened, why a command failed, or what to
+            do next.
+          public_diagnostic_json_fields: >
+            Public JSON fields whose purpose is diagnostic or remediation content, including `message`,
+            `remediation`, diagnostic `detail`, and typed-finding problem/evidence fields when exposed to users or
+            diagnostic consumers.
+          internal_metadata_exemption: >
+            Source-authority metadata, spec ledgers, testdata, implementation trackers, split-boundary bookkeeping,
+            and other non-user-facing implementation records may cite internal issues or tracker names when those
+            references are the intended internal authority.
+        severity_vocabulary:
+          command_outcome_failures: >
+            Single command-outcome failures use greppable `ERROR:` or `WARNING:` prefixes on human stderr. They are
+            one problem line plus remediation/detail continuation lines when useful.
+          typed_finding_lists: >
+            Enumerated typed diagnostic lists, such as verify and doctor findings, render `[BLOCKER]`, `[WARN]`, or
+            `[INFO]` lines. This consumes `engine.boot_verification.severity_behavior.surface_fatality.text_rendering`
+            for analyzer finding severity/fatality mapping.
+          no_mixing_rule: >
+            A single command outcome must not masquerade as a typed finding list, and a typed finding list must not
+            downgrade its enumerated entries to plain `ERROR:` lines.
+        diagnostic_content_rules:
+          translate_never_dump: >
+            Known failure classes must render author/operator-facing prose. Raw Go errors, transport verbs, runtime
+            stack details, SQL/storage implementation names, JSON-RPC envelope details, and other low-level causes
+            may appear only as secondary debug/detail/evidence context, never as the primary problem statement.
+          author_facing_terms: >
+            Diagnostics name the command, file, contract element, runtime target, or user-selected value involved.
+            Human-facing text must not use test-only or implementation vocabulary such as `test_`, `heuristic`,
+            `quiescence`, internal layer names, Go functions, SQL tables, delivery rows, or replay markers unless
+            the command is explicitly a test/internal surface.
+          no_internal_issue_or_tracker_refs: >
+            User-facing diagnostics must not reference internal GitHub issue numbers, tracker IDs, or watchlist node
+            names. State the constraint in plain terms such as `not supported yet`, `not supported in this
+            configuration`, or `use <supported setting>`. If a pointer is warranted, use a public docs URL.
+          structure: >
+            The first line is concise and states the problem. Remediation, detail, and evidence belong on
+            continuation lines or structured fields. This convention intentionally avoids a hard character cap; the
+            shape carries readability, not a numeric limit.
+          remediation: >
+            Every error has actionable remediation when an action exists. Remediation is imperative and names exact
+            commands, flags, files, or contract fields when possible.
+          evidence: >
+            Evidence is optional and should appear only when it helps the user understand what was checked or why the
+            diagnostic fired. Evidence must remain concise, stable, and user-facing.
+        exit_code_taxonomy:
+          success: 0
+          unexpected_or_internal_failure: 1
+          usage_argument_configuration_or_contract_validation_before_runtime_action: 2
+          transport_api_or_runtime_state_failure: 3
+          authentication_or_authorization_failure: 4
+          addressed_resource_not_found: 5
+          explicit_exception_rule: >
+            Command-specific state/conflict, terminal-run, interrupt, or detached outcomes may use additional exit
+            codes only when an explicit command row or narrower contract promotes that exception. Command-local
+            helpers must not reinterpret the canonical 0-5 classes.
+        examples:
+          good:
+          - 'ERROR: cannot reach the Swarm runtime at 127.0.0.1:8081.'
+          - '  Is the runtime running? Start one with `swarm serve`.'
+          - '[BLOCKER] accumulator_input_producer_path @ flow.items: handler accumulates event item.done but no accepted producer/source path was found.'
+          - '  remediation: Fix one of: add an accepted producer path; mark the event external; remove the accumulator.'
+          bad:
+          - 'v1 RPC request failed: Post "http://127.0.0.1:1/v1/rpc": dial tcp 127.0.0.1:1: connect: connection refused'
+          - 'run status: test_quiescence_ready=true heuristics=none blocking_layer='
+          - 'renamed-key adapters are tracked by an internal issue'
       modes:
         default_text:
           invocation: no output-mode flag
@@ -15337,7 +15423,9 @@ cli_specification:
         First-slice normalization for currently implemented API-backed CLI commands. This applies to diagnostics/read
         paths, mailbox list/view/decisions, version --server, agents list/view, agent mutations, control commands, event
         list/follow/view/replay/publish, entity list/view/aggregate, and swarm run start shared API/client failures. Future
-        command families consume this contract when their API-backed implementation is promoted.
+        command families consume this contract when their API-backed implementation is promoted. This contract consumes
+        `cli_specification.foundations.output_contract.diagnostic_convention.exit_code_taxonomy` for global exit-code
+        classes and declares narrower API-backed command exceptions.
       canonical_owner: cmd/swarm shared CLI API error classifier
       stdout_rule: >
         stdout is reserved for successful load-bearing command output. API/client/runtime errors, malformed API
@@ -15349,6 +15437,7 @@ cli_specification:
         application-code errors into the root fallback.
       exit_codes:
         success: 0
+        unexpected_or_internal_failure: 1
         cli_validation_or_misuse_before_api_call: 2
         runtime_transport_readiness_or_malformed_api: 3
         auth_or_missing_token: 4

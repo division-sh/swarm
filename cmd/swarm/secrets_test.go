@@ -245,6 +245,24 @@ func TestSecretsCommandsIgnoreRepoDotEnv(t *testing.T) {
 	}
 }
 
+func TestSecretsCheckMissingContractsIsValidationExit(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	repo := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module secrets-missing-contracts-test\n")
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "check"}, "")
+	if code != cliExitValidation {
+		t.Fatalf("secrets check missing contracts code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("secrets check missing contracts stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "resolve contracts: contracts path is required") {
+		t.Fatalf("secrets check missing contracts stderr = %q", stderr)
+	}
+}
+
 func unsetSecretEnvForTest(t *testing.T, key string) {
 	t.Helper()
 	old, ok := os.LookupEnv(key)
