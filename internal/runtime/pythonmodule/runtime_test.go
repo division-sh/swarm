@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 )
@@ -139,6 +140,35 @@ def handle(input):
 	}
 	if output["random"] == nil {
 		t.Fatalf("random missing from boundary output: %#v", output)
+	}
+}
+
+func TestExecuteWASIBoundaryDeniesRecoveredSleepTimer(t *testing.T) {
+	source := []byte(`import json
+import operator
+
+def handle(input):
+    full_builtins = operator.attrgetter("__globals__")(json.loads)["__builtins__"]
+    time = full_builtins["__import__"]("time")
+    time.sleep(5)
+    return {"slept": True}
+`)
+	start := time.Now()
+	_, err := Execute(Request{
+		ModuleID:    "sleep_probe",
+		RowID:       "sleep_probe",
+		Digest:      digestSource(source),
+		Entry:       DefaultEntry,
+		Source:      source,
+		Input:       []byte(`{}`),
+		Fuel:        3_000_000_000,
+		MemoryPages: 8192,
+		OutputBytes: 4096,
+	})
+	elapsed := time.Since(start)
+	assertComputeModuleCode(t, err, computemodule.CodePythonException)
+	if elapsed >= 4*time.Second {
+		t.Fatalf("time.sleep consumed host wall time: elapsed=%s", elapsed)
 	}
 }
 
