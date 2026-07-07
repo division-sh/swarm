@@ -2,9 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -17,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -184,6 +189,152 @@ func TestLogComputeModuleReplayEvidenceEmitsRuntimeLogCarrier(t *testing.T) {
 	if len(envelopes) != 1 || envelopes[0].Normalized() != trace.Normalized() {
 		t.Fatalf("decoded envelopes = %#v, want %#v", envelopes, trace.Normalized())
 	}
+}
+
+func TestExecuteNodeContractHandlerLogsComputeModuleReplayEvidenceBeforeFailureReturn(t *testing.T) {
+	source := pipelineSourceWithStructuredRendererModule(t, map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"missing"},
+		"properties": map[string]any{
+			"missing": map[string]any{"type": "string"},
+		},
+	})
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:            bus,
+		module:         staticSemanticWorkflowModule{source: source},
+		expressionEval: newWorkflowExpressionEvaluator(),
+		entityLocks:    map[string]*sync.Mutex{},
+	}
+	_, err := pc.executeNodeContractHandler(testPipelineCoordinatorRunContext(t, pc), "node-a", runtimecontracts.SystemNodeEventHandler{
+		Compute: &runtimecontracts.ComputeSpec{
+			Operation: runtimecontracts.ComputeOpModule,
+			StoreAs:   "computed.rendered_bundle",
+			Module: &runtimecontracts.ComputeModuleSpec{
+				RowID:  "render_bundle",
+				Module: "structured_renderer",
+				Into:   "computed.rendered_bundle",
+				Input: map[string]string{
+					"component": "payload.component",
+					"owner":     "payload.owner",
+					"language":  "payload.language",
+					"files":     "payload.files",
+				},
+			},
+		},
+	}, workflowTriggerContext{
+		Event: eventtest.RootIngress(
+			"evt-failure",
+			events.EventType("render.requested"),
+			"",
+			"",
+			mustJSON(map[string]any{
+				"component": "api",
+				"owner":     "platform",
+				"language":  "go",
+				"files":     []any{"main.go", "README.md", "service.yaml"},
+			}),
+			0,
+			"",
+			"",
+			events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+			time.Time{},
+		),
+		State: WorkflowState{
+			EntityID: "ent-1",
+			Stage:    WorkflowStateID("pending"),
+			Metadata: map[string]any{},
+		},
+	}, false)
+	if err == nil {
+		t.Fatal("executeNodeContractHandler error = nil, want output-schema failure")
+	}
+	var moduleErr *computemodule.Error
+	if !errors.As(err, &moduleErr) || moduleErr.Code != computemodule.CodeABI {
+		t.Fatalf("executeNodeContractHandler error = %#v, want compute module ABI failure", err)
+	}
+	logs := bus.runtimeLogEntries()
+	if len(logs) != 1 {
+		t.Fatalf("runtime logs = %#v, want failure replay evidence before error return", logs)
+	}
+	detail, ok := logs[0].Detail.(map[string]any)
+	if !ok {
+		t.Fatalf("detail = %#v, want map", logs[0].Detail)
+	}
+	envelopes, err := computemodule.DecodeReplayEvidenceDetail(detail)
+	if err != nil {
+		t.Fatalf("DecodeReplayEvidenceDetail: %v", err)
+	}
+	if len(envelopes) != 1 {
+		t.Fatalf("decoded envelopes = %#v, want one failure envelope", envelopes)
+	}
+	trace := envelopes[0].Normalized()
+	if trace.Outcome != computemodule.ReplayOutcomeFailure || trace.ErrorCode != string(computemodule.CodeABI) || trace.OutputHash != "" {
+		t.Fatalf("failure trace = %#v, want ABI failure outcome without output hash", trace)
+	}
+}
+
+func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[string]any) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	raw, err := os.ReadFile(filepath.Join("..", "computemodule", "testdata", "structured_renderer.wasm"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modulePath := filepath.Join(root, "modules", "structured_renderer.wasm")
+	if err := os.MkdirAll(filepath.Dir(modulePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modulePath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	module := runtimecontracts.PolicyModule{
+		Path:   "modules/structured_renderer.wasm",
+		ABI:    computemodule.ABI,
+		Entry:  computemodule.DefaultEntry,
+		Digest: "sha256:" + hex.EncodeToString(sum[:]),
+		InputSchema: map[string]any{
+			"type":                 "object",
+			"additionalProperties": false,
+			"required":             []any{"component", "owner", "language", "files"},
+			"properties": map[string]any{
+				"component": map[string]any{"type": "string"},
+				"owner":     map[string]any{"type": "string"},
+				"language":  map[string]any{"type": "string"},
+				"files": map[string]any{
+					"type":  "array",
+					"items": map[string]any{"type": "string"},
+				},
+			},
+		},
+		OutputSchema: outputSchema,
+		Limits: runtimecontracts.PolicyModuleLimits{
+			Gas:         5_000_000,
+			MemoryPages: 17,
+			OutputBytes: 1024,
+		},
+	}
+	flow := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "render", Flow: "render"},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"node-a": {ID: "node-a"},
+		},
+		Policy: runtimecontracts.PolicyDocument{Modules: map[string]runtimecontracts.PolicyModule{
+			"structured_renderer": module,
+		}},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Paths: runtimecontracts.ContractPaths{ContractsRoot: root},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &flow,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"render": &flow,
+			},
+		},
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestPipelineCoordinatorPublish_ReturnsBusPublishError(t *testing.T) {
