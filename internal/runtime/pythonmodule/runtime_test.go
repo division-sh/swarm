@@ -150,25 +150,29 @@ import operator
 def handle(input):
     full_builtins = operator.attrgetter("__globals__")(json.loads)["__builtins__"]
     time = full_builtins["__import__"]("time")
-    time.sleep(5)
+    time.sleep(60)
     return {"slept": True}
 `)
-	start := time.Now()
-	_, err := Execute(Request{
-		ModuleID:    "sleep_probe",
-		RowID:       "sleep_probe",
-		Digest:      digestSource(source),
-		Entry:       DefaultEntry,
-		Source:      source,
-		Input:       []byte(`{}`),
-		Fuel:        3_000_000_000,
-		MemoryPages: 8192,
-		OutputBytes: 4096,
-	})
-	elapsed := time.Since(start)
-	assertComputeModuleCode(t, err, computemodule.CodePythonException)
-	if elapsed >= 4*time.Second {
-		t.Fatalf("time.sleep consumed host wall time: elapsed=%s", elapsed)
+	done := make(chan error, 1)
+	go func() {
+		_, err := Execute(Request{
+			ModuleID:    "sleep_probe",
+			RowID:       "sleep_probe",
+			Digest:      digestSource(source),
+			Entry:       DefaultEntry,
+			Source:      source,
+			Input:       []byte(`{}`),
+			Fuel:        3_000_000_000,
+			MemoryPages: 8192,
+			OutputBytes: 4096,
+		})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		assertComputeModuleCode(t, err, computemodule.CodePythonException)
+	case <-time.After(20 * time.Second):
+		t.Fatalf("time.sleep used host timer instead of deterministic denial")
 	}
 }
 
