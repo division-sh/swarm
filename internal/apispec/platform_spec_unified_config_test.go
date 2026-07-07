@@ -72,6 +72,9 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	for _, key := range []string{
 		"claude_api.default_model",
 		"claude_api.haiku_model",
+		"claude_cli.retries",
+		"claude_cli.no_session_persistence",
+		"claude_cli.use_tmux",
 		"openai_compatible.default_model",
 		"openai_compatible.low_cost_model",
 	} {
@@ -82,6 +85,11 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	for _, want := range []string{"retired model-selection inputs", "keep rejecting", "llm.models"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")), want) {
 			t.Fatalf("retired model-selection rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")))
+		}
+	}
+	for _, want := range []string{"#1803", "inert or unsupported Claude CLI config", "MUST NOT accept"} {
+		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "inert_claude_cli_controls")), want) {
+			t.Fatalf("inert Claude CLI controls rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "inert_claude_cli_controls")))
 		}
 	}
 
@@ -131,6 +139,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"provider_triggers_packs_external_dirs": "consumed_by_unified_owner",
 		"sharding_inline_extension":             "split_unsupported_retired",
 		"llm_retired_model_selection_keys":      "split_unsupported_retired_use_llm.models",
+		"llm_claude_cli_inert_controls":         "split_unsupported_tracked_by_1803",
 		"context_descriptors":                   "different_semantic_owner_local_target_context_registry",
 		"token_and_secret_material":             "different_semantic_owner_secret_or_token_file_reference_only",
 	}
