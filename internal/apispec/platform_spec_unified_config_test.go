@@ -56,12 +56,50 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"llm",
 		"provider_triggers",
 		"budget",
-		"human_tasks",
 		"sharding",
 		"paths",
 	} {
 		if !hasMappingKey(sections, section) {
 			t.Fatalf("unified config section %s missing", section)
+		}
+	}
+	if hasMappingKey(sections, "human_tasks") {
+		t.Fatal("human_tasks must remain nested under budget, not top-level")
+	}
+
+	llm := mustMappingValue(t, sections, "llm")
+	llmKeys := mustMappingValue(t, llm, "keys")
+	for _, key := range []string{
+		"claude_api.default_model",
+		"claude_api.haiku_model",
+		"openai_compatible.default_model",
+		"openai_compatible.low_cost_model",
+	} {
+		if got := scalarValue(mustMappingValue(t, llmKeys, key)); got != "split_unsupported" {
+			t.Fatalf("llm.%s = %q, want split_unsupported", key, got)
+		}
+	}
+	for _, want := range []string{"retired model-selection inputs", "keep rejecting", "llm.models"} {
+		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")), want) {
+			t.Fatalf("retired model-selection rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")))
+		}
+	}
+
+	budget := mustMappingValue(t, sections, "budget")
+	budgetKeys := mustMappingValue(t, budget, "keys")
+	for _, key := range []string{
+		"human_tasks.max_tasks_per_week",
+		"human_tasks.budget_reset",
+		"human_tasks.auto_expire_hours",
+		"human_tasks.categories_enabled",
+	} {
+		if got := scalarValue(mustMappingValue(t, budgetKeys, key)); got != "project_safe" {
+			t.Fatalf("budget.%s = %q, want project_safe", key, got)
+		}
+	}
+	for _, want := range []string{"budget.human_tasks", "top-level `human_tasks` section is not part"} {
+		if !strings.Contains(scalarValue(mustMappingValue(t, budget, "nested_shape")), want) {
+			t.Fatalf("budget nested shape rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, budget, "nested_shape")))
 		}
 	}
 
@@ -92,6 +130,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"runtime_config_loader":                 "consumed_by_unified_owner_implementation_split",
 		"provider_triggers_packs_external_dirs": "consumed_by_unified_owner",
 		"sharding_inline_extension":             "split_unsupported_retired",
+		"llm_retired_model_selection_keys":      "split_unsupported_retired_use_llm.models",
 		"context_descriptors":                   "different_semantic_owner_local_target_context_registry",
 		"token_and_secret_material":             "different_semantic_owner_secret_or_token_file_reference_only",
 	}
