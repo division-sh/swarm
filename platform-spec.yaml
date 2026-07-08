@@ -11835,13 +11835,13 @@ environment_source_authority:
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
       migration: retired
     - name: SWARM_API_LISTEN_ADDR
-      category: seeded_legacy
-      owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
-      migration: '#1600 listener config migration'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_MCP_LISTEN_ADDR
-      category: seeded_legacy
-      owner: platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1
-      migration: '#1600 listener config migration'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_API_PORT
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
@@ -12510,7 +12510,7 @@ configuration_source_authority:
           keys:
             swarm_dir: elevated
             contracts_path: project_contained_path_or_elevated
-            platform_spec_path: elevated
+            platform_spec_path: project_contained_path_or_elevated
             prompts_dir: project_contained_path_or_elevated
             artifact_root: elevated
             monitor_dir: elevated
@@ -16065,9 +16065,9 @@ cli_specification:
         rejected_ports:
           SWARM_API_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
           SWARM_MCP_PORT: 'Not promoted; final v2.1 listener topology uses full listen addresses.'
-        accepted_listener_environment:
-          SWARM_API_LISTEN_ADDR: 'Accepted by `swarm serve` API listener source precedence in listener_topology_v2_1; ignored by the API client resolver.'
-          SWARM_MCP_LISTEN_ADDR: 'Accepted by `swarm serve` MCP listener source precedence in listener_topology_v2_1; ignored by the API client resolver.'
+        rejected_listener_environment:
+          SWARM_API_LISTEN_ADDR: 'Retired by #1891. Use `swarm serve --api-listen-addr` or config `serve.api_listen_addr`.'
+          SWARM_MCP_LISTEN_ADDR: 'Retired by #1891. Use `swarm serve --mcp-listen-addr` or config `serve.mcp_listen_addr`.'
         rule: >
           API client connection settings and serve listener bind settings are different concepts. This owner
           governs where CLI clients connect; the shared config parser accepts listener keys for the serve topology
@@ -16611,8 +16611,8 @@ cli_specification:
           Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
           listener and one MCP listener. This is the merge-bearing final topology decision. Runtime binding and
           listener source precedence now consume `--api-listen-addr <host:port>`, `--mcp-listen-addr <host:port>`,
-          `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve.api_listen_addr`, and
-          `serve.mcp_listen_addr`; historical `--health-addr` remains migration evidence only.
+          `serve.api_listen_addr`, and `serve.mcp_listen_addr`; historical `--health-addr` remains migration
+          evidence only.
         listeners:
           api:
             enabled_by_default: true
@@ -16673,21 +16673,17 @@ cli_specification:
           unified_config_supersession: >
             #1804 moved serve listener and server API token-file config under
             configuration_source_authority.unified_swarm_config `serve`. #1858 implements the unified config parser
-            and accepts `serve.*` keys; listener env rows remain current migration state until their #1600 family
-            migration lands.
+            and accepts `serve.*` keys; #1891 retires listener env rows as parent-process source authority.
           source_order:
           - flag
-          - environment
           - unified_config
           - built_in_default
           api_listen_addr:
             flag: --api-listen-addr <host:port>
-            environment: SWARM_API_LISTEN_ADDR
             config_key: serve.api_listen_addr
             built_in_default: 127.0.0.1:8081
           mcp_listen_addr:
             flag: --mcp-listen-addr <host:port>
-            environment: SWARM_MCP_LISTEN_ADDR
             config_key: serve.mcp_listen_addr
             built_in_default: 127.0.0.1:8082
           server_api_auth:
@@ -16729,7 +16725,7 @@ cli_specification:
             API and MCP source resolution is per-listener. A source for one listener MUST NOT infer, mutate,
             or default the other listener.
           validation_rule: >
-            Values from flags, environment, and unified config MUST use the host:port address_format above and
+            Values from flags and unified config MUST use the host:port address_format above and
             fail before runtime startup if invalid.
           api_auth_coupling_rule: >
             If no explicit token-file source is configured for `swarm serve`, the API listener may start only when
@@ -16794,12 +16790,12 @@ cli_specification:
               child consumes the CLI logging policy owner.
           SWARM_API_PORT:
             disposition: not_promoted_final_v2_1
-            replacement_candidate: SWARM_API_LISTEN_ADDR
-            owner: '#844 universal flag/config/env precedence'
+            replacement_candidate: --api-listen-addr or serve.api_listen_addr
+            owner: '#1891 listener config migration'
           SWARM_MCP_PORT:
             disposition: not_promoted_final_v2_1
-            replacement_candidate: SWARM_MCP_LISTEN_ADDR
-            owner: '#844 universal flag/config/env precedence'
+            replacement_candidate: --mcp-listen-addr or serve.mcp_listen_addr
+            owner: '#1891 listener config migration'
         output_boundary:
           ready_banner: >
             Human-readable ready output SHOULD report both enabled listeners and their bound addresses once
@@ -16820,7 +16816,7 @@ cli_specification:
         implementation_boundaries:
         - '#884 promoted the source-of-truth repair only.'
         - '#992 implements Cobra/runtime binding for `--api-listen-addr` and `--mcp-listen-addr`, route partitioning, listener address validation, listener bind failure exit 3 before readiness, `--health-addr` retirement, MCP gateway URL alignment, and `swarm run start --api-port` as an API listener consumer.'
-        - '#844 implements `swarm serve` listener source precedence for `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve.api_listen_addr`, and `serve.mcp_listen_addr`.'
+        - '#1891 implements `swarm serve` listener source precedence for `serve.api_listen_addr` and `serve.mcp_listen_addr` and retires `SWARM_API_LISTEN_ADDR` / `SWARM_MCP_LISTEN_ADDR`.'
         - '`swarm run start --mcp-port` remains fail-closed until a later child explicitly promotes local foreground MCP listener control.'
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'

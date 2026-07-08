@@ -26,6 +26,8 @@ const (
 	cliServeAPIListenAddrEnv = "SWARM_API_LISTEN_ADDR"
 	cliServeMCPListenAddrEnv = "SWARM_MCP_LISTEN_ADDR"
 
+	cliAPIConfigServerSource      = "config connection.api_server"
+	cliAPIConfigTokenFileSource   = "config connection.api_token_file"
 	serveAPITokenFileFlagSource   = "--api-token-file"
 	serveAPITokenFileConfigSource = "config serve.api_token_file"
 )
@@ -124,16 +126,28 @@ type cliAPISettings struct {
 	target        cliAPITargetResolution
 }
 
-type cliAPIConfigFile struct {
-	APIServer          string `yaml:"api_server"`
-	APITokenFile       string `yaml:"api_token_file"`
-	SwarmDir           string `yaml:"swarm_dir"`
-	SwarmDirSet        bool   `yaml:"-"`
-	ContractsPath      string `yaml:"contracts_path"`
-	PlatformSpecPath   string `yaml:"platform_spec_path"`
-	ServeAPIListenAddr string `yaml:"serve_api_listen_addr"`
-	ServeMCPListenAddr string `yaml:"serve_mcp_listen_addr"`
-	ServeAPITokenFile  string `yaml:"serve_api_token_file"`
+type cliCommandConfig struct {
+	Connection cliConnectionConfig
+	Serve      cliServeConfig
+	Paths      cliPathsConfig
+}
+
+type cliConnectionConfig struct {
+	APIServer    string
+	APITokenFile string
+}
+
+type cliServeConfig struct {
+	APIListenAddr string
+	MCPListenAddr string
+	APITokenFile  string
+}
+
+type cliPathsConfig struct {
+	SwarmDir         string
+	SwarmDirSet      bool
+	ContractsPath    string
+	PlatformSpecPath string
 }
 
 type cliAPIValidationError struct {
@@ -160,7 +174,7 @@ func (e *cliAPIAuthConfigError) Error() string {
 
 func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	opts = opts.ensureRootFlagState()
-	cfg, err := loadCLIAPIConfigFileWithOptions(opts.unifiedConfigLoadOptions())
+	cfg, err := loadCLICommandConfigWithOptions(opts.unifiedConfigLoadOptions())
 	if err != nil {
 		return cliAPISettings{}, err
 	}
@@ -184,15 +198,15 @@ type cliAPITokenResolution struct {
 	explicit bool
 }
 
-func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoint string) (cliAPITokenResolution, error) {
+func resolveCLIAPIToken(opts rootCommandOptions, cfg cliCommandConfig, rpcEndpoint string) (cliAPITokenResolution, error) {
 	if err := rejectRemovedClientAPIEnvSources(); err != nil {
 		return cliAPITokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
 		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
 	}
-	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "config connection.api_token_file")
+	if tokenFile := strings.TrimSpace(cfg.Connection.APITokenFile); tokenFile != "" {
+		return readCLIAPIExplicitTokenFile(tokenFile, cliAPIConfigTokenFileSource)
 	}
 	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return cliAPITokenResolution{
@@ -205,7 +219,7 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoi
 
 func rejectRemovedClientAPIEnvSources() error {
 	replacements := map[string]string{
-		"SWARM_API_SERVER":     "use --api-server, --context, project/selected context, or config api_server",
+		"SWARM_API_SERVER":     "use --api-server, --context, project/selected context, or config connection.api_server",
 		"SWARM_API_TOKEN":      "use --api-token-file, context descriptor auth, or config connection.api_token_file",
 		"SWARM_API_TOKEN_FILE": "use --api-token-file, context descriptor auth, or config connection.api_token_file",
 	}
@@ -231,46 +245,55 @@ type cliServeListenerAddressOptions struct {
 }
 
 func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, error) {
-	apiAddr, apiResolved := resolveCLIServeListenerAddressHighPriority(
-		opts.APIListenAddr,
-		opts.APIListenAddrFlagSet,
-		cliServeAPIListenAddrEnv,
-	)
-	mcpAddr, mcpResolved := resolveCLIServeListenerAddressHighPriority(
-		opts.MCPListenAddr,
-		opts.MCPListenAddrFlagSet,
-		cliServeMCPListenAddrEnv,
-	)
+	if err := rejectRemovedServeListenerEnvSources(); err != nil {
+		return "", "", err
+	}
+	apiAddr, apiResolved := resolveCLIServeListenerAddressFlag(opts.APIListenAddr, opts.APIListenAddrFlagSet)
+	mcpAddr, mcpResolved := resolveCLIServeListenerAddressFlag(opts.MCPListenAddr, opts.MCPListenAddrFlagSet)
 	if apiResolved && mcpResolved {
 		return apiAddr, mcpAddr, nil
 	}
-	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return "", "", err
 	}
 	if !apiResolved {
 		apiAddr = defaultAPIListenAddr
-		if config := strings.TrimSpace(cfg.ServeAPIListenAddr); config != "" {
+		if config := strings.TrimSpace(cfg.Serve.APIListenAddr); config != "" {
 			apiAddr = config
 		}
 	}
 	if !mcpResolved {
 		mcpAddr = defaultMCPListenAddr
-		if config := strings.TrimSpace(cfg.ServeMCPListenAddr); config != "" {
+		if config := strings.TrimSpace(cfg.Serve.MCPListenAddr); config != "" {
 			mcpAddr = config
 		}
 	}
 	return apiAddr, mcpAddr, nil
 }
 
-func resolveCLIServeListenerAddressHighPriority(flagValue string, flagSet bool, envName string) (string, bool) {
+func resolveCLIServeListenerAddressFlag(flagValue string, flagSet bool) (string, bool) {
 	if flagSet {
 		return flagValue, true
 	}
-	if env := strings.TrimSpace(os.Getenv(envName)); env != "" {
-		return env, true
-	}
 	return "", false
+}
+
+func rejectRemovedServeListenerEnvSources() error {
+	replacements := map[string]string{
+		cliServeAPIListenAddrEnv: "use --api-listen-addr or config serve.api_listen_addr",
+		cliServeMCPListenAddrEnv: "use --mcp-listen-addr or config serve.mcp_listen_addr",
+	}
+	var found []string
+	for _, name := range []string{cliServeAPIListenAddrEnv, cliServeMCPListenAddrEnv} {
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			found = append(found, fmt.Sprintf("%s (%s)", name, replacements[name]))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return &cliAPIValidationError{message: "serve listener environment sources are no longer accepted: " + strings.Join(found, "; ")}
 }
 
 func resolveServeAPIAuth(repo string, opts serveOptions) (apiv1.AuthTokenResolution, error) {
@@ -284,11 +307,11 @@ func resolveServeAPIAuth(repo string, opts serveOptions) (apiv1.AuthTokenResolut
 		}
 		return readServeAPITokenFile(tokenFile, serveAPITokenFileFlagSource)
 	}
-	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
-	if tokenFile := strings.TrimSpace(cfg.ServeAPITokenFile); tokenFile != "" {
+	if tokenFile := strings.TrimSpace(cfg.Serve.APITokenFile); tokenFile != "" {
 		return readServeAPITokenFile(tokenFile, serveAPITokenFileConfigSource)
 	}
 	return defaultServeAPIAuthResolution(), nil
@@ -353,14 +376,14 @@ func readCLIAPITokenFile(tokenFile, source string) (string, error) {
 	return token, nil
 }
 
-func loadCLIAPIConfigFile() (cliAPIConfigFile, error) {
-	return loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{})
+func loadCLICommandConfig() (cliCommandConfig, error) {
+	return loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{})
 }
 
-func loadCLIAPIConfigFileWithOptions(opts unifiedConfigLoadOptions) (cliAPIConfigFile, error) {
+func loadCLICommandConfigWithOptions(opts unifiedConfigLoadOptions) (cliCommandConfig, error) {
 	result, err := loadUnifiedConfig(opts)
 	if err != nil {
-		return cliAPIConfigFile{}, err
+		return cliCommandConfig{}, err
 	}
 	return result.CLI, nil
 }

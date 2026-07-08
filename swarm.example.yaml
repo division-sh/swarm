@@ -52,6 +52,7 @@
 # paths:
 #   agent_config_map_file: ./agent-config-map.yaml # Project-contained agent config map file.
 #   contracts_path: ./contracts # Project-contained contract bundle root.
+#   platform_spec_path: platform-spec.yaml # Project-contained platform spec path override.
 #   prompts_dir: ./prompts # Project-contained prompt directory.
 #   tooling_lock_file: ./tooling.lock # Project-contained tooling lock file.
 #   verification_gates_file: ./verification-gates.yaml # Project-contained verification gates file.
@@ -88,7 +89,6 @@
 # paths:
 #   artifact_root: .swarm/artifacts # Runtime artifact root.
 #   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
-#   platform_spec_path: platform-spec.yaml # Platform spec path override.
 #   swarm_dir: .swarm # Swarm state directory.
 # store:
 #   backend: sqlite # Runtime store backend.

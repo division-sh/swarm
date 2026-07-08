@@ -267,13 +267,13 @@ func resolveScenarioTestSources(repoRoot, contractsFlag, platformSpecFlag, confi
 	if repoRoot == "" {
 		repoRoot = "."
 	}
-	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: configPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: configPath})
 	if err != nil {
 		return "", "", err
 	}
 	contractsDir := strings.TrimSpace(contractsFlag)
 	if contractsDir == "" {
-		contractsDir = strings.TrimSpace(cfg.ContractsPath)
+		contractsDir = strings.TrimSpace(cfg.Paths.ContractsPath)
 	}
 	if contractsDir == "" {
 		contractsDir = filepath.Join(repoRoot, "contracts")
@@ -287,7 +287,7 @@ func resolveScenarioTestSources(repoRoot, contractsFlag, platformSpecFlag, confi
 	}
 	platformSpec := strings.TrimSpace(platformSpecFlag)
 	if platformSpec == "" {
-		platformSpec = strings.TrimSpace(cfg.PlatformSpecPath)
+		platformSpec = strings.TrimSpace(cfg.Paths.PlatformSpecPath)
 	}
 	if platformSpec == "" {
 		platformSpec = runtimecontracts.DefaultPlatformSpecFile(repoRoot)

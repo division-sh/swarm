@@ -23,8 +23,8 @@ func TestUnifiedConfigExplicitPathBeatsSWARMCONFIGLocator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadUnifiedConfig: %v", err)
 	}
-	if got.CLI.APIServer != "http://127.0.0.1:2222" || got.Source != string(unifiedLayerExplicit) {
-		t.Fatalf("api_server/source = %q/%q, want explicit config", got.CLI.APIServer, got.Source)
+	if got.CLI.Connection.APIServer != "http://127.0.0.1:2222" || got.Source != string(unifiedLayerExplicit) {
+		t.Fatalf("connection.api_server/source = %q/%q, want explicit config", got.CLI.Connection.APIServer, got.Source)
 	}
 }
 
@@ -216,11 +216,11 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadUnifiedConfig: %v", err)
 	}
-	if got.CLI.ServeAPIListenAddr != "127.0.0.1:3333" {
-		t.Fatalf("serve api listen addr = %q, want local-operator override", got.CLI.ServeAPIListenAddr)
+	if got.CLI.Serve.APIListenAddr != "127.0.0.1:3333" {
+		t.Fatalf("serve api listen addr = %q, want local-operator override", got.CLI.Serve.APIListenAddr)
 	}
-	if got.CLI.ContractsPath != "" {
-		t.Fatalf("contracts_path = %q, want explicit empty local override", got.CLI.ContractsPath)
+	if got.CLI.Paths.ContractsPath != "" {
+		t.Fatalf("contracts_path = %q, want explicit empty local override", got.CLI.Paths.ContractsPath)
 	}
 
 	explicitPath := filepath.Join(t.TempDir(), "explicit.yaml")
@@ -229,8 +229,8 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load explicit unified config: %v", err)
 	}
-	if got.CLI.ServeAPIListenAddr != "127.0.0.1:4444" || got.Source != string(unifiedLayerExplicit) {
-		t.Fatalf("explicit serve api/source = %q/%q", got.CLI.ServeAPIListenAddr, got.Source)
+	if got.CLI.Serve.APIListenAddr != "127.0.0.1:4444" || got.Source != string(unifiedLayerExplicit) {
+		t.Fatalf("explicit serve api/source = %q/%q", got.CLI.Serve.APIListenAddr, got.Source)
 	}
 }
 

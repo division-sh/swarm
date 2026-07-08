@@ -154,7 +154,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --workspace-backend or workspace.backend")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	cliCfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	cliCfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
 	if err != nil {
 		report := configReport
 		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))

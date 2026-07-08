@@ -581,7 +581,6 @@ func TestCLI_ServeListenAddrSourcePrecedence(t *testing.T) {
 		name    string
 		args    []string
 		config  map[string]string
-		env     map[string]string
 		wantAPI string
 		wantMCP string
 	}{
@@ -595,31 +594,14 @@ func TestCLI_ServeListenAddrSourcePrecedence(t *testing.T) {
 			wantMCP: "127.0.0.1:9102",
 		},
 		{
-			name: "environment beats config",
-			config: map[string]string{
-				"serve_api_listen_addr": "127.0.0.1:9101",
-				"serve_mcp_listen_addr": "127.0.0.1:9102",
-			},
-			env: map[string]string{
-				"SWARM_API_LISTEN_ADDR": "0.0.0.0:9201",
-				"SWARM_MCP_LISTEN_ADDR": "0.0.0.0:9202",
-			},
-			wantAPI: "0.0.0.0:9201",
-			wantMCP: "0.0.0.0:9202",
-		},
-		{
-			name: "flag beats environment for that listener only",
+			name: "flag beats config for that listener only",
 			args: []string{"--api-listen-addr", "127.0.0.1:9301"},
 			config: map[string]string{
 				"serve_api_listen_addr": "127.0.0.1:9101",
 				"serve_mcp_listen_addr": "127.0.0.1:9102",
 			},
-			env: map[string]string{
-				"SWARM_API_LISTEN_ADDR": "0.0.0.0:9201",
-				"SWARM_MCP_LISTEN_ADDR": "0.0.0.0:9202",
-			},
 			wantAPI: "127.0.0.1:9301",
-			wantMCP: "0.0.0.0:9202",
+			wantMCP: "127.0.0.1:9102",
 		},
 	}
 	for _, tc := range tests {
@@ -628,10 +610,6 @@ func TestCLI_ServeListenAddrSourcePrecedence(t *testing.T) {
 			if len(tc.config) > 0 {
 				t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, tc.config))
 			}
-			for key, value := range tc.env {
-				t.Setenv(key, value)
-			}
-
 			var captured serveOptions
 			opts := defaultRootCommandOptions()
 			opts.runServe = func(_ context.Context, _ string, serveOpts serveOptions) int {
@@ -662,11 +640,11 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 		wantStderr string
 	}{
 		{
-			name: "invalid api environment address",
+			name: "retired api environment address",
 			setup: func(t *testing.T) {
 				t.Setenv("SWARM_API_LISTEN_ADDR", "8081")
 			},
-			wantStderr: "--api-listen-addr must be a host:port listen address",
+			wantStderr: "SWARM_API_LISTEN_ADDR",
 		},
 		{
 			name: "invalid mcp config address",
@@ -923,15 +901,13 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 			args: []string{"serve", "--api-listen-addr", "127.0.0.1:9401", "--mcp-listen-addr", "127.0.0.1:9402"},
 			setup: func(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
-				t.Setenv("SWARM_API_LISTEN_ADDR", "8081")
-				t.Setenv("SWARM_MCP_LISTEN_ADDR", "http://127.0.0.1:8082")
 			},
 			wantAPI: "127.0.0.1:9401",
 			wantMCP: "127.0.0.1:9402",
 			wantRan: true,
 		},
 		{
-			name: "both env vars skip malformed cli config",
+			name: "retired env vars fail before malformed cli config",
 			args: []string{"serve"},
 			setup: func(t *testing.T) {
 				configPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -942,18 +918,16 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9501")
 				t.Setenv("SWARM_MCP_LISTEN_ADDR", "127.0.0.1:9502")
 			},
-			wantAPI: "127.0.0.1:9501",
-			wantMCP: "127.0.0.1:9502",
-			wantRan: true,
+			wantError: "SWARM_API_LISTEN_ADDR",
 		},
 		{
-			name: "partial env still loads cli config for unresolved listener",
+			name: "partial retired env fails closed",
 			args: []string{"serve"},
 			setup: func(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9601")
 			},
-			wantError: "read swarm.yaml config",
+			wantError: "SWARM_API_LISTEN_ADDR",
 		},
 	}
 	for _, tc := range tests {
@@ -1199,7 +1173,7 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 	if spec.Defaults.MCPListenAddr != defaultMCPListenAddr || spec.Listeners.MCP.DefaultListenAddr != defaultMCPListenAddr {
 		t.Fatalf("mcp default = defaults:%q listener:%q want %q", spec.Defaults.MCPListenAddr, spec.Listeners.MCP.DefaultListenAddr, defaultMCPListenAddr)
 	}
-	wantSourceOrder := []string{"flag", "environment", "unified_config", "built_in_default"}
+	wantSourceOrder := []string{"flag", "unified_config", "built_in_default"}
 	if len(spec.SourcePrecedence.SourceOrder) != len(wantSourceOrder) {
 		t.Fatalf("listener source order = %#v, want %#v", spec.SourcePrecedence.SourceOrder, wantSourceOrder)
 	}
@@ -1208,10 +1182,10 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 			t.Fatalf("listener source order[%d] = %q, want %q", i, spec.SourcePrecedence.SourceOrder[i], want)
 		}
 	}
-	if spec.SourcePrecedence.APIListenAddr.Environment != "SWARM_API_LISTEN_ADDR" || spec.SourcePrecedence.APIListenAddr.ConfigKey != "serve.api_listen_addr" {
+	if spec.SourcePrecedence.APIListenAddr.ConfigKey != "serve.api_listen_addr" {
 		t.Fatalf("api listener source precedence = %#v", spec.SourcePrecedence.APIListenAddr)
 	}
-	if spec.SourcePrecedence.MCPListenAddr.Environment != "SWARM_MCP_LISTEN_ADDR" || spec.SourcePrecedence.MCPListenAddr.ConfigKey != "serve.mcp_listen_addr" {
+	if spec.SourcePrecedence.MCPListenAddr.ConfigKey != "serve.mcp_listen_addr" {
 		t.Fatalf("mcp listener source precedence = %#v", spec.SourcePrecedence.MCPListenAddr)
 	}
 	if spec.SourcePrecedence.ServerAPIAuth.AcceptedSources["flag_file"] != "--api-token-file <path>" {
@@ -1265,7 +1239,7 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 			t.Fatalf("mcp routes missing %q: %#v", want, spec.Listeners.MCP.Routes)
 		}
 	}
-	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "`swarm run start --mcp-port` remains fail-closed", "#844 implements `swarm serve` listener source precedence"} {
+	for _, want := range []string{"#992 implements", "`--health-addr` retirement", "`swarm run start --mcp-port` remains fail-closed", "#1891 implements `swarm serve` listener source precedence"} {
 		if !stringSliceContains(spec.ImplementationBoundaries, want) {
 			t.Fatalf("implementation boundaries missing %q: %#v", want, spec.ImplementationBoundaries)
 		}
@@ -1451,8 +1425,8 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for _, key := range []string{"SWARM_API_LISTEN_ADDR", "SWARM_MCP_LISTEN_ADDR"} {
-		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.AcceptedListenerEnvironment[key], "listener_topology_v2_1") {
-			t.Fatalf("serve listener accepted env %q missing listener owner:\n%s", key, spec.ServeListenerEnvConfigBoundary.AcceptedListenerEnvironment[key])
+		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.RejectedListenerEnvironment[key], "Retired by #1891") {
+			t.Fatalf("serve listener rejected env %q missing retirement rule:\n%s", key, spec.ServeListenerEnvConfigBoundary.RejectedListenerEnvironment[key])
 		}
 	}
 	for _, want := range []string{"#848", "#884/#750", "#743", "#1636", "#1647", "`--no-retry`"} {
@@ -12930,13 +12904,11 @@ type serveListenerTopologySpec struct {
 		SourceOrder   []string `yaml:"source_order"`
 		APIListenAddr struct {
 			Flag           string `yaml:"flag"`
-			Environment    string `yaml:"environment"`
 			ConfigKey      string `yaml:"config_key"`
 			BuiltInDefault string `yaml:"built_in_default"`
 		} `yaml:"api_listen_addr"`
 		MCPListenAddr struct {
 			Flag           string `yaml:"flag"`
-			Environment    string `yaml:"environment"`
 			ConfigKey      string `yaml:"config_key"`
 			BuiltInDefault string `yaml:"built_in_default"`
 		} `yaml:"mcp_listen_addr"`
@@ -13000,7 +12972,7 @@ type cliAPIConnectionAuthConfigSpec struct {
 	} `yaml:"cli_config_file"`
 	ServeListenerEnvConfigBoundary struct {
 		RejectedPorts               map[string]string `yaml:"rejected_ports"`
-		AcceptedListenerEnvironment map[string]string `yaml:"accepted_listener_environment"`
+		RejectedListenerEnvironment map[string]string `yaml:"rejected_listener_environment"`
 		Rule                        string            `yaml:"rule"`
 	} `yaml:"serve_listener_env_config_boundary"`
 	SplitSiblings            []string `yaml:"split_siblings"`

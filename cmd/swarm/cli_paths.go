@@ -25,17 +25,17 @@ func resolveCLIContractPlatformSpecPaths(repoRoot string, opts cliContractPlatfo
 	if repoRoot == "" {
 		repoRoot = discoverRepoRoot()
 	}
-	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return cliContractPlatformSpecPaths{}, err
 	}
 	contractsPath := firstNonEmpty(
 		opts.ContractsPath,
 		os.Getenv(cliContractsPathEnv),
-		cfg.ContractsPath,
+		cfg.Paths.ContractsPath,
 		discoverRepoContractsPath(repoRoot),
 	)
-	configPlatformSpecPath := strings.TrimSpace(cfg.PlatformSpecPath)
+	configPlatformSpecPath := strings.TrimSpace(cfg.Paths.PlatformSpecPath)
 	platformSpecPath := firstNonEmpty(
 		opts.PlatformSpecPath,
 		configPlatformSpecPath,

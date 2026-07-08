@@ -35,7 +35,7 @@ type cliProjectResolution struct {
 	canonicalProjectRoot string
 }
 
-func resolveCLIAPITarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPITargetResolution, error) {
+func resolveCLIAPITarget(opts rootCommandOptions, cfg cliCommandConfig) (cliAPITargetResolution, error) {
 	if opts.apiCommandClass != cliAPICommandClassTargetDiagnostic {
 		if err := rejectRemovedClientAPIEnvSources(); err != nil {
 			return cliAPITargetResolution{}, err
@@ -60,7 +60,7 @@ func resolveCLIAPITarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPIT
 	return resolveCLIAPISelectedConfigOrDefaultTarget(opts, cfg)
 }
 
-func resolveCLIAPIExplicitContextTarget(opts rootCommandOptions, cfg cliAPIConfigFile, contextName string) (cliAPITargetResolution, error) {
+func resolveCLIAPIExplicitContextTarget(opts rootCommandOptions, cfg cliCommandConfig, contextName string) (cliAPITargetResolution, error) {
 	registry, err := cliAPILocalContextRegistry(opts, cfg)
 	if err != nil {
 		return cliAPITargetResolution{}, err
@@ -76,7 +76,7 @@ func resolveCLIAPIExplicitContextTarget(opts rootCommandOptions, cfg cliAPIConfi
 	return cliAPITargetFromDescriptor(entry, "--context")
 }
 
-func resolveCLIAPIProjectTarget(opts rootCommandOptions, cfg cliAPIConfigFile, project cliProjectResolution) (cliAPITargetResolution, error) {
+func resolveCLIAPIProjectTarget(opts rootCommandOptions, cfg cliCommandConfig, project cliProjectResolution) (cliAPITargetResolution, error) {
 	registry, err := cliAPILocalContextRegistry(opts, cfg)
 	if err != nil {
 		return cliAPITargetResolution{}, err
@@ -114,7 +114,7 @@ func resolveCLIAPIProjectTarget(opts rootCommandOptions, cfg cliAPIConfigFile, p
 	}
 }
 
-func resolveCLIAPISelectedConfigOrDefaultTarget(opts rootCommandOptions, cfg cliAPIConfigFile) (cliAPITargetResolution, error) {
+func resolveCLIAPISelectedConfigOrDefaultTarget(opts rootCommandOptions, cfg cliCommandConfig) (cliAPITargetResolution, error) {
 	registry, err := cliAPILocalContextRegistry(opts, cfg)
 	if err != nil {
 		return cliAPITargetResolution{}, err
@@ -132,15 +132,15 @@ func resolveCLIAPISelectedConfigOrDefaultTarget(opts rootCommandOptions, cfg cli
 	if report.Status != "" && report.Status != "empty" && report.Status != "no_current" && report.Status != localContextStatusOK {
 		return cliAPITargetResolution{}, &cliAPIValidationError{message: fmt.Sprintf("local context registry is %s: %s", report.Status, report.Detail)}
 	}
-	if server := strings.TrimSpace(cfg.APIServer); server != "" {
-		rpc, err := cliAPIRPCEndpointFromServer(server, "config api_server")
-		return cliAPITargetResolution{rpcEndpoint: rpc, source: "config api_server"}, err
+	if server := strings.TrimSpace(cfg.Connection.APIServer); server != "" {
+		rpc, err := cliAPIRPCEndpointFromServer(server, cliAPIConfigServerSource)
+		return cliAPITargetResolution{rpcEndpoint: rpc, source: cliAPIConfigServerSource}, err
 	}
 	rpc, err := cliAPIRPCEndpointFromServer(defaultCLIAPIServer, "built-in loopback default")
 	return cliAPITargetResolution{rpcEndpoint: rpc, source: "built-in loopback default"}, err
 }
 
-func cliAPILocalContextRegistry(opts rootCommandOptions, cfg cliAPIConfigFile) (localContextRegistry, error) {
+func cliAPILocalContextRegistry(opts rootCommandOptions, cfg cliCommandConfig) (localContextRegistry, error) {
 	swarmDir, err := resolveCLISwarmDirFromConfig(opts.swarmDirResolutionOptions(), cfg)
 	if err != nil {
 		return localContextRegistry{}, err
@@ -148,10 +148,10 @@ func cliAPILocalContextRegistry(opts rootCommandOptions, cfg cliAPIConfigFile) (
 	return newLocalContextRegistry(swarmDir.Path), nil
 }
 
-func resolveCLIAPIProject(opts rootCommandOptions, cfg cliAPIConfigFile) (cliProjectResolution, bool) {
+func resolveCLIAPIProject(opts rootCommandOptions, cfg cliCommandConfig) (cliProjectResolution, bool) {
 	contractsPath := firstNonEmpty(
 		os.Getenv(cliContractsPathEnv),
-		cfg.ContractsPath,
+		cfg.Paths.ContractsPath,
 		discoverRepoContractsPath(opts.repoRoot),
 	)
 	if strings.TrimSpace(contractsPath) == "" {
@@ -185,7 +185,7 @@ func cliAPITargetFromDescriptor(entry localContextEntry, source string) (cliAPIT
 	}, nil
 }
 
-func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliAPIConfigFile, target cliAPITargetResolution) (cliAPITokenResolution, error) {
+func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, target cliAPITargetResolution) (cliAPITokenResolution, error) {
 	if err := rejectRemovedClientAPIEnvSources(); err != nil {
 		return cliAPITokenResolution{}, err
 	}

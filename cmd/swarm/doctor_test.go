@@ -463,7 +463,7 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"swarm target diagnostics: ok",
 		"swarm_dir: " + flagSwarmDir + " (source: --swarm-dir)",
 		"project_root: " + repo,
-		"api_server: http://127.0.0.1:19001 (source: config api_server)",
+		"api_server: http://127.0.0.1:19001 (source: config connection.api_server)",
 		"descriptor_registry: empty (" + localContextRegistryOwner,
 		"runtime_identity: unavailable (platform-spec.yaml#api_specification.method_catalog.runtime.identity)",
 		"store_path: " + filepath.Join(canonicalRepo, ".swarm", "stores", "dev.db"),
