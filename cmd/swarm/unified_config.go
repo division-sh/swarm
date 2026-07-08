@@ -506,11 +506,11 @@ func yamlPathExists(node *yaml.Node, path ...string) bool {
 
 func validateUnifiedConfigNode(root *yaml.Node, layer unifiedConfigLayer, repoRoot string) []unifiedConfigDiagnostic {
 	var diagnostics []unifiedConfigDiagnostic
-	walkUnifiedMapping(root, "", layer, repoRoot, &diagnostics)
+	walkUnifiedMapping(root, nil, layer, repoRoot, &diagnostics)
 	return diagnostics
 }
 
-func walkUnifiedMapping(node *yaml.Node, prefix string, layer unifiedConfigLayer, repoRoot string, diagnostics *[]unifiedConfigDiagnostic) {
+func walkUnifiedMapping(node *yaml.Node, prefix []string, layer unifiedConfigLayer, repoRoot string, diagnostics *[]unifiedConfigDiagnostic) {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return
 	}
@@ -519,10 +519,8 @@ func walkUnifiedMapping(node *yaml.Node, prefix string, layer unifiedConfigLayer
 		keyNode := node.Content[i]
 		valueNode := node.Content[i+1]
 		key := strings.TrimSpace(keyNode.Value)
-		path := key
-		if prefix != "" {
-			path = prefix + "." + key
-		}
+		pathParts := append(append([]string{}, prefix...), key)
+		path := strings.Join(pathParts, ".")
 		if _, ok := seen[key]; ok {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticUnknownKey,
@@ -535,7 +533,7 @@ func walkUnifiedMapping(node *yaml.Node, prefix string, layer unifiedConfigLayer
 			continue
 		}
 		seen[key] = struct{}{}
-		rule, ok := unifiedConfigRule(path)
+		rule, ok := unifiedConfigRule(pathParts)
 		if !ok {
 			*diagnostics = append(*diagnostics, unknownUnifiedConfigDiagnostic(path, layer))
 			continue
@@ -587,7 +585,7 @@ func walkUnifiedMapping(node *yaml.Node, prefix string, layer unifiedConfigLayer
 			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, valueNode, layer, repoRoot)...)
 		}
 		if rule.Container && valueNode.Kind == yaml.MappingNode {
-			walkUnifiedMapping(valueNode, path, layer, repoRoot, diagnostics)
+			walkUnifiedMapping(valueNode, pathParts, layer, repoRoot, diagnostics)
 		}
 	}
 }
@@ -602,7 +600,8 @@ type unifiedConfigKeyRule struct {
 	OldShape             string
 }
 
-func unifiedConfigRule(path string) (unifiedConfigKeyRule, bool) {
+func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
+	path := strings.Join(pathParts, ".")
 	if remediation, ok := unifiedOldFlatKeyRemediation()[path]; ok {
 		return unifiedConfigKeyRule{OldShape: remediation}, true
 	}
@@ -610,13 +609,54 @@ func unifiedConfigRule(path string) (unifiedConfigKeyRule, bool) {
 	if rule, ok := rules[path]; ok {
 		return rule, true
 	}
-	if strings.HasPrefix(path, "llm.models.") || strings.HasPrefix(path, "llm.provider_limits.") {
+	if len(pathParts) > 2 && pathParts[0] == "llm" && pathParts[1] == "models" {
 		return unifiedConfigKeyRule{}, true
+	}
+	if rule, ok := unifiedConfigProviderLimitRule(pathParts); ok {
+		return rule, true
 	}
 	if strings.HasPrefix(path, "sharding") {
 		return unifiedConfigKeyRule{Split: "tracked split: runtime sharding has no supported production consumer; no supported replacement"}, true
 	}
 	return unifiedConfigKeyRule{}, false
+}
+
+func unifiedConfigProviderLimitRule(pathParts []string) (unifiedConfigKeyRule, bool) {
+	if len(pathParts) < 3 || pathParts[0] != "llm" || pathParts[1] != "provider_limits" {
+		return unifiedConfigKeyRule{}, false
+	}
+	section := unifiedConfigKeyRule{Container: true}
+	switch len(pathParts) {
+	case 3:
+		// Provider profile ids are dynamic, but their policy leaves are finite.
+		return section, true
+	case 4:
+		if pathParts[3] == "models" {
+			return section, true
+		}
+		_, ok := unifiedConfigProviderLimitPolicyLeaves()[pathParts[3]]
+		return unifiedConfigKeyRule{}, ok
+	case 5:
+		if pathParts[3] == "models" {
+			// Model keys under a provider profile are dynamic.
+			return section, true
+		}
+	case 6:
+		if pathParts[3] == "models" {
+			_, ok := unifiedConfigProviderLimitPolicyLeaves()[pathParts[5]]
+			return unifiedConfigKeyRule{}, ok
+		}
+	}
+	return unifiedConfigKeyRule{}, false
+}
+
+func unifiedConfigProviderLimitPolicyLeaves() map[string]struct{} {
+	return map[string]struct{}{
+		"rate_limit":               {},
+		"rate_limit_max_wait":      {},
+		"max_concurrency":          {},
+		"max_concurrency_max_wait": {},
+	}
 }
 
 func unifiedConfigRules() map[string]unifiedConfigKeyRule {

@@ -12325,6 +12325,13 @@ configuration_source_authority:
             `llm.claude_cli.no_session_persistence` remain split_unsupported until #1803 or a later explicitly
             gated production runtime owner promotes real behavior. Field presence/default seeding is not proof of
             supported config semantics, and #1858 MUST keep these controls fail-closed with no supported replacement.
+          provider_limits_shape: >
+            `llm.provider_limits.<profile>` profile ids and
+            `llm.provider_limits.<profile>.models.<model>` model ids are dynamic map keys, but provider-limit policy
+            fields are finite: `rate_limit`, `rate_limit_max_wait`, `max_concurrency`,
+            `max_concurrency_max_wait`, and profile-level `models`. Unknown policy fields under a provider profile
+            or model policy MUST fail closed as unknown config keys before YAML struct decoding can silently ignore
+            them. Nested `models` maps under model-specific policy entries remain unsupported and fail closed.
         provider_triggers:
           trust: project_contained_path_or_elevated
           keys:
