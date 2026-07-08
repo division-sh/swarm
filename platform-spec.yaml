@@ -6423,7 +6423,7 @@ tool_model:
       - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
       - "direct runtime provider adapter code or bespoke connector dispatch."
     connector_pack_profile:
-      status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, and Notion Basic+JSON workspace-grant connector proof"
+      status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, Notion Basic+JSON workspace-grant connector proof, and Microsoft Graph client_credentials `.default` connector proof"
       body_file: connector.yaml
       import_syntax: >
         package.yaml `connector_packs.imports[]` entries name `provider` and `tool`. The import is an explicit enablement
@@ -6605,6 +6605,14 @@ tool_model:
       an existing row blocks refresh and provider redispatch. Refresh failure sets refresh_failed state with redacted failure
       evidence and returns a redacted runtime error. Auth-code exchange, refresh, and client_credentials all consume the same
       record token_request profile; provider-specific token endpoint behavior is data, not a provider branch in the engine.
+    client_credentials_resource_scope_policy: >
+      Client-credentials connector packs may declare provider resource scopes such as
+      `https://graph.microsoft.com/.default` under `managed_credential.scopes` with `grant_model: scope_grant`. Readback,
+      boot, and execution prove only that the connected managed credential record covers the declared resource scope,
+      grant_model, token_request profile, lifecycle state, and bearer-token acquisition/re-acquisition. They MUST NOT claim
+      provider-specific app-role, delegated-scope, or admin-consent readiness unless a separate source-authoritative owner
+      for those permission claims is specified and implemented. Client-credentials refresh/re-acquisition repeats the
+      `grant_type=client_credentials` token request and MUST NOT require or send a refresh token.
     operator_surface:
       command: swarm connections connect|callback|status|disconnect
       rule: >

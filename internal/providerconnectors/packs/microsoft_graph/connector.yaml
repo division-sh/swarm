@@ -1,0 +1,41 @@
+provider: microsoft_graph
+tools:
+  microsoft_graph.send_mail:
+    category: provider_connector
+    description: send Microsoft Graph mail
+    handler_type: http
+    effect_class: non_idempotent_write
+    managed_credential:
+      key: microsoft_graph_app
+      scopes:
+        - https://graph.microsoft.com/.default
+    input_schema:
+      type: object
+      properties:
+        user_id:
+          type: string
+        to_recipients:
+          type: array
+          items:
+            type: object
+        subject:
+          type: string
+        content:
+          type: string
+      required:
+        - user_id
+        - to_recipients
+        - subject
+        - content
+    output_schema:
+      type: object
+    http:
+      method: POST
+      url: https://graph.microsoft.com/v1.0/users/{{input.user_id}}/sendMail
+      body:
+        message:
+          subject: "{{input.subject}}"
+          body:
+            contentType: Text
+            content: "{{input.content}}"
+          toRecipients: "{{input.to_recipients}}"
