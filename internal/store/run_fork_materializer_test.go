@@ -95,10 +95,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if result.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("taxonomy owner = %q, want %q", result.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
 	}
-	if !result.ReplayResumeAdmission.StateOnlyExecutionReady || result.ReplayResumeAdmission.HistoricalReplaySupported {
-		t.Fatalf("taxonomy flags = state_only:%v historical_supported:%v, want true/false",
+	if !result.ReplayResumeAdmission.StateOnlyExecutionReady || result.ReplayResumeAdmission.BoundedReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v bounded_supported:%v, want true/false",
 			result.ReplayResumeAdmission.StateOnlyExecutionReady,
-			result.ReplayResumeAdmission.HistoricalReplaySupported,
+			result.ReplayResumeAdmission.BoundedReplaySupported,
 		)
 	}
 
@@ -722,7 +722,7 @@ func TestRunForkMaterializer_FailsClosedOnRepeatAndUnsupportedBlockers(t *testin
 	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("MaterializeRunFork error = %v, want non-agent delivery blocker", err)
 	}
-	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
+	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		t.Fatalf("blocked taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
 	}
 	if !runForkTestHasDisposition(blocked.ReplayResumeAdmission, RunForkReplayResumeFactDeliveryInProgressHistory) {
@@ -789,8 +789,8 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	if !activated.Activated || !activated.SourceFrozen {
 		t.Fatalf("activation flags = activated:%v frozen:%v", activated.Activated, activated.SourceFrozen)
 	}
-	if !activated.HistoricalReplayBlocked {
-		t.Fatal("HistoricalReplayBlocked = false, want true for activation-only boundary")
+	if !activated.ReplayResumeBlocked {
+		t.Fatal("ReplayResumeBlocked = false, want true for activation-only boundary")
 	}
 	if activated.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !activated.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatalf("activation taxonomy = %#v, want owner and state-only ready", activated.ReplayResumeAdmission)
@@ -1340,7 +1340,7 @@ func TestRunForkActivation_FailsClosedForInProgressDeliveryAndMissingLineage(t *
 	if err == nil || !strings.Contains(err.Error(), RunForkBlockerNonAgentDeliveryReplayUnsupported) {
 		t.Fatalf("ActivateRunFork in-progress delivery error = %v, want non-agent delivery blocker", err)
 	}
-	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.HistoricalReplayRequired {
+	if blocked.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner || !blocked.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		t.Fatalf("blocked activation taxonomy = %#v, want owner and historical replay required", blocked.ReplayResumeAdmission)
 	}
 

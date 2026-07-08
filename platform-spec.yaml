@@ -9589,9 +9589,13 @@ run_model:
       - dashboard alert UI
       - CLI alert rendering
   fork:
-    description: 'Fork creates a new run by reconstructing full system state at a point in time, optionally
-      loading new contracts, and resuming execution. The system automatically determines which events need
-      to be re-delivered. The original run is frozen. The forked run gets independent execution.'
+    description: 'Fork creates an isolated run by reconstructing provable current state at a point in time,
+      optionally loading selected contracts, and then executing only owner-admitted fork-local work. The supported
+      model is bounded re-execution from inputs: delivery_event_replay_ready pending unstarted agent deliveries,
+      selected-contract frontier execution, and approved timer reconstruction. The system does not infer arbitrary
+      unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
+      unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
+      proves a new owner.'
     command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
@@ -9651,9 +9655,9 @@ run_model:
       unstarted source agent deliveries whose fork-local event/delivery rows can be created under the fork run_id with
       explicit source lineage and a direct committed replay-scope marker for the existing persisted delivery/recovery
       consumer. It does not authorize source event_id copying, node delivery replay, delivered/completed redelivery,
-      receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or full runtime replay
-      mutation. Full historical resume remains separately gated even when state-only activation or delivery/event replay
-      is ready.'
+      receipt-only redelivery, session/turn/timer/route reconstruction, contract swap execution, or runtime-wide replay
+      mutation. There is no separately promised arbitrary source-run resume lane: unsupported fact families remain
+      fail-closed unless a consumer-named successor promotes a new owner.'
     selected_contract_readiness_classifier: 'Selected-contract timestamp-fork readiness explanation is owned by
       runtime.run_fork.selected_contract_readiness_classifier. This owner is non-mutating and consumes the canonical
       store planner, store.run_fork.replay_resume_admission, runtime.run_fork.contract_frontier_admission, selected
@@ -9718,7 +9722,7 @@ run_model:
       MUST NOT be copied into the fork, reused as fork-local runtime truth, or used as selected-fork suppressors. Fresh
       fork-local conversation rows may appear only through normal selected fork runtime execution under the fork run_id.
       Pending or in-progress source delivery/session coupling, fork-local pre-existing conversation rows, generic/state-only
-      activation, full historical replay/resume, timers, routes, non-agent replay, restart recovery, and operator surfaces
+      activation, broad source-run resumption, timers, routes, non-agent replay, restart recovery, and operator surfaces
       remain fail-closed or split siblings unless separately approved.'
     selected_contract_active_source_delivery_conversation_coupling_policy: 'Mutating selected-contract timestamp-fork
       execution may consume runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy
@@ -9948,12 +9952,12 @@ run_model:
       recovery, or any missing/stale selected binding/source evidence. It
       MUST NOT run handlers, create fork-local events or event_deliveries, copy source rows, write receipts, dead
       letters, idempotency state, emitted follow-up events, timers, sessions, turns, route rows, API/UI state, or
-      otherwise implement mutating historical replay/resume. CLI, API, dashboard, Builder, route helpers, delivery
+      otherwise implement mutating source-run resume. CLI, API, dashboard, Builder, route helpers, delivery
       writers, and pipeline boot paths may consume this owner but MUST NOT compute contract-swap boot/resume readiness
       independently.'
-    historical_replay_execution_admission: 'Full historical replay/resume execution admission is owned by
-      runtime.run_fork.historical_replay_execution_admission. This owner is non-mutating and establishes the authority
-      boundary for the future runtime.run_fork.historical_replay_execution owner. It consumes the canonical
+    historical_replay_execution_admission: 'Bounded fork re-execution admission is owned by
+      runtime.run_fork.historical_replay_execution_admission. This legacy-named owner is non-mutating and establishes
+      the authority boundary for the runtime.run_fork.historical_replay_execution owner. It consumes the canonical
       store.run_fork.replay_resume_admission taxonomy plus selected-contract execution admission, selected binding,
       selected route topology, selected recipient planning, selected route recovery when present, and
       runtime.run_fork.contract_swap_boot_resume_admission when selected/swap evidence exists. For non-selected
@@ -9967,11 +9971,11 @@ run_model:
       store.run_fork.replay_resume_admission. This owner MUST NOT run handlers, create or copy events or
       event_deliveries, write receipts, dead letters, retry/idempotency state, emitted follow-up events, timers,
       sessions, turns, route rows, API/UI/dashboard state, suppress fork work from source outcomes, or treat selected
-      frontier execution as full historical replay/resume proof. CLI, API, dashboard, Builder, route helpers, delivery
+      frontier execution as proof of broader source-run resumption. CLI, API, dashboard, Builder, route helpers, delivery
       writers, runtime recovery, and pipeline boot paths may consume this owner but MUST NOT compute historical replay
       execution admission independently.'
-    historical_replay_execution: 'Mutating historical replay/resume execution authority is owned by
-      runtime.run_fork.historical_replay_execution. The owner consumes runtime.run_fork.historical_replay_execution_admission
+    historical_replay_execution: 'Mutating bounded fork re-execution authority is owned by
+      runtime.run_fork.historical_replay_execution. This legacy-named owner consumes runtime.run_fork.historical_replay_execution_admission
       and the canonical store.run_fork.replay_resume_admission taxonomy, validates that every historical source fact
       family has exactly one executable, reconstructed, lineage-only, fail-closed, or split-sibling classification, and
       emits the executable work set that downstream store/runtime writers may mutate. The current supported closure
@@ -9982,7 +9986,7 @@ run_model:
       blockers, or authorize full scheduler/recovery replay beyond run-scoped timer claim/fire/reload identity. The
       selected-contract contract-swap child runtime.run_fork.historical_replay_execution.contract_swap_boot_resume may
       execute only already-admitted delivery_event_replay_ready work under selected/swapped contracts. Full
-      product-complete historical replay/resume for routes, sessions, turns, audits, non-agent/node/system work,
+      product-complete source-run resumption for routes, sessions, turns, audits, non-agent/node/system work,
       broader contract-swap boot/resume, generic source-advanced policy, broader restart recovery, and API/UI/dashboard
       surfaces remains unsupported unless separately approved.
       Activation, store delivery-event replay, recovery, selected/contract-swap consumers, route
@@ -10006,8 +10010,9 @@ run_model:
       runtime restart state, and CLI/API/dashboard/Builder state are lineage-only, fail-closed blockers, split siblings,
       or consumers; they MUST NOT become selected-fork recipient truth, executable fork work, or fork suppressors. This
       child MUST NOT use store.run_fork.delivery_event_replay as-is when that writer preserves source subscriber
-      recipients, MUST NOT treat runtime.run_fork.selected_contract_execution as full replay/resume proof, and MUST NOT
-      make CLI/API/dashboard/Builder semantic owners. Product-complete #564 historical replay/resume remains open.'
+      recipients, MUST NOT treat runtime.run_fork.selected_contract_execution as broader source-run replay proof, and MUST NOT
+      make CLI/API/dashboard/Builder semantic owners. This bounded selected-frontier contract-swap child is not a
+      promise of broader source-run resumption; #564 closes through the fact matrix and successor issues #1721/#1722.'
     historical_replay_delivery_event_replay_execution: 'The first mutating historical replay execution child is owned by
       runtime.run_fork.historical_replay_execution and is limited to the already-admitted
       delivery_event_replay_ready primitive. It consumes runtime.run_fork.historical_replay_execution_admission before
@@ -10036,8 +10041,8 @@ run_model:
       state, emitted follow-ups, and post-fork source outcomes are lineage/proof only and MUST NOT become executable
       fork work or recovery suppressors. ClaimPipelineReplay remains the duplicate/race owner for fork replay event IDs.
       This owner MUST NOT reconstruct timers, routes, sessions, turns, audits, non-agent/node/system work,
-      contract-swap boot/resume, runtime-wide restart recovery, API/UI/dashboard state, or close the broader #564/#549
-      historical replay/resume parents.'
+      contract-swap boot/resume, runtime-wide restart recovery, API/UI/dashboard state, or close successor concepts
+      such as #1721 memoized re-execution or #1722 fleet fork reporting.'
     event_id_shorthand: 'When --at receives an event ID, the system resolves it to that event''s created_at
       timestamp. Under the hood, fork is always timestamp-based. The event ID is a convenience for pinpointing
       a moment without looking up timestamps manually.'
@@ -10067,7 +10072,7 @@ run_model:
         runtime.run_fork.historical_replay_execution consuming historical replay execution admission and owner-authorized
         executable delivery work, then atomically mark the source run forked and the fork run running. Activation/store
         does not authorize replay directly from replay_resume_admission or RunForkPlan pending rows. Future runtime work uses the fork
-        run_id, fork-local entity_state rows, and fork-local pending delivery rows; full historical replay remains
+        run_id, fork-local entity_state rows, and fork-local pending delivery rows; broader source-run replay remains
         unsupported outside the gated delivery/event primitive.'
       3b1_selected_contract_readiness_classifier: 'For selected-contract timestamp-fork dry-run/explain, the
         runtime.run_fork.selected_contract_readiness_classifier owner consumes existing planner, replay taxonomy,
@@ -10094,7 +10099,7 @@ run_model:
         reconstruction. Source conversation rows are never copied into the fork, reused as fork-local runtime truth, or
         used as selected-fork suppressors. Fresh fork-local conversation rows may be written only by normal selected fork
         runtime execution under the fork run_id. Pending or in-progress source delivery/session coupling, fork-local
-        pre-existing conversation rows, generic/state-only activation, full historical replay/resume, timers, routes,
+        pre-existing conversation rows, generic/state-only activation, broad source-run resumption, timers, routes,
         non-agent replay, restart recovery, and operator surfaces remain fail-closed or split siblings unless
         independently approved.'
       3d_selected_contract_timer_route_policy: 'For selected-contract mutating fork execution, source timer and route
@@ -10189,8 +10194,7 @@ run_model:
         runtime.run_fork.selected_contract_execution.fork_local_runtime_container and the normal runtime pipeline, records selected
         execution lineage, writes fork-local outcomes, consumes the fork-local runtime/platform event lineage policy for
         causally parented runtime control outputs, consumes typed runtime lineage before persisting runtime diagnostic
-        lineage, and regenerates follow-up events under the fork run_id. This is
-        not full historical resume: route
+        lineage, and regenerates follow-up events under the fork run_id. This bounded owner does not include route
         persistence/recovery, timer reconstruction, session/turn/audit reconstruction, non-agent replay, contract-swap
         boot/resume beyond selected frontier execution, runtime restart recovery, and UI/API ownership remain separate
         parents or siblings. At/before-T source session/turn/audit facts may be admitted only as lineage/no-action
@@ -10256,20 +10260,20 @@ run_model:
         fork-local work. This owner is non-mutating and does not authorize handler execution, delivery writes, receipts,
         dead letters, idempotency, emitted follow-ups, timers, sessions, turns, non-agent replay, route row mutation, or
         API/UI state.'
-      3j_historical_replay_execution_admission: 'Before any future full historical replay/resume mutation,
+      3j_historical_replay_execution_admission: 'Before any owner-authorized bounded fork re-execution mutation,
         runtime.run_fork.historical_replay_execution_admission classifies every historical source fact family under one
-        runtime authority. It consumes replay_resume_admission, selected-contract execution admission, route topology,
+        legacy-named runtime authority. It consumes replay_resume_admission, selected-contract execution admission, route topology,
         recipient planning, route recovery evidence when present, and contract-swap boot/resume admission when those
         prerequisites exist. It is
         admission/model only: it does not run handlers, create fork-local rows, copy source rows, write outcomes, replay
-        timers, reconstruct sessions/turns/audits, mutate routes, or own API/dashboard state. Full mutation remains
-        with the separately gated runtime.run_fork.historical_replay_execution owner.'
-      3j1_historical_replay_execution_owner: 'The mutating authority for historical replay/resume is
+        timers, reconstruct sessions/turns/audits, mutate routes, or own API/dashboard state. Mutation is limited to
+        separately admitted bounded children of runtime.run_fork.historical_replay_execution.'
+      3j1_historical_replay_execution_owner: 'The legacy-named mutating authority for bounded fork re-execution is
         runtime.run_fork.historical_replay_execution. It consumes the admission fact matrix, validates exactly one
         classification for every source fact family, exposes the currently executable fork work set, and keeps unsupported
         fact families explicit as fail-closed blockers or split siblings. Its current supported mutation scope is only
-        delivery_event_replay_ready; this closes canonical owner promotion, not product-complete historical replay/resume
-        for every future fact family.'
+        delivery_event_replay_ready plus approved selected-contract/timer children; it does not promise product-complete
+        resumption for every source fact family.'
       3j2_historical_replay_contract_swap_boot_resume_execution: 'For selected or swapped contracts, the bounded
         mutating contract-swap boot/resume child is
         runtime.run_fork.historical_replay_execution.contract_swap_boot_resume. It consumes the promoted historical
@@ -10294,18 +10298,22 @@ run_model:
         rows and source outcomes are lineage/proof only and never suppress fork-local recovery. This is a restart
         durability child only; timers, routes, sessions, turns, audits, non-agent replay, contract-swap boot/resume,
         runtime-wide restart recovery, and API/UI/dashboard surfaces remain split under #564/#549/#618.'
-      4_boot: 'Load contracts (new path if --contracts specified, otherwise same contracts as source run).
-        Validate contracts against reconstructed state. Boot the pipeline with the new run context.'
-      5_resume: 'Re-deliver all pending events under the new run_id. The normal event loop takes over.
-        No manual event selection — the system knows what was unfinished.'
+      4_boot: 'Load the selected contracts when provided, otherwise reuse the source contract identity, and validate
+        them against the reconstructed fork-local state and admitted fork fact matrix. Boot only the fork-local runtime
+        context required by approved owners; boot does not reconstruct source sessions, turns, audits, routes,
+        idempotency, or arbitrary in-flight work.'
+      5_resume: 'Execute only owner-admitted fork-local work under the new run_id. Today that means the
+        delivery_event_replay_ready primitive, selected-contract frontier execution when independently admitted, and
+        timer reconstruction where the timer owner has proven active-at-T lineage. Unsupported historical fact families
+        fail closed with typed blockers; the platform never infers unfinished source work from current rows.'
     parallel_safety: 'Timestamp-based fork handles parallel agent execution naturally. At timestamp T, all
       concurrent branches either committed their mutations or did not. No DAG traversal, no branch
       classification, no sibling carry-over logic. The reconstructed state is simply "what was the world at T."'
-    contract_swap: 'When --contracts specifies a new contract path, the intended full historical replay/resume behavior
-      is that admitted re-delivered events use the new handler logic uniformly with no mixed-version state. This product
-      intent is not itself an execution owner. Runtime/store readiness for full boot/resume is governed by
-      runtime.run_fork.contract_swap_boot_resume_admission, and mutating replay/resume requires separately approved
-      owners for any admitted historical work.'
+    contract_swap: 'When --contracts specifies a new contract path, any admitted fork-local delivery/event work must use
+      the selected handler logic uniformly with no mixed-version state. This intent is not itself an execution owner.
+      Runtime/store readiness for selected-contract boot/resume is governed by
+      runtime.run_fork.contract_swap_boot_resume_admission, and mutation remains limited to separately approved bounded
+      owners for admitted fork work.'
     timestamp_precision: 'Events committed in the same millisecond are disambiguated by (created_at, event_id)
       composite ordering. The fork point is inclusive: mutations from the target moment are included in
       reconstructed state. Only mutations strictly after T are undone.'

@@ -14,7 +14,7 @@ func TestBuildContractSwapBootResumeAdmissionConsumesCanonicalPrerequisites(t *t
 	selectedAdmission := testContractSwapSelectedExecutionAdmission(selection)
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,
-		HistoricalReplayRequired: true,
+		ReplayResumeFactsPresent: true,
 		Dispositions: []store.RunForkReplayResumeDisposition{{
 			Fact:        store.RunForkReplayResumeFactTimerHistory,
 			Disposition: store.RunForkReplayResumeDispositionFailClosedBlocker,

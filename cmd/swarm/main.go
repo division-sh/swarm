@@ -1983,10 +1983,10 @@ func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
 	fmt.Fprintf(w, "Fork Run: %s status=%s\n", result.ForkRunID, result.ForkRunStatus)
 	fmt.Fprintf(w, "Source Run: %s status=%s\n", result.SourceRunID, result.SourceRunStatus)
 	fmt.Fprintf(w, "Fork Point: %s (%s) at %s\n", result.ForkPoint.EventName, result.ForkPoint.EventID, result.ForkPoint.Timestamp.Format(time.RFC3339Nano))
-	fmt.Fprintf(w, "Summary: activated=%t source_frozen=%t historical_replay_blocked=%t materialized_entities=%d\n",
+	fmt.Fprintf(w, "Summary: activated=%t source_frozen=%t replay_resume_blocked=%t materialized_entities=%d\n",
 		result.Activated,
 		result.SourceFrozen,
-		result.HistoricalReplayBlocked,
+		result.ReplayResumeBlocked,
 		result.MaterializedEntityCount,
 	)
 	if result.DeliveryEventReplay != nil {

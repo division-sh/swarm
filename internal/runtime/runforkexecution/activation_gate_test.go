@@ -111,10 +111,10 @@ func TestActivateSelectedContractRunForkRequiresConcreteStoreForReplayMutation(t
 		CreatedAt:      time.Unix(1700001000, 0).UTC(),
 	}}
 	plan.ReplayResumeAdmission = store.RunForkReplayResumeAdmission{
-		Owner:                     store.RunForkReplayResumeAdmissionOwner,
-		DeliveryEventReplayReady:  true,
-		HistoricalReplayRequired:  true,
-		HistoricalReplaySupported: true,
+		Owner:                    store.RunForkReplayResumeAdmissionOwner,
+		DeliveryEventReplayReady: true,
+		ReplayResumeFactsPresent: true,
+		BoundedReplaySupported:   true,
 	}
 	fakeStore := &fakeSelectedContractActivationStore{binding: binding, bindingOK: true, plan: plan}
 	loader := &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection)}
@@ -249,7 +249,7 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 	plan := testSelectedContractStateOnlyPlan(binding)
 	plan.ExecutionReady = false
 	plan.ReplayResumeAdmission.StateOnlyExecutionReady = false
-	plan.ReplayResumeAdmission.HistoricalReplayRequired = true
+	plan.ReplayResumeAdmission.ReplayResumeFactsPresent = true
 	plan.UnsupportedBlockers = []store.RunForkUnsupportedBlocker{{
 		Code:    store.RunForkBlockerSessionHistoryUnproven,
 		Message: "session history is not reconstructable",

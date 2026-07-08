@@ -266,7 +266,7 @@ func runForkReplayResumeAdmissionRecalculateReadiness(admission RunForkReplayRes
 	}
 	admission.DeliveryEventReplayReady = hasReplayableDeliveryEvent && len(admission.UnsupportedBlockers) == 0
 	admission.StateOnlyExecutionReady = len(admission.UnsupportedBlockers) == 0 && !hasHistoricalReplayRequirement
-	admission.HistoricalReplayRequired = hasHistoricalReplayRequirement
-	admission.HistoricalReplaySupported = admission.DeliveryEventReplayReady
+	admission.ReplayResumeFactsPresent = hasHistoricalReplayRequirement
+	admission.BoundedReplaySupported = admission.DeliveryEventReplayReady
 	return admission
 }

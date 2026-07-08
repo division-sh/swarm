@@ -292,7 +292,7 @@ type RunForkHistoricalReplayExecution struct {
 	SourceRunID                string                                     `json:"source_run_id"`
 	ForkEventID                string                                     `json:"fork_event_id"`
 	ClosureLevel               string                                     `json:"closure_level"`
-	FullReplayResumeSupported  bool                                       `json:"full_replay_resume_supported"`
+	FullReplayUnsupported      bool                                       `json:"full_replay_unsupported"`
 	DeliveryEventReplayReady   bool                                       `json:"delivery_event_replay_ready"`
 	EventDeliveriesAdmission   RunForkHistoricalReplayFactAdmission       `json:"event_deliveries_admission"`
 	FactAdmissions             []RunForkHistoricalReplayFactAdmission     `json:"fact_admissions,omitempty"`

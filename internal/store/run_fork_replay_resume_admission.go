@@ -49,13 +49,13 @@ const (
 )
 
 type RunForkReplayResumeAdmission struct {
-	Owner                     string                           `json:"owner"`
-	StateOnlyExecutionReady   bool                             `json:"state_only_execution_ready"`
-	DeliveryEventReplayReady  bool                             `json:"delivery_event_replay_ready"`
-	HistoricalReplaySupported bool                             `json:"historical_replay_supported"`
-	HistoricalReplayRequired  bool                             `json:"historical_replay_required"`
-	Dispositions              []RunForkReplayResumeDisposition `json:"dispositions,omitempty"`
-	UnsupportedBlockers       []RunForkUnsupportedBlocker      `json:"unsupported_blockers,omitempty"`
+	Owner                    string                           `json:"owner"`
+	StateOnlyExecutionReady  bool                             `json:"state_only_execution_ready"`
+	DeliveryEventReplayReady bool                             `json:"delivery_event_replay_ready"`
+	BoundedReplaySupported   bool                             `json:"bounded_replay_supported"`
+	ReplayResumeFactsPresent bool                             `json:"replay_resume_facts_present"`
+	Dispositions             []RunForkReplayResumeDisposition `json:"dispositions,omitempty"`
+	UnsupportedBlockers      []RunForkUnsupportedBlocker      `json:"unsupported_blockers,omitempty"`
 }
 
 type RunForkReplayResumeDisposition struct {
@@ -82,12 +82,12 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 		{
 			Fact:        RunForkReplayResumeFactHistoricalReplayExecution,
 			Disposition: RunForkReplayResumeDispositionSplitSibling,
-			Message:     "historical replay execution remains a separate gated child; this admission taxonomy is non-mutating",
+			Message:     "bounded fork re-execution remains a separate gated child; this admission taxonomy is non-mutating",
 		},
 		{
 			Fact:        RunForkReplayResumeFactContractSwap,
 			Disposition: RunForkReplayResumeDispositionSplitSibling,
-			Message:     "contract-swap execution belongs to full historical resume and is not implemented by this admission taxonomy",
+			Message:     "contract-swap execution belongs to bounded selected-frontier fork re-execution and is not implemented by this admission taxonomy",
 		},
 	}
 	blockers := []RunForkUnsupportedBlocker{}
@@ -173,13 +173,13 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 	deliveryEventReplayReady := hasReplayableDeliveryEvent && len(blockers) == 0
 	stateOnlyExecutionReady := len(blockers) == 0 && !hasHistoricalReplayRequirement
 	return RunForkReplayResumeAdmission{
-		Owner:                     RunForkReplayResumeAdmissionOwner,
-		StateOnlyExecutionReady:   stateOnlyExecutionReady,
-		DeliveryEventReplayReady:  deliveryEventReplayReady,
-		HistoricalReplaySupported: deliveryEventReplayReady,
-		HistoricalReplayRequired:  hasHistoricalReplayRequirement,
-		Dispositions:              dispositions,
-		UnsupportedBlockers:       blockers,
+		Owner:                    RunForkReplayResumeAdmissionOwner,
+		StateOnlyExecutionReady:  stateOnlyExecutionReady,
+		DeliveryEventReplayReady: deliveryEventReplayReady,
+		BoundedReplaySupported:   deliveryEventReplayReady,
+		ReplayResumeFactsPresent: hasHistoricalReplayRequirement,
+		Dispositions:             dispositions,
+		UnsupportedBlockers:      blockers,
 	}
 }
 
@@ -314,8 +314,8 @@ func runForkReplayResumeAdmissionWithBlocker(admission RunForkReplayResumeAdmiss
 	}
 	admission.StateOnlyExecutionReady = false
 	admission.DeliveryEventReplayReady = false
-	admission.HistoricalReplaySupported = false
-	admission.HistoricalReplayRequired = true
+	admission.BoundedReplaySupported = false
+	admission.ReplayResumeFactsPresent = true
 	admission.UnsupportedBlockers = appendRunForkBlocker(admission.UnsupportedBlockers, blocker)
 	admission.Dispositions = append(admission.Dispositions, RunForkReplayResumeDisposition{
 		Fact:        fact,
@@ -405,11 +405,11 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 	default:
 		code = strings.TrimSpace(code)
 		if code == "" {
-			code = "historical_replay_unproven"
+			code = "fork_reexecution_unproven"
 		}
 		return RunForkUnsupportedBlocker{
 			Code:    code,
-			Message: fmt.Sprintf("timestamp-fork historical replay/resume is not proven for %s by the canonical admission taxonomy", code),
+			Message: fmt.Sprintf("timestamp-fork bounded re-execution is not proven for %s by the canonical admission taxonomy", code),
 		}
 	}
 }

@@ -13,7 +13,7 @@ func TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,
-		HistoricalReplayRequired: true,
+		ReplayResumeFactsPresent: true,
 		Dispositions: []store.RunForkReplayResumeDisposition{
 			{
 				Fact:        store.RunForkReplayResumeFactDeliveryDeadLetterHistory,
@@ -182,7 +182,7 @@ func TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner(
 	routeRecovery := testContractSwapRouteRecovery(selectedAdmission)
 	replayAdmission := store.RunForkReplayResumeAdmission{
 		Owner:                    store.RunForkReplayResumeAdmissionOwner,
-		HistoricalReplayRequired: true,
+		ReplayResumeFactsPresent: true,
 		Dispositions: []store.RunForkReplayResumeDisposition{{
 			Fact:           store.RunForkReplayResumeFactTimerHistory,
 			Disposition:    store.RunForkReplayResumeDispositionReconstruct,
@@ -455,7 +455,7 @@ func TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMu
 		t.Fatalf("event deliveries admission = %#v", execution.EventDeliveriesAdmission)
 	}
 	if execution.ClosureLevel != "canonical_owner_promotion_with_delivery_event_replay_ready_only" ||
-		execution.FullReplayResumeSupported ||
+		!execution.FullReplayUnsupported ||
 		len(execution.FactAdmissions) != 15 ||
 		len(execution.RequiredConsumers) == 0 {
 		t.Fatalf("execution broad owner accounting = %#v", execution)

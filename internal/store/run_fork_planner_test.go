@@ -206,8 +206,8 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatal("taxonomy StateOnlyExecutionReady = true, want false")
 	}
-	if !plan.ReplayResumeAdmission.HistoricalReplayRequired || plan.ReplayResumeAdmission.HistoricalReplaySupported {
-		t.Fatalf("taxonomy replay flags = required:%v supported:%v, want required true/supported false", plan.ReplayResumeAdmission.HistoricalReplayRequired, plan.ReplayResumeAdmission.HistoricalReplaySupported)
+	if !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
+		t.Fatalf("taxonomy replay flags = required:%v supported:%v, want required true/supported false", plan.ReplayResumeAdmission.ReplayResumeFactsPresent, plan.ReplayResumeAdmission.BoundedReplaySupported)
 	}
 	blockers := map[string]bool{}
 	for _, blocker := range plan.UnsupportedBlockers {
@@ -283,7 +283,7 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
 		t.Fatal("StateOnlyExecutionReady = true, want false because delivery/event replay is required")
 	}
-	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.HistoricalReplayRequired || !plan.ReplayResumeAdmission.HistoricalReplaySupported {
+	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || !plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("replay flags = %#v, want delivery-event replay ready and supported", plan.ReplayResumeAdmission)
 	}
 	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
@@ -608,11 +608,11 @@ func TestRunForkPlanner_StateOnlyPlanExecutionReadyWithEmptyAndUnrelatedTimerRou
 	if plan.ReplayResumeAdmission.Owner != RunForkReplayResumeAdmissionOwner {
 		t.Fatalf("taxonomy owner = %q, want %q", plan.ReplayResumeAdmission.Owner, RunForkReplayResumeAdmissionOwner)
 	}
-	if !plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.HistoricalReplayRequired || plan.ReplayResumeAdmission.HistoricalReplaySupported {
-		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v historical_supported:%v, want true/false/false",
+	if !plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.ReplayResumeFactsPresent || plan.ReplayResumeAdmission.BoundedReplaySupported {
+		t.Fatalf("taxonomy flags = state_only:%v historical_required:%v bounded_supported:%v, want true/false/false",
 			plan.ReplayResumeAdmission.StateOnlyExecutionReady,
-			plan.ReplayResumeAdmission.HistoricalReplayRequired,
-			plan.ReplayResumeAdmission.HistoricalReplaySupported,
+			plan.ReplayResumeAdmission.ReplayResumeFactsPresent,
+			plan.ReplayResumeAdmission.BoundedReplaySupported,
 		)
 	}
 	if !runForkTestHasDisposition(plan.ReplayResumeAdmission, RunForkReplayResumeFactEntityStateSnapshot) {

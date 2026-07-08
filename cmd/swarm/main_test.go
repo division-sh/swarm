@@ -8475,7 +8475,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady(t 
 	if err := json.Unmarshal(buf.Bytes(), &plan); err != nil {
 		t.Fatalf("decode fork plan json: %v\n%s", err, buf.String())
 	}
-	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.HistoricalReplaySupported {
+	if !plan.ExecutionReady || !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("dry-run replay admission = execution:%v admission:%#v", plan.ExecutionReady, plan.ReplayResumeAdmission)
 	}
 	if plan.ReplayResumeAdmission.StateOnlyExecutionReady {
@@ -8975,7 +8975,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON(t *testi
 	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("decode fork activation json: %v\n%s", err, buf.String())
 	}
-	if !result.Activated || !result.SourceFrozen || !result.HistoricalReplayBlocked {
+	if !result.Activated || !result.SourceFrozen || !result.ReplayResumeBlocked {
 		t.Fatalf("activation result = %#v", result)
 	}
 	if result.ReplayResumeAdmission.Owner != store.RunForkReplayResumeAdmissionOwner || !result.ReplayResumeAdmission.StateOnlyExecutionReady {

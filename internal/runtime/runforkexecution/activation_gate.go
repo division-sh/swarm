@@ -254,7 +254,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		}
 		return result, nil
 	}
-	if plan.ReplayResumeAdmission.HistoricalReplayRequired {
+	if plan.ReplayResumeAdmission.ReplayResumeFactsPresent {
 		return result, fmt.Errorf("selected-contract activation gate blocks historical replay before mutation; blockers: %s", selectedContractBlockerCodes(plan.UnsupportedBlockers))
 	}
 	if frontier.FrontierEventCount > 0 {
