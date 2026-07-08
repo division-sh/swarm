@@ -87,6 +87,23 @@ func TestGeneratedUnifiedConfigExampleAdvertisedDoctorCommandWorks(t *testing.T)
 	}
 }
 
+func TestGeneratedUnifiedConfigExampleHeaderFitsPublicContract(t *testing.T) {
+	text := generatedUnifiedConfigExample()
+	header, _, ok := strings.Cut(text, "\n\n")
+	if !ok {
+		t.Fatalf("generated example missing blank line after header:\n%s", text)
+	}
+	lines := strings.Split(strings.TrimRight(header, "\n"), "\n")
+	if len(lines) > 4 {
+		t.Fatalf("generated example header has %d lines, want <= 4:\n%s", len(lines), header)
+	}
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "# ") {
+			t.Fatalf("generated example header line is not a comment: %q\n%s", line, header)
+		}
+	}
+}
+
 func TestGeneratedUnifiedConfigExampleMetadataCoversSupportedRules(t *testing.T) {
 	entries := map[string]unifiedConfigExampleEntry{}
 	for _, entry := range unifiedConfigExampleEntries() {
