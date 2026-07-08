@@ -138,7 +138,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	workspaceBackend, err := resolveWorkspaceBackend(opts.workspaceBackend, opts.workspaceBackendSet, cfgResult.Config)
 	if err != nil {
 		report := newReport()
-		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --workspace-backend, workspace.backend, or SWARM_WORKSPACE_BACKEND")
+		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --workspace-backend or workspace.backend")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	cliCfg, err := loadCLIAPIConfigFile()
@@ -164,7 +164,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	})
 	if err != nil {
 		report := newReport()
-		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --data, workspace.data_source, or SWARM_WORKSPACE_DATA_SOURCE")
+		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --data or workspace.data_source")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	report := runLocalClaudeCLIPreflight(ctx, localPreflightRequest{

@@ -1699,14 +1699,12 @@ homepage: https://division.sh
 }
 
 func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
-	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager, err := configuredWorkspaceLifecycle(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{})
+	manager, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{})
 	if err != nil {
 		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
 	}
@@ -1717,15 +1715,13 @@ func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testin
 }
 
 func TestConfiguredWorkspaceLifecycleUsesExplicitDataAndContractsSources(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
-	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager, err := configuredWorkspaceLifecycle(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+	manager, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
 		DataSource:       dataDir,
 		DataSourceSource: "--data",
 	})
@@ -1738,15 +1734,13 @@ func TestConfiguredWorkspaceLifecycleUsesExplicitDataAndContractsSources(t *test
 }
 
 func TestConfiguredWorkspaceLifecycleFailsClosedForUnreadableDataSource(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
-	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
 	missingDataDir := filepath.Join(t.TempDir(), "missing-data")
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager, err := configuredWorkspaceLifecycle(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+	manager, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
 		DataSource:       missingDataDir,
 		DataSourceSource: "--data",
 	})
@@ -1760,26 +1754,24 @@ func TestConfiguredWorkspaceLifecycleFailsClosedForUnreadableDataSource(t *testi
 }
 
 func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "swarm-orchestrator")
-	_, err := configuredWorkspaceLifecycle(nil, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
+	_, err := configuredWorkspaceLifecycle(nil, cfg, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
 		DataSource:       t.TempDir(),
 		DataSourceSource: "workspace.data_source",
 	})
-	if err == nil || !strings.Contains(err.Error(), "cannot be combined with SWARM_WORKSPACE_VOLUMES_FROM") {
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined with workspace.volumes_from") {
 		t.Fatalf("configuredWorkspaceLifecycle error = %v, want volumes-from conflict", err)
 	}
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "")
-	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	cfg := &config.Config{Workspace: config.WorkspaceConfig{HostRoot: filepath.Join(t.TempDir(), "host-workspaces")}}
 	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
-	lifecycle, err := configuredWorkspaceLifecycleForBackend(nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+	lifecycle, err := configuredWorkspaceLifecycleForBackend(nil, cfg, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
 		DataSource:       dataDir,
 		DataSourceSource: "--data",
 	}, workspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
@@ -1799,12 +1791,12 @@ func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testi
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "swarm-orchestrator")
-	_, err := configuredWorkspaceLifecycleForBackend(nil, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
+	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
+	_, err := configuredWorkspaceLifecycleForBackend(nil, cfg, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{
 		DataSource:       t.TempDir(),
 		DataSourceSource: "--data",
 	}, workspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
-	if err == nil || !strings.Contains(err.Error(), "host workspace backend cannot consume SWARM_WORKSPACE_VOLUMES_FROM") {
+	if err == nil || !strings.Contains(err.Error(), "host workspace backend cannot consume workspace.volumes_from") {
 		t.Fatalf("configuredWorkspaceLifecycleForBackend error = %v, want host volumes-from rejection", err)
 	}
 }
@@ -1813,8 +1805,7 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	repoRoot := t.TempDir()
 	flagDir := filepath.Join(repoRoot, "flag-data")
 	configDir := filepath.Join(repoRoot, "config-data")
-	envDir := filepath.Join(repoRoot, "env-data")
-	for _, dir := range []string{flagDir, configDir, envDir} {
+	for _, dir := range []string{flagDir, configDir} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
@@ -1824,8 +1815,6 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 		RepoRoot:         repoRoot,
 		FlagDataSource:   "flag-data",
 		ConfigDataSource: "config-data",
-		EnvDataSource:    "env-data",
-		EnvDataSourceSet: true,
 	})
 	if err != nil {
 		t.Fatalf("resolve workspace mount sources: %v", err)
@@ -1838,28 +1827,12 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 		RepoRoot:            repoRoot,
 		ConfigDataSource:    "config-data",
 		ConfigDataSourceSet: true,
-		EnvDataSource:       "env-data",
-		EnvDataSourceSet:    true,
 	})
 	if err != nil {
 		t.Fatalf("resolve config workspace mount source: %v", err)
 	}
 	if result.DataSource != configDir || result.DataSourceSource != "workspace.data_source" {
 		t.Fatalf("config precedence result = %#v, want source %q from workspace.data_source", result, configDir)
-	}
-
-	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:         repoRoot,
-		EnvDataSource:    "env-data",
-		EnvDataSourceSet: true,
-		ConfigDataSource: " ",
-		FlagDataSource:   " ",
-	})
-	if err != nil {
-		t.Fatalf("resolve env workspace mount source: %v", err)
-	}
-	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
-		t.Fatalf("env precedence result = %#v, want source %q from %s", result, envDir, envWorkspaceDataSource)
 	}
 
 	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
@@ -1880,38 +1853,23 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	}
 }
 
-func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeEnvFallback(t *testing.T) {
+func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeAlternateOrDefault(t *testing.T) {
 	repoRoot := t.TempDir()
-	envDir := t.TempDir()
 	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:            repoRoot,
-		ConfigDataSource:    " \t ",
-		ConfigDataSourceSet: true,
-		EnvDataSource:       envDir,
-		EnvDataSourceSet:    true,
+		RepoRoot:                repoRoot,
+		ConfigDataSource:        " \t ",
+		ConfigDataSourceSet:     true,
+		VolumesFrom:             "swarm-orchestrator",
+		VolumesFromSet:          true,
+		DefaultDataSource:       filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath),
+		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
+		CreateDefaultDataSource: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "workspace.data_source") || !strings.Contains(err.Error(), "must be non-empty") {
 		t.Fatalf("resolve workspace mount sources error = %v, want empty workspace.data_source rejection", err)
 	}
 	if result.DataSource != "" || result.DataSourceSource != "workspace.data_source" {
-		t.Fatalf("workspace mount sources = %#v, want no env fallback and workspace.data_source source label", result)
-	}
-}
-
-func TestResolveWorkspaceMountSourcesRejectsEmptyEnvBeforeDefault(t *testing.T) {
-	repoRoot := t.TempDir()
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:         repoRoot,
-		EnvDataSource:    " \t ",
-		EnvDataSourceSet: true,
-		VolumesFrom:      "swarm-orchestrator",
-		VolumesFromSet:   true,
-	})
-	if err == nil || !strings.Contains(err.Error(), envWorkspaceDataSource) || !strings.Contains(err.Error(), "must be non-empty") {
-		t.Fatalf("resolve workspace mount sources error = %v, want empty env rejection", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != envWorkspaceDataSource {
-		t.Fatalf("workspace mount sources = %#v, want no default or volumes-from fallback and env source label", result)
+		t.Fatalf("workspace mount sources = %#v, want no alternate/default fallback and workspace.data_source source label", result)
 	}
 	if _, err := os.Stat(filepath.Join(repoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
 		t.Fatalf("default data source stat error = %v, want not created", err)
@@ -1990,11 +1948,9 @@ func TestResolveWorkspaceMountSourcesUsesVolumesFromAlternateWithoutDefault(t *t
 	}
 }
 
-func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndEnvFallback(t *testing.T) {
+func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *testing.T) {
 	repoRoot := t.TempDir()
 	configDir := t.TempDir()
-	envDir := t.TempDir()
-	t.Setenv(envWorkspaceDataSource, envDir)
 
 	result, err := resolveWorkspaceMountSources(repoRoot, "", &config.Config{
 		Workspace: config.WorkspaceConfig{DataSource: configDir},
@@ -2004,14 +1960,6 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndEnvFallback(t *testing
 	}
 	if result.DataSource != configDir || result.DataSourceSource != "workspace.data_source" {
 		t.Fatalf("config-backed workspace mount sources = %#v, want %q from workspace.data_source", result, configDir)
-	}
-
-	result, err = resolveWorkspaceMountSources(repoRoot, "", &config.Config{})
-	if err != nil {
-		t.Fatalf("resolve env workspace mount sources: %v", err)
-	}
-	if result.DataSource != envDir || result.DataSourceSource != envWorkspaceDataSource {
-		t.Fatalf("env-backed workspace mount sources = %#v, want %q from %s", result, envDir, envWorkspaceDataSource)
 	}
 
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -2033,7 +1981,7 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndEnvFallback(t *testing
 	}
 	result, err = resolveWorkspaceMountSources(repoRoot, "", cfg)
 	if err == nil || !strings.Contains(err.Error(), "workspace.data_source") || !strings.Contains(err.Error(), "must be non-empty") {
-		t.Fatalf("resolve empty configured workspace source error = %v, want fail-closed config rejection before env fallback", err)
+		t.Fatalf("resolve empty configured workspace source error = %v, want fail-closed config rejection", err)
 	}
 	if result.DataSource != "" || result.DataSourceSource != "workspace.data_source" {
 		t.Fatalf("empty configured workspace source result = %#v, want no env fallback", result)
@@ -2046,8 +1994,6 @@ func TestResolveWorkspaceBackendPrecedence(t *testing.T) {
 		FlagSet:       true,
 		ConfigBackend: workspace.BackendDocker,
 		ConfigSet:     true,
-		EnvBackend:    workspace.BackendDocker,
-		EnvSet:        true,
 	})
 	if err != nil {
 		t.Fatalf("resolve workspace backend flag precedence: %v", err)
@@ -2059,25 +2005,12 @@ func TestResolveWorkspaceBackendPrecedence(t *testing.T) {
 	result, err = resolveWorkspaceBackendFromInput(workspaceBackendInput{
 		ConfigBackend: workspace.BackendHost,
 		ConfigSet:     true,
-		EnvBackend:    workspace.BackendDocker,
-		EnvSet:        true,
 	})
 	if err != nil {
 		t.Fatalf("resolve workspace backend config precedence: %v", err)
 	}
 	if result.Backend != workspace.BackendHost || result.Source != "workspace.backend" {
 		t.Fatalf("config precedence result = %#v, want host from workspace.backend", result)
-	}
-
-	result, err = resolveWorkspaceBackendFromInput(workspaceBackendInput{
-		EnvBackend: workspace.BackendHost,
-		EnvSet:     true,
-	})
-	if err != nil {
-		t.Fatalf("resolve workspace backend env precedence: %v", err)
-	}
-	if result.Backend != workspace.BackendHost || result.Source != envWorkspaceBackend {
-		t.Fatalf("env precedence result = %#v, want host from %s", result, envWorkspaceBackend)
 	}
 
 	result, err = resolveWorkspaceBackendFromInput(workspaceBackendInput{})
@@ -2093,11 +2026,9 @@ func TestResolveWorkspaceBackendRejectsEmptyConfigBeforeEnvFallback(t *testing.T
 	result, err := resolveWorkspaceBackendFromInput(workspaceBackendInput{
 		ConfigBackend: " \t ",
 		ConfigSet:     true,
-		EnvBackend:    workspace.BackendHost,
-		EnvSet:        true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "workspace.backend") || !strings.Contains(err.Error(), "must be non-empty") {
-		t.Fatalf("resolve empty configured workspace backend error = %v, want fail-closed config rejection before env fallback", err)
+		t.Fatalf("resolve empty configured workspace backend error = %v, want fail-closed config rejection", err)
 	}
 	if result.Backend != "" || result.Source != "workspace.backend" {
 		t.Fatalf("empty configured workspace backend result = %#v, want no env fallback", result)
@@ -2226,7 +2157,7 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 				CanonicalOwner                 string   `yaml:"canonical_owner"`
 				CLIFlag                        string   `yaml:"cli_flag"`
 				ConfigKey                      string   `yaml:"config_key"`
-				EnvVar                         string   `yaml:"env_var"`
+				RetiredEnvVar                  string   `yaml:"retired_env_var"`
 				SourceOrder                    []string `yaml:"source_order"`
 				DefaultBehavior                string   `yaml:"default_behavior"`
 				FailureBehavior                string   `yaml:"failure_behavior"`
@@ -2244,7 +2175,7 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 						Owner      string   `yaml:"owner"`
 						Flag       string   `yaml:"flag"`
 						ConfigKey  string   `yaml:"config_key"`
-						EnvVar     string   `yaml:"env_var"`
+						RetiredEnv string   `yaml:"retired_env_var"`
 						Consumers  []string `yaml:"consumers"`
 					} `yaml:"workspace_data_source_authority"`
 				} `yaml:"serve"`
@@ -2274,10 +2205,10 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 	if !strings.Contains(authority.CanonicalOwner, "workspace_model.data_source_authority") {
 		t.Fatalf("workspace data source canonical owner = %q", authority.CanonicalOwner)
 	}
-	if authority.CLIFlag != "--data" || authority.ConfigKey != "workspace.data_source" || authority.EnvVar != envWorkspaceDataSource {
+	if authority.CLIFlag != "--data" || authority.ConfigKey != "workspace.data_source" || authority.RetiredEnvVar != "SWARM_WORKSPACE_DATA_SOURCE" {
 		t.Fatalf("workspace data source selectors = %#v", authority)
 	}
-	for _, want := range []string{"--data", "workspace.data_source", envWorkspaceDataSource, defaultWorkspaceDataSourceSource} {
+	for _, want := range []string{"--data", "workspace.data_source", defaultWorkspaceDataSourceSource} {
 		if !stringSliceContains(authority.SourceOrder, want) {
 			t.Fatalf("workspace data source order missing %q: %#v", want, authority.SourceOrder)
 		}
@@ -2321,7 +2252,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 				CLIFlag              string   `yaml:"cli_flag"`
 				ConfigKey            string   `yaml:"config_key"`
 				UnsafeConfigKey      string   `yaml:"unsafe_config_key"`
-				LegacyEnvVar         string   `yaml:"legacy_env_var"`
+				RetiredEnvVar        string   `yaml:"retired_env_var"`
 				SourceOrder          []string `yaml:"source_order"`
 				DefaultBackend       string   `yaml:"default_backend"`
 				CapabilityClasses    map[string]struct {
@@ -2330,9 +2261,9 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 				Backends map[string]struct {
 					Behavior      string `yaml:"behavior"`
 					WorkspaceRoot struct {
-						EnvVar  string `yaml:"env_var"`
-						Default string `yaml:"default"`
-						Rule    string `yaml:"rule"`
+						ConfigKey string `yaml:"config_key"`
+						Default   string `yaml:"default"`
+						Rule      string `yaml:"rule"`
 					} `yaml:"workspace_root"`
 				} `yaml:"backends"`
 				FailureBehavior []string `yaml:"failure_behavior"`
@@ -2349,7 +2280,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 						Flag            string   `yaml:"flag"`
 						ConfigKey       string   `yaml:"config_key"`
 						UnsafeConfigKey string   `yaml:"unsafe_config_key"`
-						LegacyEnvVar    string   `yaml:"legacy_env_var"`
+						RetiredEnvVar   string   `yaml:"retired_env_var"`
 						DefaultBackend  string   `yaml:"default_backend"`
 						Consumers       []string `yaml:"consumers"`
 					} `yaml:"workspace_backend_selection"`
@@ -2371,10 +2302,10 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if !strings.Contains(authority.CanonicalOwner, "workspace_model.workspace_backend_selection") {
 		t.Fatalf("workspace backend canonical owner = %q", authority.CanonicalOwner)
 	}
-	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.UnsafeConfigKey != "workspace.allow_exec_on_host" || authority.LegacyEnvVar != envWorkspaceBackend {
+	if authority.CLIFlag != "--workspace-backend <docker|host>" || authority.ConfigKey != "workspace.backend" || authority.UnsafeConfigKey != "workspace.allow_exec_on_host" || authority.RetiredEnvVar != "SWARM_WORKSPACE_BACKEND" {
 		t.Fatalf("workspace backend selectors = %#v", authority)
 	}
-	for _, want := range []string{"loaded contract execution capability", "--workspace-backend", "workspace.backend", envWorkspaceBackend} {
+	for _, want := range []string{"loaded contract execution capability", "--workspace-backend", "workspace.backend"} {
 		if !stringSliceContains(authority.SourceOrder, want) {
 			t.Fatalf("workspace backend order missing %q: %#v", want, authority.SourceOrder)
 		}
@@ -2399,7 +2330,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if !ok || !strings.Contains(hostBackend.Behavior, "workspace.allow_exec_on_host") || !strings.Contains(hostBackend.Behavior, "MUST NOT require Docker") {
 		t.Fatalf("host backend spec missing local-dev no-Docker behavior: %#v", authority.Backends)
 	}
-	if hostBackend.WorkspaceRoot.EnvVar != workspace.EnvHostWorkspaceRoot || hostBackend.WorkspaceRoot.Default != "~/.swarm/workspaces" {
+	if hostBackend.WorkspaceRoot.ConfigKey != "workspace.host_root" || hostBackend.WorkspaceRoot.Default != "~/.swarm/workspaces" {
 		t.Fatalf("host workspace root spec = %#v", hostBackend.WorkspaceRoot)
 	}
 	for _, want := range []string{"canonical/evaluated paths", "Every host lifecycle consumer", "symlink escapes"} {
@@ -2407,7 +2338,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 			t.Fatalf("host workspace root rule missing %q:\n%s", want, hostBackend.WorkspaceRoot.Rule)
 		}
 	}
-	for _, want := range []string{"Unsupported backend", "Empty explicit backend", "SWARM_WORKSPACE_VOLUMES_FROM", "Claude CLI", "SWARM_WORKSPACE_BACKEND=host", "conversation.fork_chat", "native command execution"} {
+	for _, want := range []string{"Unsupported backend", "Empty explicit backend", "workspace.volumes_from", "Claude CLI", "SWARM_WORKSPACE_BACKEND=host", "conversation.fork_chat", "native command execution"} {
 		if !joinedContains(authority.FailureBehavior, want) {
 			t.Fatalf("workspace backend failure behavior missing %q: %#v", want, authority.FailureBehavior)
 		}
@@ -2426,7 +2357,7 @@ func TestPlatformSpecWorkspaceBackendSelectionPromoted(t *testing.T) {
 	if command.PromotedBy != "#1138" || command.Owner != "workspace_model.workspace_backend_selection" || command.Flag != "--workspace-backend <docker|host>" {
 		t.Fatalf("serve command workspace backend authority = %#v", command)
 	}
-	if command.ConfigKey != "workspace.backend" || command.UnsafeConfigKey != "workspace.allow_exec_on_host" || command.LegacyEnvVar != envWorkspaceBackend || command.DefaultBackend != "capability-derived" {
+	if command.ConfigKey != "workspace.backend" || command.UnsafeConfigKey != "workspace.allow_exec_on_host" || command.RetiredEnvVar != "SWARM_WORKSPACE_BACKEND" || command.DefaultBackend != "capability-derived" {
 		t.Fatalf("serve command workspace backend selectors = %#v", command)
 	}
 	for _, want := range []string{"serve boot", "run start", "Builder project reload", "selected-contract run-fork", "verify/describe/doctor", "conversation.fork_chat"} {
@@ -2842,7 +2773,7 @@ func TestPlatformSpecLocalCLITestWorkspaceCLIAvailabilityPromoted(t *testing.T) 
 			t.Fatalf("local cli_test workspace cli availability scope missing %q:\n%s", want, availability.Scope)
 		}
 	}
-	for _, want := range []string{"startup validation MUST prove", "before readiness or event delivery", "Docker image inspection", "existing container reuse", "SWARM_WORKSPACE_IMAGE"} {
+	for _, want := range []string{"startup validation MUST prove", "before readiness or event delivery", "Docker image inspection", "existing container reuse", "workspace.image"} {
 		if !strings.Contains(availability.WorkspaceCLIRule, want) {
 			t.Fatalf("workspace cli rule missing %q:\n%s", want, availability.WorkspaceCLIRule)
 		}
@@ -6243,10 +6174,13 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 }
 
 func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(t *testing.T) {
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
-	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
+	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
+	hostRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	dataDir := t.TempDir()
-	configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"))
+	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
+		fmt.Sprintf("  docker_bin: %q", missingDocker),
+		fmt.Sprintf("  host_root: %q", hostRoot),
+	})
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
 		ConfigPath:           configPath,
@@ -6274,10 +6208,12 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 }
 
 func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db")),
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
+			fmt.Sprintf("  docker_bin: %q", missingDocker),
+		}),
 		ContractsPath:        filepath.Join("tests", "tier1-primitives", "test-emits-single"),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -6303,11 +6239,14 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 }
 
 func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
-	t.Setenv("SWARM_WORKSPACE_HOST_ROOT", filepath.Join(t.TempDir(), "host-workspaces"))
+	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
+	hostRoot := filepath.Join(t.TempDir(), "host-workspaces")
 
 	serve := startServeRuntimeTestProcess(t, serveOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db")),
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
+			fmt.Sprintf("  docker_bin: %q", missingDocker),
+			fmt.Sprintf("  host_root: %q", hostRoot),
+		}),
 		ContractsPath:        writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -6335,11 +6274,13 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 }
 
 func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) {
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 
 	var out lockedBuffer
 	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
-		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db")),
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
+			fmt.Sprintf("  docker_bin: %q", missingDocker),
+		}),
 		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
 		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -6874,7 +6815,7 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 
 	var out lockedBuffer
 	code := runServeRuntime(ctx, repoRoot(), serveOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t),
+		ConfigPath:         writeDoctorClaudeConfig(t, ""),
 		Backend:            "claude_cli",
 		BundleHash:         firstHash,
 		BundleHashes:       []string{secondHash},
@@ -7113,7 +7054,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string) (string,
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -7150,7 +7091,7 @@ func installServeRuntimePostgresTestStoresForDatabase(t *testing.T, workspaceFac
 		}
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
-	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ string, _ semanticview.Source, mountSources workspaceMountSources, _ workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(_ *sql.DB, _ *config.Config, _ string, _ semanticview.Source, mountSources workspaceMountSources, _ workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return workspaceFactory(mountSources), nil
 	}
 	t.Cleanup(func() {
@@ -11298,7 +11239,7 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 		}
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -11371,7 +11312,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 				}
 				return selectedPostgresStoreBundle(runtimePG, cfg), nil
 			}
-			configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+			configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 				return serveRuntimeWorkspaceStub{}, nil
 			}
 			t.Cleanup(func() {
@@ -11487,7 +11428,7 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 	bindingCh := make(chan toolgateway.Binding, 1)
 	opts := serveOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t),
+		ConfigPath:         writeDoctorClaudeConfig(t, ""),
 		Backend:            "claude_cli",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		DataSource:         t.TempDir(),
@@ -11554,7 +11495,7 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 	stop, err := startLocalRunServe(context.Background(), repoRoot(), runCommandOptions{
 		apiOptions:       apiOpts,
-		configPath:       writeDoctorClaudeConfig(t),
+		configPath:       writeDoctorClaudeConfig(t, ""),
 		backend:          "claude_cli",
 		contractsPath:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		dataSource:       t.TempDir(),
@@ -11617,7 +11558,7 @@ func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testin
 			t.Setenv(tt.env, tt.value)
 
 			assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, tt.env, serveOptions{
-				ConfigPath:         writeDoctorClaudeConfig(t),
+				ConfigPath:         writeDoctorClaudeConfig(t, ""),
 				Backend:            "claude_cli",
 				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 				DataSource:         t.TempDir(),
@@ -11639,7 +11580,7 @@ func TestRunServeRuntimeBundleHashRetiredGatewayURLEnvFailsBeforeStartupSideEffe
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", serveOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t),
+		ConfigPath:         writeDoctorClaudeConfig(t, ""),
 		Backend:            "claude_cli",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		DataSource:         t.TempDir(),
@@ -11749,7 +11690,7 @@ func localPreflightReportHasFinding(report localPreflightReport, code string, se
 func stubServeWorkspaceLifecycleForTest(t *testing.T) {
 	t.Helper()
 	oldWorkspaceLifecycle := configuredWorkspaceLifecycleForServe
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -11837,7 +11778,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		}
 		return selectedPostgresStoreBundle(runtimePG, cfg), nil
 	}
-	configuredWorkspaceLifecycleForServe = func(*sql.DB, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+	configuredWorkspaceLifecycleForServe = func(*sql.DB, *config.Config, string, semanticview.Source, workspaceMountSources, workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
 	}
 	t.Cleanup(func() {
@@ -12527,11 +12468,21 @@ func parseServeBootProgressRows(t *testing.T, output string) []serveBootProgress
 
 func writeServeRuntimeTestConfig(t *testing.T) string {
 	t.Helper()
+	return writeServeRuntimeTestConfigWithWorkspaceFields(t, nil)
+}
+
+func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceFields []string) string {
+	t.Helper()
 	configText := strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
 		"workspace:",
 		"  data_source: " + t.TempDir(),
+	}, "\n") + "\n"
+	if len(workspaceFields) > 0 {
+		configText += strings.Join(workspaceFields, "\n") + "\n"
+	}
+	configText += strings.Join([]string{
 		"llm:",
 		"  backend: anthropic",
 		"  session:",
@@ -12542,6 +12493,38 @@ func writeServeRuntimeTestConfig(t *testing.T) string {
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write serve runtime config: %v", err)
+	}
+	return path
+}
+
+func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend string, sqlitePath string, workspaceFields []string) string {
+	t.Helper()
+	lines := []string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
+	}
+	lines = append(lines, workspaceFields...)
+	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {
+		lines = append(lines,
+			"store:",
+			"  backend: "+backend,
+			"  sqlite:",
+			"    path: "+sqlitePath,
+		)
+	}
+	lines = append(lines,
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	)
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write runtime config: %v", err)
 	}
 	return path
 }

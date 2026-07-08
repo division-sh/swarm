@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -288,10 +287,7 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 		return nil, err
 	}
 	if execTarget.Mode == workspace.ExecutionModeDockerContainer {
-		dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))
-		if dockerBin == "" {
-			dockerBin = "docker"
-		}
+		dockerBin := configuredWorkspaceDockerBin(r.cfg)
 		dockerArgs := []string{"exec", "-i"}
 		gatewayURL := r.toolGateway.WorkspaceMCPURL()
 		if gatewayURL != "" {

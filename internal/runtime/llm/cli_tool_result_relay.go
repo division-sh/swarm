@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path"
 	"strings"
@@ -108,10 +107,7 @@ func (r *ClaudeCLIRuntime) runWorkspaceCommand(ctx context.Context, target *work
 	if r != nil && r.execWorkspaceFn != nil {
 		return r.execWorkspaceFn(ctx, target, stdin, args...)
 	}
-	dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))
-	if dockerBin == "" {
-		dockerBin = "docker"
-	}
+	dockerBin := configuredWorkspaceDockerBin(r.cfg)
 	dockerArgs := []string{"exec", "-i"}
 	if strings.TrimSpace(execTarget.Workdir) != "" {
 		dockerArgs = append(dockerArgs, "-w", execTarget.Workdir)

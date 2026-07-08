@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -67,8 +68,7 @@ func TestNativeWorkspaceCommandFailsClosedForHostTargetWithoutBackingPath(t *tes
 func TestNativeWorkspaceCommandDoesNotFallbackFromDockerToHost(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "fallback-marker")
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
-	t.Setenv("SWARM_DOCKER_BIN", missingDocker)
-	exec := &Executor{}
+	exec := &Executor{cfg: &config.Config{Workspace: config.WorkspaceConfig{DockerBin: missingDocker}}}
 	_, _, exitCode, err := exec.runWorkspaceCommand(context.Background(), &workspace.Target{
 		Backend:   workspace.BackendDocker,
 		Container: "swarm-agent",

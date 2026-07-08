@@ -63,10 +63,23 @@ type DevEntityContainerCleaner interface {
 }
 
 const DevEntityCleanupOperationName = "swarm.serve.dev.entity_container_cleanup"
-const defaultWorkspaceImage = "swarm-workspace:latest"
 
-func ConfiguredWorkspaceImageFromEnv() string {
-	return EnvOrDefault("SWARM_WORKSPACE_IMAGE", defaultWorkspaceImage)
+const (
+	defaultDockerBin        = "docker"
+	defaultWorkspaceImage   = "swarm-workspace:latest"
+	defaultWorkspaceNetwork = "mas_default"
+)
+
+func DefaultDockerBin() string {
+	return defaultDockerBin
+}
+
+func DefaultWorkspaceImage() string {
+	return defaultWorkspaceImage
+}
+
+func DefaultWorkspaceNetwork() string {
+	return defaultWorkspaceNetwork
 }
 
 type DockerConfig struct {
@@ -94,24 +107,24 @@ type DockerConfig struct {
 
 func DefaultDockerConfig() DockerConfig {
 	return DockerConfig{
-		DockerBin:             EnvOrDefault("SWARM_DOCKER_BIN", "docker"),
-		WorkspaceImage:        ConfiguredWorkspaceImageFromEnv(),
-		WorkspaceNetwork:      EnvOrDefault("SWARM_WORKSPACE_NETWORK", "mas_default"),
-		WorkspaceVolumesFrom:  EnvOrDefault("SWARM_WORKSPACE_VOLUMES_FROM", ""),
+		DockerBin:             defaultDockerBin,
+		WorkspaceImage:        defaultWorkspaceImage,
+		WorkspaceNetwork:      defaultWorkspaceNetwork,
+		WorkspaceVolumesFrom:  "",
 		SharedDataSource:      "",
-		DataMountPoint:        EnvOrDefault("SWARM_WORKSPACE_DATA_MOUNT", "/data"),
-		ContractsSource:       EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_SOURCE", ""),
-		ContractsMountPoint:   EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_MOUNT", "/opt/swarm/contracts"),
-		ScaffoldContainer:     EnvOrDefault("SWARM_SCAFFOLD_CONTAINER", "swarm-scaffold"),
-		ScaffoldWorkdir:       EnvOrDefault("SWARM_SCAFFOLD_WORKDIR", "/opt/swarm/scaffold"),
-		ScaffoldVolume:        EnvOrDefault("SWARM_SCAFFOLD_VOLUME", "scaffold"),
-		SystemContainer:       EnvOrDefault("SWARM_SYSTEM_CONTAINER", "swarm-system"),
-		SystemWorkdir:         EnvOrDefault("SWARM_SYSTEM_WORKDIR", "/opt/swarm"),
-		SystemEntitiesVolume:  EnvOrDefault("SWARM_SYSTEM_ENTITIES_VOLUME", "entities"),
-		SystemNginxVolume:     EnvOrDefault("SWARM_SYSTEM_NGINX_VOLUME", "nginx"),
-		SystemSystemdVolume:   EnvOrDefault("SWARM_SYSTEM_SYSTEMD_VOLUME", "systemd"),
-		EntityContainerPrefix: EnvOrDefault("SWARM_ENTITY_CONTAINER_PREFIX", "swarm-"),
-		EntityWorkdir:         EnvOrDefault("SWARM_ENTITY_WORKDIR", "/workspace"),
+		DataMountPoint:        "/data",
+		ContractsSource:       "",
+		ContractsMountPoint:   "/opt/swarm/contracts",
+		ScaffoldContainer:     "swarm-scaffold",
+		ScaffoldWorkdir:       "/opt/swarm/scaffold",
+		ScaffoldVolume:        "scaffold",
+		SystemContainer:       "swarm-system",
+		SystemWorkdir:         "/opt/swarm",
+		SystemEntitiesVolume:  "entities",
+		SystemNginxVolume:     "nginx",
+		SystemSystemdVolume:   "systemd",
+		EntityContainerPrefix: "swarm-",
+		EntityWorkdir:         "/workspace",
 	}
 }
 
@@ -305,7 +318,7 @@ func (m *DockerManager) CheckWorkspaceCLICommandAvailable(ctx context.Context, c
 		command = "claude"
 	}
 	if _, err := m.RunDocker(ctx, "run", "--rm", "--entrypoint", "sh", image, "-lc", `command -v -- "$1" >/dev/null && "$1" --version >/dev/null`, "swarm-cli-proof", command); err != nil {
-		return fmt.Errorf("workspace prerequisite failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE to a compatible image: %w", command, image, err)
+		return fmt.Errorf("workspace prerequisite failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, remove stale workspace containers, or set workspace.image to a compatible image: %w", command, image, err)
 	}
 	return nil
 }
@@ -781,7 +794,7 @@ func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
 		return fmt.Errorf("workspace prerequisite failed: workspace image is required")
 	}
 	if _, err := m.RunDocker(ctx, "image", "inspect", image); err != nil {
-		return fmt.Errorf("workspace prerequisite failed: workspace image %s is not available; build or pull the image before startup, or set SWARM_WORKSPACE_IMAGE to an available image: %w", image, err)
+		return fmt.Errorf("workspace prerequisite failed: workspace image %s is not available; build or pull the image before startup, or set workspace.image to an available image: %w", image, err)
 	}
 	return nil
 }
@@ -1296,12 +1309,4 @@ func SanitizeSlug(raw string) string {
 		return ""
 	}
 	return out
-}
-
-func EnvOrDefault(key, fallback string) string {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	return v
 }

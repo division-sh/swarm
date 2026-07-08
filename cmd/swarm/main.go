@@ -76,8 +76,8 @@ const (
 var (
 	buildStoresForServe                  = buildStores
 	runtimeConfigExecutablePath          = os.Executable
-	configuredWorkspaceLifecycleForServe = func(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
-		return configuredWorkspaceLifecycleForBackend(db, contractsRoot, source, mountSources, backend)
+	configuredWorkspaceLifecycleForServe = func(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+		return configuredWorkspaceLifecycleForBackend(db, cfg, contractsRoot, source, mountSources, backend)
 	}
 )
 
@@ -698,7 +698,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	}
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = strings.TrimSpace(bundleSourceFact.BundleHash)
-	workspaces, err := configuredWorkspaceLifecycleForServe(req.Stores.SQLDB, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
+	workspaces, err := configuredWorkspaceLifecycleForServe(req.Stores.SQLDB, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
@@ -973,7 +973,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		log.Printf("serve abandon active runs complete: runs=%d deliveries=%d pipeline_receipts=%d", len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
 	}
 	if recoveryStore := storeFacade.startupRecoveryStore(); recoveryStore != nil {
-		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), loadedBundle.contractsRoot, source, mountSources, primaryWorkspaceBackend)
+		recoveryWorkspaces, err := configuredWorkspaceLifecycleForServe(storeFacade.workspaceDB(), cfg, loadedBundle.contractsRoot, source, mountSources, primaryWorkspaceBackend)
 		if err != nil {
 			slog.Error("configure recovery workspaces", "error", err)
 			return 1
@@ -1815,7 +1815,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaces, err := configuredWorkspaceLifecycleForBackend(storeFacade.workspaceDB(), contractsRoot, source, mountSources, workspaceBackend)
+		workspaces, err := configuredWorkspaceLifecycleForBackend(storeFacade.workspaceDB(), cfg, contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)
@@ -3455,28 +3455,31 @@ func buildProviderCredentialStore() (runtimecredentials.Store, error) {
 	return credentialFileStore()
 }
 
-func configuredWorkspaceLifecycle(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.DockerManager, error) {
+func configuredWorkspaceLifecycle(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.DockerManager, error) {
 	manager := workspace.NewDockerManager(db)
-	cfg := workspace.DefaultDockerConfig()
+	workspaceCfg, err := dockerWorkspaceConfigFromRuntimeConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if dataSource := strings.TrimSpace(mountSources.DataSource); dataSource != "" {
-		if volumesFrom := strings.TrimSpace(cfg.WorkspaceVolumesFrom); volumesFrom != "" {
+		if volumesFrom := strings.TrimSpace(workspaceCfg.WorkspaceVolumesFrom); volumesFrom != "" {
 			sourceLabel := strings.TrimSpace(mountSources.DataSourceSource)
 			if sourceLabel == "" {
 				sourceLabel = "explicit data source"
 			}
-			return nil, fmt.Errorf("workspace data source from %s cannot be combined with SWARM_WORKSPACE_VOLUMES_FROM=%s", sourceLabel, volumesFrom)
+			return nil, fmt.Errorf("workspace data source from %s cannot be combined with workspace.volumes_from=%s", sourceLabel, volumesFrom)
 		}
-		cfg.SharedDataSource = dataSource
+		workspaceCfg.SharedDataSource = dataSource
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
-		cfg.ContractsSource = contractsDir
+		workspaceCfg.ContractsSource = contractsDir
 	}
-	manager.SetConfig(cfg)
+	manager.SetConfig(workspaceCfg)
 	manager.SetSemanticSource(source)
 	return manager, nil
 }
 
-func configuredWorkspaceLifecycleForBackend(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
+func configuredWorkspaceLifecycleForBackend(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources, backend workspaceBackendSelection) (serveWorkspaceLifecycle, error) {
 	selected := strings.TrimSpace(backend.Backend)
 	if selected == "" {
 		return nil, fmt.Errorf("workspace backend decision is required")
@@ -3485,9 +3488,9 @@ func configuredWorkspaceLifecycleForBackend(db *sql.DB, contractsRoot string, so
 	case workspaceBackendNone:
 		return nil, nil
 	case workspace.BackendDocker:
-		return configuredWorkspaceLifecycle(db, contractsRoot, source, mountSources)
+		return configuredWorkspaceLifecycle(db, cfg, contractsRoot, source, mountSources)
 	case workspace.BackendHost:
-		return configuredHostWorkspaceLifecycle(db, contractsRoot, source, mountSources)
+		return configuredHostWorkspaceLifecycle(db, cfg, contractsRoot, source, mountSources)
 	default:
 		sourceLabel := strings.TrimSpace(backend.Source)
 		if sourceLabel == "" {
@@ -3497,19 +3500,26 @@ func configuredWorkspaceLifecycleForBackend(db *sql.DB, contractsRoot string, so
 	}
 }
 
-func configuredHostWorkspaceLifecycle(db *sql.DB, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.HostManager, error) {
-	if volumesFrom := strings.TrimSpace(os.Getenv("SWARM_WORKSPACE_VOLUMES_FROM")); volumesFrom != "" {
-		return nil, fmt.Errorf("host workspace backend cannot consume SWARM_WORKSPACE_VOLUMES_FROM=%s", volumesFrom)
+func configuredHostWorkspaceLifecycle(db *sql.DB, cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources workspaceMountSources) (*workspace.HostManager, error) {
+	if cfg != nil && cfg.Workspace.VolumesFromConfigured() {
+		volumesFrom := strings.TrimSpace(cfg.Workspace.VolumesFrom)
+		if volumesFrom == "" {
+			return nil, fmt.Errorf("workspace.volumes_from must be non-empty when configured")
+		}
+		return nil, fmt.Errorf("host workspace backend cannot consume workspace.volumes_from=%s", volumesFrom)
 	}
 	manager := workspace.NewHostManager(db)
-	cfg := workspace.DefaultHostConfig()
+	workspaceCfg, err := hostWorkspaceConfigFromRuntimeConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	if dataSource := strings.TrimSpace(mountSources.DataSource); dataSource != "" {
-		cfg.SharedDataSource = dataSource
+		workspaceCfg.SharedDataSource = dataSource
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
-		cfg.ContractsSource = contractsDir
+		workspaceCfg.ContractsSource = contractsDir
 	}
-	manager.SetConfig(cfg)
+	manager.SetConfig(workspaceCfg)
 	manager.SetSemanticSource(source)
 	return manager, nil
 }

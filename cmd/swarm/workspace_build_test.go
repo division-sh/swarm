@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +16,10 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 	sourceRoot := repoRoot()
 	tempCWD := t.TempDir()
 	chdirForTest(t, tempCWD)
-	callsPath := configureWorkspaceBuildDockerStub(t)
-	t.Setenv("SWARM_WORKSPACE_IMAGE", "")
+	stub := configureWorkspaceBuildDockerStub(t)
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), tempCWD, []string{"workspace", "build", "--backend", "claude_cli"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), tempCWD, []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", stub.dockerPath}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitOK {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -36,7 +36,7 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 		}
 	}
 
-	calls := readWorkspaceBuildDockerCalls(t, callsPath)
+	calls := readWorkspaceBuildDockerCalls(t, stub.callsPath)
 	if len(calls) != 5 {
 		t.Fatalf("docker call count = %d, want 5:\n%s", len(calls), strings.Join(calls, "\n"))
 	}
@@ -83,32 +83,67 @@ func TestWorkspaceBuildClaudeCLIUsesEmbeddedBuildPlanFromTempCWD(t *testing.T) {
 }
 
 func TestWorkspaceBuildClaudeCLIImageOverride(t *testing.T) {
-	callsPath := configureWorkspaceBuildDockerStub(t)
-	t.Setenv("SWARM_WORKSPACE_IMAGE", "env-image:latest")
+	stub := configureWorkspaceBuildDockerStub(t)
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--image", "custom/image:test"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", stub.dockerPath, "--image", "custom/image:test"}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitOK {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	calls := strings.Join(readWorkspaceBuildDockerCalls(t, callsPath), "\n")
+	calls := strings.Join(readWorkspaceBuildDockerCalls(t, stub.callsPath), "\n")
 	if !strings.Contains(calls, "tag swarm-workspace-build-") || !strings.Contains(calls, " custom/image:test") {
 		t.Fatalf("docker calls did not use --image override:\n%s", calls)
 	}
 	if strings.Contains(calls, "build -t custom/image:test") || strings.Contains(calls, "run --rm --entrypoint sh custom/image:test") {
 		t.Fatalf("docker calls published or validated final image before validation completed:\n%s", calls)
 	}
-	if strings.Contains(calls, "env-image:latest") {
-		t.Fatalf("docker calls used env image despite --image override:\n%s", calls)
+}
+
+func TestWorkspaceBuildConfigPathResolvesFromDiscoveredRepoRoot(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module workspace-build-config-test\n"), 0o644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	stub := configureWorkspaceBuildDockerStub(t)
+	writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  image: repo-config-image:test",
+		fmt.Sprintf("  docker_bin: %q", stub.dockerPath),
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")+"\n")
+	subdir := filepath.Join(repo, "nested", "child")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir nested cwd: %v", err)
+	}
+	chdirForTest(t, subdir)
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), "", []string{"workspace", "build", "--backend", "claude_cli", "--config", "swarm.yaml"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitOK {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	calls := strings.Join(readWorkspaceBuildDockerCalls(t, stub.callsPath), "\n")
+	if !strings.Contains(calls, " repo-config-image:test") {
+		t.Fatalf("docker calls did not use workspace.image from repo-root config:\n%s", calls)
+	}
+	if strings.Contains(calls, " swarm-workspace:latest") {
+		t.Fatalf("docker calls used default image instead of repo-root config:\n%s", calls)
 	}
 }
 
 func TestWorkspaceBuildClaudeCLIFailsOnDockerBuildError(t *testing.T) {
-	configureWorkspaceBuildDockerStub(t)
+	stub := configureWorkspaceBuildDockerStub(t)
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_BUILD", "1")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", stub.dockerPath}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
@@ -120,11 +155,11 @@ func TestWorkspaceBuildClaudeCLIFailsOnDockerBuildError(t *testing.T) {
 }
 
 func TestWorkspaceBuildClaudeCLIFailsOnValidationError(t *testing.T) {
-	callsPath := configureWorkspaceBuildDockerStub(t)
+	stub := configureWorkspaceBuildDockerStub(t)
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", "1")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", stub.dockerPath}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
@@ -133,7 +168,7 @@ func TestWorkspaceBuildClaudeCLIFailsOnValidationError(t *testing.T) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
 	}
-	calls := strings.Join(readWorkspaceBuildDockerCalls(t, callsPath), "\n")
+	calls := strings.Join(readWorkspaceBuildDockerCalls(t, stub.callsPath), "\n")
 	if strings.Contains(calls, "\ntag ") || strings.HasPrefix(calls, "tag ") {
 		t.Fatalf("docker calls published final image after validation failure:\n%s", calls)
 	}
@@ -143,14 +178,14 @@ func TestWorkspaceBuildClaudeCLIFailsOnValidationError(t *testing.T) {
 }
 
 func TestWorkspaceBuildClaudeCLIFailsOnUnavailableDocker(t *testing.T) {
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
+	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli"}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"workspace", "build", "--backend", "claude_cli", "--docker-bin", missingDocker}, &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
-	for _, want := range []string{"Docker is not available", "SWARM_DOCKER_BIN"} {
+	for _, want := range []string{"Docker is not available", "--docker-bin"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
 		}
@@ -224,7 +259,7 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 			t.Fatalf("build plan rule missing %q:\n%s", want, owner.BuildPlanRule)
 		}
 	}
-	for _, want := range []string{"SWARM_WORKSPACE_IMAGE", "swarm-workspace:latest", "--image"} {
+	for _, want := range []string{"workspace.image", "swarm-workspace:latest", "--image"} {
 		if !strings.Contains(owner.ImageTargetRule, want) {
 			t.Fatalf("image target rule missing %q:\n%s", want, owner.ImageTargetRule)
 		}
@@ -244,10 +279,10 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 		}
 	}
 	row := spec.CLISpecification.CommandCatalog.WorkspaceBuild
-	if row.Command != "swarm workspace build --backend claude_cli [--image <tag>]" || row.ImplementationStatus != "implemented_first_slice" || row.Owner != "workspace_model.local_workspace_image_build_authority" {
+	if row.Command != "swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]" || row.ImplementationStatus != "implemented_first_slice" || row.Owner != "workspace_model.local_workspace_image_build_authority" {
 		t.Fatalf("workspace_build command catalog row = %#v", row)
 	}
-	for _, want := range []string{"embedded/materialized", "temporary image tag", "SWARM_DOCKER_BIN", "SWARM_WORKSPACE_IMAGE", "claude --version"} {
+	for _, want := range []string{"embedded/materialized", "temporary image tag", "workspace.docker_bin", "workspace.image", "claude --version"} {
 		if !strings.Contains(row.Behavior, want) {
 			t.Fatalf("workspace_build behavior missing %q:\n%s", want, row.Behavior)
 		}
@@ -257,7 +292,12 @@ func TestWorkspaceBuildSpecAuthorityPromoted(t *testing.T) {
 	}
 }
 
-func configureWorkspaceBuildDockerStub(t *testing.T) string {
+type workspaceBuildDockerStub struct {
+	callsPath  string
+	dockerPath string
+}
+
+func configureWorkspaceBuildDockerStub(t *testing.T) workspaceBuildDockerStub {
 	t.Helper()
 	dir := t.TempDir()
 	callsPath := filepath.Join(dir, "docker.calls")
@@ -301,11 +341,10 @@ esac
 	if err := os.WriteFile(dockerPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", dockerPath)
 	t.Setenv("SWARM_TEST_DOCKER_CALLS", callsPath)
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_BUILD", "")
 	t.Setenv("SWARM_TEST_DOCKER_FAIL_VALIDATE", "")
-	return callsPath
+	return workspaceBuildDockerStub{callsPath: callsPath, dockerPath: dockerPath}
 }
 
 func workspaceBuildTaggedImageFromCall(t *testing.T, call string) string {

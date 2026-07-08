@@ -10,9 +10,6 @@ import (
 )
 
 const (
-	envWorkspaceDataSource  = "SWARM_WORKSPACE_DATA_SOURCE"
-	envWorkspaceVolumesFrom = "SWARM_WORKSPACE_VOLUMES_FROM"
-
 	defaultWorkspaceDataSourceRelativePath = ".swarm/data"
 	defaultWorkspaceDataSourceSource       = "project_default"
 )
@@ -30,9 +27,6 @@ type workspaceDataSourceInput struct {
 	ConfigDataSource    string
 	ConfigDataSourceSet bool
 
-	EnvDataSource    string
-	EnvDataSourceSet bool
-
 	VolumesFrom    string
 	VolumesFromSet bool
 
@@ -49,9 +43,6 @@ func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (workspa
 	case in.ConfigDataSourceSet:
 		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.ConfigDataSource, "workspace.data_source")
 		return workspaceMountSources{DataSource: path, DataSourceSource: "workspace.data_source"}, err
-	case in.EnvDataSourceSet:
-		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.EnvDataSource, envWorkspaceDataSource)
-		return workspaceMountSources{DataSource: path, DataSourceSource: envWorkspaceDataSource}, err
 	case in.VolumesFromSet && strings.TrimSpace(in.VolumesFrom) != "":
 		return workspaceMountSources{}, nil
 	case strings.TrimSpace(in.DefaultDataSource) != "":
@@ -66,7 +57,7 @@ func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (workspa
 		}
 		return workspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, nil
 	default:
-		return workspaceMountSources{}, fmt.Errorf("workspace data source is required: pass --data, set workspace.data_source, set %s, or run from a project with a managed %s default", envWorkspaceDataSource, defaultWorkspaceDataSourceRelativePath)
+		return workspaceMountSources{}, fmt.Errorf("workspace data source is required: pass --data, set workspace.data_source, or run from a project with a managed %s default", defaultWorkspaceDataSourceRelativePath)
 	}
 }
 

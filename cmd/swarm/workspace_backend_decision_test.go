@@ -107,7 +107,7 @@ func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 			agents: map[string]runtimecontracts.AgentRegistryEntry{
 				"worker": {ID: "worker", NativeTools: map[string]any{"bash": true}},
 			},
-			preference: workspaceBackendSelection{Backend: workspace.BackendHost, Source: envWorkspaceBackend, PreferenceExplicit: true},
+			preference: workspaceBackendSelection{Backend: workspace.BackendHost, Source: "SWARM_WORKSPACE_BACKEND", PreferenceExplicit: true},
 			wantErr:    "cannot authorize unsafe host execution",
 		},
 		{
@@ -144,7 +144,7 @@ func TestWorkspaceBackendDecisionCapabilityMatrix(t *testing.T) {
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendNoWorkspace(t *testing.T) {
-	lifecycle, err := configuredWorkspaceLifecycleForBackend(nil, "", semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{}, workspaceBackendSelection{Backend: workspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
+	lifecycle, err := configuredWorkspaceLifecycleForBackend(nil, nil, "", semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), workspaceMountSources{}, workspaceBackendSelection{Backend: workspaceBackendNone, Source: "capability-derived", NoWorkspace: true})
 	if err != nil {
 		t.Fatalf("configuredWorkspaceLifecycleForBackend: %v", err)
 	}

@@ -572,6 +572,27 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
 		)
 	}
+	retiredWorkspaceConfig := func(name, key string) swarmEnvCatalogEntry {
+		return retired(
+			name,
+			name+" is retired as workspace/tooling environment source; use "+key,
+			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
+		)
+	}
+	retiredWorkspaceFlagOrConfig := func(name, replacement string) swarmEnvCatalogEntry {
+		return retired(
+			name,
+			name+" is retired as workspace/tooling environment source; use "+replacement,
+			"unset "+name+"; use "+replacement,
+		)
+	}
+	retiredWorkspaceInternal := func(name string) swarmEnvCatalogEntry {
+		return retired(
+			name,
+			name+" is retired as workspace lifecycle environment source; this value is internal runtime plumbing",
+			"unset "+name+"; no supported env replacement exists",
+		)
+	}
 	retiredUnsupported := func(name string) swarmEnvCatalogEntry {
 		return retired(
 			name,
@@ -605,26 +626,26 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		retiredStoreDatabaseConfig("SWARM_DB_SSLMODE", "database.sslmode"),
 		retiredStoreDatabaseConfig("SWARM_DB_POOL_SIZE", "database.pool_size"),
 		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in the runtime config"),
-		seeded("SWARM_WORKSPACE_DATA_SOURCE", "platform-spec.yaml#workspace_model.data_source_authority", "#1600 workspace.data_source"),
-		seeded("SWARM_WORKSPACE_BACKEND", "platform-spec.yaml#workspace_model.workspace_backend_selection", "#1600 workspace.backend"),
-		seeded("SWARM_DOCKER_BIN", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace/tooling config"),
-		seeded("SWARM_WORKSPACE_IMAGE", "platform-spec.yaml#workspace_model.runtime_image_packaging", "#1600 workspace.image"),
-		seeded("SWARM_WORKSPACE_HOST_ROOT", "platform-spec.yaml#workspace_model.workspace_backend_selection", "#1600 workspace.host_root"),
-		seeded("SWARM_WORKSPACE_VOLUMES_FROM", "platform-spec.yaml#workspace_model.data_source_authority", "#1600 workspace volumes config"),
-		seeded("SWARM_WORKSPACE_NETWORK", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace network config"),
-		seeded("SWARM_WORKSPACE_DATA_MOUNT", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace mount config"),
-		seeded("SWARM_WORKSPACE_CONTRACTS_SOURCE", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace contracts source config"),
-		seeded("SWARM_WORKSPACE_CONTRACTS_MOUNT", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace contracts mount config"),
-		seeded("SWARM_SCAFFOLD_CONTAINER", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SCAFFOLD_WORKDIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SCAFFOLD_VOLUME", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SYSTEM_CONTAINER", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SYSTEM_WORKDIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SYSTEM_ENTITIES_VOLUME", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SYSTEM_NGINX_VOLUME", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_SYSTEM_SYSTEMD_VOLUME", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_ENTITY_CONTAINER_PREFIX", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
-		seeded("SWARM_ENTITY_WORKDIR", "platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice", "#1600 workspace lifecycle config"),
+		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_DATA_SOURCE", "--data or workspace.data_source"),
+		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_BACKEND", "--workspace-backend or workspace.backend"),
+		retiredWorkspaceFlagOrConfig("SWARM_DOCKER_BIN", "--docker-bin for workspace build or workspace.docker_bin"),
+		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_IMAGE", "--image for workspace build or workspace.image"),
+		retiredWorkspaceConfig("SWARM_WORKSPACE_HOST_ROOT", "workspace.host_root"),
+		retiredWorkspaceConfig("SWARM_WORKSPACE_VOLUMES_FROM", "workspace.volumes_from"),
+		retiredWorkspaceConfig("SWARM_WORKSPACE_NETWORK", "workspace.network"),
+		retiredWorkspaceInternal("SWARM_WORKSPACE_DATA_MOUNT"),
+		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_CONTRACTS_SOURCE", "--contracts"),
+		retiredWorkspaceInternal("SWARM_WORKSPACE_CONTRACTS_MOUNT"),
+		retiredWorkspaceInternal("SWARM_SCAFFOLD_CONTAINER"),
+		retiredWorkspaceInternal("SWARM_SCAFFOLD_WORKDIR"),
+		retiredWorkspaceInternal("SWARM_SCAFFOLD_VOLUME"),
+		retiredWorkspaceInternal("SWARM_SYSTEM_CONTAINER"),
+		retiredWorkspaceInternal("SWARM_SYSTEM_WORKDIR"),
+		retiredWorkspaceInternal("SWARM_SYSTEM_ENTITIES_VOLUME"),
+		retiredWorkspaceInternal("SWARM_SYSTEM_NGINX_VOLUME"),
+		retiredWorkspaceInternal("SWARM_SYSTEM_SYSTEMD_VOLUME"),
+		retiredWorkspaceInternal("SWARM_ENTITY_CONTAINER_PREFIX"),
+		retiredWorkspaceInternal("SWARM_ENTITY_WORKDIR"),
 		retiredRuntimeConfig("SWARM_RUNTIME_RECOVERY_ON_STARTUP", "runtime.recovery_on_startup"),
 		retired("SWARM_RUNTIME_MAX_CONCURRENT_AGENTS", "SWARM_RUNTIME_MAX_CONCURRENT_AGENTS is unsupported inert runtime control", "remove it; no runtime path enforces this control"),
 		retired("SWARM_RUNTIME_EVENT_POLL_INTERVAL", "SWARM_RUNTIME_EVENT_POLL_INTERVAL is unsupported inert runtime control", "remove it; no runtime path enforces this control"),

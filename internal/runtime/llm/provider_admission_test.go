@@ -408,7 +408,7 @@ func TestClaudeCLIProviderAdmissionRejectsBeforeSubprocessDispatch(t *testing.T)
 	scriptPath, countFile := writeProviderAdmissionFakeDocker(t, `cat >/dev/null
 printf '%s\n' '{"result":"done"}'
 `)
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
+	cfg.Workspace.DockerBin = scriptPath
 	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
@@ -452,7 +452,7 @@ if [ "$count" = "1" ]; then
 fi
 printf '%s\n' '{"result":"done"}'
 `)
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
+	cfg.Workspace.DockerBin = scriptPath
 	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
 
 	_, fallback, err := runtime.runWithPromptTransportFallback(ctx, []string{"--print"}, target, "hello", MonitorTurnMeta{})

@@ -139,7 +139,6 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 
 func TestClaudeCLIRuntimeRunWithInput_MissingWorkspaceCLIUsesActionableDiagnostic(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
-	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:test")
 
 	tempDir := t.TempDir()
 	scriptPath := filepath.Join(tempDir, "fake-docker.sh")
@@ -152,9 +151,10 @@ exit 127
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
 
 	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
+	cfg.Workspace.Image = "swarm-workspace:test"
 	cfg.LLM.ClaudeCLI.Command = "claude"
 	cfg.LLM.ClaudeCLI.OutputFormat = "json"
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
@@ -177,15 +177,15 @@ exit 127
 }
 
 func TestWorkspaceCLIDiagnosticError_MatchesAbsolutePathNoSuchFile(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:absolute")
 	cfg := &config.Config{}
+	cfg.Workspace.Image = "swarm-workspace:absolute"
 	cfg.LLM.ClaudeCLI.Command = "/usr/local/bin/claude"
 
 	err := workspaceCLIDiagnosticError(cfg, &workspace.Target{Container: "swarm-agent-market-research"}, `OCI runtime exec failed: exec failed: unable to start container process: exec: "/usr/local/bin/claude": stat /usr/local/bin/claude: no such file or directory: unknown`)
 	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {
 		t.Fatalf("workspaceCLIDiagnosticError error = %v, want ErrClaudeWorkspaceCLIUnavailable", err)
 	}
-	for _, want := range []string{`"/usr/local/bin/claude"`, `"swarm-agent-market-research"`, `"swarm-workspace:absolute"`, "set SWARM_WORKSPACE_IMAGE"} {
+	for _, want := range []string{`"/usr/local/bin/claude"`, `"swarm-agent-market-research"`, `"swarm-workspace:absolute"`, "set workspace.image"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("workspaceCLIDiagnosticError error missing %q:\n%v", want, err)
 		}

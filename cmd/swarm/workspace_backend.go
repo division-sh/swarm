@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -12,11 +11,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
-const (
-	envWorkspaceBackend = "SWARM_WORKSPACE_BACKEND"
-
-	workspaceBackendNone = "none"
-)
+const workspaceBackendNone = "none"
 
 type workspaceCapabilityClass string
 
@@ -47,22 +42,16 @@ type workspaceBackendInput struct {
 	ConfigBackend string
 	ConfigSet     bool
 
-	EnvBackend string
-	EnvSet     bool
-
 	AllowExecOnHost bool
 }
 
 func resolveWorkspaceBackend(flagBackend string, flagSet bool, cfg *config.Config) (workspaceBackendSelection, error) {
-	envBackend, envSet := os.LookupEnv(envWorkspaceBackend)
 	configBackend, configSet := runtimeConfigWorkspaceBackend(cfg)
 	return resolveWorkspaceBackendFromInput(workspaceBackendInput{
 		FlagBackend:     flagBackend,
 		FlagSet:         flagSet,
 		ConfigBackend:   configBackend,
 		ConfigSet:       configSet,
-		EnvBackend:      envBackend,
-		EnvSet:          envSet,
 		AllowExecOnHost: runtimeConfigAllowExecOnHost(cfg),
 	})
 }
@@ -100,13 +89,6 @@ func resolveWorkspaceBackendFromInput(in workspaceBackendInput) (workspaceBacken
 			Source:             "workspace.backend",
 			PreferenceExplicit: true,
 			AllowExecOnHost:    in.AllowExecOnHost,
-		}, err
-	case in.EnvSet:
-		backend, err := normalizeWorkspaceBackend(in.EnvBackend, envWorkspaceBackend)
-		return workspaceBackendSelection{
-			Backend:            backend,
-			Source:             envWorkspaceBackend,
-			PreferenceExplicit: true,
 		}, err
 	default:
 		return workspaceBackendSelection{Source: "capability-derived"}, nil
@@ -176,7 +158,7 @@ func decideWorkspaceBackend(preference workspaceBackendSelection, cfg *config.Co
 				case "workspace.backend":
 					return decision, fmt.Errorf("workspace.backend: host grants agent execution on this machine for %s; set workspace.allow_exec_on_host: true or use Docker", workspaceBackendReasonSummary(reasons))
 				default:
-					return decision, fmt.Errorf("%s=host cannot authorize unsafe host execution for %s; use --workspace-backend host for one command or workspace.backend: host with workspace.allow_exec_on_host: true", envWorkspaceBackend, workspaceBackendReasonSummary(reasons))
+					return decision, fmt.Errorf("workspace backend host cannot authorize unsafe host execution for %s; use --workspace-backend host for one command or workspace.backend: host with workspace.allow_exec_on_host: true", workspaceBackendReasonSummary(reasons))
 				}
 			}
 			decision.UnsafeHost = true

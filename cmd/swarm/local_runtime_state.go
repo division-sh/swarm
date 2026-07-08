@@ -180,9 +180,11 @@ func legacyProjectSQLiteStoreError(project localRuntimeStateProject, selection s
 }
 
 func resolveWorkspaceMountSourcesForLocalState(repoRoot string, flagDataSource string, cfg *config.Config, project localRuntimeStateProject, createDefault bool) (workspaceMountSources, error) {
-	envDataSource, envDataSourceSet := os.LookupEnv(envWorkspaceDataSource)
 	configDataSource, configDataSourceSet := runtimeConfigWorkspaceDataSource(cfg)
-	volumesFrom, volumesFromSet := os.LookupEnv(envWorkspaceVolumesFrom)
+	volumesFrom, volumesFromSet, err := runtimeConfigWorkspaceVolumesFrom(cfg)
+	if err != nil {
+		return workspaceMountSources{}, err
+	}
 	defaultDataSource := ""
 	defaultSource := ""
 	if project.ProjectLocal && strings.TrimSpace(project.CanonicalProjectRoot) != "" {
@@ -194,8 +196,6 @@ func resolveWorkspaceMountSourcesForLocalState(repoRoot string, flagDataSource s
 		FlagDataSource:          flagDataSource,
 		ConfigDataSource:        configDataSource,
 		ConfigDataSourceSet:     configDataSourceSet,
-		EnvDataSource:           envDataSource,
-		EnvDataSourceSet:        envDataSourceSet,
 		VolumesFrom:             volumesFrom,
 		VolumesFromSet:          volumesFromSet,
 		DefaultDataSource:       defaultDataSource,

@@ -171,7 +171,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		}
 		report.add(localPreflightBackendPrerequisite, "backend_credential_present", localPreflightSeverityInfo, localPreflightStatusOK, message, "")
 	}
-	report.checkWorkspace(ctx, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command)
+	report.checkWorkspace(ctx, req.Config, source, contractsRoot, req.MountSources, workspaceBackend, req.Config.LLM.ClaudeCLI.Command)
 	return report.finalize()
 }
 
@@ -308,8 +308,8 @@ func (r *localPreflightReport) checkContractSecrets(ctx context.Context, source 
 	}
 }
 
-func (r *localPreflightReport) checkWorkspace(ctx context.Context, source semanticview.Source, contractsRoot string, mountSources workspaceMountSources, backend workspaceBackendSelection, claudeCLICommand string) {
-	workspaces, err := configuredWorkspaceLifecycleForServe(nil, contractsRoot, source, mountSources, backend)
+func (r *localPreflightReport) checkWorkspace(ctx context.Context, cfg *config.Config, source semanticview.Source, contractsRoot string, mountSources workspaceMountSources, backend workspaceBackendSelection, claudeCLICommand string) {
+	workspaces, err := configuredWorkspaceLifecycleForServe(nil, cfg, contractsRoot, source, mountSources, backend)
 	if err != nil {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_config_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix workspace backend or mount configuration")
 		return
@@ -328,12 +328,12 @@ func (r *localPreflightReport) checkWorkspace(ctx context.Context, source semant
 		return
 	}
 	if err := dockerManager.CheckDockerAvailable(ctx); err != nil {
-		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "start Docker or set SWARM_DOCKER_BIN to a working Docker-compatible CLI")
+		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "start Docker, set workspace.docker_bin in runtime config, or pass --docker-bin to `swarm workspace build`")
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "docker_available", localPreflightSeverityInfo, localPreflightStatusOK, "Docker is reachable", "")
 	}
 	if err := dockerManager.CheckWorkspaceImageAvailable(ctx); err != nil {
-		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "run `swarm workspace build --backend claude_cli`, pull the configured workspace image, or set SWARM_WORKSPACE_IMAGE")
+		r.add(localPreflightWorkspacePrerequisite, "workspace_image_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "run `swarm workspace build --backend claude_cli`, pull the configured workspace image, or set workspace.image")
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "workspace_image_available", localPreflightSeverityInfo, localPreflightStatusOK, "workspace image is available", "")
 	}

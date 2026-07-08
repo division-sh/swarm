@@ -100,7 +100,7 @@ func newRuntimeProjectSupervisor(
 			if err != nil {
 				return nil, workspaceBackendSelection{}, err
 			}
-			lifecycle, err := configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), contractsRoot, source, mountSources, decision)
+			lifecycle, err := configuredWorkspaceLifecycleForBackend(stores.facade().workspaceDB(), cfg, contractsRoot, source, mountSources, decision)
 			if err != nil {
 				return nil, decision, err
 			}

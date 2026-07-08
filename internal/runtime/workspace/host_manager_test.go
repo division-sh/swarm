@@ -31,7 +31,6 @@ func TestHostManagerValidatesSourcesAndCreatesSystemWorkspacesWithoutDocker(t *t
 	if err := manager.ValidateSource(context.Background(), source); err != nil {
 		t.Fatalf("ValidateSource: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", filepath.Join(t.TempDir(), "missing-docker"))
 	if err := manager.EnsureSystemWorkspaces(context.Background()); err != nil {
 		t.Fatalf("EnsureSystemWorkspaces: %v", err)
 	}

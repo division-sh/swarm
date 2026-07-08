@@ -337,10 +337,7 @@ func (e *Executor) runWorkspaceCommand(ctx context.Context, target *workspace.Ta
 	var cmd *exec.Cmd
 	switch execTarget.Mode {
 	case workspace.ExecutionModeDockerContainer:
-		dockerBin := strings.TrimSpace(os.Getenv("SWARM_DOCKER_BIN"))
-		if dockerBin == "" {
-			dockerBin = "docker"
-		}
+		dockerBin := workspaceDockerBin(e.cfg)
 		dockerArgs := []string{"exec", "-i"}
 		if workdir := strings.TrimSpace(execTarget.Workdir); workdir != "" {
 			dockerArgs = append(dockerArgs, "-w", workdir)
