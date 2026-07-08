@@ -242,6 +242,87 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	}
 }
 
+func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	now := time.Now().UTC()
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, bundle_source, started_at)
+		VALUES (?, 'running', 'legacy', ?)
+	`, runID, now); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES (?, ?, 'custom.stop', 'global', '{}', 'test', 'agent', ?)
+	`, eventID, runID, now); err != nil {
+		t.Fatalf("seed sqlite event: %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at)
+		VALUES (?, ?, ?, 'agent', 'agent-pending', 'pending', ?, ?)
+	`, deliveryID, runID, eventID, uuid.NewString(), now); err != nil {
+		t.Fatalf("seed sqlite pending delivery: %v", err)
+	}
+
+	state, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
+		RunID:        runID,
+		Reason:       "test",
+		ControlledBy: "test",
+		Now:          now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("StopRunControl: %v", err)
+	}
+	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 1 {
+		t.Fatalf("stop state = %+v, want cancelled/stopped/1", state)
+	}
+
+	var deliveryStatus, reasonCode, lastError, activeSession string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(active_session_id, '')
+		FROM event_deliveries
+		WHERE event_id = ?
+		  AND subscriber_id = 'agent-pending'
+	`, eventID).Scan(&deliveryStatus, &reasonCode, &lastError, &activeSession); err != nil {
+		t.Fatalf("load stopped sqlite delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || lastError != "run stopped" || activeSession != "" {
+		t.Fatalf("stopped sqlite delivery = %s/%s/%q active=%q, want dead_letter/run_stopped/run stopped/no active session", deliveryStatus, reasonCode, lastError, activeSession)
+	}
+
+	var agentOutcome, agentReason string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = ?
+		  AND subscriber_type = 'agent'
+		  AND subscriber_id = 'agent-pending'
+	`, eventID).Scan(&agentOutcome, &agentReason); err != nil {
+		t.Fatalf("load stopped sqlite agent receipt: %v", err)
+	}
+	if agentOutcome != "dead_letter" || agentReason != "run_stopped" {
+		t.Fatalf("stopped sqlite agent receipt = %s/%s, want dead_letter/run_stopped", agentOutcome, agentReason)
+	}
+
+	var pipelineOutcome string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT outcome
+		FROM event_receipts
+		WHERE event_id = ?
+		  AND subscriber_type = 'platform'
+		  AND subscriber_id = 'pipeline'
+	`, eventID).Scan(&pipelineOutcome); err != nil {
+		t.Fatalf("load stopped sqlite pipeline receipt: %v", err)
+	}
+	if pipelineOutcome != "dead_letter" {
+		t.Fatalf("stopped sqlite pipeline receipt = %s, want dead_letter", pipelineOutcome)
+	}
+}
+
 func TestSQLiteRuntimeStoreUpsertAgentConsumesActivePipelineTransaction(t *testing.T) {
 	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)

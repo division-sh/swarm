@@ -508,13 +508,17 @@ func sqliteContinueRunControl(ctx context.Context, tx *sql.Tx, state runtimerunc
 	return state, nil
 }
 
-func sqliteStopRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	switch state.Status {
 	case "running", "paused":
 	case "completed", "failed", "cancelled", "forked":
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	default:
 		return runtimeruncontrol.State{}, fmt.Errorf("unsupported run status %q", state.Status)
+	}
+	abandoned, err := s.sqliteAbandonPendingRunDeliveriesTx(ctx, tx, state.RunID)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', ended_at = COALESCE(ended_at, ?) WHERE run_id = ?`, req.Now.UTC(), state.RunID); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("stop sqlite run: %w", err)
@@ -533,5 +537,94 @@ func sqliteStopRunControl(ctx context.Context, tx *sql.Tx, state runtimeruncontr
 	state.Reason = req.Reason
 	state.ControlledBy = req.ControlledBy
 	state.UpdatedAt = req.Now.UTC()
+	state.AbandonedDeliveries = abandoned
 	return state, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT event_id, subscriber_id
+		FROM event_deliveries
+		WHERE run_id = ?
+		  AND subscriber_type = 'agent'
+		  AND status = 'pending'
+		ORDER BY event_id ASC, subscriber_id ASC
+	`, runID)
+	if err != nil {
+		return 0, fmt.Errorf("query sqlite pending run deliveries: %w", err)
+	}
+	defer rows.Close()
+	type target struct {
+		eventID string
+		agentID string
+	}
+	targets := []target{}
+	for rows.Next() {
+		var item target
+		if err := rows.Scan(&item.eventID, &item.agentID); err != nil {
+			return 0, fmt.Errorf("scan sqlite pending run delivery: %w", err)
+		}
+		item.eventID = strings.TrimSpace(item.eventID)
+		item.agentID = strings.TrimSpace(item.agentID)
+		if item.eventID != "" && item.agentID != "" {
+			targets = append(targets, item)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read sqlite pending run deliveries: %w", err)
+	}
+
+	eventsTouched := map[string]struct{}{}
+	abandoned := 0
+	for _, item := range targets {
+		delivery, err := s.sqliteLockAgentDeliveryTx(ctx, tx, item.eventID, item.agentID)
+		if err != nil {
+			return 0, err
+		}
+		if !delivery.found || strings.TrimSpace(delivery.status) != "pending" {
+			continue
+		}
+		if _, err := s.applySQLiteDeliveryBackedTerminalTransitionTx(ctx, tx, item.eventID, item.agentID, delivery, deliveryBackedTerminalTransitionRequest{
+			reasonCode:   "run_stopped",
+			errorText:    "run stopped",
+			retryAdvance: 0,
+		}); err != nil {
+			return 0, fmt.Errorf("abandon sqlite stopped run delivery: %w", err)
+		}
+		eventsTouched[item.eventID] = struct{}{}
+		abandoned++
+	}
+	for eventID := range eventsTouched {
+		var active bool
+		if err := tx.QueryRowContext(ctx, `
+				SELECT EXISTS (
+					SELECT 1
+					FROM event_deliveries
+					WHERE event_id = ?
+				  AND status IN ('pending', 'in_progress')
+			)
+		`, eventID).Scan(&active); err != nil {
+			return 0, fmt.Errorf("check sqlite stopped run event active deliveries: %w", err)
+		}
+		if !active {
+			var hasPipelineReceipt bool
+			if err := tx.QueryRowContext(ctx, `
+					SELECT EXISTS (
+						SELECT 1
+						FROM event_receipts
+						WHERE event_id = ?
+						  AND subscriber_type = 'platform'
+						  AND subscriber_id = 'pipeline'
+					)
+				`, eventID).Scan(&hasPipelineReceipt); err != nil {
+				return 0, fmt.Errorf("check sqlite stopped run pipeline receipt: %w", err)
+			}
+			if !hasPipelineReceipt {
+				if err := s.UpsertPipelineReceiptTx(ctx, tx, eventID, "error", "run stopped"); err != nil {
+					return 0, fmt.Errorf("mark sqlite stopped run pipeline receipt: %w", err)
+				}
+			}
+		}
+	}
+	return abandoned, nil
 }

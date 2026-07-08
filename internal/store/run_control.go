@@ -313,18 +313,32 @@ func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *s
 	for eventID := range eventsTouched {
 		var active bool
 		if err := tx.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM event_deliveries
-				WHERE event_id = $1::uuid
+				SELECT EXISTS (
+					SELECT 1
+					FROM event_deliveries
+					WHERE event_id = $1::uuid
 				  AND status IN ('pending', 'in_progress')
 			)
 		`, eventID).Scan(&active); err != nil {
 			return 0, fmt.Errorf("check stopped run event active deliveries: %w", err)
 		}
 		if !active {
-			if err := s.upsertPipelineReceiptSpec(ctx, tx, eventID, "error", "run stopped"); err != nil {
-				return 0, fmt.Errorf("mark stopped run pipeline receipt: %w", err)
+			var hasPipelineReceipt bool
+			if err := tx.QueryRowContext(ctx, `
+					SELECT EXISTS (
+						SELECT 1
+						FROM event_receipts
+						WHERE event_id = $1::uuid
+						  AND subscriber_type = 'platform'
+						  AND subscriber_id = 'pipeline'
+					)
+				`, eventID).Scan(&hasPipelineReceipt); err != nil {
+				return 0, fmt.Errorf("check stopped run pipeline receipt: %w", err)
+			}
+			if !hasPipelineReceipt {
+				if err := s.upsertPipelineReceiptSpec(ctx, tx, eventID, "error", "run stopped"); err != nil {
+					return 0, fmt.Errorf("mark stopped run pipeline receipt: %w", err)
+				}
 			}
 		}
 	}
