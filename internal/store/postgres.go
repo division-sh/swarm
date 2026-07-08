@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -205,6 +206,9 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	if err := s.ensureRunForkBundleHashSelectionSchema(ctx, catalog); err != nil {
 		return err
 	}
+	if err := s.ensureMailboxDeferredUntilSchema(ctx, catalog); err != nil {
+		return err
+	}
 	if catalog.hasTable("events") {
 		for _, stmt := range []struct {
 			column string
@@ -391,6 +395,35 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *PostgresStore) ensureMailboxDeferredUntilSchema(ctx context.Context, catalog schemaColumnCatalog) error {
+	if s == nil || s.DB == nil || !catalog.hasTable("mailbox") {
+		return nil
+	}
+	if !catalog.hasColumns("mailbox", "deferred_until") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE mailbox ADD COLUMN IF NOT EXISTS deferred_until TIMESTAMPTZ`); err != nil {
+			return fmt.Errorf("ensure mailbox.deferred_until column: %w", err)
+		}
+	}
+	if !catalog.hasColumns("mailbox", "status", "decision") {
+		return nil
+	}
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE mailbox
+		SET status = 'pending',
+		    decision = NULL,
+		    deferred_until = NULL
+		WHERE status = 'decided'
+		  AND COALESCE(decision, '') = 'deferred'
+	`)
+	if err != nil {
+		return fmt.Errorf("normalize postgres legacy deferred mailbox rows: %w", err)
+	}
+	if count, err := res.RowsAffected(); err == nil && count > 0 {
+		log.Printf("normalized %d postgres legacy deferred mailbox rows to pending with deferred_until unset", count)
+	}
+	return nil
 }
 
 func (s *PostgresStore) ensureAgentLLMBackendProfiles(ctx context.Context) error {
