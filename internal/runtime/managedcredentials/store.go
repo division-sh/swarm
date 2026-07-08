@@ -1,6 +1,7 @@
 package managedcredentials
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -16,9 +17,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 )
 
 const (
+	GrantAuthorizationCode     = "authorization_code"
 	GrantAuthorizationCodePKCE = "authorization_code_pkce"
 	GrantClientCredentials     = "client_credentials"
 
@@ -43,39 +47,43 @@ type Store interface {
 }
 
 type Record struct {
-	Key             string    `json:"key"`
-	Provider        string    `json:"provider"`
-	Account         string    `json:"account,omitempty"`
-	GrantType       string    `json:"grant_type"`
-	AuthURL         string    `json:"auth_url,omitempty"`
-	TokenURL        string    `json:"token_url"`
-	ClientID        string    `json:"client_id"`
-	ClientSecret    string    `json:"client_secret,omitempty"`
-	RedirectURL     string    `json:"redirect_url,omitempty"`
-	Scopes          []string  `json:"scopes,omitempty"`
-	AccessToken     string    `json:"access_token,omitempty"`
-	RefreshToken    string    `json:"refresh_token,omitempty"`
-	TokenType       string    `json:"token_type,omitempty"`
-	ExpiresAt       time.Time `json:"expires_at,omitempty"`
-	Status          string    `json:"status"`
-	Failure         string    `json:"failure,omitempty"`
-	PKCEVerifier    string    `json:"pkce_verifier,omitempty"`
-	PKCEChallenge   string    `json:"pkce_challenge,omitempty"`
-	OAuthState      string    `json:"oauth_state,omitempty"`
-	RefreshWindowMS int64     `json:"refresh_window_ms,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	Key             string                                     `json:"key"`
+	Provider        string                                     `json:"provider"`
+	Account         string                                     `json:"account,omitempty"`
+	GrantType       string                                     `json:"grant_type"`
+	AuthURL         string                                     `json:"auth_url,omitempty"`
+	TokenURL        string                                     `json:"token_url"`
+	ClientID        string                                     `json:"client_id"`
+	ClientSecret    string                                     `json:"client_secret,omitempty"`
+	RedirectURL     string                                     `json:"redirect_url,omitempty"`
+	Scopes          []string                                   `json:"scopes,omitempty"`
+	GrantModel      string                                     `json:"grant_model,omitempty"`
+	TokenRequest    managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	AccessToken     string                                     `json:"access_token,omitempty"`
+	RefreshToken    string                                     `json:"refresh_token,omitempty"`
+	TokenType       string                                     `json:"token_type,omitempty"`
+	ExpiresAt       time.Time                                  `json:"expires_at,omitempty"`
+	Status          string                                     `json:"status"`
+	Failure         string                                     `json:"failure,omitempty"`
+	PKCEVerifier    string                                     `json:"pkce_verifier,omitempty"`
+	PKCEChallenge   string                                     `json:"pkce_challenge,omitempty"`
+	OAuthState      string                                     `json:"oauth_state,omitempty"`
+	RefreshWindowMS int64                                      `json:"refresh_window_ms,omitempty"`
+	UpdatedAt       time.Time                                  `json:"updated_at"`
 }
 
 type Descriptor struct {
-	Key       string    `json:"key"`
-	Provider  string    `json:"provider,omitempty"`
-	Account   string    `json:"account,omitempty"`
-	GrantType string    `json:"grant_type,omitempty"`
-	Scopes    []string  `json:"scopes,omitempty"`
-	Status    string    `json:"status"`
-	Failure   string    `json:"failure,omitempty"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Key          string                                     `json:"key"`
+	Provider     string                                     `json:"provider,omitempty"`
+	Account      string                                     `json:"account,omitempty"`
+	GrantType    string                                     `json:"grant_type,omitempty"`
+	Scopes       []string                                   `json:"scopes,omitempty"`
+	GrantModel   string                                     `json:"grant_model,omitempty"`
+	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	Status       string                                     `json:"status"`
+	Failure      string                                     `json:"failure,omitempty"`
+	ExpiresAt    time.Time                                  `json:"expires_at,omitempty"`
+	UpdatedAt    time.Time                                  `json:"updated_at,omitempty"`
 }
 
 type BeginAuthCodeRequest struct {
@@ -87,6 +95,8 @@ type BeginAuthCodeRequest struct {
 	ClientSecret string
 	RedirectURL  string
 	Scopes       []string
+	GrantModel   string
+	TokenRequest managedcredentialmodel.TokenRequestProfile
 	Account      string
 }
 
@@ -110,12 +120,16 @@ type ClientCredentialsRequest struct {
 	ClientID     string
 	ClientSecret string
 	Scopes       []string
+	GrantModel   string
+	TokenRequest managedcredentialmodel.TokenRequestProfile
 	Account      string
 }
 
 type AccessTokenRequest struct {
-	Key    string
-	Scopes []string
+	Key          string
+	Scopes       []string
+	GrantModel   string
+	TokenRequest managedcredentialmodel.TokenRequestProfile
 }
 
 type TokenSource struct {
@@ -145,6 +159,14 @@ func NewDefaultFileStore() (*FileStore, error) {
 }
 
 func (s *TokenSource) BeginAuthCodePKCE(ctx context.Context, req BeginAuthCodeRequest) (BeginAuthCodeResult, error) {
+	return s.beginAuthCode(ctx, req, true)
+}
+
+func (s *TokenSource) BeginAuthCode(ctx context.Context, req BeginAuthCodeRequest) (BeginAuthCodeResult, error) {
+	return s.beginAuthCode(ctx, req, false)
+}
+
+func (s *TokenSource) beginAuthCode(ctx context.Context, req BeginAuthCodeRequest, usePKCE bool) (BeginAuthCodeResult, error) {
 	if s == nil || s.Store == nil {
 		return BeginAuthCodeResult{}, fmt.Errorf("managed credential store is not configured")
 	}
@@ -157,23 +179,39 @@ func (s *TokenSource) BeginAuthCodePKCE(ctx context.Context, req BeginAuthCodeRe
 	clientID := strings.TrimSpace(req.ClientID)
 	redirectURL := strings.TrimSpace(req.RedirectURL)
 	if authURL == "" || tokenURL == "" || clientID == "" || redirectURL == "" {
-		return BeginAuthCodeResult{}, fmt.Errorf("auth_url, token_url, client_id, and redirect_url are required for authorization_code_pkce")
+		return BeginAuthCodeResult{}, fmt.Errorf("auth_url, token_url, client_id, and redirect_url are required for authorization_code grants")
 	}
-	verifier, err := randomURLToken(48)
-	if err != nil {
+	if err := managedcredentialmodel.ValidateGrantModel(req.GrantModel); err != nil {
 		return BeginAuthCodeResult{}, err
+	}
+	if err := managedcredentialmodel.ValidateTokenRequestProfile(req.TokenRequest); err != nil {
+		return BeginAuthCodeResult{}, err
+	}
+	if err := validateTokenRequestClientAuthConfig(key, clientID, req.ClientSecret, req.TokenRequest); err != nil {
+		return BeginAuthCodeResult{}, err
+	}
+	verifier := ""
+	challenge := ""
+	var err error
+	if usePKCE {
+		verifier, err = randomURLToken(48)
+		if err != nil {
+			return BeginAuthCodeResult{}, err
+		}
+		challenge = pkceChallenge(verifier)
 	}
 	state, err := randomURLToken(32)
 	if err != nil {
 		return BeginAuthCodeResult{}, err
 	}
-	challenge := pkceChallenge(verifier)
 	values := url.Values{}
 	values.Set("response_type", "code")
 	values.Set("client_id", clientID)
 	values.Set("redirect_uri", redirectURL)
-	values.Set("code_challenge", challenge)
-	values.Set("code_challenge_method", "S256")
+	if usePKCE {
+		values.Set("code_challenge", challenge)
+		values.Set("code_challenge_method", "S256")
+	}
 	values.Set("state", state)
 	if scopes := normalizeStrings(req.Scopes); len(scopes) > 0 {
 		values.Set("scope", strings.Join(scopes, " "))
@@ -189,17 +227,23 @@ func (s *TokenSource) BeginAuthCodePKCE(ctx context.Context, req BeginAuthCodeRe
 		}
 	}
 	parsed.RawQuery = query.Encode()
+	grantType := GrantAuthorizationCode
+	if usePKCE {
+		grantType = GrantAuthorizationCodePKCE
+	}
 	record := Record{
 		Key:           key,
 		Provider:      strings.TrimSpace(req.Provider),
 		Account:       strings.TrimSpace(req.Account),
-		GrantType:     GrantAuthorizationCodePKCE,
+		GrantType:     grantType,
 		AuthURL:       authURL,
 		TokenURL:      tokenURL,
 		ClientID:      clientID,
 		ClientSecret:  strings.TrimSpace(req.ClientSecret),
 		RedirectURL:   redirectURL,
 		Scopes:        normalizeStrings(req.Scopes),
+		GrantModel:    managedcredentialmodel.NormalizeGrantModel(req.GrantModel),
+		TokenRequest:  managedcredentialmodel.NormalizeTokenRequestProfile(req.TokenRequest),
 		Status:        StatusPendingConsent,
 		PKCEVerifier:  verifier,
 		PKCEChallenge: challenge,
@@ -225,8 +269,8 @@ func (s *TokenSource) CompleteAuthCode(ctx context.Context, req CompleteAuthCode
 	if !ok {
 		return Record{}, fmt.Errorf("missing managed credential %q", strings.TrimSpace(req.Key))
 	}
-	if record.GrantType != GrantAuthorizationCodePKCE {
-		return Record{}, fmt.Errorf("managed credential %q grant_type is %q, want %s", record.Key, record.GrantType, GrantAuthorizationCodePKCE)
+	if record.GrantType != GrantAuthorizationCodePKCE && record.GrantType != GrantAuthorizationCode {
+		return Record{}, fmt.Errorf("managed credential %q grant_type is %q, want %s or %s", record.Key, record.GrantType, GrantAuthorizationCodePKCE, GrantAuthorizationCode)
 	}
 	if strings.TrimSpace(record.OAuthState) == "" || strings.TrimSpace(req.State) != record.OAuthState {
 		return Record{}, fmt.Errorf("managed credential %q callback state mismatch", record.Key)
@@ -238,10 +282,8 @@ func (s *TokenSource) CompleteAuthCode(ctx context.Context, req CompleteAuthCode
 	values.Set("grant_type", "authorization_code")
 	values.Set("code", strings.TrimSpace(req.Code))
 	values.Set("redirect_uri", strings.TrimSpace(record.RedirectURL))
-	values.Set("client_id", strings.TrimSpace(record.ClientID))
-	values.Set("code_verifier", strings.TrimSpace(record.PKCEVerifier))
-	if strings.TrimSpace(record.ClientSecret) != "" {
-		values.Set("client_secret", strings.TrimSpace(record.ClientSecret))
+	if record.GrantType == GrantAuthorizationCodePKCE {
+		values.Set("code_verifier", strings.TrimSpace(record.PKCEVerifier))
 	}
 	updated, err := s.exchange(ctx, record, values)
 	if err != nil {
@@ -272,18 +314,25 @@ func (s *TokenSource) ConnectClientCredentials(ctx context.Context, req ClientCr
 		ClientID:     strings.TrimSpace(req.ClientID),
 		ClientSecret: strings.TrimSpace(req.ClientSecret),
 		Scopes:       normalizeStrings(req.Scopes),
+		GrantModel:   managedcredentialmodel.NormalizeGrantModel(req.GrantModel),
+		TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(req.TokenRequest),
 		Status:       StatusUnconnected,
 		UpdatedAt:    s.now(),
 	}
 	if record.Key == "" || record.TokenURL == "" || record.ClientID == "" {
 		return Record{}, fmt.Errorf("key, token_url, and client_id are required for client_credentials")
 	}
+	if err := managedcredentialmodel.ValidateGrantModel(record.GrantModel); err != nil {
+		return Record{}, err
+	}
+	if err := managedcredentialmodel.ValidateTokenRequestProfile(record.TokenRequest); err != nil {
+		return Record{}, err
+	}
+	if err := validateTokenRequestClientAuthConfig(record.Key, record.ClientID, record.ClientSecret, record.TokenRequest); err != nil {
+		return Record{}, err
+	}
 	values := url.Values{}
 	values.Set("grant_type", "client_credentials")
-	values.Set("client_id", record.ClientID)
-	if record.ClientSecret != "" {
-		values.Set("client_secret", record.ClientSecret)
-	}
 	if len(record.Scopes) > 0 {
 		values.Set("scope", strings.Join(record.Scopes, " "))
 	}
@@ -307,6 +356,12 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 	if !ok {
 		return "", Record{}, fmt.Errorf("missing managed credential %q", strings.TrimSpace(req.Key))
 	}
+	if err := managedcredentialmodel.GrantModelCovers(record.GrantModel, req.GrantModel); err != nil {
+		return "", Record{}, fmt.Errorf("managed credential %q grant-model-insufficient: %w", record.Key, err)
+	}
+	if err := managedcredentialmodel.TokenRequestProfileCovers(record.TokenRequest, req.TokenRequest); err != nil {
+		return "", Record{}, fmt.Errorf("managed credential %q token-request-insufficient: %w", record.Key, err)
+	}
 	if err := ensureScopes(record.Scopes, req.Scopes); err != nil {
 		return "", Record{}, fmt.Errorf("managed credential %q scope-insufficient: %w", record.Key, err)
 	}
@@ -320,6 +375,12 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 		}
 		if err := ensureScopes(record.Scopes, req.Scopes); err != nil {
 			return "", record, fmt.Errorf("managed credential %q scope-insufficient: %w", record.Key, err)
+		}
+		if err := managedcredentialmodel.GrantModelCovers(record.GrantModel, req.GrantModel); err != nil {
+			return "", record, fmt.Errorf("managed credential %q grant-model-insufficient: %w", record.Key, err)
+		}
+		if err := managedcredentialmodel.TokenRequestProfileCovers(record.TokenRequest, req.TokenRequest); err != nil {
+			return "", record, fmt.Errorf("managed credential %q token-request-insufficient: %w", record.Key, err)
 		}
 	}
 	return record.AccessToken, record, nil
@@ -343,23 +404,15 @@ func (s *TokenSource) Refresh(ctx context.Context, key string) (string, Record, 
 func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error) {
 	values := url.Values{}
 	switch record.GrantType {
-	case GrantAuthorizationCodePKCE:
+	case GrantAuthorizationCodePKCE, GrantAuthorizationCode:
 		if strings.TrimSpace(record.RefreshToken) == "" {
 			err := fmt.Errorf("managed credential %q has no refresh token", record.Key)
 			return s.markFailure(ctx, record, err)
 		}
 		values.Set("grant_type", "refresh_token")
 		values.Set("refresh_token", strings.TrimSpace(record.RefreshToken))
-		values.Set("client_id", strings.TrimSpace(record.ClientID))
-		if strings.TrimSpace(record.ClientSecret) != "" {
-			values.Set("client_secret", strings.TrimSpace(record.ClientSecret))
-		}
 	case GrantClientCredentials:
 		values.Set("grant_type", "client_credentials")
-		values.Set("client_id", strings.TrimSpace(record.ClientID))
-		if strings.TrimSpace(record.ClientSecret) != "" {
-			values.Set("client_secret", strings.TrimSpace(record.ClientSecret))
-		}
 		if len(record.Scopes) > 0 {
 			values.Set("scope", strings.Join(record.Scopes, " "))
 		}
@@ -389,11 +442,28 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 	if client == nil {
 		client = http.DefaultClient
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(values.Encode()))
+	profile := managedcredentialmodel.NormalizeTokenRequestProfile(record.TokenRequest)
+	if err := managedcredentialmodel.ValidateTokenRequestProfile(profile); err != nil {
+		return Record{}, fmt.Errorf("managed credential %q has invalid token_request: %w", record.Key, err)
+	}
+	if err := applyTokenRequestClientAuth(values, record, profile); err != nil {
+		return Record{}, err
+	}
+	requestBody, contentType, err := encodeTokenRequestBody(values, profile)
 	if err != nil {
 		return Record{}, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, requestBody)
+	if err != nil {
+		return Record{}, err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if profile.ClientAuth == managedcredentialmodel.TokenClientAuthBasic {
+		req.SetBasicAuth(strings.TrimSpace(record.ClientID), strings.TrimSpace(record.ClientSecret))
+	}
+	for key, value := range profile.StaticHeaders {
+		req.Header.Set(key, value)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return Record{}, err
@@ -407,6 +477,7 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		Scope        string `json:"scope"`
 		Error        string `json:"error"`
 		Description  string `json:"error_description"`
+		Message      string `json:"message"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return Record{}, fmt.Errorf("decode token response: %w", err)
@@ -417,6 +488,8 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 			msg = fmt.Sprintf("token endpoint returned status %d", resp.StatusCode)
 		}
 		if desc := strings.TrimSpace(body.Description); desc != "" {
+			msg += ": " + desc
+		} else if desc := strings.TrimSpace(body.Message); desc != "" {
 			msg += ": " + desc
 		}
 		return Record{}, fmt.Errorf("%s", msg)
@@ -442,6 +515,70 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		updated.ExpiresAt = s.now().Add(time.Duration(body.ExpiresIn) * time.Second).UTC()
 	}
 	return updated, nil
+}
+
+func applyTokenRequestClientAuth(values url.Values, record Record, profile managedcredentialmodel.TokenRequestProfile) error {
+	clientID := strings.TrimSpace(record.ClientID)
+	clientSecret := strings.TrimSpace(record.ClientSecret)
+	if err := validateTokenRequestClientAuthConfig(record.Key, clientID, clientSecret, profile); err != nil {
+		return err
+	}
+	switch managedcredentialmodel.NormalizeTokenRequestProfile(profile).ClientAuth {
+	case managedcredentialmodel.TokenClientAuthPost:
+		values.Set("client_id", clientID)
+		if clientSecret != "" {
+			values.Set("client_secret", clientSecret)
+		}
+	case managedcredentialmodel.TokenClientAuthBasic:
+		if clientSecret == "" {
+			return fmt.Errorf("managed credential %q client_secret is required for token_request.client_auth basic", record.Key)
+		}
+	default:
+		return fmt.Errorf("managed credential %q has unsupported token_request.client_auth %q", record.Key, profile.ClientAuth)
+	}
+	return nil
+}
+
+func validateTokenRequestClientAuthConfig(key, clientID, clientSecret string, profile managedcredentialmodel.TokenRequestProfile) error {
+	key = strings.TrimSpace(key)
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	if clientID == "" {
+		return fmt.Errorf("managed credential %q client_id is required", key)
+	}
+	switch managedcredentialmodel.NormalizeTokenRequestProfile(profile).ClientAuth {
+	case managedcredentialmodel.TokenClientAuthBasic:
+		if clientSecret == "" {
+			return fmt.Errorf("managed credential %q client_secret is required for token_request.client_auth basic", key)
+		}
+	case managedcredentialmodel.TokenClientAuthPost:
+	default:
+		return fmt.Errorf("managed credential %q has unsupported token_request.client_auth %q", key, profile.ClientAuth)
+	}
+	return nil
+}
+
+func encodeTokenRequestBody(values url.Values, profile managedcredentialmodel.TokenRequestProfile) (*bytes.Reader, string, error) {
+	switch managedcredentialmodel.NormalizeTokenRequestProfile(profile).Body {
+	case managedcredentialmodel.TokenBodyForm:
+		return bytes.NewReader([]byte(values.Encode())), "application/x-www-form-urlencoded", nil
+	case managedcredentialmodel.TokenBodyJSON:
+		body := make(map[string]string, len(values))
+		for key, items := range values {
+			key = strings.TrimSpace(key)
+			if key == "" || len(items) == 0 {
+				continue
+			}
+			body[key] = items[0]
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, "", err
+		}
+		return bytes.NewReader(raw), "application/json", nil
+	default:
+		return nil, "", fmt.Errorf("unsupported token_request.body %q", profile.Body)
+	}
 }
 
 func (s *TokenSource) markFailure(ctx context.Context, record Record, cause error, extraSecrets ...string) (Record, error) {
@@ -508,15 +645,17 @@ func (s *TokenSource) refreshWindow() time.Duration {
 func (r Record) Descriptor() Descriptor {
 	status := statusOrUnconnected(r.Status)
 	return Descriptor{
-		Key:       strings.TrimSpace(r.Key),
-		Provider:  strings.TrimSpace(r.Provider),
-		Account:   strings.TrimSpace(r.Account),
-		GrantType: strings.TrimSpace(r.GrantType),
-		Scopes:    append([]string{}, r.Scopes...),
-		Status:    status,
-		Failure:   RedactString(strings.TrimSpace(r.Failure), r.SecretValues()...),
-		ExpiresAt: r.ExpiresAt,
-		UpdatedAt: r.UpdatedAt,
+		Key:          strings.TrimSpace(r.Key),
+		Provider:     strings.TrimSpace(r.Provider),
+		Account:      strings.TrimSpace(r.Account),
+		GrantType:    strings.TrimSpace(r.GrantType),
+		Scopes:       append([]string{}, r.Scopes...),
+		GrantModel:   managedcredentialmodel.NormalizeGrantModel(r.GrantModel),
+		TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(r.TokenRequest),
+		Status:       status,
+		Failure:      RedactString(strings.TrimSpace(r.Failure), r.SecretValues()...),
+		ExpiresAt:    r.ExpiresAt,
+		UpdatedAt:    r.UpdatedAt,
 	}
 }
 
@@ -774,6 +913,8 @@ func normalizeRecord(record Record) Record {
 	record.ClientSecret = strings.TrimSpace(record.ClientSecret)
 	record.RedirectURL = strings.TrimSpace(record.RedirectURL)
 	record.Scopes = normalizeStrings(record.Scopes)
+	record.GrantModel = managedcredentialmodel.NormalizeGrantModel(record.GrantModel)
+	record.TokenRequest = managedcredentialmodel.NormalizeTokenRequestProfile(record.TokenRequest)
 	record.AccessToken = strings.TrimSpace(record.AccessToken)
 	record.RefreshToken = strings.TrimSpace(record.RefreshToken)
 	record.TokenType = strings.TrimSpace(record.TokenType)

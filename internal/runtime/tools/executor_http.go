@@ -195,8 +195,10 @@ func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor m
 		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
 	}
 	token, record, err := e.managedTokenSource().AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
-		Key:    storeKey,
-		Scopes: ref.Scopes,
+		Key:          storeKey,
+		Scopes:       ref.Scopes,
+		GrantModel:   ref.GrantModel,
+		TokenRequest: ref.TokenRequest,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))

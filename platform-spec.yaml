@@ -6337,8 +6337,12 @@ tool_model:
           same-name fallback is allowed. header optionally names the request header to receive the access token and defaults
           to `Authorization`. prefix optionally names the value prefix and defaults to `Bearer` only when header is omitted
           or `Authorization`; custom headers default to the raw access token. scopes optionally lists scopes required by this
-          tool call. Boot/verify and execution fail closed when the connected managed credential record does not cover every
-          required scope.
+          tool call. grant_model defaults to `scope_grant` and may be `workspace_grant` for providers such as Notion that
+          return workspace/page grants rather than scope strings. token_request declares the required token endpoint profile:
+          client_auth `post` or `basic`, body `form` or `json`, and optional static non-secret token endpoint headers; static
+          token headers MUST NOT include Authorization or Content-Type, which are owned by client_auth/body. Boot/verify and
+          execution fail closed when the connected managed credential record does not cover every required scope, grant_model,
+          and token_request profile.
         rate_limit: string — optional external dispatch rate limit, format N/period.
         rate_limit_max_wait: string — required when rate_limit is present; maximum per-call admission wait before
           returning typed rate_limited.
@@ -6359,8 +6363,9 @@ tool_model:
         credential owner provides only in-flight authorization material. The runtime refreshes before use when the record is
         expired or near expiry, injects the token into the configured header, and on provider 401 refreshes once and retries
         the request once. Missing, unconnected, refresh-failed, scope-insufficient, unsupported, or unbound managed
-        credentials fail closed before dispatch. A tool may not also configure the same header in `http.headers`; that would
-        create dual authorization ownership.
+        credentials fail closed before dispatch. The connected record's grant_model and token_request profile must match the
+        tool declaration before dispatch. A tool may not also configure the same header in `http.headers`; that would create
+        dual authorization ownership.
     external_provider_dispatch_rate_limit:
       description: >
         `rate_limit` on an HTTP tool declares process-local admission for outbound HTTP provider dispatch by that tool.
@@ -6418,7 +6423,7 @@ tool_model:
       - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
       - "direct runtime provider adapter code or bespoke connector dispatch."
     connector_pack_profile:
-      status: "first slices: Telegram static connector pack proof plus Slack managed-credential connector pack proof"
+      status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, and Notion Basic+JSON workspace-grant connector proof"
       body_file: connector.yaml
       import_syntax: >
         package.yaml `connector_packs.imports[]` entries name `provider` and `tool`. The import is an explicit enablement
@@ -6438,8 +6443,8 @@ tool_model:
         `activity_attempts`. Connector CANNOT rows include bypassing `activity_attempts`, automatically retrying
         non-idempotent writes, or exposing credential values. Requirement rows are typed: static secret requirements render
         BOUND/UNBOUND from the static credential store, while managed credential requirements render managed credential
-        lifecycle status such as CONNECTED, UNCONNECTED, PENDING_CONSENT, REFRESH_FAILED, or SCOPE_INSUFFICIENT without
-        exposing token values.
+        lifecycle status such as CONNECTED, UNCONNECTED, PENDING_CONSENT, REFRESH_FAILED, or SCOPE_INSUFFICIENT plus the
+        required scopes, grant_model, and token_request profile without exposing token values.
       collision_policy: >
         No packed-vs-packed or packed-vs-flow-local connector shadowing is allowed in this slice. Any duplicate tool id
         fails closed before runtime construction and names both sources with remediation to remove one source or rename the
@@ -6537,10 +6542,10 @@ tool_model:
       hidden behavior inside `credentials.Store.Get(string) string`.
     scope:
     - single-tenant/self-hosted/operator-connected deployment token records
-    - authorization-code + PKCE consent and callback
+    - authorization-code consent and callback, with or without PKCE depending on provider contract
     - client_credentials as the first non-consent grant variant
-    - access token, refresh token when present, expiry, scopes, provider/account identity, grant type, status, refresh
-      policy, and failure evidence
+    - access token, refresh token when present, expiry, scopes, grant_model, token_request profile, provider/account identity,
+      grant type, status, refresh policy, and failure evidence
     - direct Executor.Execute, served /tools/{name}, MCP tools/call HTTP-tool entry points, and provider_connector activity
       execution on the `activity_attempts` path
     non_goals:
@@ -6564,13 +6569,22 @@ tool_model:
       key: Deployment-level managed credential key after import-boundary binding.
       provider: Provider label for operator status.
       account: Optional connected account identity/label.
-      grant_type: authorization_code_pkce | client_credentials.
-      auth_url: Authorization endpoint for authorization_code_pkce records.
+      grant_type: authorization_code | authorization_code_pkce | client_credentials.
+      auth_url: Authorization endpoint for authorization-code records.
       token_url: Token endpoint for grant and refresh requests.
       client_id: OAuth client ID.
       client_secret: Optional OAuth client secret.
-      redirect_url: Callback URL for authorization_code_pkce.
-      scopes: Granted/available scopes.
+      redirect_url: Callback URL for authorization-code records.
+      scopes: Granted/available scopes for scope_grant providers. Declared-empty scopes are valid for workspace_grant
+        providers and MUST NOT be filled with fake scopes.
+      grant_model: scope_grant | workspace_grant. Readback must render workspace_grant as a workspace/page-level grant, not
+        as missing scopes.
+      token_request: >
+        Closed token endpoint profile used by auth-code exchange, refresh, and client_credentials. Fields are
+        client_auth (`post` sends client_id/client_secret in the request body; `basic` sends HTTP Basic and omits
+        client_id/client_secret from the body), body (`form` or `json`), and static_headers (non-secret endpoint headers
+        such as Notion-Version; Authorization and Content-Type are forbidden because client_auth/body own them). The default
+        profile is client_auth=post and body=form for existing Slack-compatible behavior.
       access_token: Secret access token, never returned by metadata/status surfaces.
       refresh_token: Secret refresh token, never returned by metadata/status surfaces.
       token_type: Token type, default Bearer.
@@ -6580,31 +6594,34 @@ tool_model:
     resolver_rule: >
       HTTP tools name `managed_credential.key` as a package-local handle. Runtime consumers MUST map that handle through the
       same import-boundary `requires.credentials` / `bind.credentials` resolver used by static credentials, then read the
-      managed credential record by the resulting deployment key. If the handle is undeclared, unbound, empty, or missing from
-      the managed store, execution fails before outbound dispatch. Same-name ambient fallback is forbidden for imported
-      packages.
+      managed credential record by the resulting deployment key. If the handle is undeclared, unbound, empty, missing from
+      the managed store, or does not match the tool's required grant_model/token_request/scopes, execution fails before
+      outbound dispatch. Same-name ambient fallback is forbidden for imported packages.
     refresh_rule: >
       Before request dispatch, the resolver returns a valid access token or fails closed. It refreshes before use when the
       access token is absent or expires within the configured refresh window. For provider 401 responses, supported HTTP
       executors refresh once and retry the request once. For non_idempotent_write provider_connector activity execution,
       the activity_attempts journal must be checked before managed credential resolution on duplicate/redelivered requests;
       an existing row blocks refresh and provider redispatch. Refresh failure sets refresh_failed state with redacted failure
-      evidence and returns a redacted runtime error.
+      evidence and returns a redacted runtime error. Auth-code exchange, refresh, and client_credentials all consume the same
+      record token_request profile; provider-specific token endpoint behavior is data, not a provider branch in the engine.
     operator_surface:
       command: swarm connections connect|callback|status|disconnect
       rule: >
         `swarm connections` is the supported local operator CLI for managed credential lifecycle. `connect` starts
-        authorization_code_pkce consent or completes a client_credentials grant; `callback` records the authorization-code
+        authorization_code or authorization_code_pkce consent or completes a client_credentials grant; `callback` records the authorization-code
         callback; `status` returns metadata and required_by information only; `disconnect` deletes the token record. The
         command is intentionally separate from `swarm secrets`, which remains static key/value secret storage. Secret
         values accepted by the CLI, including OAuth client secrets and authorization callback codes, MUST NOT be accepted
-        as argv flag values; supported local secret input uses stdin or an equivalent non-argv source.
+        as argv flag values; supported local secret input uses stdin or an equivalent non-argv source. `connect` supports
+        closed token endpoint profile flags for grant_model, client_auth, body, and static non-secret token headers.
     boot_validation: >
       Boot/verify consumes managed_credential requirements and reports managed_credential_state for missing, pending,
-      refresh_failed, scope_insufficient, or otherwise unusable records. When boot warnings are fatal, these findings block
-      startup. Connector readback/doctor MUST compare declared tool scopes against connected record scopes and surface
-      scope_insufficient rather than connected/bound when the record does not cover every declared scope. Execution still
-      fails closed even when boot warnings are non-fatal.
+      refresh_failed, scope_insufficient, grant-model/token-profile mismatches, or otherwise unusable records. When boot
+      warnings are fatal, these findings block startup. Connector readback/doctor MUST compare declared tool scopes,
+      grant_model, and token_request profile against connected records and surface scope_insufficient rather than
+      connected/bound when the record does not cover every declared requirement. Execution still fails closed even when boot
+      warnings are non-fatal.
     redaction_guarantee: >
       Access tokens, refresh tokens, client secrets, authorization codes, PKCE verifier/state, and provider errors containing
       those values MUST NOT be returned through logs, events, dead letters, tool results, metadata, or CLI/API/status
@@ -8891,10 +8908,12 @@ platform_tables:
         result after the dispatch outcome, and consume the row on request redelivery/replay/restart before deciding whether
         a provider call may occur. For non_idempotent_write activities, any existing started, uncertain, succeeded, or
         failed row blocks automatic provider re-dispatch. Generated result events are published from this journaled terminal
-        state. Static credentials are resolved through the existing credential-store/import-boundary owner before the started
-        row is inserted; missing credentials therefore fail before provider dispatch and do not create an attempt row.
-        Managed credentials/OAuth, response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and
-        long_running remain split/fail-closed.'
+        state. Static credentials and admitted managed credentials for provider_connector tools are resolved through their
+        respective credential-store/import-boundary owners before the started row is inserted; missing, unbound, unusable, or
+        mismatched credentials therefore fail before provider dispatch and do not create an attempt row. On duplicate/redelivered
+        request events, the existing row is consumed before static or managed credential resolution, token refresh, or outbound
+        preparation. response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and long_running remain
+        split/fail-closed.'
       ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    error             TEXT,\n    input_hash        TEXT NOT NULL,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND error IS NULL AND completed_at IS NULL) OR (status IN ('succeeded', 'failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
@@ -16068,25 +16087,28 @@ cli_specification:
         JSON.
       subcommands:
         connect:
-          command: swarm connections connect <key> --grant authorization_code_pkce|client_credentials [...]
+          command: swarm connections connect <key> --grant authorization_code|authorization_code_pkce|client_credentials [...]
           behavior: >
-            For authorization_code_pkce, stores a pending consent record with provider config, PKCE challenge/state, and
-            metadata, then prints only the authorization URL/state and redacted connection metadata. For client_credentials,
-            exchanges with the token endpoint immediately and stores a connected token record. OAuth client secrets, when
-            required by the provider, are read through `--client-secret-stdin`; an argv `--client-secret <value>` source is
-            unsupported because it leaks through shell history and process listings.
+            For authorization_code and authorization_code_pkce, stores a pending consent record with provider config, optional
+            PKCE challenge/state, grant_model, and token_request metadata, then prints only the authorization URL/state and
+            redacted connection metadata. For client_credentials, exchanges with the token endpoint immediately and stores a
+            connected token record. OAuth client secrets, when required by the provider, are read through
+            `--client-secret-stdin`; an argv `--client-secret <value>` source is unsupported because it leaks through shell
+            history and process listings. Token endpoint profile flags are closed: token-client-auth post|basic, token-body
+            form|json, token-header Name=Value for non-secret headers, and grant-model scope_grant|workspace_grant.
         callback:
           command: swarm connections callback <key> --state <state> --code-stdin
           behavior: >
-            Completes an authorization_code_pkce record by validating callback state, exchanging the code with the stored
-            verifier, clearing transient verifier/state fields, and persisting connected token metadata. The authorization
-            code is read from stdin and MUST NOT be accepted as an argv flag value. Output is metadata only.
+            Completes an authorization_code or authorization_code_pkce record by validating callback state, exchanging the code
+            through the stored token_request profile, clearing transient verifier/state fields, and persisting connected token
+            metadata. The authorization code is read from stdin and MUST NOT be accepted as an argv flag value. Output is
+            metadata only.
         status:
           command: swarm connections status [<key>] [--json] [--contracts <path>]
           behavior: >
-            Lists managed credential metadata only: key, provider, account, grant_type, scopes, status, redacted failure,
-            expires_at, updated_at, present, and required_by where contract source context is available. Values and token
-            material are never returned.
+            Lists managed credential metadata only: key, provider, account, grant_type, scopes, grant_model, token_request,
+            status, redacted failure, expires_at, updated_at, present, and required_by where contract source context is
+            available. Values and token material are never returned.
         disconnect:
           command: swarm connections disconnect <key>
           behavior: Deletes the managed credential token record for the deployment key.

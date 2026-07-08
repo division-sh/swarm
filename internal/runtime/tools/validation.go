@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -53,6 +54,14 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 			}
 			if entry.ManagedCredential != nil && strings.TrimSpace(entry.ManagedCredential.Header) == "" && strings.TrimSpace(entry.ManagedCredential.Prefix) != "" {
 				return warnings, fmt.Errorf("tool %s managed_credential.header is required when prefix is set", name)
+			}
+			if entry.ManagedCredential != nil {
+				if err := managedcredentialmodel.ValidateGrantModel(entry.ManagedCredential.GrantModel); err != nil {
+					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
+				}
+				if err := managedcredentialmodel.ValidateTokenRequestProfile(entry.ManagedCredential.TokenRequest); err != nil {
+					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
+				}
 			}
 		case implementationMCP:
 			if entry.ManagedCredential != nil {

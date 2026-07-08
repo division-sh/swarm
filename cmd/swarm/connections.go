@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/spf13/cobra"
 )
@@ -24,6 +25,10 @@ type connectionsConnectOptions struct {
 	redirectURL       string
 	account           string
 	scopes            []string
+	grantModel        string
+	tokenClientAuth   string
+	tokenBody         string
+	tokenHeaders      []string
 	asJSON            bool
 }
 
@@ -34,22 +39,27 @@ type connectionsStatusOptions struct {
 }
 
 type connectionRecord struct {
-	Key        string                  `json:"key"`
-	Provider   string                  `json:"provider,omitempty"`
-	Account    string                  `json:"account,omitempty"`
-	GrantType  string                  `json:"grant_type,omitempty"`
-	Scopes     []string                `json:"scopes,omitempty"`
-	Status     string                  `json:"status"`
-	Failure    string                  `json:"failure,omitempty"`
-	ExpiresAt  string                  `json:"expires_at,omitempty"`
-	UpdatedAt  string                  `json:"updated_at,omitempty"`
-	Present    bool                    `json:"present"`
-	RequiredBy []connectionRequirement `json:"required_by,omitempty"`
+	Key          string                                     `json:"key"`
+	Provider     string                                     `json:"provider,omitempty"`
+	Account      string                                     `json:"account,omitempty"`
+	GrantType    string                                     `json:"grant_type,omitempty"`
+	Scopes       []string                                   `json:"scopes,omitempty"`
+	GrantModel   string                                     `json:"grant_model,omitempty"`
+	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	Status       string                                     `json:"status"`
+	Failure      string                                     `json:"failure,omitempty"`
+	ExpiresAt    string                                     `json:"expires_at,omitempty"`
+	UpdatedAt    string                                     `json:"updated_at,omitempty"`
+	Present      bool                                       `json:"present"`
+	RequiredBy   []connectionRequirement                    `json:"required_by,omitempty"`
 }
 
 type connectionRequirement struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	Kind         string                                     `json:"kind"`
+	Name         string                                     `json:"name"`
+	Scopes       []string                                   `json:"scopes,omitempty"`
+	GrantModel   string                                     `json:"grant_model,omitempty"`
+	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
 }
 
 type connectionsStatusResult struct {
@@ -80,7 +90,12 @@ func newConnectionsCommand(ctx context.Context, repo string) *cobra.Command {
 }
 
 func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Command {
-	opts := connectionsConnectOptions{grant: runtimemanagedcredentials.GrantAuthorizationCodePKCE}
+	opts := connectionsConnectOptions{
+		grant:           runtimemanagedcredentials.GrantAuthorizationCodePKCE,
+		grantModel:      managedcredentialmodel.GrantModelScope,
+		tokenClientAuth: managedcredentialmodel.TokenClientAuthPost,
+		tokenBody:       managedcredentialmodel.TokenBodyForm,
+	}
 	cmd := &cobra.Command{
 		Use:   "connect <key>",
 		Short: "Start or complete a managed credential grant.",
@@ -90,6 +105,21 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
+			tokenHeaders, err := parseConnectionTokenHeaders(opts.tokenHeaders)
+			if err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			tokenProfile := managedcredentialmodel.TokenRequestProfile{
+				ClientAuth:    opts.tokenClientAuth,
+				Body:          opts.tokenBody,
+				StaticHeaders: tokenHeaders,
+			}
+			if err := managedcredentialmodel.ValidateGrantModel(opts.grantModel); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			if err := managedcredentialmodel.ValidateTokenRequestProfile(tokenProfile); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			store, err := buildManagedCredentialStore()
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure managed credential store: %w", err))
@@ -97,6 +127,38 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 			source := runtimemanagedcredentials.TokenSource{Store: store}
 			key := strings.TrimSpace(args[0])
 			switch strings.TrimSpace(opts.grant) {
+			case runtimemanagedcredentials.GrantAuthorizationCode:
+				result, err := source.BeginAuthCode(ctx, runtimemanagedcredentials.BeginAuthCodeRequest{
+					Key:          key,
+					Provider:     opts.provider,
+					AuthURL:      opts.authURL,
+					TokenURL:     opts.tokenURL,
+					ClientID:     opts.clientID,
+					ClientSecret: secret,
+					RedirectURL:  opts.redirectURL,
+					Scopes:       opts.scopes,
+					GrantModel:   opts.grantModel,
+					TokenRequest: tokenProfile,
+					Account:      opts.account,
+				})
+				if err != nil {
+					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+				}
+				record, ok, err := store.Get(ctx, key)
+				if err != nil {
+					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+				}
+				output := connectionsConnectResult{
+					Connection:   connectionRecordFromDescriptor(record.Descriptor(), ok, nil),
+					AuthorizeURL: result.AuthorizeURL,
+					State:        result.State,
+				}
+				if opts.asJSON {
+					return encodeSecretsJSON(cmd.OutOrStdout(), output)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "connection pending: key=%s status=%s\n", output.Connection.Key, output.Connection.Status)
+				fmt.Fprintf(cmd.OutOrStdout(), "authorize_url: %s\n", output.AuthorizeURL)
+				return nil
 			case runtimemanagedcredentials.GrantAuthorizationCodePKCE:
 				result, err := source.BeginAuthCodePKCE(ctx, runtimemanagedcredentials.BeginAuthCodeRequest{
 					Key:          key,
@@ -107,6 +169,8 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 					ClientSecret: secret,
 					RedirectURL:  opts.redirectURL,
 					Scopes:       opts.scopes,
+					GrantModel:   opts.grantModel,
+					TokenRequest: tokenProfile,
 					Account:      opts.account,
 				})
 				if err != nil {
@@ -135,6 +199,8 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 					ClientID:     opts.clientID,
 					ClientSecret: secret,
 					Scopes:       opts.scopes,
+					GrantModel:   opts.grantModel,
+					TokenRequest: tokenProfile,
 					Account:      opts.account,
 				})
 				if err != nil {
@@ -147,19 +213,23 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 				fmt.Fprintf(cmd.OutOrStdout(), "connection connected: key=%s status=%s\n", output.Connection.Key, output.Connection.Status)
 				return nil
 			default:
-				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--grant must be %s or %s", runtimemanagedcredentials.GrantAuthorizationCodePKCE, runtimemanagedcredentials.GrantClientCredentials))
+				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--grant must be %s, %s, or %s", runtimemanagedcredentials.GrantAuthorizationCode, runtimemanagedcredentials.GrantAuthorizationCodePKCE, runtimemanagedcredentials.GrantClientCredentials))
 			}
 		},
 	}
-	cmd.Flags().StringVar(&opts.grant, "grant", opts.grant, "Grant type: authorization_code_pkce or client_credentials")
+	cmd.Flags().StringVar(&opts.grant, "grant", opts.grant, "Grant type: authorization_code, authorization_code_pkce, or client_credentials")
 	cmd.Flags().StringVar(&opts.provider, "provider", "", "Provider label for operator status")
 	cmd.Flags().StringVar(&opts.authURL, "auth-url", "", "OAuth authorization URL")
 	cmd.Flags().StringVar(&opts.tokenURL, "token-url", "", "OAuth token URL")
 	cmd.Flags().StringVar(&opts.clientID, "client-id", "", "OAuth client ID")
 	cmd.Flags().BoolVar(&opts.clientSecretStdin, "client-secret-stdin", false, "Read the OAuth client secret from stdin")
-	cmd.Flags().StringVar(&opts.redirectURL, "redirect-url", "", "OAuth redirect URL for authorization_code_pkce")
+	cmd.Flags().StringVar(&opts.redirectURL, "redirect-url", "", "OAuth redirect URL for authorization_code grants")
 	cmd.Flags().StringVar(&opts.account, "account", "", "Connected provider account label")
 	cmd.Flags().StringSliceVar(&opts.scopes, "scope", nil, "Required OAuth scope; repeat or comma-separate")
+	cmd.Flags().StringVar(&opts.grantModel, "grant-model", opts.grantModel, "Grant model: scope_grant or workspace_grant")
+	cmd.Flags().StringVar(&opts.tokenClientAuth, "token-client-auth", opts.tokenClientAuth, "Token endpoint client authentication: post or basic")
+	cmd.Flags().StringVar(&opts.tokenBody, "token-body", opts.tokenBody, "Token endpoint request body encoding: form or json")
+	cmd.Flags().StringArrayVar(&opts.tokenHeaders, "token-header", nil, "Static non-secret token endpoint header as Name=Value; repeatable")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
 	return cmd
 }
@@ -284,6 +354,30 @@ func readConnectionAuthCode(in io.Reader, codeStdin bool) (string, error) {
 	return code, nil
 }
 
+func parseConnectionTokenHeaders(items []string) (map[string]string, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	headers := make(map[string]string, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(item, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if !ok || key == "" || value == "" {
+			return nil, fmt.Errorf("--token-header must be Name=Value with non-empty name and value")
+		}
+		headers[key] = value
+	}
+	if len(headers) == 0 {
+		return nil, nil
+	}
+	return headers, nil
+}
+
 func loadConnectionsSource(cmd *cobra.Command, repo, contractsPath, platformSpecPath string) (semanticview.Source, error) {
 	if strings.TrimSpace(contractsPath) == "" {
 		return nil, nil
@@ -317,14 +411,16 @@ func connectionRecords(ctx context.Context, store runtimemanagedcredentials.Stor
 
 func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, present bool, requiredBy []runtimemanagedcredentials.Requirement) connectionRecord {
 	record := connectionRecord{
-		Key:       strings.TrimSpace(desc.Key),
-		Provider:  strings.TrimSpace(desc.Provider),
-		Account:   strings.TrimSpace(desc.Account),
-		GrantType: strings.TrimSpace(desc.GrantType),
-		Scopes:    append([]string{}, desc.Scopes...),
-		Status:    strings.TrimSpace(desc.Status),
-		Failure:   strings.TrimSpace(desc.Failure),
-		Present:   present,
+		Key:          strings.TrimSpace(desc.Key),
+		Provider:     strings.TrimSpace(desc.Provider),
+		Account:      strings.TrimSpace(desc.Account),
+		GrantType:    strings.TrimSpace(desc.GrantType),
+		Scopes:       append([]string{}, desc.Scopes...),
+		GrantModel:   strings.TrimSpace(desc.GrantModel),
+		TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(desc.TokenRequest),
+		Status:       strings.TrimSpace(desc.Status),
+		Failure:      strings.TrimSpace(desc.Failure),
+		Present:      present,
 	}
 	if !desc.ExpiresAt.IsZero() {
 		record.ExpiresAt = desc.ExpiresAt.Format(time.RFC3339)
@@ -334,8 +430,11 @@ func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, p
 	}
 	for _, item := range requiredBy {
 		record.RequiredBy = append(record.RequiredBy, connectionRequirement{
-			Kind: strings.TrimSpace(item.Kind),
-			Name: strings.TrimSpace(item.Name),
+			Kind:         strings.TrimSpace(item.Kind),
+			Name:         strings.TrimSpace(item.Name),
+			Scopes:       append([]string{}, item.Scopes...),
+			GrantModel:   strings.TrimSpace(item.GrantModel),
+			TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(item.TokenRequest),
 		})
 	}
 	return record
@@ -346,13 +445,15 @@ func writeConnectionsTable(out io.Writer, records []connectionRecord) {
 		return
 	}
 	writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "KEY\tPROVIDER\tACCOUNT\tGRANT\tSTATUS\tEXPIRES_AT\tREQUIRED_BY")
+	fmt.Fprintln(writer, "KEY\tPROVIDER\tACCOUNT\tGRANT\tGRANT_MODEL\tTOKEN_REQUEST\tSTATUS\tEXPIRES_AT\tREQUIRED_BY")
 	for _, record := range records {
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			record.Key,
 			dash(record.Provider),
 			dash(record.Account),
 			dash(record.GrantType),
+			dash(record.GrantModel),
+			dash(managedcredentialmodel.TokenRequestProfileSummary(record.TokenRequest)),
 			dash(record.Status),
 			dash(record.ExpiresAt),
 			dash(formatConnectionRequirements(record.RequiredBy)),
@@ -370,6 +471,20 @@ func formatConnectionRequirements(items []connectionRequirement) string {
 		item.Kind = strings.TrimSpace(item.Kind)
 		item.Name = strings.TrimSpace(item.Name)
 		if item.Kind == "" || item.Name == "" {
+			continue
+		}
+		details := make([]string, 0, 3)
+		if len(item.Scopes) > 0 {
+			details = append(details, "scopes="+strings.Join(item.Scopes, ","))
+		}
+		if grantModel := strings.TrimSpace(item.GrantModel); grantModel != "" {
+			details = append(details, "grant_model="+grantModel)
+		}
+		if summary := managedcredentialmodel.TokenRequestProfileSummary(item.TokenRequest); summary != managedcredentialmodel.TokenRequestProfileSummary(managedcredentialmodel.DefaultTokenRequestProfile()) {
+			details = append(details, "token_request="+summary)
+		}
+		if len(details) > 0 {
+			parts = append(parts, item.Kind+":"+item.Name+"("+strings.Join(details, ";")+")")
 			continue
 		}
 		parts = append(parts, item.Kind+":"+item.Name)

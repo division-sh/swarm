@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -96,6 +97,20 @@ func formatProviderConnectorRequirements(requirements []providerconnectors.Requi
 		name := strings.TrimSpace(requirement.Name)
 		if strings.TrimSpace(requirement.Kind) == "managed_credential" {
 			name = "managed_credential:" + name
+		}
+		details := make([]string, 0, 3)
+		if len(requirement.Scopes) > 0 {
+			details = append(details, "scopes="+strings.Join(requirement.Scopes, ","))
+		}
+		if grantModel := strings.TrimSpace(requirement.GrantModel); grantModel != "" {
+			details = append(details, "grant_model="+grantModel)
+		}
+		if summary := managedcredentialmodel.TokenRequestProfileSummary(requirement.TokenRequest); summary != managedcredentialmodel.TokenRequestProfileSummary(managedcredentialmodel.DefaultTokenRequestProfile()) {
+			details = append(details, "token_request="+summary)
+		}
+		if len(details) > 0 {
+			parts = append(parts, name+"="+status+"("+strings.Join(details, ";")+")")
+			continue
 		}
 		parts = append(parts, name+"="+status)
 	}

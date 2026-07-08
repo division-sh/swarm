@@ -11,16 +11,20 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const Category = "provider_connector"
 
 type RequirementStatus struct {
-	Kind   string
-	Name   string
-	Status string
-	Bound  bool
+	Kind         string
+	Name         string
+	Status       string
+	Bound        bool
+	Scopes       []string
+	GrantModel   string
+	TokenRequest managedcredentialmodel.TokenRequestProfile
 }
 
 type Surface struct {
@@ -133,6 +137,12 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 		key := strings.TrimSpace(tool.ManagedCredential.Key)
 		if key == "" {
 			errs = append(errs, fmt.Errorf("%s managed_credential.key is required", context))
+		}
+		if err := managedcredentialmodel.ValidateGrantModel(tool.ManagedCredential.GrantModel); err != nil {
+			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
+		}
+		if err := managedcredentialmodel.ValidateTokenRequestProfile(tool.ManagedCredential.TokenRequest); err != nil {
+			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
 		}
 	}
 	if len(tool.ResponseMapping) > 0 {
@@ -309,6 +319,8 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 	if tool.ManagedCredential != nil {
 		key := strings.TrimSpace(tool.ManagedCredential.Key)
 		if key != "" {
+			requiredGrantModel := managedcredentialmodel.NormalizeGrantModel(tool.ManagedCredential.GrantModel)
+			requiredTokenRequest := managedcredentialmodel.NormalizeTokenRequestProfile(tool.ManagedCredential.TokenRequest)
 			storeKey := key
 			if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
 				storeKey = strings.TrimSpace(resolved)
@@ -324,6 +336,18 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 					desc := record.Descriptor()
 					status = strings.ToUpper(strings.TrimSpace(desc.Status))
 					bound = desc.Status == runtimemanagedcredentials.StatusConnected
+					if bound {
+						if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, requiredGrantModel); err != nil {
+							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
+							bound = false
+						}
+					}
+					if bound {
+						if err := managedcredentialmodel.TokenRequestProfileCovers(desc.TokenRequest, requiredTokenRequest); err != nil {
+							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
+							bound = false
+						}
+					}
 					if bound && !managedCredentialScopesCover(desc.Scopes, tool.ManagedCredential.Scopes) {
 						status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
 						bound = false
@@ -333,7 +357,15 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 			if strings.TrimSpace(status) == "" {
 				status = "UNBOUND"
 			}
-			requires = append(requires, RequirementStatus{Kind: "managed_credential", Name: key, Status: status, Bound: bound})
+			requires = append(requires, RequirementStatus{
+				Kind:         "managed_credential",
+				Name:         key,
+				Status:       status,
+				Bound:        bound,
+				Scopes:       append([]string{}, tool.ManagedCredential.Scopes...),
+				GrantModel:   requiredGrantModel,
+				TokenRequest: requiredTokenRequest,
+			})
 		}
 	}
 	sort.Slice(requires, func(i, j int) bool {

@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 )
 
 func TestConnectionsClientCredentialsStatusDisconnectRedactsTokenMaterial(t *testing.T) {
@@ -158,6 +161,115 @@ func TestConnectionsAuthCodeCallbackCompletesPKCERecord(t *testing.T) {
 	}
 }
 
+func TestConnectionsAuthCodeCallbackCompletesBasicJSONWorkspaceGrantRecord(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "managed.json"))
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "notion-client" || pass != "notion-secret" {
+			t.Fatalf("BasicAuth = (%q, %q, %v), want notion client credentials", user, pass, ok)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if got := r.Header.Get("Notion-Version"); got != "2026-03-11" {
+			t.Fatalf("Notion-Version = %q, want 2026-03-11", got)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode token JSON body: %v", err)
+		}
+		if body["grant_type"] != "authorization_code" || body["code"] != "notion-code" {
+			t.Fatalf("token body = %#v, want Notion auth-code exchange", body)
+		}
+		if body["client_id"] != "" || body["client_secret"] != "" || body["code_verifier"] != "" {
+			t.Fatalf("token body leaked post-auth fields for Basic auth: %#v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "notion-access-token",
+			"refresh_token": "notion-refresh-token",
+			"expires_in":    3600,
+		})
+	}))
+	defer tokenServer.Close()
+
+	code, stdout, stderr := executeRootCommandWithInput(context.Background(), repo, []string{
+		"connections", "connect", "notion_oauth",
+		"--grant", "authorization_code",
+		"--provider", "notion",
+		"--auth-url", tokenServer.URL + "/auth",
+		"--token-url", tokenServer.URL + "/v1/oauth/token",
+		"--client-id", "notion-client",
+		"--client-secret-stdin",
+		"--redirect-url", "http://127.0.0.1/callback",
+		"--grant-model", "workspace_grant",
+		"--token-client-auth", "basic",
+		"--token-body", "json",
+		"--token-header", "Notion-Version=2026-03-11",
+		"--json",
+	}, "notion-secret\n")
+	if code != 0 {
+		t.Fatalf("connections connect exit = %d err=%s", code, stderr)
+	}
+	if outputLeaksManagedSecret(stdout) {
+		t.Fatalf("connect output leaked secret material: %s", stdout)
+	}
+	var begin connectionsConnectResult
+	if err := json.Unmarshal([]byte(stdout), &begin); err != nil {
+		t.Fatalf("decode connect output: %v\n%s", err, stdout)
+	}
+	authorizeURL, err := url.Parse(begin.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize_url: %v", err)
+	}
+	if begin.State == "" || authorizeURL.Query().Get("state") == "" {
+		t.Fatalf("connect output missing state: %#v", begin)
+	}
+	if authorizeURL.Query().Get("code_challenge") != "" || authorizeURL.Query().Get("code_challenge_method") != "" {
+		t.Fatalf("authorization_code connect emitted PKCE params: %s", begin.AuthorizeURL)
+	}
+	if begin.Connection.GrantModel != managedcredentialmodel.GrantModelWorkspace || begin.Connection.TokenRequest.ClientAuth != managedcredentialmodel.TokenClientAuthBasic || begin.Connection.TokenRequest.Body != managedcredentialmodel.TokenBodyJSON {
+		t.Fatalf("connect record = %#v, want workspace Basic JSON profile", begin.Connection)
+	}
+
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{
+		"connections", "callback", "notion_oauth",
+		"--state", begin.State,
+		"--code-stdin",
+		"--json",
+	}, "notion-code\n")
+	if code != 0 {
+		t.Fatalf("connections callback exit = %d err=%s", code, stderr)
+	}
+	if outputLeaksManagedSecret(stdout) {
+		t.Fatalf("callback output leaked secret material: %s", stdout)
+	}
+	var completed connectionsConnectResult
+	if err := json.Unmarshal([]byte(stdout), &completed); err != nil {
+		t.Fatalf("decode callback output: %v\n%s", err, stdout)
+	}
+	if completed.Connection.Status != "connected" || completed.Connection.GrantModel != managedcredentialmodel.GrantModelWorkspace || completed.Connection.TokenRequest.StaticHeaders["Notion-Version"] != "2026-03-11" {
+		t.Fatalf("completed record = %#v, want connected Notion profile", completed.Connection)
+	}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code = executeRootCommand(context.Background(), repo, []string{"connections", "status", "notion_oauth", "--json"}, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("connections status exit = %d err=%s", code, errOut.String())
+	}
+	if outputLeaksManagedSecret(out.String()) {
+		t.Fatalf("status output leaked secret material: %s", out.String())
+	}
+	var status connectionsStatusResult
+	if err := json.Unmarshal(out.Bytes(), &status); err != nil {
+		t.Fatalf("decode status output: %v\n%s", err, out.String())
+	}
+	if len(status.Connections) != 1 || status.Connections[0].GrantModel != managedcredentialmodel.GrantModelWorkspace || status.Connections[0].TokenRequest.ClientAuth != managedcredentialmodel.TokenClientAuthBasic {
+		t.Fatalf("status = %#v, want Notion grant/profile readback", status)
+	}
+}
+
 func TestConnectionsRejectSecretBearingArgvFlags(t *testing.T) {
 	repo := t.TempDir()
 	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "managed.json"))
@@ -196,6 +308,10 @@ func outputLeaksManagedSecret(raw string) bool {
 		"callback-access-token",
 		"callback-refresh-token",
 		"callback-code",
+		"notion-secret",
+		"notion-access-token",
+		"notion-refresh-token",
+		"notion-code",
 	} {
 		if strings.Contains(raw, secret) {
 			return true

@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -346,6 +347,89 @@ func TestDefaultPackRegistryLoadsSlackManagedCredentialPack(t *testing.T) {
 	}
 }
 
+func TestDefaultPackRegistryLoadsNotionManagedCredentialPack(t *testing.T) {
+	tool, ok := BuiltinTool("notion", "notion.append_block_children")
+	if !ok {
+		t.Fatal("BuiltinTool notion.append_block_children not found")
+	}
+	if !isProviderConnector(tool) {
+		t.Fatalf("builtin Notion tool category = %q, want %q", tool.Category, Category)
+	}
+	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "notion_oauth" {
+		t.Fatalf("builtin Notion managed credential = %#v, want notion_oauth", tool.ManagedCredential)
+	}
+	if tool.ManagedCredential.GrantModel != managedcredentialmodel.GrantModelWorkspace {
+		t.Fatalf("builtin Notion grant_model = %q, want workspace_grant", tool.ManagedCredential.GrantModel)
+	}
+	wantProfile := managedcredentialmodel.TokenRequestProfile{
+		ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+		Body:       managedcredentialmodel.TokenBodyJSON,
+		StaticHeaders: map[string]string{
+			"Notion-Version": "2026-03-11",
+		},
+	}
+	if !managedcredentialmodel.TokenRequestProfileEqual(tool.ManagedCredential.TokenRequest, wantProfile) {
+		t.Fatalf("builtin Notion token_request = %#v, want Basic JSON Notion-Version", tool.ManagedCredential.TokenRequest)
+	}
+	if tool.HTTP == nil || tool.HTTP.Method != "PATCH" || !strings.Contains(tool.HTTP.URL, "/v1/blocks/{{input.block_id}}/children") {
+		t.Fatalf("builtin Notion http = %#v, want append block children PATCH endpoint", tool.HTTP)
+	}
+	if got := tool.HTTP.Headers["Notion-Version"]; got != "2026-03-11" {
+		t.Fatalf("builtin Notion API header = %q, want Notion-Version", got)
+	}
+	if len(tool.Credentials) != 0 {
+		t.Fatalf("builtin Notion static credentials = %#v, want none", tool.Credentials)
+	}
+}
+
+func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *testing.T) {
+	ctx := context.Background()
+	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "notion", "notion.append_block_children"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+
+	unbound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions unbound: %v", err)
+	}
+	if len(unbound) != 1 || len(unbound[0].Requires) != 1 {
+		t.Fatalf("unbound surfaces = %#v, want one Notion managed credential requirement", unbound)
+	}
+	requirement := unbound[0].Requires[0]
+	if requirement.Kind != "managed_credential" || requirement.Name != "notion_oauth" || requirement.Bound || requirement.Status != "UNBOUND" {
+		t.Fatalf("unbound requirement = %#v, want unbound notion_oauth", requirement)
+	}
+	if requirement.GrantModel != managedcredentialmodel.GrantModelWorkspace || requirement.TokenRequest.ClientAuth != managedcredentialmodel.TokenClientAuthBasic || requirement.TokenRequest.Body != managedcredentialmodel.TokenBodyJSON {
+		t.Fatalf("unbound requirement shape = %#v, want workspace Basic JSON", requirement)
+	}
+
+	matchingStore := runtimemanagedcredentials.NewMemoryStore(notionConnectedRecord())
+	bound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: matchingStore})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions bound: %v", err)
+	}
+	if len(bound) != 1 || len(bound[0].Requires) != 1 || !bound[0].Requires[0].Bound || bound[0].Requires[0].Status != "CONNECTED" {
+		t.Fatalf("bound requirement = %#v, want connected Notion credential", bound)
+	}
+
+	wrongProfile := notionConnectedRecord()
+	wrongProfile.TokenRequest = managedcredentialmodel.DefaultTokenRequestProfile()
+	wrongProfileStore := runtimemanagedcredentials.NewMemoryStore(wrongProfile)
+	mismatch, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: wrongProfileStore})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions mismatch: %v", err)
+	}
+	if len(mismatch) != 1 || len(mismatch[0].Requires) != 1 || mismatch[0].Requires[0].Bound || mismatch[0].Requires[0].Status != "SCOPE_INSUFFICIENT" {
+		t.Fatalf("mismatch requirement = %#v, want fail-closed token profile mismatch", mismatch)
+	}
+}
+
 func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -634,6 +718,29 @@ func slackConnectorTool(url string) runtimecontracts.ToolSchemaEntry {
 				"text":    "{{input.text}}",
 			},
 		},
+	}
+}
+
+func notionConnectedRecord() runtimemanagedcredentials.Record {
+	return runtimemanagedcredentials.Record{
+		Key:          "notion_oauth",
+		Provider:     "notion",
+		GrantType:    runtimemanagedcredentials.GrantAuthorizationCode,
+		TokenURL:     "https://api.notion.com/v1/oauth/token",
+		ClientID:     "notion-client",
+		ClientSecret: "notion-secret",
+		GrantModel:   managedcredentialmodel.GrantModelWorkspace,
+		TokenRequest: managedcredentialmodel.TokenRequestProfile{
+			ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+			Body:       managedcredentialmodel.TokenBodyJSON,
+			StaticHeaders: map[string]string{
+				"Notion-Version": "2026-03-11",
+			},
+		},
+		AccessToken:  "notion-access-secret",
+		RefreshToken: "notion-refresh-secret",
+		Status:       runtimemanagedcredentials.StatusConnected,
+		ExpiresAt:    time.Now().Add(time.Hour),
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -150,6 +151,12 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 		}
 		if strings.TrimSpace(tool.ManagedCredential.Key) == "" {
 			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.key is required", context, toolID))
+		}
+		if err := managedcredentialmodel.ValidateGrantModel(tool.ManagedCredential.GrantModel); err != nil {
+			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.%s", context, toolID, err.Error()))
+		}
+		if err := managedcredentialmodel.ValidateTokenRequestProfile(tool.ManagedCredential.TokenRequest); err != nil {
+			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.%s", context, toolID, err.Error()))
 		}
 	}
 	if len(tool.Credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {

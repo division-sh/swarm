@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 )
 
 func TestTokenSourceAuthCodePKCEPersistsStructuredTokenRecord(t *testing.T) {
@@ -162,6 +164,130 @@ func TestTokenSourceAuthCodeFailureRedactsCallbackCode(t *testing.T) {
 	}
 }
 
+func TestTokenSourceAuthCodeUsesBasicJSONTokenRequestProfile(t *testing.T) {
+	ctx := context.Background()
+	var sawBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" {
+			http.NotFound(w, r)
+			return
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "notion-client" || pass != "notion-secret" {
+			t.Fatalf("BasicAuth = (%q, %q, %v), want notion client credentials", user, pass, ok)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if got := r.Header.Get("Notion-Version"); got != "2026-03-11" {
+			t.Fatalf("Notion-Version = %q, want 2026-03-11", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&sawBody); err != nil {
+			t.Fatalf("decode token body: %v", err)
+		}
+		for _, forbidden := range []string{"client_id", "client_secret", "code_verifier"} {
+			if _, exists := sawBody[forbidden]; exists {
+				t.Fatalf("token JSON body carried %s: %#v", forbidden, sawBody)
+			}
+		}
+		if sawBody["grant_type"] != "authorization_code" || sawBody["code"] != "auth-code" || sawBody["redirect_uri"] != "http://127.0.0.1/callback" {
+			t.Fatalf("token JSON body = %#v, want Notion auth-code body", sawBody)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "notion-access",
+			"refresh_token": "notion-refresh",
+			"expires_in":    3600,
+			"token_type":    "Bearer",
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore()
+	source := TokenSource{Store: store}
+	begin, err := source.BeginAuthCode(ctx, BeginAuthCodeRequest{
+		Key:          "notion_oauth",
+		Provider:     "notion",
+		AuthURL:      server.URL + "/auth",
+		TokenURL:     server.URL + "/token",
+		ClientID:     "notion-client",
+		ClientSecret: "notion-secret",
+		RedirectURL:  "http://127.0.0.1/callback",
+		GrantModel:   managedcredentialmodel.GrantModelWorkspace,
+		TokenRequest: managedcredentialmodel.TokenRequestProfile{
+			ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+			Body:       managedcredentialmodel.TokenBodyJSON,
+			StaticHeaders: map[string]string{
+				"Notion-Version": "2026-03-11",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BeginAuthCode: %v", err)
+	}
+	authorizeURL, err := url.Parse(begin.AuthorizeURL)
+	if err != nil {
+		t.Fatalf("Parse authorize URL: %v", err)
+	}
+	if authorizeURL.Query().Get("code_challenge") != "" || authorizeURL.Query().Get("code_challenge_method") != "" {
+		t.Fatalf("non-PKCE authorize URL carried PKCE params: %s", begin.AuthorizeURL)
+	}
+	if begin.CodeVerifier != "" {
+		t.Fatalf("CodeVerifier = %q, want empty for authorization_code", begin.CodeVerifier)
+	}
+
+	record, err := source.CompleteAuthCode(ctx, CompleteAuthCodeRequest{
+		Key:   "notion_oauth",
+		State: begin.State,
+		Code:  "auth-code",
+	})
+	if err != nil {
+		t.Fatalf("CompleteAuthCode: %v", err)
+	}
+	if record.GrantType != GrantAuthorizationCode || record.GrantModel != managedcredentialmodel.GrantModelWorkspace {
+		t.Fatalf("record grant = (%q, %q), want authorization_code workspace_grant", record.GrantType, record.GrantModel)
+	}
+	if !managedcredentialmodel.TokenRequestProfileEqual(record.TokenRequest, managedcredentialmodel.TokenRequestProfile{
+		ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+		Body:       managedcredentialmodel.TokenBodyJSON,
+		StaticHeaders: map[string]string{
+			"Notion-Version": "2026-03-11",
+		},
+	}) {
+		t.Fatalf("record token_request = %#v, want Basic JSON Notion header", record.TokenRequest)
+	}
+	if record.AccessToken != "notion-access" || record.RefreshToken != "notion-refresh" {
+		t.Fatalf("record tokens = (%q, %q), want Notion tokens", record.AccessToken, record.RefreshToken)
+	}
+}
+
+func TestTokenSourceAuthCodeBasicProfileRequiresClientSecretBeforePersisting(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	source := TokenSource{Store: store}
+	_, err := source.BeginAuthCode(ctx, BeginAuthCodeRequest{
+		Key:         "notion_oauth",
+		Provider:    "notion",
+		AuthURL:     "https://example.invalid/auth",
+		TokenURL:    "https://example.invalid/token",
+		ClientID:    "notion-client",
+		RedirectURL: "http://127.0.0.1/callback",
+		GrantModel:  managedcredentialmodel.GrantModelWorkspace,
+		TokenRequest: managedcredentialmodel.TokenRequestProfile{
+			ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+			Body:       managedcredentialmodel.TokenBodyJSON,
+		},
+	})
+	if err == nil {
+		t.Fatal("BeginAuthCode error = nil, want missing client_secret failure")
+	}
+	if !strings.Contains(err.Error(), "client_secret is required") {
+		t.Fatalf("BeginAuthCode error = %v, want missing client_secret failure", err)
+	}
+	if _, ok, getErr := store.Get(ctx, "notion_oauth"); getErr != nil || ok {
+		t.Fatalf("store.Get after failed BeginAuthCode = (%v, %v), want no persisted pending record", ok, getErr)
+	}
+}
+
 func TestTokenSourceClientCredentialsRefreshBeforeUseAndFailureEvidence(t *testing.T) {
 	ctx := context.Background()
 	requests := 0
@@ -220,6 +346,111 @@ func TestTokenSourceClientCredentialsRefreshBeforeUseAndFailureEvidence(t *testi
 	}
 	if requests != 2 {
 		t.Fatalf("token endpoint requests = %d, want 2", requests)
+	}
+}
+
+func TestTokenSourceRefreshUsesBasicJSONTokenRequestProfileAndRotatesRefreshToken(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != "notion-client" || pass != "notion-secret" {
+			t.Fatalf("BasicAuth = (%q, %q, %v), want notion client credentials", user, pass, ok)
+		}
+		if got := r.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		if got := r.Header.Get("Notion-Version"); got != "2026-03-11" {
+			t.Fatalf("Notion-Version = %q, want 2026-03-11", got)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode refresh body: %v", err)
+		}
+		for _, forbidden := range []string{"client_id", "client_secret"} {
+			if _, exists := body[forbidden]; exists {
+				t.Fatalf("refresh JSON body carried %s: %#v", forbidden, body)
+			}
+		}
+		if body["grant_type"] != "refresh_token" || body["refresh_token"] != "old-refresh" {
+			t.Fatalf("refresh body = %#v, want old refresh token", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "refreshed-access",
+			"refresh_token": "rotated-refresh",
+			"expires_in":    3600,
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore(Record{
+		Key:          "notion_oauth",
+		Provider:     "notion",
+		GrantType:    GrantAuthorizationCode,
+		TokenURL:     server.URL,
+		ClientID:     "notion-client",
+		ClientSecret: "notion-secret",
+		GrantModel:   managedcredentialmodel.GrantModelWorkspace,
+		TokenRequest: managedcredentialmodel.TokenRequestProfile{
+			ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+			Body:       managedcredentialmodel.TokenBodyJSON,
+			StaticHeaders: map[string]string{
+				"Notion-Version": "2026-03-11",
+			},
+		},
+		AccessToken:  "expired-access",
+		RefreshToken: "old-refresh",
+		Status:       StatusConnected,
+	})
+	source := TokenSource{Store: store}
+	token, record, err := source.Refresh(ctx, "notion_oauth")
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if token != "refreshed-access" || record.AccessToken != "refreshed-access" || record.RefreshToken != "rotated-refresh" {
+		t.Fatalf("refreshed record = (%q, %#v), want rotated Notion tokens", token, record)
+	}
+	stored, ok, err := store.Get(ctx, "notion_oauth")
+	if err != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, err)
+	}
+	if stored.RefreshToken != "rotated-refresh" {
+		t.Fatalf("stored refresh token = %q, want rotated-refresh", stored.RefreshToken)
+	}
+}
+
+func TestTokenSourceAccessTokenFailsClosedWhenTokenRequestProfileDoesNotSatisfyRequirement(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore(Record{
+		Key:         "notion_oauth",
+		Provider:    "notion",
+		GrantType:   GrantAuthorizationCode,
+		TokenURL:    "https://api.notion.test/oauth/token",
+		ClientID:    "notion-client",
+		GrantModel:  managedcredentialmodel.GrantModelWorkspace,
+		AccessToken: "fresh-token",
+		Status:      StatusConnected,
+		ExpiresAt:   time.Now().Add(time.Hour),
+	})
+	source := TokenSource{Store: store}
+	token, _, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:        "notion_oauth",
+		GrantModel: managedcredentialmodel.GrantModelWorkspace,
+		TokenRequest: managedcredentialmodel.TokenRequestProfile{
+			ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
+			Body:       managedcredentialmodel.TokenBodyJSON,
+			StaticHeaders: map[string]string{
+				"Notion-Version": "2026-03-11",
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("AccessToken error = nil, want token-request-insufficient")
+	}
+	if token != "" {
+		t.Fatalf("token = %q, want no token on token_request mismatch", token)
+	}
+	if !strings.Contains(err.Error(), "token-request-insufficient") {
+		t.Fatalf("AccessToken error = %v, want token-request-insufficient", err)
 	}
 }
 
