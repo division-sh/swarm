@@ -902,7 +902,8 @@ func unifiedConfigDelegatedSwarmEnvSources(repoRoot, explicitPath string) map[st
 	out := map[string]string{}
 	repoRoot = unifiedConfigRepoRoot(repoRoot)
 	layers, _ := discoverUnifiedConfigLayers(repoRoot, explicitPath)
-	var delegatedEnv string
+	var merged yaml.Node
+	merged.Kind = yaml.MappingNode
 	for _, layer := range layers {
 		raw, err := os.ReadFile(layer.Path)
 		if err != nil {
@@ -919,12 +920,9 @@ func unifiedConfigDelegatedSwarmEnvSources(repoRoot, explicitPath string) map[st
 		if diagnostics := validateUnifiedConfigNode(root, layer, repoRoot); len(unifiedConfigBlockers(diagnostics)) > 0 {
 			continue
 		}
-		value := strings.TrimSpace(yamlScalarPath(root, "database", "password_env"))
-		if value == "" {
-			continue
-		}
-		delegatedEnv = value
+		mergeYAMLMapping(&merged, root)
 	}
+	delegatedEnv := strings.TrimSpace(yamlScalarPath(&merged, "database", "password_env"))
 	if delegatedEnv == "" {
 		return out
 	}

@@ -772,6 +772,51 @@ func TestSwarmEnvGuardRejectsProjectTypedDatabasePasswordEnvDelegation(t *testin
 	}
 }
 
+func TestSwarmEnvGuardHonorsTypedDatabasePasswordEnvClearOverride(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("SWARM_DB_PASSWORD", "secret")
+	repo := t.TempDir()
+	userPath := userGlobalUnifiedConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatalf("mkdir user global config: %v", err)
+	}
+	writeWorkflowValidationFixtureFile(t, userPath, "database:\n  password_env: SWARM_DB_PASSWORD\n")
+	localDir := filepath.Join(repo, ".swarm")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatalf("mkdir local operator config: %v", err)
+	}
+	writeWorkflowValidationFixtureFile(t, filepath.Join(localDir, "swarm.yaml"), "database:\n  password_env: \"\"\n")
+
+	called := false
+	opts := defaultRootCommandOptions()
+	opts.runServe = func(_ context.Context, _ string, _ serveOptions) int {
+		called = true
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{
+		"serve",
+		"--api-listen-addr", "127.0.0.1:0",
+		"--mcp-listen-addr", "127.0.0.1:0",
+	}, &stdout, &stderr, opts)
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
+	}
+	if called {
+		t.Fatalf("serve callback was called after typed env delegation was cleared; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	output := stdout.String() + stderr.String()
+	for _, want := range []string{"env/known_retired", "SWARM_DB_PASSWORD", "database.password_env"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "accepted by explicit typed config delegation") {
+		t.Fatalf("cleared typed env delegation remained active:\n%s", output)
+	}
+}
+
 func TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
