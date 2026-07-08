@@ -747,6 +747,105 @@ func TestPostgresStore_EnsureSchemaTables_AllowsCurrentTimerSchema(t *testing.T)
 	}
 }
 
+func TestPostgresStore_EnsureSchemaTables_AddsMailboxDeferredUntilAndNormalizesLegacyDeferredRows(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+
+	spec := loadPlatformSpecForSQLiteSchemaTest(t)
+	platformPlans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	mailboxPlans := []SchemaTableDDL{}
+	for _, plan := range platformPlans {
+		if plan.TableName == "mailbox" {
+			mailboxPlans = append(mailboxPlans, plan)
+		}
+	}
+	if len(mailboxPlans) != 1 {
+		t.Fatalf("mailbox platform plans = %d, want 1", len(mailboxPlans))
+	}
+
+	if _, err := db.ExecContext(ctx, `DROP TABLE IF EXISTS mailbox CASCADE`); err != nil {
+		t.Fatalf("drop mailbox: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		CREATE TABLE mailbox (
+			item_id UUID PRIMARY KEY,
+			entity_id UUID,
+			flow_instance TEXT,
+			scope TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity', 'flow', 'global')),
+			item_type TEXT NOT NULL,
+			source_event_id UUID,
+			from_agent TEXT,
+			severity TEXT NOT NULL DEFAULT 'normal' CHECK (severity IN ('normal', 'urgent', 'critical')),
+			summary TEXT,
+			payload JSONB NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'decided', 'expired', 'cancelled')),
+			decision TEXT,
+			decision_notes TEXT,
+			decided_by TEXT,
+			decided_at TIMESTAMPTZ,
+			notified BOOLEAN NOT NULL DEFAULT FALSE,
+			expires_at TIMESTAMPTZ,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		t.Fatalf("create legacy mailbox table: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO mailbox (
+			item_id, item_type, payload, status, decision, decided_at, expires_at
+		) VALUES (
+			'44444444-4444-4444-8444-444444444444', 'approval', '{}'::jsonb, 'decided', 'deferred', '2026-05-10T12:00:00Z', '2026-06-10T12:00:00Z'
+		)
+	`); err != nil {
+		t.Fatalf("insert legacy deferred mailbox row: %v", err)
+	}
+
+	if err := pg.EnsureSchemaTables(ctx, mailboxPlans); err != nil {
+		t.Fatalf("EnsureSchemaTables mailbox migration: %v", err)
+	}
+	var hasDeferredUntil bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'mailbox'
+			  AND column_name = 'deferred_until'
+		)
+	`).Scan(&hasDeferredUntil); err != nil {
+		t.Fatalf("inspect mailbox.deferred_until column: %v", err)
+	}
+	if !hasDeferredUntil {
+		t.Fatal("mailbox.deferred_until column missing after migration")
+	}
+	var (
+		status        string
+		decision      sql.NullString
+		deferredUntil sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, decision, deferred_until
+		FROM mailbox
+		WHERE item_id = '44444444-4444-4444-8444-444444444444'
+	`).Scan(&status, &decision, &deferredUntil); err != nil {
+		t.Fatalf("load migrated legacy deferred mailbox row: %v", err)
+	}
+	if status != "pending" || decision.Valid || deferredUntil.Valid {
+		t.Fatalf("legacy deferred row status=%q decision=%v deferred_until=%v, want pending/null/null", status, decision, deferredUntil)
+	}
+	caps, err := pg.ResolveSchemaCapabilities(ctx)
+	if err != nil {
+		t.Fatalf("ResolveSchemaCapabilities: %v", err)
+	}
+	if caps.Mailbox != SchemaFlavorCanonical {
+		t.Fatalf("mailbox capability = %s, want %s", caps.Mailbox, SchemaFlavorCanonical)
+	}
+}
+
 func legacyTimerDiagnosticPlan() SchemaTableDDL {
 	return SchemaTableDDL{
 		TableName:   "timers",
