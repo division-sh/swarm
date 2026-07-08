@@ -26,6 +26,7 @@ type templateInstanceLifecyclePreviewKey struct{}
 
 type templateInstanceLifecycleOwner struct {
 	source          semanticview.Source
+	routeTable      *RouteTable
 	loadDescriptors connectRoutePlanDescriptorLoader
 	activate        runtimepipeline.FlowInstanceActivator
 }
@@ -43,9 +44,10 @@ type TemplateInstanceLifecycleDecision struct {
 	SourceEventID string
 }
 
-func newTemplateInstanceLifecycleOwner(source semanticview.Source, loadDescriptors connectRoutePlanDescriptorLoader, activate runtimepipeline.FlowInstanceActivator) templateInstanceLifecycleOwner {
+func newTemplateInstanceLifecycleOwner(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activate runtimepipeline.FlowInstanceActivator) templateInstanceLifecycleOwner {
 	return templateInstanceLifecycleOwner{
 		source:          source,
+		routeTable:      routeTable,
 		loadDescriptors: loadDescriptors,
 		activate:        activate,
 	}
@@ -189,7 +191,7 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, refreshErr
 			}
 			matches = runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, refreshed)
-			if len(matches) == 1 {
+			if len(matches) == 1 && templateInstanceLifecycleMatchIsRoutable(o.routeTable, plan, matches[0]) {
 				return templateInstanceLifecycleMaterialization(plan, matches), o.decision(plan, evt, keyMaterial, onMissing, onConflict, matches[0], templateInstanceLifecycleActionReused), true, nil
 			}
 			if len(matches) > 1 {
@@ -347,6 +349,24 @@ func templateInstanceLifecycleCanReuseAfterActivationError(plan runtimepinroutin
 		return false
 	}
 	return strings.TrimSpace(onMissing) == "create" && strings.TrimSpace(onConflict) == "reuse"
+}
+
+func templateInstanceLifecycleMatchIsRoutable(routeTable *RouteTable, plan runtimepinrouting.ConnectRoutePlan, target events.RouteIdentity) bool {
+	if routeTable == nil {
+		return false
+	}
+	target = target.Normalized()
+	if target.Empty() {
+		return false
+	}
+	for _, key := range connectReceiverCarrierRouteKeys(plan, target) {
+		for _, subscriber := range routeTable.Resolve(key) {
+			if connectSubscriberMatchesTarget(subscriber, target) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func templateInstanceLifecycleParentRoute(evt events.Event, plan runtimepinrouting.ConnectRoutePlan) runtimeflowidentity.ParentRoute {

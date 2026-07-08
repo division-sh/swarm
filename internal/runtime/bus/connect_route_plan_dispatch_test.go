@@ -51,8 +51,9 @@ type connectRoutePlanMutationStore struct {
 
 type connectRoutePlanLifecycleStore struct {
 	*connectRoutePlanDescriptorStore
-	bus         *EventBus
-	activations []runtimepipeline.FlowInstanceActivationRequest
+	bus                             *EventBus
+	activations                     []runtimepipeline.FlowInstanceActivationRequest
+	failAfterDescriptorWithoutRoute error
 }
 
 type connectRoutePlanConcurrentLifecycleStore struct {
@@ -131,6 +132,9 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 		FlowTemplate:  req.Instance.TemplateID,
 		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
 	})
+	if s.failAfterDescriptorWithoutRoute != nil {
+		return s.failAfterDescriptorWithoutRoute
+	}
 	if s.bus == nil {
 		return nil
 	}
@@ -1411,6 +1415,47 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAn
 	}
 	if got := store.flowInstanceDescriptorCalls; got != 0 {
 		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionDoesNotReuseUnroutableActivationFailure(t *testing.T) {
+	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+		failAfterDescriptorWithoutRoute: errors.New("route installation failed"),
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-partial"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	err = eb.Publish(context.Background(), evt)
+	if err == nil {
+		t.Fatal("Publish succeeded, want activation error preserved for unroutable descriptor")
+	}
+	if !strings.Contains(err.Error(), "route installation failed") {
+		t.Fatalf("Publish error = %v, want original activation failure", err)
+	}
+	if got := len(store.activations); got != 1 {
+		t.Fatalf("activations = %d, want one failed activation attempt", got)
+	}
+	if got := len(store.flowInstances); got != 1 {
+		t.Fatalf("flow instance descriptors = %d, want descriptor visible from failed activation", got)
+	}
+	if routes := eb.RouteTable().MaterializedRoutes(store.activations[0].Instance.Route()); len(routes) != 0 {
+		t.Fatalf("materialized routes after failed activation = %#v, want none", routes)
+	}
+	if routes := store.routes[eventID]; len(routes) != 0 {
+		t.Fatalf("persisted delivery routes = %#v, want none when activation failure is preserved", routes)
 	}
 }
 
