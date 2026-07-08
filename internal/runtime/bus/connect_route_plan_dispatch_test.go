@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -52,6 +53,11 @@ type connectRoutePlanLifecycleStore struct {
 	*connectRoutePlanDescriptorStore
 	bus         *EventBus
 	activations []runtimepipeline.FlowInstanceActivationRequest
+}
+
+type connectRoutePlanConcurrentLifecycleStore struct {
+	*connectRoutePlanLifecycleStore
+	mu sync.Mutex
 }
 
 type targetRouteMemoryEventMutation struct {
@@ -132,6 +138,53 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 		Identity:            req.Instance.Route(),
 		ActivationVariables: connectRoutePlanActivationVariables(req),
 	})
+}
+
+func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescriptors(ctx context.Context) ([]ActiveFlowInstanceDescriptor, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.flowInstanceDescriptorCalls++
+	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...), nil
+}
+
+func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
+	s.mu.Lock()
+	for _, descriptor := range s.flowInstances {
+		descriptor = descriptor.Normalized()
+		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
+			s.mu.Unlock()
+			return errors.New("flow instance already exists")
+		}
+	}
+	s.activations = append(s.activations, req)
+	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
+		InstanceID:    req.Instance.InstanceID,
+		EntityID:      req.Instance.EntityID,
+		FlowInstance:  req.Instance.InstancePath,
+		FlowTemplate:  req.Instance.TemplateID,
+		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
+	})
+	bus := s.bus
+	s.mu.Unlock()
+	if bus == nil {
+		return nil
+	}
+	return bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
+		Identity:            req.Instance.Route(),
+		ActivationVariables: connectRoutePlanActivationVariables(req),
+	})
+}
+
+func (s *connectRoutePlanConcurrentLifecycleStore) ActivationCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.activations)
+}
+
+func (s *connectRoutePlanConcurrentLifecycleStore) FlowInstanceDescriptors() []ActiveFlowInstanceDescriptor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]ActiveFlowInstanceDescriptor(nil), s.flowInstances...)
 }
 
 func connectRoutePlanActivationAddressFields(metadata map[string]any) map[string]string {
@@ -1233,6 +1286,246 @@ func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGap
 			}
 			requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
 		})
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionReusesCreatesAndReplaysCommittedRoute(t *testing.T) {
+	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "account/one",
+				AddressFields: map[string]string{"entity.account_id": "acct-1"},
+			}},
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
+	}
+	existingID := uuid.NewString()
+	existing := eventtest.RootIngress(existingID,
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	existingWant := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node-one", Target: events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: "ent-1"}}
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), existing)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan(existing): %v", err)
+	}
+	if preflight.TargetFailure != "" || !deliveryRoutesContain(preflight.DeliveryRoutes, existingWant) || len(preflight.DeliveryRoutes) != 1 {
+		t.Fatalf("existing preflight failure/routes = %q/%#v, want existing route %#v", preflight.TargetFailure, preflight.DeliveryRoutes, existingWant)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("existing preflight activations = %d, want 0", got)
+	}
+	if err := eb.Publish(context.Background(), existing); err != nil {
+		t.Fatalf("Publish(existing): %v", err)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("existing publish activations = %d, want 0 because select-or-create reuses exact match", got)
+	}
+	if !deliveryRoutesContain(store.routes[existingID], existingWant) || len(store.routes[existingID]) != 1 {
+		t.Fatalf("existing persisted routes = %#v, want %#v", store.routes[existingID], existingWant)
+	}
+
+	missingID := uuid.NewString()
+	missing := eventtest.RootIngress(missingID,
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-2"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	preflight, err = eb.CheckPublishRecipientPlan(context.Background(), missing)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan(missing): %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
+		t.Fatalf("missing preflight failure/routes = %q/%#v, want preview route", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("missing preflight activations = %d, want 0 preview-only", got)
+	}
+	if err := eb.Publish(context.Background(), missing); err != nil {
+		t.Fatalf("Publish(missing): %v", err)
+	}
+	if got := len(store.activations); got != 1 {
+		t.Fatalf("missing publish activations = %d, want 1 create", got)
+	}
+	activation := store.activations[0]
+	if activation.Config["template_instance_on_missing"] != "create" || activation.Config["template_instance_on_conflict"] != "reuse" {
+		t.Fatalf("activation policy config = %#v, want canonical select-or-create create/reuse", activation.Config)
+	}
+	if activation.Config["account_id"] != "acct-2" || activation.Metadata["account_id"] != "acct-2" {
+		t.Fatalf("activation config/metadata = %#v/%#v, want carried account_id acct-2", activation.Config, activation.Metadata)
+	}
+	createdWant := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "account-node-" + activation.Instance.InstanceID,
+		Target: events.RouteIdentity{
+			FlowID:       "account",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[missingID], createdWant) || len(store.routes[missingID]) != 1 {
+		t.Fatalf("missing persisted routes = %#v, want created route %#v", store.routes[missingID], createdWant)
+	}
+
+	retryID := uuid.NewString()
+	retry := eventtest.RootIngress(retryID,
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-2"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	if err := eb.Publish(context.Background(), retry); err != nil {
+		t.Fatalf("Publish(retry): %v", err)
+	}
+	if got := len(store.activations); got != 1 {
+		t.Fatalf("retry activations = %d, want reuse without second activation", got)
+	}
+	if !deliveryRoutesContain(store.routes[retryID], createdWant) || len(store.routes[retryID]) != 1 {
+		t.Fatalf("retry persisted routes = %#v, want reused route %#v", store.routes[retryID], createdWant)
+	}
+
+	replayTarget := eb.SubscribeInternal("account-node-" + activation.Instance.InstanceID)
+	store.flowInstances = []ActiveFlowInstanceDescriptor{{
+		InstanceID:    "drift",
+		EntityID:      "ent-drift",
+		FlowInstance:  "account/drift",
+		AddressFields: map[string]string{"entity.account_id": "acct-2"},
+	}}
+	store.flowInstanceDescriptorCalls = 0
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
+	}
+	if err := eb.PublishPersistedRecipients(context.Background(), missing, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
+	}
+	replayed := requireBusEvent(t, replayTarget, "select-or-create committed replay")
+	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
+		t.Fatalf("replayed target = flow_instance:%q entity:%q, want persisted %s/%s",
+			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForAmbiguousTarget(t *testing.T) {
+	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+			flowInstances: []ActiveFlowInstanceDescriptor{
+				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+			},
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	for _, instanceID := range []string{"one", "two"} {
+		if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", instanceID)}); err != nil {
+			t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+		}
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+	if err != nil {
+		t.Fatalf("planSubscribedRoutePlan: %v", err)
+	}
+	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.TargetFailure != runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous) {
+		t.Fatalf("route plan authority/failure = %q/%q, want fail-closed ambiguous", routePlan.AuthorityState, routePlan.TargetFailure)
+	}
+	if got := routePlan.ExtraDetail["connect_route_plan_matched_instance_count"]; got != 2 {
+		t.Fatalf("matched count detail = %#v, want 2; all detail %#v", got, routePlan.ExtraDetail)
+	}
+	if remediation, _ := routePlan.ExtraDetail["connect_route_plan_failure_remediation"].(string); !strings.Contains(remediation, "select-or-create") || !strings.Contains(remediation, "account") || !strings.Contains(remediation, "account_id") {
+		t.Fatalf("remediation = %q, want select-or-create/account/account_id detail", remediation)
+	}
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("activations = %d, want 0 on ambiguous fail-closed", got)
+	}
+	if routes := store.routes[eventID]; len(routes) != 0 {
+		t.Fatalf("persisted routes = %#v, want none for ambiguous fail-closed", routes)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameKeyConverges(t *testing.T) {
+	source := connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t, "reject", "reject")
+	base := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	store := &connectRoutePlanConcurrentLifecycleStore{connectRoutePlanLifecycleStore: base}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	eventIDs := []string{uuid.NewString(), uuid.NewString()}
+	errs := make(chan error, len(eventIDs))
+	var wg sync.WaitGroup
+	for _, eventID := range eventIDs {
+		eventID := eventID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			evt := eventtest.RootIngress(eventID,
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-race"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+			errs <- eb.Publish(context.Background(), evt)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent Publish returned error: %v", err)
+		}
+	}
+	if got := store.ActivationCount(); got != 1 {
+		t.Fatalf("activations = %d, want one same-key select-or-create activation", got)
+	}
+	descriptors := store.FlowInstanceDescriptors()
+	if len(descriptors) != 1 {
+		t.Fatalf("descriptors = %#v, want one same-key descriptor", descriptors)
+	}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "account-node-" + descriptors[0].InstanceID,
+		Target: events.RouteIdentity{
+			FlowID:       "account",
+			FlowInstance: descriptors[0].FlowInstance,
+			EntityID:     descriptors[0].EntityID,
+		},
+	}
+	for _, eventID := range eventIDs {
+		routes, err := store.ListEventDeliveryRoutes(context.Background(), eventID)
+		if err != nil {
+			t.Fatalf("ListEventDeliveryRoutes(%s): %v", eventID, err)
+		}
+		if !deliveryRoutesContain(routes, want) || len(routes) != 1 {
+			t.Fatalf("routes[%s] = %#v, want converged same-key route %#v", eventID, routes, want)
+		}
 	}
 }
 
@@ -2415,12 +2708,22 @@ func connectRoutePlanCreateResolutionSource(t testing.TB, mint string) semanticv
 
 func connectRoutePlanSelectResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
 	t.Helper()
+	return connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, onMissing, onConflict)
+}
+
+func connectRoutePlanSelectOrCreateResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
+	return connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate, onMissing, onConflict)
+}
+
+func connectRoutePlanCarriedKeyResolutionSourceWithPolicy(t testing.TB, mode, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t, onMissing, onConflict)
+	root := writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, mode, onMissing, onConflict)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -2513,7 +2816,16 @@ validator-node:
 
 func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
 	t.Helper()
+	return writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t, runtimecontracts.FlowInputResolutionModeSelect, onMissing, onConflict)
+}
+
+func writeConnectRoutePlanCarriedKeyResolutionFixtureWithPolicy(t testing.TB, mode, onMissing, onConflict string) string {
+	t.Helper()
 	root := t.TempDir()
+	mode = strings.TrimSpace(mode)
+	if mode == "" {
+		mode = runtimecontracts.FlowInputResolutionModeSelect
+	}
 	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: select-resolution-connect-route-plan-bus
 version: "1.0.0"
@@ -2563,7 +2875,7 @@ pins:
       - name: account_ready
         event: account.ready
         resolution:
-          mode: select
+          mode: `+mode+`
           instance_key: account_id
         carries:
           account_id:

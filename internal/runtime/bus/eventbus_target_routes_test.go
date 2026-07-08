@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 )
 
 type targetRouteMemoryStore struct {
+	mu          sync.Mutex
 	events      map[string]events.Event
 	routes      map[string][]events.DeliveryRoute
 	scopes      map[string]replayclaim.CommittedReplayScope
@@ -39,6 +41,8 @@ func newTargetRouteMemoryStore() *targetRouteMemoryStore {
 }
 
 func (s *targetRouteMemoryStore) AppendEvent(_ context.Context, evt events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events[evt.ID()] = evt
 	return nil
 }
@@ -48,6 +52,8 @@ func (s *targetRouteMemoryStore) InsertEventDeliveries(_ context.Context, _ stri
 }
 
 func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, eventID string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var out []string
 	for _, route := range s.routes[eventID] {
 		if route.SubscriberType == "agent" {
@@ -60,6 +66,8 @@ func (s *targetRouteMemoryStore) ListEventDeliveryRecipients(_ context.Context, 
 func (s *targetRouteMemoryStore) SupportsPersistedReplay() bool { return true }
 
 func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScope(_ context.Context, evt events.Event, deliveryRoutes []events.DeliveryRoute, scope replayclaim.CommittedReplayScope) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events[evt.ID()] = evt
 	s.routes[evt.ID()] = events.NormalizeDeliveryRoutes(deliveryRoutes)
 	s.scopes[evt.ID()] = scope
@@ -67,10 +75,14 @@ func (s *targetRouteMemoryStore) PersistEventWithDeliveryRouteSetAndScope(_ cont
 }
 
 func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, eventID string) ([]events.DeliveryRoute, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
 func (s *targetRouteMemoryStore) UpsertPipelineReceipt(_ context.Context, eventID, status, errText string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.receipts == nil {
 		s.receipts = map[string]string{}
 	}
@@ -83,10 +95,14 @@ func (s *targetRouteMemoryStore) UpsertPipelineReceipt(_ context.Context, eventI
 }
 
 func (s *targetRouteMemoryStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return append([]events.PersistedReplayEvent(nil), s.missing...), nil
 }
 
 func (s *targetRouteMemoryStore) ClaimPipelineReplay(_ context.Context, eventID string) (runtimeownership.Lease, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.claimed == nil {
 		s.claimed = map[string]bool{}
 	}
@@ -103,8 +119,12 @@ type targetRouteMemoryLease struct {
 }
 
 func (l targetRouteMemoryLease) Release(context.Context) error {
-	if l.store != nil && l.store.claimed != nil {
-		delete(l.store.claimed, l.eventID)
+	if l.store != nil {
+		l.store.mu.Lock()
+		defer l.store.mu.Unlock()
+		if l.store.claimed != nil {
+			delete(l.store.claimed, l.eventID)
+		}
 	}
 	return nil
 }
@@ -365,6 +385,8 @@ func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRo
 }
 
 func (s *targetRouteMemoryStore) LoadCommittedReplayScope(_ context.Context, eventID string) (replayclaim.CommittedReplayScope, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	scope := s.scopes[eventID]
 	if scope == "" {
 		return "", replayclaim.ErrMissingCommittedReplayScope

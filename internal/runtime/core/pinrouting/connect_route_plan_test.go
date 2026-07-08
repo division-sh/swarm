@@ -261,6 +261,69 @@ func TestLowerCompositionConnectRoutePlansUsesSelectInputResolution(t *testing.T
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansUsesSelectOrCreateInputResolution(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t, selectResolutionConnectRoutePlanFixtureOptions{
+		mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate,
+	})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if plan.InstanceKey == nil {
+		t.Fatal("InstanceKey = nil, want select-or-create resolution instance-key evidence")
+	}
+	if got, want := plan.ResolutionKind, ConnectResolutionInstanceKey; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
+	}
+	if !plan.RequiresRuntimeResolution {
+		t.Fatal("select-or-create resolution should require runtime descriptor resolution")
+	}
+	if got, want := plan.InstanceKey.Mode, runtimecontracts.FlowInputResolutionModeSelectOrCreate; got != want {
+		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.OnMissing, "create"; got != want {
+		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.OnConflict, "reuse"; got != want {
+		t.Fatalf("InstanceKey.OnConflict = %q, want %q", got, want)
+	}
+	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "account_id" {
+		t.Fatalf("InstanceKey.Fields = %#v, want [account_id]", plan.InstanceKey.Fields)
+	}
+	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "account_id" || plan.InstanceKey.Mappings[0].Target != "account_id" || !plan.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("InstanceKey.Mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
+	}
+
+	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+		Descriptors: []Descriptor{{
+			EntityID:      "ent-1",
+			FlowInstance:  "account/one",
+			AddressFields: map[string]string{"entity.account_id": "acct-1"},
+		}},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	}
+	if got, want := materialized.Target.FlowInstance, "account/one"; got != want {
+		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -309,6 +372,34 @@ func TestLowerCompositionConnectRoutePlansRejectsSelectCarryTypeMismatch(t *test
 	}
 	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
 		t.Fatalf("issue = %#v, want instance resolution invalid for select carry type mismatch", issues[0])
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansRejectsSelectOrCreateCarryTypeMismatch(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t, selectResolutionConnectRoutePlanFixtureOptions{
+		mode:                runtimecontracts.FlowInputResolutionModeSelectOrCreate,
+		accountIDEntityType: "integer",
+		accountIDCarryType:  "string",
+	})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(plans) != 0 {
+		t.Fatalf("plans = %#v, want none for invalid select-or-create resolution", plans)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one fail-closed issue", issues)
+	}
+	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
+		t.Fatalf("issue = %#v, want instance resolution invalid for select-or-create carry type mismatch", issues[0])
 	}
 }
 
@@ -1219,6 +1310,7 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t *t
 }
 
 type selectResolutionConnectRoutePlanFixtureOptions struct {
+	mode                string
 	extraResolution     string
 	accountIDEntityType string
 	accountIDCarryType  string
@@ -1233,6 +1325,10 @@ func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T
 	accountIDCarryType := strings.TrimSpace(options.accountIDCarryType)
 	if accountIDCarryType == "" {
 		accountIDCarryType = "string"
+	}
+	mode := strings.TrimSpace(options.mode)
+	if mode == "" {
+		mode = runtimecontracts.FlowInputResolutionModeSelect
 	}
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1277,7 +1373,7 @@ pins:
       - name: account_ready
         event: account.ready
         resolution:
-          mode: select
+          mode: `+mode+`
           instance_key: account_id
 `+options.extraResolution+`
         carries:

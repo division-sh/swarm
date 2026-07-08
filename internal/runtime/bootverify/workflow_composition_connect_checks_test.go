@@ -99,6 +99,25 @@ func TestRun_AllowsSelectInputResolutionCompositionConnect(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsSelectOrCreateInputResolutionCompositionConnect(t *testing.T) {
+	root := writeSelectResolutionCompositionConnectFixture(t, selectResolutionCompositionFixtureOptions{
+		mode: runtimecontracts.FlowInputResolutionModeSelectOrCreate,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "composition_connect_validation", "") {
+		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "template_instance_validation", "") {
+		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "input_pin_wiring", "account.ready") {
+		t.Fatalf("parent connect should satisfy select-or-create-resolution input pin wiring proof, got %#v", report.Errors())
+	}
+}
+
 func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 	tests := []struct {
 		name string
@@ -143,11 +162,13 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 		{
 			name: "wrong delivery",
 			opts: selectResolutionCompositionFixtureOptions{delivery: "many"},
-			want: "resolution mode select requires delivery one",
+			want: "requires delivery one",
 		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, mode := range []string{runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate} {
+		for _, tc := range tests {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				tc.opts.mode = mode
 			root := writeSelectResolutionCompositionConnectFixture(t, tc.opts)
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -157,6 +178,7 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
 			}
 		})
+		}
 	}
 }
 
@@ -167,9 +189,9 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 		want string
 	}{
 		{
-			name: "non-create modes are design-locked but not runnable",
+			name: "non-runnable modes are design-locked but not runnable",
 			opts: createResolutionCompositionFixtureOptions{
-				mode:         runtimecontracts.FlowInputResolutionModeSelectOrCreate,
+				mode:         runtimecontracts.FlowInputResolutionModeFanIn,
 				mint:         runtimecontracts.FlowInputResolutionMintUUID,
 				includeCarry: true,
 			},
@@ -1167,6 +1189,7 @@ type createResolutionCompositionFixtureOptions struct {
 }
 
 type selectResolutionCompositionFixtureOptions struct {
+	mode          string
 	instanceKey   string
 	carryType     string
 	receiverMode  string
@@ -1191,6 +1214,10 @@ func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectRes
 	instanceKey := strings.TrimSpace(opts.instanceKey)
 	if instanceKey == "" {
 		instanceKey = "account_id"
+	}
+	mode := strings.TrimSpace(opts.mode)
+	if mode == "" {
+		mode = runtimecontracts.FlowInputResolutionModeSelect
 	}
 	carryType := strings.TrimSpace(opts.carryType)
 	if carryType == "" {
@@ -1276,7 +1303,7 @@ pins:
       - name: account_ready
         event: account.ready`+addressBlock+`
         resolution:
-          mode: select
+          mode: `+mode+`
           instance_key: `+instanceKey+`
         carries:
           account_id:
