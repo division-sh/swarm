@@ -6625,7 +6625,7 @@
     },
     {
       "name": "run.stop",
-      "description": "Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their own semantics. The selected run-control store terminalizes pending same-run agent deliveries as `dead_letter` with `reason_code=run_stopped`. For events that already have a platform/pipeline receipt, run.stop preserves that receipt as the authoritative routing outcome while terminalizing the pending delivery. When a stopped event lacks a platform/pipeline receipt and no active delivery remains, the store writes a stopped-run pipeline dead-letter so missing-pipeline-receipt replay cannot resurrect abandoned work.\n",
+      "description": "Stop an in-progress run. Pending events are abandoned; in-flight handlers complete or roll back per their own semantics. The selected run-control store terminalizes pending same-run `event_deliveries` rows for canonical runtime subscriber types (`agent` and `node`) as `dead_letter` with `reason_code=run_stopped`, and writes the matching agent or node receipt. For events that already have a platform/pipeline receipt, run.stop preserves that receipt as the authoritative routing outcome while terminalizing the pending delivery. When a stopped event lacks a platform/pipeline receipt and no active delivery remains, the store writes a stopped-run pipeline dead-letter so missing-pipeline-receipt replay cannot resurrect abandoned work.\n",
       "params": [
         {
           "name": "run_id",
