@@ -5436,9 +5436,10 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 const (
 	servedEventPublishLifecycleProbeWaitTimeout = 45 * time.Second
 	// servedProofPollDeadline bounds poll-until-state helpers in served-path
-	// proofs. Success exits early; the margin absorbs full-suite load where the
-	// old 5s deadline flaked (Postgres-served runs green in ~4s isolated).
-	servedProofPollDeadline = 30 * time.Second
+	// proofs. Success exits early; the margin absorbs full-suite load where
+	// Postgres-served runs are green in seconds isolated but can lag under
+	// concurrent package load.
+	servedProofPollDeadline = 60 * time.Second
 )
 
 func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
