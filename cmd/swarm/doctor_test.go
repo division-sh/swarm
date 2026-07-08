@@ -11,8 +11,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"gopkg.in/yaml.v3"
 )
@@ -38,6 +40,21 @@ func setDoctorProviderSecrets(t *testing.T, values map[string]string) {
 	for key, value := range values {
 		if err := store.Set(context.Background(), key, value); err != nil {
 			t.Fatalf("Set provider credential: %v", err)
+		}
+	}
+}
+
+func setDoctorManagedCredentials(t *testing.T, records ...runtimemanagedcredentials.Record) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "managed-credentials.json")
+	t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", path)
+	store, err := runtimemanagedcredentials.NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore managed credentials: %v", err)
+	}
+	for _, record := range records {
+		if err := store.Put(context.Background(), record); err != nil {
+			t.Fatalf("Put managed credential: %v", err)
 		}
 	}
 }
@@ -228,6 +245,63 @@ func TestDoctorClaudeCLIPreflightReportsTelegramConnectorToolSurface(t *testing.
 	}
 	if strings.Contains(stdout.String(), "provider-secret") {
 		t.Fatalf("doctor report leaked provider secret:\n%s", stdout.String())
+	}
+}
+
+func TestDoctorClaudeCLIPreflightReportsSlackManagedConnectorPackSurface(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	setDoctorEmptyProviderSecrets(t)
+	setDoctorManagedCredentials(t, runtimemanagedcredentials.Record{
+		Key:          "slack_oauth",
+		Provider:     "slack",
+		GrantType:    runtimemanagedcredentials.GrantAuthorizationCodePKCE,
+		TokenURL:     "https://slack.com/api/oauth.v2.access",
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		Scopes:       []string{"chat:write"},
+		AccessToken:  "xoxb-secret",
+		RefreshToken: "refresh-secret",
+		Status:       runtimemanagedcredentials.StatusConnected,
+		ExpiresAt:    time.Now().Add(time.Hour),
+	})
+
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), true)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--contracts" {
+			args[i+1] = writeDoctorSlackConnectorPackContractsFixture(t)
+			break
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+	}
+	if !localPreflightReportHasCode(report, "provider_connector_slack_post_message") {
+		t.Fatalf("report missing slack connector finding: %#v", report.Findings)
+	}
+	for _, want := range []string{
+		"CAN post Slack messages via slack.com",
+		"CAN lower through platform.activity_requested",
+		"CAN journal non-idempotent attempts in activity_attempts",
+		"CANNOT expose credential values",
+		"requires managed_credential:slack_oauth=CONNECTED",
+	} {
+		if !localPreflightReportFindingContains(report, "provider_connector_slack_post_message", want) {
+			t.Fatalf("slack connector finding missing %q: %#v", want, report.Findings)
+		}
+	}
+	for _, secret := range []string{"xoxb-secret", "refresh-secret", "client-secret"} {
+		if strings.Contains(stdout.String(), secret) {
+			t.Fatalf("doctor report leaked managed credential secret %q:\n%s", secret, stdout.String())
+		}
 	}
 }
 
@@ -1060,6 +1134,23 @@ telegram.send_message:
       chat_id: "{{input.chat_id}}"
       text: "{{input.text}}"
 `)
+	return root
+}
+
+func writeDoctorSlackConnectorPackContractsFixture(t *testing.T) string {
+	t.Helper()
+	root := writeDoctorAgentFreeContractsFixture(t)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: agent-free-doctor
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+connector_packs:
+  imports:
+    - provider: slack
+      tool: slack.post_message
+flows: []
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	return root
 }
 

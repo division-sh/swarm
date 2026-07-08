@@ -1,0 +1,32 @@
+provider: slack
+tools:
+  slack.post_message:
+    category: provider_connector
+    description: post Slack messages
+    handler_type: http
+    effect_class: non_idempotent_write
+    managed_credential:
+      key: slack_oauth
+      scopes:
+        - chat:write
+    input_schema:
+      type: object
+      properties:
+        channel:
+          type: string
+        text:
+          type: string
+      required:
+        - channel
+        - text
+    output_schema:
+      type: object
+    response_success:
+      path: response.body.ok
+      equals: true
+    http:
+      method: POST
+      url: https://slack.com/api/chat.postMessage
+      body:
+        channel: "{{input.channel}}"
+        text: "{{input.text}}"

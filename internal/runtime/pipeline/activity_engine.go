@@ -176,6 +176,12 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	intent.Attempt = 1
+	requestEventID := activityRequestEventID(intent)
+	if existing, ok, err := d.coordinator.workflowStore.LoadActivityAttempt(ctx, requestEventID); err != nil {
+		return d.publishActivityFailure(ctx, intent, err)
+	} else if ok {
+		return d.publishExistingActivityAttempt(ctx, intent, existing)
+	}
 	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
 	if err != nil {
 		return d.publishActivityFailure(ctx, intent, err)
@@ -514,15 +520,17 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 }
 
 type preparedActivityHTTPTool struct {
-	toolName  string
-	method    string
-	url       string
-	headers   http.Header
-	body      []byte
-	timeout   time.Duration
-	client    *http.Client
-	secrets   []string
-	inputHash string
+	toolName    string
+	method      string
+	url         string
+	headers     http.Header
+	body        []byte
+	timeout     time.Duration
+	client      *http.Client
+	secrets     []string
+	managedAuth *activityManagedHTTPAuth
+	success     *runtimecontracts.HTTPResponseSuccess
+	inputHash   string
 }
 
 func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
@@ -543,11 +551,11 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	if len(tool.ResponseMapping) > 0 {
 		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses response_mapping; activity HTTP response mapping is not admitted in Stage 1", intent.Tool)
 	}
-	if tool.ManagedCredential != nil {
-		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses managed_credential; managed credential activity HTTP execution is not admitted in Stage 1", intent.Tool)
-	}
 	credentials := map[string]any{}
 	secrets := []string{}
+	if len(tool.Credentials) > 0 && tool.ManagedCredential != nil {
+		return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s must not declare both static credentials and managed_credential", intent.Tool)
+	}
 	if len(tool.Credentials) > 0 {
 		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 			return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write activities", intent.Tool)
@@ -558,6 +566,11 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		}
 		credentials = resolved
 		secrets = secretValues
+	}
+	if tool.ManagedCredential != nil {
+		if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || !strings.EqualFold(strings.TrimSpace(tool.Category), "provider_connector") {
+			return preparedActivityHTTPTool{}, fmt.Errorf("activity tool %s uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector activities", intent.Tool)
+		}
 	}
 	input := cloneStringAnyMap(intent.Input)
 	env := map[string]any{"input": input, "credentials": credentials}
@@ -603,50 +616,277 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 	if client == nil {
 		client = &http.Client{Timeout: timeout}
 	}
+	managedAuth, err := d.resolveActivityManagedCredential(ctx, client, intent, tool)
+	if err != nil {
+		return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
+	}
+	if managedAuth != nil {
+		if err := applyActivityManagedCredentialHeader(headers, managedAuth, false); err != nil {
+			return preparedActivityHTTPTool{}, redactActivityError(err, append(secrets, managedAuth.SecretValues()...))
+		}
+		secrets = append(secrets, managedAuth.SecretValues()...)
+	}
 	return preparedActivityHTTPTool{
-		toolName:  intent.Tool,
-		method:    method,
-		url:       url,
-		headers:   headers,
-		body:      body,
-		timeout:   timeout,
-		client:    client,
-		secrets:   secrets,
-		inputHash: activityInputHash(input),
+		toolName:    intent.Tool,
+		method:      method,
+		url:         url,
+		headers:     headers,
+		body:        body,
+		timeout:     timeout,
+		client:      client,
+		secrets:     secrets,
+		managedAuth: managedAuth,
+		success:     cloneActivityResponseSuccess(tool.ResponseSuccess),
+		inputHash:   activityInputHash(input),
 	}, nil
 }
 
 func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActivityHTTPTool) (any, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, prepared.timeout)
 	defer cancel()
-	var body io.Reader
-	if len(prepared.body) > 0 {
-		body = bytes.NewReader(prepared.body)
-	}
-	req, err := http.NewRequestWithContext(reqCtx, prepared.method, prepared.url, body)
-	if err != nil {
-		return nil, redactActivityError(err, prepared.secrets)
-	}
-	for key, values := range prepared.headers {
-		for _, value := range values {
-			req.Header.Add(key, value)
+	refreshedAfterUnauthorized := false
+	for {
+		var body io.Reader
+		if len(prepared.body) > 0 {
+			body = bytes.NewReader(prepared.body)
 		}
+		req, err := http.NewRequestWithContext(reqCtx, prepared.method, prepared.url, body)
+		if err != nil {
+			return nil, redactActivityError(err, prepared.secrets)
+		}
+		for key, values := range prepared.headers {
+			for _, value := range values {
+				req.Header.Add(key, value)
+			}
+		}
+		resp, err := prepared.client.Do(req)
+		if err != nil {
+			return nil, activityHTTPUncertainError{err: redactActivityError(err, prepared.secrets)}
+		}
+		raw, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, activityHTTPUncertainError{err: redactActivityError(readErr, prepared.secrets)}
+		}
+		parsed := parseHTTPActivityResponse(raw)
+		parsed = runtimemanagedcredentials.RedactValue(parsed, prepared.secrets...)
+		if prepared.managedAuth != nil && resp.StatusCode == http.StatusUnauthorized && !refreshedAfterUnauthorized {
+			refreshedAfterUnauthorized = true
+			token, record, refreshErr := prepared.managedAuth.TokenSource.Refresh(ctx, prepared.managedAuth.StoreKey)
+			if refreshErr != nil {
+				return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(prepared.secrets, record.SecretValues()...)...))
+			}
+			prepared.managedAuth.Token = token
+			prepared.managedAuth.Record = record
+			prepared.secrets = append(prepared.secrets, prepared.managedAuth.SecretValues()...)
+			if err := applyActivityManagedCredentialHeader(prepared.headers, prepared.managedAuth, true); err != nil {
+				return nil, redactActivityError(err, prepared.secrets)
+			}
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("activity http tool %s returned status %d: %s", prepared.toolName, resp.StatusCode, strings.TrimSpace(asString(parsed)))
+		}
+		responseEnv := map[string]any{
+			"response": map[string]any{
+				"status":  resp.StatusCode,
+				"headers": flattenActivityHTTPHeaders(resp.Header),
+				"body":    parsed,
+			},
+		}
+		if err := evaluateActivityHTTPResponseSuccess(prepared.toolName, prepared.success, responseEnv, prepared.secrets); err != nil {
+			return nil, err
+		}
+		return parsed, nil
 	}
-	resp, err := prepared.client.Do(req)
+}
+
+func cloneActivityResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *runtimecontracts.HTTPResponseSuccess {
+	if check == nil {
+		return nil
+	}
+	out := *check
+	return &out
+}
+
+func evaluateActivityHTTPResponseSuccess(toolName string, check *runtimecontracts.HTTPResponseSuccess, responseEnv map[string]any, secrets []string) error {
+	if check == nil {
+		return nil
+	}
+	path := strings.TrimSpace(check.Path)
+	if path == "" {
+		return fmt.Errorf("activity http tool %s response_success.path is required", strings.TrimSpace(toolName))
+	}
+	got, ok := workflowExpressionLookupPath(responseEnv, path)
+	if !ok {
+		return fmt.Errorf("activity http tool %s response_success path %q did not resolve", strings.TrimSpace(toolName), path)
+	}
+	if activityResponseSuccessValuesEqual(got, check.Equals) {
+		return nil
+	}
+	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(
+		fmt.Sprintf("activity http tool %s response_success failed: %s = %s, want %s", strings.TrimSpace(toolName), path, asString(got), asString(check.Equals)),
+		secrets...,
+	))
+}
+
+func activityResponseSuccessValuesEqual(got, want any) bool {
+	switch wantTyped := want.(type) {
+	case bool:
+		gotTyped, ok := got.(bool)
+		return ok && gotTyped == wantTyped
+	case string:
+		gotTyped, ok := got.(string)
+		return ok && gotTyped == wantTyped
+	case int:
+		gotFloat, ok := activityResponseSuccessFloat(got)
+		return ok && gotFloat == float64(wantTyped)
+	case int64:
+		gotFloat, ok := activityResponseSuccessFloat(got)
+		return ok && gotFloat == float64(wantTyped)
+	case float64:
+		gotFloat, ok := activityResponseSuccessFloat(got)
+		return ok && gotFloat == wantTyped
+	case float32:
+		gotFloat, ok := activityResponseSuccessFloat(got)
+		return ok && gotFloat == float64(wantTyped)
+	default:
+		return fmt.Sprint(got) == fmt.Sprint(want)
+	}
+}
+
+func activityResponseSuccessFloat(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	case json.Number:
+		parsed, err := typed.Float64()
+		return parsed, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func flattenActivityHTTPHeaders(headers http.Header) map[string]any {
+	out := make(map[string]any, len(headers))
+	for key, values := range headers {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" || len(values) == 0 {
+			continue
+		}
+		if len(values) == 1 {
+			out[key] = values[0]
+			continue
+		}
+		items := make([]any, 0, len(values))
+		for _, value := range values {
+			items = append(items, value)
+		}
+		out[key] = items
+	}
+	return out
+}
+
+type activityManagedHTTPAuth struct {
+	StoreKey    string
+	Token       string
+	Record      runtimemanagedcredentials.Record
+	Header      string
+	Prefix      string
+	TokenSource *runtimemanagedcredentials.TokenSource
+}
+
+func (a *activityManagedHTTPAuth) SecretValues() []string {
+	if a == nil {
+		return nil
+	}
+	secrets := a.Record.SecretValues()
+	token := strings.TrimSpace(a.Token)
+	if token != "" {
+		secrets = append(secrets, token)
+	}
+	return secrets
+}
+
+func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (*activityManagedHTTPAuth, error) {
+	if tool.ManagedCredential == nil {
+		return nil, nil
+	}
+	ref := *tool.ManagedCredential
+	key := strings.TrimSpace(ref.Key)
+	if key == "" {
+		return nil, fmt.Errorf("activity tool %s managed_credential.key is required", intent.Tool)
+	}
+	source := semanticview.Source(nil)
+	var store runtimemanagedcredentials.Store
+	if d.coordinator != nil {
+		source = d.coordinator.SemanticSource()
+		store = d.coordinator.managedCredentials
+	}
+	flowID := intent.FlowID.String()
+	storeKey, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key)
+	if mapped && strings.TrimSpace(storeKey) == "" {
+		return nil, fmt.Errorf("managed credential %q is not declared and bound for imported package flow %s", key, flowID)
+	}
+	storeKey = strings.TrimSpace(storeKey)
+	if storeKey == "" {
+		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
+	}
+	tokenSource := &runtimemanagedcredentials.TokenSource{
+		Store:      store,
+		HTTPClient: client,
+	}
+	token, record, err := tokenSource.AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
+		Key:    storeKey,
+		Scopes: ref.Scopes,
+	})
 	if err != nil {
-		return nil, activityHTTPUncertainError{err: redactActivityError(err, prepared.secrets)}
+		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, activityHTTPUncertainError{err: redactActivityError(err, prepared.secrets)}
+	header := strings.TrimSpace(ref.Header)
+	if header == "" {
+		header = "Authorization"
 	}
-	parsed := parseHTTPActivityResponse(raw)
-	parsed = runtimemanagedcredentials.RedactValue(parsed, prepared.secrets...)
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("activity http tool %s returned status %d: %s", prepared.toolName, resp.StatusCode, strings.TrimSpace(asString(parsed)))
+	prefix := strings.TrimSpace(ref.Prefix)
+	if prefix == "" && strings.EqualFold(header, "Authorization") {
+		prefix = "Bearer"
 	}
-	return parsed, nil
+	return &activityManagedHTTPAuth{
+		StoreKey:    storeKey,
+		Token:       token,
+		Record:      record,
+		Header:      header,
+		Prefix:      prefix,
+		TokenSource: tokenSource,
+	}, nil
+}
+
+func applyActivityManagedCredentialHeader(headers http.Header, auth *activityManagedHTTPAuth, replace bool) error {
+	if auth == nil {
+		return nil
+	}
+	header := strings.TrimSpace(auth.Header)
+	if header == "" {
+		header = "Authorization"
+	}
+	if existing := strings.TrimSpace(headers.Get(header)); existing != "" && !replace {
+		return fmt.Errorf("managed credential cannot set %s because the header is already configured", header)
+	}
+	value := strings.TrimSpace(auth.Token)
+	if value == "" {
+		return fmt.Errorf("managed credential %q did not provide an access token", auth.StoreKey)
+	}
+	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
+		value = prefix + " " + value
+	}
+	headers.Set(header, value)
+	return nil
 }
 
 type activityHTTPUncertainError struct {

@@ -288,6 +288,124 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 	}
 }
 
+func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorToolAdmitted(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"slack.post_message": {
+			Category:    "provider_connector",
+			Description: "post Slack messages",
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+			ManagedCredential: &runtimecontracts.ManagedCredentialRef{
+				Key:    "slack_oauth",
+				Scopes: []string{"chat:write"},
+			},
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type:     "object",
+				Required: []string{"channel", "text"},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"channel": {Type: "string"},
+					"text":    {Type: "string"},
+				},
+			},
+			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+			ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+				Path:   "response.body.ok",
+				Equals: true,
+			},
+			HTTP: &runtimecontracts.HTTPToolSpec{
+				Method: "POST",
+				URL:    "https://slack.com/api/chat.postMessage",
+				Body: map[string]any{
+					"channel": "{{input.channel}}",
+					"text":    "{{input.text}}",
+				},
+			},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"responder": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"inbound.telegram": {
+					Activity: runtimecontracts.ActivitySpec{
+						Tool: "slack.post_message",
+						Input: map[string]runtimecontracts.ExpressionValue{
+							"channel": runtimecontracts.CELExpression(`"C123"`),
+							"text":    runtimecontracts.CELExpression(`"hello"`),
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err != nil {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Slack managed connector admitted", err)
+	}
+}
+
+func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorRequiresResponseSuccess(t *testing.T) {
+	bundle := testRuntimeWorkflowValidationBundle()
+	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
+		"slack.post_message": {
+			Category:    "provider_connector",
+			Description: "post Slack messages",
+			HandlerType: "http",
+			EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+			ManagedCredential: &runtimecontracts.ManagedCredentialRef{
+				Key:    "slack_oauth",
+				Scopes: []string{"chat:write"},
+			},
+			InputSchema: runtimecontracts.ToolInputSchema{
+				Type:     "object",
+				Required: []string{"channel", "text"},
+				Properties: map[string]runtimecontracts.ToolInputSchema{
+					"channel": {Type: "string"},
+					"text":    {Type: "string"},
+				},
+			},
+			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+			HTTP: &runtimecontracts.HTTPToolSpec{
+				Method: "POST",
+				URL:    "https://slack.com/api/chat.postMessage",
+				Body: map[string]any{
+					"channel": "{{input.channel}}",
+					"text":    "{{input.text}}",
+				},
+			},
+		},
+	}
+	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
+		"responder": {
+			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"inbound.telegram": {
+					Activity: runtimecontracts.ActivitySpec{
+						Tool: "slack.post_message",
+						Input: map[string]runtimecontracts.ExpressionValue{
+							"channel": runtimecontracts.CELExpression(`"C123"`),
+							"text":    runtimecontracts.CELExpression(`"hello"`),
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := ValidateWorkflowContractSurface(context.Background(), semanticview.Wrap(bundle), WorkflowContractValidationOptions{
+		CheckMCPReachable:              false,
+		StrictEmitSchemas:              false,
+		FatalToolImplementationWarning: false,
+		FatalBootWarnings:              false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "provider connector validation failed") || !strings.Contains(err.Error(), "must declare response_success response.body.ok == true") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Slack response_success fail-closed", err)
+	}
+}
+
 func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsupportedShape(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{

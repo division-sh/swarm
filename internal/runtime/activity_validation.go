@@ -142,7 +142,15 @@ func validateActivitySpec(source semanticview.Source, flowID, nodeID, handlerEve
 		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, tool.EffectClass))
 	}
 	if tool.ManagedCredential != nil {
-		errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is split until OAuth/token lifecycle ownership is specified", context, toolID))
+		if len(tool.Credentials) > 0 {
+			errs = append(errs, fmt.Errorf("%s: tool %q must not declare both static credentials and managed_credential for activity HTTP execution", context, toolID))
+		}
+		if !strings.EqualFold(strings.TrimSpace(tool.Category), "provider_connector") || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+			errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector tools", context, toolID))
+		}
+		if strings.TrimSpace(tool.ManagedCredential.Key) == "" {
+			errs = append(errs, fmt.Errorf("%s: tool %q managed_credential.key is required", context, toolID))
+		}
 	}
 	if len(tool.Credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write authored HTTP activities", context, toolID))

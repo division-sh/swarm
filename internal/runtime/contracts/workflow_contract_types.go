@@ -1792,8 +1792,14 @@ type ToolSchemaEntry struct {
 	OutputSchema       ToolInputSchema       `yaml:"output_schema"`
 	HTTP               *HTTPToolSpec         `yaml:"http"`
 	ResponseMapping    map[string]any        `yaml:"response_mapping"`
+	ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success"`
 	Credentials        []string              `yaml:"credentials"`
 	ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential"`
+}
+
+type HTTPResponseSuccess struct {
+	Path   string `yaml:"path"`
+	Equals any    `yaml:"equals"`
 }
 type PlatformSpecDocument struct {
 	Platform struct {

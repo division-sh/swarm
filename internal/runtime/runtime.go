@@ -526,6 +526,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			MailboxMaterializer:              stores.MailboxMaterializer,
 			EventReceiptsCapability:          boot.EventReceiptCapability,
 			Credentials:                      rt.Credentials,
+			ManagedCredentials:               rt.ManagedCredentials,
 			ArtifactRoot:                     artifactRoot,
 			BundleFingerprint:                opts.BundleFingerprint,
 			TestEntityStateHook:              opts.TestEntityStateHook,
