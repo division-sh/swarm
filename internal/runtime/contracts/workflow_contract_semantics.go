@@ -665,7 +665,7 @@ func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, s
 	seen := make(map[string]struct{})
 	if root != nil {
 		for _, stage := range root.LoweredWorkflowStages("") {
-			key := workflowStageScopeKey("", stage.ID)
+			key := strings.TrimSpace(stage.ID)
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -680,7 +680,7 @@ func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, s
 			continue
 		}
 		for _, stage := range schema.LoweredWorkflowStages(flowID) {
-			key := workflowStageScopeKey(flowID, stage.ID)
+			key := strings.TrimSpace(stage.ID)
 			if _, exists := seen[key]; exists {
 				continue
 			}
@@ -689,10 +689,6 @@ func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, s
 		}
 	}
 	return out
-}
-
-func workflowStageScopeKey(flowID, stageID string) string {
-	return strings.TrimSpace(flowID) + "\x00" + strings.TrimSpace(stageID)
 }
 
 func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []string {

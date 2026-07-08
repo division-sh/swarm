@@ -36,7 +36,7 @@ func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 		t.Fatalf("FlowStates(child) = %#v, want %#v", got, want)
 	}
 	if got := bundle.WorkflowStages(); len(got) != 4 {
-		t.Fatalf("WorkflowStages length = %d, want aggregate root+child states", len(got))
+		t.Fatalf("WorkflowStages length = %d, want runtime-safe aggregate root+child states", len(got))
 	}
 }
 
@@ -78,9 +78,15 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 	if got, want := bundle.FlowTerminalStages("child"), []string{"done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("FlowTerminalStages(child) = %#v, want %#v", got, want)
 	}
+	if got, want := bundle.FlowInitialStage("child"), "ready"; got != want {
+		t.Fatalf("FlowInitialStage(child) = %q, want %q", got, want)
+	}
+	if got, want := bundle.FlowStates("child"), []string{"ready", "done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FlowStates(child) = %#v, want %#v", got, want)
+	}
 	stages := bundle.WorkflowStages()
-	if len(stages) != 4 {
-		t.Fatalf("WorkflowStages length = %d, want root+child scoped duplicates", len(stages))
+	if len(stages) != 2 {
+		t.Fatalf("WorkflowStages length = %d, want runtime-safe deduped aggregate", len(stages))
 	}
 	var childReady bool
 	for _, stage := range stages {
@@ -88,8 +94,8 @@ func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
 			childReady = true
 		}
 	}
-	if !childReady {
-		t.Fatalf("WorkflowStages = %#v, want child-scoped ready stage", stages)
+	if childReady {
+		t.Fatalf("WorkflowStages = %#v, want child duplicate hidden from global runtime aggregate", stages)
 	}
 }
 

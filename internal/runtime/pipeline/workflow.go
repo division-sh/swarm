@@ -302,14 +302,6 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 	if name == "" {
 		return nil, fmt.Errorf("workflow.name missing from contract bundle semantics")
 	}
-	terminalStages := source.WorkflowTerminalStages()
-	terminal := make(map[string]struct{}, len(terminalStages))
-	for _, stageID := range terminalStages {
-		stageID = strings.TrimSpace(stageID)
-		if stageID != "" {
-			terminal[stageID] = struct{}{}
-		}
-	}
 	stageContracts := source.WorkflowStages()
 	stages := make([]WorkflowStage, 0, len(stageContracts))
 	for _, stage := range stageContracts {
@@ -317,12 +309,11 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 		if stageID == "" {
 			continue
 		}
-		_, isTerminal := terminal[stageID]
 		stages = append(stages, WorkflowStage{
 			Name:        WorkflowStateID(stageID),
 			Phase:       strings.TrimSpace(stage.Phase),
 			Description: strings.TrimSpace(stage.Description),
-			Terminal:    isTerminal,
+			Terminal:    workflowStageContractTerminal(source, stage),
 		})
 	}
 	actionInstructions := source.ActionInstructions()
@@ -381,6 +372,22 @@ func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, er
 		})
 	}
 	return NewWorkflowDefinition(name, stages, transitions), nil
+}
+
+func workflowStageContractTerminal(source semanticview.Source, stage runtimecontracts.WorkflowStageContract) bool {
+	if source == nil {
+		return false
+	}
+	stageID := strings.TrimSpace(stage.ID)
+	if stageID == "" {
+		return false
+	}
+	for _, terminal := range source.FlowTerminalStages(strings.TrimSpace(stage.Phase)) {
+		if strings.TrimSpace(terminal) == stageID {
+			return true
+		}
+	}
+	return false
 }
 
 func workflowTransitionFromStages(raw any) []WorkflowStateID {
