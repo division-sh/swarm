@@ -123,7 +123,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 func assertBootFloorWorkspaceRequirementOutput(t *testing.T, output string) {
 	t.Helper()
-	for _, want := range []string{"workspace backend: docker", "native_tools.bash"} {
+	for _, want := range []string{"workspace backend: docker", "agent native-bash-worker", "native_tools.bash"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output missing %q:\n%s", want, output)
 		}
