@@ -42,6 +42,9 @@ active_trackers:
   - kind: github_issue
     issue: 1783
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: github_issue
+    issue: 1864
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -98,17 +101,38 @@ mutating_api_parity_ledger:
       covered transitively by the event.publish servedparity scenario rather
       than by a dedicated wrapper scenario.
   - method: run.stop
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: run_stop_control_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessRunControlLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc run.stop on default SQLite and
+      explicit Postgres, including persisted stop state, pending-agent delivery
+      abandonment, idempotency replay, and generic settlement postconditions.
   - method: run.pause
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: run_pause_control_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessRunControlLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc run.pause on default SQLite and
+      explicit Postgres, including run_control_state persistence, run-scoped
+      dispatch gating, idempotency replay, and generic settlement postconditions.
   - method: run.continue
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: run_continue_control_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessRunControlLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc run.continue on default SQLite
+      and explicit Postgres, including release of run-scoped queued work exactly
+      through the EventBus owner, idempotency replay, and generic settlement.
   - method: mailbox.approve
     classification: split_with_issue_ref
     split_issue: 1386
@@ -134,13 +158,29 @@ mutating_api_parity_ledger:
     split_issue: 1386
     proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
   - method: runtime.pause
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: runtime_pause_ingress_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessRuntimeIngressControlLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc runtime.pause on default SQLite
+      and explicit Postgres, including persisted runtime_ingress_state,
+      platform.paused transition event, queued ingress blocking, idempotency
+      replay, and generic settlement postconditions.
   - method: runtime.resume
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: runtime_resume_ingress_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessRuntimeIngressControlLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc runtime.resume on default SQLite
+      and explicit Postgres, including persisted running state, platform.resumed
+      transition event, queued ingress release, idempotency replay, and generic
+      settlement postconditions.
   - method: runtime.nuke
     classification: split_with_issue_ref
     split_issue: 1386

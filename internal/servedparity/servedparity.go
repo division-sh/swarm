@@ -23,7 +23,14 @@ const (
 	PostconditionNoUnfiredDueTimers      Postcondition = "no_unfired_due_timers"
 )
 
-const ScenarioEventPublishDynamicAutoEmitLifecycle = "event_publish_dynamic_auto_emit_lifecycle"
+const (
+	ScenarioEventPublishDynamicAutoEmitLifecycle = "event_publish_dynamic_auto_emit_lifecycle"
+	ScenarioRunStopControlLifecycle              = "run_stop_control_lifecycle"
+	ScenarioRunPauseControlLifecycle             = "run_pause_control_lifecycle"
+	ScenarioRunContinueControlLifecycle          = "run_continue_control_lifecycle"
+	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
+	ScenarioRuntimeResumeIngressLifecycle        = "runtime_resume_ingress_lifecycle"
+)
 
 type Scenario struct {
 	ID             string
@@ -52,6 +59,25 @@ func Scenarios() []Scenario {
 				PostconditionNoUnfiredDueTimers,
 			},
 		},
+		servedControlScenario(ScenarioRunStopControlLifecycle, "run.stop", "TestServedParityHarnessRunControlLifecycle"),
+		servedControlScenario(ScenarioRunPauseControlLifecycle, "run.pause", "TestServedParityHarnessRunControlLifecycle"),
+		servedControlScenario(ScenarioRunContinueControlLifecycle, "run.continue", "TestServedParityHarnessRunControlLifecycle"),
+		servedControlScenario(ScenarioRuntimePauseIngressLifecycle, "runtime.pause", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
+		servedControlScenario(ScenarioRuntimeResumeIngressLifecycle, "runtime.resume", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
+	}
+}
+
+func servedControlScenario(id, apiMethod, testName string) Scenario {
+	return Scenario{
+		ID:        id,
+		APIMethod: apiMethod,
+		TestName:  testName,
+		Backends:  append([]Backend(nil), RequiredBackends...),
+		Postconditions: []Postcondition{
+			PostconditionNoNonTerminalDeliveries,
+			PostconditionNoPendingPipelineEvents,
+			PostconditionNoUnfiredDueTimers,
+		},
 	}
 }
 
@@ -75,18 +101,54 @@ func MustScenario(id string) Scenario {
 
 func Run(t *testing.T, scenario Scenario, run func(*testing.T, Backend)) {
 	t.Helper()
-	if strings.TrimSpace(scenario.ID) == "" {
-		t.Fatal("served parity scenario missing id")
-	}
-	if len(scenario.Backends) == 0 {
-		t.Fatalf("served parity scenario %s missing backends", scenario.ID)
-	}
+	requireValidScenario(t, scenario)
 	for _, backend := range scenario.Backends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
 			run(t, backend)
 		})
 	}
+}
+
+func RunScenarioGroup(t *testing.T, scenarios []Scenario, run func(*testing.T, Backend)) {
+	t.Helper()
+	if len(scenarios) == 0 {
+		t.Fatal("served parity scenario group is empty")
+	}
+	for _, scenario := range scenarios {
+		requireValidScenario(t, scenario)
+		if !sameBackends(scenarios[0].Backends, scenario.Backends) {
+			t.Fatalf("served parity scenario %s backends = %v, want group backends %v", scenario.ID, scenario.Backends, scenarios[0].Backends)
+		}
+	}
+	for _, backend := range scenarios[0].Backends {
+		backend := backend
+		t.Run(string(backend), func(t *testing.T) {
+			run(t, backend)
+		})
+	}
+}
+
+func requireValidScenario(t *testing.T, scenario Scenario) {
+	t.Helper()
+	if strings.TrimSpace(scenario.ID) == "" {
+		t.Fatal("served parity scenario missing id")
+	}
+	if len(scenario.Backends) == 0 {
+		t.Fatalf("served parity scenario %s missing backends", scenario.ID)
+	}
+}
+
+func sameBackends(a, b []Backend) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func SettlementPostconditionFailures(scenario Scenario, counts SettlementCounts) []string {
