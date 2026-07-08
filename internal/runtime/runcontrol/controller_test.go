@@ -31,6 +31,23 @@ func TestControllerContinueDoesNotFailAfterCommittedTransitionWhenReleaseFails(t
 	}
 }
 
+func TestControllerContinueRetriesTransientEmptyQueueRelease(t *testing.T) {
+	store := &fakeRunControlStore{}
+	queue := &fakeRunControlQueue{releases: []int{0, 1}}
+	controller := NewController(store, queue, Options{})
+
+	result, err := controller.Continue(context.Background(), TransitionRequest{RunID: "run-1"})
+	if err != nil {
+		t.Fatalf("Continue() error = %v, want nil", err)
+	}
+	if result.ReleasedDeliveries != 1 {
+		t.Fatalf("released deliveries = %d, want 1 after retry", result.ReleasedDeliveries)
+	}
+	if queue.calls != 2 {
+		t.Fatalf("queue release calls = %d, want 2", queue.calls)
+	}
+}
+
 type fakeRunControlStore struct {
 	continued bool
 }
@@ -53,12 +70,20 @@ func (s *fakeRunControlStore) RunDispatchBlocked(context.Context, string) (bool,
 }
 
 type fakeRunControlQueue struct {
-	called bool
-	err    error
+	called   bool
+	calls    int
+	err      error
+	releases []int
 }
 
 func (q *fakeRunControlQueue) ReleaseRunQueue(context.Context, string, time.Duration, int) (int, error) {
 	q.called = true
+	q.calls++
+	if len(q.releases) > 0 {
+		released := q.releases[0]
+		q.releases = q.releases[1:]
+		return released, nil
+	}
 	if q.err != nil {
 		return 0, q.err
 	}
