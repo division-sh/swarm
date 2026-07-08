@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -159,8 +160,51 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 			return err
 		}
 	}
+	if err := s.ensureSQLiteMailboxDeferredUntil(ctx); err != nil {
+		return err
+	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *SQLiteSchemaStore) ensureSQLiteMailboxDeferredUntil(ctx context.Context) error {
+	if s == nil || s.DB == nil {
+		return fmt.Errorf("sqlite schema store is required")
+	}
+	columns, err := sqliteTableColumnList(ctx, s.DB, "mailbox")
+	if err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		return nil
+	}
+	hasDeferredUntil := false
+	for _, column := range columns {
+		if strings.EqualFold(strings.TrimSpace(column), "deferred_until") {
+			hasDeferredUntil = true
+			break
+		}
+	}
+	if !hasDeferredUntil {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE mailbox ADD COLUMN deferred_until TIMESTAMP`); err != nil {
+			return fmt.Errorf("add sqlite mailbox.deferred_until: %w", err)
+		}
+	}
+	res, err := s.DB.ExecContext(ctx, `
+		UPDATE mailbox
+		SET status = 'pending',
+		    decision = NULL,
+		    deferred_until = NULL
+		WHERE status = 'decided'
+		  AND COALESCE(decision, '') = 'deferred'
+	`)
+	if err != nil {
+		return fmt.Errorf("normalize sqlite legacy deferred mailbox rows: %w", err)
+	}
+	if count, err := res.RowsAffected(); err == nil && count > 0 {
+		log.Printf("normalized %d sqlite legacy deferred mailbox rows to pending with deferred_until unset", count)
+	}
+	return nil
 }
 
 func (s *SQLiteSchemaStore) ensureSQLiteAgentLLMBackendProfiles(ctx context.Context, agentStatements []string) error {

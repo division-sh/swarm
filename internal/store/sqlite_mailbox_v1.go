@@ -50,6 +50,8 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts Mailbo
 			COALESCE(m.flow_instance, ''),
 			COALESCE(m.entity_id, ''),
 			COALESCE(m.payload, '{}'),
+			m.expires_at,
+			m.deferred_until,
 			m.created_at,
 			m.decided_at,
 			COALESCE(m.decided_by, ''),
@@ -186,57 +188,77 @@ func (s *SQLiteRuntimeStore) DecideV1MailboxItem(ctx context.Context, input Mail
 				DecidedAt:        row.decisionTime(input.Now),
 			}
 		}
-		if action == "approved" && strings.TrimSpace(input.ApprovalEventType) == "" {
-			return &MailboxV1ApprovalRouteError{MailboxID: row.ID, ItemType: row.Type}
+		if strings.TrimSpace(input.DecisionEventType) == "" {
+			return &MailboxV1DecisionRouteError{MailboxID: row.ID, ItemType: row.Type}
+		}
+		if action == "deferred" && row.ExpiresAt.Valid && input.DeferUntil.After(row.ExpiresAt.Time.UTC()) {
+			maxUntil := row.ExpiresAt.Time.UTC()
+			return &MailboxV1InvalidDeferUntilError{Reason: "beyond_expiry", MaxUntil: &maxUntil}
 		}
 
 		decisionID := uuid.NewString()
+		resultStatus := "decided"
+		if action == "deferred" {
+			resultStatus = "deferred"
+		}
 		outcome = MailboxV1DecisionOutcome{
 			Result: MailboxV1DecisionResult{
 				OK:                true,
 				MailboxDecisionID: decisionID,
-				Status:            mailboxV1APIStatus("decided", action),
+				Status:            resultStatus,
 			},
 		}
-		var expiresAt any
 		notes := strings.TrimSpace(input.Reason)
 		if action == "deferred" {
-			expiresAt = input.DeferUntil.UTC()
 			if notes == "" {
 				notes = "Deferred until " + input.DeferUntil.UTC().Format(time.RFC3339Nano)
 			}
 		}
-		if action == "approved" {
-			eventID := uuid.NewString()
-			evt, err := row.approvalEvent(eventID, decisionID, strings.TrimSpace(input.ApprovalEventType), input.ActorTokenID, input.DecisionPayload, input.Now)
-			if err != nil {
-				return err
-			}
-			subscribers := append([]string(nil), input.ApprovalEventSubscribers...)
-			if subscribers == nil {
-				subscribers = []string{}
-			}
-			subscriberSource := strings.TrimSpace(input.ApprovalEventSubscriberSource)
-			if subscriberSource == "" {
-				subscriberSource = "unavailable"
-			}
-			outcome.Result.DownstreamEventID = eventID
-			outcome.Result.DownstreamEventName = strings.TrimSpace(input.ApprovalEventType)
-			outcome.Result.DownstreamSubscribers = &subscribers
-			outcome.Result.DownstreamSubscriberSource = subscriberSource
-			outcome.ApprovalEvent = &evt
+		eventID := uuid.NewString()
+		evt, err := row.decisionEvent(eventID, decisionID, strings.TrimSpace(input.DecisionEventType), action, strings.TrimSpace(input.ActorTokenID), strings.TrimSpace(input.Reason), input.DecisionPayload, input.DeferUntil, input.Now)
+		if err != nil {
+			return err
 		}
-		res, err := tx.ExecContext(txctx, `
+		subscribers := append([]string(nil), input.DecisionEventSubscribers...)
+		if subscribers == nil {
+			subscribers = []string{}
+		}
+		subscriberSource := strings.TrimSpace(input.DecisionEventSubscriberSource)
+		if subscriberSource == "" {
+			subscriberSource = "unavailable"
+		}
+		outcome.Result.DownstreamEventID = eventID
+		outcome.Result.DownstreamEventName = strings.TrimSpace(input.DecisionEventType)
+		outcome.Result.DownstreamSubscribers = &subscribers
+		outcome.Result.DownstreamSubscriberSource = subscriberSource
+		outcome.DecisionEvent = &evt
+
+		var res sql.Result
+		if action == "deferred" {
+			res, err = tx.ExecContext(txctx, `
+			UPDATE mailbox
+			SET status = 'pending',
+			    decision = NULL,
+			    decision_notes = NULLIF(?, ''),
+			    decided_by = NULLIF(?, ''),
+			    decided_at = ?,
+			    deferred_until = ?
+			WHERE item_id = ?
+			  AND status = 'pending'
+		`, notes, strings.TrimSpace(input.ActorTokenID), input.Now, input.DeferUntil.UTC(), row.ID)
+		} else {
+			res, err = tx.ExecContext(txctx, `
 			UPDATE mailbox
 			SET status = 'decided',
 			    decision = ?,
 			    decision_notes = NULLIF(?, ''),
 			    decided_by = NULLIF(?, ''),
 			    decided_at = ?,
-			    expires_at = COALESCE(?, expires_at)
+			    deferred_until = NULL
 			WHERE item_id = ?
 			  AND status = 'pending'
-		`, action, notes, strings.TrimSpace(input.ActorTokenID), input.Now, expiresAt, row.ID)
+		`, action, notes, strings.TrimSpace(input.ActorTokenID), input.Now, row.ID)
+		}
 		if err != nil {
 			return fmt.Errorf("decide sqlite v1 mailbox item: %w", err)
 		}
@@ -251,15 +273,15 @@ func (s *SQLiteRuntimeStore) DecideV1MailboxItem(ctx context.Context, input Mail
 				DecidedAt:        latest.decisionTime(input.Now),
 			}
 		}
-		if outcome.ApprovalEvent != nil {
-			publish := input.ApprovalEventPublish
+		if outcome.DecisionEvent != nil {
+			publish := input.DecisionEventPublish
 			if publish == nil {
 				publish = func(ctx context.Context, evt events.Event) error {
-					return s.appendSQLiteMailboxV1ApprovalEventTx(ctx, tx, evt)
+					return s.appendSQLiteMailboxV1DecisionEventTx(ctx, tx, evt)
 				}
 			}
-			if err := publish(txctx, *outcome.ApprovalEvent); err != nil {
-				return fmt.Errorf("publish sqlite v1 mailbox approval event: %w", err)
+			if err := publish(txctx, *outcome.DecisionEvent); err != nil {
+				return fmt.Errorf("publish sqlite v1 mailbox decision event: %w", err)
 			}
 		}
 		if hasIdempotency {
@@ -291,13 +313,13 @@ func sqliteMailboxV1ListWhere(opts MailboxV1ListOptions, cursor mailboxV1Cursor)
 	switch strings.TrimSpace(strings.ToLower(opts.Status)) {
 	case "":
 	case "pending":
-		clauses = append(clauses, "m.status = 'pending'")
+		clauses = append(clauses, "m.status = 'pending' AND m.deferred_until IS NULL")
 	case "decided":
-		clauses = append(clauses, "m.status = 'decided' AND COALESCE(m.decision, '') <> 'deferred'")
+		clauses = append(clauses, "m.status = 'decided'")
 	case "expired":
 		clauses = append(clauses, "m.status = 'expired'")
 	case "deferred":
-		clauses = append(clauses, "m.status = 'decided' AND COALESCE(m.decision, '') = 'deferred'")
+		clauses = append(clauses, "m.status = 'pending' AND m.deferred_until IS NOT NULL")
 	default:
 		clauses = append(clauses, "false")
 	}
@@ -340,6 +362,8 @@ func (s *SQLiteRuntimeStore) loadSQLiteMailboxV1RowTx(ctx context.Context, tx *s
 			COALESCE(m.flow_instance, ''),
 			COALESCE(m.entity_id, ''),
 			COALESCE(m.payload, '{}'),
+			m.expires_at,
+			m.deferred_until,
 			m.created_at,
 			m.decided_at,
 			COALESCE(m.decided_by, ''),
@@ -369,6 +393,8 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 	for rows.Next() {
 		var row mailboxV1Row
 		var payloadRaw any
+		var expiresAtRaw any
+		var deferredUntilRaw any
 		var createdAtRaw any
 		var decidedAtRaw any
 		if err := rows.Scan(
@@ -381,6 +407,8 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 			&row.FlowInstance,
 			&row.EntityID,
 			&payloadRaw,
+			&expiresAtRaw,
+			&deferredUntilRaw,
 			&createdAtRaw,
 			&decidedAtRaw,
 			&row.DecidedBy,
@@ -403,6 +431,16 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 		} else if ok {
 			row.CreatedAtTime = at
 		}
+		if at, ok, err := sqliteTimeValue(expiresAtRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite v1 mailbox expires_at: %w", err)
+		} else if ok {
+			row.ExpiresAt = sql.NullTime{Time: at, Valid: true}
+		}
+		if at, ok, err := sqliteTimeValue(deferredUntilRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite v1 mailbox deferred_until: %w", err)
+		} else if ok {
+			row.DeferredUntil = sql.NullTime{Time: at, Valid: true}
+		}
 		if at, ok, err := sqliteTimeValue(decidedAtRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite v1 mailbox decided_at: %w", err)
 		} else if ok {
@@ -416,7 +454,7 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 	return out, nil
 }
 
-func (s *SQLiteRuntimeStore) appendSQLiteMailboxV1ApprovalEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+func (s *SQLiteRuntimeStore) appendSQLiteMailboxV1DecisionEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
 	return s.AppendEventTx(ctx, tx, evt)
 }
 

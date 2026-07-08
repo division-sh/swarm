@@ -283,11 +283,11 @@ func TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary(t *testing.T)
 	operatorMailboxText := string(operatorMailboxData)
 	for _, forbidden := range []string{"TransactionalEventPublisher", "ApprovalEventTx", "*sql.Tx"} {
 		if strings.Contains(operatorMailboxText, forbidden) {
-			t.Fatalf("operator mailbox approval publish must consume typed event mutation API, found %s", forbidden)
+			t.Fatalf("operator mailbox decision publish must consume typed event mutation API, found %s", forbidden)
 		}
 	}
 	if !strings.Contains(operatorMailboxText, "PublishInMutation") {
-		t.Fatal("operator mailbox approval publish must consume EventBus.PublishInMutation")
+		t.Fatal("operator mailbox decision publish must consume EventBus.PublishInMutation")
 	}
 
 	pipelineData, err := os.ReadFile(filepath.Join(root, "internal", "runtime", "pipeline", "workflow_instance_store.go"))
@@ -846,7 +846,7 @@ func sqliteActiveTxHelper(site runtimeWriterCallSite) bool {
 		}
 		switch site.Function {
 		case "sqliteLockAgentDeliveryTx", "sqliteEnsureRunRow", "purgeExpiredSQLiteAPIIdempotency", "sqliteStoreAPIIdempotency",
-			"appendSQLiteMailboxV1ApprovalEventTx", "normalizeSQLiteMailboxV1DecisionReplayResult",
+			"appendSQLiteMailboxV1DecisionEventTx", "normalizeSQLiteMailboxV1DecisionReplayResult",
 			"loadSQLiteMailboxV1RowTx", "sqliteMarkRunTerminalTx", "sqliteNormalRunCompletionRunReadyTx",
 			"sqliteNormalRunCompletionSessionLeasesSettledTx", "ensureSQLiteTaskConversationAuditRowTx":
 			return true

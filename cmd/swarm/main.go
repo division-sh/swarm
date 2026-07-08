@@ -1132,9 +1132,9 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 			log.Printf("runtime shutdown failed: %v", err)
 		}
 	}()
-	mailboxApprovalRoutes, err := apiv1.MailboxApprovalRoutesFromSpec(resolvedPlatformSpecPath)
+	mailboxDecisionRoutes, err := apiv1.MailboxDecisionRoutesFromSpec(resolvedPlatformSpecPath)
 	if err != nil {
-		log.Printf("load v1 api mailbox approval routes: %v", err)
+		log.Printf("load v1 api mailbox decision routes: %v", err)
 		return 1
 	}
 	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
@@ -1190,7 +1190,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		ResetCleaner:              apiStoreCaps.ResetCleaner,
 		ResetContainers:           runtimedestructivereset.ManagedContainerStopper{Runtime: workspaces},
 		Source:                    source,
-		MailboxApprovalRoutes:     mailboxApprovalRoutes,
+		MailboxDecisionRoutes:     mailboxDecisionRoutes,
 		Bundle:                    bootBundleIdentity,
 		RuntimeIdentity: apiv1.RuntimeIdentityResult{
 			RuntimeInstanceID:   runtimeInstanceID,

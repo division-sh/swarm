@@ -225,8 +225,8 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
-	cmd.Flags().StringVar(&actionOpts.decisionPayloadFile, "decision-payload", "", "Read optional approval event JSON object from file")
-	cmd.Flags().StringVar(&actionOpts.decisionPayloadJSON, "decision-payload-json", "", "Optional JSON object attached to the approval event")
+	cmd.Flags().StringVar(&actionOpts.decisionPayloadFile, "decision-payload", "", "Read optional terminal decision event JSON object from file")
+	cmd.Flags().StringVar(&actionOpts.decisionPayloadJSON, "decision-payload-json", "", "Optional JSON object attached to the terminal decision event")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox approve")
 	return cmd
 }
@@ -348,7 +348,7 @@ func mailboxReadAPIErrorClassifier() cliAPIErrorClassifier {
 func mailboxDecisionAPIErrorClassifier() cliAPIErrorClassifier {
 	return cliAPIErrorClassifier{
 		notFoundCodes: []string{"MAILBOX_NOT_FOUND"},
-		conflictCodes: []string{"MAILBOX_ALREADY_DECIDED", "MAILBOX_APPROVAL_EVENT_UNCONFIGURED", "IDEMPOTENCY_CONFLICT"},
+		conflictCodes: []string{"MAILBOX_ALREADY_DECIDED", "MAILBOX_DECISION_EVENT_UNCONFIGURED", "IDEMPOTENCY_CONFLICT"},
 	}
 }
 

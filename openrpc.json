@@ -4389,7 +4389,7 @@
     },
     {
       "name": "mailbox.approve",
-      "description": "Approve a pending mailbox item. Triggers the downstream event configured for the item's type by api_specification.conventions.mailbox.approval_event_routes.\nThe mailbox row decision, `mailbox.item_decided` event persistence, delivery/replay-scope evidence, and API idempotency completion commit atomically. Downstream subscriber/interceptor/runtime work from the transactional approval publish runs only after that decision transaction commits, or remains queued while ingress is paused.\n",
+      "description": "Approve a pending mailbox item. Triggers `mailbox.item_decided` using api_specification.conventions.mailbox.decision_event_routes.\nThe mailbox row decision, `mailbox.item_decided` event persistence, delivery/replay-scope evidence, and API idempotency completion commit atomically. Route or publish failure fails closed without row-only success. Downstream subscriber/interceptor/runtime work from the transactional decision publish runs only after that decision transaction commits, or remains queued while ingress is paused.\n",
       "params": [
         {
           "name": "mailbox_id",
@@ -4484,7 +4484,6 @@
                     "enum": [
                       "approved",
                       "rejected",
-                      "deferred",
                       "expired"
                     ],
                     "type": "string"
@@ -4515,12 +4514,12 @@
         },
         {
           "code": -32023,
-          "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+          "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
             "properties": {
               "code": {
-                "const": "MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+                "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
                 "type": "string"
               },
               "correlation_id": {
@@ -4618,7 +4617,7 @@
     },
     {
       "name": "mailbox.defer",
-      "description": "Defer a pending mailbox item until a specified time.",
+      "description": "Defer a pending mailbox item until a specified time. Defer is non-terminal: the row remains pending with `deferred_until` set and `expires_at` unchanged. Triggers `mailbox.item_deferred`; route or publish failure fails closed without row-only success. `until` must be in the future and must not exceed `expires_at` when the item has an expiry deadline.\n",
       "params": [
         {
           "name": "mailbox_id",
@@ -4711,7 +4710,6 @@
                     "enum": [
                       "approved",
                       "rejected",
-                      "deferred",
                       "expired"
                     ],
                     "type": "string"
@@ -4724,6 +4722,48 @@
                   "mailbox_id",
                   "existing_decision",
                   "decided_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32023,
+          "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "item_type": {
+                    "type": "string"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id",
+                  "item_type"
                 ],
                 "type": "object"
               },
@@ -4762,6 +4802,7 @@
                   "reason": {
                     "enum": [
                       "in_past",
+                      "beyond_expiry",
                       "beyond_max_window"
                     ],
                     "type": "string"
@@ -4988,7 +5029,7 @@
     },
     {
       "name": "mailbox.reject",
-      "description": "Reject a pending mailbox item with a stated reason. No downstream event is emitted.",
+      "description": "Reject a pending mailbox item with a stated reason. Triggers `mailbox.item_decided` with `decision = rejected` and schema-visible `reason`; route or publish failure fails closed without row-only success.\n",
       "params": [
         {
           "name": "mailbox_id",
@@ -5082,7 +5123,6 @@
                     "enum": [
                       "approved",
                       "rejected",
-                      "deferred",
                       "expired"
                     ],
                     "type": "string"
@@ -5095,6 +5135,48 @@
                   "mailbox_id",
                   "existing_decision",
                   "decided_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32023,
+          "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "item_type": {
+                    "type": "string"
+                  },
+                  "mailbox_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  }
+                },
+                "required": [
+                  "mailbox_id",
+                  "item_type"
                 ],
                 "type": "object"
               },
@@ -10472,7 +10554,7 @@
         "properties": {
           "downstream_event_id": {
             "$ref": "#/components/schemas/OpaqueId",
-            "description": "Present only when the decision triggered an event emission (typically on approve)."
+            "description": "Present when the decision triggered a required event emission."
           },
           "downstream_event_name": {
             "description": "Present with downstream_event_id when the decision triggered an event emission.",
@@ -10540,13 +10622,13 @@
             "type": "boolean"
           },
           "event_name": {
-            "description": "Approval event name when a downstream route exists.",
+            "description": "Terminal decision event name when a downstream route exists.",
             "type": "string"
           },
           "reason": {
             "description": "Present when available is false.",
             "enum": [
-              "no_approval_route"
+              "no_decision_route"
             ],
             "type": "string"
           },
@@ -10646,10 +10728,12 @@
             "enum": [
               "approved",
               "rejected",
-              "deferred",
               "expired"
             ],
             "type": "string"
+          },
+          "deferred_until": {
+            "$ref": "#/components/schemas/Timestamp"
           },
           "mailbox_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -12667,6 +12751,7 @@
                 "reason": {
                   "enum": [
                     "in_past",
+                    "beyond_expiry",
                     "beyond_max_window"
                   ],
                   "type": "string"
@@ -12713,7 +12798,6 @@
                   "enum": [
                     "approved",
                     "rejected",
-                    "deferred",
                     "expired"
                   ],
                   "type": "string"
@@ -12742,14 +12826,14 @@
           "type": "object"
         }
       },
-      "MAILBOX_APPROVAL_EVENT_UNCONFIGURED": {
+      "MAILBOX_DECISION_EVENT_UNCONFIGURED": {
         "code": -32023,
-        "message": "Application error: MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+        "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
         "data": {
           "additionalProperties": false,
           "properties": {
             "code": {
-              "const": "MAILBOX_APPROVAL_EVENT_UNCONFIGURED",
+              "const": "MAILBOX_DECISION_EVENT_UNCONFIGURED",
               "type": "string"
             },
             "correlation_id": {

@@ -561,7 +561,7 @@ methods:
   - method: mailbox.approve
     transport: http
     required_params: [mailbox_id]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_APPROVAL_EVENT_UNCONFIGURED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_DECISION_EVENT_UNCONFIGURED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -576,7 +576,7 @@ methods:
   - method: mailbox.defer
     transport: http
     required_params: [mailbox_id, until]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, INVALID_DEFER_UNTIL, IDEMPOTENCY_CONFLICT]
+    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_DECISION_EVENT_UNCONFIGURED, INVALID_DEFER_UNTIL, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorMailboxHandlersSupportedRPCPath}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -621,7 +621,7 @@ methods:
   - method: mailbox.reject
     transport: http
     required_params: [mailbox_id, reason]
-    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [MAILBOX_NOT_FOUND, MAILBOX_ALREADY_DECIDED, MAILBOX_DECISION_EVENT_UNCONFIGURED, IDEMPOTENCY_CONFLICT]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

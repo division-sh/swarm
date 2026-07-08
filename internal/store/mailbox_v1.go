@@ -18,7 +18,7 @@ import (
 
 var ErrMailboxV1NotFound = errors.New("mailbox item not found")
 var ErrMailboxV1InvalidCursor = errors.New("invalid mailbox cursor")
-var ErrMailboxV1ApprovalRouteUnconfigured = errors.New("mailbox approval event route is not configured")
+var ErrMailboxV1DecisionRouteUnconfigured = errors.New("mailbox decision event route is not configured")
 
 type MailboxV1ListOptions struct {
 	Status   string
@@ -43,6 +43,7 @@ type MailboxV1Item struct {
 	CreatedAt      string         `json:"created_at"`
 	DecidedAt      string         `json:"decided_at,omitempty"`
 	Decision       string         `json:"decision,omitempty"`
+	DeferredUntil  string         `json:"deferred_until,omitempty"`
 }
 
 type MailboxV1HistoryEntry struct {
@@ -87,10 +88,10 @@ type MailboxV1DecisionRequest struct {
 	DecisionPayload               json.RawMessage
 	DeferUntil                    time.Time
 	Now                           time.Time
-	ApprovalEventType             string
-	ApprovalEventSubscribers      []string
-	ApprovalEventSubscriberSource string
-	ApprovalEventPublish          func(context.Context, events.Event) error
+	DecisionEventType             string
+	DecisionEventSubscribers      []string
+	DecisionEventSubscriberSource string
+	DecisionEventPublish          func(context.Context, events.Event) error
 	Idempotency                   *APIIdempotencyRequest
 }
 
@@ -107,7 +108,7 @@ type MailboxV1DecisionResult struct {
 
 type MailboxV1DecisionOutcome struct {
 	Result        MailboxV1DecisionResult
-	ApprovalEvent *events.Event
+	DecisionEvent *events.Event
 	Replayed      bool
 }
 
@@ -130,17 +131,17 @@ func (e *MailboxV1InvalidDeferUntilError) Error() string {
 	return "invalid mailbox defer timestamp"
 }
 
-type MailboxV1ApprovalRouteError struct {
+type MailboxV1DecisionRouteError struct {
 	MailboxID string
 	ItemType  string
 }
 
-func (e *MailboxV1ApprovalRouteError) Error() string {
-	return "mailbox approval event route is not configured"
+func (e *MailboxV1DecisionRouteError) Error() string {
+	return "mailbox decision event route is not configured"
 }
 
-func (e *MailboxV1ApprovalRouteError) Is(target error) bool {
-	return target == ErrMailboxV1ApprovalRouteUnconfigured
+func (e *MailboxV1DecisionRouteError) Is(target error) bool {
+	return target == ErrMailboxV1DecisionRouteUnconfigured
 }
 
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1ListOptions) ([]MailboxV1Item, string, error) {
@@ -180,6 +181,8 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1Li
 			COALESCE(m.flow_instance, ''),
 			COALESCE(m.entity_id::text, ''),
 			COALESCE(m.payload, '{}'::jsonb),
+			m.expires_at,
+			m.deferred_until,
 			m.created_at,
 			m.decided_at,
 			COALESCE(m.decided_by, ''),
@@ -335,57 +338,77 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 			DecidedAt:        row.decisionTime(input.Now),
 		}
 	}
-	if action == "approved" && strings.TrimSpace(input.ApprovalEventType) == "" {
-		return MailboxV1DecisionOutcome{}, &MailboxV1ApprovalRouteError{MailboxID: row.ID, ItemType: row.Type}
+	if strings.TrimSpace(input.DecisionEventType) == "" {
+		return MailboxV1DecisionOutcome{}, &MailboxV1DecisionRouteError{MailboxID: row.ID, ItemType: row.Type}
+	}
+	if action == "deferred" && row.ExpiresAt.Valid && input.DeferUntil.After(row.ExpiresAt.Time.UTC()) {
+		maxUntil := row.ExpiresAt.Time.UTC()
+		return MailboxV1DecisionOutcome{}, &MailboxV1InvalidDeferUntilError{Reason: "beyond_expiry", MaxUntil: &maxUntil}
 	}
 
 	decisionID := uuid.NewString()
+	resultStatus := "decided"
+	if action == "deferred" {
+		resultStatus = "deferred"
+	}
 	outcome := MailboxV1DecisionOutcome{
 		Result: MailboxV1DecisionResult{
 			OK:                true,
 			MailboxDecisionID: decisionID,
-			Status:            mailboxV1APIStatus("decided", action),
+			Status:            resultStatus,
 		},
 	}
-	var expiresAt any
 	notes := strings.TrimSpace(input.Reason)
 	if action == "deferred" {
-		expiresAt = input.DeferUntil.UTC()
 		if notes == "" {
 			notes = "Deferred until " + input.DeferUntil.UTC().Format(time.RFC3339Nano)
 		}
 	}
-	if action == "approved" {
-		eventID := uuid.NewString()
-		evt, err := row.approvalEvent(eventID, decisionID, strings.TrimSpace(input.ApprovalEventType), input.ActorTokenID, input.DecisionPayload, input.Now)
-		if err != nil {
-			return MailboxV1DecisionOutcome{}, err
-		}
-		subscribers := append([]string(nil), input.ApprovalEventSubscribers...)
-		if subscribers == nil {
-			subscribers = []string{}
-		}
-		subscriberSource := strings.TrimSpace(input.ApprovalEventSubscriberSource)
-		if subscriberSource == "" {
-			subscriberSource = "unavailable"
-		}
-		outcome.Result.DownstreamEventID = eventID
-		outcome.Result.DownstreamEventName = strings.TrimSpace(input.ApprovalEventType)
-		outcome.Result.DownstreamSubscribers = &subscribers
-		outcome.Result.DownstreamSubscriberSource = subscriberSource
-		outcome.ApprovalEvent = &evt
+	eventID := uuid.NewString()
+	evt, err := row.decisionEvent(eventID, decisionID, strings.TrimSpace(input.DecisionEventType), action, strings.TrimSpace(input.ActorTokenID), strings.TrimSpace(input.Reason), input.DecisionPayload, input.DeferUntil, input.Now)
+	if err != nil {
+		return MailboxV1DecisionOutcome{}, err
 	}
-	res, err := tx.ExecContext(txctx, `
+	subscribers := append([]string(nil), input.DecisionEventSubscribers...)
+	if subscribers == nil {
+		subscribers = []string{}
+	}
+	subscriberSource := strings.TrimSpace(input.DecisionEventSubscriberSource)
+	if subscriberSource == "" {
+		subscriberSource = "unavailable"
+	}
+	outcome.Result.DownstreamEventID = eventID
+	outcome.Result.DownstreamEventName = strings.TrimSpace(input.DecisionEventType)
+	outcome.Result.DownstreamSubscribers = &subscribers
+	outcome.Result.DownstreamSubscriberSource = subscriberSource
+	outcome.DecisionEvent = &evt
+
+	var res sql.Result
+	if action == "deferred" {
+		res, err = tx.ExecContext(txctx, `
+		UPDATE mailbox
+		SET status = 'pending',
+		    decision = NULL,
+		    decision_notes = NULLIF($2, ''),
+		    decided_by = NULLIF($3, ''),
+		    decided_at = $4,
+		    deferred_until = $5
+		WHERE item_id = $1::uuid
+		  AND status = 'pending'
+	`, row.ID, notes, strings.TrimSpace(input.ActorTokenID), input.Now, input.DeferUntil.UTC())
+	} else {
+		res, err = tx.ExecContext(txctx, `
 		UPDATE mailbox
 		SET status = 'decided',
 		    decision = $2,
 		    decision_notes = NULLIF($3, ''),
 		    decided_by = NULLIF($4, ''),
 		    decided_at = $5,
-		    expires_at = COALESCE($6::timestamptz, expires_at)
+		    deferred_until = NULL
 		WHERE item_id = $1::uuid
 		  AND status = 'pending'
-	`, row.ID, action, notes, strings.TrimSpace(input.ActorTokenID), input.Now, expiresAt)
+	`, row.ID, action, notes, strings.TrimSpace(input.ActorTokenID), input.Now)
+	}
 	if err != nil {
 		return MailboxV1DecisionOutcome{}, fmt.Errorf("decide v1 mailbox item: %w", err)
 	}
@@ -400,15 +423,15 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 			DecidedAt:        latest.decisionTime(input.Now),
 		}
 	}
-	if outcome.ApprovalEvent != nil {
-		publish := input.ApprovalEventPublish
+	if outcome.DecisionEvent != nil {
+		publish := input.DecisionEventPublish
 		if publish == nil {
 			publish = func(ctx context.Context, evt events.Event) error {
-				return s.appendMailboxV1ApprovalEventTx(ctx, tx, evt)
+				return s.appendMailboxV1DecisionEventTx(ctx, tx, evt)
 			}
 		}
-		if err := publish(txctx, *outcome.ApprovalEvent); err != nil {
-			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox approval event: %w", err)
+		if err := publish(txctx, *outcome.DecisionEvent); err != nil {
+			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox decision event: %w", err)
 		}
 	}
 	if hasIdempotency {
@@ -501,7 +524,7 @@ func loadMailboxV1DecisionReplayEventName(ctx context.Context, q execQueryer, ev
 	return eventName, nil
 }
 
-func (s *PostgresStore) appendMailboxV1ApprovalEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
+func (s *PostgresStore) appendMailboxV1DecisionEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error {
 	if err := s.AppendEventTx(ctx, tx, evt); err != nil {
 		return err
 	}
@@ -553,13 +576,13 @@ func mailboxV1ListWhere(opts MailboxV1ListOptions, cursor mailboxV1Cursor) (stri
 	switch strings.TrimSpace(strings.ToLower(opts.Status)) {
 	case "":
 	case "pending":
-		clauses = append(clauses, "m.status = 'pending'")
+		clauses = append(clauses, "m.status = 'pending' AND m.deferred_until IS NULL")
 	case "decided":
-		clauses = append(clauses, "m.status = 'decided' AND COALESCE(m.decision, '') <> 'deferred'")
+		clauses = append(clauses, "m.status = 'decided'")
 	case "expired":
 		clauses = append(clauses, "m.status = 'expired'")
 	case "deferred":
-		clauses = append(clauses, "m.status = 'decided' AND COALESCE(m.decision, '') = 'deferred'")
+		clauses = append(clauses, "m.status = 'pending' AND m.deferred_until IS NOT NULL")
 	default:
 		clauses = append(clauses, "false")
 	}
@@ -593,6 +616,8 @@ type mailboxV1Row struct {
 	EntityID      string
 	Payload       map[string]any
 	RawPayload    json.RawMessage
+	ExpiresAt     sql.NullTime
+	DeferredUntil sql.NullTime
 	CreatedAtTime time.Time
 	DecidedAt     sql.NullTime
 	DecidedBy     string
@@ -629,6 +654,8 @@ func (s *PostgresStore) loadMailboxV1RowTx(ctx context.Context, tx *sql.Tx, id s
 			COALESCE(m.flow_instance, ''),
 			COALESCE(m.entity_id::text, ''),
 			COALESCE(m.payload, '{}'::jsonb),
+			m.expires_at,
+			m.deferred_until,
 			m.created_at,
 			m.decided_at,
 			COALESCE(m.decided_by, ''),
@@ -668,6 +695,8 @@ func scanMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 			&row.FlowInstance,
 			&row.EntityID,
 			&row.RawPayload,
+			&row.ExpiresAt,
+			&row.DeferredUntil,
 			&row.CreatedAtTime,
 			&row.DecidedAt,
 			&row.DecidedBy,
@@ -696,7 +725,7 @@ func (r mailboxV1Row) projectItem() MailboxV1Item {
 	item := MailboxV1Item{
 		MailboxID:      strings.TrimSpace(r.ID),
 		Type:           strings.TrimSpace(r.Type),
-		Status:         mailboxV1APIStatus(r.Status, r.Decision),
+		Status:         mailboxV1APIStatus(r.Status, r.Decision, r.DeferredUntil),
 		Priority:       mailboxV1PriorityForSeverity(r.Priority),
 		SourceEventID:  strings.TrimSpace(r.SourceEventID),
 		SourceRunID:    strings.TrimSpace(r.RunID),
@@ -709,6 +738,9 @@ func (r mailboxV1Row) projectItem() MailboxV1Item {
 	if r.DecidedAt.Valid {
 		item.DecidedAt = r.DecidedAt.Time.UTC().Format(time.RFC3339Nano)
 	}
+	if r.DeferredUntil.Valid {
+		item.DeferredUntil = r.DeferredUntil.Time.UTC().Format(time.RFC3339Nano)
+	}
 	return item
 }
 
@@ -719,8 +751,12 @@ func (r mailboxV1Row) projectDetail() MailboxV1ItemDetail {
 		TS:           r.CreatedAtTime.UTC().Format(time.RFC3339Nano),
 	}}
 	if r.DecidedAt.Valid {
+		action := mailboxV1Decision(r.Status, r.Decision)
+		if action == "" && r.DeferredUntil.Valid {
+			action = "deferred"
+		}
 		entry := MailboxV1HistoryEntry{
-			Action:       mailboxV1Decision(r.Status, r.Decision),
+			Action:       action,
 			ActorTokenID: strings.TrimSpace(coalesce(r.DecidedBy, "unknown")),
 			TS:           r.DecidedAt.Time.UTC().Format(time.RFC3339Nano),
 		}
@@ -756,7 +792,8 @@ func (r mailboxV1Row) decisionTime(fallback time.Time) time.Time {
 	return time.Now().UTC()
 }
 
-func (r mailboxV1Row) approvalEvent(eventID, decisionID, eventType, actorTokenID string, decisionPayload json.RawMessage, now time.Time) (events.Event, error) {
+func (r mailboxV1Row) decisionEvent(eventID, decisionID, eventType, action, actorTokenID, reason string, decisionPayload json.RawMessage, deferUntil time.Time, now time.Time) (events.Event, error) {
+	action = strings.TrimSpace(strings.ToLower(action))
 	payloadMap := map[string]any{}
 	if len(decisionPayload) > 0 {
 		if err := json.Unmarshal(decisionPayload, &payloadMap); err != nil {
@@ -769,15 +806,24 @@ func (r mailboxV1Row) approvalEvent(eventID, decisionID, eventType, actorTokenID
 	eventPayload := map[string]any{
 		"mailbox_id":          strings.TrimSpace(r.ID),
 		"mailbox_decision_id": strings.TrimSpace(decisionID),
-		"decision":            "approved",
-		"decision_payload":    payloadMap,
 		"item_type":           strings.TrimSpace(r.Type),
 		"mailbox_payload":     cloneMailboxV1Payload(r.Payload),
 		"source_event_id":     strings.TrimSpace(r.SourceEventID),
 		"source_flow":         mailboxV1SourceFlow(r.FlowInstance),
 		"source_entity_id":    strings.TrimSpace(r.EntityID),
-		"decided_by":          strings.TrimSpace(actorTokenID),
-		"decided_at":          now.UTC().Format(time.RFC3339Nano),
+	}
+	if action == "deferred" {
+		eventPayload["until"] = deferUntil.UTC().Format(time.RFC3339Nano)
+		eventPayload["deferred_by"] = strings.TrimSpace(actorTokenID)
+		eventPayload["deferred_at"] = now.UTC().Format(time.RFC3339Nano)
+	} else {
+		eventPayload["decision"] = action
+		eventPayload["decision_payload"] = payloadMap
+		eventPayload["decided_by"] = strings.TrimSpace(actorTokenID)
+		eventPayload["decided_at"] = now.UTC().Format(time.RFC3339Nano)
+		if action == "rejected" {
+			eventPayload["reason"] = strings.TrimSpace(reason)
+		}
 	}
 	raw, err := json.Marshal(eventPayload)
 	if err != nil {
@@ -804,11 +850,11 @@ func (r mailboxV1Row) approvalEvent(eventID, decisionID, eventType, actorTokenID
 	return evt, nil
 }
 
-func mailboxV1APIStatus(status, decision string) string {
+func mailboxV1APIStatus(status, decision string, deferredUntil sql.NullTime) string {
 	status = strings.TrimSpace(status)
 	decision = strings.TrimSpace(decision)
 	switch {
-	case status == "decided" && decision == "deferred":
+	case status == "pending" && deferredUntil.Valid:
 		return "deferred"
 	case status == "expired" || status == "cancelled":
 		return "expired"

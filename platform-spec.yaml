@@ -4177,12 +4177,12 @@ engine:
         promoted_by: '#1403'
         promoted_first_slice_by: '#1414'
         typed_entrypoint_owners:
-        - runtimebus.EventMutationRunner and runtimebus.EventMutation for selected event publish, PublishInMutation, mailbox approval publish, and outbox atomic mutation groups
+        - runtimebus.EventMutationRunner and runtimebus.EventMutation for selected event publish, PublishInMutation, mailbox decision publish, and outbox atomic mutation groups
         - runtimepipeline.Store.RunPipelineMutation for selected workflow pipeline mutation groups
         - internal/store.SQLiteRuntimeStore.RunRuntimeMutation for selected SQLite runtime row-family mutations
         - internal/store.PostgresStore normal transaction methods for selected Postgres runtime row-family mutations
         rule: >
-          Mutation writers must consume a semantic mutation owner. Event publish/outbox, mailbox approval publication,
+          Mutation writers must consume a semantic mutation owner. Event publish/outbox, mailbox decision publication,
           workflow pipeline producers, and selected runtime row-family producers must not construct raw
           `func(context.Context, *sql.Tx) error` callbacks, pass raw `*sql.Tx`, or branch on SQLite/Postgres transaction
           mechanics as their selected-runtime mutation authority. Backend-specific SQL transaction mechanics may remain
@@ -9173,7 +9173,7 @@ platform_tables:
         \           TEXT,\n    payload           JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT\
         \ 'pending' CHECK (status IN ('pending', 'decided', 'expired', 'cancelled')),\n    decision          TEXT,\n    decision_notes\
         \    TEXT,\n    decided_by        TEXT,\n    decided_at        TIMESTAMPTZ,\n    notified          BOOLEAN NOT NULL\
-        \ DEFAULT FALSE,\n    expires_at        TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \ DEFAULT FALSE,\n    expires_at        TIMESTAMPTZ,\n    deferred_until    TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
         \    INDEX idx_mailbox_status (status, severity, created_at),\n    INDEX idx_mailbox_entity (entity_id) WHERE entity_id\
         \ IS NOT NULL,\n    INDEX idx_mailbox_type (item_type, status),\n    INDEX idx_mailbox_global (scope, status) WHERE\
         \ scope = 'global'\n);"
@@ -10724,7 +10724,7 @@ multi_bundle_persistence:
         - event.publish and run.start select a loaded BundleContext by explicit canonical bundle_hash for create-new work or by runs.bundle_hash/runs.bundle_source for existing-run work. Missing, deleted, legacy, or unloaded contexts fail closed rather than falling back to ambient boot state.
         - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
         - Successful bundle.delete, force bundle.delete partial failure after force-controlled cleanup begins, and successful or partial runtime.nuke with include_bundles=true consume RuntimeContextManager deactivation for loaded matching contexts. runtime.nuke include_bundles=false must not deactivate bundle contexts.
-        - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox approval event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
+        - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox decision event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
         - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery are disabled for every context until bundle-scoped recovery filters are promoted. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
         - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
@@ -11580,7 +11580,7 @@ platform_events:
       produced_by_type: platform
     mailbox.item_decided:
       description: Product-facing platform event emitted after an operator makes a terminal mailbox decision.
-      schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.approval_event_payload_contract
+      schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
       producer_evidence:
         produced_by_type: platform
         locations:
@@ -11600,6 +11600,7 @@ platform_events:
         source_entity_id: uuid
         decided_by: text
         decided_at: timestamp
+        reason: string (required for rejected decisions)
       required:
       - mailbox_id
       - mailbox_decision_id
@@ -11615,13 +11616,48 @@ platform_events:
       forbidden_fields:
       - payload
       produced_by_type: platform
+    mailbox.item_deferred:
+      description: Product-facing platform event emitted after an operator defers a mailbox item without terminally deciding it.
+      schema_authority: platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/mailbox_v1.go#DecideV1MailboxItem
+        - internal/apiv1/operator_mailbox.go#executeMailboxDecision
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        mailbox_id: uuid
+        mailbox_decision_id: uuid
+        until: timestamp
+        item_type: text
+        mailbox_payload: object
+        source_event_id: uuid
+        source_flow: text
+        source_entity_id: uuid
+        deferred_by: text
+        deferred_at: timestamp
+      required:
+      - mailbox_id
+      - mailbox_decision_id
+      - until
+      - item_type
+      - mailbox_payload
+      - source_event_id
+      - source_flow
+      - source_entity_id
+      - deferred_by
+      - deferred_at
+      forbidden_fields:
+      - payload
+      produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
       them. They follow standard routing, delivery, and persistence rules.
     routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
       platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.run_stalled, platform.reset, platform.auth_required,
       platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed,
-      mailbox.item_decided. Products can subscribe to these.'
+      mailbox.item_decided, mailbox.item_deferred. Products can subscribe to these.'
     internal_routable_events: 'platform.activity_requested enters the normal event loop as a platform-internal durable activity
       request and is consumed by workflow-runtime; products MUST NOT author, emit, or claim ownership of it.'
     diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:
@@ -17300,10 +17336,10 @@ cli_specification:
       flags:
       - name: --decision-payload <file>
         maps_to: decision_payload
-        behavior: Optional path to a file containing a JSON object attached to the approval event.
+        behavior: Optional path to a file containing a JSON object attached to the terminal decision event.
       - name: --decision-payload-json <json-object>
         maps_to: decision_payload
-        behavior: Optional inline JSON object attached to the approval event.
+        behavior: Optional inline JSON object attached to the terminal decision event.
       - name: --idempotency-key <key>
         maps_to: idempotency_key
         behavior: Optional v1 API idempotency key for this mutating approval request.
@@ -17341,12 +17377,12 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc mailbox.reject
-      behavior: Mailbox rejection action through canonical API owner; no direct DB/store/mailbox writes.
+      behavior: Mailbox rejection action through canonical API owner; no direct DB/store/mailbox/EventBus writes.
       output:
-        success_detail: Renders API-owned `MailboxDecisionResult` common fields including required `idempotency_replayed`; reject reason echo remains split.
+        success_detail: Renders API-owned `MailboxDecisionResult` common fields including required `idempotency_replayed` and server-owned downstream event detail when present; reject reason echo remains split.
       proof_expectations:
       - exact /v1/rpc mailbox.reject call with mailbox_id, reason, and optional idempotency_key params only
-      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.reject
+      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.reject, including downstream event detail
       - invalid args and missing explicit token for non-loopback API targets make zero API calls
     mailbox_defer:
       command: swarm mailbox defer <mailbox-item-id>
@@ -17354,12 +17390,12 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       owner: /v1/rpc mailbox.defer
-      behavior: Mailbox defer action through canonical API owner; no direct DB/store/mailbox writes.
+      behavior: Mailbox defer action through canonical API owner; no direct DB/store/mailbox/EventBus writes.
       output:
-        success_detail: Renders API-owned `MailboxDecisionResult` common fields including required `idempotency_replayed`; defer-until echo remains split.
+        success_detail: Renders API-owned `MailboxDecisionResult` common fields including required `idempotency_replayed` and server-owned downstream event detail when present; defer-until echo remains split.
       proof_expectations:
       - exact /v1/rpc mailbox.defer call with mailbox_id, until, and optional idempotency_key params only
-      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.defer
+      - success rendering consumes only MailboxDecisionResult fields from /v1/rpc mailbox.defer, including downstream event detail
       - invalid args and missing explicit token for non-loopback API targets make zero API calls
     health:
       command: swarm health
@@ -19141,26 +19177,35 @@ api_specification:
       - conversation.fork_delete
       - test.setup_entities
     mailbox:
-      status_storage_model: 'The storage table keeps terminal defer decisions as status = decided and decision = deferred.
-        v1 read projections expose that row as MailboxStatus deferred. Approval/reject terminal rows remain status = decided
-        with decision approved/rejected; expired/cancelled rows project as expired.'
-      approval_event_routes:
+      status_storage_model: 'Terminal approve/reject decisions are stored as status = decided with decision approved/rejected.
+        Defer is non-terminal: storage keeps status = pending, decision unset, and deferred_until set independently from
+        expires_at. v1 read projections expose pending/deferred/decided/expired from those first-class fields; expired/cancelled
+        rows project as expired. Existing pre-1.0 terminal deferred rows are migrated one-way to pending with deferred_until
+        unset when no recoverable until exists.'
+      decision_event_routes:
       - item_type: review_request
-        event_name: mailbox.item_decided
+        terminal_event_name: mailbox.item_decided
+        deferred_event_name: mailbox.item_deferred
       - item_type: approval
-        event_name: mailbox.item_decided
+        terminal_event_name: mailbox.item_decided
+        deferred_event_name: mailbox.item_deferred
       - item_type: operational_decision
-        event_name: mailbox.item_decided
-      approval_event_payload_contract:
-        event_name: mailbox.item_decided
-        producer: /v1/rpc mailbox.approve
+        terminal_event_name: mailbox.item_decided
+        deferred_event_name: mailbox.item_deferred
+      decision_event_payload_contract:
+        terminal_event_name: mailbox.item_decided
+        deferred_event_name: mailbox.item_deferred
+        producer: /v1/rpc mailbox.approve|mailbox.reject|mailbox.defer
         rule: >
-          Mailbox approval events are platform-produced flat event payloads and
-          MUST satisfy the active event schema before persistence. The original
-          public mailbox row payload MUST be emitted under the declared
-          `mailbox_payload` field. The operator approval context remains under
-          `decision_payload`.
-        required_fields:
+          Mailbox decision events are platform-produced flat event payloads and
+          MUST satisfy the active event schema before persistence. Approve and
+          reject are terminal verdicts emitted as `mailbox.item_decided` with
+          `decision = approved|rejected`; reject MUST carry schema-visible
+          `reason`. Defer is non-terminal and emitted as `mailbox.item_deferred`
+          with schema-visible `until`. The original public mailbox row payload
+          MUST be emitted under the declared `mailbox_payload` field. The
+          optional operator decision context remains under `decision_payload`.
+        terminal_required_fields:
         - mailbox_id
         - mailbox_decision_id
         - decision
@@ -19172,32 +19217,52 @@ api_specification:
         - source_entity_id
         - decided_by
         - decided_at
+        deferred_required_fields:
+        - mailbox_id
+        - mailbox_decision_id
+        - until
+        - item_type
+        - mailbox_payload
+        - source_event_id
+        - source_flow
+        - source_entity_id
+        - deferred_by
+        - deferred_at
         field_semantics:
           mailbox_payload: >
             Original public mailbox row payload produced by the mailbox row
             materialization owner, exposed as a declared business payload field
-            for consumers of `mailbox.item_decided`.
+            for consumers of mailbox decision/defer events.
           decision_payload: >
-            Operator-supplied approval context from the `mailbox.approve`
+            Operator-supplied decision context from the `mailbox.approve`
             request. It is separate from `mailbox_payload` and MUST NOT be
             merged with the row payload.
+          reason: >
+            Operator-supplied rejection reason from `mailbox.reject`, emitted as
+            a first-class terminal event field rather than buried inside
+            `decision_payload`.
+          until: >
+            Operator-supplied defer-until timestamp from `mailbox.defer`, emitted
+            as a first-class non-terminal event field and persisted as
+            `deferred_until`; it MUST NOT overwrite or extend `expires_at`.
         forbidden_fields:
         - payload
         validation: >
           The producer MUST NOT emit the retired top-level `payload` member and
           validators MUST NOT add a special allowlist for it. Contracts that need
           the mailbox row payload must declare and consume `mailbox_payload`.
-      approval_transaction_boundary: >
-        `mailbox.approve` owns a caller-owned transactional publish boundary:
-        the mailbox row decision, `mailbox.item_decided` event persistence,
-        event delivery/replay-scope evidence, and API idempotency completion
-        commit atomically. Downstream subscriber/interceptor/runtime work MUST
-        run only after that decision transaction commits, or be durably queued
-        while ingress is paused. Post-commit downstream failures are recorded
-        as event receipt/recovery diagnostics; they MUST NOT leave the mailbox
-        decision transaction open, block later run/event writes, duplicate the
-        approval event, or roll back already-committed mailbox/idempotency
-        evidence.
+      decision_transaction_boundary: >
+        `mailbox.approve`, `mailbox.reject`, and `mailbox.defer` own a
+        caller-owned transactional publish boundary: the mailbox row state,
+        mailbox decision/defer event persistence, event delivery/replay-scope
+        evidence, and API idempotency completion commit atomically. Downstream
+        subscriber/interceptor/runtime work MUST run only after that decision
+        transaction commits, or be durably queued while ingress is paused.
+        Route or event-publish failure MUST fail closed without row-only
+        success. Post-commit downstream failures are recorded as event
+        receipt/recovery diagnostics; they MUST NOT leave the mailbox decision
+        transaction open, block later run/event writes, duplicate the event, or
+        roll back already-committed mailbox/idempotency evidence.
     scopes:
       vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, approve:<resource>,
         verify:<resource>)
@@ -20455,12 +20520,13 @@ api_specification:
             $ref: '#/components/schemas/Timestamp'
           decided_at:
             $ref: '#/components/schemas/Timestamp'
+          deferred_until:
+            $ref: '#/components/schemas/Timestamp'
           decision:
             type: string
             enum:
             - approved
             - rejected
-            - deferred
             - expired
       MailboxHistoryEntry:
         type: object
@@ -20551,11 +20617,11 @@ api_specification:
           reason:
             type: string
             enum:
-            - no_approval_route
+            - no_decision_route
             description: Present when available is false.
           event_name:
             type: string
-            description: Approval event name when a downstream route exists.
+            description: Terminal decision event name when a downstream route exists.
           subscribers:
             type: array
             items:
@@ -20582,7 +20648,7 @@ api_specification:
             $ref: '#/components/schemas/OpaqueId'
           downstream_event_id:
             $ref: '#/components/schemas/OpaqueId'
-            description: Present only when the decision triggered an event emission (typically on approve).
+            description: Present when the decision triggered a required event emission.
           downstream_event_name:
             type: string
             description: Present with downstream_event_id when the decision triggered an event emission.
@@ -22497,11 +22563,10 @@ api_specification:
             enum:
             - approved
             - rejected
-            - deferred
             - expired
           decided_at:
             $ref: '#/components/schemas/Timestamp'
-      MAILBOX_APPROVAL_EVENT_UNCONFIGURED:
+      MAILBOX_DECISION_EVENT_UNCONFIGURED:
         type: object
         additionalProperties: false
         required:
@@ -22522,6 +22587,7 @@ api_specification:
             type: string
             enum:
             - in_past
+            - beyond_expiry
             - beyond_max_window
           max_until:
             $ref: '#/components/schemas/Timestamp'
@@ -23809,14 +23875,14 @@ api_specification:
     mailbox.approve:
       tier: must_have
       description: >
-        Approve a pending mailbox item. Triggers the downstream event configured
-        for the item's type by
-        api_specification.conventions.mailbox.approval_event_routes.
+        Approve a pending mailbox item. Triggers `mailbox.item_decided` using
+        api_specification.conventions.mailbox.decision_event_routes.
 
         The mailbox row decision, `mailbox.item_decided` event persistence,
         delivery/replay-scope evidence, and API idempotency completion commit
-        atomically. Downstream subscriber/interceptor/runtime work from the
-        transactional approval publish runs only after that decision transaction
+        atomically. Route or publish failure fails closed without row-only
+        success. Downstream subscriber/interceptor/runtime work from the
+        transactional decision publish runs only after that decision transaction
         commits, or remains queued while ingress is paused.
       scope:
         required:
@@ -23845,11 +23911,15 @@ api_specification:
       errors:
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
-      - MAILBOX_APPROVAL_EVENT_UNCONFIGURED
+      - MAILBOX_DECISION_EVENT_UNCONFIGURED
       - IDEMPOTENCY_CONFLICT
     mailbox.reject:
       tier: must_have
-      description: Reject a pending mailbox item with a stated reason. No downstream event is emitted.
+      description: >
+        Reject a pending mailbox item with a stated reason. Triggers
+        `mailbox.item_decided` with `decision = rejected` and schema-visible
+        `reason`; route or publish failure fails closed without row-only
+        success.
       scope:
         required:
         - approve:mailbox
@@ -23876,10 +23946,17 @@ api_specification:
       errors:
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
+      - MAILBOX_DECISION_EVENT_UNCONFIGURED
       - IDEMPOTENCY_CONFLICT
     mailbox.defer:
       tier: must_have
-      description: Defer a pending mailbox item until a specified time.
+      description: >
+        Defer a pending mailbox item until a specified time. Defer is
+        non-terminal: the row remains pending with `deferred_until` set and
+        `expires_at` unchanged. Triggers `mailbox.item_deferred`; route or
+        publish failure fails closed without row-only success. `until` must be
+        in the future and must not exceed `expires_at` when the item has an
+        expiry deadline.
       scope:
         required:
         - approve:mailbox
@@ -23905,6 +23982,7 @@ api_specification:
       errors:
       - MAILBOX_NOT_FOUND
       - MAILBOX_ALREADY_DECIDED
+      - MAILBOX_DECISION_EVENT_UNCONFIGURED
       - INVALID_DEFER_UNTIL
       - IDEMPOTENCY_CONFLICT
     agent.list:

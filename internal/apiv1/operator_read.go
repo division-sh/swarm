@@ -107,7 +107,7 @@ type OperatorReadOptions struct {
 	ResetCleaner              DestructiveResetCleaner
 	ResetContainers           DestructiveResetContainerStopper
 	Source                    semanticview.Source
-	MailboxApprovalRoutes     map[string]string
+	MailboxDecisionRoutes     map[string]MailboxDecisionEventRoute
 	Bundle                    runtimecontracts.BundleIdentity
 	RuntimeIdentity           RuntimeIdentityResult
 }
