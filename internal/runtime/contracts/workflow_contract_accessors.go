@@ -375,6 +375,9 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
+		if b.RootSchema == nil {
+			return workflowSemanticRootStates(b.Semantics)
+		}
 		return rootSchemaStates(b.RootSchema)
 	}
 	if states := b.Semantics.FlowStates[flowID]; len(states) > 0 {
@@ -384,6 +387,26 @@ func (b *WorkflowContractBundle) FlowStates(flowID string) []string {
 		return rootSchemaStates(b.RootSchema)
 	}
 	return nil
+}
+
+func workflowSemanticRootStates(semantics WorkflowSemanticView) []string {
+	out := make([]string, 0, len(semantics.Stages))
+	seen := make(map[string]struct{}, len(semantics.Stages))
+	for _, stage := range semantics.Stages {
+		if strings.TrimSpace(stage.Phase) != "" {
+			continue
+		}
+		id := strings.TrimSpace(stage.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 func rootSchemaStates(root *FlowSchemaDocument) []string {
@@ -399,6 +422,9 @@ func (b *WorkflowContractBundle) FlowTerminalStages(flowID string) []string {
 	}
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
+		if b.RootSchema == nil {
+			return append([]string{}, b.Semantics.TerminalStages...)
+		}
 		return rootSchemaTerminalStates(b.RootSchema)
 	}
 	if terminal := b.Semantics.FlowTerminal[flowID]; len(terminal) > 0 {

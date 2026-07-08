@@ -21,7 +21,7 @@ func NewSource(db *sql.DB, source semanticview.Source) (*Source, error) {
 	if source == nil {
 		return nil, fmt.Errorf("semantic source is required for digest reads")
 	}
-	return newSource(db, source.WorkflowTerminalStages())
+	return newSource(db, source.FlowTerminalStages(""))
 }
 
 func newSource(db *sql.DB, terminalStates []string) (*Source, error) {

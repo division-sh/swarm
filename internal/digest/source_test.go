@@ -22,6 +22,36 @@ func TestNewSource_RequiresTerminalStates(t *testing.T) {
 	}
 }
 
+func TestNewSourceUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	source, err := NewSource(db, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{
+				Declared: true,
+				Entries: []runtimecontracts.FlowStageDeclaration{
+					{ID: "ready", Initial: true},
+					{ID: "done"},
+					{ID: "archived", Terminal: true},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			TerminalStages: []string{"done", "archived"},
+			FlowTerminal: map[string][]string{
+				"child": {"done"},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("NewSource: %v", err)
+	}
+	if got, want := source.terminalStates, []string{"archived"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("terminalStates = %#v, want root-only %#v", got, want)
+	}
+}
+
 func TestSource_FiltersTerminalStatesFromDigestReads(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)

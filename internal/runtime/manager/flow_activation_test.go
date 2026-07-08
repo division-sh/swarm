@@ -436,6 +436,33 @@ func TestActivateFlowInstanceAddsDerivedRouteTableInstance(t *testing.T) {
 	}
 }
 
+func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
+	bus := &flowActivationTestBus{}
+	store := &flowActivationTestInstanceStore{}
+	am := newFlowActivationManager(bus, store)
+	bundle := testFlowBundle("")
+	schema := bundle.FlowSchemas["review"]
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{
+		Declared: true,
+		Entries: []runtimecontracts.FlowStageDeclaration{
+			{ID: "queued", Initial: true},
+			{ID: "done", Terminal: true},
+		},
+	}
+	bundle.FlowSchemas["review"] = schema
+
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(store.creates) != 1 {
+		t.Fatalf("creates = %d, want 1", len(store.creates))
+	}
+	if got := store.creates[0].CurrentState; got != "queued" {
+		t.Fatalf("created instance current state = %q, want queued", got)
+	}
+}
+
 func TestActivateFlowInstancePassesActivationConfigToRouteMaterialization(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})

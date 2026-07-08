@@ -58,7 +58,7 @@ func checkRedundantInTopologySelectEntity(c *checkerContext) []Finding {
 	findings := []Finding{}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
-		if flowID == "" || strings.TrimSpace(schema.InitialState) == "" {
+		if flowID == "" || !bootverifyFlowStateful(c.source, flowID, schema) {
 			continue
 		}
 		scope, ok := c.source.FlowScopeByID(flowID)
@@ -98,13 +98,13 @@ func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
 	findings := []Finding{}
 	for flowID, schema := range c.source.FlowSchemaEntries() {
 		flowID = strings.TrimSpace(flowID)
-		if flowID == "" || strings.TrimSpace(schema.InitialState) == "" || strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
+		if flowID == "" || !bootverifyFlowStateful(c.source, flowID, schema) || strings.EqualFold(strings.TrimSpace(schema.Mode), "template") {
 			continue
 		}
-		if retiredStaticMultiEntityAcquisitionFlow(schema) {
+		if retiredStaticMultiEntityAcquisitionFlow(c.source, flowID, schema) {
 			continue
 		}
-		if normalPrimaryEntityFlow(schema) {
+		if normalPrimaryEntityFlow(c.source, flowID, schema) {
 			continue
 		}
 		inputs := normalizeStringSet(c.source.FlowInputEvents(flowID))

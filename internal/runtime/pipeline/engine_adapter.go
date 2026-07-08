@@ -675,22 +675,27 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 		}
 		return strings.TrimSpace(asString(payload["mailbox_decision_id"])) != "", true, nil
 	case "not_in_terminal_state", "not_in_terminal_stage":
-		if pc.SemanticSource() == nil {
+		source := pc.SemanticSource()
+		if source == nil {
 			return true, true, nil
 		}
 		currentState := strings.TrimSpace(string(state.Stage))
 		if currentState == "" {
 			return true, true, nil
 		}
+		flowID := strings.TrimSpace(execCtx.Request.FlowID.String())
+		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, *state) {
+			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
+				return false, true, nil
+			}
+			if stageSetContains(source.FlowStates(candidateFlowID), currentState) {
+				return true, true, nil
+			}
+		}
 		workflow := pc.WorkflowDefinition()
 		if workflow != nil {
 			if stage, ok := workflow.Stage(state.Stage); ok {
 				return !stage.Terminal, true, nil
-			}
-		}
-		for _, terminal := range pc.SemanticSource().WorkflowTerminalStages() {
-			if strings.EqualFold(strings.TrimSpace(terminal), currentState) {
-				return false, true, nil
 			}
 		}
 		return true, true, nil
@@ -1068,6 +1073,9 @@ func (pc *PipelineCoordinator) isTerminalFlowState(flowID, state string) bool {
 			if strings.EqualFold(strings.TrimSpace(terminal), state) {
 				return true
 			}
+		}
+		if len(source.FlowStates(flowID)) > 0 {
+			return false
 		}
 	}
 	workflow := pc.WorkflowDefinition()

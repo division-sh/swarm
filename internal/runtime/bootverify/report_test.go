@@ -5607,6 +5607,28 @@ func TestRun_RejectsCreateEntityForStatefulStaticInputPinHandlers(t *testing.T) 
 	}
 }
 
+func TestRun_RejectsCreateEntityForStagedStatefulStaticInputPinHandlers(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-pin-wiring"))
+	flowID := "child"
+	useStagedLifecycleForFlow(t, bundle, flowID, "pending", []string{"pending", "done"}, []string{"done"})
+	flowView, ok := bundle.FlowViewByID(flowID)
+	if !ok || flowView == nil {
+		t.Fatalf("flow view %s missing", flowID)
+	}
+	for nodeID, node := range flowView.Nodes {
+		for eventType, handler := range node.EventHandlers {
+			handler.CreateEntity = true
+			writeFlowHandler(t, bundle, flowID, nodeID, eventType, handler)
+		}
+	}
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "flow_boundary_create_entity_validation", "static multi-row entity ownership is retired") {
+		t.Fatalf("expected retired static create_entity error for staged flow, got %#v", report.Errors())
+	}
+}
+
 func TestRun_RejectsCallerSelectedEntityIDForRootNormalInputPinMaterializers(t *testing.T) {
 	root := writeRootDefaultStaticInputPinFixtureWithOptions(t, rootDefaultStaticInputPinFixtureOptions{
 		DeclareEntityID: true,

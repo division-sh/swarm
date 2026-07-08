@@ -346,7 +346,7 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 						Location: location,
 					})
 				}
-				if retiredStaticMultiEntityAcquisitionFlow(validationScope.schema) {
+				if validationScope.retiredStatic {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
@@ -362,7 +362,7 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 						Location: location,
 					})
 				}
-				if strings.TrimSpace(validationScope.schema.InitialState) == "" {
+				if !validationScope.stateful {
 					findings = append(findings, Finding{
 						CheckID:  "select_entity_validation",
 						Severity: "error",
@@ -537,7 +537,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 		if strings.EqualFold(strings.TrimSpace(validationScope.schema.Mode), "template") {
 			continue
 		}
-		if strings.TrimSpace(validationScope.schema.InitialState) == "" {
+		if !validationScope.stateful {
 			continue
 		}
 		if len(validationScope.inputs) == 0 {
@@ -553,7 +553,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if _, ok := validationScope.inputs[eventType]; !ok {
 					continue
 				}
-				if retiredStaticMultiEntityAcquisitionFlow(validationScope.schema) {
+				if validationScope.retiredStatic {
 					if handler.CreateEntity {
 						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 							CheckID:  "flow_boundary_create_entity_validation",
@@ -575,7 +575,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 					}
 					continue
 				}
-				if normalPrimaryEntityFlow(validationScope.schema) &&
+				if validationScope.normalPrimary &&
 					bootverifyHandlerMaterializesEntity(c.source, validationScope.semanticFlowID, handler) &&
 					flowInputEventDeclaresPayloadField(c.source, validationScope.semanticFlowID, eventType, "entity_id") {
 					c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
@@ -585,7 +585,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 						Location: validationScope.displayFlowID,
 					})
 				}
-				if normalPrimaryEntityFlow(validationScope.schema) {
+				if validationScope.normalPrimary {
 					continue
 				}
 				if handler.CreateEntity {
@@ -613,6 +613,9 @@ type flowAcquisitionValidationScope struct {
 	displayFlowID  string
 	semanticFlowID string
 	schema         runtimecontracts.FlowSchemaDocument
+	stateful       bool
+	retiredStatic  bool
+	normalPrimary  bool
 	inputs         map[string]struct{}
 	nodes          map[string]runtimecontracts.SystemNodeContract
 }
@@ -630,10 +633,14 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 			}
 		}
 		if len(rootNodes) > 0 {
+			schema := *bundle.RootSchema
 			scopes = append(scopes, flowAcquisitionValidationScope{
 				displayFlowID:  "root",
 				semanticFlowID: "",
-				schema:         *bundle.RootSchema,
+				schema:         schema,
+				stateful:       bootverifyFlowStateful(c.source, "", schema),
+				retiredStatic:  retiredStaticMultiEntityAcquisitionFlow(c.source, "", schema),
+				normalPrimary:  normalPrimaryEntityFlow(c.source, "", schema),
 				inputs:         normalizeStringSet(bundle.RootSchema.Pins.Inputs.Events),
 				nodes:          rootNodes,
 			})
@@ -652,6 +659,9 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 			displayFlowID:  flowID,
 			semanticFlowID: flowID,
 			schema:         schema,
+			stateful:       bootverifyFlowStateful(c.source, flowID, schema),
+			retiredStatic:  retiredStaticMultiEntityAcquisitionFlow(c.source, flowID, schema),
+			normalPrimary:  normalPrimaryEntityFlow(c.source, flowID, schema),
 			inputs:         normalizeStringSet(c.source.FlowInputEvents(flowID)),
 			nodes:          scope.Nodes,
 		})
@@ -659,17 +669,31 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 	return scopes
 }
 
-func retiredStaticMultiEntityAcquisitionFlow(schema runtimecontracts.FlowSchemaDocument) bool {
+func bootverifyFlowInitialStage(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) string {
+	if initial := strings.TrimSpace(schema.LoweredInitialState()); initial != "" || schema.UsesAuthoredStages() || schema.HasLegacyLifecycleFields() {
+		return initial
+	}
+	if source == nil {
+		return ""
+	}
+	return strings.TrimSpace(source.FlowInitialStage(strings.TrimSpace(flowID)))
+}
+
+func bootverifyFlowStateful(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) bool {
+	return bootverifyFlowInitialStage(source, flowID, schema) != ""
+}
+
+func retiredStaticMultiEntityAcquisitionFlow(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) bool {
 	mode := strings.TrimSpace(schema.Mode)
-	return strings.TrimSpace(schema.InitialState) != "" && strings.EqualFold(mode, runtimecontracts.FlowModeStatic)
+	return bootverifyFlowStateful(source, flowID, schema) && strings.EqualFold(mode, runtimecontracts.FlowModeStatic)
 }
 
 func retiredStaticMultiEntityAcquisitionMessage(flowID, eventType, nodeID, label string) string {
 	return fmt.Sprintf("flow %s handler %s on node %s uses %s, but stateful static multi-row entity ownership is retired; model this as one primary entity with contained state, a mode: template flow instance, a mode: singleton coordinator, or a child flow", flowID, eventType, nodeID, label)
 }
 
-func normalPrimaryEntityFlow(schema runtimecontracts.FlowSchemaDocument) bool {
-	return strings.TrimSpace(schema.InitialState) != "" && strings.TrimSpace(schema.Mode) == ""
+func normalPrimaryEntityFlow(source semanticview.Source, flowID string, schema runtimecontracts.FlowSchemaDocument) bool {
+	return bootverifyFlowStateful(source, flowID, schema) && strings.TrimSpace(schema.Mode) == ""
 }
 
 func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, eventType, field string) bool {

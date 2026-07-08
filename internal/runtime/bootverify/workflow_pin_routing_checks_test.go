@@ -150,6 +150,24 @@ func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T
 	}
 }
 
+func TestRedundantInTopologySelectEntityFailsClosedForStagedParentConnect(t *testing.T) {
+	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+		consumerMode: "static",
+		acquisition:  "select_entity",
+		withProducer: true,
+	})
+	useStagedLifecycleForFlow(t, bundle, "consumer", "pending", []string{"pending", "done"}, []string{"done"})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+		t.Fatalf("expected redundant_in_topology_select_entity hard invalidity for staged flow, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+	if reportContains(report.Warnings(), "redundant_in_topology_select_entity", "") {
+		t.Fatalf("redundant_in_topology_select_entity must not remain warning-only for staged flow, got %#v", report.Warnings())
+	}
+}
+
 func TestRedundantInTopologySelectOrCreateEntityFailsClosedForParentConnect(t *testing.T) {
 	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
 		consumerMode: "static",
@@ -1086,6 +1104,64 @@ consumer-node:
     deploy.done:
 ` + acquisitionBlock + `      advances_to: done
 `
+}
+
+func useStagedLifecycleForFlow(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, initial string, states, terminals []string) {
+	t.Helper()
+	if bundle == nil {
+		t.Fatal("bundle is nil")
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		t.Fatal("flowID is required")
+	}
+	schema, ok := bundle.FlowSchemas[flowID]
+	if !ok {
+		t.Fatalf("flow schema %s missing", flowID)
+	}
+	terminalSet := map[string]struct{}{}
+	for _, terminal := range terminals {
+		terminal = strings.TrimSpace(terminal)
+		if terminal != "" {
+			terminalSet[terminal] = struct{}{}
+		}
+	}
+	entries := make([]runtimecontracts.FlowStageDeclaration, 0, len(states))
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		_, terminal := terminalSet[state]
+		entries = append(entries, runtimecontracts.FlowStageDeclaration{
+			ID:       state,
+			Initial:  state == strings.TrimSpace(initial),
+			Terminal: terminal,
+		})
+	}
+	schema.InitialState = ""
+	schema.InitialStateDeclared = false
+	schema.States = nil
+	schema.StatesDeclared = false
+	schema.TerminalStates = nil
+	schema.TerminalStatesDeclared = false
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: entries}
+	bundle.FlowSchemas[flowID] = schema
+	if bundle.Semantics.FlowInitial == nil {
+		bundle.Semantics.FlowInitial = map[string]string{}
+	}
+	if bundle.Semantics.FlowStates == nil {
+		bundle.Semantics.FlowStates = map[string][]string{}
+	}
+	if bundle.Semantics.FlowTerminal == nil {
+		bundle.Semantics.FlowTerminal = map[string][]string{}
+	}
+	bundle.Semantics.FlowInitial[flowID] = schema.LoweredInitialState()
+	bundle.Semantics.FlowStates[flowID] = schema.LoweredStates()
+	bundle.Semantics.FlowTerminal[flowID] = schema.LoweredTerminalStates()
+	if view, ok := bundle.FlowViewByID(flowID); ok && view != nil {
+		view.Schema = schema
+	}
 }
 
 type pinRoutingVerifySourceFixture struct {
