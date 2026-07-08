@@ -11,6 +11,7 @@ type unifiedConfigExampleTier string
 const (
 	unifiedConfigExampleTierProjectSafe          unifiedConfigExampleTier = "project_safe"
 	unifiedConfigExampleTierProjectContainedPath unifiedConfigExampleTier = "project_contained_path"
+	unifiedConfigExampleTierFullTrust            unifiedConfigExampleTier = "full_trust"
 	unifiedConfigExampleTierElevated             unifiedConfigExampleTier = "elevated"
 	unifiedConfigExampleTierSecretReference      unifiedConfigExampleTier = "secret_reference"
 )
@@ -42,16 +43,16 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("serve.mcp_listen_addr", `"127.0.0.1:8082"`, "Loopback MCP listener. Public or wildcard binds require local/operator config or a flag.", unifiedConfigExampleTierProjectSafe),
 		e("workspace.backend", "docker", "Workspace backend preference; actual isolation still follows capability policy.", unifiedConfigExampleTierProjectSafe),
 		e("llm.backend", "anthropic", "Active LLM backend profile.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.models.regular.anthropic", "claude-3-5-sonnet", "Provider-specific model alias override.", unifiedConfigExampleTierProjectSafe),
-		e("llm.session.lock_ttl", "10s", "Session lock lease TTL.", unifiedConfigExampleTierProjectSafe),
+		dynamic("llm.models.regular.anthropic", "claude-sonnet-4-5", "Anthropic model to use for the regular alias.", unifiedConfigExampleTierProjectSafe),
+		e("llm.session.lock_ttl", "10s", "How long a session lock can be held before it expires.", unifiedConfigExampleTierProjectSafe),
 		e("llm.session.rotate_after_turns", "40", "Rotate an LLM session after this many turns.", unifiedConfigExampleTierProjectSafe),
 		e("llm.session.rotate_on_parse_failures", "3", "Rotate an LLM session after repeated parse failures.", unifiedConfigExampleTierProjectSafe),
 		dynamic("llm.provider_limits.anthropic.rate_limit", "30/m", "Provider-wide request rate limit.", unifiedConfigExampleTierProjectSafe),
 		dynamic("llm.provider_limits.anthropic.rate_limit_max_wait", "30s", "Maximum wait for provider-wide rate limiting.", unifiedConfigExampleTierProjectSafe),
 		dynamic("llm.provider_limits.anthropic.max_concurrency", "2", "Provider-wide concurrency limit.", unifiedConfigExampleTierProjectSafe),
 		dynamic("llm.provider_limits.anthropic.max_concurrency_max_wait", "30s", "Maximum wait for provider-wide concurrency limiting.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.models.claude-3-5-sonnet.rate_limit", "10/m", "Model-specific request rate limit.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.models.claude-3-5-sonnet.rate_limit_max_wait", "30s", "Maximum wait for model-specific rate limiting.", unifiedConfigExampleTierProjectSafe),
+		dynamic("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit", "10/m", "Model-specific request rate limit.", unifiedConfigExampleTierProjectSafe),
+		dynamic("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit_max_wait", "30s", "Maximum wait for model-specific rate limiting.", unifiedConfigExampleTierProjectSafe),
 		e("llm.claude_api.max_retries", "1", "Anthropic API retry count.", unifiedConfigExampleTierProjectSafe),
 		e("llm.claude_api.retry_backoff", "2s", "Anthropic API retry backoff.", unifiedConfigExampleTierProjectSafe),
 		e("llm.claude_cli.timeout", "1h", "Claude CLI request timeout.", unifiedConfigExampleTierProjectSafe),
@@ -62,7 +63,7 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("budget.human_tasks.max_tasks_per_week", "0", "Human task weekly cap; zero leaves enforcement disabled.", unifiedConfigExampleTierProjectSafe),
 		e("budget.human_tasks.budget_reset", "monday", "Weekly human-task budget reset day.", unifiedConfigExampleTierProjectSafe),
 		e("budget.human_tasks.auto_expire_hours", "168", "Human task auto-expiration window in hours.", unifiedConfigExampleTierProjectSafe),
-		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories enabled for budget policy.", unifiedConfigExampleTierProjectSafe),
+		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget.", unifiedConfigExampleTierProjectSafe),
 
 		e("workspace.data_source", "./.swarm/data", "Project-contained workspace data source.", unifiedConfigExampleTierProjectContainedPath),
 		e("provider_triggers.packs.external_dirs", `["./provider-packs"]`, "Project-contained provider trigger pack directories.", unifiedConfigExampleTierProjectContainedPath),
@@ -72,9 +73,12 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("paths.verification_gates_file", "./verification-gates.yaml", "Project-contained verification gates file.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.tooling_lock_file", "./tooling.lock", "Project-contained tooling lock file.", unifiedConfigExampleTierProjectContainedPath),
 
-		e("connection.api_server", "http://127.0.0.1:8081", "CLI API target. Keep out of checked-in project config.", unifiedConfigExampleTierElevated),
+		e("connection.api_server", "http://127.0.0.1:8081", "CLI API target. Keep out of shared project config and this-machine config.", unifiedConfigExampleTierFullTrust),
+		e("connection.api_token_file", ".swarm/api-token", "CLI API bearer-token file reference; never inline the token.", unifiedConfigExampleTierFullTrust),
+		e("serve.api_token_file", ".swarm/serve-api-token", "Serve API bearer-token file reference; never inline the token.", unifiedConfigExampleTierFullTrust),
+
 		e("store.backend", "sqlite", "Runtime store backend.", unifiedConfigExampleTierElevated),
-		e("store.sqlite.path", ".swarm/dev.db", "SQLite runtime store path.", unifiedConfigExampleTierElevated),
+		e("store.sqlite.path", ".swarm/stores/dev.db", "SQLite runtime store path.", unifiedConfigExampleTierElevated),
 		e("database.host", "127.0.0.1", "Postgres host for postgres store deployments.", unifiedConfigExampleTierElevated),
 		e("database.port", "5432", "Postgres port for postgres store deployments.", unifiedConfigExampleTierElevated),
 		e("database.name", "swarm", "Postgres database name.", unifiedConfigExampleTierElevated),
@@ -95,8 +99,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("paths.artifact_root", ".swarm/artifacts", "Runtime artifact root.", unifiedConfigExampleTierElevated),
 		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory.", unifiedConfigExampleTierElevated),
 
-		e("connection.api_token_file", ".swarm/api-token", "CLI API bearer-token file reference; never inline the token.", unifiedConfigExampleTierSecretReference),
-		e("serve.api_token_file", ".swarm/serve-api-token", "Serve API bearer-token file reference; never inline the token.", unifiedConfigExampleTierSecretReference),
 		e("database.password_secret_key", "postgres_password", "Database password key in the Swarm secrets store.", unifiedConfigExampleTierSecretReference),
 		skippedValidation("database.password_file", "/run/secrets/postgres-password", "Database password file for orchestrator-mounted secrets.", unifiedConfigExampleTierSecretReference),
 		skippedValidation("database.password_env", "DB_PASSWORD", "Explicit env delegation for orchestrator-injected database password.", unifiedConfigExampleTierSecretReference),
@@ -105,15 +107,17 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 
 func generatedUnifiedConfigExample() string {
 	var b strings.Builder
-	b.WriteString("# Generated from cmd/swarm unified config metadata.\n")
-	b.WriteString("# Do not hand-maintain key lists here; update the generator metadata and drift test.\n")
-	b.WriteString("# Copy selected keys into ./swarm.yaml for project-safe settings, .swarm/swarm.yaml for local-operator settings, or a file passed with --config for explicit full-trust settings.\n")
-	b.WriteString("# All example entries are commented so this file is documentation, not active project config.\n")
-	b.WriteString("# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the schema owns that reference.\n\n")
+	b.WriteString("# swarm.yaml - Swarm's config file. Copy keys you want to change into:\n")
+	b.WriteString("#   ./swarm.yaml (project-safe), .swarm/swarm.yaml (this machine only), or --config <file>.\n")
+	b.WriteString("# Everything here is commented out; uncommenting is how you override a default.\n")
+	b.WriteString("# `swarm doctor config` shows which values are in effect and where they came from.\n")
+	b.WriteString("# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the config file owns that reference.\n")
+	b.WriteString("# (Contributors: generated file - edit the generator metadata, not this file; see drift test.)\n\n")
 
 	tiers := []unifiedConfigExampleTier{
 		unifiedConfigExampleTierProjectSafe,
 		unifiedConfigExampleTierProjectContainedPath,
+		unifiedConfigExampleTierFullTrust,
 		unifiedConfigExampleTierElevated,
 		unifiedConfigExampleTierSecretReference,
 	}
@@ -158,8 +162,10 @@ func unifiedConfigExampleTierTitle(tier unifiedConfigExampleTier) string {
 		return "Project-safe keys: safe in checked-in ./swarm.yaml"
 	case unifiedConfigExampleTierProjectContainedPath:
 		return "Project-contained paths: relative paths under the project when used in ./swarm.yaml"
+	case unifiedConfigExampleTierFullTrust:
+		return "Connection and auth settings: use user-global config, --config, or flags"
 	case unifiedConfigExampleTierElevated:
-		return "Elevated/local-only keys: use .swarm/swarm.yaml, user-global config, explicit --config, or flags"
+		return "Settings for this machine only: put these in .swarm/swarm.yaml"
 	case unifiedConfigExampleTierSecretReference:
 		return "Secret references: never store plaintext secrets in config"
 	default:
@@ -173,8 +179,10 @@ func unifiedConfigExampleTierDescription(tier unifiedConfigExampleTier) string {
 		return "These keys express portable runtime behavior."
 	case unifiedConfigExampleTierProjectContainedPath:
 		return "Project config may use these only as relative paths that stay inside the project root."
+	case unifiedConfigExampleTierFullTrust:
+		return "These keys can redirect clients or name auth material, so keep them in user-global config, an explicit --config file, or invocation flags."
 	case unifiedConfigExampleTierElevated:
-		return "These keys are machine/operator-specific or unsafe if committed to a shared project file."
+		return "These keys are machine-specific or unsafe if committed to a shared project file."
 	case unifiedConfigExampleTierSecretReference:
 		return "These keys point at secret material; the secret value itself belongs in the secrets store, a token file, a mounted secret file, or an explicitly delegated env var."
 	default:

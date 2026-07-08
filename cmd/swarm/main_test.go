@@ -953,7 +953,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9601")
 			},
-			wantError: "read unified config",
+			wantError: "read swarm.yaml config",
 		},
 	}
 	for _, tc := range tests {

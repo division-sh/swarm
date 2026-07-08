@@ -96,7 +96,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.Mode = "unknown"
 	}
 	if req.Config == nil {
-		report.add(localPreflightBackendPrerequisite, "config_missing", localPreflightSeverityBlocker, localPreflightStatusFailed, "runtime config is required", "load unified Swarm config (swarm.yaml) through the serve/run config owner")
+		report.add(localPreflightBackendPrerequisite, "config_missing", localPreflightSeverityBlocker, localPreflightStatusFailed, "runtime config is required", "load swarm.yaml through the serve/run config owner")
 		return report.finalize()
 	}
 	profile, err := req.Config.LLMBackendProfile()
@@ -338,7 +338,7 @@ func (r *localPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 		return
 	}
 	if err := dockerManager.CheckDockerAvailable(ctx); err != nil {
-		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "start Docker, set workspace.docker_bin in unified Swarm config (swarm.yaml), or pass --docker-bin to `swarm workspace build`")
+		r.add(localPreflightWorkspacePrerequisite, "docker_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "start Docker, set workspace.docker_bin in swarm.yaml, or pass --docker-bin to `swarm workspace build`")
 	} else {
 		r.add(localPreflightWorkspacePrerequisite, "docker_available", localPreflightSeverityInfo, localPreflightStatusOK, "Docker is reachable", "")
 	}

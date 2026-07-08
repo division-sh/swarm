@@ -93,7 +93,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
 	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to the Swarm user/global state directory")
-	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.configPath, changed: &opts.rootFlags.configPathSet}, "config", "Path to unified swarm.yaml config")
+	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.configPath, changed: &opts.rootFlags.configPathSet}, "config", "Path to swarm.yaml config")
 	cmd.AddGroup(
 		&cobra.Group{ID: commandGroupStart, Title: "Getting started:"},
 		&cobra.Group{ID: commandGroupAuthor, Title: "Author & validate:"},
@@ -231,7 +231,7 @@ func effectiveCommandConfigPath(cmd *cobra.Command, localPath string, localSet b
 	localPath = strings.TrimSpace(localPath)
 	rootPath = strings.TrimSpace(rootPath)
 	if rootSet && localSet && localPath != rootPath {
-		return "", false, fmt.Errorf("root --config and command --config name different files; use one explicit unified config source")
+		return "", false, fmt.Errorf("root --config and command --config name different files; pass one --config path")
 	}
 	if localSet {
 		return localPath, true, nil
@@ -347,7 +347,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Optional path to unified Swarm config (swarm.yaml)")
+	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.ContractsPath, "contracts", opts.ContractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.DataSource, "data", opts.DataSource, "Path to agent-visible read-only /data reference directory")

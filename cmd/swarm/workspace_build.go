@@ -80,7 +80,7 @@ func newWorkspaceBuildCommand(ctx context.Context, repoRoot string) *cobra.Comma
 		},
 	}
 	cmd.Flags().StringVar(&opts.backend, "backend", opts.backend, "Workspace image build backend to materialize: claude_cli")
-	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Optional path to unified Swarm config (swarm.yaml) for workspace.image/workspace.docker_bin")
+	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to swarm.yaml config for workspace.image/workspace.docker_bin")
 	cmd.Flags().StringVar(&opts.image, "image", opts.image, "Workspace image tag to build; defaults to workspace.image or swarm-workspace:latest")
 	cmd.Flags().StringVar(&opts.dockerBin, "docker-bin", opts.dockerBin, "Docker-compatible CLI binary; defaults to workspace.docker_bin or docker")
 	return cmd
