@@ -33,7 +33,15 @@ func appendProviderConnectorToolSurfaceFindings(ctx context.Context, report *loc
 		report.add(localPreflightProviderPackPrerequisite, "provider_connector_credential_store_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the local credential store used by swarm secrets")
 		return
 	}
-	surfaces, err := providerconnectors.Surfaces(ctx, source, store)
+	managedStore, err := buildManagedCredentialStore()
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "provider_connector_managed_credential_store_unavailable", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the local managed credential store used by swarm connections")
+		return
+	}
+	surfaces, err := providerconnectors.SurfacesWithOptions(ctx, source, providerconnectors.SurfaceOptions{
+		StaticCredentials:  store,
+		ManagedCredentials: managedStore,
+	})
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "provider_connector_surface_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider connector tool declarations")
 		return
@@ -80,10 +88,16 @@ func formatProviderConnectorRequirements(requirements []providerconnectors.Requi
 	parts := make([]string, 0, len(requirements))
 	for _, requirement := range requirements {
 		status := "UNBOUND"
-		if requirement.Bound {
+		if strings.TrimSpace(requirement.Status) != "" {
+			status = strings.TrimSpace(requirement.Status)
+		} else if requirement.Bound {
 			status = "BOUND"
 		}
-		parts = append(parts, strings.TrimSpace(requirement.Name)+"="+status)
+		name := strings.TrimSpace(requirement.Name)
+		if strings.TrimSpace(requirement.Kind) == "managed_credential" {
+			name = "managed_credential:" + name
+		}
+		parts = append(parts, name+"="+status)
 	}
 	return strings.Join(parts, "; ")
 }

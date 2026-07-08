@@ -2918,13 +2918,16 @@ handler_specification:
       supported_tool_sources:
         authored_http_tools: Required Stage 1 supported surface for read_only activity execution and for non_idempotent_write
           activity execution when the activity_attempts journal owns provider-attempt truth. The tool must be declared in
-          tools.yaml, resolve to handler_type http, and include an http block. read_only tools may retry under the read-only
-          retry policy. non_idempotent_write tools must insert activity_attempts.started before outbound dispatch, must not
-          automatically retry or re-dispatch once an attempt may have reached the provider, and may consume static
-          credentials through the existing credential-store/import-boundary owner. Missing static credentials fail before
-          provider dispatch. HTTP tools using managed_credential, response_mapping, rate_limit, or rate_limit_max_wait are
-          not admitted to activities in Stage 1; those subfeatures require later owner consumption before activity execution
-          may claim them.
+          tools.yaml or imported as a connector pack, resolve to handler_type http, and include an http block. read_only
+          tools may retry under the read-only retry policy. non_idempotent_write tools must check the existing
+          activity_attempts row for the request identity before credential resolution or outbound preparation, must insert
+          activity_attempts.started before outbound dispatch, must not automatically retry or re-dispatch once an attempt
+          may have reached the provider, and may consume static credentials through the existing credential-store/import-
+          boundary owner or managed credentials through `tool_model.managed_credential_store` when the tool is a
+          provider_connector. Missing static or managed credentials fail before provider dispatch. HTTP tools using
+          response_success are admitted as a provider response success predicate and fail the activity when the predicate
+          is false or unresolved. HTTP tools using response_mapping, rate_limit, or rate_limit_max_wait are not admitted to
+          activities in Stage 1; those subfeatures require later owner consumption before activity execution may claim them.
         platform_builtin: Not callable from activity in Stage 1; fail closed. This includes `artifact_repo_commit`, which
           remains action-owned under `handler_fields.action.valid_values.artifact_repo_commit` until a separately gated
           write-effect activity migration preserves that action's artifact safety and idempotency guarantees.
@@ -2932,8 +2935,10 @@ handler_specification:
           authored registration-site override is required in a future slice before MCP tools can be activity-callable.
         native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
         credentialed_http_tools: Static credentials are admitted only for authored HTTP non_idempotent_write activities and
-          only through the existing credential-store/import-boundary owner. Static credential values must not appear in logs,
-          result payloads, readback, capability output, or errors. Managed credentials/OAuth remain split and fail closed.
+          only through the existing credential-store/import-boundary owner. Managed credentials are admitted only for
+          non_idempotent_write provider_connector HTTP activities and only through `tool_model.managed_credential_store`.
+          Static and managed credential values must not appear in logs, result payloads, readback, capability output, or
+          errors.
       effect_classes:
         read_only:
           retry_default: max_attempts 3, exponential backoff
@@ -2944,12 +2949,13 @@ handler_specification:
           retry_default: max_attempts 2, exponential backoff
           fork_default: reuse_recorded_result
         non_idempotent_write:
-          stage_1_execution: Executable only for authored HTTP tools, with optional static credentials, when the
-            activity_attempts journal is available. The runtime must resolve static credentials before provider dispatch,
-            insert the started attempt row before outbound dispatch, update the row with succeeded, failed, or uncertain
-            terminal state after the outcome, and consume the row on duplicate/redelivered request events before deciding
-            whether dispatch is allowed. Any existing started, uncertain, succeeded, or failed row blocks automatic provider
-            re-dispatch.
+          stage_1_execution: Executable only for authored HTTP tools, with optional static credentials or managed
+            credentials for provider_connector tools, when the activity_attempts journal is available. The runtime must
+            consume the row on duplicate/redelivered request events before credential resolution or provider preparation,
+            resolve admitted credentials before provider dispatch, insert the started attempt row before outbound dispatch,
+            update the row with succeeded, failed, or uncertain terminal state after the outcome, and consume the row on
+            duplicate/redelivered request events before deciding whether dispatch is allowed. Any existing started,
+            uncertain, succeeded, or failed row blocks automatic provider re-dispatch and managed credential refresh.
           retry_default: max_attempts 1, no retry
           fork_default: require_manual_confirmation
         long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.
@@ -6275,6 +6281,12 @@ tool_model:
         output_schema: object — field names and types the tool returns (for documentation and LLM context)
         response_mapping: object — maps response body fields to tool output fields. If omitted, the entire response body is
           returned as the tool result.
+        response_success: >
+          object — optional provider success predicate evaluated after a 2xx HTTP response is parsed and before the tool
+          result is accepted. Fields: path is a response-rooted dotted path such as `response.body.ok`; equals is the
+          expected scalar value. Missing paths or unequal values fail closed. This is not response mapping and does not shape
+          output; it only prevents providers that encode failure inside HTTP 2xx bodies from being journaled as successful
+          calls.
         credentials: list of strings — credential store key names this tool needs. The platform resolves them from the credential
           store at call time and makes them available as {{credentials.key}} in templates.
         managed_credential: >
@@ -6293,12 +6305,13 @@ tool_model:
     template_resolution:
       description: Template variables in url, headers, body, and response_mapping are resolved at tool call time. URL
         template resolution is context-aware and performs URL-component percent-encoding for embedded substitutions;
-        headers, body, and response_mapping resolve raw semantic values.
+        headers, body, and response_mapping resolve raw semantic values. response_success is not a template expansion
+        field; it evaluates its response-rooted path against parsed HTTP response data.
       variables:
         input: Tool call arguments from the agent. Accessed as {{input.field_name}}.
         credentials: Values from the credential store for keys listed in the tool's credentials field. Accessed as {{credentials.key_name}}.
-        response: HTTP response data. Available only in response_mapping. Accessed as {{response.body}}, {{response.status}},
-          {{response.headers.header_name}}.
+        response: HTTP response data. Available only in response_success and response_mapping. Accessed as
+          {{response.body}}, {{response.status}}, {{response.headers.header_name}}.
       missing_variable: If a required template variable cannot be resolved (missing input field, missing credential), the tool
         call fails with an error returned to the agent. The platform does not make the HTTP request.
       managed_credentials: >
@@ -6347,22 +6360,25 @@ tool_model:
       pack_envelope: "internal/packs universal envelope plus internal/providerconnectors connector body verifier."
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
-      credentials: "static credential store keys listed under tool `credentials`."
-      readback: "local preflight/doctor provider connector CAN/CANNOT/BOUND/UNBOUND findings."
+      credentials: "static credential store keys listed under tool `credentials`, or managed credential handles listed under tool `managed_credential`; exactly one credential mode owns connector auth."
+      readback: "local preflight/doctor provider connector CAN/CANNOT plus typed requirement status findings."
       display: "first CAN action label is derived from the authored tool `description`; if absent, it falls back to normalized `<action> via <Provider>`."
     stage_1_profile:
       required:
       - "tool id MUST use `<provider>.<action>` form."
       - "`handler_type` MUST resolve to `http` and include an `http` block with explicit `method` and `url`."
       - "`effect_class` MUST be `non_idempotent_write`."
-      - "at least one static credential key MUST be declared under `credentials`."
+      - "exactly one credential mode MUST be declared: either static credential keys under `credentials` or one managed credential handle under `managed_credential`."
+      - "If the provider can return HTTP 2xx for provider-level failure, the connector MUST declare `response_success` so the activity journal does not record that provider failure as success."
+      known_response_success_requirements:
+      - "Slack Web API `slack.post_message` MUST declare `response_success.path: response.body.ok` and `response_success.equals: true` whether authored locally or imported from the Slack connector pack."
       forbidden:
-      - "`managed_credential`; managed OAuth/token lifecycle is a separate owner."
+      - "declaring both static `credentials` and `managed_credential`; dual auth ownership is forbidden."
       - "`response_mapping`; connector response mapping is split until specified."
       - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
       - "direct runtime provider adapter code or bespoke connector dispatch."
     connector_pack_profile:
-      status: "first slice: Telegram connector pack proof"
+      status: "first slices: Telegram static connector pack proof plus Slack managed-credential connector pack proof"
       body_file: connector.yaml
       import_syntax: >
         package.yaml `connector_packs.imports[]` entries name `provider` and `tool`. The import is an explicit enablement
@@ -6377,17 +6393,23 @@ tool_model:
         provider_connector profile, derives connector capabilities/requires mechanically from the tool declaration, and
         rejects any declared capability or requirement drift.
       capability_surface: >
-        Connector pack CAN/CANNOT/BOUND/UNBOUND readback is kind-specific. Connector CAN rows include calling the declared
-        provider action, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in
+        Connector pack CAN/CANNOT/readback is kind-specific. Connector CAN rows include calling the declared provider
+        action, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in
         `activity_attempts`. Connector CANNOT rows include bypassing `activity_attempts`, automatically retrying
-        non-idempotent writes, or exposing credential values.
+        non-idempotent writes, or exposing credential values. Requirement rows are typed: static secret requirements render
+        BOUND/UNBOUND from the static credential store, while managed credential requirements render managed credential
+        lifecycle status such as CONNECTED, UNCONNECTED, PENDING_CONSENT, REFRESH_FAILED, or SCOPE_INSUFFICIENT without
+        exposing token values.
       collision_policy: >
         No packed-vs-packed or packed-vs-flow-local connector shadowing is allowed in this slice. Any duplicate tool id
         fails closed before runtime construction and names both sources with remediation to remove one source or rename the
         flow-local tool.
       unbound_requirement_policy: >
         Pack import may succeed with an unbound credential name. Runtime activity dispatch must fail closed before the
-        provider HTTP call and before creating an `activity_attempts` row when a required static credential is unavailable.
+        provider HTTP call and before creating an `activity_attempts` row when a required static credential or managed
+        credential is unavailable, unconnected, pending, refresh_failed, scope-insufficient, unsupported, or unbound.
+        Duplicate/redelivered activity requests with an existing activity_attempts row must reuse the journaled result
+        before resolving managed credentials and MUST NOT refresh or dispatch again.
   credential_store:
     description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
       platform provides a typed interface with a layered resolution model.
@@ -6479,7 +6501,8 @@ tool_model:
     - client_credentials as the first non-consent grant variant
     - access token, refresh token when present, expiry, scopes, provider/account identity, grant type, status, refresh
       policy, and failure evidence
-    - direct Executor.Execute, served /tools/{name}, and MCP tools/call HTTP-tool entry points
+    - direct Executor.Execute, served /tools/{name}, MCP tools/call HTTP-tool entry points, and provider_connector activity
+      execution on the `activity_attempts` path
     non_goals:
     - multi-tenant per-user token vault or end-user account selection
     - provider trigger/webhook adapters; those extend existing inbound.webhook in a separate owner
@@ -6522,9 +6545,11 @@ tool_model:
       packages.
     refresh_rule: >
       Before request dispatch, the resolver returns a valid access token or fails closed. It refreshes before use when the
-      access token is absent or expires within the configured refresh window. For provider 401 responses, the HTTP executor
-      refreshes once and retries the request once. Refresh failure sets refresh_failed state with redacted failure evidence
-      and returns a redacted runtime error.
+      access token is absent or expires within the configured refresh window. For provider 401 responses, supported HTTP
+      executors refresh once and retry the request once. For non_idempotent_write provider_connector activity execution,
+      the activity_attempts journal must be checked before managed credential resolution on duplicate/redelivered requests;
+      an existing row blocks refresh and provider redispatch. Refresh failure sets refresh_failed state with redacted failure
+      evidence and returns a redacted runtime error.
     operator_surface:
       command: swarm connections connect|callback|status|disconnect
       rule: >
@@ -6537,7 +6562,9 @@ tool_model:
     boot_validation: >
       Boot/verify consumes managed_credential requirements and reports managed_credential_state for missing, pending,
       refresh_failed, scope_insufficient, or otherwise unusable records. When boot warnings are fatal, these findings block
-      startup. Execution still fails closed even when boot warnings are non-fatal.
+      startup. Connector readback/doctor MUST compare declared tool scopes against connected record scopes and surface
+      scope_insufficient rather than connected/bound when the record does not cover every declared scope. Execution still
+      fails closed even when boot warnings are non-fatal.
     redaction_guarantee: >
       Access tokens, refresh tokens, client secrets, authorization codes, PKCE verifier/state, and provider errors containing
       those values MUST NOT be returned through logs, events, dead letters, tool results, metadata, or CLI/API/status
@@ -6609,9 +6636,9 @@ tool_model:
           body manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
           capabilities, missing capabilities, or narrative/manual capability truth fail import.
         requires: >
-          Required dependency declaration surface for resources such as `webhook_signing.<provider>`. Declared requirements
-          describe binding needs and readback state; they do not make an otherwise valid pack invalid merely because the
-          deployment has not bound the secret yet.
+          Required typed dependency declaration surface for resources such as `webhook_signing.<provider>`, static connector
+          secrets, and managed connector credentials. Declared requirements describe binding needs and readback state; they
+          do not make an otherwise valid pack invalid merely because the deployment has not bound the requirement yet.
         tests: >
           Required metadata in this slice. Entries must parse as non-empty test references. Executing pack-declared tests is
           a later gated harness; current behavioral proof remains the provider-trigger conformance/runtime suite.
@@ -6641,11 +6668,14 @@ tool_model:
         without exposing secret values. `swarm doctor` is the first operator surface for this readback and renders the same
         verified first-party and declared external provider-trigger pack capability surface that serve admits at boot.
         Connector-pack readback uses connector-specific CAN/CANNOT rows defined by `tool_model.provider_connector_tools`;
-        trigger rows MUST NOT be reused to describe connector proof.
+        trigger rows MUST NOT be reused to describe connector proof. Connector requirement readback is typed and may include
+        static secrets or managed credentials with their own lifecycle statuses.
       unbound_requirement_policy: >
-        A missing deployment binding for a declared signing secret does not reject pack import. Runtime webhook admission
-        still fails closed before signature verification, dedupe marker persistence, or event publish when a required
-        signing secret is unavailable.
+        A missing deployment binding for a declared signing secret, static connector secret, or managed connector credential
+        does not reject pack import. Runtime webhook admission still fails closed before signature verification, dedupe
+        marker persistence, or event publish when a required signing secret is unavailable. Runtime connector activity
+        dispatch still fails closed before provider dispatch and before creating a new activity_attempts row when a required
+        connector credential is unavailable or unusable.
       first_party_pack_migration: >
         GitHub, Slack, Stripe, Twilio, Shopify, Typeform, Intercom, and Telegram provider-trigger manifests are first-party
         bundled packs loaded through this envelope path. There is no permanent built-in-control exemption for
@@ -6897,6 +6927,7 @@ tool_model:
     http_fields:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
+      response_success: object — optional response-rooted success predicate, evaluated before accepting a 2xx HTTP result
       credentials: list of strings — credential store keys
       managed_credential: object — managed OAuth/token credential reference; supported only for handler_type http
       rate_limit: string — optional external dispatch admission rate, supported only when handler_type resolves to http.

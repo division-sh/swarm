@@ -1,0 +1,22 @@
+id: provider.slack.connector
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: connector
+manifest_hash: sha256:7222305e4ec813fa7eb6ecc8c2b9154fae6d9ec9f5fea1a20f75e31f20c1bfa4
+provenance:
+  source: platform
+capabilities:
+  can:
+    call_provider_action: slack.post_message
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot:
+    - bypass activity_attempts
+    - retry non_idempotent_write automatically
+    - expose credential values
+requires:
+  managed_credentials:
+    - slack_oauth
+tests:
+  - providerconnectors/slack_pack
+  - runtime/slack_connector_managed_credential_supported_surface

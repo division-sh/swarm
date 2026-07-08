@@ -220,23 +220,36 @@ func DerivedCapabilities(manifest ConnectorManifest) packs.Capabilities {
 }
 
 func DerivedRequires(manifest ConnectorManifest) packs.Requires {
-	seen := map[string]struct{}{}
+	seenSecrets := map[string]struct{}{}
+	seenManaged := map[string]struct{}{}
 	var secrets []string
+	var managedCredentials []string
 	for _, toolID := range manifestToolNames(manifest) {
-		for _, credential := range manifest.Tools[toolID].Credentials {
+		tool := manifest.Tools[toolID]
+		for _, credential := range tool.Credentials {
 			credential = strings.TrimSpace(credential)
 			if credential == "" {
 				continue
 			}
-			if _, exists := seen[credential]; exists {
+			if _, exists := seenSecrets[credential]; exists {
 				continue
 			}
-			seen[credential] = struct{}{}
+			seenSecrets[credential] = struct{}{}
 			secrets = append(secrets, credential)
+		}
+		if tool.ManagedCredential != nil {
+			credential := strings.TrimSpace(tool.ManagedCredential.Key)
+			if credential != "" {
+				if _, exists := seenManaged[credential]; !exists {
+					seenManaged[credential] = struct{}{}
+					managedCredentials = append(managedCredentials, credential)
+				}
+			}
 		}
 	}
 	sort.Strings(secrets)
-	return packs.Requires{Secrets: secrets}
+	sort.Strings(managedCredentials)
+	return packs.Requires{Secrets: secrets, ManagedCredentials: managedCredentials}
 }
 
 func SourceWithConnectorPackImports(source semanticview.Source) (semanticview.Source, error) {

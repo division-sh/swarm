@@ -63,7 +63,8 @@ type CanCapabilities struct {
 }
 
 type Requires struct {
-	Secrets []string `yaml:"secrets" json:"secrets"`
+	Secrets            []string `yaml:"secrets" json:"secrets"`
+	ManagedCredentials []string `yaml:"managed_credentials" json:"managed_credentials"`
 }
 
 type Loaded struct {
@@ -73,8 +74,10 @@ type Loaded struct {
 }
 
 type RequirementStatus struct {
-	Name  string
-	Bound bool
+	Kind   string
+	Name   string
+	Status string
+	Bound  bool
 }
 
 type CapabilitySurface struct {
@@ -279,6 +282,17 @@ func (r Requires) Validate(packID string) error {
 		}
 		seen[secret] = struct{}{}
 	}
+	managedSeen := map[string]struct{}{}
+	for _, credential := range r.ManagedCredentials {
+		credential = strings.TrimSpace(credential)
+		if credential == "" {
+			return fmt.Errorf("pack %q requires.managed_credentials must not contain empty entries", packID)
+		}
+		if _, exists := managedSeen[credential]; exists {
+			return fmt.Errorf("pack %q requires.managed_credentials contains duplicate %q", packID, credential)
+		}
+		managedSeen[credential] = struct{}{}
+	}
 	return nil
 }
 
@@ -291,6 +305,10 @@ func RequiresEqual(a, b Requires) bool {
 }
 
 func (e Envelope) Surface(boundSecrets map[string]bool) CapabilitySurface {
+	return e.SurfaceWithRequirements(boundSecrets, nil)
+}
+
+func (e Envelope) SurfaceWithRequirements(boundSecrets, boundManagedCredentials map[string]bool) CapabilitySurface {
 	can := []string{}
 	switch strings.TrimSpace(e.Type) {
 	case TypeConnector:
@@ -315,12 +333,29 @@ func (e Envelope) Surface(boundSecrets map[string]bool) CapabilitySurface {
 	}
 	cannot := append([]string(nil), e.Capabilities.Cannot...)
 	sort.Strings(cannot)
-	requirements := make([]RequirementStatus, 0, len(e.Requires.Secrets))
+	requirements := make([]RequirementStatus, 0, len(e.Requires.Secrets)+len(e.Requires.ManagedCredentials))
 	for _, secret := range e.Requires.Secrets {
 		secret = strings.TrimSpace(secret)
-		requirements = append(requirements, RequirementStatus{Name: secret, Bound: boundSecrets[secret]})
+		bound := boundSecrets[secret]
+		status := "UNBOUND"
+		if bound {
+			status = "BOUND"
+		}
+		requirements = append(requirements, RequirementStatus{Kind: "secret", Name: secret, Status: status, Bound: bound})
+	}
+	for _, credential := range e.Requires.ManagedCredentials {
+		credential = strings.TrimSpace(credential)
+		bound := boundManagedCredentials[credential]
+		status := "UNBOUND"
+		if bound {
+			status = "CONNECTED"
+		}
+		requirements = append(requirements, RequirementStatus{Kind: "managed_credential", Name: credential, Status: status, Bound: bound})
 	}
 	sort.Slice(requirements, func(i, j int) bool {
+		if requirements[i].Kind != requirements[j].Kind {
+			return requirements[i].Kind < requirements[j].Kind
+		}
 		return requirements[i].Name < requirements[j].Name
 	})
 	return CapabilitySurface{Can: can, Cannot: cannot, Requires: requirements}

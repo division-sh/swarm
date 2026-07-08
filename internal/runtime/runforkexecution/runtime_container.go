@@ -152,7 +152,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, fmt.Errorf("create selected-contract fork-local runtime container bus: %w", err)
 	}
-	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource)
+	pipeline := newSelectedContractPipeline(bus, req.Store, req.LoadedSource, req.AgentRuntime.Options)
 	bus.SetInterceptors(pipeline)
 
 	runCtx := selectedContractRuntimeContainerLineageContext(ctx, c.proof)

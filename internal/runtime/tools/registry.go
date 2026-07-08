@@ -32,6 +32,7 @@ type RegisteredTool struct {
 	GeneratedSchema    bool
 	HTTP               *runtimecontracts.HTTPToolSpec
 	ResponseMapping    map[string]any
+	ResponseSuccess    *runtimecontracts.HTTPResponseSuccess
 	Credentials        []string
 	ManagedCredential  *runtimecontracts.ManagedCredentialRef
 	RateLimit          externalDispatchRateLimitConfig
@@ -239,10 +240,19 @@ func registeredToolFromContract(name string, entry runtimecontracts.ToolSchemaEn
 		OutputSchema:       outputSchema,
 		HTTP:               entry.HTTP,
 		ResponseMapping:    deepCloneMap(entry.ResponseMapping),
+		ResponseSuccess:    cloneResponseSuccess(entry.ResponseSuccess),
 		Credentials:        append([]string{}, entry.Credentials...),
 		ManagedCredential:  cloneManagedCredentialRef(entry.ManagedCredential),
 		RateLimit:          rateLimit,
 	}, true, nil
+}
+
+func cloneResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *runtimecontracts.HTTPResponseSuccess {
+	if check == nil {
+		return nil
+	}
+	out := *check
+	return &out
 }
 
 func cloneManagedCredentialRef(ref *runtimecontracts.ManagedCredentialRef) *runtimecontracts.ManagedCredentialRef {

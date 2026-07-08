@@ -10,14 +10,17 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const Category = "provider_connector"
 
 type RequirementStatus struct {
-	Name  string
-	Bound bool
+	Kind   string
+	Name   string
+	Status string
+	Bound  bool
 }
 
 type Surface struct {
@@ -29,6 +32,11 @@ type Surface struct {
 	Can          []string
 	Cannot       []string
 	Requires     []RequirementStatus
+}
+
+type SurfaceOptions struct {
+	StaticCredentials  runtimecredentials.Store
+	ManagedCredentials runtimemanagedcredentials.Store
 }
 
 func ValidateSource(source semanticview.Source) []error {
@@ -54,6 +62,10 @@ func ValidateSource(source semanticview.Source) []error {
 }
 
 func Surfaces(ctx context.Context, source semanticview.Source, store runtimecredentials.Store) ([]Surface, error) {
+	return SurfacesWithOptions(ctx, source, SurfaceOptions{StaticCredentials: store})
+}
+
+func SurfacesWithOptions(ctx context.Context, source semanticview.Source, opts SurfaceOptions) ([]Surface, error) {
 	if source == nil {
 		return nil, nil
 	}
@@ -69,7 +81,7 @@ func Surfaces(ctx context.Context, source semanticview.Source, store runtimecred
 		if !isProviderConnector(tool) {
 			continue
 		}
-		surface, err := surfaceForTool(ctx, source, name, tool, store)
+		surface, err := surfaceForTool(ctx, source, name, tool, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -110,19 +122,123 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 	if effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		errs = append(errs, fmt.Errorf("%s effect_class must be non_idempotent_write for the Stage 1 connector proof", context))
 	}
-	if len(tool.Credentials) == 0 {
-		errs = append(errs, fmt.Errorf("%s must declare at least one static credential binding", context))
+	hasStaticCredentials := len(tool.Credentials) > 0
+	hasManagedCredential := tool.ManagedCredential != nil
+	if hasStaticCredentials && hasManagedCredential {
+		errs = append(errs, fmt.Errorf("%s must not declare both static credentials and managed_credential; connector auth has one authoritative credential mode", context))
+	} else if !hasStaticCredentials && !hasManagedCredential {
+		errs = append(errs, fmt.Errorf("%s must declare exactly one credential binding mode: static credentials or managed_credential", context))
 	}
-	if tool.ManagedCredential != nil {
-		errs = append(errs, fmt.Errorf("%s uses managed_credential; managed credential connector execution is split", context))
+	if hasManagedCredential {
+		key := strings.TrimSpace(tool.ManagedCredential.Key)
+		if key == "" {
+			errs = append(errs, fmt.Errorf("%s managed_credential.key is required", context))
+		}
 	}
 	if len(tool.ResponseMapping) > 0 {
 		errs = append(errs, fmt.Errorf("%s uses response_mapping; connector activity response mapping is split", context))
+	}
+	if tool.ResponseSuccess != nil {
+		errs = append(errs, validateResponseSuccess(context, *tool.ResponseSuccess)...)
+	}
+	if required, ok := requiredResponseSuccessForProviderAction(provider, action); ok {
+		if tool.ResponseSuccess == nil {
+			errs = append(errs, fmt.Errorf("%s must declare response_success %s == %s; this provider action can return HTTP 2xx for provider-level failure", context, required.Path, asConnectorScalar(required.Equals)))
+		} else if !responseSuccessMatches(*tool.ResponseSuccess, required) {
+			errs = append(errs, fmt.Errorf("%s response_success must be %s == %s for this provider action", context, required.Path, asConnectorScalar(required.Equals)))
+		}
 	}
 	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
 		errs = append(errs, fmt.Errorf("%s uses rate_limit; connector activity rate-limit admission is split", context))
 	}
 	return errs
+}
+
+func validateResponseSuccess(context string, check runtimecontracts.HTTPResponseSuccess) []error {
+	path := strings.TrimSpace(check.Path)
+	var errs []error
+	if path == "" {
+		errs = append(errs, fmt.Errorf("%s response_success.path is required", context))
+	} else if !strings.HasPrefix(path, "response.") {
+		errs = append(errs, fmt.Errorf("%s response_success.path must start with response.", context))
+	}
+	if check.Equals == nil {
+		errs = append(errs, fmt.Errorf("%s response_success.equals is required", context))
+	} else if !responseSuccessScalar(check.Equals) {
+		errs = append(errs, fmt.Errorf("%s response_success.equals must be a scalar value", context))
+	}
+	return errs
+}
+
+func responseSuccessScalar(value any) bool {
+	switch value.(type) {
+	case string, bool, int, int64, float64, float32, uint, uint64:
+		return true
+	default:
+		return false
+	}
+}
+
+func requiredResponseSuccessForProviderAction(provider, action string) (runtimecontracts.HTTPResponseSuccess, bool) {
+	switch normalizeToken(provider) + "." + normalizeToken(action) {
+	case "slack.post_message":
+		return runtimecontracts.HTTPResponseSuccess{Path: "response.body.ok", Equals: true}, true
+	default:
+		return runtimecontracts.HTTPResponseSuccess{}, false
+	}
+}
+
+func responseSuccessMatches(got, want runtimecontracts.HTTPResponseSuccess) bool {
+	return strings.TrimSpace(got.Path) == strings.TrimSpace(want.Path) && responseSuccessValuesEqual(got.Equals, want.Equals)
+}
+
+func responseSuccessValuesEqual(got, want any) bool {
+	switch wantTyped := want.(type) {
+	case bool:
+		gotTyped, ok := got.(bool)
+		return ok && gotTyped == wantTyped
+	case string:
+		gotTyped, ok := got.(string)
+		return ok && gotTyped == wantTyped
+	case int:
+		gotFloat, ok := responseSuccessFloat(got)
+		return ok && gotFloat == float64(wantTyped)
+	case int64:
+		gotFloat, ok := responseSuccessFloat(got)
+		return ok && gotFloat == float64(wantTyped)
+	case float64:
+		gotFloat, ok := responseSuccessFloat(got)
+		return ok && gotFloat == wantTyped
+	case float32:
+		gotFloat, ok := responseSuccessFloat(got)
+		return ok && gotFloat == float64(wantTyped)
+	default:
+		return fmt.Sprint(got) == fmt.Sprint(want)
+	}
+}
+
+func responseSuccessFloat(value any) (float64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case float64:
+		return typed, true
+	case float32:
+		return float64(typed), true
+	default:
+		return 0, false
+	}
+}
+
+func asConnectorScalar(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 func validateProviderConnectorAgentExposure(source semanticview.Source) []error {
@@ -153,7 +269,7 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 	return errs
 }
 
-func surfaceForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, store runtimecredentials.Store) (Surface, error) {
+func surfaceForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, opts SurfaceOptions) (Surface, error) {
 	provider, action, _ := splitToolID(toolID)
 	host := ""
 	if tool.HTTP != nil {
@@ -162,7 +278,7 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 			host = strings.TrimSpace(parsed.Host)
 		}
 	}
-	requires := make([]RequirementStatus, 0, len(tool.Credentials))
+	requires := make([]RequirementStatus, 0, len(tool.Credentials)+1)
 	flowID, err := connectorToolFlowID(source, toolID, tool)
 	if err != nil {
 		return Surface{}, err
@@ -177,16 +293,53 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 			storeKey = strings.TrimSpace(resolved)
 		}
 		bound := false
-		if store != nil && storeKey != "" {
-			_, ok, err := store.Get(ctx, storeKey)
+		if opts.StaticCredentials != nil && storeKey != "" {
+			_, ok, err := opts.StaticCredentials.Get(ctx, storeKey)
 			if err != nil {
 				return Surface{}, err
 			}
 			bound = ok
 		}
-		requires = append(requires, RequirementStatus{Name: key, Bound: bound})
+		status := "UNBOUND"
+		if bound {
+			status = "BOUND"
+		}
+		requires = append(requires, RequirementStatus{Kind: "secret", Name: key, Status: status, Bound: bound})
+	}
+	if tool.ManagedCredential != nil {
+		key := strings.TrimSpace(tool.ManagedCredential.Key)
+		if key != "" {
+			storeKey := key
+			if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
+				storeKey = strings.TrimSpace(resolved)
+			}
+			status := "UNBOUND"
+			bound := false
+			if opts.ManagedCredentials != nil && strings.TrimSpace(storeKey) != "" {
+				record, ok, err := opts.ManagedCredentials.Get(ctx, storeKey)
+				if err != nil {
+					return Surface{}, err
+				}
+				if ok {
+					desc := record.Descriptor()
+					status = strings.ToUpper(strings.TrimSpace(desc.Status))
+					bound = desc.Status == runtimemanagedcredentials.StatusConnected
+					if bound && !managedCredentialScopesCover(desc.Scopes, tool.ManagedCredential.Scopes) {
+						status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
+						bound = false
+					}
+				}
+			}
+			if strings.TrimSpace(status) == "" {
+				status = "UNBOUND"
+			}
+			requires = append(requires, RequirementStatus{Kind: "managed_credential", Name: key, Status: status, Bound: bound})
+		}
 	}
 	sort.Slice(requires, func(i, j int) bool {
+		if requires[i].Kind != requires[j].Kind {
+			return requires[i].Kind < requires[j].Kind
+		}
 		return requires[i].Name < requires[j].Name
 	})
 	actionLabel := connectorActionLabel(provider, action, tool)
@@ -209,6 +362,43 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 		},
 		Requires: requires,
 	}, nil
+}
+
+func managedCredentialScopesCover(actual, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	have := map[string]struct{}{}
+	for _, scope := range normalizeStringSet(actual) {
+		have[scope] = struct{}{}
+	}
+	for _, scope := range normalizeStringSet(required) {
+		if _, ok := have[scope]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeStringSet(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func connectorToolFlowID(source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry) (string, error) {

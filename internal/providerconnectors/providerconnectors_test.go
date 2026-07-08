@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -46,13 +48,73 @@ func TestValidateSourceRejectsUnsupportedProviderConnectorShape(t *testing.T) {
 	joined := joinErrors(errs)
 	for _, want := range []string{
 		"effect_class must be non_idempotent_write",
-		"must declare at least one static credential binding",
+		"must declare exactly one credential binding mode",
 		"uses response_mapping",
 		"uses rate_limit",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("ValidateSource errors = %q, want %q", joined, want)
 		}
+	}
+}
+
+func TestValidateSourceAcceptsSlackManagedCredentialProviderConnectorHTTPActivityTool(t *testing.T) {
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"slack.post_message": slackConnectorTool("https://slack.com/api/chat.postMessage"),
+		},
+	})
+
+	if errs := ValidateSource(source); len(errs) != 0 {
+		t.Fatalf("ValidateSource errors = %#v, want none", errs)
+	}
+}
+
+func TestValidateSourceRejectsMixedStaticAndManagedProviderConnectorCredentials(t *testing.T) {
+	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
+	tool.Credentials = []string{"slack_bot_token"}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"slack.post_message": tool,
+		},
+	})
+
+	errs := ValidateSource(source)
+	joined := joinErrors(errs)
+	if !strings.Contains(joined, "must not declare both static credentials and managed_credential") {
+		t.Fatalf("ValidateSource errors = %q, want mixed auth rejection", joined)
+	}
+}
+
+func TestValidateSourceRejectsSlackPostMessageWithoutRequiredResponseSuccess(t *testing.T) {
+	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
+	tool.ResponseSuccess = nil
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"slack.post_message": tool,
+		},
+	})
+
+	errs := ValidateSource(source)
+	joined := joinErrors(errs)
+	if !strings.Contains(joined, "must declare response_success response.body.ok == true") {
+		t.Fatalf("ValidateSource errors = %q, want required Slack response_success rejection", joined)
+	}
+}
+
+func TestValidateSourceRejectsMalformedProviderConnectorResponseSuccess(t *testing.T) {
+	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
+	tool.ResponseSuccess = &runtimecontracts.HTTPResponseSuccess{Path: "body.ok", Equals: true}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"slack.post_message": tool,
+		},
+	})
+
+	errs := ValidateSource(source)
+	joined := joinErrors(errs)
+	if !strings.Contains(joined, "response_success.path must start with response.") {
+		t.Fatalf("ValidateSource errors = %q, want response_success path rejection", joined)
 	}
 }
 
@@ -70,6 +132,75 @@ func TestValidateSourceRejectsAgentExposureOfProviderConnector(t *testing.T) {
 	joined := joinErrors(errs)
 	if !strings.Contains(joined, `agent "sender" must not expose provider connector tool "telegram.send_message" directly`) {
 		t.Fatalf("ValidateSource errors = %q, want direct exposure rejection", joined)
+	}
+}
+
+func TestSurfacesReportManagedCredentialRequirementsWithoutSecretValues(t *testing.T) {
+	ctx := context.Background()
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"slack.post_message": slackConnectorTool("https://slack.com/api/chat.postMessage"),
+		},
+	})
+	store := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
+		Key:          "slack_oauth",
+		Provider:     "slack",
+		GrantType:    runtimemanagedcredentials.GrantAuthorizationCodePKCE,
+		TokenURL:     "https://slack.com/api/oauth.v2.access",
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		Scopes:       []string{"chat:write"},
+		AccessToken:  "xoxb-access-secret",
+		RefreshToken: "refresh-secret",
+		Status:       runtimemanagedcredentials.StatusConnected,
+		ExpiresAt:    time.Now().Add(time.Hour),
+	})
+
+	surfaces, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: store})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions: %v", err)
+	}
+	if len(surfaces) != 1 {
+		t.Fatalf("surfaces = %#v, want one", surfaces)
+	}
+	requires := surfaces[0].Requires
+	if len(requires) != 1 || requires[0].Kind != "managed_credential" || requires[0].Name != "slack_oauth" || !requires[0].Bound || requires[0].Status != "CONNECTED" {
+		t.Fatalf("requirements = %#v, want connected managed slack_oauth", requires)
+	}
+	rendered := strings.Join(surfaces[0].Can, " ") + strings.Join(surfaces[0].Cannot, " ") + joinRequirementStatuses(requires)
+	for _, secret := range []string{"xoxb-access-secret", "refresh-secret", "client-secret"} {
+		if strings.Contains(rendered, secret) {
+			t.Fatalf("surface leaked managed credential secret %q: %s", secret, rendered)
+		}
+	}
+
+	unbound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions without store: %v", err)
+	}
+	if len(unbound) != 1 || len(unbound[0].Requires) != 1 || unbound[0].Requires[0].Bound || unbound[0].Requires[0].Status != "UNBOUND" {
+		t.Fatalf("unbound managed requirements = %#v", unbound)
+	}
+
+	insufficient := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
+		Key:          "slack_oauth",
+		Provider:     "slack",
+		GrantType:    runtimemanagedcredentials.GrantAuthorizationCodePKCE,
+		TokenURL:     "https://slack.com/api/oauth.v2.access",
+		ClientID:     "client-id",
+		ClientSecret: "client-secret",
+		Scopes:       []string{"channels:read"},
+		AccessToken:  "xoxb-access-secret",
+		RefreshToken: "refresh-secret",
+		Status:       runtimemanagedcredentials.StatusConnected,
+		ExpiresAt:    time.Now().Add(time.Hour),
+	})
+	scopeSurfaces, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: insufficient})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions insufficient scopes: %v", err)
+	}
+	if len(scopeSurfaces) != 1 || len(scopeSurfaces[0].Requires) != 1 || scopeSurfaces[0].Requires[0].Bound || scopeSurfaces[0].Requires[0].Status != "SCOPE_INSUFFICIENT" {
+		t.Fatalf("scope-insufficient managed requirements = %#v, want SCOPE_INSUFFICIENT unbound", scopeSurfaces)
 	}
 }
 
@@ -193,6 +324,28 @@ func TestDefaultPackRegistryLoadsTelegramFromVerifiedPlatformPack(t *testing.T) 
 	}
 }
 
+func TestDefaultPackRegistryLoadsSlackManagedCredentialPack(t *testing.T) {
+	tool, ok := BuiltinTool("slack", "slack.post_message")
+	if !ok {
+		t.Fatal("BuiltinTool slack.post_message not found")
+	}
+	if !isProviderConnector(tool) {
+		t.Fatalf("builtin slack tool category = %q, want %q", tool.Category, Category)
+	}
+	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "slack_oauth" {
+		t.Fatalf("builtin slack managed credential = %#v, want slack_oauth", tool.ManagedCredential)
+	}
+	if tool.ResponseSuccess == nil || tool.ResponseSuccess.Path != "response.body.ok" || tool.ResponseSuccess.Equals != true {
+		t.Fatalf("builtin slack response_success = %#v, want response.body.ok true", tool.ResponseSuccess)
+	}
+	if len(tool.Credentials) != 0 {
+		t.Fatalf("builtin slack static credentials = %#v, want none", tool.Credentials)
+	}
+	if strings.Contains(tool.HTTP.URL, "xoxb") || strings.Contains(tool.HTTP.URL, "secret") {
+		t.Fatal("builtin slack tool leaked a concrete credential value")
+	}
+}
+
 func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -256,6 +409,15 @@ func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 	}
 }
 
+func TestSlackConnectorPackRequiresManagedCredentialDriftFailsClosed(t *testing.T) {
+	files := connectorPackTestFS(t, "slack")
+	replaceConnectorPackFile(t, files, "pack.yaml", "slack_oauth", "other_oauth")
+	_, err := LoadPackFS(files, ".", "0.7.0")
+	if err == nil || !strings.Contains(err.Error(), "requires do not match") {
+		t.Fatalf("LoadPackFS error = %v, want managed requires drift failure", err)
+	}
+}
+
 func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T) {
 	ambient := providerConnectorScopedSource{
 		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
@@ -298,6 +460,51 @@ func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T
 	}
 	if len(surfaces[0].Requires) != 1 || surfaces[0].Requires[0].Name != "telegram_bot_token" || surfaces[0].Requires[0].Bound {
 		t.Fatalf("surface requirements = %#v, want unbound telegram_bot_token", surfaces[0].Requires)
+	}
+}
+
+func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(t *testing.T) {
+	ambient := providerConnectorScopedSource{
+		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{{Key: "."}},
+	}
+	ambientSource, err := SourceWithConnectorPackImports(ambient)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports ambient: %v", err)
+	}
+	if _, exists := ambientSource.ToolEntries()["slack.post_message"]; exists {
+		t.Fatal("ambient source exposed slack.post_message without explicit import")
+	}
+
+	explicit := providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "slack", "slack.post_message"),
+		},
+	}
+	source, err := SourceWithConnectorPackImports(explicit)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports explicit: %v", err)
+	}
+	tool, exists := source.ToolEntries()["slack.post_message"]
+	if !exists {
+		t.Fatal("explicit import did not expose slack.post_message")
+	}
+	if tool.Category != Category || tool.ManagedCredential == nil || tool.ManagedCredential.Key != "slack_oauth" {
+		t.Fatalf("imported tool = %#v, want provider_connector managed slack_oauth", tool)
+	}
+	if errs := ValidateSource(source); len(errs) != 0 {
+		t.Fatalf("ValidateSource imported Slack connector errors = %#v", errs)
+	}
+	surfaces, err := SurfacesWithOptions(context.Background(), source, SurfaceOptions{})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions: %v", err)
+	}
+	if len(surfaces) != 1 || surfaces[0].ToolID != "slack.post_message" {
+		t.Fatalf("surfaces = %#v, want slack.post_message", surfaces)
+	}
+	if len(surfaces[0].Requires) != 1 || surfaces[0].Requires[0].Kind != "managed_credential" || surfaces[0].Requires[0].Name != "slack_oauth" || surfaces[0].Requires[0].Bound {
+		t.Fatalf("surface requirements = %#v, want unbound managed slack_oauth", surfaces[0].Requires)
 	}
 }
 
@@ -396,6 +603,40 @@ func telegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
 	}
 }
 
+func slackConnectorTool(url string) runtimecontracts.ToolSchemaEntry {
+	return runtimecontracts.ToolSchemaEntry{
+		Category:    Category,
+		Description: "post Slack messages",
+		HandlerType: "http",
+		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+		ManagedCredential: &runtimecontracts.ManagedCredentialRef{
+			Key:    "slack_oauth",
+			Scopes: []string{"chat:write"},
+		},
+		InputSchema: runtimecontracts.ToolInputSchema{
+			Type: "object",
+			Properties: map[string]runtimecontracts.ToolInputSchema{
+				"channel": {Type: "string"},
+				"text":    {Type: "string"},
+			},
+			Required: []string{"channel", "text"},
+		},
+		OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+			Path:   "response.body.ok",
+			Equals: true,
+		},
+		HTTP: &runtimecontracts.HTTPToolSpec{
+			Method: "POST",
+			URL:    strings.TrimSpace(url),
+			Body: map[string]any{
+				"channel": "{{input.channel}}",
+				"text":    "{{input.text}}",
+			},
+		},
+	}
+}
+
 func projectScopeWithConnectorPackImport(key, provider, tool string) semanticview.ProjectScope {
 	return semanticview.ProjectScope{
 		Key: key,
@@ -424,7 +665,7 @@ func rewriteConnectorPackHash(t *testing.T, files fstest.MapFS) {
 	t.Helper()
 	sum := sha256.Sum256(files["connector.yaml"].Data)
 	hash := "sha256:" + hex.EncodeToString(sum[:])
-	replaceConnectorPackFile(t, files, "pack.yaml", "manifest_hash: sha256:f983e4df5b934a2322781aac992179b3d520c416e41e70e1963ee29a5bf08026", "manifest_hash: "+hash)
+	replaceConnectorPackHashLine(t, files, hash)
 }
 
 func replaceConnectorPackFile(t *testing.T, files fstest.MapFS, name, old, new string) {
@@ -438,6 +679,20 @@ func replaceConnectorPackFile(t *testing.T, files fstest.MapFS, name, old, new s
 	file.Data = []byte(body)
 }
 
+func replaceConnectorPackHashLine(t *testing.T, files fstest.MapFS, hash string) {
+	t.Helper()
+	file := files["pack.yaml"]
+	lines := strings.Split(string(file.Data), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "manifest_hash: ") {
+			lines[i] = "manifest_hash: " + hash
+			file.Data = []byte(strings.Join(lines, "\n"))
+			return
+		}
+	}
+	t.Fatal("pack.yaml missing manifest_hash line")
+}
+
 func joinErrors(errs []error) string {
 	parts := make([]string, 0, len(errs))
 	for _, err := range errs {
@@ -446,4 +701,12 @@ func joinErrors(errs []error) string {
 		}
 	}
 	return strings.Join(parts, "\n")
+}
+
+func joinRequirementStatuses(requirements []RequirementStatus) string {
+	parts := make([]string, 0, len(requirements))
+	for _, req := range requirements {
+		parts = append(parts, req.Kind+":"+req.Name+"="+req.Status)
+	}
+	return strings.Join(parts, "; ")
 }

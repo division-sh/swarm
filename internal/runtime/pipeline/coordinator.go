@@ -16,6 +16,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/google/uuid"
 )
 
@@ -60,6 +61,7 @@ type PipelineCoordinator struct {
 	mailboxMaterializer     MailboxWriteMaterializationStore
 	eventReceiptsCapability func(context.Context) (bool, error)
 	credentials             runtimecredentials.Store
+	managedCredentials      runtimemanagedcredentials.Store
 	artifactRoot            string
 	bundleFingerprint       string
 
@@ -82,6 +84,7 @@ type PipelineCoordinatorOptions struct {
 	MailboxMaterializer              MailboxWriteMaterializationStore
 	EventReceiptsCapability          func(context.Context) (bool, error)
 	Credentials                      runtimecredentials.Store
+	ManagedCredentials               runtimemanagedcredentials.Store
 	ArtifactRoot                     string
 	BundleFingerprint                string
 	TestEntityStateHook              func(entityID, state string)
@@ -118,6 +121,7 @@ func NewPipelineCoordinatorWithOptions(bus Bus, db *sql.DB, opts PipelineCoordin
 		mailboxMaterializer:              opts.MailboxMaterializer,
 		eventReceiptsCapability:          opts.EventReceiptsCapability,
 		credentials:                      credentials,
+		managedCredentials:               opts.ManagedCredentials,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleFingerprint:                strings.TrimSpace(opts.BundleFingerprint),
 		testEntityStateHook:              opts.TestEntityStateHook,
