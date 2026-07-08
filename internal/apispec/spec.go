@@ -81,13 +81,14 @@ type Conventions struct {
 	} `yaml:"scopes" json:"scopes"`
 	Mailbox struct {
 		StatusStorageModel  string                      `yaml:"status_storage_model" json:"status_storage_model,omitempty"`
-		ApprovalEventRoutes []MailboxApprovalEventRoute `yaml:"approval_event_routes" json:"approval_event_routes,omitempty"`
+		DecisionEventRoutes []MailboxDecisionEventRoute `yaml:"decision_event_routes" json:"decision_event_routes,omitempty"`
 	} `yaml:"mailbox" json:"mailbox,omitempty"`
 }
 
-type MailboxApprovalEventRoute struct {
-	ItemType  string `yaml:"item_type" json:"item_type"`
-	EventName string `yaml:"event_name" json:"event_name"`
+type MailboxDecisionEventRoute struct {
+	ItemType          string `yaml:"item_type" json:"item_type"`
+	TerminalEventName string `yaml:"terminal_event_name" json:"terminal_event_name"`
+	DeferredEventName string `yaml:"deferred_event_name" json:"deferred_event_name"`
 }
 
 type Method struct {
@@ -274,7 +275,7 @@ func Validate(api *APISpecification) (ValidationReport, error) {
 			problems = append(problems, fmt.Sprintf("conventions.idempotency.mutating_methods references missing method %s", mutating))
 		}
 	}
-	problems = append(problems, validateMailboxConventions(api.Conventions.Mailbox.ApprovalEventRoutes)...)
+	problems = append(problems, validateMailboxConventions(api.Conventions.Mailbox.DecisionEventRoutes)...)
 	if _, ok := api.MethodCatalog["rpc.unsubscribe"]; !ok {
 		problems = append(problems, "rpc.unsubscribe is described by subscription conventions but missing from method_catalog")
 	}
@@ -359,23 +360,27 @@ func validateServiceDiscoveryPolicy(policy ServiceDiscoveryPolicy) []string {
 	return problems
 }
 
-func validateMailboxConventions(routes []MailboxApprovalEventRoute) []string {
+func validateMailboxConventions(routes []MailboxDecisionEventRoute) []string {
 	var problems []string
 	seen := map[string]struct{}{}
 	for i, route := range routes {
 		itemType := strings.TrimSpace(route.ItemType)
-		eventName := strings.TrimSpace(route.EventName)
+		terminalEventName := strings.TrimSpace(route.TerminalEventName)
+		deferredEventName := strings.TrimSpace(route.DeferredEventName)
 		if itemType == "" {
-			problems = append(problems, fmt.Sprintf("conventions.mailbox.approval_event_routes[%d] missing item_type", i))
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.decision_event_routes[%d] missing item_type", i))
 		}
-		if eventName == "" {
-			problems = append(problems, fmt.Sprintf("conventions.mailbox.approval_event_routes[%d] missing event_name", i))
+		if terminalEventName == "" {
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.decision_event_routes[%d] missing terminal_event_name", i))
+		}
+		if deferredEventName == "" {
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.decision_event_routes[%d] missing deferred_event_name", i))
 		}
 		if itemType == "" {
 			continue
 		}
 		if _, ok := seen[itemType]; ok {
-			problems = append(problems, fmt.Sprintf("conventions.mailbox.approval_event_routes duplicate item_type %q", itemType))
+			problems = append(problems, fmt.Sprintf("conventions.mailbox.decision_event_routes duplicate item_type %q", itemType))
 			continue
 		}
 		seen[itemType] = struct{}{}

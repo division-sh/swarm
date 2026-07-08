@@ -297,7 +297,7 @@ func detectStoreSchemaCapabilities(catalog schemaColumnCatalog) StoreSchemaCapab
 		[]string{
 			"item_id", "entity_id", "flow_instance", "scope", "item_type", "source_event_id",
 			"from_agent", "severity", "summary", "payload", "status", "decision", "decision_notes",
-			"decided_by", "decided_at", "notified", "expires_at", "created_at",
+			"decided_by", "decided_at", "notified", "expires_at", "deferred_until", "created_at",
 		},
 		[]string{
 			"id", "event_id", "entity_id", "from_agent", "type", "priority", "status",

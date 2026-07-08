@@ -292,6 +292,89 @@ func TestSQLiteSchemaStoreMigratesLegacyAgentLLMBackendProfiles(t *testing.T) {
 	}
 }
 
+func TestSQLiteSchemaStoreAddsMailboxDeferredUntilAndNormalizesLegacyDeferredRows(t *testing.T) {
+	ctx := context.Background()
+	spec := loadPlatformSpecForSQLiteSchemaTest(t)
+	platformPlans, err := GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
+	}
+	mailboxPlans := []SchemaTableDDL{}
+	for _, plan := range platformPlans {
+		if plan.TableName == "mailbox" {
+			mailboxPlans = append(mailboxPlans, plan)
+		}
+	}
+	if len(mailboxPlans) != 1 {
+		t.Fatalf("mailbox platform plans = %d, want 1", len(mailboxPlans))
+	}
+	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteSchemaStore: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqliteStore.Close(); err != nil {
+			t.Fatalf("close sqlite schema store: %v", err)
+		}
+	})
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		CREATE TABLE mailbox (
+			item_id TEXT PRIMARY KEY,
+			entity_id TEXT,
+			flow_instance TEXT,
+			scope TEXT NOT NULL DEFAULT 'entity',
+			item_type TEXT NOT NULL,
+			source_event_id TEXT,
+			from_agent TEXT,
+			severity TEXT NOT NULL DEFAULT 'normal',
+			summary TEXT,
+			payload TEXT NOT NULL DEFAULT '{}',
+			status TEXT NOT NULL DEFAULT 'pending',
+			decision TEXT,
+			decision_notes TEXT,
+			decided_by TEXT,
+			decided_at TIMESTAMP,
+			notified BOOLEAN NOT NULL DEFAULT FALSE,
+			expires_at TIMESTAMP,
+			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)
+	`); err != nil {
+		t.Fatalf("create legacy mailbox table: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO mailbox (
+			item_id, item_type, payload, status, decision, decided_at, expires_at
+		) VALUES (
+			'mailbox-legacy-deferred', 'approval', '{}', 'decided', 'deferred', '2026-05-10T12:00:00Z', '2026-06-10T12:00:00Z'
+		)
+	`); err != nil {
+		t.Fatalf("insert legacy deferred mailbox row: %v", err)
+	}
+	if err := sqliteStore.EnsureSchemaTables(ctx, mailboxPlans); err != nil {
+		t.Fatalf("EnsureSchemaTables mailbox migration: %v", err)
+	}
+	columns, err := sqliteTableColumnList(ctx, sqliteStore.DB, "mailbox")
+	if err != nil {
+		t.Fatalf("inspect mailbox columns: %v", err)
+	}
+	if !containsString(columns, "deferred_until") {
+		t.Fatalf("mailbox columns missing deferred_until: %v", columns)
+	}
+	var status string
+	var decision sql.NullString
+	var deferredUntil sql.NullString
+	if err := sqliteStore.DB.QueryRowContext(ctx, `
+		SELECT status, decision, deferred_until
+		FROM mailbox
+		WHERE item_id = 'mailbox-legacy-deferred'
+	`).Scan(&status, &decision, &deferredUntil); err != nil {
+		t.Fatalf("load migrated legacy deferred mailbox row: %v", err)
+	}
+	if status != "pending" || decision.Valid || deferredUntil.Valid {
+		t.Fatalf("legacy deferred row status=%q decision=%v deferred_until=%v, want pending/null/null", status, decision, deferredUntil)
+	}
+}
+
 func TestSQLiteSchemaStoreEnsureAgentModelAliasesMigratesLegacyModelTier(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore, err := NewSQLiteSchemaStore(filepath.Join(t.TempDir(), "runtime.db"))

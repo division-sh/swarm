@@ -141,7 +141,7 @@ func (h *handler) dispatchRPC(ctx context.Context, method string, params map[str
 		instanceIDs := asStringSlice(params["instance_ids"])
 		decision := strings.TrimSpace(asString(params["decision"]))
 		if len(instanceIDs) > 0 || decision != "" {
-			return nil, &RPCError{Code: -32602, Message: "run.continue no longer accepts human-decision parameters; use mailbox approval methods"}
+			return nil, &RPCError{Code: -32602, Message: "run.continue no longer accepts human-decision parameters; use mailbox decision methods"}
 		}
 		if err := h.runHub.continueRun(ctx, runID); err != nil {
 			return nil, internalError(err)

@@ -1912,9 +1912,9 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 		ActorTokenID:                  "token-1",
 		DecisionPayload:               json.RawMessage(`{"approved":true}`),
 		Now:                           now,
-		ApprovalEventType:             "mailbox.item_decided",
-		ApprovalEventSubscribers:      []string{"agent-2"},
-		ApprovalEventSubscriberSource: "test",
+		DecisionEventType:             "mailbox.item_decided",
+		DecisionEventSubscribers:      []string{"agent-2"},
+		DecisionEventSubscriberSource: "test",
 		Idempotency: &APIIdempotencyRequest{
 			Method:         "mailbox.approve",
 			ActorTokenID:   "token-1",
@@ -1955,6 +1955,109 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 	_, err = store.DecideV1MailboxItem(ctx, req)
 	if !errors.Is(err, ErrAPIIdempotencyConflict) {
 		t.Fatalf("DecideV1MailboxItem conflict error = %v, want ErrAPIIdempotencyConflict", err)
+	}
+
+	rejectID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   eventID,
+		EntityID:  entityID,
+		FromAgent: "agent-1",
+		Type:      "approval",
+		Priority:  "high",
+		Status:    "pending",
+		Summary:   "reject test",
+		Context:   json.RawMessage(`{"thing":"reject"}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMailboxItem reject: %v", err)
+	}
+	rejected, err := store.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
+		MailboxID:         rejectID,
+		Action:            "rejected",
+		ActorTokenID:      "token-1",
+		Reason:            "not enough evidence",
+		Now:               now,
+		DecisionEventType: "mailbox.item_decided",
+	})
+	if err != nil {
+		t.Fatalf("DecideV1MailboxItem reject: %v", err)
+	}
+	if rejected.Result.Status != "decided" || rejected.Result.DownstreamEventName != "mailbox.item_decided" || rejected.DecisionEvent == nil {
+		t.Fatalf("rejected outcome = %+v, want decided downstream event", rejected)
+	}
+	var rejectedPayload map[string]any
+	if err := json.Unmarshal(rejected.DecisionEvent.Payload(), &rejectedPayload); err != nil {
+		t.Fatalf("decode reject event payload: %v", err)
+	}
+	if rejectedPayload["decision"] != "rejected" || rejectedPayload["reason"] != "not enough evidence" {
+		t.Fatalf("rejected payload = %#v", rejectedPayload)
+	}
+
+	deferID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   eventID,
+		EntityID:  entityID,
+		FromAgent: "agent-1",
+		Type:      "approval",
+		Priority:  "normal",
+		Status:    "pending",
+		Summary:   "defer test",
+		Context:   json.RawMessage(`{"thing":"defer"}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMailboxItem defer: %v", err)
+	}
+	deferred, err := store.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
+		MailboxID:         deferID,
+		Action:            "deferred",
+		ActorTokenID:      "token-1",
+		DeferUntil:        now.Add(time.Hour),
+		Now:               now,
+		DecisionEventType: "mailbox.item_deferred",
+	})
+	if err != nil {
+		t.Fatalf("DecideV1MailboxItem defer: %v", err)
+	}
+	if deferred.Result.Status != "deferred" || deferred.Result.DownstreamEventName != "mailbox.item_deferred" || deferred.DecisionEvent == nil {
+		t.Fatalf("deferred outcome = %+v, want deferred downstream event", deferred)
+	}
+	deferredDetail, err := store.GetV1MailboxItem(ctx, deferID)
+	if err != nil {
+		t.Fatalf("GetV1MailboxItem deferred: %v", err)
+	}
+	if deferredDetail.Item.Status != "deferred" || deferredDetail.Item.Decision != "" || deferredDetail.Item.DeferredUntil == "" {
+		t.Fatalf("deferred detail = %+v, want non-terminal deferred_until projection", deferredDetail.Item)
+	}
+
+	expiringID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   eventID,
+		EntityID:  entityID,
+		FromAgent: "agent-1",
+		Type:      "approval",
+		Priority:  "normal",
+		Status:    "pending",
+		Summary:   "expires before defer",
+		Context:   json.RawMessage(`{"thing":"expires"}`),
+	})
+	if err != nil {
+		t.Fatalf("InsertMailboxItem expiring defer: %v", err)
+	}
+	expiresAt := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Microsecond)
+	if _, err := store.DB.ExecContext(ctx, `UPDATE mailbox SET expires_at = ? WHERE item_id = ?`, expiresAt, expiringID); err != nil {
+		t.Fatalf("set expiring defer deadline: %v", err)
+	}
+	_, err = store.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
+		MailboxID:         expiringID,
+		Action:            "deferred",
+		ActorTokenID:      "token-1",
+		DeferUntil:        expiresAt.Add(time.Minute),
+		Now:               now,
+		DecisionEventType: "mailbox.item_deferred",
+	})
+	if err == nil {
+		t.Fatal("DecideV1MailboxItem defer beyond expiry error = nil")
+	}
+	var invalid *MailboxV1InvalidDeferUntilError
+	if !errors.As(err, &invalid) || invalid.Reason != "beyond_expiry" || invalid.MaxUntil == nil || !invalid.MaxUntil.Equal(expiresAt) {
+		t.Fatalf("defer beyond expiry error = %v, want beyond_expiry max %s", err, expiresAt)
 	}
 }
 

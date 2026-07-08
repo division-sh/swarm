@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -331,18 +330,18 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "decision_payload": map[string]any{"approved": true}},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "decision_payload": map[string]any{"approved": false}},
 			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed", "downstream_event_id", "downstream_event_name", "downstream_subscribers", "downstream_subscriber_source"},
-			SuccessEffects: 2,
+			SuccessEffects: 1,
 		},
 		"mailbox.defer": {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "until": until},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "until": later},
-			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed"},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed", "downstream_event_id", "downstream_event_name", "downstream_subscribers", "downstream_subscriber_source"},
 			SuccessEffects: 1,
 		},
 		"mailbox.reject": {
 			Params:         map[string]any{"mailbox_id": "mailbox-1", "reason": "not enough evidence"},
 			ConflictParams: map[string]any{"mailbox_id": "mailbox-1", "reason": "duplicate request"},
-			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed"},
+			ResultKeys:     []string{"ok", "mailbox_decision_id", "status", "idempotency_replayed", "downstream_event_id", "downstream_event_name", "downstream_subscribers", "downstream_subscriber_source"},
 			SuccessEffects: 1,
 		},
 		"run.fork": {
@@ -572,16 +571,22 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "mailbox.approve", Params: map[string]any{"mailbox_id": "mailbox-1", "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "approved", DecidedAt: s.now}
 		}}},
-		{Method: "mailbox.approve", Params: map[string]any{"mailbox_id": "mailbox-1", "idempotency_key": "idem-error"}, Code: MailboxApprovalEventUnconfiguredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.mailbox.decisionErr = &store.MailboxV1ApprovalRouteError{MailboxID: "mailbox-1", ItemType: "review_request"}
+		{Method: "mailbox.approve", Params: map[string]any{"mailbox_id": "mailbox-1", "idempotency_key": "idem-error"}, Code: MailboxDecisionEventUnconfiguredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1DecisionRouteError{MailboxID: "mailbox-1", ItemType: "review_request"}
 		}}},
 		{Method: "mailbox.reject", Params: map[string]any{"mailbox_id": "missing", "reason": "no", "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.decisionErr = store.ErrMailboxV1NotFound }}},
 		{Method: "mailbox.reject", Params: map[string]any{"mailbox_id": "mailbox-1", "reason": "no", "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "rejected", DecidedAt: s.now}
 		}}},
+		{Method: "mailbox.reject", Params: map[string]any{"mailbox_id": "mailbox-1", "reason": "no", "idempotency_key": "idem-error"}, Code: MailboxDecisionEventUnconfiguredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1DecisionRouteError{MailboxID: "mailbox-1", ItemType: "review_request"}
+		}}},
 		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "missing", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) { s.mailbox.decisionErr = store.ErrMailboxV1NotFound }}},
 		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "mailbox-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxAlreadyDecidedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
-			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "deferred", DecidedAt: s.now}
+			s.mailbox.decisionErr = &store.MailboxV1AlreadyDecidedError{MailboxID: "mailbox-1", ExistingDecision: "approved", DecidedAt: s.now}
+		}}},
+		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "mailbox-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: MailboxDecisionEventUnconfiguredCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.mailbox.decisionErr = &store.MailboxV1DecisionRouteError{MailboxID: "mailbox-1", ItemType: "review_request"}
 		}}},
 		{Method: "mailbox.defer", Params: map[string]any{"mailbox_id": "mailbox-1", "until": time.Unix(1700003600, 0).UTC().Format(time.RFC3339Nano), "idempotency_key": "idem-error"}, Code: InvalidDeferUntilCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.mailbox.decisionErr = &store.MailboxV1InvalidDeferUntilError{Reason: "too far in future"}
@@ -906,23 +911,25 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 		ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
 			AssistantMessage: "forkchat sandbox response: inspect fork",
 		}},
-		Mailbox:               s.mailbox,
-		BundleCatalog:         s.bundleCatalog,
-		Idempotency:           s.idempotency,
-		Events:                s.events,
-		RunBundleContext:      s.runForkAvailability,
-		RunForkAvailability:   s.runForkAvailability,
-		RunFork:               s.runFork,
-		RunControl:            s.runControl,
-		RuntimeIngress:        s.runtimeIngress,
-		ResetCoordinator:      s.nuke,
-		ResetQuiescer:         recordingRuntimeNukeQuiescer{s.nuke},
-		ResetCleaner:          recordingRuntimeNukeCleaner{s.nuke},
-		ResetContainers:       recordingRuntimeNukeContainerStopper{s.nuke},
-		BundleDelete:          s.bundleDelete,
-		TestSetup:             s.testSetup,
-		Source:                source,
-		MailboxApprovalRoutes: map[string]string{"review_request": "mailbox.item_decided"},
+		Mailbox:             s.mailbox,
+		BundleCatalog:       s.bundleCatalog,
+		Idempotency:         s.idempotency,
+		Events:              s.events,
+		RunBundleContext:    s.runForkAvailability,
+		RunForkAvailability: s.runForkAvailability,
+		RunFork:             s.runFork,
+		RunControl:          s.runControl,
+		RuntimeIngress:      s.runtimeIngress,
+		ResetCoordinator:    s.nuke,
+		ResetQuiescer:       recordingRuntimeNukeQuiescer{s.nuke},
+		ResetCleaner:        recordingRuntimeNukeCleaner{s.nuke},
+		ResetContainers:     recordingRuntimeNukeContainerStopper{s.nuke},
+		BundleDelete:        s.bundleDelete,
+		TestSetup:           s.testSetup,
+		Source:              source,
+		MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+			"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+		},
 		Bundle: runtimecontracts.BundleIdentity{
 			WorkflowName:    "review",
 			WorkflowVersion: "1.0.0",
@@ -1382,21 +1389,16 @@ func (s *mutatingProbeMailboxStore) DecideV1MailboxItem(ctx context.Context, dec
 			MailboxDecisionID: "decision-" + strings.TrimSpace(decision.Action),
 			Status:            status,
 		}
-		if decision.Action == "approved" && strings.TrimSpace(decision.ApprovalEventType) != "" && decision.ApprovalEventPublish != nil {
+		if strings.TrimSpace(decision.DecisionEventType) != "" {
 			eventID := "mailbox-event-1"
 			result.DownstreamEventID = eventID
-			result.DownstreamEventName = strings.TrimSpace(decision.ApprovalEventType)
-			subscribers := append([]string(nil), decision.ApprovalEventSubscribers...)
+			result.DownstreamEventName = strings.TrimSpace(decision.DecisionEventType)
+			subscribers := append([]string(nil), decision.DecisionEventSubscribers...)
 			if subscribers == nil {
 				subscribers = []string{}
 			}
 			result.DownstreamSubscribers = &subscribers
-			result.DownstreamSubscriberSource = strings.TrimSpace(decision.ApprovalEventSubscriberSource)
-			if err := decision.ApprovalEventPublish(ctx, eventtest.RootIngress(eventID,
-				events.EventType(decision.ApprovalEventType),
-				"mailbox", "", json.RawMessage(`{"mailbox_id":"mailbox-1"}`), 0, "", "", events.EventEnvelope{}, decision.Now)); err != nil {
-				return store.APIIdempotencyCompletion{}, err
-			}
+			result.DownstreamSubscriberSource = strings.TrimSpace(decision.DecisionEventSubscriberSource)
 		}
 		raw, err := json.Marshal(result)
 		if err != nil {

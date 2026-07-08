@@ -82,25 +82,29 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
-			eventName, subscribers, subscriberSource := mailboxApprovalEventEffect(opts.MailboxApprovalRoutes, stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
+			eventName, subscribers, subscriberSource := mailboxDecisionEventEffect(opts.MailboxDecisionRoutes, "approved", stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
 			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
 				MailboxID:                     stringParam(req.Params, "mailbox_id"),
 				Action:                        "approved",
 				ActorTokenID:                  req.ActorTokenID,
 				DecisionPayload:               payload,
 				Now:                           now().UTC(),
-				ApprovalEventType:             eventName,
-				ApprovalEventSubscribers:      subscribers,
-				ApprovalEventSubscriberSource: subscriberSource,
+				DecisionEventType:             eventName,
+				DecisionEventSubscribers:      subscribers,
+				DecisionEventSubscriberSource: subscriberSource,
 			})
 		},
 		"mailbox.reject": func(ctx context.Context, req Request) (any, error) {
+			eventName, subscribers, subscriberSource := mailboxDecisionEventEffect(opts.MailboxDecisionRoutes, "rejected", stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
 			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
-				MailboxID:    stringParam(req.Params, "mailbox_id"),
-				Action:       "rejected",
-				ActorTokenID: req.ActorTokenID,
-				Reason:       stringParam(req.Params, "reason"),
-				Now:          now().UTC(),
+				MailboxID:                     stringParam(req.Params, "mailbox_id"),
+				Action:                        "rejected",
+				ActorTokenID:                  req.ActorTokenID,
+				Reason:                        stringParam(req.Params, "reason"),
+				Now:                           now().UTC(),
+				DecisionEventType:             eventName,
+				DecisionEventSubscribers:      subscribers,
+				DecisionEventSubscriberSource: subscriberSource,
 			})
 		},
 		"mailbox.defer": func(ctx context.Context, req Request) (any, error) {
@@ -108,12 +112,16 @@ func OperatorMailboxHandlers(opts OperatorReadOptions) map[string]MethodHandler 
 			if err != nil {
 				return nil, err
 			}
+			eventName, subscribers, subscriberSource := mailboxDecisionEventEffect(opts.MailboxDecisionRoutes, "deferred", stringParam(req.Params, "mailbox_id"), opts.Mailbox, ctx, opts)
 			return executeMailboxDecision(ctx, req, opts, store.MailboxV1DecisionRequest{
-				MailboxID:    stringParam(req.Params, "mailbox_id"),
-				Action:       "deferred",
-				ActorTokenID: req.ActorTokenID,
-				DeferUntil:   until,
-				Now:          now().UTC(),
+				MailboxID:                     stringParam(req.Params, "mailbox_id"),
+				Action:                        "deferred",
+				ActorTokenID:                  req.ActorTokenID,
+				DeferUntil:                    until,
+				Now:                           now().UTC(),
+				DecisionEventType:             eventName,
+				DecisionEventSubscribers:      subscribers,
+				DecisionEventSubscriberSource: subscriberSource,
 			})
 		},
 	}
@@ -152,11 +160,12 @@ func mailboxEntityContext(ctx context.Context, item store.MailboxV1Item, entitie
 }
 
 func mailboxDownstreamPreview(item store.MailboxV1Item, opts OperatorReadOptions) store.MailboxV1DownstreamPreview {
-	eventName := strings.TrimSpace(opts.MailboxApprovalRoutes[strings.TrimSpace(item.Type)])
+	route := opts.MailboxDecisionRoutes[strings.TrimSpace(item.Type)]
+	eventName := strings.TrimSpace(route.TerminalEventName)
 	if eventName == "" {
 		return store.MailboxV1DownstreamPreview{
 			Available:        false,
-			Reason:           "no_approval_route",
+			Reason:           "no_decision_route",
 			Subscribers:      []string{},
 			SubscriberSource: "none",
 		}
@@ -205,15 +214,15 @@ func uniqueNonEmptyStrings(values []string) []string {
 func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadOptions, decision store.MailboxV1DecisionRequest) (any, error) {
 	idempotencyKey := stringParam(req.Params, "idempotency_key")
 	action := strings.ToLower(strings.TrimSpace(decision.Action))
-	if action == "approved" || action == "approve" {
+	if action == "approved" || action == "approve" || action == "rejected" || action == "reject" || action == "deferred" || action == "defer" {
 		if multiRuntimeContextMode(opts) {
-			return nil, runtimeContextRequiredError(req.Method, "mailbox approval event publishing is not supported in multi-context DB-loaded mode without an explicit runtime context")
+			return nil, runtimeContextRequiredError(req.Method, "mailbox decision event publishing is not supported in multi-context DB-loaded mode without an explicit runtime context")
 		}
 		mutationPublisher, ok := opts.Events.(EventMutationPublisher)
 		if !ok || mutationPublisher == nil {
-			return nil, errors.New("event mutation publisher is required for mailbox approval")
+			return nil, errors.New("event mutation publisher is required for mailbox decision")
 		}
-		decision.ApprovalEventPublish = mutationPublisher.PublishInMutation
+		decision.DecisionEventPublish = mutationPublisher.PublishInMutation
 	}
 	if strings.TrimSpace(idempotencyKey) != "" {
 		decision.Idempotency = &store.APIIdempotencyRequest{
@@ -265,9 +274,9 @@ func mailboxDecisionError(mailboxID string, err error) error {
 		}
 		return NewApplicationError(InvalidDeferUntilCode, false, details)
 	}
-	var route *store.MailboxV1ApprovalRouteError
+	var route *store.MailboxV1DecisionRouteError
 	if errors.As(err, &route) {
-		return NewApplicationError(MailboxApprovalEventUnconfiguredCode, false, map[string]any{
+		return NewApplicationError(MailboxDecisionEventUnconfiguredCode, false, map[string]any{
 			"mailbox_id": route.MailboxID,
 			"item_type":  route.ItemType,
 		})
@@ -347,7 +356,7 @@ func requiredTimestampParam(params map[string]any, name string) (time.Time, erro
 	return parsed.UTC(), nil
 }
 
-func mailboxApprovalEventEffect(routes map[string]string, mailboxID string, mailbox MailboxAPIStore, ctx context.Context, opts OperatorReadOptions) (string, []string, string) {
+func mailboxDecisionEventEffect(routes map[string]MailboxDecisionEventRoute, action string, mailboxID string, mailbox MailboxAPIStore, ctx context.Context, opts OperatorReadOptions) (string, []string, string) {
 	if len(routes) == 0 || mailbox == nil {
 		return "", nil, ""
 	}
@@ -355,7 +364,13 @@ func mailboxApprovalEventEffect(routes map[string]string, mailboxID string, mail
 	if err != nil {
 		return "", nil, ""
 	}
-	eventName := strings.TrimSpace(routes[detail.Item.Type])
+	route := routes[detail.Item.Type]
+	var eventName string
+	if strings.TrimSpace(strings.ToLower(action)) == "deferred" || strings.TrimSpace(strings.ToLower(action)) == "defer" {
+		eventName = strings.TrimSpace(route.DeferredEventName)
+	} else {
+		eventName = strings.TrimSpace(route.TerminalEventName)
+	}
 	if eventName == "" {
 		return "", nil, ""
 	}

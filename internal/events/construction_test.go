@@ -493,7 +493,7 @@ func isPublishSurfaceCall(call *ast.CallExpr) bool {
 		return false
 	}
 	switch selector.Sel.Name {
-	case "Publish", "PublishDirect", "PublishInMutation", "ApprovalEventPublish":
+	case "Publish", "PublishDirect", "PublishInMutation", "DecisionEventPublish":
 		return true
 	default:
 		return false

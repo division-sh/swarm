@@ -112,7 +112,7 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 		Action:       "approved",
 		ActorTokenID: "actor-1",
 		Now:          now,
-	}); !errors.Is(err, ErrMailboxV1ApprovalRouteUnconfigured) {
+	}); !errors.Is(err, ErrMailboxV1DecisionRouteUnconfigured) {
 		t.Fatalf("approve without route error = %v, want route unconfigured", err)
 	}
 
@@ -122,16 +122,16 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 		ActorTokenID:      "actor-1",
 		DecisionPayload:   json.RawMessage(`{"ok":true}`),
 		Now:               now,
-		ApprovalEventType: "mailbox.item_decided",
+		DecisionEventType: "mailbox.item_decided",
 	})
 	if err != nil {
 		t.Fatalf("approve with route: %v", err)
 	}
-	if !outcome.Result.OK || outcome.Result.Status != "decided" || outcome.Result.DownstreamEventID == "" || outcome.ApprovalEvent == nil {
+	if !outcome.Result.OK || outcome.Result.Status != "decided" || outcome.Result.DownstreamEventID == "" || outcome.DecisionEvent == nil {
 		t.Fatalf("unexpected approve outcome=%#v", outcome)
 	}
 	var approvalPayload map[string]any
-	if err := json.Unmarshal(outcome.ApprovalEvent.Payload(), &approvalPayload); err != nil {
+	if err := json.Unmarshal(outcome.DecisionEvent.Payload(), &approvalPayload); err != nil {
 		t.Fatalf("decode approval event payload: %v", err)
 	}
 	if _, ok := approvalPayload["payload"]; ok {
@@ -150,7 +150,7 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 		Action:            "approved",
 		ActorTokenID:      "actor-1",
 		Now:               now,
-		ApprovalEventType: "mailbox.item_decided",
+		DecisionEventType: "mailbox.item_decided",
 	}); err == nil {
 		t.Fatal("second approve error = nil, want already decided")
 	} else {
@@ -160,7 +160,35 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 		}
 	}
 
-	pastID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{Type: "approval", Summary: "later"})
+	rejected, err := s.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
+		MailboxID:         secondID,
+		Action:            "rejected",
+		ActorTokenID:      "actor-1",
+		Reason:            "insufficient evidence",
+		Now:               now,
+		DecisionEventType: "mailbox.item_decided",
+	})
+	if err != nil {
+		t.Fatalf("reject with route: %v", err)
+	}
+	if rejected.Result.Status != "decided" || rejected.Result.DownstreamEventName != "mailbox.item_decided" || rejected.DecisionEvent == nil {
+		t.Fatalf("unexpected reject outcome=%#v", rejected)
+	}
+	var rejectedPayload map[string]any
+	if err := json.Unmarshal(rejected.DecisionEvent.Payload(), &rejectedPayload); err != nil {
+		t.Fatalf("decode reject event payload: %v", err)
+	}
+	if rejectedPayload["decision"] != "rejected" || rejectedPayload["reason"] != "insufficient evidence" {
+		t.Fatalf("reject event payload = %#v", rejectedPayload)
+	}
+
+	pastID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   sourceEventID,
+		EntityID:  entityID,
+		FromAgent: "review-agent",
+		Type:      "approval",
+		Summary:   "later",
+	})
 	if err != nil {
 		t.Fatalf("insert defer mailbox item: %v", err)
 	}
@@ -178,12 +206,44 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 			t.Fatalf("defer in past error = %v, want in_past", err)
 		}
 	}
+
+	expiringID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EventID:   sourceEventID,
+		EntityID:  entityID,
+		FromAgent: "review-agent",
+		Type:      "approval",
+		Summary:   "expires soon",
+	})
+	if err != nil {
+		t.Fatalf("insert expiring defer mailbox item: %v", err)
+	}
+	expiresAt := time.Now().UTC().Add(30 * time.Minute).Truncate(time.Microsecond)
+	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET expires_at = $1 WHERE item_id = $2::uuid`, expiresAt, expiringID); err != nil {
+		t.Fatalf("set expiring defer deadline: %v", err)
+	}
 	if _, err := s.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
-		MailboxID:    pastID,
-		Action:       "deferred",
-		ActorTokenID: "actor-1",
-		DeferUntil:   now.Add(time.Hour),
-		Now:          now,
+		MailboxID:         expiringID,
+		Action:            "deferred",
+		ActorTokenID:      "actor-1",
+		DeferUntil:        expiresAt.Add(time.Minute),
+		Now:               now,
+		DecisionEventType: "mailbox.item_deferred",
+	}); err == nil {
+		t.Fatal("defer beyond expiry error = nil, want invalid defer")
+	} else {
+		var invalid *MailboxV1InvalidDeferUntilError
+		if !errors.As(err, &invalid) || invalid.Reason != "beyond_expiry" || invalid.MaxUntil == nil || !invalid.MaxUntil.Equal(expiresAt) {
+			t.Fatalf("defer beyond expiry error = %v, want beyond_expiry max %s", err, expiresAt)
+		}
+	}
+
+	if _, err := s.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
+		MailboxID:         pastID,
+		Action:            "deferred",
+		ActorTokenID:      "actor-1",
+		DeferUntil:        now.Add(time.Hour),
+		Now:               now,
+		DecisionEventType: "mailbox.item_deferred",
 	}); err != nil {
 		t.Fatalf("defer future: %v", err)
 	}
@@ -191,8 +251,11 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get deferred: %v", err)
 	}
-	if deferred.Item.Status != "deferred" || deferred.Item.Decision != "deferred" {
+	if deferred.Item.Status != "deferred" || deferred.Item.Decision != "" || deferred.Item.DeferredUntil == "" {
 		t.Fatalf("deferred projection = %#v", deferred.Item)
+	}
+	if len(deferred.History) != 2 || deferred.History[1].Action != "deferred" {
+		t.Fatalf("deferred history = %#v", deferred.History)
 	}
 }
 

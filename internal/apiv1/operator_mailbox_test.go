@@ -86,10 +86,12 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	bundle := runStartTestBundle("mailbox.item_decided")
 	delete(bundle.Events, "mailbox.item_decided")
 	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
-		"mailbox.item_decided": {},
+		"mailbox.item_decided":  {},
+		"mailbox.item_deferred": {},
 	}
 	bundle.Semantics.EventOwners = map[string][]string{
-		"mailbox.item_decided": {"approval-agent", "review-agent"},
+		"mailbox.item_decided":  {"approval-agent", "review-agent"},
+		"mailbox.item_deferred": {"review-agent"},
 	}
 	source := semanticview.Wrap(bundle)
 	handler := testHandler(t, Options{
@@ -105,8 +107,9 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 			Idempotency: pg,
 			Events:      bus,
 			Source:      source,
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "empire",
@@ -248,12 +251,17 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	}
 
 	deferID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		Type:    "approval",
-		Summary: "defer me",
-		Context: []byte(`{"title":"defer"}`),
+		EventID:  sourceEventID,
+		EntityID: entityID,
+		Type:     "approval",
+		Summary:  "defer me",
+		Context:  []byte(`{"title":"defer"}`),
 	})
 	if err != nil {
 		t.Fatalf("insert defer mailbox: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, deferID); err != nil {
+		t.Fatalf("set defer flow instance: %v", err)
 	}
 	past := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"past","method":"mailbox.defer","params":{"mailbox_id":"`+deferID+`","until":"2026-05-10T11:59:59Z","idempotency_key":"idem-past"}}`)
 	if past.Error == nil {
@@ -270,8 +278,11 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if status := deferredResult["status"]; status != "deferred" {
 		t.Fatalf("mailbox.defer status = %v, want deferred", status)
 	}
-	if deferredResult["idempotency_replayed"] != false {
-		t.Fatalf("mailbox.defer idempotency_replayed = %v, want false", deferredResult["idempotency_replayed"])
+	if deferredResult["idempotency_replayed"] != false ||
+		deferredResult["downstream_event_name"] != "mailbox.item_deferred" ||
+		deferredResult["downstream_event_id"] == "" ||
+		deferredResult["downstream_subscriber_source"] != "event_catalog" {
+		t.Fatalf("mailbox.defer result = %#v", deferredResult)
 	}
 	laterHandler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
@@ -284,8 +295,9 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 			Mailbox:     pg,
 			Idempotency: pg,
 			Events:      bus,
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "empire",
@@ -302,17 +314,24 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if status := deferReplayResult["status"]; status != "deferred" {
 		t.Fatalf("mailbox.defer replay status = %v, want deferred", status)
 	}
-	if deferReplayResult["idempotency_replayed"] != true {
-		t.Fatalf("mailbox.defer replay idempotency_replayed = %v, want true", deferReplayResult["idempotency_replayed"])
+	if deferReplayResult["idempotency_replayed"] != true ||
+		deferReplayResult["downstream_event_name"] != "mailbox.item_deferred" ||
+		deferReplayResult["downstream_event_id"] != deferredResult["downstream_event_id"] {
+		t.Fatalf("mailbox.defer replay result = %#v", deferReplayResult)
 	}
 
 	rejectID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		Type:    "approval",
-		Summary: "reject me",
-		Context: []byte(`{"title":"reject"}`),
+		EventID:  sourceEventID,
+		EntityID: entityID,
+		Type:     "approval",
+		Summary:  "reject me",
+		Context:  []byte(`{"title":"reject"}`),
 	})
 	if err != nil {
 		t.Fatalf("insert reject mailbox: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE mailbox SET flow_instance = 'empire/review' WHERE item_id = $1::uuid`, rejectID); err != nil {
+		t.Fatalf("set reject flow instance: %v", err)
 	}
 	rejectBody := `{"jsonrpc":"2.0","id":"reject-fresh","method":"mailbox.reject","params":{"mailbox_id":"` + rejectID + `","reason":"not enough evidence","idempotency_key":"idem-reject"}}`
 	rejected := rpcCall(t, handler, rejectBody)
@@ -320,7 +339,10 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 		t.Fatalf("mailbox.reject error = %#v", rejected.Error)
 	}
 	rejectedResult := asMap(t, rejected.Result)
-	if rejectedResult["status"] != "decided" || rejectedResult["idempotency_replayed"] != false {
+	if rejectedResult["status"] != "decided" ||
+		rejectedResult["idempotency_replayed"] != false ||
+		rejectedResult["downstream_event_name"] != "mailbox.item_decided" ||
+		rejectedResult["downstream_event_id"] == "" {
 		t.Fatalf("mailbox.reject result = %#v", rejectedResult)
 	}
 	rejectReplay := rpcCall(t, handler, rejectBody)
@@ -328,8 +350,15 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 		t.Fatalf("mailbox.reject replay error = %#v", rejectReplay.Error)
 	}
 	rejectReplayResult := asMap(t, rejectReplay.Result)
-	if rejectReplayResult["status"] != "decided" || rejectReplayResult["idempotency_replayed"] != true {
+	if rejectReplayResult["status"] != "decided" ||
+		rejectReplayResult["idempotency_replayed"] != true ||
+		rejectReplayResult["downstream_event_name"] != "mailbox.item_decided" ||
+		rejectReplayResult["downstream_event_id"] != rejectedResult["downstream_event_id"] {
 		t.Fatalf("mailbox.reject replay result = %#v", rejectReplayResult)
+	}
+	rejectPayload := loadEventPayload(t, db, rejectedResult["downstream_event_id"].(string))
+	if rejectPayload["decision"] != "rejected" || rejectPayload["reason"] != "not enough evidence" {
+		t.Fatalf("mailbox.reject event payload = %#v", rejectPayload)
 	}
 
 	empty := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"empty","method":"mailbox.list","params":{"status":"pending","type":"review_request"}}`)
@@ -415,8 +444,9 @@ func TestOperatorMailboxApproveRejectsUndeclaredMailboxPayloadSchemaAndRollsBack
 			Mailbox:     pg,
 			Idempotency: pg,
 			Events:      bus,
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 		}),
 	})
@@ -486,8 +516,9 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 			Database: fakePinger{},
 			Mailbox:  pg,
 			Events:   failingMutationPublisher{},
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 		}),
 	})
@@ -524,8 +555,9 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 			Database: fakePinger{},
 			Mailbox:  pg,
 			Events:   bus,
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 		}),
 	})
@@ -541,6 +573,101 @@ func TestOperatorMailboxApprovePublishFailureLeavesItemRetryable(t *testing.T) {
 	}
 	if count := countAPIIdempotencyRows(t, db); count != 1 {
 		t.Fatalf("api_idempotency rows after retry = %d, want 1", count)
+	}
+}
+
+func TestOperatorMailboxRejectAndDeferPublishFailureLeavesItemRetryable(t *testing.T) {
+	cases := []struct {
+		name      string
+		method    string
+		params    func(string, time.Time) string
+		eventName string
+	}{
+		{
+			name:   "reject",
+			method: "mailbox.reject",
+			params: func(mailboxID string, _ time.Time) string {
+				return `{"mailbox_id":"` + mailboxID + `","reason":"not enough evidence","idempotency_key":"idem-reject-publish-fails"}`
+			},
+			eventName: "mailbox.item_decided",
+		},
+		{
+			name:   "defer",
+			method: "mailbox.defer",
+			params: func(mailboxID string, now time.Time) string {
+				return `{"mailbox_id":"` + mailboxID + `","until":"` + now.Add(time.Hour).Format(time.RFC3339) + `","idempotency_key":"idem-defer-publish-fails"}`
+			},
+			eventName: "mailbox.item_deferred",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			pg := &store.PostgresStore{DB: db}
+			ctx := context.Background()
+			now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+			sourceEventID := uuid.NewString()
+			entityID := uuid.NewString()
+			if err := pg.AppendEvent(ctx, eventtest.RootIngress(
+				sourceEventID,
+				"review.requested",
+				"",
+				"",
+				json.RawMessage(`{"request":true}`),
+				0,
+				uuid.NewString(),
+				"",
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+				time.Time{},
+			)); err != nil {
+				t.Fatalf("append source event: %v", err)
+			}
+			mailboxID, err := pg.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+				EventID:  sourceEventID,
+				EntityID: entityID,
+				Type:     "approval",
+				Summary:  "needs decision",
+				Context:  []byte(`{"title":"review this"}`),
+			})
+			if err != nil {
+				t.Fatalf("insert mailbox: %v", err)
+			}
+
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: OperatorReadHandlers(OperatorReadOptions{
+					Now:         func() time.Time { return now },
+					Ready:       func() bool { return true },
+					Database:    fakePinger{},
+					Mailbox:     pg,
+					Idempotency: pg,
+					Events:      failingMutationPublisher{},
+					MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+						"approval": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+					},
+				}),
+			})
+
+			body := `{"jsonrpc":"2.0","id":"decision","method":"` + tc.method + `","params":` + tc.params(mailboxID, now) + `}`
+			failed := rpcCall(t, handler, body)
+			if failed.Error == nil {
+				t.Fatalf("%s with failing publisher error = nil", tc.method)
+			}
+			detail, err := pg.GetV1MailboxItem(ctx, mailboxID)
+			if err != nil {
+				t.Fatalf("get mailbox after failed publish: %v", err)
+			}
+			if detail.Item.Status != "pending" || detail.Item.Decision != "" || detail.Item.DeferredUntil != "" {
+				t.Fatalf("mailbox after failed publish = %+v, want retryable pending item", detail.Item)
+			}
+			if count := countEventsByName(t, db, tc.eventName); count != 0 {
+				t.Fatalf("%s event count after failed publish = %d, want 0", tc.eventName, count)
+			}
+			if count := countAPIIdempotencyRows(t, db); count != 0 {
+				t.Fatalf("api_idempotency rows after failed publish = %d, want 0", count)
+			}
+		})
 	}
 }
 
@@ -621,8 +748,9 @@ func TestOperatorMailboxApproveQueuesTransactionalPublishWhileRuntimePaused(t *t
 			Database: fakePinger{},
 			Mailbox:  pg,
 			Events:   bus,
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "empire",
@@ -778,8 +906,9 @@ func TestOperatorMailboxApproveRunsPublishDispatchAfterDecisionCommit(t *testing
 			Database: fakePinger{},
 			Mailbox:  pg,
 			Events:   bus,
-			MailboxApprovalRoutes: map[string]string{
-				"review_request": "mailbox.item_decided",
+			MailboxDecisionRoutes: map[string]MailboxDecisionEventRoute{
+				"review_request": {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
+				"approval":       {TerminalEventName: "mailbox.item_decided", DeferredEventName: "mailbox.item_deferred"},
 			},
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "empire",
@@ -915,12 +1044,11 @@ func mailboxItemDecidedStrictPayloadSchema(includeMailboxPayload bool) map[strin
 			"type": "string",
 		},
 		"decision_payload": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"approved": map[string]any{"type": "boolean"},
-			},
-			"required":             []any{"approved"},
-			"additionalProperties": false,
+			"type":                 "object",
+			"additionalProperties": true,
+		},
+		"reason": map[string]any{
+			"type": "string",
 		},
 		"item_type": map[string]any{
 			"type": "string",

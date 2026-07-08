@@ -974,6 +974,7 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 		"platform.inbound_recorded",
 		"platform.recovery_failed",
 		"mailbox.item_decided",
+		"mailbox.item_deferred",
 	} {
 		entry := mustMappingValue(t, catalog, eventName)
 		if scalarValue(mappingValue(entry, "schema_authority")) == "" {
@@ -999,7 +1000,7 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 	}
 
 	mailbox := mustMappingValue(t, catalog, "mailbox.item_decided")
-	assertScalarContains(t, mappingValue(mailbox, "schema_authority"), "approval_event_payload_contract")
+	assertScalarContains(t, mappingValue(mailbox, "schema_authority"), "decision_event_payload_contract")
 	assertScalarValue(t, mappingValue(mailbox, "routing_class"), "event_loop_routable")
 	payload := mustMappingValue(t, mailbox, "payload")
 	required := mustMappingValue(t, mailbox, "required")
@@ -1025,6 +1026,18 @@ func TestPlatformEventsCatalogOwnsPlatformEmittedEvents(t *testing.T) {
 	}
 	if !sequenceContainsScalar(mustMappingValue(t, mailbox, "forbidden_fields"), "payload") {
 		t.Fatal("mailbox.item_decided must forbid retired payload field")
+	}
+	deferred := mustMappingValue(t, catalog, "mailbox.item_deferred")
+	assertScalarContains(t, mappingValue(deferred, "schema_authority"), "decision_event_payload_contract")
+	deferredPayload := mustMappingValue(t, deferred, "payload")
+	deferredRequired := mustMappingValue(t, deferred, "required")
+	for _, field := range []string{"mailbox_id", "mailbox_decision_id", "until", "item_type", "mailbox_payload", "source_event_id", "source_flow", "source_entity_id", "deferred_by", "deferred_at"} {
+		if mappingValue(deferredPayload, field) == nil {
+			t.Fatalf("mailbox.item_deferred payload missing %s", field)
+		}
+		if !sequenceContainsScalar(deferredRequired, field) {
+			t.Fatalf("mailbox.item_deferred required missing %s", field)
+		}
 	}
 }
 

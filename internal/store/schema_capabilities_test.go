@@ -71,7 +71,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	addColumns("mailbox",
 		"item_id", "entity_id", "flow_instance", "scope", "item_type", "source_event_id",
 		"from_agent", "severity", "summary", "payload", "status", "decision", "decision_notes",
-		"decided_by", "decided_at", "notified", "expires_at", "created_at",
+		"decided_by", "decided_at", "notified", "expires_at", "deferred_until", "created_at",
 	)
 	addColumns("timers",
 		"timer_id", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id",
