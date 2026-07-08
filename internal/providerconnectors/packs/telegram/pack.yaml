@@ -1,0 +1,22 @@
+id: provider.telegram.connector
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: connector
+manifest_hash: sha256:f983e4df5b934a2322781aac992179b3d520c416e41e70e1963ee29a5bf08026
+provenance:
+  source: platform
+capabilities:
+  can:
+    call_provider_action: telegram.send_message
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot:
+    - bypass activity_attempts
+    - retry non_idempotent_write automatically
+    - expose credential values
+requires:
+  secrets:
+    - telegram_bot_token
+tests:
+  - providerconnectors/telegram_pack
+  - runtime/telegram_connector_supported_surface

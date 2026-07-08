@@ -15,6 +15,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -135,7 +137,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	defer server.Close()
 
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram_bot_token", "provider-secret")
-	source := telegramConnectorSupportedSurfaceSource(server.URL)
+	source := telegramConnectorSupportedSurfaceSource(t, server.URL)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -223,7 +225,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, baseURL string, calls <-chan telegramConnectorSupportedSurfaceCall) {
 	t.Helper()
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "", "")
-	source := telegramConnectorSupportedSurfaceSource(baseURL)
+	source := telegramConnectorSupportedSurfaceSource(t, baseURL)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := runtimebus.NewEventBusWithOptions(backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source,
@@ -261,7 +263,8 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 
 const telegramConnectorSupportedSurfaceNodeID = "telegram-responder"
 
-func telegramConnectorSupportedSurfaceSource(baseURL string) semanticview.Source {
+func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL string) semanticview.Source {
+	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "telegram_send_message",
@@ -279,7 +282,7 @@ func telegramConnectorSupportedSurfaceSource(baseURL string) semanticview.Source
 			"inbound.telegram": handler,
 		},
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
@@ -289,9 +292,6 @@ func telegramConnectorSupportedSurfaceSource(baseURL string) semanticview.Source
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			telegramConnectorSupportedSurfaceNodeID: node,
-		},
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": telegramConnectorSupportedSurfaceTool(baseURL),
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:    "telegram_connector_supported_surface",
@@ -313,27 +313,70 @@ func telegramConnectorSupportedSurfaceSource(baseURL string) semanticview.Source
 			},
 		},
 	})
-}
-
-func telegramConnectorSupportedSurfaceTool(baseURL string) runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.ToolSchemaEntry{
-		Category:    "provider_connector",
-		Description: "send Telegram messages",
-		HandlerType: "http",
-		EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-		Credentials: []string{"telegram_bot_token"},
-		OutputSchema: runtimecontracts.ToolInputSchema{
-			Type: "object",
-		},
-		HTTP: &runtimecontracts.HTTPToolSpec{
-			Method: "POST",
-			URL:    strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage",
-			Body: map[string]any{
-				"chat_id": "{{input.chat_id}}",
-				"text":    "{{input.text}}",
+	importSource := telegramConnectorSupportedSurfacePackImportSource{
+		Source: base,
+		projectScopes: []semanticview.ProjectScope{
+			{
+				Key: ".",
+				Manifest: runtimecontracts.ProjectPackageDocument{
+					ConnectorPacks: runtimecontracts.ConnectorPackImports{
+						Imports: []runtimecontracts.ConnectorPackImport{{Provider: "telegram", Tool: "telegram.send_message"}},
+					},
+				},
 			},
 		},
 	}
+	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, telegramConnectorSupportedSurfacePackRegistry(t, baseURL))
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+	}
+	return source
+}
+
+func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
+	t.Helper()
+	tool, ok := providerconnectors.BuiltinTool("telegram", "telegram.send_message")
+	if !ok {
+		t.Fatal("provider connector pack telegram.send_message not found")
+	}
+	if tool.HTTP == nil {
+		t.Fatal("provider connector pack telegram.send_message missing http block")
+	}
+	httpSpec := *tool.HTTP
+	tool.HTTP = &httpSpec
+	tool.HTTP.URL = strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
+	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
+		Envelope: packs.Envelope{
+			ID: "provider.telegram.connector",
+			Provenance: packs.Provenance{
+				Source: packs.ProvenancePlatform,
+			},
+		},
+		Manifest: providerconnectors.ConnectorManifest{
+			Provider: "telegram",
+			Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"telegram.send_message": tool,
+			},
+		},
+		Source: "test:provider.telegram.connector",
+	})
+	if err != nil {
+		t.Fatalf("NewPackRegistry: %v", err)
+	}
+	return registry
+}
+
+type telegramConnectorSupportedSurfacePackImportSource struct {
+	semanticview.Source
+	projectScopes []semanticview.ProjectScope
+}
+
+func (s telegramConnectorSupportedSurfacePackImportSource) BaseSemanticSource() semanticview.Source {
+	return s.Source
+}
+
+func (s telegramConnectorSupportedSurfacePackImportSource) ProjectScopes() []semanticview.ProjectScope {
+	return append([]semanticview.ProjectScope(nil), s.projectScopes...)
 }
 
 type telegramConnectorSupportedSurfaceModule struct {

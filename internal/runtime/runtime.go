@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -278,6 +279,26 @@ func ensureWorkflowBootWiring(opts RuntimeOptions) error {
 	return nil
 }
 
+type connectorPackWorkflowModule struct {
+	runtimepipeline.WorkflowModule
+	source semanticview.Source
+}
+
+func (m connectorPackWorkflowModule) SemanticSource() semanticview.Source {
+	return m.source
+}
+
+func workflowModuleWithConnectorPacks(module runtimepipeline.WorkflowModule) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
+	if module == nil {
+		return nil, nil, nil
+	}
+	source, err := providerconnectors.SourceWithConnectorPackImports(module.SemanticSource())
+	if err != nil {
+		return nil, nil, err
+	}
+	return connectorPackWorkflowModule{WorkflowModule: module, source: source}, source, nil
+}
+
 func bootWarningsFatal() bool {
 	return runtimeEnvBool("SWARM_BOOT_WARNINGS_FATAL", true)
 }
@@ -326,10 +347,21 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
 	}
+	var source semanticview.Source
+	if opts.WorkflowModule != nil {
+		workflowModule, wrappedSource, err := workflowModuleWithConnectorPacks(opts.WorkflowModule)
+		if err != nil {
+			return validatedRuntimeDeps{}, fmt.Errorf("provider connector pack import failed: %w", err)
+		}
+		opts.WorkflowModule = workflowModule
+		source = wrappedSource
+	}
 	if err := ensureWorkflowBootWiring(opts); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("workflow contract validation failed: %w", err)
 	}
-	source := opts.WorkflowModule.SemanticSource()
+	if source == nil {
+		source = opts.WorkflowModule.SemanticSource()
+	}
 	if err := validateSelectedBackendModelAliasesForDeclaredAgents(cfg, source); err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}

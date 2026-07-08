@@ -33,6 +33,7 @@ var projectPackageDocumentFields = map[string]struct{}{
 	"children":         {},
 	"subpackages":      {},
 	"connect":          {},
+	"connector_packs":  {},
 	"handoffs":         {},
 }
 
@@ -58,6 +59,7 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Children        []ProjectPackageRef  `yaml:"children"`
 		Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
 		Connect         []FlowPackageConnect `yaml:"connect"`
+		ConnectorPacks  ConnectorPackImports `yaml:"connector_packs"`
 		Handoffs        []ProjectHandoff     `yaml:"handoffs"`
 	}
 	if err := node.Decode(&aux); err != nil {
@@ -95,6 +97,7 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Children:        append([]ProjectPackageRef(nil), aux.Children...),
 		Subpackages:     append([]ProjectPackageRef(nil), aux.Subpackages...),
 		Connect:         cloneFlowPackageConnects(aux.Connect),
+		ConnectorPacks:  aux.ConnectorPacks.normalized(),
 		Handoffs:        append([]ProjectHandoff(nil), aux.Handoffs...),
 	}
 	return nil
@@ -224,6 +227,96 @@ func (b *FlowPackageBind) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*b = out.normalized()
 	return nil
+}
+
+func (c *ConnectorPackImports) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*c = ConnectorPackImports{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("connector_packs must be a mapping")
+	}
+	var out ConnectorPackImports
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "imports":
+			if err := value.Decode(&out.Imports); err != nil {
+				return fmt.Errorf("connector_packs.imports: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: connector_packs field %q not in platform spec", key)
+		}
+	}
+	*c = out.normalized()
+	return nil
+}
+
+func (i *ConnectorPackImport) UnmarshalYAML(node *yaml.Node) error {
+	if i == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*i = ConnectorPackImport{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("connector_packs.imports entries must be mappings")
+	}
+	var out ConnectorPackImport
+	for j := 0; j+1 < len(node.Content); j += 2 {
+		key := strings.TrimSpace(node.Content[j].Value)
+		value := node.Content[j+1]
+		switch key {
+		case "":
+			continue
+		case "provider":
+			if err := value.Decode(&out.Provider); err != nil {
+				return fmt.Errorf("provider: %w", err)
+			}
+		case "tool":
+			if err := value.Decode(&out.Tool); err != nil {
+				return fmt.Errorf("tool: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: connector_packs.imports field %q not in platform spec", key)
+		}
+	}
+	*i = out.normalized()
+	return nil
+}
+
+func (c ConnectorPackImports) normalized() ConnectorPackImports {
+	out := ConnectorPackImports{Imports: make([]ConnectorPackImport, 0, len(c.Imports))}
+	for _, item := range c.Imports {
+		item = item.normalized()
+		if item.Provider == "" && item.Tool == "" {
+			continue
+		}
+		out.Imports = append(out.Imports, item)
+	}
+	return out
+}
+
+func (i ConnectorPackImport) normalized() ConnectorPackImport {
+	return ConnectorPackImport{
+		Provider: normalizeConnectorPackToken(i.Provider),
+		Tool:     strings.TrimSpace(i.Tool),
+	}
+}
+
+func normalizeConnectorPackToken(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	raw = strings.ReplaceAll(raw, "-", "_")
+	raw = strings.ReplaceAll(raw, " ", "_")
+	return strings.Trim(raw, "_")
 }
 
 func (r FlowPackageRequires) normalized() FlowPackageRequires {

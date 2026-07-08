@@ -2,9 +2,13 @@ package providerconnectors
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -176,6 +180,171 @@ func TestSurfacesResolveImportedFlowCredentialBindings(t *testing.T) {
 	}
 }
 
+func TestDefaultPackRegistryLoadsTelegramFromVerifiedPlatformPack(t *testing.T) {
+	tool, ok := BuiltinTool("telegram", "telegram.send_message")
+	if !ok {
+		t.Fatal("BuiltinTool telegram.send_message not found")
+	}
+	if !isProviderConnector(tool) {
+		t.Fatalf("builtin telegram tool category = %q, want %q", tool.Category, Category)
+	}
+	if strings.Contains(tool.HTTP.URL, "provider-secret") {
+		t.Fatal("builtin telegram tool leaked a concrete credential value")
+	}
+}
+
+func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, files fstest.MapFS)
+		want   string
+	}{
+		{
+			name: "platform pack bad exact byte hash",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				files["connector.yaml"].Data = append(files["connector.yaml"].Data, '\n')
+			},
+			want: "manifest_hash mismatch",
+		},
+		{
+			name: "unknown connector manifest field",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				files["connector.yaml"].Data = append(files["connector.yaml"].Data, []byte("unexpected: true\n")...)
+				rewriteConnectorPackHash(t, files)
+			},
+			want: "field unexpected not found",
+		},
+		{
+			name: "capability declaration drift",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_action: telegram.send_message", "call_provider_action: telegram.other")
+			},
+			want: "capabilities do not match",
+		},
+		{
+			name: "requires declaration drift",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceConnectorPackFile(t, files, "pack.yaml", "telegram_bot_token", "other_token")
+			},
+			want: "requires do not match",
+		},
+		{
+			name: "unknown envelope field",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				files["pack.yaml"].Data = append(files["pack.yaml"].Data, []byte("unexpected: true\n")...)
+			},
+			want: "field unexpected not found",
+		},
+		{
+			name: "missing tests metadata",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceConnectorPackFile(t, files, "pack.yaml", "tests:\n  - providerconnectors/telegram_pack\n  - runtime/telegram_connector_supported_surface\n", "tests: []\n")
+			},
+			want: "tests are required",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			files := connectorPackTestFS(t, "telegram")
+			tc.mutate(t, files)
+			_, err := LoadPackFS(files, ".", "0.7.0")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadPackFS error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T) {
+	ambient := providerConnectorScopedSource{
+		Source:        semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{{Key: "."}},
+	}
+	ambientSource, err := SourceWithConnectorPackImports(ambient)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports ambient: %v", err)
+	}
+	if _, exists := ambientSource.ToolEntries()["telegram.send_message"]; exists {
+		t.Fatal("ambient source exposed telegram.send_message without explicit import")
+	}
+
+	explicit := providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		},
+	}
+	source, err := SourceWithConnectorPackImports(explicit)
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports explicit: %v", err)
+	}
+	tool, exists := source.ToolEntries()["telegram.send_message"]
+	if !exists {
+		t.Fatal("explicit import did not expose telegram.send_message")
+	}
+	if tool.Category != Category {
+		t.Fatalf("imported tool category = %q, want %q", tool.Category, Category)
+	}
+	if errs := ValidateSource(source); len(errs) != 0 {
+		t.Fatalf("ValidateSource imported connector errors = %#v", errs)
+	}
+	surfaces, err := Surfaces(context.Background(), source, nil)
+	if err != nil {
+		t.Fatalf("Surfaces: %v", err)
+	}
+	if len(surfaces) != 1 || surfaces[0].ToolID != "telegram.send_message" {
+		t.Fatalf("surfaces = %#v, want telegram.send_message", surfaces)
+	}
+	if len(surfaces[0].Requires) != 1 || surfaces[0].Requires[0].Name != "telegram_bot_token" || surfaces[0].Requires[0].Bound {
+		t.Fatalf("surface requirements = %#v, want unbound telegram_bot_token", surfaces[0].Requires)
+	}
+}
+
+func TestConnectorPackImportRejectsCollisionsAndNamesSources(t *testing.T) {
+	source := providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Tools: map[string]runtimecontracts.ToolSchemaEntry{
+				"telegram.send_message": telegramConnectorTool("https://api.telegram.org"),
+			},
+		}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		},
+	}
+
+	_, err := SourceWithConnectorPackImports(source)
+	if err == nil {
+		t.Fatal("SourceWithConnectorPackImports succeeded, want collision")
+	}
+	for _, want := range []string{`provider connector tool "telegram.send_message" collision`, "package . connector_packs.imports", "merged tool source", "remove one"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("collision error = %q, want containing %q", err.Error(), want)
+		}
+	}
+}
+
+func TestValidateSourceRejectsDirectAgentExposureOfImportedProviderConnector(t *testing.T) {
+	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Agents: map[string]runtimecontracts.AgentRegistryEntry{
+				"sender": {ID: "sender", Tools: []string{"telegram.send_message"}},
+			},
+		}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+	errs := ValidateSource(source)
+	joined := joinErrors(errs)
+	if !strings.Contains(joined, `agent "sender" must not expose provider connector tool "telegram.send_message" directly`) {
+		t.Fatalf("ValidateSource errors = %q, want imported direct exposure rejection", joined)
+	}
+}
+
 type providerConnectorScopedSource struct {
 	semanticview.Source
 	projectScopes []semanticview.ProjectScope
@@ -225,6 +394,48 @@ func telegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
 			},
 		},
 	}
+}
+
+func projectScopeWithConnectorPackImport(key, provider, tool string) semanticview.ProjectScope {
+	return semanticview.ProjectScope{
+		Key: key,
+		Manifest: runtimecontracts.ProjectPackageDocument{
+			ConnectorPacks: runtimecontracts.ConnectorPackImports{
+				Imports: []runtimecontracts.ConnectorPackImport{{Provider: provider, Tool: tool}},
+			},
+		},
+	}
+}
+
+func connectorPackTestFS(t *testing.T, provider string) fstest.MapFS {
+	t.Helper()
+	out := fstest.MapFS{}
+	for _, file := range []string{"pack.yaml", "connector.yaml"} {
+		body, err := fs.ReadFile(builtinConnectorPackFS, "packs/"+provider+"/"+file)
+		if err != nil {
+			t.Fatalf("read builtin connector pack file %s/%s: %v", provider, file, err)
+		}
+		out[file] = &fstest.MapFile{Data: append([]byte(nil), body...)}
+	}
+	return out
+}
+
+func rewriteConnectorPackHash(t *testing.T, files fstest.MapFS) {
+	t.Helper()
+	sum := sha256.Sum256(files["connector.yaml"].Data)
+	hash := "sha256:" + hex.EncodeToString(sum[:])
+	replaceConnectorPackFile(t, files, "pack.yaml", "manifest_hash: sha256:f983e4df5b934a2322781aac992179b3d520c416e41e70e1963ee29a5bf08026", "manifest_hash: "+hash)
+}
+
+func replaceConnectorPackFile(t *testing.T, files fstest.MapFS, name, old, new string) {
+	t.Helper()
+	file := files[name]
+	body := string(file.Data)
+	if !strings.Contains(body, old) {
+		t.Fatalf("%s missing %q", name, old)
+	}
+	body = strings.Replace(body, old, new, 1)
+	file.Data = []byte(body)
 }
 
 func joinErrors(errs []error) string {

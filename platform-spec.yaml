@@ -6332,12 +6332,15 @@ tool_model:
       \ \"{{response.body.status[0].summary}}\"\n  credentials:\n    - domainr_api_key"
   provider_connector_tools:
     description: >
-      Stage 1 flow-local outbound provider connectors are authored HTTP tools in tools.yaml, marked with
-      `category: provider_connector`, and executed only through handler `activity` requests. The category is a readback and
-      validation profile, not a new runtime dispatcher: dispatch remains owned by the HTTP activity executor and
-      non-idempotent writes remain owned by `activity_attempts`.
+      Outbound provider connectors are authored HTTP tools represented by the existing `ToolSchemaEntry` model with
+      `category: provider_connector`, and executed only through handler `activity` requests. Connector declarations may be
+      flow-local entries in tools.yaml or explicitly imported connector-pack bodies, but both routes must produce the same
+      canonical `ToolSchemaEntry` object. The category is a readback and validation profile, not a new runtime dispatcher:
+      dispatch remains owned by the HTTP activity executor and non-idempotent writes remain owned by `activity_attempts`.
     canonical_owners:
-      declaration: "tools.yaml ToolSchemaEntry with `category: provider_connector`."
+      declaration: "ToolSchemaEntry with `category: provider_connector`, authored in tools.yaml or imported from a verified connector pack."
+      pack_import: "package.yaml `connector_packs.imports[]` enables specific packed connector tools; omitted imports expose nothing."
+      pack_envelope: "internal/packs universal envelope plus internal/providerconnectors connector body verifier."
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
       credentials: "static credential store keys listed under tool `credentials`."
@@ -6353,7 +6356,34 @@ tool_model:
       - "`managed_credential`; managed OAuth/token lifecycle is a separate owner."
       - "`response_mapping`; connector response mapping is split until specified."
       - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
-      - "direct runtime provider adapter code, connector-pack body/envelope execution, or bespoke connector dispatch."
+      - "direct runtime provider adapter code or bespoke connector dispatch."
+    connector_pack_profile:
+      status: "first slice: Telegram connector pack proof"
+      body_file: connector.yaml
+      import_syntax: >
+        package.yaml `connector_packs.imports[]` entries name `provider` and `tool`. The import is an explicit enablement
+        gate: packed connectors MUST NOT become ambient global tools and MUST NOT appear in tool readback, activity
+        validation, agent surfaces, or execution unless imported.
+      body_rule: >
+        The connector body wraps/carries real `ToolSchemaEntry` values. The body MUST NOT define a second connector DSL,
+        second validator, second execution model, or provider-specific Go adapter path.
+      verification_rule: >
+        The envelope hash is over the exact connector.yaml bytes. The loader parses the envelope with strict known fields,
+        verifies the exact byte hash, parses connector.yaml through the normal tool schema owner, validates the
+        provider_connector profile, derives connector capabilities/requires mechanically from the tool declaration, and
+        rejects any declared capability or requirement drift.
+      capability_surface: >
+        Connector pack CAN/CANNOT/BOUND/UNBOUND readback is kind-specific. Connector CAN rows include calling the declared
+        provider action, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in
+        `activity_attempts`. Connector CANNOT rows include bypassing `activity_attempts`, automatically retrying
+        non-idempotent writes, or exposing credential values.
+      collision_policy: >
+        No packed-vs-packed or packed-vs-flow-local connector shadowing is allowed in this slice. Any duplicate tool id
+        fails closed before runtime construction and names both sources with remediation to remove one source or rename the
+        flow-local tool.
+      unbound_requirement_policy: >
+        Pack import may succeed with an unbound credential name. Runtime activity dispatch must fail closed before the
+        provider HTTP call and before creating an `activity_attempts` row when a required static credential is unavailable.
   credential_store:
     description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
       platform provides a typed interface with a layered resolution model.
@@ -6542,14 +6572,16 @@ tool_model:
       A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
       extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
     pack_envelope_source_authority:
-      owner: internal/packs universal envelope plus internal/providertriggers trigger body verifier
+      owner: internal/packs universal envelope plus body-specific verifiers such as internal/providertriggers and internal/providerconnectors
       status: >
-        E5 source-authority path. Provider-trigger packs wrap the frozen provider-trigger manifest vocabulary in a
-        universal pack envelope before registration. The envelope is a trust/admission artifact, not a provider-specific
-        adapter and not a new provider-trigger vocabulary owner. First-party configured-provider manifests are platform
-        packs, not embed-only trust fixtures. Runtime config declares external provider-trigger pack directories at
+        E5 source-authority path. Provider-trigger packs and provider-connector packs wrap their body-specific canonical
+        vocabulary in a universal pack envelope before registration/import. The envelope is a trust/admission artifact, not
+        a provider-specific adapter and not a new body vocabulary owner. First-party configured-provider manifests are
+        platform packs, not embed-only trust fixtures. Runtime config declares external provider-trigger pack directories at
         `provider_triggers.packs.external_dirs`; `swarm serve` resolves those directories at boot and fails closed before
-        runtime construction if any declared pack cannot be verified.
+        runtime construction if any declared pack cannot be verified. Connector packs in this first slice are built-in
+        platform packs explicitly imported by package.yaml `connector_packs.imports[]`; external connector-pack directories
+        require a later gated surface.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -6559,10 +6591,10 @@ tool_model:
           Required compatibility range checked with the same platform-version constraint grammar used by package admission.
           Missing, malformed, or incompatible ranges fail pack import before provider registration.
         type: >
-          Required pack body type. The first supported body type is `trigger`; other pack body types require their own
+          Required pack body type. Supported body types are `trigger` and `connector`. New body types require their own
           gated proof cases.
         manifest_hash: >
-          Required SHA-256 hash of the exact trigger manifest bytes carried by the pack, formatted as `sha256:<hex>`.
+          Required SHA-256 hash of the exact body manifest bytes carried by the pack, formatted as `sha256:<hex>`.
           Implementations MUST NOT hash re-serialized YAML or semantic object forms because those are not stable contract
           bytes.
         provenance: >
@@ -6570,7 +6602,7 @@ tool_model:
           review/readback classification but does not create verification shortcuts.
         capabilities: >
           Required declared capability surface. The loader derives canonical capabilities mechanically from the accepted
-          trigger manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
+          body manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
           capabilities, missing capabilities, or narrative/manual capability truth fail import.
         requires: >
           Required dependency declaration surface for resources such as `webhook_signing.<provider>`. Declared requirements
@@ -6583,13 +6615,13 @@ tool_model:
       - read declared external pack directories from `provider_triggers.packs.external_dirs`
       - parse envelope with strict known fields
       - validate id/version/platform_version/type/provenance/tests metadata
-      - read trigger manifest bytes
-      - verify manifest_hash against exact trigger manifest bytes
-      - parse and validate trigger manifest through `internal/providertriggers`
-      - derive trigger capabilities and requires mechanically from the manifest
+      - read body manifest bytes selected by pack type, such as trigger.yaml or connector.yaml
+      - verify manifest_hash against exact body manifest bytes
+      - parse and validate the body manifest through the matching body-specific owner
+      - derive body capabilities and requires mechanically from the manifest
       - compare declared capabilities/requires to derived values
-      - reject provider-name collisions across first-party packs and external packs
-      - register only verified trigger manifests
+      - reject provider-name/tool-name collisions according to the body-specific collision rule
+      - register/import only verified body manifests
       trust_tiers: >
         Trust tiers differ by provenance value and by readback/operational policy only. First-party bundled packs and
         future external packs use the identical verifier path. No pack is trusted merely because the platform ships it.
@@ -6604,6 +6636,8 @@ tool_model:
         undeclared events, or touch unbound resources. Requirement readback marks each declared secret as BOUND or UNBOUND
         without exposing secret values. `swarm doctor` is the first operator surface for this readback and renders the same
         verified first-party and declared external provider-trigger pack capability surface that serve admits at boot.
+        Connector-pack readback uses connector-specific CAN/CANNOT rows defined by `tool_model.provider_connector_tools`;
+        trigger rows MUST NOT be reused to describe connector proof.
       unbound_requirement_policy: >
         A missing deployment binding for a declared signing secret does not reject pack import. Runtime webhook admission
         still fails closed before signature verification, dedupe marker persistence, or event publish when a required
@@ -7491,6 +7525,7 @@ flow_model:
         - children
         - subpackages
         - connect
+        - connector_packs
         - handoffs
         retired_fields:
           entity_schema: >
@@ -7518,6 +7553,12 @@ flow_model:
           Optional downstream metadata map. Keys MUST be namespaced as domain.tld/name and values MUST be strings.
           Swarm stores and projects this map for catalog/read-model consumers but does not interpret its values for
           runtime semantics.
+        connector_packs: >
+          Optional explicit provider-connector pack imports. The first supported shape is
+          `connector_packs.imports[]` with required `provider` and `tool` fields. Each imported tool must resolve to a
+          verified built-in connector pack, must produce a normal `ToolSchemaEntry` with `category: provider_connector`,
+          and must fail closed on unknown fields, unknown providers/tools, provider/tool mismatch, or collision with any
+          packed or flow-local tool id. Omission imports no connector tools.
       catalog_consumption:
         owner: bundle catalog projection
         rule: >
