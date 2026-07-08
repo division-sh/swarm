@@ -85,6 +85,11 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 	}{
 		{name: "old flat", body: "api_server: http://127.0.0.1:8081\n", want: "old flat config key \"api_server\""},
 		{name: "split unsupported", body: "runtime:\n  max_concurrent_agents: 4\n", want: "recognized but not yet supported"},
+		{name: "claude cli retries split unsupported", body: "llm:\n  claude_cli:\n    retries: 2\n", want: "llm.claude_cli.retries"},
+		{name: "claude cli no session persistence split unsupported", body: "llm:\n  claude_cli:\n    no_session_persistence: true\n", want: "llm.claude_cli.no_session_persistence"},
+		{name: "claude cli tmux split unsupported", body: "llm:\n  claude_cli:\n    use_tmux: true\n", want: "llm.claude_cli.use_tmux"},
+		{name: "unknown budget key", body: "budget:\n  not_a_real_key: 1\n", want: "unknown config key \"budget.not_a_real_key\""},
+		{name: "unknown human task budget typo", body: "budget:\n  human_tasks:\n    max_tasks_per_wek: 1\n", want: "unknown config key \"budget.human_tasks.max_tasks_per_wek\""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "swarm.yaml")

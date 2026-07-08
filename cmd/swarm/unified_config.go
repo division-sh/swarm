@@ -610,7 +610,7 @@ func unifiedConfigRule(path string) (unifiedConfigKeyRule, bool) {
 	if rule, ok := rules[path]; ok {
 		return rule, true
 	}
-	if strings.HasPrefix(path, "llm.models.") || strings.HasPrefix(path, "llm.provider_limits.") || strings.HasPrefix(path, "budget.") {
+	if strings.HasPrefix(path, "llm.models.") || strings.HasPrefix(path, "llm.provider_limits.") {
 		return unifiedConfigKeyRule{}, true
 	}
 	if strings.HasPrefix(path, "sharding") {
@@ -677,9 +677,9 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"llm.claude_cli.command":                {Elevated: true},
 		"llm.claude_cli.timeout":                {},
 		"llm.claude_cli.output_format":          {},
-		"llm.claude_cli.retries":                {},
-		"llm.claude_cli.no_session_persistence": {},
-		"llm.claude_cli.use_tmux":               {},
+		"llm.claude_cli.retries":                {Split: "tracked split: llm.claude_cli.retries remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
+		"llm.claude_cli.no_session_persistence": {Split: "tracked split: llm.claude_cli.no_session_persistence remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
+		"llm.claude_cli.use_tmux":               {Split: "tracked split: llm.claude_cli.use_tmux remains unsupported/inert until #1803 promotes a production runtime owner; no supported replacement"},
 		"llm.openai_compatible":                 section,
 		"llm.openai_compatible.base_url":        {Elevated: true},
 		"llm.openai_compatible.default_model":   {Split: "retired model-selection input; use llm.models"},
@@ -690,6 +690,14 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"provider_triggers.packs":               pathSection,
 		"provider_triggers.packs.external_dirs": {ProjectContainedPath: true},
 		"budget":                                section,
+		"budget.global_monthly_cap":             {},
+		"budget.per_entity_monthly_cap":         {},
+		"budget.system_monthly_cap":             {},
+		"budget.human_tasks":                    section,
+		"budget.human_tasks.max_tasks_per_week": {},
+		"budget.human_tasks.budget_reset":       {},
+		"budget.human_tasks.auto_expire_hours":  {},
+		"budget.human_tasks.categories_enabled": {},
 		"paths":                                 section,
 		"paths.swarm_dir":                       {Elevated: true},
 		"paths.contracts_path":                  {ProjectContainedPath: true},
@@ -894,8 +902,7 @@ func unifiedConfigDelegatedSwarmEnvSources(repoRoot, explicitPath string) map[st
 	out := map[string]string{}
 	repoRoot = unifiedConfigRepoRoot(repoRoot)
 	layers, _ := discoverUnifiedConfigLayers(repoRoot, explicitPath)
-	var merged yaml.Node
-	merged.Kind = yaml.MappingNode
+	var delegatedEnv string
 	for _, layer := range layers {
 		raw, err := os.ReadFile(layer.Path)
 		if err != nil {
@@ -909,21 +916,34 @@ func unifiedConfigDelegatedSwarmEnvSources(repoRoot, explicitPath string) map[st
 		if root == nil || root.Kind != yaml.MappingNode {
 			continue
 		}
-		mergeYAMLMapping(&merged, root)
+		if diagnostics := validateUnifiedConfigNode(root, layer, repoRoot); len(unifiedConfigBlockers(diagnostics)) > 0 {
+			continue
+		}
+		value := strings.TrimSpace(yamlScalarPath(root, "database", "password_env"))
+		if value == "" {
+			continue
+		}
+		delegatedEnv = value
 	}
-	var cfg struct {
-		Database struct {
-			PasswordEnv string `yaml:"password_env"`
-		} `yaml:"database"`
-	}
-	if len(merged.Content) == 0 {
+	if delegatedEnv == "" {
 		return out
 	}
-	if err := merged.Decode(&cfg); err != nil {
-		return out
-	}
-	if name := strings.TrimSpace(cfg.Database.PasswordEnv); strings.HasPrefix(name, "SWARM_") {
+	if name := delegatedEnv; strings.HasPrefix(name, "SWARM_") {
 		out[name] = "database.password_env"
 	}
 	return out
+}
+
+func yamlScalarPath(node *yaml.Node, path ...string) string {
+	cur := node
+	for _, key := range path {
+		cur = yamlMappingValue(cur, key)
+		if cur == nil {
+			return ""
+		}
+	}
+	if cur.Kind != yaml.ScalarNode {
+		return ""
+	}
+	return cur.Value
 }

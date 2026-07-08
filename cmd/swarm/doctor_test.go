@@ -973,8 +973,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		"    command: claude",
 		"    timeout: 2s",
 		"    output_format: json",
-		"    retries: 1",
-		"    no_session_persistence: false",
 	}, "\n")+"\n")
 	return path
 }
@@ -1006,8 +1004,6 @@ func writeDoctorTargetRuntimeConfig(t *testing.T, body string) string {
 		"    command: claude",
 		"    timeout: 2s",
 		"    output_format: json",
-		"    retries: 1",
-		"    no_session_persistence: false",
 	}, "\n")+"\n")
 	return path
 }
