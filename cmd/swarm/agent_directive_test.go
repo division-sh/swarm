@@ -187,7 +187,7 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "http runtime failure exits three",
@@ -195,7 +195,7 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			},
 			wantCode:   3,
-			wantStderr: "v1 RPC HTTP 503",
+			wantStderr: "returned status 503",
 		},
 		{
 			name: "agent not found exits five",

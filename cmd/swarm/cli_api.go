@@ -636,6 +636,7 @@ func applicationErrorDetailValue(value any) string {
 
 type cliAPIHTTPError struct {
 	surface    string
+	endpoint   string
 	statusCode int
 	message    string
 }
@@ -646,9 +647,67 @@ func (e *cliAPIHTTPError) Error() string {
 	}
 	surface := strings.TrimSpace(e.surface)
 	if surface == "" {
-		surface = "v1 RPC"
+		surface = "runtime API"
 	}
-	return fmt.Sprintf("%s HTTP %d: %s", surface, e.statusCode, e.message)
+	return fmt.Sprintf("%s returned status %d", surface, e.statusCode)
+}
+
+type cliAPITransportError struct {
+	surface   string
+	endpoint  string
+	operation string
+	err       error
+}
+
+func (e *cliAPITransportError) Error() string {
+	if e == nil {
+		return ""
+	}
+	surface := strings.TrimSpace(e.surface)
+	if surface == "" {
+		surface = "runtime API"
+	}
+	operation := strings.TrimSpace(e.operation)
+	if operation == "" {
+		operation = "request"
+	}
+	return fmt.Sprintf("%s %s failed", surface, operation)
+}
+
+func (e *cliAPITransportError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+type cliAPIProtocolError struct {
+	surface   string
+	endpoint  string
+	operation string
+	err       error
+}
+
+func (e *cliAPIProtocolError) Error() string {
+	if e == nil {
+		return ""
+	}
+	surface := strings.TrimSpace(e.surface)
+	if surface == "" {
+		surface = "runtime API"
+	}
+	operation := strings.TrimSpace(e.operation)
+	if operation == "" {
+		operation = "response"
+	}
+	return fmt.Sprintf("%s invalid %s", surface, operation)
+}
+
+func (e *cliAPIProtocolError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
 }
 
 func (c *cliAPIClient) call(ctx context.Context, method string, params map[string]any, result any) error {
@@ -671,32 +730,32 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("v1 RPC request failed: %w", err)
+		return &cliAPITransportError{surface: "runtime API", endpoint: c.endpoint, operation: "request", err: err}
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return fmt.Errorf("read v1 RPC response: %w", err)
+		return &cliAPITransportError{surface: "runtime API", endpoint: c.endpoint, operation: "response read", err: err}
 	}
 	if resp.StatusCode != http.StatusOK {
 		message := strings.TrimSpace(string(raw))
 		if message == "" {
 			message = http.StatusText(resp.StatusCode)
 		}
-		return &cliAPIHTTPError{statusCode: resp.StatusCode, message: message}
+		return &cliAPIHTTPError{surface: "runtime API", endpoint: c.endpoint, statusCode: resp.StatusCode, message: message}
 	}
 
 	var envelope jsonRPCResponse
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return fmt.Errorf("decode JSON-RPC response: %w", err)
+		return &cliAPIProtocolError{surface: "runtime API", endpoint: c.endpoint, operation: "response", err: err}
 	}
 	if envelope.JSONRPC != "2.0" {
-		return fmt.Errorf("malformed JSON-RPC response: jsonrpc=%q", envelope.JSONRPC)
+		return &cliAPIProtocolError{surface: "runtime API", endpoint: c.endpoint, operation: "response", err: fmt.Errorf("jsonrpc=%q", envelope.JSONRPC)}
 	}
 	responseID, ok := envelope.ID.(string)
 	if !ok || responseID != requestID {
-		return fmt.Errorf("malformed JSON-RPC response: id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)
+		return &cliAPIProtocolError{surface: "runtime API", endpoint: c.endpoint, operation: "response", err: fmt.Errorf("id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)}
 	}
 	if envelope.Error != nil {
 		return envelope.Error

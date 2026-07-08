@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,6 +107,7 @@ func TestLocalContextValidationTaxonomy(t *testing.T) {
 		desc       localContextDescriptor
 		caller     *fakeRuntimeIdentityCaller
 		wantStatus string
+		wantDetail string
 		wantCalls  int
 	}{
 		{
@@ -127,8 +127,9 @@ func TestLocalContextValidationTaxonomy(t *testing.T) {
 		{
 			name:       "no server",
 			desc:       testLocalContextDescriptor("down", "runtime-a"),
-			caller:     &fakeRuntimeIdentityCaller{err: &net.DNSError{Err: "no such host"}},
+			caller:     &fakeRuntimeIdentityCaller{err: &cliAPITransportError{surface: "runtime API", endpoint: "http://127.0.0.1:19001/v1/rpc", operation: "request", err: errors.New("connection refused")}},
 			wantStatus: localContextStatusNoServer,
+			wantDetail: "cannot reach the Swarm runtime at 127.0.0.1:19001.",
 			wantCalls:  1,
 		},
 		{
@@ -152,6 +153,14 @@ func TestLocalContextValidationTaxonomy(t *testing.T) {
 			got := validateLocalContextEntry(context.Background(), entry, tt.caller)
 			if got.Status != tt.wantStatus {
 				t.Fatalf("status = %q, want %q detail=%s", got.Status, tt.wantStatus, got.Detail)
+			}
+			if tt.wantDetail != "" && !strings.Contains(got.Detail, tt.wantDetail) {
+				t.Fatalf("detail = %q, want substring %q", got.Detail, tt.wantDetail)
+			}
+			for _, forbidden := range []string{"v1 RPC", "/v1/rpc", "Post ", "dial tcp", "connection refused"} {
+				if strings.Contains(got.Detail, forbidden) {
+					t.Fatalf("detail = %q, must not leak %q", got.Detail, forbidden)
+				}
 			}
 			if tt.caller.calls != tt.wantCalls {
 				t.Fatalf("calls = %d, want %d", tt.caller.calls, tt.wantCalls)

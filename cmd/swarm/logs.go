@@ -79,6 +79,7 @@ type runtimeLogSubscriptionNotification struct {
 
 type runtimeLogSubscription struct {
 	conn           *websocket.Conn
+	endpoint       string
 	subscriptionID string
 	logs           chan runtimeLogEntry
 	errs           chan error
@@ -348,9 +349,9 @@ func subscribeRuntimeLogs(ctx context.Context, wsEndpoint, token string, params 
 	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
 		if resp != nil {
-			return nil, runtimeLogsWSHTTPError(resp)
+			return nil, cliAPIWebSocketHTTPError("runtime log stream", wsEndpoint, resp)
 		}
-		return nil, fmt.Errorf("v1 WS dial failed: %w", err)
+		return nil, &cliAPITransportError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "dial", err: err}
 	}
 	requestID := "swarm-cli:" + runtimeLogsMethodSubscribe
 	if err := conn.WriteJSON(jsonRPCRequest{
@@ -360,20 +361,20 @@ func subscribeRuntimeLogs(ctx context.Context, wsEndpoint, token string, params 
 		Params:  params,
 	}); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("write runtime.subscribe_logs request: %w", err)
+		return nil, &cliAPITransportError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "subscription request", err: err}
 	}
 	var envelope jsonRPCResponse
-	if err := conn.ReadJSON(&envelope); err != nil {
+	if err := cliAPIReadWebSocketJSON(conn, "runtime log stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("read runtime.subscribe_logs response: %w", err)
+		return nil, err
 	}
 	if envelope.JSONRPC != "2.0" {
 		conn.Close()
-		return nil, fmt.Errorf("malformed runtime.subscribe_logs response: jsonrpc=%q", envelope.JSONRPC)
+		return nil, &cliAPIProtocolError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("jsonrpc=%q", envelope.JSONRPC)}
 	}
 	if id, ok := envelope.ID.(string); !ok || id != requestID {
 		conn.Close()
-		return nil, fmt.Errorf("malformed runtime.subscribe_logs response: id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)
+		return nil, &cliAPIProtocolError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)}
 	}
 	if envelope.Error != nil {
 		conn.Close()
@@ -382,14 +383,15 @@ func subscribeRuntimeLogs(ctx context.Context, wsEndpoint, token string, params 
 	var result runtimeLogSubscriptionResult
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("decode runtime.subscribe_logs result: %w", err)
+		return nil, &cliAPIProtocolError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "subscription result", err: err}
 	}
 	if strings.TrimSpace(result.SubscriptionID) == "" {
 		conn.Close()
-		return nil, fmt.Errorf("malformed runtime.subscribe_logs result: subscription_id is required")
+		return nil, &cliAPIProtocolError{surface: "runtime log stream", endpoint: wsEndpoint, operation: "subscription result", err: fmt.Errorf("subscription_id is required")}
 	}
 	sub := &runtimeLogSubscription{
 		conn:           conn,
+		endpoint:       wsEndpoint,
 		subscriptionID: result.SubscriptionID,
 		logs:           make(chan runtimeLogEntry, 16),
 		errs:           make(chan error, 1),
@@ -398,43 +400,28 @@ func subscribeRuntimeLogs(ctx context.Context, wsEndpoint, token string, params 
 	return sub, nil
 }
 
-func runtimeLogsWSHTTPError(resp *http.Response) error {
-	if resp == nil {
-		return nil
-	}
-	message := http.StatusText(resp.StatusCode)
-	if resp.Body != nil {
-		defer resp.Body.Close()
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if err == nil && strings.TrimSpace(string(raw)) != "" {
-			message = strings.TrimSpace(string(raw))
-		}
-	}
-	return &cliAPIHTTPError{surface: "v1 WS", statusCode: resp.StatusCode, message: message}
-}
-
 func (s *runtimeLogSubscription) readLoop() {
 	defer close(s.logs)
 	for {
 		var notification runtimeLogSubscriptionNotification
-		if err := s.conn.ReadJSON(&notification); err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || strings.Contains(err.Error(), "use of closed network connection") {
+		if err := cliAPIReadWebSocketJSON(s.conn, "runtime log stream", s.endpoint, "notification read", &notification); err != nil {
+			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}
-			s.reportError(fmt.Errorf("read runtime.subscribe_logs notification: %w", err))
+			s.reportError(err)
 			return
 		}
 		if notification.JSONRPC != "2.0" || notification.Method != "rpc.subscription" {
-			s.reportError(fmt.Errorf("malformed runtime.subscribe_logs notification"))
+			s.reportError(&cliAPIProtocolError{surface: "runtime log stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("malformed runtime.subscribe_logs notification")})
 			return
 		}
 		if notification.Params.Subscription != s.subscriptionID {
-			s.reportError(fmt.Errorf("malformed runtime.subscribe_logs notification: subscription mismatch"))
+			s.reportError(&cliAPIProtocolError{surface: "runtime log stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("subscription mismatch")})
 			return
 		}
 		log := notification.Params.Result
 		if err := validateRuntimeLogEntry("runtime.subscribe_logs notification", log); err != nil {
-			s.reportError(err)
+			s.reportError(&cliAPIProtocolError{surface: "runtime log stream", endpoint: s.endpoint, operation: "notification", err: err})
 			return
 		}
 		select {

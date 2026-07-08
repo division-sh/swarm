@@ -170,7 +170,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "json rpc error",
@@ -200,7 +200,7 @@ func TestVersionServerFailsClosedOnAPIAndMalformedResults(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "1.0", "id": req.ID, "result": validVersionHealthResult()})
 			},
 			wantCode:   3,
-			wantStderr: "malformed JSON-RPC response",
+			wantStderr: "returned an invalid API response",
 		},
 		{
 			name: "malformed health result",
@@ -255,7 +255,7 @@ func TestVersionServerFailsClosedOnTransportError(t *testing.T) {
 	if strings.TrimSpace(stdout.String()) != "" {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "v1 RPC request failed") {
+	if !strings.Contains(stderr.String(), "cannot reach the Swarm runtime") {
 		t.Fatalf("stderr = %q, want transport failure", stderr.String())
 	}
 }

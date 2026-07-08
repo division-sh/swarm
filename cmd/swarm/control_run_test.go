@@ -323,7 +323,7 @@ func TestControlRunFailsClosedOnTransportRPCAndMalformedResponses(t *testing.T) 
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "run not found",
@@ -343,7 +343,7 @@ func TestControlRunFailsClosedOnTransportRPCAndMalformedResponses(t *testing.T) 
 				_, _ = w.Write([]byte(`{`))
 			},
 			wantCode:   3,
-			wantStderr: "decode JSON-RPC response",
+			wantStderr: "returned an invalid API response",
 		},
 		{
 			name: "malformed ok result",
@@ -571,6 +571,54 @@ func TestControlStopAllReportsPartialFailures(t *testing.T) {
 	for _, want := range []string{"control stop failed: run_id=run-b", "RUN_ALREADY_TERMINAL"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestControlStopAllPerRunHTTPFailureUsesSharedDiagnostic(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	var captured []jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		captured = append(captured, req)
+		switch len(captured) {
+		case 1:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []map[string]any{
+				controlRunHeaderResult("run-a", "running"),
+			}})
+		case 2:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{"runs": []any{}})
+		case 3:
+			http.Error(w, "runtime unavailable", http.StatusServiceUnavailable)
+		default:
+			t.Fatalf("unexpected request %d: %#v", len(captured), req)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"control", "stop", "--all", "--yes"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 3 {
+		t.Fatalf("code = %d, want 3 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "control stop partial: scope=all matched=1 stopped=0 failed=1") {
+		t.Fatalf("stdout = %q, want partial summary", stdout.String())
+	}
+	for _, want := range []string{
+		"ERROR: control stop failed: run_id=run-a: the Swarm runtime at ",
+		"returned status 503",
+		"Check the runtime with `swarm health`",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+	for _, forbidden := range []string{"runtime API returned status", "/v1/rpc"} {
+		if strings.Contains(stderr.String(), forbidden) {
+			t.Fatalf("stderr = %q, must not contain %q", stderr.String(), forbidden)
 		}
 	}
 }

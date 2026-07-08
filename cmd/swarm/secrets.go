@@ -557,7 +557,7 @@ func dash(value string) string {
 
 func returnSecretsRuntimeError(errOut io.Writer, err error) error {
 	if errOut != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 	}
 	return commandExitError{code: cliExitRuntime}
 }
@@ -565,7 +565,7 @@ func returnSecretsRuntimeError(errOut io.Writer, err error) error {
 func returnSecretsStoreError(errOut io.Writer, err error) error {
 	if errors.Is(err, runtimecredentials.ErrStoreLocked) {
 		if errOut != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 		}
 		return commandExitError{code: cliExitConflict}
 	}

@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	traceFollowMaxReconnects    = 3
-	traceFollowInitialBackoff   = 250 * time.Millisecond
-	traceFollowMaximumBackoff   = time.Second
-	traceFollowRetryableReadErr = "read run.subscribe_trace notification:"
+	traceFollowMaxReconnects  = 3
+	traceFollowInitialBackoff = 250 * time.Millisecond
+	traceFollowMaximumBackoff = time.Second
 )
 
 var traceDeliverySummaryStatuses = []string{"pending", "in_progress", "delivered", "failed", "dead_letter"}
@@ -869,7 +868,7 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 	wsEndpoint, err := runCommandWebSocketEndpoint(client.endpoint)
 	if err != nil {
 		if errOut != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 		}
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
@@ -887,7 +886,7 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 			}
 			if reconnectsRemaining == 0 || !traceFollowRetryableSubscribeError(err) {
 				if errOut != nil {
-					fmt.Fprintln(errOut, err)
+					writeCLIAPIError(errOut, err)
 				}
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
@@ -915,9 +914,7 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 			continue
 		}
 		if reconnectsRemaining == 0 || !traceFollowRetryableStreamError(streamErr) {
-			if errOut != nil {
-				fmt.Fprintln(errOut, streamErr)
-			}
+			writeCLIAPIError(errOut, streamErr)
 			return commandExitError{code: runCommandErrorExitCode(streamErr)}
 		}
 		reconnectsRemaining--
@@ -999,12 +996,8 @@ func traceFollowRetryableSubscribeError(err error) bool {
 	if errors.As(err, &rpcErr) {
 		return false
 	}
-	msg := err.Error()
-	if strings.HasPrefix(msg, "v1 WS dial failed:") || strings.HasPrefix(msg, "write run.subscribe_trace request:") {
+	if cliAPIIsTransportFailure(err) {
 		return true
-	}
-	if strings.HasPrefix(msg, "read run.subscribe_trace response:") {
-		return traceFollowTransportErrorText(msg)
 	}
 	return false
 }
@@ -1013,30 +1006,8 @@ func traceFollowRetryableStreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	if !strings.HasPrefix(msg, traceFollowRetryableReadErr) {
-		return false
-	}
-	return traceFollowTransportErrorText(msg)
-}
-
-func traceFollowTransportErrorText(msg string) bool {
-	msg = strings.ToLower(msg)
-	if msg == "eof" || strings.HasSuffix(msg, ": eof") {
+	if cliAPIIsTransportFailure(err) {
 		return true
-	}
-	for _, fragment := range []string{
-		"websocket: close",
-		"unexpected eof",
-		"connection reset",
-		"connection refused",
-		"broken pipe",
-		"i/o timeout",
-		"use of closed network connection",
-	} {
-		if strings.Contains(msg, fragment) {
-			return true
-		}
 	}
 	return false
 }

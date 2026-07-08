@@ -70,23 +70,23 @@ func newAgentReplayCommand(opts rootCommandOptions) *cobra.Command {
 func runAgentReplayCommand(ctx context.Context, out, errOut io.Writer, args []string, opts agentReplayCommandOptions) error {
 	agentID, eventID, err := validateAgentReplayArgs(args, opts.eventID)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayExitValidation}
 	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayErrorExitCode(err)}
 	}
 
 	var result agentReplayResult
 	if err := client.call(ctx, agentReplayMethod, opts.params(agentID, eventID), &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayErrorExitCode(err)}
 	}
 	if err := validateAgentReplayResult(result, agentID, eventID); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayExitRuntime}
 	}
 	writeAgentReplayResult(out, result)

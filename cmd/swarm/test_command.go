@@ -236,7 +236,7 @@ func runScenarioTestCommand(ctx context.Context, repoRoot string, out, errOut io
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
 	runner := scenarioRunner{
@@ -250,7 +250,7 @@ func runScenarioTestCommand(ctx context.Context, repoRoot string, out, errOut io
 	}
 	for _, file := range files {
 		if err := runner.runScenarioFile(ctx, file); err != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 			return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 		}
 	}
@@ -2142,7 +2142,7 @@ func scenarioStringSliceContains(values []string, want string) bool {
 }
 
 func returnScenarioTestValidationError(errOut io.Writer, err error) error {
-	fmt.Fprintln(errOut, err)
+	writeCLIAPIError(errOut, err)
 	return commandExitError{code: scenarioTestExitValidation}
 }
 

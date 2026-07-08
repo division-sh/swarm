@@ -47,23 +47,23 @@ func newAgentReplayBacklogCommand(opts rootCommandOptions) *cobra.Command {
 func runAgentReplayBacklogCommand(ctx context.Context, out, errOut io.Writer, args []string, opts agentReplayBacklogCommandOptions) error {
 	agentID, err := validateAgentReplayBacklogArgs(args)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayBacklogExitValidation}
 	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayBacklogErrorExitCode(err)}
 	}
 
 	var result agentReplayBacklogResult
 	if err := client.call(ctx, agentReplayBacklogMethod, opts.params(agentID), &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayBacklogErrorExitCode(err)}
 	}
 	if err := validateAgentReplayBacklogResult(result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentReplayBacklogExitRuntime}
 	}
 	writeAgentReplayBacklogResult(out, agentID, result)

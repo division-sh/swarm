@@ -656,7 +656,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	if !serveCanceled.Load() {
 		t.Fatal("local serve hook was not canceled after readiness auth failure")
 	}
-	if !strings.Contains(stderr.String(), "v1 RPC HTTP 401") {
+	if !strings.Contains(stderr.String(), "rejected the request with status 401") {
 		t.Fatalf("stderr = %q, want auth failure", stderr.String())
 	}
 }
@@ -754,6 +754,49 @@ func TestRunCommandMalformedWebSocketFailuresExitThree(t *testing.T) {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
 			}
 		})
+	}
+}
+
+func TestRunCommandWebSocketHandshakeHTTPErrorUsesSharedDiagnostic(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
+		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+			switch req.Method {
+			case "health.check":
+				return runCommandHealthResult()
+			case "run.start":
+				return map[string]any{"run_id": "run-ws-auth", "status": "running"}
+			default:
+				t.Fatalf("unexpected method = %q", req.Method)
+			}
+			return nil
+		},
+		wsHTTPStatus: http.StatusUnauthorized,
+		wsHTTPBody:   "invalid bearer token",
+	})
+	defer server.Close()
+
+	opts := testRunCommandOptions(server)
+	opts.runStatusPoll = time.Hour
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, &stdout, &stderr, opts)
+	if code != 4 {
+		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{
+		"ERROR: the Swarm runtime at ",
+		"rejected the request with status 401",
+		"Check API credentials",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
+		}
+	}
+	for _, forbidden := range []string{"cannot reach", "runtime event stream dial failed", "/v1/ws"} {
+		if strings.Contains(stderr.String(), forbidden) {
+			t.Fatalf("stderr = %q, must not contain %q", stderr.String(), forbidden)
+		}
 	}
 }
 
@@ -874,6 +917,8 @@ type runCommandServerOptions struct {
 	wsSubscribed         chan struct{}
 	wsSubscriptionResult map[string]any
 	wsCloseAfterRows     bool
+	wsHTTPStatus         int
+	wsHTTPBody           string
 	expectedToken        string
 	strictAuth           bool
 }
@@ -917,6 +962,14 @@ func newRunCommandServer(t *testing.T, opts runCommandServerOptions) (*httptest.
 					return
 				}
 				t.Errorf("WS Authorization = %q, want bearer token", got)
+			}
+			if opts.wsHTTPStatus != 0 {
+				body := opts.wsHTTPBody
+				if body == "" {
+					body = http.StatusText(opts.wsHTTPStatus)
+				}
+				http.Error(w, body, opts.wsHTTPStatus)
+				return
 			}
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {

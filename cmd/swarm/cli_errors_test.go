@@ -34,7 +34,7 @@ func TestCLIAPIErrorExitCodeClassifiesSharedCategories(t *testing.T) {
 		{name: "rpc conflict", err: rpcError("IDEMPOTENCY_CONFLICT"), want: cliExitConflict},
 		{name: "rpc state conflict", err: rpcError("RUN_ALREADY_TERMINAL"), want: cliExitConflict},
 		{name: "unknown rpc", err: rpcError("UNKNOWN_CODE"), want: cliExitRuntime},
-		{name: "transport", err: fmt.Errorf("v1 RPC request failed: %w", errors.New("connection refused")), want: cliExitRuntime},
+		{name: "transport", err: &cliAPITransportError{surface: "runtime API", endpoint: "http://127.0.0.1:1/v1/rpc", operation: "request", err: errors.New("connection refused")}, want: cliExitRuntime},
 		{name: "malformed response", err: errors.New("malformed JSON-RPC response: jsonrpc=\"1.0\""), want: cliExitRuntime},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -42,6 +42,92 @@ func TestCLIAPIErrorExitCodeClassifiesSharedCategories(t *testing.T) {
 				t.Fatalf("exit = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestCLIAPITransportDiagnosticRendersUserFacingRuntimeTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want []string
+	}{
+		{
+			name: "transport",
+			err:  &cliAPITransportError{surface: "runtime API", endpoint: "http://127.0.0.1:1/v1/rpc", operation: "request", err: errors.New("connection refused")},
+			want: []string{
+				"ERROR: cannot reach the Swarm runtime at 127.0.0.1:1.",
+				"Is the runtime running?",
+				"Check the selected target with `swarm context current`; override with --api-server.",
+			},
+		},
+		{
+			name: "http auth",
+			err:  &cliAPIHTTPError{surface: "runtime API", endpoint: "http://127.0.0.1:8081/proxy/v1/rpc", statusCode: 401, message: "unauthorized"},
+			want: []string{
+				"ERROR: the Swarm runtime at 127.0.0.1:8081/proxy rejected the request with status 401.",
+				"Check API credentials",
+			},
+		},
+		{
+			name: "http runtime",
+			err:  &cliAPIHTTPError{surface: "runtime API", endpoint: "http://127.0.0.1:8081/v1/rpc", statusCode: 503, message: "unavailable"},
+			want: []string{
+				"ERROR: the Swarm runtime at 127.0.0.1:8081 returned status 503.",
+				"Check the runtime with `swarm health`",
+			},
+		},
+		{
+			name: "protocol",
+			err:  &cliAPIProtocolError{surface: "runtime event stream", endpoint: "ws://127.0.0.1:8081/v1/ws", operation: "subscription response", err: errors.New("bad jsonrpc")},
+			want: []string{
+				"ERROR: the Swarm runtime at 127.0.0.1:8081 returned an invalid API response.",
+				"Check the selected target with `swarm context current`; override with --api-server.",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formatCLIAPIError(tc.err)
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("diagnostic = %q, want substring %q", got, want)
+				}
+			}
+			for _, forbidden := range []string{"v1 RPC", "v1 WS", "/v1/rpc", "/v1/ws", "Post ", "dial tcp", "connection refused"} {
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("diagnostic = %q, must not leak %q", got, forbidden)
+				}
+			}
+		})
+	}
+}
+
+func TestCLIAPITransportDiagnosticPreservesWrapperContext(t *testing.T) {
+	err := fmt.Errorf("scenario.yaml: step 2: %w", &cliAPITransportError{
+		surface:   "runtime API",
+		endpoint:  "http://127.0.0.1:1/v1/rpc",
+		operation: "request",
+		err:       errors.New("connection refused"),
+	})
+
+	got := formatCLIAPIError(err)
+	for _, want := range []string{
+		"ERROR: scenario.yaml: step 2: cannot reach the Swarm runtime at 127.0.0.1:1.",
+		"Is the runtime running?",
+		"Check the selected target with `swarm context current`; override with --api-server.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diagnostic = %q, want substring %q", got, want)
+		}
+	}
+	for _, forbidden := range []string{"runtime API request failed", "connection refused", "/v1/rpc"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("diagnostic = %q, must not leak %q", got, forbidden)
+		}
+	}
+
+	detail := formatCLIAPITransportDetail(err)
+	if want := "scenario.yaml: step 2: cannot reach the Swarm runtime at 127.0.0.1:1."; detail != want {
+		t.Fatalf("detail = %q, want %q", detail, want)
 	}
 }
 

@@ -76,6 +76,7 @@ type runTraceNotification struct {
 
 type runTraceSubscription struct {
 	conn           *websocket.Conn
+	endpoint       string
 	subscriptionID string
 	rows           chan diagnosticRunTraceRow
 	errs           chan error
@@ -126,12 +127,12 @@ func runCommandChangedFlags(cmd *cobra.Command) map[string]bool {
 
 func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts runCommandOptions) error {
 	if err := opts.validate(); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
 	}
 	apiOpts, wsEndpoint, err := opts.runtimeEndpoints()
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
 	}
 	apiOpts.disableLocalTargeting = true
@@ -143,7 +144,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 
 	payload, err := loadRunCommandPayload(opts.payloadPath)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
 	}
 
@@ -153,16 +154,16 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		var err error
 		opts, err = opts.withLocalForegroundServeAuth()
 		if err != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 		if _, err := newCLIAPIClient(opts.apiOptions); err != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 		stopLocal, err = startLocalRunServe(ctx, repo, opts)
 		if err != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
 		defer stopLocal()
@@ -170,12 +171,12 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	health, err := runCommandHealth(ctx, client)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	if expected := strings.TrimSpace(opts.bundleFingerprint); expected != "" && expected != health.Bundle.Fingerprint {
@@ -185,7 +186,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 	traceReplaySince := time.Now().UTC()
 	start, err := runCommandStart(ctx, client, health, opts, payload)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	writeRunCommandStarted(out, start)
@@ -542,13 +543,13 @@ func validateRunStartResult(result runStartResult) error {
 func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runCommandOptions, wsEndpoint string) error {
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	runID := strings.TrimSpace(opts.reattachRunID)
 	run, err := runCommandGet(ctx, client, runID)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	if runCommandTerminalStatus(run.Status) {
@@ -562,7 +563,7 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool) error {
 	sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince, nil)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	defer sub.close()
@@ -578,7 +579,8 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		case <-ctx.Done():
 			if stopOnInterrupt {
 				if err := runCommandStop(context.Background(), client, runID); err != nil {
-					fmt.Fprintf(errOut, "interrupted; run.stop failed: %v\n", err)
+					fmt.Fprintln(errOut, "interrupted; run.stop failed")
+					writeCLIAPIError(errOut, err)
 					return commandExitError{code: 130}
 				}
 			}
@@ -596,13 +598,13 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			writeRunCommandTraceRow(out, row)
 		case err := <-sub.errs:
 			if err != nil {
-				fmt.Fprintln(errOut, err)
+				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
 		case <-ticker.C:
 			run, err := runCommandGet(ctx, client, runID)
 			if err != nil {
-				fmt.Fprintln(errOut, err)
+				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
 			if runCommandTerminalStatus(run.Status) {
@@ -615,9 +617,12 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 
 func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, replaySince *time.Time, extraParams map[string]any) (*runTraceSubscription, error) {
 	header := http.Header{"Authorization": []string{"Bearer " + token}}
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
-		return nil, fmt.Errorf("v1 WS dial failed: %w", err)
+		if resp != nil {
+			return nil, cliAPIWebSocketHTTPError("runtime event stream", wsEndpoint, resp)
+		}
+		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "dial", err: err}
 	}
 	requestID := "swarm-cli:" + runCommandMethodSubscribeTrace
 	params := map[string]any{"run_id": runID}
@@ -634,20 +639,20 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 		Params:  params,
 	}); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("write run.subscribe_trace request: %w", err)
+		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription request", err: err}
 	}
 	var envelope jsonRPCResponse
-	if err := conn.ReadJSON(&envelope); err != nil {
+	if err := cliAPIReadWebSocketJSON(conn, "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("read run.subscribe_trace response: %w", err)
+		return nil, err
 	}
 	if envelope.JSONRPC != "2.0" {
 		conn.Close()
-		return nil, fmt.Errorf("malformed run.subscribe_trace response: jsonrpc=%q", envelope.JSONRPC)
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("jsonrpc=%q", envelope.JSONRPC)}
 	}
 	if id, ok := envelope.ID.(string); !ok || id != requestID {
 		conn.Close()
-		return nil, fmt.Errorf("malformed run.subscribe_trace response: id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)}
 	}
 	if envelope.Error != nil {
 		conn.Close()
@@ -656,14 +661,15 @@ func subscribeRunTrace(ctx context.Context, wsEndpoint, token, runID string, rep
 	var result runTraceSubscriptionResult
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("decode run.subscribe_trace result: %w", err)
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: err}
 	}
 	if strings.TrimSpace(result.SubscriptionID) == "" {
 		conn.Close()
-		return nil, fmt.Errorf("malformed run.subscribe_trace result: subscription_id is required")
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: fmt.Errorf("subscription_id is required")}
 	}
 	sub := &runTraceSubscription{
 		conn:           conn,
+		endpoint:       wsEndpoint,
 		subscriptionID: result.SubscriptionID,
 		rows:           make(chan diagnosticRunTraceRow, 16),
 		errs:           make(chan error, 1),
@@ -676,24 +682,24 @@ func (s *runTraceSubscription) readLoop() {
 	defer close(s.rows)
 	for {
 		var notification runTraceNotification
-		if err := s.conn.ReadJSON(&notification); err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || strings.Contains(err.Error(), "use of closed network connection") {
+		if err := cliAPIReadWebSocketJSON(s.conn, "runtime event stream", s.endpoint, "notification read", &notification); err != nil {
+			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}
-			s.reportError(fmt.Errorf("read run.subscribe_trace notification: %w", err))
+			s.reportError(err)
 			return
 		}
 		if notification.JSONRPC != "2.0" || notification.Method != "rpc.subscription" {
-			s.reportError(fmt.Errorf("malformed run.subscribe_trace notification"))
+			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("malformed run.subscribe_trace notification")})
 			return
 		}
 		if notification.Params.Subscription != s.subscriptionID {
-			s.reportError(fmt.Errorf("malformed run.subscribe_trace notification: subscription mismatch"))
+			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("subscription mismatch")})
 			return
 		}
 		row := notification.Params.Result
 		if err := validateRunCommandTraceRow(row); err != nil {
-			s.reportError(err)
+			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: err})
 			return
 		}
 		select {

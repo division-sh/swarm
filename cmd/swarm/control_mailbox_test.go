@@ -540,7 +540,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "malformed response",
@@ -548,7 +548,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 				_, _ = w.Write([]byte(`{`))
 			},
 			wantCode:   3,
-			wantStderr: "decode JSON-RPC response",
+			wantStderr: "returned an invalid API response",
 		},
 		{
 			name: "malformed result",
@@ -570,7 +570,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 				})
 			},
 			wantCode:   3,
-			wantStderr: "malformed JSON-RPC response: id",
+			wantStderr: "returned an invalid API response",
 		},
 		{
 			name: "missing json rpc id",
@@ -586,7 +586,7 @@ func TestMailboxSurfacesTransportAndRPCFailures(t *testing.T) {
 				})
 			},
 			wantCode:   3,
-			wantStderr: "malformed JSON-RPC response: id=<missing>",
+			wantStderr: "returned an invalid API response",
 		},
 		{
 			name: "json rpc application error",
@@ -648,7 +648,7 @@ func TestMailboxReadCommandsFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "list malformed missing items",

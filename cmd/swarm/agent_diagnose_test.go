@@ -164,7 +164,7 @@ func TestAgentDiagnoseFailClosedOnRPCAndMalformedResponses(t *testing.T) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
 			wantCode:   cliExitAuth,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "agent not found",

@@ -104,23 +104,23 @@ func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 func runEventPublishCommand(ctx context.Context, out, errOut io.Writer, args []string, opts eventPublishCommandOptions) error {
 	eventName, params, err := opts.params(args)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventPublishExitValidation}
 	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventPublishErrorExitCode(err)}
 	}
 
 	var result eventPublishResult
 	if err := client.call(ctx, eventPublishMethod, params, &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventPublishErrorExitCode(err)}
 	}
 	if err := validateEventPublishResult(result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventPublishExitRuntime}
 	}
 	writeEventPublishResult(out, eventName, result)

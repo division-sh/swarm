@@ -223,7 +223,7 @@ func TestLogsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "http runtime exits three",
@@ -232,7 +232,7 @@ func TestLogsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 				http.Error(w, "unavailable", http.StatusServiceUnavailable)
 			},
 			wantCode:   3,
-			wantStderr: "v1 RPC HTTP 503",
+			wantStderr: "returned status 503",
 		},
 		{
 			name: "unknown rpc error exits three",
@@ -464,7 +464,7 @@ func TestLogsFollowMapsHandshakeAuthToAuthExit(t *testing.T) {
 	if wsCalls.Load() != 1 {
 		t.Fatalf("ws calls = %d, want 1", wsCalls.Load())
 	}
-	if !strings.Contains(stderr.String(), "v1 WS HTTP 401") {
+	if !strings.Contains(stderr.String(), "rejected the request with status 401") {
 		t.Fatalf("stderr = %q, want WS auth status", stderr.String())
 	}
 }
