@@ -197,8 +197,8 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	if graph.FlowID != "support" || graph.FlowPath != "support" {
 		t.Fatalf("graph identity = %#v, want support namespace", graph)
 	}
-	if len(graph.Nodes) != 3 {
-		t.Fatalf("graph nodes = %#v, want waiting/active/done", graph.Nodes)
+	if len(graph.Nodes) != 5 {
+		t.Fatalf("graph nodes = %#v, want waiting/active/review/timed_out/done", graph.Nodes)
 	}
 	if !graph.Nodes[0].Initial || graph.Nodes[0].ID != "waiting" {
 		t.Fatalf("first graph node = %#v, want waiting initial", graph.Nodes[0])
@@ -216,13 +216,27 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		t.Fatalf("graph edges missing: %#v", graph)
 	}
 	var foundOpenedAdvance bool
+	var foundAccumulateComplete bool
+	var foundAccumulateTimeout bool
 	for _, edge := range graph.Edges {
 		if edge.Source == "handler.advances_to" && edge.NodeID == "support-node" && edge.EventType == "ticket.opened" && edge.To == "active" {
 			foundOpenedAdvance = true
 		}
+		if edge.Source == "handler.accumulate.on_complete" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "review" {
+			foundAccumulateComplete = true
+		}
+		if edge.Source == "handler.accumulate.on_timeout" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "timed_out" {
+			foundAccumulateTimeout = true
+		}
 	}
 	if !foundOpenedAdvance {
 		t.Fatalf("graph edges = %#v, want ticket.opened handler.advances_to edge to active", graph.Edges)
+	}
+	if !foundAccumulateComplete {
+		t.Fatalf("graph edges = %#v, want ticket.closed handler.accumulate.on_complete edge to review", graph.Edges)
+	}
+	if !foundAccumulateTimeout {
+		t.Fatalf("graph edges = %#v, want ticket.closed handler.accumulate.on_timeout edge to timed_out", graph.Edges)
 	}
 
 	stdout.Reset()
@@ -242,9 +256,36 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"waiting [initial]",
 		"done [terminal]",
 		"handler.advances_to support-node on ticket.opened",
+		"handler.accumulate.on_complete support-node on ticket.closed",
+		"handler.accumulate.on_timeout support-node on ticket.closed",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestVerifyCommandAcceptsAccumulatorTransitionCarrierFixture(t *testing.T) {
+	contractsRoot := writeDescribeStageGraphContracts(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"verify",
+		"--contracts", contractsRoot,
+		"--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("verify --json stderr = %q, want empty", stderr.String())
+	}
+	output := decodeOutputJSON[verifyCommandResult](t, stdout.String())
+	if !output.OK {
+		t.Fatalf("verify --json output = %#v, want ok", output)
+	}
+	for _, warning := range output.Warnings {
+		if warning.CheckID == "semantic_drift_unreachable_state" && (strings.Contains(warning.Message, "review") || strings.Contains(warning.Message, "timed_out")) {
+			t.Fatalf("verify warnings = %#v, want accumulator carrier states reachable", output.Warnings)
 		}
 	}
 }
@@ -313,6 +354,8 @@ stages:
   waiting:
     initial: true
   active: {}
+  review: {}
+  timed_out: {}
   done:
     terminal: true
 `)
@@ -321,9 +364,16 @@ stages:
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 ticket.opened:
+  swarm:
+    source: external
   entity_id: string
 ticket.closed:
+  swarm:
+    source: external
   entity_id: string
+accumulate.timeout:
+  swarm:
+    source: platform
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
 ticket: {}
@@ -341,6 +391,14 @@ support-node:
       advances_to: active
     ticket.closed:
       advances_to: done
+      accumulate:
+        completion: timeout
+        timeout_ms: 1000
+        on_complete:
+          - condition: "true"
+            advances_to: review
+        on_timeout:
+          advances_to: timed_out
 `)
 	return root
 }

@@ -1642,28 +1642,7 @@ func validationFlowLabel(flowID string) string {
 }
 
 func handlerAdvanceTargets(handler runtimecontracts.SystemNodeEventHandler) []string {
-	out := make([]string, 0, 8)
-	if target := strings.TrimSpace(handler.AdvancesTo); target != "" {
-		out = append(out, target)
-	}
-	for _, rule := range handler.Rules {
-		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
-			out = append(out, target)
-		}
-	}
-	for _, rule := range handler.OnComplete {
-		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
-			out = append(out, target)
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
-				out = append(out, target)
-			}
-		}
-	}
-	return out
+	return runtimecontracts.HandlerAdvanceTargets(handler)
 }
 
 func uniqueFindings(items []Finding) []Finding {

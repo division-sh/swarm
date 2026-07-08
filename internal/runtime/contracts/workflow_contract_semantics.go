@@ -307,7 +307,7 @@ func sortedGuardActionEntries(entries map[string]GuardActionEntry) []GuardAction
 	return out
 }
 func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
-	to := strings.TrimSpace(transition.AdvancesTo)
+	to := handlerLevelAdvanceTarget(transition)
 	if to == "" {
 		return WorkflowTransitionContract{}, false
 	}
@@ -328,43 +328,70 @@ func deriveWorkflowTransitionContract(transition HandlerTransitionSemantic) (Wor
 	return out, strings.TrimSpace(out.ID) != "" && strings.TrimSpace(out.Trigger) != ""
 }
 
+func handlerLevelAdvanceTarget(transition HandlerTransitionSemantic) string {
+	for _, carrier := range HandlerTransitionAdvanceCarriers(transition) {
+		if carrier.Kind == HandlerAdvanceCarrierHandler {
+			return strings.TrimSpace(carrier.AdvancesTo)
+		}
+	}
+	return ""
+}
+
 func deriveAccumulateTimeoutTransition(transition HandlerTransitionSemantic) (WorkflowTransitionContract, bool) {
-	if transition.Accumulate == nil || transition.Accumulate.OnTimeout == nil {
-		return WorkflowTransitionContract{}, false
+	for _, carrier := range HandlerTransitionAdvanceCarriers(transition) {
+		if carrier.Kind != HandlerAdvanceCarrierAccumulateOnTimeout {
+			continue
+		}
+		return WorkflowTransitionContract{
+			ID:      strings.TrimSpace(transition.ID) + ":on_timeout",
+			From:    []string{"*"},
+			To:      strings.TrimSpace(carrier.AdvancesTo),
+			Trigger: "accumulate.timeout",
+			Node:    strings.TrimSpace(transition.NodeID),
+		}, true
 	}
-	to := strings.TrimSpace(transition.Accumulate.OnTimeout.AdvancesTo)
-	if to == "" {
-		return WorkflowTransitionContract{}, false
-	}
-	return WorkflowTransitionContract{
-		ID:      strings.TrimSpace(transition.ID) + ":on_timeout",
-		From:    []string{"*"},
-		To:      to,
-		Trigger: "accumulate.timeout",
-		Node:    strings.TrimSpace(transition.NodeID),
-	}, true
+	return WorkflowTransitionContract{}, false
 }
 
 func deriveRuleTransitions(transition HandlerTransitionSemantic) []WorkflowTransitionContract {
-	rules := append([]HandlerRuleEntry{}, transition.OnComplete...)
-	if len(rules) == 0 && transition.Accumulate != nil {
-		rules = append(rules, transition.Accumulate.OnComplete...)
-	}
-	nonHandlerRuleCount := len(rules)
-	rules = append(rules, transition.Rules...)
-	out := make([]WorkflowTransitionContract, 0, len(rules))
-	for idx, rule := range rules {
-		to := strings.TrimSpace(rule.AdvancesTo)
-		if to == "" && idx >= nonHandlerRuleCount && strings.TrimSpace(rule.Action.ID) != "" {
-			to = strings.TrimSpace(transition.AdvancesTo)
+	carriers := HandlerTransitionAdvanceCarriers(transition)
+	out := make([]WorkflowTransitionContract, 0, len(carriers))
+	defaultIDIndex := 0
+	for _, carrier := range carriers {
+		switch carrier.Kind {
+		case HandlerAdvanceCarrierOnComplete, HandlerAdvanceCarrierRules, HandlerAdvanceCarrierAccumulateOnComplete:
+		default:
+			continue
 		}
+		rule := carrier.Rule
+		id := strings.TrimSpace(rule.ID)
+		if id == "" {
+			id = fmt.Sprintf("%s:rule:%d", strings.TrimSpace(transition.ID), defaultIDIndex)
+		}
+		defaultIDIndex++
+		out = append(out, WorkflowTransitionContract{
+			ID:      id,
+			From:    []string{"*"},
+			To:      strings.TrimSpace(carrier.AdvancesTo),
+			Trigger: strings.TrimSpace(transition.EventType),
+			Node:    strings.TrimSpace(transition.NodeID),
+			Actions: actionIDsForRule(rule),
+		})
+	}
+	handlerAdvanceTo := handlerLevelAdvanceTarget(transition)
+	for _, rule := range transition.Rules {
+		if strings.TrimSpace(rule.AdvancesTo) != "" || strings.TrimSpace(rule.Action.ID) == "" {
+			continue
+		}
+		to := handlerAdvanceTo
 		if to == "" {
 			continue
 		}
 		id := strings.TrimSpace(rule.ID)
 		if id == "" {
-			id = fmt.Sprintf("%s:rule:%d", strings.TrimSpace(transition.ID), idx)
+			id = fmt.Sprintf("%s:rule:%d", strings.TrimSpace(transition.ID), defaultIDIndex)
 		}
+		defaultIDIndex++
 		out = append(out, WorkflowTransitionContract{
 			ID:      id,
 			From:    []string{"*"},

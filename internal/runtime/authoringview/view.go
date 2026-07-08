@@ -514,12 +514,8 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 					from = []string{strings.TrimSpace(initial)}
 				}
 			}
-			edges = appendStageGraphEdge(edges, from, handler.AdvancesTo, stateSet, "handler.advances_to", nodeID, eventType)
-			for _, rule := range handler.OnComplete {
-				edges = appendStageGraphEdge(edges, from, rule.AdvancesTo, stateSet, "handler.on_complete", nodeID, eventType)
-			}
-			for _, rule := range handler.Rules {
-				edges = appendStageGraphEdge(edges, from, rule.AdvancesTo, stateSet, "handler.rules", nodeID, eventType)
+			for _, carrier := range runtimecontracts.HandlerAdvanceCarriers(handler) {
+				edges = appendStageGraphEdge(edges, from, carrier.AdvancesTo, stateSet, carrier.Source(), nodeID, eventType)
 			}
 		}
 	}
