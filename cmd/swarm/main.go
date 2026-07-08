@@ -1114,7 +1114,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, contractsRoot, bundle, source, rt, opts.Dev)
 	if len(pinnedBundleHashes) > 0 {
-		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is split to RuntimeContextManager Load/Unload work")
+		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
 	defer func() {
 		if err := closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], opts); err != nil {
@@ -3347,7 +3347,7 @@ func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBun
 	if profile.ID != llmselection.BackendClaudeCLI {
 		return nil
 	}
-	return fmt.Errorf("multi-context swarm serve --bundle-hash with llm.backend=claude_cli is unsupported by #1568 first-slice source authority: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context until a separately gated context-aware gateway router exists; use one --bundle-hash or a non-claude_cli backend")
+	return fmt.Errorf("multi-context swarm serve --bundle-hash with llm.backend=claude_cli is not supported in this configuration: ToolGatewayBinding, MCP /mcp and /tools routes, and forkchat sandbox runtime are single-context; use one --bundle-hash or a non-claude_cli backend")
 }
 
 var retiredToolGatewayURLEnvNames = []string{"SWARM_TOOL_GATEWAY_URL", "SWARM_TOOL_GATEWAY_CONTAINER_URL"}

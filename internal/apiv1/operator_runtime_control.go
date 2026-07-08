@@ -42,7 +42,7 @@ func OperatorRuntimeControlHandlers(opts OperatorReadOptions) map[string]MethodH
 
 func executeRuntimeIngressControl(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time, pause bool) (any, error) {
 	if multiRuntimeContextMode(opts) {
-		return nil, runtimeContextRequiredError(req.Method, "runtime ingress control is ambiguous in multi-context DB-loaded mode; dynamic per-context runtime control is split to #1176")
+		return nil, runtimeContextRequiredError(req.Method, "runtime ingress control is not supported in multi-context DB-loaded mode without an explicit runtime context")
 	}
 	idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
 	if err != nil {

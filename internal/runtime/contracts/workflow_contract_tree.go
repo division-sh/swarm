@@ -107,7 +107,7 @@ func normalizeAgentRegistryEntries(entries map[string]AgentRegistryEntry, source
 func validateAgentRegistryMapKey(key, sourceFile string) error {
 	switch strings.TrimSpace(key) {
 	case "agent_defaults", "agent_profiles", "profiles":
-		return fmt.Errorf("UNSUPPORTED: %s key %q is reserved for a later #1685 gate and is not accepted by Layer 1 platform defaults", strings.TrimSpace(sourceFile), key)
+		return fmt.Errorf("UNSUPPORTED: %s key %q is reserved for future platform-defaults support and is not accepted by Layer 1 platform defaults", strings.TrimSpace(sourceFile), key)
 	default:
 		return nil
 	}

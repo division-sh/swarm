@@ -563,7 +563,7 @@ func validateLocalContextEntry(ctx context.Context, entry localContextEntry, cal
 	desc := entry.Descriptor
 	if desc.Transport == localContextTransportUnix {
 		entry.Status = localContextStatusUnsupportedTransport
-		entry.Detail = "unix descriptor is schema-valid but IPC dialing is split to #1576"
+		entry.Detail = "unix descriptor is schema-valid but IPC dialing is not supported yet"
 		return entry
 	}
 	rpcEndpoint, err := cliAPIRPCEndpointFromServer(desc.APIServer, "descriptor api_server")

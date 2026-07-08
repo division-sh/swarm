@@ -553,7 +553,8 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		return swarmEnvCatalogEntry{Prefix: prefix, Category: category, Owner: owner, Migration: migration, Message: message, Remediation: remediation}
 	}
 	seeded := func(name, owner, migration string) swarmEnvCatalogEntry {
-		return e(name, swarmEnvCategorySeededLegacy, owner, migration, "", "migrate "+name+" through "+migration+" and then remove it from the seeded accepted set")
+		target := swarmEnvUserFacingMigrationTarget(name, migration)
+		return e(name, swarmEnvCategorySeededLegacy, owner, migration, "", "migrate "+name+" to "+target+" and then remove it from the seeded accepted set")
 	}
 	retired := func(name, message, remediation string) swarmEnvCatalogEntry {
 		return e(name, swarmEnvCategoryKnownRetired, swarmEnvAuthorityOwner, "retired", message, remediation)
@@ -596,7 +597,7 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 	retiredUnsupported := func(name string) swarmEnvCatalogEntry {
 		return retired(
 			name,
-			name+" is retired; this Claude CLI control has no supported replacement and is tracked by #1803",
+			name+" is retired; this Claude CLI control has no supported replacement",
 			"unset "+name+"; no supported replacement exists for this inert/unsupported Claude CLI control",
 		)
 	}
@@ -694,4 +695,18 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		retired("SWARM_BUILDER_AUTH_TOKEN", "SWARM_BUILDER_AUTH_TOKEN is not accepted as API auth fallback", "use token files, context descriptor auth, or configured auth sources"),
 		retired("SWARM_OPERATOR_AUTH_TOKEN", "SWARM_OPERATOR_AUTH_TOKEN is not accepted as API auth fallback", "use token files, context descriptor auth, or configured auth sources"),
 	}
+}
+
+func swarmEnvUserFacingMigrationTarget(name, migration string) string {
+	switch strings.TrimSpace(name) {
+	case "SWARM_API_LISTEN_ADDR":
+		return "serve_api_listen_addr or --api-listen-addr"
+	case "SWARM_MCP_LISTEN_ADDR":
+		return "serve_mcp_listen_addr or --mcp-listen-addr"
+	}
+	parts := strings.Fields(strings.TrimSpace(migration))
+	if len(parts) > 1 && strings.HasPrefix(parts[0], "#") {
+		return strings.Join(parts[1:], " ")
+	}
+	return strings.TrimSpace(migration)
 }

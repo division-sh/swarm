@@ -207,7 +207,7 @@ func executeMailboxDecision(ctx context.Context, req Request, opts OperatorReadO
 	action := strings.ToLower(strings.TrimSpace(decision.Action))
 	if action == "approved" || action == "approve" {
 		if multiRuntimeContextMode(opts) {
-			return nil, runtimeContextRequiredError(req.Method, "mailbox approval event publishing is ambiguous in multi-context DB-loaded mode; per-context mailbox approval routing is split to #1176")
+			return nil, runtimeContextRequiredError(req.Method, "mailbox approval event publishing is not supported in multi-context DB-loaded mode without an explicit runtime context")
 		}
 		mutationPublisher, ok := opts.Events.(EventMutationPublisher)
 		if !ok || mutationPublisher == nil {

@@ -6672,7 +6672,7 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 			name:        "multi context claude backend fails closed",
 			cfg:         claudeCfg,
 			loaded:      twoContexts,
-			wantErr:     "multi-context swarm serve --bundle-hash with llm.backend=claude_cli is unsupported",
+			wantErr:     "multi-context swarm serve --bundle-hash with llm.backend=claude_cli is not supported in this configuration",
 			wantDetails: true,
 		},
 		{
@@ -6696,7 +6696,7 @@ func TestValidateServeMultiContextToolGatewayAdmission(t *testing.T) {
 				t.Fatalf("validateServeMultiContextToolGatewayAdmission err = %v, want %q", err, tt.wantErr)
 			}
 			if tt.wantDetails {
-				for _, want := range []string{"ToolGatewayBinding", "MCP /mcp and /tools routes", "forkchat sandbox runtime", "context-aware gateway router"} {
+				for _, want := range []string{"ToolGatewayBinding", "MCP /mcp and /tools routes", "forkchat sandbox runtime", "single-context"} {
 					if !strings.Contains(err.Error(), want) {
 						t.Fatalf("admission error missing %q:\n%s", want, err.Error())
 					}
@@ -6839,7 +6839,7 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 		"ToolGatewayBinding",
 		"MCP /mcp and /tools routes",
 		"forkchat sandbox runtime",
-		"context-aware gateway router",
+		"single-context",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("serve output missing %q:\n%s", want, out.String())
