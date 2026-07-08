@@ -18,7 +18,7 @@ const (
 	cliExitInterrupted = 130
 )
 
-var errCLIAPITokenRequired = errors.New("API token source is required for non-loopback API targets; use --api-token-file, context descriptor auth, or config api_token_file")
+var errCLIAPITokenRequired = errors.New("API token source is required for non-loopback API targets; use --api-token-file, context descriptor auth, or config connection.api_token_file")
 
 type cliAPIErrorClassifier struct {
 	runtimeExit   int
@@ -58,6 +58,10 @@ func cliAPIErrorExitCode(err error, classifier cliAPIErrorClassifier) int {
 	}
 	var validationErr *cliAPIValidationError
 	if errors.As(err, &validationErr) {
+		return cliExitValidation
+	}
+	var configErr unifiedConfigError
+	if errors.As(err, &configErr) {
 		return cliExitValidation
 	}
 	var httpErr *cliAPIHTTPError

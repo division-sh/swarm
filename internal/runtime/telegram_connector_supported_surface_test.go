@@ -255,9 +255,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	if got := countTelegramConnectorSupportedSurfaceActivityAttemptsForEvent(t, backend, "123456790"); got != 0 {
 		t.Fatalf("%s missing-token activity attempts = %d, want 0", backend.name, got)
 	}
-	if got := countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t, backend, "123456790"); got != 1 {
-		t.Fatalf("%s missing-token generated failure events = %d, want 1", backend.name, got)
-	}
+	requireTelegramConnectorSupportedSurfaceFailureEventEventually(t, backend, "123456790")
 	assertTelegramConnectorSupportedSurfaceNoStoredSecret(t, backend, "provider-secret")
 }
 
@@ -725,6 +723,23 @@ func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, b
 		t.Fatalf("%s count failure events for provider event %s: %v", backend.name, providerEventID, err)
 	}
 	return count
+}
+
+func requireTelegramConnectorSupportedSurfaceFailureEventEventually(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, providerEventID string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	last := 0
+	for {
+		if got := countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t, backend, providerEventID); got == 1 {
+			return
+		} else {
+			last = got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s missing-token generated failure events = %d, want 1; diagnostics: %s", backend.name, last, telegramConnectorSupportedSurfaceDiagnostics(t, backend))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func requireTelegramConnectorSupportedSurfaceEventEventually(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, eventID, eventType string) {

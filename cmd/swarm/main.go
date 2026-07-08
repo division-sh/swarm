@@ -797,7 +797,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	runtimeInstanceID := uuid.NewString()
 	reporter := newServeBootReporter(opts.Verbose, opts.Output)
 	reporter.emit(1, "process_start", "ok", "")
-	apiAuth, err := resolveServeAPIAuth(opts)
+	apiAuth, err := resolveServeAPIAuth(repo, opts)
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
 		log.Printf("configure v1 api auth: %v", err)
@@ -809,11 +809,12 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 		return 1
 	}
 	if apiAuth.UsesDefaultLoopbackToken() {
-		log.Print("using built-in dev API token on numeric loopback; use swarm serve --api-token-file or config serve_api_token_file before exposing")
+		log.Print("using built-in dev API token on numeric loopback; use swarm serve --api-token-file or config serve.api_token_file before exposing")
 	}
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
 		PlatformSpecPath: opts.PlatformSpecPath,
+		ConfigPath:       opts.ConfigPath,
 	})
 	if err != nil {
 		reporter.emit(2, "config_load", "FAILED", err.Error())
@@ -1349,6 +1350,7 @@ type verifyFindingOutput struct {
 type verifyCommandOptions struct {
 	contractsPath    string
 	platformSpecPath string
+	configPath       string
 	output           cliOutputOptions
 	logging          cliLoggingOptions
 }
@@ -1379,6 +1381,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,
+		ConfigPath:       opts.configPath,
 	})
 	if err != nil {
 		if errOut != nil {
@@ -2413,9 +2416,11 @@ type runtimeConfigLoadOptions struct {
 }
 
 type runtimeConfigLoadResult struct {
-	Config *config.Config
-	Source string
-	Path   string
+	Config      *config.Config
+	Source      string
+	Path        string
+	Layers      []unifiedConfigLayer
+	Diagnostics []unifiedConfigDiagnostic
 }
 
 func (r runtimeConfigLoadResult) Detail() string {
@@ -2439,60 +2444,21 @@ func loadRuntimeConfig(path string) (*config.Config, error) {
 }
 
 func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigLoadResult, error) {
-	if err := rejectUnsupportedRuntimeControlEnv(); err != nil {
-		return runtimeConfigLoadResult{}, err
+	loaded, err := loadUnifiedConfig(unifiedConfigLoadOptions{
+		RepoRoot:        opts.RepoRoot,
+		ExplicitPath:    opts.ExplicitPath,
+		BackendOverride: opts.BackendOverride,
+	})
+	result := runtimeConfigLoadResult{
+		Config:      loaded.Config,
+		Source:      loaded.Source,
+		Path:        loaded.Path,
+		Layers:      loaded.Layers,
+		Diagnostics: loaded.Diagnostics,
 	}
-	if err := llmselection.RejectRetiredEnvBackend(os.LookupEnv); err != nil {
-		return runtimeConfigLoadResult{}, err
+	if err != nil {
+		return result, err
 	}
-	if err := llmselection.RejectRetiredEnvRuntimeMode(os.LookupEnv); err != nil {
-		return runtimeConfigLoadResult{}, err
-	}
-	if err := llmselection.RejectRetiredOpenAICompatibleBaseURLEnv(os.LookupEnv); err != nil {
-		return runtimeConfigLoadResult{}, err
-	}
-	if err := llmselection.RejectRetiredModelEnv(os.LookupEnv); err != nil {
-		return runtimeConfigLoadResult{}, err
-	}
-
-	explicitPath := strings.TrimSpace(opts.ExplicitPath)
-	var result runtimeConfigLoadResult
-	var cfg *config.Config
-	backendOverride := strings.TrimSpace(opts.BackendOverride)
-	if explicitPath != "" {
-		path := resolvePath(opts.RepoRoot, explicitPath)
-		loaded, err := config.LoadWithOptions(path, config.LoadOptions{BackendOverride: backendOverride})
-		if err != nil {
-			return runtimeConfigLoadResult{}, fmt.Errorf("load %s: %w", path, err)
-		}
-		cfg = loaded
-		result.Source = "explicit"
-		result.Path = path
-	} else if path, ok, err := executableAdjacentRuntimeConfigPath(); err != nil {
-		return runtimeConfigLoadResult{}, err
-	} else if ok {
-		loaded, err := config.LoadWithOptions(path, config.LoadOptions{BackendOverride: backendOverride})
-		if err != nil {
-			return runtimeConfigLoadResult{}, fmt.Errorf("load %s: %w", path, err)
-		}
-		cfg = loaded
-		result.Source = "executable"
-		result.Path = path
-	} else {
-		loaded, err := defaultRuntimeConfig()
-		if err != nil {
-			return runtimeConfigLoadResult{}, err
-		}
-		cfg = loaded
-		result.Source = "built-in default"
-	}
-	if backendOverride != "" && result.Source == "built-in default" {
-		cfg.LLM.Backend = backendOverride
-		if err := cfg.Validate(); err != nil {
-			return runtimeConfigLoadResult{}, err
-		}
-	}
-	result.Config = cfg
 	return result, nil
 }
 
@@ -3189,7 +3155,7 @@ func validateServeAPIAuthBinding(apiListenAddr string, auth apiv1.AuthTokenResol
 	if apiv1.DefaultLoopbackAPITokenAllowedHost(host) {
 		return nil
 	}
-	return fmt.Errorf("non-loopback API bind %s requires --api-token-file or config serve_api_token_file", strings.TrimSpace(apiListenAddr))
+	return fmt.Errorf("non-loopback API bind %s requires --api-token-file or config serve.api_token_file", strings.TrimSpace(apiListenAddr))
 }
 
 func listenServeHTTPListener(name, addr string) (net.Listener, error) {

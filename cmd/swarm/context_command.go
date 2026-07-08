@@ -113,7 +113,11 @@ func resolveSwarmDirForCommand(cmd *cobra.Command) (cliSwarmDirResolution, error
 		path, err := normalizeCLISwarmDir(swarmDirFlag, "--swarm-dir")
 		return cliSwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
-	cfg, err := loadCLIAPIConfigFile()
+	configPath, _, err := effectiveCommandConfigPath(cmd, "", false)
+	if err != nil {
+		return cliSwarmDirResolution{}, err
+	}
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{ExplicitPath: configPath})
 	if err != nil {
 		return cliSwarmDirResolution{}, err
 	}

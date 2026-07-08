@@ -14,8 +14,8 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	if got := scalarValue(mustMappingValue(t, authority, "promoted_by")); got != "#1804" {
 		t.Fatalf("unified config promoted_by = %q, want #1804", got)
 	}
-	if got := scalarValue(mustMappingValue(t, authority, "implementation_status")); got != "spec_lock_only" {
-		t.Fatalf("unified config implementation_status = %q, want spec_lock_only", got)
+	if got := scalarValue(mustMappingValue(t, authority, "implementation_status")); got != "parser_discovery_first_slice_implemented" {
+		t.Fatalf("unified config implementation_status = %q, want parser_discovery_first_slice_implemented", got)
 	}
 	if got := scalarValue(mustMappingValue(t, authority, "canonical_owner")); got != "platform-spec.yaml#configuration_source_authority.unified_swarm_config" {
 		t.Fatalf("unified config canonical owner = %q", got)
@@ -72,9 +72,6 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	for _, key := range []string{
 		"claude_api.default_model",
 		"claude_api.haiku_model",
-		"claude_cli.retries",
-		"claude_cli.no_session_persistence",
-		"claude_cli.use_tmux",
 		"openai_compatible.default_model",
 		"openai_compatible.low_cost_model",
 	} {
@@ -82,14 +79,23 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 			t.Fatalf("llm.%s = %q, want split_unsupported", key, got)
 		}
 	}
+	for _, key := range []string{
+		"claude_cli.retries",
+		"claude_cli.no_session_persistence",
+		"claude_cli.use_tmux",
+	} {
+		if got := scalarValue(mustMappingValue(t, llmKeys, key)); got != "project_safe" {
+			t.Fatalf("llm.%s = %q, want project_safe", key, got)
+		}
+	}
 	for _, want := range []string{"retired model-selection inputs", "keep rejecting", "llm.models"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")), want) {
 			t.Fatalf("retired model-selection rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")))
 		}
 	}
-	for _, want := range []string{"#1803", "inert or unsupported Claude CLI config", "MUST NOT accept"} {
-		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "inert_claude_cli_controls")), want) {
-			t.Fatalf("inert Claude CLI controls rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "inert_claude_cli_controls")))
+	for _, want := range []string{"#1803", "accepted as current wired Claude CLI config fields", "does not classify"} {
+		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")), want) {
+			t.Fatalf("Claude CLI controls cleanup rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")))
 		}
 	}
 
@@ -134,12 +140,15 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 
 	consumerMatrix := mustMappingValue(t, authority, "consumer_matrix")
 	wantConsumers := map[string]string{
-		"flat_cli_config":                       "superseded_by_unified_owner_implementation_split",
-		"runtime_config_loader":                 "consumed_by_unified_owner_implementation_split",
+		"flat_cli_config":                       "superseded_by_unified_owner_first_slice_implemented",
+		"xdg_config_yaml":                       "invalid_legacy_discovery_replaced_by_user_global_swarm_yaml_by_1858",
+		"runtime_config_loader":                 "consumed_by_unified_owner_first_slice_implemented",
+		"executable_adjacent_config_yaml":       "invalid_ambient_reader_removed_by_1858",
+		"env_guard_delegated_env_sources":       "consumed_by_unified_owner_first_slice_implemented",
 		"provider_triggers_packs_external_dirs": "consumed_by_unified_owner",
 		"sharding_inline_extension":             "split_unsupported_retired",
 		"llm_retired_model_selection_keys":      "split_unsupported_retired_use_llm.models",
-		"llm_claude_cli_inert_controls":         "split_unsupported_tracked_by_1803",
+		"llm_claude_cli_current_controls":       "accepted_current_schema_residual_cleanup_tracked_by_1803",
 		"context_descriptors":                   "different_semantic_owner_local_target_context_registry",
 		"token_and_secret_material":             "different_semantic_owner_secret_or_token_file_reference_only",
 	}

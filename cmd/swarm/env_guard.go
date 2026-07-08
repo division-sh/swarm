@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -196,11 +195,11 @@ func firstSwarmCommandArg(args []string) string {
 		if arg == "--" {
 			return ""
 		}
-		if arg == "--swarm-dir" {
+		if arg == "--swarm-dir" || arg == "--config" {
 			i++
 			continue
 		}
-		if strings.HasPrefix(arg, "--swarm-dir=") {
+		if strings.HasPrefix(arg, "--swarm-dir=") || strings.HasPrefix(arg, "--config=") {
 			continue
 		}
 		if strings.HasPrefix(arg, "-") {
@@ -304,38 +303,7 @@ func collectSwarmEnvFindings(ctx swarmEnvGuardContext) []swarmEnvFinding {
 }
 
 func delegatedSwarmEnvSources(repoRoot, runtimeConfigPath string) map[string]string {
-	out := map[string]string{}
-	path := runtimeConfigPathForEnvDelegation(repoRoot, runtimeConfigPath)
-	if path == "" {
-		return out
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return out
-	}
-	var cfg struct {
-		Database struct {
-			PasswordEnv string `yaml:"password_env"`
-		} `yaml:"database"`
-	}
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return out
-	}
-	if name := strings.TrimSpace(cfg.Database.PasswordEnv); strings.HasPrefix(name, "SWARM_") {
-		out[name] = "database.password_env"
-	}
-	return out
-}
-
-func runtimeConfigPathForEnvDelegation(repoRoot, explicitPath string) string {
-	if path := strings.TrimSpace(explicitPath); path != "" {
-		return resolvePath(repoRoot, path)
-	}
-	path, ok, err := executableAdjacentRuntimeConfigPath()
-	if err != nil || !ok {
-		return ""
-	}
-	return path
+	return unifiedConfigDelegatedSwarmEnvSources(repoRoot, runtimeConfigPath)
 }
 
 func visibleSwarmEnvNames() []string {
@@ -605,19 +573,19 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		return e(name, swarmEnvCategoryTestQuarantine, swarmEnvAuthorityOwner, "test/debug quarantine", "", "")
 	}
 	return []swarmEnvCatalogEntry{
-		e("SWARM_CONFIG", swarmEnvCategoryBootstrap, "platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file", "keep bootstrap locator", "", ""),
-		retired("SWARM_API_SERVER", "client-side API environment sources are no longer accepted: SWARM_API_SERVER", "use --api-server, --context, project/selected context, or config api_server"),
-		retired("SWARM_API_TOKEN", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN", "use --api-token-file, context descriptor auth, config api_token_file, or serve_api_token_file for server auth"),
-		retired("SWARM_API_TOKEN_FILE", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN_FILE", "use --api-token-file, context descriptor auth, or config api_token_file"),
+		e("SWARM_CONFIG", swarmEnvCategoryBootstrap, unifiedConfigOwner, "keep bootstrap locator for unified swarm.yaml; --config wins when present", "", ""),
+		retired("SWARM_API_SERVER", "client-side API environment sources are no longer accepted: SWARM_API_SERVER", "use --api-server, --context, project/selected context, or config connection.api_server"),
+		retired("SWARM_API_TOKEN", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN", "use --api-token-file, context descriptor auth, config connection.api_token_file, or serve.api_token_file for server auth"),
+		retired("SWARM_API_TOKEN_FILE", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN_FILE", "use --api-token-file, context descriptor auth, or config connection.api_token_file"),
 		seeded("SWARM_API_LISTEN_ADDR", "platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1", "#1600 listener config migration"),
 		seeded("SWARM_MCP_LISTEN_ADDR", "platform-spec.yaml#cli_specification.command_catalog.serve.listener_topology_v2_1", "#1600 listener config migration"),
-		retired("SWARM_API_PORT", "SWARM_API_PORT is retired; final listener topology uses full listen addresses", "use --api-listen-addr or config serve_api_listen_addr"),
-		retired("SWARM_MCP_PORT", "SWARM_MCP_PORT is retired; final listener topology uses full listen addresses", "use --mcp-listen-addr or config serve_mcp_listen_addr"),
-		seeded("SWARM_CONTRACTS_PATH", "platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution", "config contracts_path or --contracts"),
-		retired("SWARM_CONTRACTS_DIR", "SWARM_CONTRACTS_DIR is not a promoted CLI source", "use --contracts or config contracts_path"),
-		retired("SWARM_PLATFORM_SPEC_PATH", "SWARM_PLATFORM_SPEC_PATH is not promoted", "use --platform-spec or config platform_spec_path where supported"),
-		retired("SWARM_DIR", "SWARM_DIR is not promoted as state directory authority", "use --swarm-dir or config swarm_dir"),
-		retired("SWARM_HOME", "SWARM_HOME is not promoted as state directory authority", "use --swarm-dir or config swarm_dir"),
+		retired("SWARM_API_PORT", "SWARM_API_PORT is retired; final listener topology uses full listen addresses", "use --api-listen-addr or config serve.api_listen_addr"),
+		retired("SWARM_MCP_PORT", "SWARM_MCP_PORT is retired; final listener topology uses full listen addresses", "use --mcp-listen-addr or config serve.mcp_listen_addr"),
+		seeded("SWARM_CONTRACTS_PATH", "platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution", "config paths.contracts_path or --contracts"),
+		retired("SWARM_CONTRACTS_DIR", "SWARM_CONTRACTS_DIR is not a promoted CLI source", "use --contracts or config paths.contracts_path"),
+		retired("SWARM_PLATFORM_SPEC_PATH", "SWARM_PLATFORM_SPEC_PATH is not promoted", "use --platform-spec or config paths.platform_spec_path where supported"),
+		retired("SWARM_DIR", "SWARM_DIR is not promoted as state directory authority", "use --swarm-dir or config paths.swarm_dir"),
+		retired("SWARM_HOME", "SWARM_HOME is not promoted as state directory authority", "use --swarm-dir or config paths.swarm_dir"),
 		retiredStoreDatabaseConfig("SWARM_STORE_BACKEND", "--store or store.backend"),
 		retiredStoreDatabaseConfig("SWARM_SQLITE_PATH", "store.sqlite.path"),
 		retiredStoreDatabaseConfig("SWARM_DB_HOST", "database.host"),
@@ -700,9 +668,9 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 func swarmEnvUserFacingMigrationTarget(name, migration string) string {
 	switch strings.TrimSpace(name) {
 	case "SWARM_API_LISTEN_ADDR":
-		return "serve_api_listen_addr or --api-listen-addr"
+		return "serve.api_listen_addr or --api-listen-addr"
 	case "SWARM_MCP_LISTEN_ADDR":
-		return "serve_mcp_listen_addr or --mcp-listen-addr"
+		return "serve.mcp_listen_addr or --mcp-listen-addr"
 	}
 	parts := strings.Fields(strings.TrimSpace(migration))
 	if len(parts) > 1 && strings.HasPrefix(parts[0], "#") {

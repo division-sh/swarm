@@ -64,6 +64,11 @@ func newWorkspaceBuildCommand(ctx context.Context, repoRoot string) *cobra.Comma
 				}
 				opts.image = image
 			}
+			if path, set, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config")); err != nil {
+				return err
+			} else if set {
+				opts.configPath = path
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {

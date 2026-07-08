@@ -32,6 +32,7 @@ const (
 	localPreflightProviderPackPrerequisite   localPreflightCategory = "provider_pack_prerequisite"
 	localPreflightDevConveniencePrerequisite localPreflightCategory = "dev_convenience_prerequisite"
 	localPreflightEnvPrerequisite            localPreflightCategory = "env"
+	localPreflightConfigPrerequisite         localPreflightCategory = "config"
 )
 
 type localPreflightSeverity string

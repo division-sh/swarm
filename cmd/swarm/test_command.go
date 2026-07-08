@@ -215,7 +215,11 @@ func runScenarioTestCommand(ctx context.Context, repoRoot string, out, errOut io
 	if opts.pollInterval <= 0 {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("--poll-interval must be positive"))
 	}
-	contractsDir, platformSpec, err := resolveScenarioTestSources(repoRoot, opts.contracts, opts.platformSpec)
+	configPath := ""
+	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
+		configPath = opts.apiOptions.rootFlags.configPath
+	}
+	contractsDir, platformSpec, err := resolveScenarioTestSources(repoRoot, opts.contracts, opts.platformSpec, configPath)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
 	}
@@ -258,12 +262,12 @@ func runScenarioTestCommand(ctx context.Context, repoRoot string, out, errOut io
 	return nil
 }
 
-func resolveScenarioTestSources(repoRoot, contractsFlag, platformSpecFlag string) (string, string, error) {
+func resolveScenarioTestSources(repoRoot, contractsFlag, platformSpecFlag, configPath string) (string, string, error) {
 	repoRoot = strings.TrimSpace(repoRoot)
 	if repoRoot == "" {
 		repoRoot = "."
 	}
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: configPath})
 	if err != nil {
 		return "", "", err
 	}

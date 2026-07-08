@@ -91,7 +91,7 @@ func TestSecretsCheckIncludesSelectedProviderCredential(t *testing.T) {
 	contractsRoot := writeProviderSecretsCommandContractsFixture(t)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	t.Setenv("OPENAI_API_KEY", "env-only-openai-key")
-	withExecutableRuntimeConfig(t, strings.Join([]string{
+	withUnifiedRuntimeConfig(t, strings.Join([]string{
 		"llm:",
 		"  backend: openai_responses",
 		"  session:",
@@ -381,17 +381,9 @@ provider-agent:
 	return root
 }
 
-func withExecutableRuntimeConfig(t *testing.T, configText string) {
+func withUnifiedRuntimeConfig(t *testing.T, configText string) {
 	t.Helper()
-	original := runtimeConfigExecutablePath
-	exeDir := t.TempDir()
-	exePath := filepath.Join(exeDir, "swarm")
-	writeWorkflowValidationFixtureFile(t, exePath, "")
-	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), configText)
-	runtimeConfigExecutablePath = func() (string, error) {
-		return exePath, nil
-	}
-	t.Cleanup(func() {
-		runtimeConfigExecutablePath = original
-	})
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, configText)
+	t.Setenv("SWARM_CONFIG", configPath)
 }

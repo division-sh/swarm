@@ -31,7 +31,7 @@ type cliSwarmDirResolution struct {
 }
 
 func resolveCLISwarmDir(opts cliSwarmDirOptions) (cliSwarmDirResolution, error) {
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{})
 	if err != nil {
 		return cliSwarmDirResolution{}, err
 	}
@@ -44,8 +44,8 @@ func resolveCLISwarmDirFromConfig(opts cliSwarmDirOptions, cfg cliAPIConfigFile)
 		return cliSwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
 	if cfg.SwarmDirSet {
-		path, err := normalizeCLISwarmDir(cfg.SwarmDir, "config swarm_dir")
-		return cliSwarmDirResolution{Path: path, Source: "config swarm_dir"}, err
+		path, err := normalizeCLISwarmDir(cfg.SwarmDir, "config paths.swarm_dir")
+		return cliSwarmDirResolution{Path: path, Source: "config paths.swarm_dir"}, err
 	}
 	path, err := defaultCLISwarmDir()
 	return cliSwarmDirResolution{Path: path, Source: "default ~/.swarm"}, err
@@ -86,6 +86,7 @@ type doctorTargetReport struct {
 	Store           doctorTargetPath           `json:"store"`
 	Data            doctorTargetPath           `json:"data"`
 	Env             []localPreflightFinding    `json:"env,omitempty"`
+	Config          []localPreflightFinding    `json:"config,omitempty"`
 	CommandClasses  []doctorTargetCommandClass `json:"command_classes"`
 	SplitSiblings   []string                   `json:"split_siblings"`
 }
@@ -143,9 +144,12 @@ type doctorTargetCommandClass struct {
 func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions) error {
 	envFindings := doctorSwarmEnvFindings(repo, opts.configPath)
 	envReport := doctorTargetEnvReport(envFindings)
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
 	if err != nil {
-		return returnCLIValidationError(cmd.ErrOrStderr(), err)
+		if !envReport.HasBlockers() {
+			return returnCLIValidationError(cmd.ErrOrStderr(), err)
+		}
+		cfg = cliAPIConfigFile{}
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
 	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfg)
@@ -163,12 +167,19 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 		}
 		runtimeCfgResult.Config = &config.Config{}
 	}
+	configReport := localPreflightReport{Owner: unifiedConfigOwner, Mode: "doctor_target"}
+	addUnifiedConfigDiagnosticsToReport(&configReport, runtimeCfgResult.Diagnostics)
+	if diagnostics := unifiedConfigDiagnosticsFromError(err); len(diagnostics) > 0 {
+		addUnifiedConfigDiagnosticsToReport(&configReport, diagnostics)
+	}
+	configReport = configReport.finalize()
 	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir, runtimeCfgResult.Config)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
 	report.Env = envReport.Findings
-	report.OK = report.OK && !envReport.HasBlockers()
+	report.Config = configReport.Findings
+	report.OK = report.OK && !envReport.HasBlockers() && !configReport.HasBlockers()
 	if opts.asJSON {
 		if err := writeDoctorTargetJSON(cmd.OutOrStdout(), report); err != nil {
 			return err
@@ -349,7 +360,7 @@ func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliAPICon
 
 func resolveDoctorTargetCLIToken(cfg cliAPIConfigFile, rpcEndpoint string) (cliAPITokenResolution, error) {
 	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "config api_token_file")
+		return readCLIAPIExplicitTokenFile(tokenFile, "config connection.api_token_file")
 	}
 	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return cliAPITokenResolution{
@@ -374,7 +385,7 @@ func cliAPIServerBaseFromRPCEndpoint(rpcEndpoint, source string) (string, error)
 
 func doctorTargetAuthFromTokenResolution(token cliAPITokenResolution) doctorTargetAuth {
 	switch token.source {
-	case "--api-token-file", "config api_token_file":
+	case "--api-token-file", "config connection.api_token_file":
 		return doctorTargetAuth{Source: token.source, Status: "configured", Detail: "token file"}
 	case string(apiv1.AuthTokenSourceBuiltInLoopbackToken):
 		return doctorTargetAuth{Source: token.source, Status: "available", Detail: "numeric loopback target"}
@@ -387,7 +398,7 @@ func doctorTargetMissingExplicitTokenAuth() doctorTargetAuth {
 	return doctorTargetAuth{
 		Source: "none",
 		Status: "missing_explicit_token",
-		Detail: "non-loopback target requires --api-token-file, context descriptor auth, or config api_token_file",
+		Detail: "non-loopback target requires --api-token-file, context descriptor auth, or config connection.api_token_file",
 	}
 }
 
@@ -414,7 +425,7 @@ func resolveDoctorTargetProject(repo string, opts doctorOptions, cfg cliAPIConfi
 		return doctorTargetProject{
 			CanonicalizationStatus: "not_applicable",
 			Status:                 "no_contract_source",
-			Detail:                 "no --contracts, SWARM_CONTRACTS_PATH, config contracts_path, or repo-local contracts/package.yaml source was resolved",
+			Detail:                 "no --contracts, SWARM_CONTRACTS_PATH, config paths.contracts_path, or repo-local contracts/package.yaml source was resolved",
 		}
 	}
 	projectRoot := inferProjectRootFromContractsPath(contractsPath)
@@ -437,7 +448,7 @@ func firstDoctorTargetContractsPath(repo string, opts doctorOptions, cfg cliAPIC
 		return resolvePath(repo, path), cliContractsPathEnv
 	}
 	if path := strings.TrimSpace(cfg.ContractsPath); path != "" {
-		return resolvePath(repo, path), "config contracts_path"
+		return resolvePath(repo, path), "config paths.contracts_path"
 	}
 	if path := discoverRepoContractsPath(repo); path != "" {
 		return path, "repo contracts/package.yaml"
@@ -662,6 +673,12 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	if len(report.Env) > 0 {
 		fmt.Fprintln(out, "env:")
 		for _, finding := range report.Env {
+			fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
+		}
+	}
+	if len(report.Config) > 0 {
+		fmt.Fprintln(out, "config:")
+		for _, finding := range report.Config {
 			fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
 		}
 	}

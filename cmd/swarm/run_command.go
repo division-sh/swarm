@@ -92,6 +92,12 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := opts
 			runOpts.changedFlags = runCommandChangedFlags(cmd)
+			if path, set, err := effectiveCommandConfigPath(cmd, runOpts.configPath, runOpts.changedFlags["config"]); err != nil {
+				return err
+			} else if set {
+				runOpts.configPath = path
+				runOpts.changedFlags["config"] = true
+			}
 			return runRunCommand(cmd.Context(), repo, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
 	}
@@ -276,7 +282,7 @@ func (o runCommandOptions) validate() error {
 }
 
 func (o runCommandOptions) withLocalForegroundServeAuth() (runCommandOptions, error) {
-	auth, err := resolveServeAPIAuth(defaultServeOptions())
+	auth, err := resolveServeAPIAuth("", defaultServeOptions())
 	if err != nil {
 		return o, err
 	}
@@ -375,6 +381,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,
+		ConfigPath:       opts.configPath,
 	})
 	if err != nil {
 		return nil, err

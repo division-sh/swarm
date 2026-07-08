@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +16,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -30,7 +27,7 @@ const (
 	cliServeMCPListenAddrEnv = "SWARM_MCP_LISTEN_ADDR"
 
 	serveAPITokenFileFlagSource   = "--api-token-file"
-	serveAPITokenFileConfigSource = "config serve_api_token_file"
+	serveAPITokenFileConfigSource = "config serve.api_token_file"
 )
 
 type rootCommandOptions struct {
@@ -68,8 +65,10 @@ func defaultRootCommandOptions() rootCommandOptions {
 }
 
 type rootCommandFlagState struct {
-	swarmDir    string
-	swarmDirSet bool
+	swarmDir      string
+	swarmDirSet   bool
+	configPath    string
+	configPathSet bool
 }
 
 func (opts rootCommandOptions) ensureRootFlagState() rootCommandOptions {
@@ -84,6 +83,13 @@ func (opts rootCommandOptions) swarmDirResolutionOptions() cliSwarmDirOptions {
 		return cliSwarmDirOptions{SwarmDir: opts.rootFlags.swarmDir, SwarmDirFlagSet: opts.rootFlags.swarmDirSet}
 	}
 	return cliSwarmDirOptions{SwarmDir: opts.swarmDir, SwarmDirFlagSet: strings.TrimSpace(opts.swarmDir) != ""}
+}
+
+func (opts rootCommandOptions) unifiedConfigLoadOptions() unifiedConfigLoadOptions {
+	if opts.rootFlags != nil && opts.rootFlags.configPathSet {
+		return unifiedConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: opts.rootFlags.configPath}
+	}
+	return unifiedConfigLoadOptions{RepoRoot: opts.repoRoot}
 }
 
 func processStdinIsTerminal() bool {
@@ -154,7 +160,7 @@ func (e *cliAPIAuthConfigError) Error() string {
 
 func resolveCLIAPISettings(opts rootCommandOptions) (cliAPISettings, error) {
 	opts = opts.ensureRootFlagState()
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(opts.unifiedConfigLoadOptions())
 	if err != nil {
 		return cliAPISettings{}, err
 	}
@@ -186,7 +192,7 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoi
 		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
 	}
 	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "config api_token_file")
+		return readCLIAPIExplicitTokenFile(tokenFile, "config connection.api_token_file")
 	}
 	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return cliAPITokenResolution{
@@ -200,8 +206,8 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliAPIConfigFile, rpcEndpoi
 func rejectRemovedClientAPIEnvSources() error {
 	replacements := map[string]string{
 		"SWARM_API_SERVER":     "use --api-server, --context, project/selected context, or config api_server",
-		"SWARM_API_TOKEN":      "use --api-token-file, context descriptor auth, or config api_token_file",
-		"SWARM_API_TOKEN_FILE": "use --api-token-file, context descriptor auth, or config api_token_file",
+		"SWARM_API_TOKEN":      "use --api-token-file, context descriptor auth, or config connection.api_token_file",
+		"SWARM_API_TOKEN_FILE": "use --api-token-file, context descriptor auth, or config connection.api_token_file",
 	}
 	var found []string
 	for _, name := range []string{"SWARM_API_SERVER", "SWARM_API_TOKEN", "SWARM_API_TOKEN_FILE"} {
@@ -220,6 +226,8 @@ type cliServeListenerAddressOptions struct {
 	MCPListenAddr        string
 	APIListenAddrFlagSet bool
 	MCPListenAddrFlagSet bool
+	ConfigPath           string
+	RepoRoot             string
 }
 
 func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (string, string, error) {
@@ -236,7 +244,7 @@ func resolveCLIServeListenerAddresses(opts cliServeListenerAddressOptions) (stri
 	if apiResolved && mcpResolved {
 		return apiAddr, mcpAddr, nil
 	}
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return "", "", err
 	}
@@ -265,7 +273,7 @@ func resolveCLIServeListenerAddressHighPriority(flagValue string, flagSet bool, 
 	return "", false
 }
 
-func resolveServeAPIAuth(opts serveOptions) (apiv1.AuthTokenResolution, error) {
+func resolveServeAPIAuth(repo string, opts serveOptions) (apiv1.AuthTokenResolution, error) {
 	if err := rejectRemovedServeAPIEnvSource(); err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
@@ -276,7 +284,7 @@ func resolveServeAPIAuth(opts serveOptions) (apiv1.AuthTokenResolution, error) {
 		}
 		return readServeAPITokenFile(tokenFile, serveAPITokenFileFlagSource)
 	}
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
@@ -290,7 +298,7 @@ func rejectRemovedServeAPIEnvSource() error {
 	if strings.TrimSpace(os.Getenv("SWARM_API_TOKEN")) == "" {
 		return nil
 	}
-	return &cliAPIValidationError{message: "server-side API environment source is no longer accepted: SWARM_API_TOKEN (use swarm serve --api-token-file or config serve_api_token_file)"}
+	return &cliAPIValidationError{message: "server-side API environment source is no longer accepted: SWARM_API_TOKEN (use swarm serve --api-token-file or config serve.api_token_file)"}
 }
 
 func readServeAPITokenFile(tokenFile, source string) (apiv1.AuthTokenResolution, error) {
@@ -346,62 +354,15 @@ func readCLIAPITokenFile(tokenFile, source string) (string, error) {
 }
 
 func loadCLIAPIConfigFile() (cliAPIConfigFile, error) {
-	configPath, explicit, err := cliAPIConfigPath()
+	return loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{})
+}
+
+func loadCLIAPIConfigFileWithOptions(opts unifiedConfigLoadOptions) (cliAPIConfigFile, error) {
+	result, err := loadUnifiedConfig(opts)
 	if err != nil {
 		return cliAPIConfigFile{}, err
 	}
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		if !explicit && errors.Is(err, os.ErrNotExist) {
-			return cliAPIConfigFile{}, nil
-		}
-		source := "CLI config"
-		if explicit {
-			source = "SWARM_CONFIG"
-		}
-		return cliAPIConfigFile{}, &cliAPIValidationError{message: fmt.Sprintf("read %s: %v", source, err)}
-	}
-	return parseCLIAPIConfigFile(configPath, raw)
-}
-
-func cliAPIConfigPath() (string, bool, error) {
-	if raw, ok := os.LookupEnv("SWARM_CONFIG"); ok && strings.TrimSpace(raw) != "" {
-		return strings.TrimSpace(raw), true, nil
-	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", false, &cliAPIValidationError{message: fmt.Sprintf("resolve XDG CLI config path: %v", err)}
-	}
-	return filepath.Join(dir, "swarm", "config.yaml"), false, nil
-}
-
-func parseCLIAPIConfigFile(configPath string, raw []byte) (cliAPIConfigFile, error) {
-	var decoded map[string]any
-	if err := yaml.Unmarshal(raw, &decoded); err != nil {
-		return cliAPIConfigFile{}, &cliAPIValidationError{message: fmt.Sprintf("parse CLI config %s: %v", configPath, err)}
-	}
-	if decoded == nil {
-		return cliAPIConfigFile{}, nil
-	}
-	for key, value := range decoded {
-		switch key {
-		case "api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr", "serve_api_token_file":
-			if value == nil {
-				continue
-			}
-			if _, ok := value.(string); !ok {
-				return cliAPIConfigFile{}, &cliAPIValidationError{message: fmt.Sprintf("CLI config %s must be a string", key)}
-			}
-		default:
-			return cliAPIConfigFile{}, &cliAPIValidationError{message: fmt.Sprintf("unsupported CLI config key %q", key)}
-		}
-	}
-	var cfg cliAPIConfigFile
-	if err := yaml.Unmarshal(raw, &cfg); err != nil {
-		return cliAPIConfigFile{}, &cliAPIValidationError{message: fmt.Sprintf("decode CLI config %s: %v", configPath, err)}
-	}
-	_, cfg.SwarmDirSet = decoded["swarm_dir"]
-	return cfg, nil
+	return result.CLI, nil
 }
 
 func normalizeCLIAPIRPCEndpoint(raw, source string) (string, error) {

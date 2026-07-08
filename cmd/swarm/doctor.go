@@ -24,7 +24,7 @@ type doctorOptions struct {
 	apiOptions          rootCommandOptions
 }
 
-func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
+func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := doctorOptions{
 		apiListenAddr: defaultAPIListenAddr,
 		mcpListenAddr: defaultMCPListenAddr,
@@ -46,6 +46,11 @@ func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
 				}
 			}
 			opts.dataSourceSet = cmd.Flags().Changed("data")
+			if path, set, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config")); err != nil {
+				return err
+			} else if set {
+				opts.configPath = path
+			}
 			if opts.target {
 				return nil
 			}
@@ -73,6 +78,7 @@ func newDoctorCommand(ctx context.Context, repo string) *cobra.Command {
 	cmd.Flags().StringVar(&opts.mcpListenAddr, "mcp-listen-addr", opts.mcpListenAddr, "HTTP bind address to preflight for MCP and tools routes")
 	cmd.Flags().BoolVar(&opts.target, "target", false, "Explain local target, state directory, project, and context resolution without runtime preflight")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render the diagnostic report as JSON")
+	opts.apiOptions.rootFlags = rootOpts.rootFlags
 	bindCLIAPIConnectionFlags(cmd, &opts.apiOptions)
 	return cmd
 }
@@ -87,15 +93,6 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
 		return report
 	}
-	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
-		ContractsPath:    opts.contractsPath,
-		PlatformSpecPath: opts.platformSpecPath,
-	})
-	if err != nil {
-		report := newReport()
-		report.add(localPreflightBackendPrerequisite, "path_resolution_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
-	}
 	cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{
 		RepoRoot:        repo,
 		ExplicitPath:    opts.configPath,
@@ -103,12 +100,25 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	})
 	if err != nil {
 		report := newReport()
+		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
 		report.add(localPreflightBackendPrerequisite, "config_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --config, --backend, retired env vars, or llm.backend")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
+	configReport := newReport()
+	addUnifiedConfigDiagnosticsToReport(&configReport, cfgResult.Diagnostics)
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
+		ContractsPath:    opts.contractsPath,
+		PlatformSpecPath: opts.platformSpecPath,
+		ConfigPath:       opts.configPath,
+	})
+	if err != nil {
+		report := configReport
+		report.add(localPreflightBackendPrerequisite, "path_resolution_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	providerPackLoad, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
 	if err != nil {
-		report := newReport()
+		report := configReport
 		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider_triggers.packs.external_dirs or the referenced provider pack envelope")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
@@ -117,41 +127,45 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		MCPListenAddr:        opts.mcpListenAddr,
 		APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
 		MCPListenAddrFlagSet: cmd.Flags().Changed("mcp-listen-addr"),
+		ConfigPath:           opts.configPath,
+		RepoRoot:             repo,
 	})
 	if err != nil {
-		report := newReport()
+		report := configReport
+		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
 		report.add(localPreflightServeListenerPrerequisite, "listener_resolution_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --api-listen-addr, --mcp-listen-addr, config listener addresses, or SWARM_CONFIG")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	opts.apiListenAddr = apiListenAddr
 	opts.mcpListenAddr = mcpListenAddr
 	if err := validateServeListenAddr("--api-listen-addr", opts.apiListenAddr); err != nil {
-		report := newReport()
-		report.add(localPreflightServeListenerPrerequisite, "api_listener_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --api-listen-addr or config serve_api_listen_addr")
+		report := configReport
+		report.add(localPreflightServeListenerPrerequisite, "api_listener_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --api-listen-addr or config serve.api_listen_addr")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	if err := validateServeListenAddr("--mcp-listen-addr", opts.mcpListenAddr); err != nil {
-		report := newReport()
-		report.add(localPreflightServeListenerPrerequisite, "mcp_listener_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --mcp-listen-addr or config serve_mcp_listen_addr")
+		report := configReport
+		report.add(localPreflightServeListenerPrerequisite, "mcp_listener_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --mcp-listen-addr or config serve.mcp_listen_addr")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	workspaceBackend, err := resolveWorkspaceBackend(opts.workspaceBackend, opts.workspaceBackendSet, cfgResult.Config)
 	if err != nil {
-		report := newReport()
+		report := configReport
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --workspace-backend or workspace.backend")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	cliCfg, err := loadCLIAPIConfigFile()
+	cliCfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
 	if err != nil {
-		report := newReport()
+		report := configReport
+		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
 		report.add(localPreflightBackendPrerequisite, "cli_config_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix SWARM_CONFIG or the CLI config file")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
 	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
 	if err != nil {
-		report := newReport()
-		report.add(localPreflightBackendPrerequisite, "swarm_dir_resolution_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --swarm-dir or CLI config swarm_dir")
+		report := configReport
+		report.add(localPreflightBackendPrerequisite, "swarm_dir_resolution_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --swarm-dir or config paths.swarm_dir")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	localState, err := resolveLocalRuntimeState(localRuntimeStateOptions{
@@ -163,7 +177,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		CreateDefaultDataSource: true,
 	})
 	if err != nil {
-		report := newReport()
+		report := configReport
 		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix --data or workspace.data_source")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
@@ -183,6 +197,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets("doctor"),
 	})
 	appendProviderTriggerPackSurfaceFindings(&report, providerPackLoad.Loaded)
+	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)
 	addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
 	return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 }

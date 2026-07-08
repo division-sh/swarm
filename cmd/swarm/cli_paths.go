@@ -12,6 +12,7 @@ const cliContractsPathEnv = "SWARM_CONTRACTS_PATH"
 type cliContractPlatformSpecPathOptions struct {
 	ContractsPath    string
 	PlatformSpecPath string
+	ConfigPath       string
 }
 
 type cliContractPlatformSpecPaths struct {
@@ -24,7 +25,7 @@ func resolveCLIContractPlatformSpecPaths(repoRoot string, opts cliContractPlatfo
 	if repoRoot == "" {
 		repoRoot = discoverRepoRoot()
 	}
-	cfg, err := loadCLIAPIConfigFile()
+	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return cliContractPlatformSpecPaths{}, err
 	}

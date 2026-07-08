@@ -686,7 +686,7 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 				}
 				t.Setenv("SWARM_CONFIG", configPath)
 			},
-			wantStderr: `unsupported CLI config key "api_listen_addr"`,
+			wantStderr: `unknown config key "api_listen_addr"`,
 		},
 	}
 	for _, tc := range tests {
@@ -726,9 +726,9 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	}{
 		{name: "default token allowed on ipv4 loopback", addr: "127.0.0.1:8081", auth: defaultAuth},
 		{name: "default token allowed on ipv6 loopback", addr: "[::1]:8081", auth: defaultAuth},
-		{name: "default token rejects localhost", addr: "localhost:8081", auth: defaultAuth, wantErr: "non-loopback API bind localhost:8081 requires --api-token-file or config serve_api_token_file"},
-		{name: "default token rejects wildcard", addr: "0.0.0.0:8081", auth: defaultAuth, wantErr: "non-loopback API bind 0.0.0.0:8081 requires --api-token-file or config serve_api_token_file"},
-		{name: "default token rejects routable", addr: "192.0.2.10:8081", auth: defaultAuth, wantErr: "non-loopback API bind 192.0.2.10:8081 requires --api-token-file or config serve_api_token_file"},
+		{name: "default token rejects localhost", addr: "localhost:8081", auth: defaultAuth, wantErr: "non-loopback API bind localhost:8081 requires --api-token-file or config serve.api_token_file"},
+		{name: "default token rejects wildcard", addr: "0.0.0.0:8081", auth: defaultAuth, wantErr: "non-loopback API bind 0.0.0.0:8081 requires --api-token-file or config serve.api_token_file"},
+		{name: "default token rejects routable", addr: "192.0.2.10:8081", auth: defaultAuth, wantErr: "non-loopback API bind 192.0.2.10:8081 requires --api-token-file or config serve.api_token_file"},
 		{name: "explicit token allows wildcard", addr: "0.0.0.0:8081", auth: explicitAuth},
 	}
 	for _, tc := range tests {
@@ -750,7 +750,7 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 	t.Run("default loopback when no explicit source", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
-		auth, err := resolveServeAPIAuth(defaultServeOptions())
+		auth, err := resolveServeAPIAuth("", defaultServeOptions())
 		if err != nil {
 			t.Fatalf("resolveServeAPIAuth: %v", err)
 		}
@@ -766,7 +766,7 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 			"serve_api_token_file": configTokenFile,
 		}))
-		auth, err := resolveServeAPIAuth(serveOptions{APITokenFile: flagTokenFile, APITokenFileFlagSet: true})
+		auth, err := resolveServeAPIAuth("", serveOptions{APITokenFile: flagTokenFile, APITokenFileFlagSet: true})
 		if err != nil {
 			t.Fatalf("resolveServeAPIAuth: %v", err)
 		}
@@ -784,7 +784,7 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 			"serve_api_token_file": configTokenFile,
 		}))
-		auth, err := resolveServeAPIAuth(defaultServeOptions())
+		auth, err := resolveServeAPIAuth("", defaultServeOptions())
 		if err != nil {
 			t.Fatalf("resolveServeAPIAuth: %v", err)
 		}
@@ -800,8 +800,8 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		tokenFile := writeCLIAPITokenFile(t, "flag-token")
 		t.Setenv("SWARM_API_TOKEN", "env-token")
-		_, err := resolveServeAPIAuth(serveOptions{APITokenFile: tokenFile, APITokenFileFlagSet: true})
-		if err == nil || !strings.Contains(err.Error(), "server-side API environment source is no longer accepted") || !strings.Contains(err.Error(), "serve_api_token_file") {
+		_, err := resolveServeAPIAuth("", serveOptions{APITokenFile: tokenFile, APITokenFileFlagSet: true})
+		if err == nil || !strings.Contains(err.Error(), "server-side API environment source is no longer accepted") || !strings.Contains(err.Error(), "serve.api_token_file") {
 			t.Fatalf("err = %v, want removed-env diagnostic", err)
 		}
 	})
@@ -809,20 +809,20 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 	t.Run("blank and missing token files fail closed", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		blank := writeCLIAPITokenFile(t, "  \n")
-		if _, err := resolveServeAPIAuth(serveOptions{APITokenFile: blank, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "--api-token-file is blank") {
+		if _, err := resolveServeAPIAuth("", serveOptions{APITokenFile: blank, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "--api-token-file is blank") {
 			t.Fatalf("blank token err = %v, want blank token failure", err)
 		}
 		missing := filepath.Join(t.TempDir(), "missing-token")
-		if _, err := resolveServeAPIAuth(serveOptions{APITokenFile: missing, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "read --api-token-file") {
+		if _, err := resolveServeAPIAuth("", serveOptions{APITokenFile: missing, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "read --api-token-file") {
 			t.Fatalf("missing token err = %v, want read failure", err)
 		}
 	})
 }
 
-func TestCLI_ServeRuntimeConfigDoesNotFeedListenerConfig(t *testing.T) {
+func TestCLI_ServeUnifiedConfigFeedsListenerConfig(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	runtimeConfig := filepath.Join(t.TempDir(), "runtime.yaml")
-	if err := os.WriteFile(runtimeConfig, []byte("serve_api_listen_addr: \"0.0.0.0:9999\"\nserve_mcp_listen_addr: \"0.0.0.0:9998\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(runtimeConfig, []byte("serve:\n  api_listen_addr: \"127.0.0.1:9999\"\n  mcp_listen_addr: \"127.0.0.1:9998\"\n"), 0o600); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
 
@@ -841,11 +841,11 @@ func TestCLI_ServeRuntimeConfigDoesNotFeedListenerConfig(t *testing.T) {
 	if captured.ConfigPath != runtimeConfig {
 		t.Fatalf("runtime config path = %q, want %q", captured.ConfigPath, runtimeConfig)
 	}
-	if captured.APIListenAddr != defaultAPIListenAddr {
-		t.Fatalf("api listen addr = %q, want default %q", captured.APIListenAddr, defaultAPIListenAddr)
+	if captured.APIListenAddr != "127.0.0.1:9999" {
+		t.Fatalf("api listen addr = %q, want unified config value", captured.APIListenAddr)
 	}
-	if captured.MCPListenAddr != defaultMCPListenAddr {
-		t.Fatalf("mcp listen addr = %q, want default %q", captured.MCPListenAddr, defaultMCPListenAddr)
+	if captured.MCPListenAddr != "127.0.0.1:9998" {
+		t.Fatalf("mcp listen addr = %q, want unified config value", captured.MCPListenAddr)
 	}
 }
 
@@ -953,7 +953,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 				t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 				t.Setenv("SWARM_API_LISTEN_ADDR", "127.0.0.1:9601")
 			},
-			wantError: "read SWARM_CONFIG",
+			wantError: "read unified config",
 		},
 	}
 	for _, tc := range tests {
@@ -1199,7 +1199,7 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 	if spec.Defaults.MCPListenAddr != defaultMCPListenAddr || spec.Listeners.MCP.DefaultListenAddr != defaultMCPListenAddr {
 		t.Fatalf("mcp default = defaults:%q listener:%q want %q", spec.Defaults.MCPListenAddr, spec.Listeners.MCP.DefaultListenAddr, defaultMCPListenAddr)
 	}
-	wantSourceOrder := []string{"flag", "environment", "cli_config_file", "built_in_default"}
+	wantSourceOrder := []string{"flag", "environment", "unified_config", "built_in_default"}
 	if len(spec.SourcePrecedence.SourceOrder) != len(wantSourceOrder) {
 		t.Fatalf("listener source order = %#v, want %#v", spec.SourcePrecedence.SourceOrder, wantSourceOrder)
 	}
@@ -1208,27 +1208,27 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 			t.Fatalf("listener source order[%d] = %q, want %q", i, spec.SourcePrecedence.SourceOrder[i], want)
 		}
 	}
-	if spec.SourcePrecedence.APIListenAddr.Environment != "SWARM_API_LISTEN_ADDR" || spec.SourcePrecedence.APIListenAddr.ConfigKey != "serve_api_listen_addr" {
+	if spec.SourcePrecedence.APIListenAddr.Environment != "SWARM_API_LISTEN_ADDR" || spec.SourcePrecedence.APIListenAddr.ConfigKey != "serve.api_listen_addr" {
 		t.Fatalf("api listener source precedence = %#v", spec.SourcePrecedence.APIListenAddr)
 	}
-	if spec.SourcePrecedence.MCPListenAddr.Environment != "SWARM_MCP_LISTEN_ADDR" || spec.SourcePrecedence.MCPListenAddr.ConfigKey != "serve_mcp_listen_addr" {
+	if spec.SourcePrecedence.MCPListenAddr.Environment != "SWARM_MCP_LISTEN_ADDR" || spec.SourcePrecedence.MCPListenAddr.ConfigKey != "serve.mcp_listen_addr" {
 		t.Fatalf("mcp listener source precedence = %#v", spec.SourcePrecedence.MCPListenAddr)
 	}
 	if spec.SourcePrecedence.ServerAPIAuth.AcceptedSources["flag_file"] != "--api-token-file <path>" {
 		t.Fatalf("server api auth flag source = %#v", spec.SourcePrecedence.ServerAPIAuth.AcceptedSources)
 	}
-	if spec.SourcePrecedence.ServerAPIAuth.AcceptedSources["config_file_key"] != "serve_api_token_file" {
+	if spec.SourcePrecedence.ServerAPIAuth.AcceptedSources["config_file_key"] != "serve.api_token_file" {
 		t.Fatalf("server api auth config source = %#v", spec.SourcePrecedence.ServerAPIAuth.AcceptedSources)
 	}
-	wantServeAuthOrder := []string{"--api-token-file", "config serve_api_token_file", "built-in loopback default"}
+	wantServeAuthOrder := []string{"--api-token-file", "config serve.api_token_file", "built-in loopback default"}
 	if !reflect.DeepEqual(spec.SourcePrecedence.ServerAPIAuth.SourceOrder, wantServeAuthOrder) {
 		t.Fatalf("server api auth source order = %#v, want %#v", spec.SourcePrecedence.ServerAPIAuth.SourceOrder, wantServeAuthOrder)
 	}
 	for key, want := range map[string]string{
-		"SWARM_API_TOKEN":       "#1647",
-		"SWARM_API_TOKEN_FILE":  "Not promoted",
-		"config api_token_file": "Client-side API auth only",
-		"config api_token":      "Inline bearer tokens",
+		"SWARM_API_TOKEN":                  "#1647",
+		"SWARM_API_TOKEN_FILE":             "Not promoted",
+		"config connection.api_token_file": "Client-side API auth only",
+		"config api_token":                 "Inline bearer tokens",
 	} {
 		if !strings.Contains(spec.SourcePrecedence.ServerAPIAuth.RejectedSources[key], want) {
 			t.Fatalf("server api auth rejected source %q missing %q:\n%s", key, want, spec.SourcePrecedence.ServerAPIAuth.RejectedSources[key])
@@ -1239,7 +1239,7 @@ func TestPlatformSpecServeListenerTopologyRuntimeBindingPromoted(t *testing.T) {
 			t.Fatalf("server token_file_rule missing %q:\n%s", want, spec.SourcePrecedence.ServerAPIAuth.TokenFileRule)
 		}
 	}
-	for _, want := range []string{"--api-token-file", "serve_api_token_file"} {
+	for _, want := range []string{"--api-token-file", "serve.api_token_file"} {
 		if !strings.Contains(spec.SourcePrecedence.APIAuthCouplingRule, want) {
 			t.Fatalf("api auth coupling rule missing %q:\n%s", want, spec.SourcePrecedence.APIAuthCouplingRule)
 		}
@@ -1309,7 +1309,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if !strings.Contains(spec.CanonicalOwner, "cli_specification.foundations.api_connection_auth_config_precedence") {
 		t.Fatalf("canonical owner does not point at promoted section: %s", spec.CanonicalOwner)
 	}
-	for _, want := range []string{"API-backed command leaves consume", "OpenRPC", "root/global `--config`"} {
+	for _, want := range []string{"API-backed command leaves consume", "OpenRPC", "unified `swarm.yaml` connection config"} {
 		if !strings.Contains(spec.Scope, want) {
 			t.Fatalf("scope missing boundary %q:\n%s", want, spec.Scope)
 		}
@@ -1329,8 +1329,8 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if !strings.Contains(spec.APIServer.AcceptedSources.ContextDescriptor, "context descriptor") {
 		t.Fatalf("api_server context_descriptor = %q, want context descriptor source", spec.APIServer.AcceptedSources.ContextDescriptor)
 	}
-	if spec.APIServer.AcceptedSources.ConfigKey != "api_server" {
-		t.Fatalf("api_server config key = %q, want api_server", spec.APIServer.AcceptedSources.ConfigKey)
+	if spec.APIServer.AcceptedSources.ConfigKey != "connection.api_server" {
+		t.Fatalf("api_server config key = %q, want connection.api_server", spec.APIServer.AcceptedSources.ConfigKey)
 	}
 	if spec.APIServer.AcceptedSources.BuiltInDefault != "http://127.0.0.1:8081" {
 		t.Fatalf("api_server default = %q, want http://127.0.0.1:8081", spec.APIServer.AcceptedSources.BuiltInDefault)
@@ -1358,7 +1358,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("api_token accepted source %q should be removed: %#v", removed, spec.APIToken.AcceptedSources)
 		}
 	}
-	wantTokenSourceOrder := []string{"--api-token-file", "context descriptor auth", "config api_token_file", "built-in loopback default"}
+	wantTokenSourceOrder := []string{"--api-token-file", "context descriptor auth", "config connection.api_token_file", "built-in loopback default"}
 	if len(spec.APIToken.SourceOrder) != len(wantTokenSourceOrder) {
 		t.Fatalf("api_token source order = %#v, want %#v", spec.APIToken.SourceOrder, wantTokenSourceOrder)
 	}
@@ -1371,7 +1371,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		"--api-token":          "shell history",
 		"config api_token":     "inline",
 		"SWARM_API_TOKEN":      "#1636",
-		"SWARM_API_TOKEN_FILE": "config `api_token_file`",
+		"SWARM_API_TOKEN_FILE": "config `connection.api_token_file`",
 	} {
 		if !strings.Contains(spec.APIToken.RejectedSources[key], want) {
 			t.Fatalf("api_token rejected source %q missing %q:\n%s", key, want, spec.APIToken.RejectedSources[key])
@@ -1404,17 +1404,23 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for key, want := range map[string]string{
+		"flag":        "--config <path>",
 		"environment": "SWARM_CONFIG",
-		"xdg_default": "swarm/config.yaml",
+		"xdg_default": "swarm/swarm.yaml",
 	} {
 		if !strings.Contains(spec.CLIConfigFile.AcceptedSources[key], want) {
 			t.Fatalf("cli config accepted source %q missing %q:\n%s", key, want, spec.CLIConfigFile.AcceptedSources[key])
 		}
 	}
-	if !strings.Contains(spec.CLIConfigFile.RejectedSources["--config"], "dual semantic ownership") {
-		t.Fatalf("cli config --config rejection missing dual-ownership rule:\n%s", spec.CLIConfigFile.RejectedSources["--config"])
+	for key, want := range map[string]string{
+		"${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml": "retired",
+		"executable_adjacent_config.yaml":                     "retired",
+	} {
+		if !strings.Contains(spec.CLIConfigFile.RejectedSources[key], want) {
+			t.Fatalf("cli config rejected source %q missing %q:\n%s", key, want, spec.CLIConfigFile.RejectedSources[key])
+		}
 	}
-	for _, key := range []string{"api_server", "api_token_file"} {
+	for _, key := range []string{"connection.api_server", "connection.api_token_file"} {
 		if strings.TrimSpace(spec.CLIConfigFile.AcceptedKeys[key]) == "" {
 			t.Fatalf("cli config accepted key %q missing: %#v", key, spec.CLIConfigFile.AcceptedKeys)
 		}
@@ -1424,20 +1430,20 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 			t.Fatalf("cli config rejected key %q missing: %#v", key, spec.CLIConfigFile.RejectedKeys)
 		}
 	}
-	for _, key := range []string{"contracts_path", "platform_spec_path"} {
+	for _, key := range []string{"paths.contracts_path", "paths.platform_spec_path"} {
 		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "contract_platform_spec_path_resolution") {
 			t.Fatalf("cli config shared non-API key %q missing contract path owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
 		}
 	}
-	for _, key := range []string{"serve_api_listen_addr", "serve_mcp_listen_addr"} {
+	for _, key := range []string{"serve.api_listen_addr", "serve.mcp_listen_addr"} {
 		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "listener_topology_v2_1.source_precedence") {
 			t.Fatalf("cli config shared non-API key %q missing listener source owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
 		}
 	}
-	if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"], "server_api_auth") ||
-		!strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"], "server-side `swarm serve` auth only") ||
-		!strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"], "MUST NOT") {
-		t.Fatalf("cli config serve_api_token_file missing server/client boundary: %#v", spec.CLIConfigFile.SharedNonAPIKeys["serve_api_token_file"])
+	if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve.api_token_file"], "server_api_auth") ||
+		!strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve.api_token_file"], "server-side `swarm serve` auth only") ||
+		!strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys["serve.api_token_file"], "MUST NOT") {
+		t.Fatalf("cli config serve.api_token_file missing server/client boundary: %#v", spec.CLIConfigFile.SharedNonAPIKeys["serve.api_token_file"])
 	}
 	for _, key := range []string{"SWARM_API_PORT", "SWARM_MCP_PORT"} {
 		if !strings.Contains(spec.ServeListenerEnvConfigBoundary.RejectedPorts[key], "Not promoted") {
@@ -3141,12 +3147,12 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 			t.Fatalf("applies_to missing %q: %#v", want, spec.AppliesTo)
 		}
 	}
-	for _, want := range []string{"swarm run start --connect", "swarm run start --reattach", "root/global `--config`"} {
+	for _, want := range []string{"swarm run start --connect", "swarm run start --reattach"} {
 		if !stringSliceContains(spec.NotAppliesTo, want) {
 			t.Fatalf("not_applies_to missing %q: %#v", want, spec.NotAppliesTo)
 		}
 	}
-	wantContractsOrder := []string{"--contracts", "SWARM_CONTRACTS_PATH", "config contracts_path", "repo contracts/package.yaml"}
+	wantContractsOrder := []string{"--contracts", "SWARM_CONTRACTS_PATH", "config paths.contracts_path", "repo contracts/package.yaml"}
 	if len(spec.ContractsPath.SourceOrder) != len(wantContractsOrder) {
 		t.Fatalf("contracts source order = %#v, want %#v", spec.ContractsPath.SourceOrder, wantContractsOrder)
 	}
@@ -3161,13 +3167,13 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	if spec.ContractsPath.AcceptedSources.Environment != "SWARM_CONTRACTS_PATH" {
 		t.Fatalf("contracts env = %q", spec.ContractsPath.AcceptedSources.Environment)
 	}
-	if spec.ContractsPath.AcceptedSources.ConfigKey != "contracts_path" {
+	if spec.ContractsPath.AcceptedSources.ConfigKey != "paths.contracts_path" {
 		t.Fatalf("contracts config key = %q", spec.ContractsPath.AcceptedSources.ConfigKey)
 	}
 	if !strings.Contains(spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"], "Not a CLI source") {
 		t.Fatalf("SWARM_CONTRACTS_DIR rejection missing CLI-source rule:\n%s", spec.ContractsPath.RejectedSources["SWARM_CONTRACTS_DIR"])
 	}
-	wantPlatformOrder := []string{"--platform-spec", "config platform_spec_path", "embedded tracked platform spec"}
+	wantPlatformOrder := []string{"--platform-spec", "config paths.platform_spec_path", "embedded tracked platform spec"}
 	if len(spec.PlatformSpecPath.SourceOrder) != len(wantPlatformOrder) {
 		t.Fatalf("platform source order = %#v, want %#v", spec.PlatformSpecPath.SourceOrder, wantPlatformOrder)
 	}
@@ -3179,7 +3185,7 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 	if spec.PlatformSpecPath.AcceptedSources.Flag != "--platform-spec <path>" {
 		t.Fatalf("platform flag = %q", spec.PlatformSpecPath.AcceptedSources.Flag)
 	}
-	if spec.PlatformSpecPath.AcceptedSources.ConfigKey != "platform_spec_path" {
+	if spec.PlatformSpecPath.AcceptedSources.ConfigKey != "paths.platform_spec_path" {
 		t.Fatalf("platform config key = %q", spec.PlatformSpecPath.AcceptedSources.ConfigKey)
 	}
 	if spec.PlatformSpecPath.AcceptedSources.BuiltInDefault != defaultPlatformSpecPath {
@@ -8771,13 +8777,9 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 			t.Setenv(item.env, value)
 		}
 	}
-	exeDir := t.TempDir()
-	originalExecutablePath := runtimeConfigExecutablePath
-	runtimeConfigExecutablePath = func() (string, error) {
-		return filepath.Join(exeDir, "swarm"), nil
-	}
-	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
-	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), fmt.Sprintf(`store:
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	t.Setenv("SWARM_CONFIG", configPath)
+	writeRuntimeConfigText(t, configPath, fmt.Sprintf(`store:
   backend: postgres
 database:
   host: %s
@@ -8959,16 +8961,12 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 }
 
 func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t *testing.T) {
-	originalExecutablePath := runtimeConfigExecutablePath
-	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
-
 	repo := t.TempDir()
-	exeDir := t.TempDir()
-	exePath := filepath.Join(exeDir, "swarm")
-	runtimeConfigExecutablePath = func() (string, error) {
-		return exePath, nil
+	localDir := filepath.Join(repo, ".swarm")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatalf("mkdir local config dir: %v", err)
 	}
-	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), strings.Join([]string{
+	writeRuntimeConfigText(t, filepath.Join(localDir, "swarm.yaml"), strings.Join([]string{
 		"llm:",
 		"  backend: claude_cli",
 		"  session:",
@@ -8996,17 +8994,17 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 
 	result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo})
 	if err != nil {
-		t.Fatalf("load executable config: %v", err)
+		t.Fatalf("load discovered local-operator config: %v", err)
 	}
-	if result.Config.LLM.Backend != "claude_cli" || result.Source != "executable" {
-		t.Fatalf("executable config result = source=%s backend=%s, want executable claude_cli", result.Source, result.Config.LLM.Backend)
+	if result.Config.LLM.Backend != "claude_cli" || result.Source != string(unifiedLayerLocalOperator) {
+		t.Fatalf("local-operator config result = source=%s backend=%s, want local_operator_config claude_cli", result.Source, result.Config.LLM.Backend)
 	}
 
 	result, err = loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: "runtime.yaml", BackendOverride: "openai_compatible"})
 	if err != nil {
 		t.Fatalf("load explicit config with backend override: %v", err)
 	}
-	if result.Config.LLM.Backend != "openai_compatible" || result.Source != "explicit" || filepath.Clean(result.Path) != filepath.Clean(explicitPath) {
+	if result.Config.LLM.Backend != "openai_compatible" || result.Source != string(unifiedLayerExplicit) || filepath.Clean(result.Path) != filepath.Clean(explicitPath) {
 		t.Fatalf("explicit config result = %#v backend=%s", result, result.Config.LLM.Backend)
 	}
 }
@@ -10042,18 +10040,12 @@ func TestRunVerifyCommand_FailsForUndefinedSelectedBackendModelAlias(t *testing.
 	}
 }
 
-func TestRunVerifyCommand_UsesExecutableRuntimeConfigModelAliases(t *testing.T) {
-	originalExecutablePath := runtimeConfigExecutablePath
-	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
-
+func TestRunVerifyCommand_UsesUnifiedRuntimeConfigModelAliases(t *testing.T) {
 	root := t.TempDir()
 	writeVerifyModelAliasFixture(t, root, "audit.custom")
 
-	exeDir := t.TempDir()
-	runtimeConfigExecutablePath = func() (string, error) {
-		return filepath.Join(exeDir, "swarm"), nil
-	}
-	writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), strings.Join([]string{
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, strings.Join([]string{
 		"llm:",
 		"  backend: anthropic",
 		"  models:",
@@ -10064,6 +10056,7 @@ func TestRunVerifyCommand_UsesExecutableRuntimeConfigModelAliases(t *testing.T) 
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n")
+	t.Setenv("SWARM_CONFIG", configPath)
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)

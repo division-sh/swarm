@@ -93,6 +93,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
 	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to the Swarm user/global state directory")
+	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.configPath, changed: &opts.rootFlags.configPathSet}, "config", "Path to unified swarm.yaml config")
 	cmd.AddGroup(
 		&cobra.Group{ID: commandGroupStart, Title: "Getting started:"},
 		&cobra.Group{ID: commandGroupAuthor, Title: "Author & validate:"},
@@ -107,16 +108,16 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		}
 	}
 	addToGroup(commandGroupStart,
-		newDoctorCommand(ctx, repo),
+		newDoctorCommand(ctx, repo, opts),
 		newWorkspaceCommand(ctx, opts.repoRoot),
 		newContextCommand(ctx, opts),
 		newServeCommand(ctx, repo, opts.runServe),
 		newVersionCommand(opts),
 	)
 	addToGroup(commandGroupAuthor,
-		newVerifyCommand(ctx, repo),
+		newVerifyCommand(ctx, repo, opts),
 		newTestCommand(repo, opts),
-		newDescribeCommand(ctx, repo),
+		newDescribeCommand(ctx, repo, opts),
 		newBundleCommand(repo, opts),
 		newSecretsCommand(ctx, repo),
 		newConnectionsCommand(ctx, repo),
@@ -214,6 +215,33 @@ func (f *trackedRootStringFlag) Type() string {
 	return "string"
 }
 
+func rootConfigFlag(cmd *cobra.Command) (string, bool) {
+	if cmd == nil || cmd.Root() == nil {
+		return "", false
+	}
+	flag := cmd.Root().PersistentFlags().Lookup("config")
+	if flag == nil {
+		return "", false
+	}
+	return flag.Value.String(), flag.Changed
+}
+
+func effectiveCommandConfigPath(cmd *cobra.Command, localPath string, localSet bool) (string, bool, error) {
+	rootPath, rootSet := rootConfigFlag(cmd)
+	localPath = strings.TrimSpace(localPath)
+	rootPath = strings.TrimSpace(rootPath)
+	if rootSet && localSet && localPath != rootPath {
+		return "", false, fmt.Errorf("root --config and command --config name different files; use one explicit unified config source")
+	}
+	if localSet {
+		return localPath, true, nil
+	}
+	if rootSet {
+		return rootPath, true, nil
+	}
+	return "", false, nil
+}
+
 func newServeCommand(ctx context.Context, repo string, runServe func(context.Context, string, serveOptions) int) *cobra.Command {
 	opts := defaultServeOptions()
 	if runServe == nil {
@@ -274,6 +302,11 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			opts.WorkspaceBackendSet = cmd.Flags().Changed("workspace-backend")
 			opts.ContextNameSet = cmd.Flags().Changed("context")
 			opts.APITokenFileFlagSet = cmd.Flags().Changed("api-token-file")
+			if path, set, err := effectiveCommandConfigPath(cmd, opts.ConfigPath, cmd.Flags().Changed("config")); err != nil {
+				return err
+			} else if set {
+				opts.ConfigPath = path
+			}
 			if opts.APITokenFileFlagSet {
 				opts.APITokenFile = strings.TrimSpace(opts.APITokenFile)
 				if opts.APITokenFile == "" {
@@ -288,6 +321,8 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 				MCPListenAddr:        opts.MCPListenAddr,
 				APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
 				MCPListenAddrFlagSet: cmd.Flags().Changed("mcp-listen-addr"),
+				ConfigPath:           opts.ConfigPath,
+				RepoRoot:             assetCommandRepoRoot(repo),
 			})
 			if err != nil {
 				return err
@@ -334,7 +369,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	return cmd
 }
 
-func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
+func newVerifyCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultVerifyCommandOptions()
 	cmd := &cobra.Command{
 		Use:     "verify",
@@ -349,6 +384,9 @@ func newVerifyCommand(ctx context.Context, repo string) *cobra.Command {
 			}
 			if len(args) > 0 {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			}
+			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
+				opts.configPath = rootOpts.rootFlags.configPath
 			}
 			code := runVerifyCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {

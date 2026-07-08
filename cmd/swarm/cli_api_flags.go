@@ -129,6 +129,11 @@ func stripRootPersistentFlags(args []string) []string {
 			continue
 		case strings.HasPrefix(arg, "--swarm-dir="):
 			continue
+		case arg == "--config" && i+1 < len(args):
+			i++
+			continue
+		case strings.HasPrefix(arg, "--config="):
+			continue
 		default:
 			stripped = append(stripped, arg)
 		}

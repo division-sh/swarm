@@ -874,7 +874,7 @@ func TestPlatformSpecLocalTargetResolutionAuthorityPromoted(t *testing.T) {
 	if target.PromotedBy != "#1612" || target.ImplementationStatus != "implemented_first_slice" || target.CanonicalOwner != localTargetOwner {
 		t.Fatalf("local target owner = %#v", target)
 	}
-	wantSwarmDirOrder := []string{"--swarm-dir", "config swarm_dir", "default ~/.swarm"}
+	wantSwarmDirOrder := []string{"--swarm-dir", "config paths.swarm_dir", "default ~/.swarm"}
 	if !reflect.DeepEqual(target.SwarmDir.SourceOrder, wantSwarmDirOrder) {
 		t.Fatalf("swarm_dir source order = %#v, want %#v", target.SwarmDir.SourceOrder, wantSwarmDirOrder)
 	}
