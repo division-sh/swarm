@@ -68,7 +68,7 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 			return runDoctorCommand(ctx, assetCommandRepoRoot(repo), cmd, opts)
 		},
 	}
-	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Optional path to Swarm runtime config")
+	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Optional path to unified Swarm config (swarm.yaml)")
 	cmd.Flags().StringVar(&opts.backend, "backend", opts.backend, "LLM backend profile to diagnose: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.dataSource, "data", opts.dataSource, "Path to agent-visible read-only /data reference directory")
@@ -158,7 +158,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	if err != nil {
 		report := configReport
 		addUnifiedConfigDiagnosticsToReport(&report, unifiedConfigDiagnosticsFromError(err))
-		report.add(localPreflightBackendPrerequisite, "cli_config_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix SWARM_CONFIG or the CLI config file")
+		report.add(localPreflightBackendPrerequisite, "cli_config_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix SWARM_CONFIG or the unified Swarm config (swarm.yaml)")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)

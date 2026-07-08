@@ -12285,9 +12285,9 @@ configuration_source_authority:
       schema sections, source layers, trust tiers, source precedence, strict/old-shape handling, deep-merge and
       provenance semantics, and #1600 env-drain destinations. The #1858 parser/discovery first slice implements the
       unified parser, layered discovery, global explicit config selection, `SWARM_CONFIG` locator behavior,
-      executable-adjacent `config.yaml` invalidation, and minimum doctor provenance. Examples migration,
-      provider-trigger runtime behavior changes, sharding runtime promotion, serve/connection family cleanup, and
-      seeded env-row shrinkage remain split to later children.
+      executable-adjacent `config.yaml` invalidation, and minimum doctor provenance. #1844 implements the generated
+      `swarm.example.yaml` public guidance cleanup. Provider-trigger runtime behavior changes, sharding runtime
+      promotion, serve/connection family cleanup, and seeded env-row shrinkage remain split to later children.
     invariant: >
       Swarm configuration is explicit, typed, and provenance-bearing. Environment variables are never a normal
       precedence layer; they are accepted only as the `SWARM_CONFIG` config-file locator/replacement, as a
@@ -12594,7 +12594,7 @@ configuration_source_authority:
     - '#1803 inert/unsupported Claude CLI config-surface cleanup'
     - '#1600 seeded env-row family migrations'
     - '#1799 runtime/LLM config-default env-row retirement consumes this owner for final key-path guidance'
-    - examples/docs cleanup for one `swarm.example.yaml`
+    - '#1844 generated `swarm.example.yaml` examples/docs cleanup'
     - runtime sharding behavior promotion, if ever desired
     - provider-trigger runtime behavior changes, explicitly not part of #1804
 workspace_model:
@@ -15530,7 +15530,7 @@ cli_specification:
         database variables, provider credential variables, workspace/bootstrap variables, and final-boundary tooling
         variables remain governed by their specific source-authority owners and #1600 sibling issues.
       replacement_setup:
-        non_secret_settings: config.example.yaml and runtime-config.example.yaml guidance
+        non_secret_settings: generated swarm.example.yaml guidance
         credentials: '`swarm secrets set|check|list|rm` and token-file sources where explicitly owned'
       rejected_sources:
         repo_dotenv_autoload: >

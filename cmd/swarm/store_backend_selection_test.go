@@ -339,17 +339,19 @@ func TestPostgresDSNFromConfigSecretKeyUsesFileStoreNotEnvOverlay(t *testing.T) 
 	}
 }
 
-func TestRuntimeConfigExampleDoesNotPromoteDatabasePassword(t *testing.T) {
-	runtimeConfig, err := os.ReadFile(filepath.Join(repoRoot(), "runtime-config.example.yaml"))
+func TestSwarmExampleDoesNotPromoteDatabasePassword(t *testing.T) {
+	runtimeConfig, err := os.ReadFile(filepath.Join(repoRoot(), "swarm.example.yaml"))
 	if err != nil {
-		t.Fatalf("read runtime-config.example.yaml: %v", err)
+		t.Fatalf("read swarm.example.yaml: %v", err)
 	}
 	text := string(runtimeConfig)
-	if strings.Contains(text, "password:") {
-		t.Fatalf("runtime-config.example.yaml must not promote plaintext DB password config:\n%s", text)
+	if strings.Contains(text, "\n#   password:") || strings.Contains(text, "\npassword:") {
+		t.Fatalf("swarm.example.yaml must not promote plaintext DB password config:\n%s", text)
 	}
-	if !strings.Contains(text, "Keep credentials") || !strings.Contains(text, "swarm secrets") {
-		t.Fatalf("runtime-config.example.yaml must keep credential guidance out of plaintext config:\n%s", text)
+	for _, want := range []string{"Secret references", "password_secret_key", "password_file", "password_env", "never store plaintext secrets"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("swarm.example.yaml missing credential guidance %q:\n%s", want, text)
+		}
 	}
 }
 

@@ -531,21 +531,21 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		return retired(
 			name,
 			name+" is retired as runtime/LLM environment source; use "+key,
-			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
+			"unset "+name+"; set "+key+" in unified Swarm config (swarm.yaml)",
 		)
 	}
 	retiredStoreDatabaseConfig := func(name, key string) swarmEnvCatalogEntry {
 		return retired(
 			name,
 			name+" is retired as store/database environment source; use "+key,
-			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
+			"unset "+name+"; set "+key+" in unified Swarm config (swarm.yaml)",
 		)
 	}
 	retiredWorkspaceConfig := func(name, key string) swarmEnvCatalogEntry {
 		return retired(
 			name,
 			name+" is retired as workspace/tooling environment source; use "+key,
-			"unset "+name+"; set "+key+" in unified swarm.yaml/runtime config",
+			"unset "+name+"; set "+key+" in unified Swarm config (swarm.yaml)",
 		)
 	}
 	retiredWorkspaceFlagOrConfig := func(name, replacement string) swarmEnvCatalogEntry {
@@ -594,7 +594,7 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		retiredStoreDatabaseConfig("SWARM_DB_USER", "database.user"),
 		retiredStoreDatabaseConfig("SWARM_DB_SSLMODE", "database.sslmode"),
 		retiredStoreDatabaseConfig("SWARM_DB_POOL_SIZE", "database.pool_size"),
-		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in the runtime config"),
+		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in unified Swarm config (swarm.yaml)"),
 		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_DATA_SOURCE", "--data or workspace.data_source"),
 		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_BACKEND", "--workspace-backend or workspace.backend"),
 		retiredWorkspaceFlagOrConfig("SWARM_DOCKER_BIN", "--docker-bin for workspace build or workspace.docker_bin"),

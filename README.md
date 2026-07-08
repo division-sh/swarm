@@ -104,8 +104,8 @@ default) and no LLM credential (an agent-free flow boots without one). For
 Postgres, the agent workspace image, and LLM backend setup, see
 [Installation](https://docs.division.sh/installation) and
 [Configuration](https://docs.division.sh/reference/configuration). For local
-non-secret defaults, use [`config.example.yaml`](config.example.yaml) or
-[`runtime-config.example.yaml`](runtime-config.example.yaml). For contract
+non-secret defaults, use the unified [`swarm.example.yaml`](swarm.example.yaml)
+as a reference for `swarm.yaml`. For contract
 credentials, use `swarm secrets set` and validate with `swarm secrets check`.
 
 ---
@@ -211,7 +211,7 @@ Available in this repo too:
 
 Requirements: Go 1.23. Docker is the default workspace-isolation backend; an
 explicit host backend is available for local-dev or trusted remote work (see
-[`runtime-config.example.yaml`](runtime-config.example.yaml)). Host backend command execution is
+[`swarm.example.yaml`](swarm.example.yaml)). Host backend command execution is
 trusted/unsafe: native `bash` commands run as the host user when both host
 backend selection and `native_tools.bash` authorization are present. Host bash
 is full host-user shell execution from the workspace backing directory; use
