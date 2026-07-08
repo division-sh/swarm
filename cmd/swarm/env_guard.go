@@ -531,21 +531,21 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		return retired(
 			name,
 			name+" is retired as runtime/LLM environment source; use "+key,
-			"unset "+name+"; set "+key+" in unified Swarm config (swarm.yaml)",
+			"unset "+name+"; set "+key+" in swarm.yaml",
 		)
 	}
 	retiredStoreDatabaseConfig := func(name, key string) swarmEnvCatalogEntry {
 		return retired(
 			name,
 			name+" is retired as store/database environment source; use "+key,
-			"unset "+name+"; set "+key+" in unified Swarm config (swarm.yaml)",
+			"unset "+name+"; set "+key+" in swarm.yaml",
 		)
 	}
 	retiredWorkspaceConfig := func(name, key string) swarmEnvCatalogEntry {
 		return retired(
 			name,
 			name+" is retired as workspace/tooling environment source; use "+key,
-			"unset "+name+"; set "+key+" in unified Swarm config (swarm.yaml)",
+			"unset "+name+"; set "+key+" in swarm.yaml",
 		)
 	}
 	retiredWorkspaceFlagOrConfig := func(name, replacement string) swarmEnvCatalogEntry {
@@ -573,7 +573,7 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		return e(name, swarmEnvCategoryTestQuarantine, swarmEnvAuthorityOwner, "test/debug quarantine", "", "")
 	}
 	return []swarmEnvCatalogEntry{
-		e("SWARM_CONFIG", swarmEnvCategoryBootstrap, unifiedConfigOwner, "keep bootstrap locator for unified swarm.yaml; --config wins when present", "", ""),
+		e("SWARM_CONFIG", swarmEnvCategoryBootstrap, unifiedConfigOwner, "keep bootstrap locator for swarm.yaml; --config wins when present", "", ""),
 		retired("SWARM_API_SERVER", "client-side API environment sources are no longer accepted: SWARM_API_SERVER", "use --api-server, --context, project/selected context, or config connection.api_server"),
 		retired("SWARM_API_TOKEN", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN", "use --api-token-file, context descriptor auth, config connection.api_token_file, or serve.api_token_file for server auth"),
 		retired("SWARM_API_TOKEN_FILE", "client-side API environment sources are no longer accepted: SWARM_API_TOKEN_FILE", "use --api-token-file, context descriptor auth, or config connection.api_token_file"),
@@ -594,7 +594,7 @@ func swarmEnvCatalogEntries() []swarmEnvCatalogEntry {
 		retiredStoreDatabaseConfig("SWARM_DB_USER", "database.user"),
 		retiredStoreDatabaseConfig("SWARM_DB_SSLMODE", "database.sslmode"),
 		retiredStoreDatabaseConfig("SWARM_DB_POOL_SIZE", "database.pool_size"),
-		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in unified Swarm config (swarm.yaml)"),
+		retired("SWARM_DB_PASSWORD", "SWARM_DB_PASSWORD is not read implicitly; it is accepted only when explicitly named by database.password_env", "unset SWARM_DB_PASSWORD or declare database.password_env: SWARM_DB_PASSWORD in swarm.yaml"),
 		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_DATA_SOURCE", "--data or workspace.data_source"),
 		retiredWorkspaceFlagOrConfig("SWARM_WORKSPACE_BACKEND", "--workspace-backend or workspace.backend"),
 		retiredWorkspaceFlagOrConfig("SWARM_DOCKER_BIN", "--docker-bin for workspace build or workspace.docker_bin"),

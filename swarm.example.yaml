@@ -1,8 +1,9 @@
-# Generated from cmd/swarm unified config metadata.
-# Do not hand-maintain key lists here; update the generator metadata and drift test.
-# Copy selected keys into ./swarm.yaml for project-safe settings, .swarm/swarm.yaml for local-operator settings, or a file passed with --config for explicit full-trust settings.
-# All example entries are commented so this file is documentation, not active project config.
-# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the schema owns that reference.
+# swarm.yaml - Swarm's config file. Copy keys you want to change into:
+#   ./swarm.yaml (project-safe), .swarm/swarm.yaml (this machine only), or --config <file>.
+# Everything here is commented out; uncommenting is how you override a default.
+# `swarm doctor config` shows which values are in effect and where they came from.
+# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the config file owns that reference.
+# (Contributors: generated file - edit the generator metadata, not this file; see drift test.)
 
 # Project-safe keys: safe in checked-in ./swarm.yaml
 # These keys express portable runtime behavior.
@@ -11,7 +12,7 @@
 #   human_tasks:
 #     auto_expire_hours: 168 # Human task auto-expiration window in hours.
 #     budget_reset: monday # Weekly human-task budget reset day.
-#     categories_enabled: ["ops"] # Human task categories enabled for budget policy.
+#     categories_enabled: ["ops"] # Human task categories covered by the budget.
 #     max_tasks_per_week: 0 # Human task weekly cap; zero leaves enforcement disabled.
 #   per_entity_monthly_cap: 0 # Per-entity monthly budget cap; zero leaves enforcement disabled.
 #   system_monthly_cap: 0 # System actor monthly budget cap; zero leaves enforcement disabled.
@@ -25,19 +26,19 @@
 #     timeout: 1h # Claude CLI request timeout.
 #   models:
 #     regular:
-#       anthropic: claude-3-5-sonnet # Provider-specific model alias override.
+#       anthropic: claude-sonnet-4-5 # Anthropic model to use for the regular alias.
 #   provider_limits:
 #     anthropic:
 #       max_concurrency: 2 # Provider-wide concurrency limit.
 #       max_concurrency_max_wait: 30s # Maximum wait for provider-wide concurrency limiting.
 #       models:
-#         claude-3-5-sonnet:
+#         claude-sonnet-4-5:
 #           rate_limit: 10/m # Model-specific request rate limit.
 #           rate_limit_max_wait: 30s # Maximum wait for model-specific rate limiting.
 #       rate_limit: 30/m # Provider-wide request rate limit.
 #       rate_limit_max_wait: 30s # Maximum wait for provider-wide rate limiting.
 #   session:
-#     lock_ttl: 10s # Session lock lease TTL.
+#     lock_ttl: 10s # How long a session lock can be held before it expires.
 #     rotate_after_turns: 40 # Rotate an LLM session after this many turns.
 #     rotate_on_parse_failures: 3 # Rotate an LLM session after repeated parse failures.
 # runtime:
@@ -62,10 +63,16 @@
 # workspace:
 #   data_source: ./.swarm/data # Project-contained workspace data source.
 
-# Elevated/local-only keys: use .swarm/swarm.yaml, user-global config, explicit --config, or flags
-# These keys are machine/operator-specific or unsafe if committed to a shared project file.
+# Connection and auth settings: use user-global config, --config, or flags
+# These keys can redirect clients or name auth material, so keep them in user-global config, an explicit --config file, or invocation flags.
 # connection:
-#   api_server: http://127.0.0.1:8081 # CLI API target. Keep out of checked-in project config.
+#   api_server: http://127.0.0.1:8081 # CLI API target. Keep out of shared project config and this-machine config.
+#   api_token_file: .swarm/api-token # CLI API bearer-token file reference; never inline the token.
+# serve:
+#   api_token_file: .swarm/serve-api-token # Serve API bearer-token file reference; never inline the token.
+
+# Settings for this machine only: put these in .swarm/swarm.yaml
+# These keys are machine-specific or unsafe if committed to a shared project file.
 # database:
 #   host: 127.0.0.1 # Postgres host for postgres store deployments.
 #   name: swarm # Postgres database name.
@@ -88,7 +95,7 @@
 # store:
 #   backend: sqlite # Runtime store backend.
 #   sqlite:
-#     path: .swarm/dev.db # SQLite runtime store path.
+#     path: .swarm/stores/dev.db # SQLite runtime store path.
 # workspace:
 #   allow_exec_on_host: false # Unsafe host execution opt-in; requires local/operator config or a flag.
 #   docker_bin: docker # Docker executable path/name.
@@ -99,11 +106,7 @@
 
 # Secret references: never store plaintext secrets in config
 # These keys point at secret material; the secret value itself belongs in the secrets store, a token file, a mounted secret file, or an explicitly delegated env var.
-# connection:
-#   api_token_file: .swarm/api-token # CLI API bearer-token file reference; never inline the token.
 # database:
 #   password_env: DB_PASSWORD # Explicit env delegation for orchestrator-injected database password.
 #   password_file: /run/secrets/postgres-password # Database password file for orchestrator-mounted secrets.
 #   password_secret_key: postgres_password # Database password key in the Swarm secrets store.
-# serve:
-#   api_token_file: .swarm/serve-api-token # Serve API bearer-token file reference; never inline the token.

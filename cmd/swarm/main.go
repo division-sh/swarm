@@ -1608,7 +1608,7 @@ type runStatusOptions struct {
 func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("fork", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	configPath := fs.String("config", "", "Optional path to unified Swarm config (swarm.yaml)")
+	configPath := fs.String("config", "", "Path to swarm.yaml config")
 	backend := fs.String("backend", "", "LLM backend profile for local runtime startup")
 	contractsPath := fs.String("contracts", "", "Path to selected Swarm contract bundle root for fork planning or selected-contract execution")
 	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")

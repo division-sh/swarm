@@ -11783,7 +11783,7 @@ environment_source_authority:
     - name: SWARM_CONFIG
       category: bootstrap
       owner: platform-spec.yaml#configuration_source_authority.unified_swarm_config
-      migration: keep bootstrap locator for unified swarm.yaml; --config wins when present
+      migration: keep bootstrap locator for swarm.yaml; --config wins when present
     - name: SWARM_API_SERVER
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set

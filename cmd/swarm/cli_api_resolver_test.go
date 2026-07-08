@@ -250,8 +250,8 @@ func TestCLISwarmDirConfigValidation(t *testing.T) {
 	}
 	t.Setenv("SWARM_CONFIG", path)
 
-	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "decode unified CLI config") {
-		t.Fatalf("resolveCLISwarmDir err = %v, want unified CLI decode validation", err)
+	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "decode swarm.yaml CLI config") {
+		t.Fatalf("resolveCLISwarmDir err = %v, want swarm.yaml CLI decode validation", err)
 	}
 }
 
@@ -305,7 +305,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  "read unified config",
+			wantErr:  "read swarm.yaml config",
 		},
 		{
 			name: "malformed config",
@@ -319,7 +319,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  "parse unified config",
+			wantErr:  "parse swarm.yaml config",
 		},
 		{
 			name: "unsupported inline config token",

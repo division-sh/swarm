@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -32,7 +33,7 @@ func TestGeneratedUnifiedConfigExampleMatchesCommittedFile(t *testing.T) {
 	}
 	want := generatedUnifiedConfigExample()
 	if string(got) != want {
-		t.Fatalf("swarm.example.yaml drifted from generated unified config metadata:\n%s", firstStringDiff(string(got), want))
+		t.Fatalf("swarm.example.yaml drifted from generated config example metadata:\n%s", firstStringDiff(string(got), want))
 	}
 }
 
@@ -108,6 +109,8 @@ func TestGeneratedUnifiedConfigExampleOmitsSplitUnsupportedAndPlaintextSecrets(t
 		"llm.claude_cli.use_tmux",
 		"llm.openai_compatible.default_model",
 		"llm.openai_compatible.low_cost_model",
+		"claude-3-5-sonnet",
+		".swarm/dev.db",
 		"sharding",
 		"\n#   password:",
 	} {
@@ -119,6 +122,25 @@ func TestGeneratedUnifiedConfigExampleOmitsSplitUnsupportedAndPlaintextSecrets(t
 		if !strings.Contains(text, want) {
 			t.Fatalf("generated example missing secret-reference guidance %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestGeneratedUnifiedConfigExampleUsesPublicVocabulary(t *testing.T) {
+	text := generatedUnifiedConfigExample()
+	lower := strings.ToLower(text)
+	for _, forbidden := range []string{
+		"unified",
+		"presence",
+		"authority",
+		"precedence",
+		"drain",
+	} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("generated example exposes internal vocabulary %q:\n%s", forbidden, text)
+		}
+	}
+	if regexp.MustCompile(`#\d+`).MatchString(text) {
+		t.Fatalf("generated example exposes issue-number implementation context:\n%s", text)
 	}
 }
 

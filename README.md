@@ -99,13 +99,13 @@ git clone https://github.com/division-sh/swarm && cd swarm
 go build ./cmd/swarm
 ```
 
-Plain local runs need no database service (SQLite at `.swarm/dev.db` is the
+Plain local runs need no database service (SQLite at `.swarm/stores/dev.db` is the
 default) and no LLM credential (an agent-free flow boots without one). For
 Postgres, the agent workspace image, and LLM backend setup, see
 [Installation](https://docs.division.sh/installation) and
 [Configuration](https://docs.division.sh/reference/configuration). For local
-non-secret defaults, use the unified [`swarm.example.yaml`](swarm.example.yaml)
-as a reference for `swarm.yaml`. For contract
+non-secret defaults, use [`swarm.example.yaml`](swarm.example.yaml) as the
+non-secret `swarm.yaml` reference. For contract
 credentials, use `swarm secrets set` and validate with `swarm secrets check`.
 
 ---

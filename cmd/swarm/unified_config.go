@@ -82,7 +82,7 @@ func (e unifiedConfigError) Error() string {
 	if len(e.Diagnostics) == 0 {
 		return ""
 	}
-	lines := []string{"unified config source authority blockers:"}
+	lines := []string{"swarm.yaml config blockers:"}
 	for _, d := range e.Diagnostics {
 		if !d.blocker() {
 			continue
@@ -125,7 +125,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 				Kind:        unifiedConfigDiagnosticReadFailed,
 				Layer:       layer.Name,
 				Path:        layer.Path,
-				Message:     fmt.Sprintf("read unified config %s: %v", layer.Path, err),
+				Message:     fmt.Sprintf("read swarm.yaml config %s: %v", layer.Path, err),
 				Remediation: unifiedConfigReadRemediation(layer),
 			})
 			continue
@@ -136,14 +136,14 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 				Kind:        unifiedConfigDiagnosticParseFailed,
 				Layer:       layer.Name,
 				Path:        layer.Path,
-				Message:     fmt.Sprintf("parse unified config %s: %v", layer.Path, err),
+				Message:     fmt.Sprintf("parse swarm.yaml config %s: %v", layer.Path, err),
 				Remediation: "fix YAML syntax in this config file",
 			})
 			continue
 		}
 		root := yamlDocumentRoot(&doc)
 		if root == nil || root.Kind == 0 {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded empty unified config"})
+			diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded empty swarm.yaml config"})
 			continue
 		}
 		if root.Kind != yaml.MappingNode {
@@ -151,7 +151,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 				Kind:        unifiedConfigDiagnosticParseFailed,
 				Layer:       layer.Name,
 				Path:        layer.Path,
-				Message:     fmt.Sprintf("unified config %s must be a YAML mapping", layer.Path),
+				Message:     fmt.Sprintf("swarm.yaml config %s must be a YAML mapping", layer.Path),
 				Remediation: "use sectioned swarm.yaml keys such as runtime, workspace, connection, serve, paths, llm, store, or database",
 			})
 			continue
@@ -163,7 +163,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 			// Continue scanning later files so doctor can render a complete blocker set.
 			mergeYAMLMapping(&merged, root)
 		}
-		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded unified config"})
+		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Layer: layer.Name, Path: layer.Path, Message: "loaded swarm.yaml config"})
 	}
 	if legacy := executableAdjacentRuntimeConfigDiagnostic(); legacy != nil {
 		diagnostics = append(diagnostics, *legacy)
@@ -179,7 +179,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		if err := merged.Decode(cfg); err != nil {
 			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticParseFailed,
-				Message:     fmt.Sprintf("decode unified config: %v", err),
+				Message:     fmt.Sprintf("decode swarm.yaml config: %v", err),
 				Remediation: "fix value types in swarm.yaml",
 			})
 		}
@@ -202,7 +202,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
 				Kind:        unifiedConfigDiagnosticValidationFailed,
 				Message:     err.Error(),
-				Remediation: "fix the referenced unified swarm.yaml key or command flag",
+				Remediation: "fix the referenced swarm.yaml key or command flag",
 			})
 		}
 	}
@@ -210,7 +210,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	if err != nil {
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{
 			Kind:        unifiedConfigDiagnosticParseFailed,
-			Message:     fmt.Sprintf("decode unified CLI config: %v", err),
+			Message:     fmt.Sprintf("decode swarm.yaml CLI config: %v", err),
 			Remediation: "fix connection, serve, or paths value types in swarm.yaml",
 		})
 	}
@@ -292,7 +292,7 @@ func discoverUnifiedConfigLayers(repoRoot, explicitPath string) ([]unifiedConfig
 		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerExplicit, Path: explicit, Explicit: true})
 	}
 	if len(layers) == 0 {
-		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Message: "no unified swarm.yaml config files loaded; using built-in defaults"})
+		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Message: "no swarm.yaml config files loaded; using built-in defaults"})
 	}
 	return layers, diagnostics
 }
@@ -363,7 +363,7 @@ func executableAdjacentRuntimeConfigDiagnostic() *unifiedConfigDiagnostic {
 		Kind:        unifiedConfigDiagnosticLegacyDiscovery,
 		Path:        path,
 		Message:     fmt.Sprintf("executable-adjacent runtime config %s is no longer a config source", path),
-		Remediation: "move this file to an explicit unified swarm.yaml source and remove executable-adjacent config.yaml",
+		Remediation: "move this file to an explicit swarm.yaml source and remove executable-adjacent config.yaml",
 	}
 }
 
@@ -385,7 +385,7 @@ func unifiedConfigPrimarySource(layers []unifiedConfigLayer) (string, string) {
 
 func unifiedConfigReadRemediation(layer unifiedConfigLayer) string {
 	if layer.Explicit {
-		return "fix --config or SWARM_CONFIG to point at a readable unified swarm.yaml file"
+		return "fix --config or SWARM_CONFIG to point at a readable swarm.yaml file"
 	}
 	return "fix or remove this discovered swarm.yaml file"
 }
@@ -757,14 +757,14 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 
 func unifiedOldFlatKeyRemediation() map[string]string {
 	return map[string]string{
-		"api_server":            "move to connection.api_server in unified swarm.yaml",
-		"api_token_file":        "move to connection.api_token_file in unified swarm.yaml",
-		"swarm_dir":             "move to paths.swarm_dir in unified swarm.yaml",
-		"contracts_path":        "move to paths.contracts_path in unified swarm.yaml",
-		"platform_spec_path":    "move to paths.platform_spec_path in unified swarm.yaml",
-		"serve_api_listen_addr": "move to serve.api_listen_addr in unified swarm.yaml",
-		"serve_mcp_listen_addr": "move to serve.mcp_listen_addr in unified swarm.yaml",
-		"serve_api_token_file":  "move to serve.api_token_file in unified swarm.yaml",
+		"api_server":            "move to connection.api_server in swarm.yaml",
+		"api_token_file":        "move to connection.api_token_file in swarm.yaml",
+		"swarm_dir":             "move to paths.swarm_dir in swarm.yaml",
+		"contracts_path":        "move to paths.contracts_path in swarm.yaml",
+		"platform_spec_path":    "move to paths.platform_spec_path in swarm.yaml",
+		"serve_api_listen_addr": "move to serve.api_listen_addr in swarm.yaml",
+		"serve_mcp_listen_addr": "move to serve.mcp_listen_addr in swarm.yaml",
+		"serve_api_token_file":  "move to serve.api_token_file in swarm.yaml",
 	}
 }
 
