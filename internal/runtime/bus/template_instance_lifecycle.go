@@ -140,9 +140,15 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	}
 	onMissing := strings.TrimSpace(instanceContract.OnMissing)
 	onConflict := strings.TrimSpace(instanceContract.OnConflict)
-	if plan.InstanceKey != nil && strings.TrimSpace(plan.InstanceKey.Mode) == runtimecontracts.FlowInputResolutionModeCreate {
-		onMissing = "create"
-		onConflict = "reuse"
+	if plan.InstanceKey != nil {
+		switch strings.TrimSpace(plan.InstanceKey.Mode) {
+		case runtimecontracts.FlowInputResolutionModeCreate:
+			onMissing = "create"
+			onConflict = "reuse"
+		case runtimecontracts.FlowInputResolutionModeSelect:
+			onMissing = "reject"
+			onConflict = "reject"
+		}
 	}
 	matches := runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, descriptors)
 	if len(matches) > 1 {

@@ -1048,6 +1048,194 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *t
 	}
 }
 
+func TestEventBusPublish_ConnectRoutePlanSelectResolutionRoutesExistingInstanceAndReplaysCommittedRoute(t *testing.T) {
+	source := connectRoutePlanSelectResolutionSourceWithPolicy(t, "create", "reuse")
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "one",
+				EntityID:      "ent-1",
+				FlowInstance:  "account/one",
+				AddressFields: map[string]string{"entity.account_id": "acct-1"},
+			}},
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(one): %v", err)
+	}
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	want := events.DeliveryRoute{SubscriberType: "node", SubscriberID: "account-node-one", Target: events.RouteIdentity{FlowID: "account", FlowInstance: "account/one", EntityID: "ent-1"}}
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" {
+		t.Fatalf("preflight target failure = %q, want none", preflight.TargetFailure)
+	}
+	if !deliveryRoutesContain(preflight.DeliveryRoutes, want) || len(preflight.DeliveryRoutes) != 1 {
+		t.Fatalf("preflight delivery routes = %#v, want select existing route %#v", preflight.DeliveryRoutes, want)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("preflight activations = %d, want 0 for select", got)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("publish activations = %d, want 0 because select never creates", got)
+	}
+	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want select existing route %#v", store.routes[eventID], want)
+	}
+
+	replayTarget := eb.SubscribeInternal("account-node-one")
+	store.flowInstances = []ActiveFlowInstanceDescriptor{{
+		InstanceID:    "drift",
+		EntityID:      "ent-drift",
+		FlowInstance:  "account/drift",
+		AddressFields: map[string]string{"entity.account_id": "acct-1"},
+	}}
+	store.flowInstanceDescriptorCalls = 0
+	if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", "drift")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute(drift): %v", err)
+	}
+	if err := eb.PublishPersistedRecipients(context.Background(), evt, nil); err != nil {
+		t.Fatalf("PublishPersistedRecipients: %v", err)
+	}
+	replayed := requireBusEvent(t, replayTarget, "select resolution committed replay")
+	if replayed.FlowInstance() != "account/one" || replayed.EntityID() != "ent-1" {
+		t.Fatalf("replayed delivery target = flow_instance:%q entity:%q, want persisted account/one ent-1", replayed.FlowInstance(), replayed.EntityID())
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("replay descriptor calls = %d, want 0 because persisted route/scope is authoritative", got)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanSelectResolutionFailsClosedForTargetGaps(t *testing.T) {
+	tests := []struct {
+		name          string
+		flowInstances []ActiveFlowInstanceDescriptor
+		addRoutes     []string
+		wantFailure   runtimepinrouting.TargetFailure
+		wantDetail    map[string]any
+	}{
+		{
+			name: "missing existing instance does not create",
+			flowInstances: []ActiveFlowInstanceDescriptor{{
+				InstanceID:    "other",
+				EntityID:      "ent-other",
+				FlowInstance:  "account/other",
+				AddressFields: map[string]string{"entity.account_id": "acct-2"},
+			}},
+			addRoutes:   []string{"other"},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetUnresolved),
+			wantDetail: map[string]any{
+				"connect_route_plan_receiver_flow":      "account",
+				"connect_route_plan_instance_key_field": "account_id",
+				"connect_route_plan_instance_key_value": "acct-1",
+			},
+		},
+		{
+			name: "ambiguous existing instances fail closed",
+			flowInstances: []ActiveFlowInstanceDescriptor{
+				{InstanceID: "one", EntityID: "ent-1", FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+				{InstanceID: "two", EntityID: "ent-2", FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+			},
+			addRoutes:   []string{"one", "two"},
+			wantFailure: runtimepinrouting.TargetFailure(runtimepinrouting.ConnectFailureTargetAmbiguous),
+			wantDetail: map[string]any{
+				"connect_route_plan_receiver_flow":          "account",
+				"connect_route_plan_instance_key_field":     "account_id",
+				"connect_route_plan_instance_key_value":     "acct-1",
+				"connect_route_plan_matched_instance_count": 2,
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := connectRoutePlanSelectResolutionSourceWithPolicy(t, "create", "reuse")
+			store := &connectRoutePlanLifecycleStore{
+				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+					targetRouteMemoryStore: newTargetRouteMemoryStore(),
+					flowInstances:          tc.flowInstances,
+				},
+			}
+			eb, err := NewEventBusWithOptions(store, EventBusOptions{
+				ContractBundle:            source,
+				TemplateInstanceActivator: store.Activate,
+			})
+			if err != nil {
+				t.Fatalf("NewEventBusWithOptions: %v", err)
+			}
+			store.bus = eb
+			for _, instanceID := range tc.addRoutes {
+				if err := eb.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("account", instanceID)}); err != nil {
+					t.Fatalf("AddFlowInstanceRoute(%s): %v", instanceID, err)
+				}
+			}
+			raw := eb.Subscribe("raw-source-listener", events.EventType("producer/account.ready"), events.EventType("account.ready"))
+			defer eb.Unsubscribe("raw-source-listener")
+			eventID := uuid.NewString()
+			evt := eventtest.RootIngress(eventID,
+				events.EventType("producer/account.ready"), "", "", json.RawMessage(`{"account_id":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+			routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
+			if err != nil {
+				t.Fatalf("planSubscribedRoutePlan: %v", err)
+			}
+			if routePlan.AuthorityState != RoutePlanAuthorityCanonicalFailedClosed || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
+				t.Fatalf("route plan authority = %q/%q, want fail-closed connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
+			}
+			if routePlan.TargetFailure != tc.wantFailure {
+				t.Fatalf("target failure = %q, want %q", routePlan.TargetFailure, tc.wantFailure)
+			}
+			for key, want := range tc.wantDetail {
+				if got := routePlan.ExtraDetail[key]; got != want {
+					t.Fatalf("route plan detail %s = %#v, want %#v; all detail %#v", key, got, want, routePlan.ExtraDetail)
+				}
+			}
+			if remediation, _ := routePlan.ExtraDetail["connect_route_plan_failure_remediation"].(string); !strings.Contains(remediation, "select") || !strings.Contains(remediation, "account") || !strings.Contains(remediation, "account_id") {
+				t.Fatalf("remediation = %q, want select/account/account_id user-facing detail", remediation)
+			}
+
+			plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+			if err != nil {
+				t.Fatalf("CheckPublishRecipientPlan: %v", err)
+			}
+			if got, want := plan.TargetFailure, string(tc.wantFailure); got != want {
+				t.Fatalf("preflight target failure = %q, want %q", got, want)
+			}
+			if got := len(store.activations); got != 0 {
+				t.Fatalf("preflight activations = %d, want 0 because select never creates", got)
+			}
+			if err := eb.Publish(context.Background(), evt); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if got := len(store.activations); got != 0 {
+				t.Fatalf("publish activations = %d, want 0 because select never creates", got)
+			}
+			if routes := store.routes[eventID]; len(routes) != 0 {
+				t.Fatalf("persisted delivery routes = %#v, want none for fail-closed select", routes)
+			}
+			requireNoConnectRoutePlanBusEvent(t, raw, "source/raw subscriber fallback")
+		})
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanLifecycleCreateRefreshesDescriptorsForLaterPlans(t *testing.T) {
 	source := connectRoutePlanInstanceKeyMultiInputSourceWithPolicy(t, "create", "reuse")
 	store := &connectRoutePlanLifecycleStore{
@@ -2225,6 +2413,21 @@ func connectRoutePlanCreateResolutionSource(t testing.TB, mint string) semanticv
 	return semanticview.Wrap(bundle)
 }
 
+func connectRoutePlanSelectResolutionSourceWithPolicy(t testing.TB, onMissing, onConflict string) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t, onMissing, onConflict)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
 	return writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t, "one")
 }
@@ -2304,6 +2507,83 @@ validator-node:
   execution_type: system_node
   event_handlers:
     validation.requested: {}
+`)
+	return root
+}
+
+func writeConnectRoutePlanSelectResolutionFixtureWithPolicy(t testing.TB, onMissing, onConflict string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: select-resolution-connect-route-plan-bus
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: account
+    flow: account
+    mode: template
+connect:
+  - from: producer.account_ready
+    to: account.account_ready
+    delivery: one
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-resolution-connect-route-plan-bus\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: account_ready
+        event: account.ready
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  account_id: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `
+name: account
+mode: template
+instance:
+  by: account_id
+  on_missing: `+onMissing+`
+  on_conflict: `+onConflict+`
+pins:
+  inputs:
+    events:
+      - name: account_ready
+        event: account.ready
+        resolution:
+          mode: select
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: string
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "events.yaml"), "account.ready:\n  account_id: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
+account_state:
+  account_id:
+    type: string
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "account", "nodes.yaml"), `
+account-node:
+  id: account-node-{instance_id}
+  execution_type: system_node
+  event_handlers:
+    account.ready: {}
 `)
 	return root
 }

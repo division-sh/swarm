@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/fanoutpinroute"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectexisting"
 )
 
 func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *testing.T) {
@@ -121,6 +122,53 @@ func TestTemplateFlowPilotConformance_FailClosedMatrix(t *testing.T) {
 				t.Fatalf("expected hard invalidity %s containing %q, got %#v", tc.checkID, tc.wantMessage, report.HardInvalidities())
 			}
 		})
+	}
+}
+
+func TestTemplateSelectExistingConformance_CoversResolutionSelectOwner(t *testing.T) {
+	source := templateselectexisting.LoadSource(t)
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	if got := report.HardInvalidities(); len(got) != 0 {
+		t.Fatalf("template-select-existing hard invalidities = %#v, want none", got)
+	}
+
+	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
+	if len(issues) != 0 {
+		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one select route plan", plans)
+	}
+	plan := plans[0]
+	if plan.Source.FlowID != templateselectexisting.ProducerFlowID || plan.Source.Pin != templateselectexisting.ProducerOutputPin {
+		t.Fatalf("route plan source = %#v, want %s.%s", plan.Source, templateselectexisting.ProducerFlowID, templateselectexisting.ProducerOutputPin)
+	}
+	if plan.Receiver.FlowID != templateselectexisting.TemplateFlowID || plan.Receiver.Pin != templateselectexisting.TemplateInputPin || plan.Receiver.Mode != "template" {
+		t.Fatalf("route plan receiver = %#v, want template %s.%s", plan.Receiver, templateselectexisting.TemplateFlowID, templateselectexisting.TemplateInputPin)
+	}
+	if plan.ResolutionKind != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution {
+		t.Fatalf("route plan resolution = %s runtime=%v, want runtime instance-key select", plan.ResolutionKind, plan.RequiresRuntimeResolution)
+	}
+	if plan.InstanceKey == nil || plan.InstanceKey.Mode != "select" || strings.Join(plan.InstanceKey.Fields, ",") != templateselectexisting.TemplateInstanceBy {
+		t.Fatalf("route plan instance key = %#v, want select/account_id", plan.InstanceKey)
+	}
+	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != templateselectexisting.TemplateInstanceBy || plan.InstanceKey.Mappings[0].Target != templateselectexisting.TemplateInstanceBy || !plan.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("route plan mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
+	}
+
+	materialized := runtimepinrouting.MaterializeConnectRoutePlan(plan, runtimepinrouting.ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+		Descriptors: []runtimepinrouting.Descriptor{{
+			EntityID:      "ent-1",
+			FlowInstance:  "account/one",
+			AddressFields: map[string]string{"entity.account_id": "acct-1"},
+		}},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("MaterializeConnectRoutePlan failure = %q, want none", materialized.Failure)
+	}
+	if materialized.Target.FlowInstance != "account/one" || materialized.Target.EntityID != "ent-1" {
+		t.Fatalf("materialized target = %#v, want account/one ent-1", materialized.Target)
 	}
 }
 

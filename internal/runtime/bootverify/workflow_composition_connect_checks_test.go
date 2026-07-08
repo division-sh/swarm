@@ -82,6 +82,84 @@ func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
 	}
 }
 
+func TestRun_AllowsSelectInputResolutionCompositionConnect(t *testing.T) {
+	root := writeSelectResolutionCompositionConnectFixture(t, selectResolutionCompositionFixtureOptions{})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "composition_connect_validation", "") {
+		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "template_instance_validation", "") {
+		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "input_pin_wiring", "account.ready") {
+		t.Fatalf("parent connect should satisfy select-resolution input pin wiring proof, got %#v", report.Errors())
+	}
+}
+
+func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		opts selectResolutionCompositionFixtureOptions
+		want string
+	}{
+		{
+			name: "undeclared carried key",
+			opts: selectResolutionCompositionFixtureOptions{instanceKey: "missing_account_id"},
+			want: "instance_key missing_account_id must name a declared carries.missing_account_id field",
+		},
+		{
+			name: "composite receiver key",
+			opts: selectResolutionCompositionFixtureOptions{compositeKey: true},
+			want: "requires exactly one receiver instance.by field",
+		},
+		{
+			name: "type mismatch",
+			opts: selectResolutionCompositionFixtureOptions{carryType: "integer"},
+			want: "key_types_incompatible",
+		},
+		{
+			name: "legacy address is incompatible",
+			opts: selectResolutionCompositionFixtureOptions{legacyAddress: true},
+			want: "input pin resolution is incompatible with legacy address",
+		},
+		{
+			name: "legacy connect using instance is incompatible",
+			opts: selectResolutionCompositionFixtureOptions{usingInstance: true},
+			want: "connect.using.instance is incompatible with input pin resolution",
+		},
+		{
+			name: "legacy connect map is incompatible",
+			opts: selectResolutionCompositionFixtureOptions{connectMap: true},
+			want: "connect.map is incompatible with input pin resolution",
+		},
+		{
+			name: "non-template receiver",
+			opts: selectResolutionCompositionFixtureOptions{receiverMode: "static"},
+			want: "INVALID-TEMPLATE-INSTANCE",
+		},
+		{
+			name: "wrong delivery",
+			opts: selectResolutionCompositionFixtureOptions{delivery: "many"},
+			want: "resolution mode select requires delivery one",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeSelectResolutionCompositionConnectFixture(t, tc.opts)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 	tests := []struct {
 		name string
@@ -91,7 +169,7 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 		{
 			name: "non-create modes are design-locked but not runnable",
 			opts: createResolutionCompositionFixtureOptions{
-				mode:         runtimecontracts.FlowInputResolutionModeSelect,
+				mode:         runtimecontracts.FlowInputResolutionModeSelectOrCreate,
 				mint:         runtimecontracts.FlowInputResolutionMintUUID,
 				includeCarry: true,
 			},
@@ -1086,6 +1164,145 @@ type createResolutionCompositionFixtureOptions struct {
 	mint          string
 	includeCarry  bool
 	usingInstance bool
+}
+
+type selectResolutionCompositionFixtureOptions struct {
+	instanceKey   string
+	carryType     string
+	receiverMode  string
+	delivery      string
+	compositeKey  bool
+	legacyAddress bool
+	usingInstance bool
+	connectMap    bool
+}
+
+func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectResolutionCompositionFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	receiverMode := strings.TrimSpace(opts.receiverMode)
+	if receiverMode == "" {
+		receiverMode = "template"
+	}
+	delivery := strings.TrimSpace(opts.delivery)
+	if delivery == "" {
+		delivery = "one"
+	}
+	instanceKey := strings.TrimSpace(opts.instanceKey)
+	if instanceKey == "" {
+		instanceKey = "account_id"
+	}
+	carryType := strings.TrimSpace(opts.carryType)
+	if carryType == "" {
+		carryType = "string"
+	}
+	instanceBy := "account_id"
+	eventsFields := "  account_id: string\n"
+	if opts.compositeKey {
+		instanceBy = "[account_id, region]"
+		eventsFields += "  region: string\n"
+	}
+	usingBlock := ""
+	if opts.usingInstance {
+		usingBlock = `
+    using:
+      instance:
+        source: account_id
+        target: account_id`
+	}
+	mapBlock := ""
+	if opts.connectMap {
+		mapBlock = `
+    map:
+      account_id:
+        source: payload.account_id
+        target: entity.account_id`
+	}
+	addressBlock := ""
+	if opts.legacyAddress {
+		addressBlock = `
+        address:
+          by: account_id
+          source: payload.account_id
+          target: entity.account_id
+          cardinality: one`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: select-resolution-composition-connect
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: account
+    flow: account
+    mode: `+receiverMode+`
+connect:
+  - from: producer.account_ready
+    to: account.account_ready
+    delivery: `+delivery+usingBlock+mapBlock+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-resolution-composition-connect\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: account_ready
+        event: account.ready
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n"+eventsFields)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `
+name: account
+mode: `+receiverMode+`
+instance:
+  by: `+instanceBy+`
+  on_missing: create
+  on_conflict: reuse
+pins:
+  inputs:
+    events:
+      - name: account_ready
+        event: account.ready`+addressBlock+`
+        resolution:
+          mode: select
+          instance_key: `+instanceKey+`
+        carries:
+          account_id:
+            from: payload.account_id
+            type: `+carryType+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "events.yaml"), "account.ready:\n"+eventsFields)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
+account_state:
+  account_id:
+    type: string
+    _unused_reason: composition select route key test field
+  region:
+    type: string
+    _unused_reason: composition select composite-key test field
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "account", "nodes.yaml"), `
+account-node:
+  id: account-node-{account_id}
+  execution_type: system_node
+  event_handlers:
+    account.ready: {}
+`)
+	return root
 }
 
 func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createResolutionCompositionFixtureOptions) string {

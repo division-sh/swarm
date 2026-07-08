@@ -181,6 +181,85 @@ func TestLowerCompositionConnectRoutePlansUsesCreateInputResolution(t *testing.T
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansUsesSelectInputResolution(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeSelectResolutionConnectRoutePlanPackageFixture(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if plan.InstanceKey == nil {
+		t.Fatal("InstanceKey = nil, want select resolution instance-key evidence")
+	}
+	if got, want := plan.ResolutionKind, ConnectResolutionInstanceKey; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
+	}
+	if !plan.RequiresRuntimeResolution {
+		t.Fatal("select resolution should require runtime descriptor resolution")
+	}
+	if got, want := plan.InstanceKey.Mode, runtimecontracts.FlowInputResolutionModeSelect; got != want {
+		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.OnMissing, "reject"; got != want {
+		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.OnConflict, "reject"; got != want {
+		t.Fatalf("InstanceKey.OnConflict = %q, want %q", got, want)
+	}
+	if len(plan.InstanceKey.Fields) != 1 || plan.InstanceKey.Fields[0] != "account_id" {
+		t.Fatalf("InstanceKey.Fields = %#v, want [account_id]", plan.InstanceKey.Fields)
+	}
+	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "account_id" || plan.InstanceKey.Mappings[0].Target != "account_id" || !plan.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("InstanceKey.Mappings = %#v, want explicit account_id -> account_id", plan.InstanceKey.Mappings)
+	}
+
+	materialized := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+		Descriptors: []Descriptor{{
+			EntityID:      "ent-1",
+			FlowInstance:  "account/one",
+			AddressFields: map[string]string{"entity.account_id": "acct-1"},
+		}},
+	})
+	if materialized.Failure != "" {
+		t.Fatalf("Failure = %q, want empty", materialized.Failure)
+	}
+	if got, want := materialized.Target.FlowInstance, "account/one"; got != want {
+		t.Fatalf("Target.FlowInstance = %q, want %q", got, want)
+	}
+
+	missing := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+	})
+	if missing.Failure != ConnectFailureTargetUnresolved {
+		t.Fatalf("missing Failure = %q, want %q", missing.Failure, ConnectFailureTargetUnresolved)
+	}
+
+	ambiguous := MaterializeConnectRoutePlan(plan, ConnectRoutePlanMaterializationInput{
+		MatchValues: map[string]string{"payload.account_id": "acct-1"},
+		Descriptors: []Descriptor{
+			{EntityID: "ent-1", FlowInstance: "account/one", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+			{EntityID: "ent-2", FlowInstance: "account/two", AddressFields: map[string]string{"entity.account_id": "acct-1"}},
+		},
+	})
+	if ambiguous.Failure != ConnectFailureTargetAmbiguous {
+		t.Fatalf("ambiguous Failure = %q, want %q", ambiguous.Failure, ConnectFailureTargetAmbiguous)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -1075,6 +1154,70 @@ pins:
 validation_case:
   validation_case_id:
     type: uuid
+`)
+	return root
+}
+
+func writeSelectResolutionConnectRoutePlanPackageFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: select-resolution-connect-route-plan-package
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: account
+    flow: account
+    mode: template
+connect:
+  - from: producer.account_ready
+    to: account.account_ready
+    delivery: one
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-resolution-connect-route-plan-package\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFlowFixture(t, root, "producer", `
+pins:
+  outputs:
+    events:
+      - name: account_ready
+        event: account.ready
+`, "account.ready:\n  account_id: string\n", "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "schema.yaml"), `
+name: account
+mode: template
+instance:
+  by: account_id
+  on_missing: create
+  on_conflict: reuse
+pins:
+  inputs:
+    events:
+      - name: account_ready
+        event: account.ready
+        resolution:
+          mode: select
+          instance_key: account_id
+        carries:
+          account_id:
+            from: payload.account_id
+            type: string
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "events.yaml"), "account.ready:\n  account_id: string\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
+account_state:
+  account_id:
+    type: string
 `)
 	return root
 }

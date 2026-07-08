@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -92,6 +93,9 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			out.ExtraDetail["connect_route_plan_failure"] = string(materialized.Failure)
 			out.ExtraDetail["connect_route_plan_source_event"] = plan.Source.ResolvedEvent
 			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.Receiver.ResolvedEvent
+			for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values, descriptors) {
+				out.ExtraDetail[key] = value
+			}
 			return out, nil
 		}
 		if !decision.Empty() {
@@ -385,6 +389,71 @@ func connectRoutePlanTargetFailure(failure runtimepinrouting.ConnectRoutePlanFai
 		return ""
 	}
 	return runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
+}
+
+func connectRoutePlanFailureDetail(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, values map[string]string, descriptors []runtimepinrouting.Descriptor) map[string]any {
+	if plan.InstanceKey == nil || strings.TrimSpace(plan.InstanceKey.Mode) != runtimecontracts.FlowInputResolutionModeSelect {
+		return nil
+	}
+	fields := plan.InstanceKey.Fields
+	if len(fields) != 1 {
+		return nil
+	}
+	keyField := strings.TrimSpace(fields[0])
+	if keyField == "" {
+		return nil
+	}
+	out := map[string]any{
+		"connect_route_plan_resolution_mode":     runtimecontracts.FlowInputResolutionModeSelect,
+		"connect_route_plan_receiver_flow":       strings.TrimSpace(plan.Receiver.FlowID),
+		"connect_route_plan_instance_key_field":  keyField,
+		"connect_route_plan_failure_remediation": connectRoutePlanSelectRemediation(plan, failure, keyField, ""),
+	}
+	material, materialFailure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, values)
+	if materialFailure != "" {
+		if failure == runtimepinrouting.ConnectFailureAddressValueMissing {
+			out["connect_route_plan_failure_remediation"] = connectRoutePlanSelectRemediation(plan, failure, keyField, "")
+		}
+		return out
+	}
+	keyValue := ""
+	for _, key := range material.Keys {
+		if strings.TrimSpace(key.Field) == keyField {
+			keyValue = strings.TrimSpace(key.Value)
+			break
+		}
+	}
+	if keyValue != "" {
+		out["connect_route_plan_instance_key_value"] = keyValue
+	}
+	if failure == runtimepinrouting.ConnectFailureTargetAmbiguous {
+		out["connect_route_plan_matched_instance_count"] = len(runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, material.Keys, descriptors))
+	}
+	out["connect_route_plan_failure_remediation"] = connectRoutePlanSelectRemediation(plan, failure, keyField, keyValue)
+	return out
+}
+
+func connectRoutePlanSelectRemediation(plan runtimepinrouting.ConnectRoutePlan, failure runtimepinrouting.ConnectRoutePlanFailure, keyField, keyValue string) string {
+	receiverFlow := strings.TrimSpace(plan.Receiver.FlowID)
+	if receiverFlow == "" {
+		receiverFlow = "receiver flow"
+	}
+	keyLabel := strings.TrimSpace(keyField)
+	if keyLabel == "" {
+		keyLabel = "instance key"
+	}
+	valueText := ""
+	if value := strings.TrimSpace(keyValue); value != "" {
+		valueText = " = " + value
+	}
+	switch failure {
+	case runtimepinrouting.ConnectFailureAddressValueMissing:
+		return fmt.Sprintf("Provide payload.%s before publishing to %s; resolution mode select requires a carried key value.", keyLabel, receiverFlow)
+	case runtimepinrouting.ConnectFailureTargetAmbiguous:
+		return fmt.Sprintf("Ensure exactly one active %s instance has %s%s; resolution mode select cannot choose between multiple matches.", receiverFlow, keyLabel, valueText)
+	default:
+		return fmt.Sprintf("Create or connect exactly one active %s instance with %s%s before publishing; resolution mode select never creates a missing instance.", receiverFlow, keyLabel, valueText)
+	}
 }
 
 func connectRoutePlanMatchValues(evt events.Event) map[string]string {
