@@ -159,16 +159,36 @@ func (c *Controller) Continue(ctx context.Context, req TransitionRequest) (Trans
 	}
 	result := TransitionResult{RunID: state.RunID, Status: StatusRunning}
 	if c.queue != nil {
-		released, err := c.queue.ReleaseRunQueue(ctx, state.RunID, c.releaseLookback, c.releaseLimit)
-		if err != nil {
-			// The persisted transition is already committed. A transient queue-release
-			// failure must not turn run.continue into a false external failure because
-			// retrying would observe the run as no longer paused.
-			return result, nil
-		}
-		result.ReleasedDeliveries = released
+		result.ReleasedDeliveries = c.releaseQueuedAfterContinue(ctx, state.RunID)
 	}
 	return result, nil
+}
+
+func (c *Controller) releaseQueuedAfterContinue(ctx context.Context, runID string) int {
+	if c == nil || c.queue == nil {
+		return 0
+	}
+	const attempts = 3
+	const retryDelay = 25 * time.Millisecond
+	releasedTotal := 0
+	for attempt := 0; attempt < attempts; attempt++ {
+		released, err := c.queue.ReleaseRunQueue(ctx, runID, c.releaseLookback, c.releaseLimit)
+		if err == nil {
+			releasedTotal += released
+			if released > 0 {
+				return releasedTotal
+			}
+		}
+		if attempt == attempts-1 {
+			return releasedTotal
+		}
+		select {
+		case <-ctx.Done():
+			return releasedTotal
+		case <-time.After(retryDelay):
+		}
+	}
+	return releasedTotal
 }
 
 func (c *Controller) QueueableRunDispatchBlocked(ctx context.Context, runID string) (bool, error) {

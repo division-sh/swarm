@@ -4681,15 +4681,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending delivery: %v", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-				INSERT INTO event_receipts (
-					event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
-				)
-				VALUES (
-					$1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted',
-					'{"manager_status":"processed","reason_code":"pipeline_persisted"}'::jsonb, $2
-				)
-			`, eventID, now); err != nil {
+		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", ""); err != nil {
 			t.Fatalf("seed postgres run-control pipeline receipt: %v", err)
 		}
 	case "sqlite":
@@ -4711,15 +4703,8 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending delivery: %v", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
-				INSERT INTO event_receipts (
-					receipt_id, event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
-				)
-				VALUES (
-					?, ?, 'platform', 'pipeline', 'success', 'pipeline_persisted',
-					'{"manager_status":"processed","reason_code":"pipeline_persisted"}', ?
-				)
-			`, uuid.NewString(), eventID, now); err != nil {
+		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
+		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", ""); err != nil {
 			t.Fatalf("seed sqlite run-control pipeline receipt: %v", err)
 		}
 	default:
