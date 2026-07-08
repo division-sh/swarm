@@ -96,7 +96,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.Mode = "unknown"
 	}
 	if req.Config == nil {
-		report.add(localPreflightBackendPrerequisite, "config_missing", localPreflightSeverityBlocker, localPreflightStatusFailed, "runtime config is required", "load swarm.yaml through the serve/run config owner")
+		report.add(localPreflightBackendPrerequisite, "config_missing", localPreflightSeverityBlocker, localPreflightStatusFailed, "swarm.yaml config is required", "load swarm.yaml through the serve/run config owner")
 		return report.finalize()
 	}
 	profile, err := req.Config.LLMBackendProfile()

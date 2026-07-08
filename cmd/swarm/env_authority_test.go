@@ -196,6 +196,7 @@ func TestPublicConfigGuidanceUsesUnifiedSwarmYAML(t *testing.T) {
 			"Path to Swarm runtime config",
 			"unified swarm.yaml/runtime config",
 			"the runtime config",
+			"runtime config is required",
 			"load runtime config through",
 			"workspace.docker_bin in runtime config",
 			"CLI config file",
