@@ -687,8 +687,8 @@ func connectSelectResolutionInstanceKey(source semanticview.Source, connect runt
 	if delivery != ConnectDeliveryOne {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "resolution mode select requires delivery one"}
 	}
-	if strings.TrimSpace(resolution.InstanceKey.Mint) != "" || strings.TrimSpace(resolution.InstanceKey.As) != "" {
-		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode select may not declare instance_key.mint or instance_key.as"}
+	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" || strings.TrimSpace(resolution.InstanceKey.Mint) != "" || strings.TrimSpace(resolution.InstanceKey.As) != "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode select may only declare instance_key and carries"}
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {

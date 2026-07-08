@@ -3,6 +3,7 @@ package pinrouting
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -257,6 +258,30 @@ func TestLowerCompositionConnectRoutePlansUsesSelectInputResolution(t *testing.T
 	})
 	if ambiguous.Failure != ConnectFailureTargetAmbiguous {
 		t.Fatalf("ambiguous Failure = %q, want %q", ambiguous.Failure, ConnectFailureTargetAmbiguous)
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t, "          aggregation: stream\n")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(plans) != 0 {
+		t.Fatalf("plans = %#v, want none for invalid select resolution", plans)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one fail-closed issue", issues)
+	}
+	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "may only declare instance_key and carries") {
+		t.Fatalf("issue = %#v, want instance resolution invalid for extra select field", issues[0])
 	}
 }
 
@@ -1159,6 +1184,10 @@ validation_case:
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixture(t *testing.T) string {
+	return writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t, "")
+}
+
+func writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t *testing.T, extraResolution string) string {
 	t.Helper()
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
@@ -1205,6 +1234,7 @@ pins:
         resolution:
           mode: select
           instance_key: account_id
+`+extraResolution+`
         carries:
           account_id:
             from: payload.account_id
