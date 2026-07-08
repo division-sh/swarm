@@ -75,7 +75,7 @@ func decodeGuardOnFailNode(node *yaml.Node) (string, GuardFailureSpec, error) {
 				}
 				escalation = &decoded
 			default:
-				return "", GuardFailureSpec{}, fmt.Errorf("UNDEFINED-FIELD: guard.on_fail field %q not in platform spec", key)
+				return "", GuardFailureSpec{}, NewUndefinedFieldDiagnostic("guard.on_fail", key, guardOnFailFieldOptions)
 			}
 		}
 		if escalation == nil {
@@ -124,13 +124,23 @@ func decodeGuardEscalationNode(node *yaml.Node) (EmitSpec, error) {
 				}
 				fields = decoded
 			default:
-				return EmitSpec{}, fmt.Errorf("UNDEFINED-FIELD: guard.on_fail.escalate field %q not in platform spec", key)
+				return EmitSpec{}, NewUndefinedFieldDiagnostic("guard.on_fail.escalate", key, guardOnFailEscalateFieldOptions)
 			}
 		}
 		return EmitSpec{Event: strings.TrimSpace(event), From: strings.TrimSpace(from), Fields: fields}, nil
 	default:
 		return EmitSpec{}, fmt.Errorf("guard.on_fail.escalate must be a mapping with event and optional fields")
 	}
+}
+
+var guardOnFailFieldOptions = map[string]struct{}{
+	"escalate": {},
+}
+
+var guardOnFailEscalateFieldOptions = map[string]struct{}{
+	"event":  {},
+	"from":   {},
+	"fields": {},
 }
 
 func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
@@ -181,28 +191,29 @@ func validateAccumulateFieldNodes(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
-	allowed := map[string]struct{}{
-		"into":          {},
-		"expected_from": {},
-		"from":          {},
-		"description":   {},
-		"dedup_by":      {},
-		"threshold":     {},
-		"timeout_ms":    {},
-		"completion":    {},
-		"on_complete":   {},
-		"on_timeout":    {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: accumulate field %q not in platform spec", key)
+		if _, ok := accumulateFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("accumulate", key, accumulateFieldOptions)
 		}
 	}
 	return nil
+}
+
+var accumulateFieldOptions = map[string]struct{}{
+	"into":          {},
+	"expected_from": {},
+	"from":          {},
+	"description":   {},
+	"dedup_by":      {},
+	"threshold":     {},
+	"timeout_ms":    {},
+	"completion":    {},
+	"on_complete":   {},
+	"on_timeout":    {},
 }
 
 func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
@@ -232,10 +243,6 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
-	allowed := map[string]struct{}{
-		"items_from": {},
-		"emit":       {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
@@ -249,11 +256,16 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 		case "emit_mapping":
 			return fmt.Errorf("RETIRED: fan_out field %q is retired; move per-item payload ownership into fan_out.emit", key)
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: fan_out field %q not in platform spec", key)
+		if _, ok := fanOutFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("fan_out", key, fanOutFieldOptions)
 		}
 	}
 	return nil
+}
+
+var fanOutFieldOptions = map[string]struct{}{
+	"items_from": {},
+	"emit":       {},
 }
 
 func (g *GroupBySpec) UnmarshalYAML(node *yaml.Node) error {

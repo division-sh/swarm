@@ -108,7 +108,7 @@ func validateProjectPackageDocumentFields(node *yaml.Node) error {
 		return nil
 	}
 	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("package.yaml must be a mapping")
+		return NewPackageDocumentMappingDiagnostic(nil)
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
@@ -116,7 +116,7 @@ func validateProjectPackageDocumentFields(node *yaml.Node) error {
 			continue
 		}
 		if _, ok := projectPackageDocumentFields[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: package.yaml field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("package.yaml", key, projectPackageDocumentFields)
 		}
 	}
 	return nil
@@ -132,6 +132,87 @@ func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+var flowPackageRequiresFieldOptions = map[string]struct{}{
+	"inputs":           {},
+	"outputs":          {},
+	"policy":           {},
+	"credentials":      {},
+	"platform_version": {},
+}
+
+var flowPackageBindFieldOptions = map[string]struct{}{
+	"inputs":      {},
+	"outputs":     {},
+	"policy":      {},
+	"credentials": {},
+	"observe":     {},
+}
+
+var connectorPackFieldOptions = map[string]struct{}{
+	"imports": {},
+}
+
+var connectorPackImportFieldOptions = map[string]struct{}{
+	"provider": {},
+	"tool":     {},
+}
+
+var flowPackageRequiresPolicyFieldOptions = map[string]struct{}{
+	"default":     {},
+	"type":        {},
+	"description": {},
+	"required":    {},
+}
+
+var flowPackageConnectFieldOptions = map[string]struct{}{
+	"from":     {},
+	"to":       {},
+	"adapter":  {},
+	"using":    {},
+	"map":      {},
+	"delivery": {},
+	"reply":    {},
+}
+
+var flowPackageConnectUsingFieldOptions = map[string]struct{}{
+	"instance": {},
+}
+
+var flowPackageConnectInstanceFieldOptions = map[string]struct{}{
+	"source": {},
+	"target": {},
+}
+
+var flowPackageConnectMapFieldOptions = map[string]struct{}{
+	"source": {},
+	"target": {},
+}
+
+var typeCatalogFieldOptions = map[string]struct{}{
+	"scalars": {},
+	"enums":   {},
+	"types":   {},
+}
+
+var typeMetadataFieldOptions = map[string]struct{}{
+	"_description": {},
+}
+
+var entityMetadataFieldOptions = map[string]struct{}{
+	"_description": {},
+	"_owner":       {},
+}
+
+var schemaLengthRefinementFieldOptions = map[string]struct{}{
+	"min": {},
+	"max": {},
+}
+
+var schemaRangeRefinementFieldOptions = map[string]struct{}{
+	"min": {},
+	"max": {},
 }
 
 func (r *FlowPackageRequires) UnmarshalYAML(node *yaml.Node) error {
@@ -176,7 +257,7 @@ func (r *FlowPackageRequires) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("requires.platform_version: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: requires field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("requires", key, flowPackageRequiresFieldOptions)
 		}
 	}
 	*r = out.normalized()
@@ -222,7 +303,7 @@ func (b *FlowPackageBind) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("bind.observe: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: bind field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("bind", key, flowPackageBindFieldOptions)
 		}
 	}
 	*b = out.normalized()
@@ -252,7 +333,7 @@ func (c *ConnectorPackImports) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("connector_packs.imports: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: connector_packs field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("connector_packs", key, connectorPackFieldOptions)
 		}
 	}
 	*c = out.normalized()
@@ -286,7 +367,7 @@ func (i *ConnectorPackImport) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("tool: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: connector_packs.imports field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("connector_packs.imports", key, connectorPackImportFieldOptions)
 		}
 	}
 	*i = out.normalized()
@@ -390,7 +471,7 @@ func decodeFlowPackagePolicyDefault(node *yaml.Node) (any, bool, error) {
 		case "type", "description", "required":
 			continue
 		default:
-			return nil, false, fmt.Errorf("UNDEFINED-FIELD: requires.policy option %q not in platform spec", key)
+			return nil, false, NewUndefinedFieldDiagnostic("requires.policy", key, flowPackageRequiresPolicyFieldOptions)
 		}
 	}
 	return out, hasDefault, nil
@@ -497,7 +578,7 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("connect.reply: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: connect field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("connect", key, flowPackageConnectFieldOptions)
 		}
 	}
 	*c = out.normalized()
@@ -527,7 +608,7 @@ func (u *FlowPackageConnectUsing) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("connect.using.instance: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: connect using field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("connect using", key, flowPackageConnectUsingFieldOptions)
 		}
 	}
 	*u = out.normalized()
@@ -565,7 +646,7 @@ func (a *FlowPackageConnectInstanceAdapter) UnmarshalYAML(node *yaml.Node) error
 			}
 			out.Target = target
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: connect using instance field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("connect using instance", key, flowPackageConnectInstanceFieldOptions)
 		}
 	}
 	*a = out.normalized()
@@ -626,7 +707,7 @@ func (m *FlowPackageConnectMap) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("connect map target: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: connect map field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("connect map", key, flowPackageConnectMapFieldOptions)
 		}
 	}
 	*m = FlowPackageConnectMap{
@@ -690,7 +771,7 @@ func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
 				return err
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: type catalog field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
 		}
 	}
 	*d = doc
@@ -757,7 +838,7 @@ func (n *NamedTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 				}
 				decl.Description = text
 			default:
-				return fmt.Errorf("UNDEFINED-FIELD: type metadata field %q not in platform spec", key)
+				return NewUndefinedFieldDiagnostic("type metadata", key, typeMetadataFieldOptions)
 			}
 			continue
 		}
@@ -852,7 +933,7 @@ func (e *EntityContract) UnmarshalYAML(node *yaml.Node) error {
 			case "_state_model":
 				return fmt.Errorf("RETIRED: entity field %q is retired; state authority is implicit from schema.yaml", key)
 			default:
-				return fmt.Errorf("UNDEFINED-FIELD: entity metadata field %q not in platform spec", key)
+				return NewUndefinedFieldDiagnostic("entity metadata", key, entityMetadataFieldOptions)
 			}
 			continue
 		}
@@ -984,9 +1065,9 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 				listOf = listValue
 				continue
 			case "initial", "immutable", "indexed", "_unused_reason", "_unused_reader_reason", "materialize_from", "project":
-				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
+				return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
 			default:
-				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
+				return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
 			}
 		}
 		switch key {
@@ -1032,7 +1113,7 @@ func decodeWave1FieldNode(node *yaml.Node, opts wave1FieldNodeOptions) (wave1Par
 			field.Refinements.EqualTo = target
 		case "citation":
 			if !opts.AllowCitation {
-				return wave1ParsedFieldNode{}, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", opts.Context, key)
+				return wave1ParsedFieldNode{}, NewUndefinedFieldDiagnostic(opts.Context, key, allowed)
 			}
 			var citation CriteriaCitation
 			if err := value.Decode(&citation); err != nil {
@@ -1145,7 +1226,7 @@ func decodeSchemaLengthRefinement(node *yaml.Node) (SchemaLengthRefinement, erro
 			}
 			out.Max = &max
 		default:
-			return SchemaLengthRefinement{}, fmt.Errorf("UNDEFINED-FIELD: length field %q not in platform spec", key)
+			return SchemaLengthRefinement{}, NewUndefinedFieldDiagnostic("length", key, schemaLengthRefinementFieldOptions)
 		}
 	}
 	if out.Min == nil && out.Max == nil {
@@ -1187,7 +1268,7 @@ func decodeSchemaRangeRefinement(node *yaml.Node) (SchemaRangeRefinement, error)
 			}
 			out.Max = &max
 		default:
-			return SchemaRangeRefinement{}, fmt.Errorf("UNDEFINED-FIELD: range field %q not in platform spec", key)
+			return SchemaRangeRefinement{}, NewUndefinedFieldDiagnostic("range", key, schemaRangeRefinementFieldOptions)
 		}
 	}
 	if out.Min == nil && out.Max == nil {

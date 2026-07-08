@@ -455,7 +455,7 @@ func loadYAMLFile(path string, target any) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	if err := yaml.Unmarshal(raw, target); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+		return wrapLoaderDiagnosticFile(err, path)
 	}
 	return nil
 }

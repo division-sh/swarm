@@ -122,7 +122,7 @@ func TestDescribeMissingContractsIsValidationExit(t *testing.T) {
 	if stdout.String() != "" {
 		t.Fatalf("describe missing contracts stdout = %q, want empty", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "describe failed: resolve contracts: contracts path is required") {
+	if got := stderr.String(); !strings.Contains(got, "ERROR: a contracts directory is required.") || !strings.Contains(got, "Remediation: Pass a contracts directory") {
 		t.Fatalf("describe missing contracts stderr = %q", got)
 	}
 }

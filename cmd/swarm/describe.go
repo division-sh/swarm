@@ -91,16 +91,12 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 	}
 	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "describe failed: resolve contracts: %v\n", err)
-		}
+		writeCLIAPIError(errOut, err)
 		return cliExitValidation
 	}
 	_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
 	if err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "describe failed: load Swarm contracts: %v\n", err)
-		}
+		writeCLIAPIError(errOut, err)
 		return cliExitValidation
 	}
 	source := semanticview.Wrap(bundle)

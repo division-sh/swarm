@@ -1752,7 +1752,7 @@ func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, er
 				return nil, fmt.Errorf("UNSUPPORTED: agent field %s is reserved for future agent-defaults/profile support and is not accepted by Layer 1 platform defaults", field)
 			default:
 				if !supportedAgentRegistryEntryField(field) {
-					return nil, fmt.Errorf("UNDEFINED-FIELD: agent field %s is not supported", field)
+					return nil, NewUndefinedFieldDiagnostic("agent", field, agentRegistryEntryFieldOptions)
 				}
 			}
 		}
@@ -1760,16 +1760,33 @@ func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, er
 	return authoredFields, nil
 }
 
+var agentRegistryEntryFieldOptions = map[string]struct{}{
+	"id":                 {},
+	"type":               {},
+	"role":               {},
+	"prompt_ref":         {},
+	"entity_writes":      {},
+	"permissions":        {},
+	"permissions_bundle": {},
+	"workspace_class":    {},
+	"manager_fallback":   {},
+	"node_type":          {},
+	"model":              {},
+	"mode":               {},
+	"max_turns_per_task": {},
+	"subscriptions":      {},
+	"prompt_inputs":      {},
+	"tools":              {},
+	"native_tools":       {},
+	"flow_data_access":   {},
+	"criteria":           {},
+	"emit_events":        {},
+	"implementation":     {},
+}
+
 func supportedAgentRegistryEntryField(field string) bool {
-	switch strings.TrimSpace(field) {
-	case "id", "type", "role", "prompt_ref", "entity_writes",
-		"permissions", "permissions_bundle", "workspace_class", "manager_fallback",
-		"node_type", "model", "mode", "max_turns_per_task", "subscriptions",
-		"prompt_inputs", "tools", "native_tools", "flow_data_access", "criteria", "emit_events", "implementation":
-		return true
-	default:
-		return false
-	}
+	_, ok := agentRegistryEntryFieldOptions[strings.TrimSpace(field)]
+	return ok
 }
 
 func (e AgentRegistryEntry) ConfiguredTools() []string {

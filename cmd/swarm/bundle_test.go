@@ -749,8 +749,8 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "register blank idempotency", args: []string{"bundle", "register", envelopePath, "--data-blob", dataBlobPath, "--idempotency-key", " "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "register contracts with envelope", args: []string{"bundle", "register", envelopePath, "--contracts", contractsDir}, wantStderr: "--contracts cannot be combined with a registration envelope argument"},
 		{name: "register contracts with data blob", args: []string{"bundle", "register", "--contracts", contractsDir, "--data-blob", dataBlobPath}, wantStderr: "--data-blob cannot be used with --contracts"},
-		{name: "register contracts typo child under bundle", args: []string{"bundle", "register", "--contracts", invalidChildContractsDir}, wantStderr: "resolve contracts"},
-		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "resolve contracts"},
+		{name: "register contracts typo child under bundle", args: []string{"bundle", "register", "--contracts", invalidChildContractsDir}, wantStderr: "no Swarm package manifest was found"},
+		{name: "register contracts missing package", args: []string{"bundle", "register", "--contracts", invalidContractsDir}, wantStderr: "no Swarm package manifest was found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls.Store(0)

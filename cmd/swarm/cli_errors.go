@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
 const (
@@ -96,7 +98,7 @@ func returnCLIAPIError(errOut io.Writer, err error, classifier cliAPIErrorClassi
 
 func returnCLIValidationError(errOut io.Writer, err error) error {
 	if errOut != nil {
-		fmt.Fprintln(errOut, err)
+		fmt.Fprintln(errOut, formatCLIAPIError(err))
 	}
 	return commandExitError{code: cliExitValidation}
 }
@@ -112,6 +114,9 @@ func formatCLIAPIError(err error) string {
 	if err == nil {
 		return ""
 	}
+	if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+		return formatCLILoaderDiagnostic(diagnostic)
+	}
 	if diagnostic, ok := cliAPITransportDiagnosticParts(err); ok {
 		lines := []string{"ERROR: " + cliAPIProblemWithWrapper(err, diagnostic.leaf, diagnostic.problem)}
 		lines = append(lines, diagnostic.evidence...)
@@ -119,6 +124,30 @@ func formatCLIAPIError(err error) string {
 		return strings.Join(lines, "\n")
 	}
 	return err.Error()
+}
+
+func formatCLILoaderDiagnostic(diagnostic *runtimecontracts.LoaderDiagnostic) string {
+	if diagnostic == nil {
+		return ""
+	}
+	problem := strings.TrimSpace(diagnostic.Problem)
+	if problem == "" {
+		problem = strings.TrimSpace(diagnostic.RawCause)
+	}
+	if problem == "" {
+		problem = "contract loader validation failed."
+	}
+	lines := []string{"ERROR: " + problem}
+	if location := diagnostic.Location.String(); location != "" {
+		lines = append(lines, "  Location: "+location)
+	}
+	if len(diagnostic.ValidOptions) > 0 {
+		lines = append(lines, "  Valid options: "+strings.Join(diagnostic.ValidOptions, ", "))
+	}
+	if remediation := strings.TrimSpace(diagnostic.Remediation); remediation != "" {
+		lines = append(lines, "  Remediation: "+remediation)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatCLIAPITransportDetail(err error) string {

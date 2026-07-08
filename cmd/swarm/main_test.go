@@ -1697,7 +1697,7 @@ homepage: https://division.sh
 	if code == 0 {
 		t.Fatalf("runVerifyCommand exit code = 0, output = %q", buf.String())
 	}
-	for _, want := range []string{"verify failed: load Swarm contracts:", "UNDEFINED-FIELD", "homepage"} {
+	for _, want := range []string{"ERROR: package.yaml field \"homepage\" is not supported.", "Valid options:", "Remediation:"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("verify output missing %q:\n%s", want, buf.String())
 		}
@@ -7907,13 +7907,13 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	missingContracts := filepath.Join(t.TempDir(), "missing")
 	code := executeRootCommand(context.Background(), t.TempDir(), []string{"verify", "--contracts", missingContracts}, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("verify code = %d, want 1 stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	if code != cliExitValidation {
+		t.Fatalf("verify code = %d, want %d stderr=%s stdout=%s", code, cliExitValidation, stderr.String(), stdout.String())
 	}
 	if strings.TrimSpace(stdout.String()) != "" {
 		t.Fatalf("verify stdout = %q, want empty on error", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "verify failed: resolve contracts") {
+	if !strings.Contains(stderr.String(), "ERROR: no Swarm package manifest was found") {
 		t.Fatalf("verify stderr = %q, want local contract resolution failure", stderr.String())
 	}
 }
@@ -10117,11 +10117,392 @@ func TestRunVerifyCommand_BadContractsPath(t *testing.T) {
 				t.Fatal("expected non-zero exit code")
 			}
 			out := buf.String()
-			if !strings.Contains(out, "verify failed: resolve contracts") {
+			if !strings.Contains(out, "ERROR: no Swarm package manifest was found") {
 				t.Fatalf("output = %q", out)
 			}
 			if !strings.Contains(out, tc.path) {
 				t.Fatalf("output does not name explicit path %q:\n%s", tc.path, out)
+			}
+		})
+	}
+}
+
+func TestRunVerifyCommandFormatsPreBootLoaderDiagnostics(t *testing.T) {
+	tests := []struct {
+		name     string
+		write    func(t *testing.T, root string)
+		wants    []string
+		notWants []string
+	}{
+		{
+			name: "package yaml syntax",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-yaml
+flows:
+  - [broken
+`)
+			},
+			wants: []string{
+				"ERROR: contract YAML could not be parsed.",
+				"Location:",
+				"package.yaml",
+				"Remediation: Fix the YAML syntax, then run the command again.",
+			},
+			notWants: []string{"yaml: line", "did not find expected", "parse ", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "package document mapping shape",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `invalid-package-shape`)
+			},
+			wants: []string{
+				"ERROR: package.yaml must be a mapping.",
+				"Location:",
+				"package.yaml:package.yaml",
+				"Remediation: Use a package.yaml mapping with fields like name, version, flows, and packages.",
+			},
+			notWants: []string{"package.yaml must be a mapping\n", "parse ", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "schema document mapping shape",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-schema-shape
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `invalid-schema-shape`)
+			},
+			wants: []string{
+				"ERROR: schema.yaml must be a mapping.",
+				"Location:",
+				"schema.yaml:schema.yaml",
+				"Remediation: Use a schema.yaml mapping with fields like name, states, pins, and entity.",
+			},
+			notWants: []string{"flow schema document must be a mapping", "parse ", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "schema field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-schema-field
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-schema-field
+bogus: true
+`)
+			},
+			wants: []string{
+				"ERROR: schema field \"bogus\" is not supported.",
+				"Location:",
+				"schema.yaml:schema",
+				"Valid options:",
+				"auto_emit_on_create",
+				"terminal_states",
+				"Remediation: Use one of the supported schema fields.",
+			},
+			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "stage field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-stage-field
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-stage-field
+stages:
+  queued:
+    surprise: true
+`)
+			},
+			wants: []string{
+				"ERROR: stage field \"surprise\" is not supported.",
+				"Location:",
+				"schema.yaml:stage",
+				"Valid options:",
+				"description",
+				"initial",
+				"terminal",
+				"Remediation: Use one of the supported stage fields.",
+			},
+			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "package flows entries shape",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-package-flow-shape
+version: "1.0.0"
+flows:
+  - child
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: invalid-package-flow-shape`)
+			},
+			wants: []string{
+				"ERROR: package.yaml flows entries must be mappings with id, flow, and optional mode.",
+				"Location:",
+				"package.yaml:package.yaml.flows",
+				"Remediation: Use entries like `flows: [{id: child, flow: child, mode: child}]`.",
+			},
+			notWants: []string{"yaml: unmarshal errors", "cannot unmarshal", "contracts.ProjectFlowRef", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "package requires field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-package-requires-field
+version: "1.0.0"
+requires:
+  surprise: true
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: invalid-package-requires-field`)
+			},
+			wants: []string{
+				"ERROR: requires field \"surprise\" is not supported.",
+				"Location:",
+				"package.yaml:requires",
+				"Valid options:",
+				"inputs",
+				"platform_version",
+				"Remediation: Use one of the supported requires fields.",
+			},
+			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "agent field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-agent-field
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: invalid-agent-field`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
+reviewer:
+  role: reviewer
+  model: regular
+  subscriptions: [item.received]
+  surprise: true
+`)
+			},
+			wants: []string{
+				"ERROR: agent field \"surprise\" is not supported.",
+				"Location:",
+				"agents.yaml:agent",
+				"Valid options:",
+				"model",
+				"subscriptions",
+				"Remediation: Use one of the supported agent fields.",
+			},
+			notWants: []string{"parse ", "UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "handler field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-handler-mailbox-write
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-handler-mailbox-write
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [item.received]
+  outputs:
+    events: [item.processed]
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.processed]
+  event_handlers:
+    item.received:
+      mailbox_write: {}
+      advances_to: done
+`)
+			},
+			wants: []string{
+				"ERROR: handler field \"mailbox_write\" is not supported.",
+				"Valid options:",
+				"action",
+				"on_success",
+				"Remediation: Use the supported action field",
+			},
+			notWants: []string{"UNDEFINED-FIELD", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "guard on fail field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-guard-on-fail-field
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-guard-on-fail-field
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [item.received]
+  outputs:
+    events: [item.processed]
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.processed]
+  event_handlers:
+    item.received:
+      guard:
+        id: gatekeeper
+        on_fail:
+          reject: true
+      advances_to: done
+`)
+			},
+			wants: []string{
+				"ERROR: guard.on_fail field \"reject\" is not supported.",
+				"Location:",
+				"nodes.yaml:guard.on_fail",
+				"Valid options:",
+				"escalate",
+				"Remediation: Use one of the supported guard.on_fail fields.",
+			},
+			notWants: []string{"action", "emit", "reason", "UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "node field valid options",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-node-field
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-node-field
+initial_state: pending
+terminal_states: [done]
+states: [pending, done]
+pins:
+  inputs:
+    events: [item.received]
+  outputs:
+    events: [item.processed]
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+test-node:
+  id: test-node
+  execution_type: system_node
+  subscribes_to: [item.received]
+  produces: [item.processed]
+  bogus: true
+`)
+			},
+			wants: []string{
+				"ERROR: node field \"bogus\" is not supported.",
+				"Location:",
+				"nodes.yaml:node",
+				"Valid options:",
+				"event_handlers",
+				"execution_type",
+				"Remediation: Use one of the supported node fields.",
+			},
+			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "input event pin required shape",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-input-pin
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-input-pin
+pins:
+  inputs:
+    events:
+      - event: item.received
+`)
+			},
+			wants: []string{
+				"ERROR: input event pins must name the pin or use a scalar event name.",
+				"Location:",
+				"schema.yaml.pins.inputs.events",
+				"Remediation: Use `events: [item.received]`",
+			},
+			notWants: []string{"input event pin name is required", "load Swarm contracts", "resolve contracts"},
+		},
+		{
+			name: "output event pin required shape",
+			write: func(t *testing.T, root string) {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: invalid-output-pin
+version: "1.0.0"
+flows: []
+`)
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: invalid-output-pin
+pins:
+  outputs:
+    events:
+      - event: item.processed
+`)
+			},
+			wants: []string{
+				"ERROR: output event pins must name the pin or use a scalar event name.",
+				"Location:",
+				"schema.yaml.pins.outputs.events",
+				"Remediation: Use `events: [item.processed]`",
+			},
+			notWants: []string{"output event pin name is required", "load Swarm contracts", "resolve contracts"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			tt.write(t, root)
+			var buf bytes.Buffer
+			code := runVerifyCommandWithContractsForTest(context.Background(), repoRoot(), root, &buf)
+			if code != cliExitValidation {
+				t.Fatalf("code = %d, want %d output=%s", code, cliExitValidation, buf.String())
+			}
+			out := buf.String()
+			for _, want := range tt.wants {
+				if !strings.Contains(out, want) {
+					t.Fatalf("output missing %q:\n%s", want, out)
+				}
+			}
+			for _, notWant := range tt.notWants {
+				if strings.Contains(out, notWant) {
+					t.Fatalf("output contains %q:\n%s", notWant, out)
+				}
 			}
 		})
 	}
@@ -10732,7 +11113,7 @@ accumulator:
 	if code == 0 {
 		t.Fatalf("expected non-zero exit code, output = %q", buf.String())
 	}
-	if out := buf.String(); !strings.Contains(out, "verify failed: load Swarm contracts:") || !strings.Contains(out, "state_schema field type") {
+	if out := buf.String(); !strings.Contains(out, "state_schema field type") {
 		t.Fatalf("unexpected output = %q", out)
 	}
 }
