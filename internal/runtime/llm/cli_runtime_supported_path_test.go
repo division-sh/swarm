@@ -78,10 +78,10 @@ func TestConversationStep_ClaudeCLIFirstTurnPreservesSupportedReadFileSurface(t 
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
 	t.Setenv("FAKE_DOCKER_CAPTURE_DIR", captureDir)
 
 	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ func setDoctorProviderSecrets(t *testing.T, values map[string]string) {
 }
 
 func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	setDoctorEmptyProviderSecrets(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TEST_DOCKER_IMAGE_MISSING", "1")
@@ -51,7 +52,7 @@ func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false), &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), false), &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
@@ -60,7 +61,7 @@ func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 		"backend_prerequisite/missing_backend_credential",
 		"workspace_prerequisite/workspace_image_unavailable",
 		"swarm secrets set CLAUDE_CODE_OAUTH_TOKEN",
-		"set SWARM_WORKSPACE_IMAGE",
+		"set workspace.image",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
@@ -72,7 +73,7 @@ func TestDoctorClaudeCLIPreflightReportsMissingPrerequisites(t *testing.T) {
 }
 
 func TestDoctorClaudeCLIPreflightReportsMissingDocker(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TEST_DOCKER_UNAVAILABLE", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -80,14 +81,14 @@ func TestDoctorClaudeCLIPreflightReportsMissingDocker(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false), &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), false), &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
 		"workspace_prerequisite/docker_unavailable",
 		"docker is not available",
-		"start Docker or set SWARM_DOCKER_BIN",
+		"start Docker, set workspace.docker_bin",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
@@ -96,14 +97,14 @@ func TestDoctorClaudeCLIPreflightReportsMissingDocker(t *testing.T) {
 }
 
 func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), true)
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), true)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
 	if code != 0 {
@@ -158,7 +159,7 @@ func TestDoctorClaudeCLIPreflightSkipsCredentialForAgentFreeContracts(t *testing
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false)
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), false)
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--contracts" {
 			args[i+1] = writeDoctorAgentFreeContractsFixture(t)
@@ -195,7 +196,7 @@ func TestDoctorClaudeCLIPreflightReportsTelegramConnectorToolSurface(t *testing.
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 	setDoctorProviderSecret(t, "telegram_bot_token", "provider-secret")
 
-	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), true)
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), true)
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--contracts" {
 			args[i+1] = writeDoctorTelegramConnectorContractsFixture(t)
@@ -231,7 +232,7 @@ func TestDoctorClaudeCLIPreflightReportsTelegramConnectorToolSurface(t *testing.
 }
 
 func TestDoctorClaudeCLIPreflightReportsMissingWorkspaceCLI(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TEST_DOCKER_CLI_MISSING", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -239,7 +240,7 @@ func TestDoctorClaudeCLIPreflightReportsMissingWorkspaceCLI(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false), &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), false), &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
@@ -256,7 +257,7 @@ func TestDoctorClaudeCLIPreflightReportsMissingWorkspaceCLI(t *testing.T) {
 }
 
 func TestDoctorClaudeCLIPreflightReportsBrokenWorkspaceCLI(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TEST_DOCKER_CLI_BROKEN", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -264,7 +265,7 @@ func TestDoctorClaudeCLIPreflightReportsBrokenWorkspaceCLI(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false), &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), false), &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
@@ -286,7 +287,7 @@ func TestDoctorClaudeCLIPreflightUsesCredentialStoreForContractSecrets(t *testin
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
-	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false)
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), false)
 	for i := 0; i+1 < len(args); i++ {
 		if args[i] == "--contracts" {
 			args[i+1] = writeSecretsCommandContractsFixture(t)
@@ -315,7 +316,7 @@ func TestDoctorClaudeCLIPreflightReportsRetiredBackendEnv(t *testing.T) {
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false), &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), false), &stdout, &stderr, defaultRootCommandOptions())
 	if code != cliExitRuntime {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
 	}
@@ -331,7 +332,7 @@ func TestDoctorClaudeCLIPreflightReportsRetiredBackendEnv(t *testing.T) {
 }
 
 func TestDoctorClaudeCLIPreflightBlocksGeneratedGatewayParentEnv(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	setDoctorProviderSecret(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "operator-token")
 
@@ -339,7 +340,7 @@ func TestDoctorClaudeCLIPreflightBlocksGeneratedGatewayParentEnv(t *testing.T) {
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+mcpPort)
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+mcpPort)
 
-	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t), false)
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, dockerBin), false)
 	args = append(args[:len(args)-4], "--api-listen-addr", "127.0.0.1:0", "--mcp-listen-addr", "127.0.0.1:"+mcpPort)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
@@ -676,7 +677,7 @@ func TestDoctorAPIFlagsRequireTargetMode(t *testing.T) {
 }
 
 func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testing.T) {
-	configureDoctorDockerStub(t)
+	dockerBin := configureDoctorDockerStub(t)
 	setDoctorEmptyProviderSecrets(t)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
@@ -685,7 +686,7 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 
 	var out bytes.Buffer
 	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t),
+		ConfigPath:         writeDoctorClaudeConfig(t, dockerBin),
 		ContractsPath:      doctorAgentContractsPath,
 		DataSource:         t.TempDir(),
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -947,14 +948,21 @@ func doctorClaudeArgs(t *testing.T, configPath string, asJSON bool) []string {
 
 const doctorAgentContractsPath = "tests/tier8-boot-verification/test-boot-prompt-stub"
 
-func writeDoctorClaudeConfig(t *testing.T) string {
+func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "claude.yaml")
+	workspace := []string{
+		"workspace:",
+		"  data_source: " + t.TempDir(),
+		"  image: doctor-test-image:latest",
+	}
+	if strings.TrimSpace(dockerBin) != "" {
+		workspace = append(workspace, fmt.Sprintf("  docker_bin: %q", dockerBin))
+	}
 	writeRuntimeConfigText(t, path, strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
-		"workspace:",
-		"  data_source: " + t.TempDir(),
+		strings.Join(workspace, "\n"),
 		"llm:",
 		"  backend: claude_cli",
 		"  session:",
@@ -1059,7 +1067,7 @@ telegram.send_message:
 	return root
 }
 
-func configureDoctorDockerStub(t *testing.T) {
+func configureDoctorDockerStub(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "docker")
 	script := `#!/bin/sh
@@ -1101,9 +1109,7 @@ esac
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("write docker stub: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", path)
-	t.Setenv("SWARM_WORKSPACE_IMAGE", "doctor-test-image:latest")
-	t.Setenv("SWARM_WORKSPACE_VOLUMES_FROM", "")
+	return path
 }
 
 func freeDoctorTCPPort(t *testing.T) string {

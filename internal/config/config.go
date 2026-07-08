@@ -67,10 +67,20 @@ type WorkspaceConfig struct {
 	DataSource      string `yaml:"data_source"`
 	Backend         string `yaml:"backend"`
 	AllowExecOnHost bool   `yaml:"allow_exec_on_host"`
+	Image           string `yaml:"image"`
+	DockerBin       string `yaml:"docker_bin"`
+	HostRoot        string `yaml:"host_root"`
+	VolumesFrom     string `yaml:"volumes_from"`
+	Network         string `yaml:"network"`
 
 	dataSourceSet      bool
 	backendSet         bool
 	allowExecOnHostSet bool
+	imageSet           bool
+	dockerBinSet       bool
+	hostRootSet        bool
+	volumesFromSet     bool
+	networkSet         bool
 }
 
 func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
@@ -89,6 +99,16 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 				w.backendSet = true
 			case "allow_exec_on_host":
 				w.allowExecOnHostSet = true
+			case "image":
+				w.imageSet = true
+			case "docker_bin":
+				w.dockerBinSet = true
+			case "host_root":
+				w.hostRootSet = true
+			case "volumes_from":
+				w.volumesFromSet = true
+			case "network":
+				w.networkSet = true
 			}
 		}
 	}
@@ -105,6 +125,26 @@ func (w WorkspaceConfig) BackendConfigured() bool {
 
 func (w WorkspaceConfig) AllowExecOnHostConfigured() bool {
 	return w.allowExecOnHostSet || w.AllowExecOnHost
+}
+
+func (w WorkspaceConfig) ImageConfigured() bool {
+	return w.imageSet || strings.TrimSpace(w.Image) != ""
+}
+
+func (w WorkspaceConfig) DockerBinConfigured() bool {
+	return w.dockerBinSet || strings.TrimSpace(w.DockerBin) != ""
+}
+
+func (w WorkspaceConfig) HostRootConfigured() bool {
+	return w.hostRootSet || strings.TrimSpace(w.HostRoot) != ""
+}
+
+func (w WorkspaceConfig) VolumesFromConfigured() bool {
+	return w.volumesFromSet || strings.TrimSpace(w.VolumesFrom) != ""
+}
+
+func (w WorkspaceConfig) NetworkConfigured() bool {
+	return w.networkSet || strings.TrimSpace(w.Network) != ""
 }
 
 type LLMConfig struct {

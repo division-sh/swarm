@@ -536,7 +536,7 @@ func resolveDoctorTargetData(repo string, opts doctorOptions, project localRunti
 		return doctorTargetPath{Status: "missing", Detail: err.Error()}
 	}
 	if strings.TrimSpace(mountSources.DataSource) == "" {
-		return doctorTargetPath{Source: envWorkspaceVolumesFrom, Status: "no_host_data_dir", Detail: "workspace volumes_from supplies container mounts"}
+		return doctorTargetPath{Source: "workspace.volumes_from", Status: "no_host_data_dir", Detail: "workspace volumes_from supplies container mounts"}
 	}
 	return doctorTargetPath{
 		Path:   mountSources.DataSource,

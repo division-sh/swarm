@@ -65,7 +65,7 @@ func TestDoctorCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), repo, []string{
 		"doctor",
 		"--backend", "claude_cli",
-		"--config", writeDoctorClaudeConfig(t),
+		"--config", writeDoctorClaudeConfig(t, ""),
 		"--contracts", contractsRoot,
 		"--platform-spec", defaultPlatformSpecPath,
 		"--data", t.TempDir(),
@@ -199,13 +199,13 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 	}
 
 	authority := spec.EnvironmentSourceAuthority.WorkspaceMonitorArtifactDebugSlice
-	if authority.PromotedBy != "#1640" || authority.ParentTracker != "#1600" || authority.ImplementationStatus != "classification_spec_lock_only" {
+	if authority.PromotedBy != "#1640" || authority.ParentTracker != "#1600" || authority.ImplementationStatus != "classification_updated_by_1843" {
 		t.Fatalf("#1640 env authority status = promoted_by:%q parent:%q status:%q", authority.PromotedBy, authority.ParentTracker, authority.ImplementationStatus)
 	}
 	if !strings.Contains(authority.CanonicalOwner, "environment_source_authority.workspace_monitor_artifact_debug_slice") {
 		t.Fatalf("#1640 canonical owner = %q", authority.CanonicalOwner)
 	}
-	for _, want := range []string{"classification authority", "#1731", "does not implement unknown-env", "Public docs"} {
+	for _, want := range []string{"classification authority", "#1731", "guard/doctor enforcement", "Public docs"} {
 		if !strings.Contains(authority.Scope+authority.ClassificationRule+authority.PublicDocQuarantine.Rule, want) {
 			t.Fatalf("#1640 env authority missing %q:\n%#v", want, authority)
 		}
@@ -215,9 +215,9 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 	}
 
 	for name, wantDisposition := range map[string]string{
-		"existing_config_owned_workspace_sources":     "existing_config_owned_env_source",
-		"production_bootstrap_or_deployment_plumbing": "keep_env_first_slice_bootstrap_or_deployment_plumbing",
-		"internal_workspace_lifecycle_names":          "keep_env_first_slice_internal_runtime_plumbing",
+		"existing_config_owned_workspace_sources":     "retired_by_1843_to_flags_or_typed_workspace_config",
+		"production_bootstrap_or_deployment_plumbing": "retired_by_1843_to_workspace_config_or_internal_defaults",
+		"internal_workspace_lifecycle_names":          "retired_by_1843_internal_generated_defaults",
 		"runtime_private_storage_and_observability":   "keep_env_first_slice_runtime_private_storage_or_observability",
 		"internal_prompt_and_spec_helpers":            "keep_env_first_slice_internal_developer_helper",
 		"debug_and_test_quarantine":                   "keep_env_first_slice_debug_or_test_quarantine",

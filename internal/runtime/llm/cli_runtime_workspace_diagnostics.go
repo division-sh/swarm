@@ -2,7 +2,6 @@ package llm
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -23,11 +22,8 @@ func workspaceCLIDiagnosticError(cfg *config.Config, target *workspace.Target, r
 	if target != nil && strings.TrimSpace(target.Container) != "" {
 		container = strings.TrimSpace(target.Container)
 	}
-	image := strings.TrimSpace(os.Getenv("SWARM_WORKSPACE_IMAGE"))
-	if image == "" {
-		image = workspace.ConfiguredWorkspaceImageFromEnv()
-	}
-	return fmt.Errorf("%w: local cli_test workspace cannot execute configured Claude CLI command %q in container %q (workspace image %q or an existing stale/incompatible workspace container is missing the CLI); build or pull a workspace image that includes the Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE to a compatible image: %s", ErrClaudeWorkspaceCLIUnavailable, command, container, image, summary)
+	image := configuredWorkspaceImage(cfg)
+	return fmt.Errorf("%w: local cli_test workspace cannot execute configured Claude CLI command %q in container %q (workspace image %q or an existing stale/incompatible workspace container is missing the CLI); build or pull a workspace image that includes the Claude CLI, remove stale workspace containers, or set workspace.image to a compatible image: %s", ErrClaudeWorkspaceCLIUnavailable, command, container, image, summary)
 }
 
 func configuredClaudeCLICommand(cfg *config.Config) string {

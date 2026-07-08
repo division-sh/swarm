@@ -11688,85 +11688,85 @@ environment_source_authority:
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
       migration: retired
     - name: SWARM_WORKSPACE_DATA_SOURCE
-      category: seeded_legacy
-      owner: platform-spec.yaml#workspace_model.data_source_authority
-      migration: '#1600 workspace.data_source'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_BACKEND
-      category: seeded_legacy
-      owner: platform-spec.yaml#workspace_model.workspace_backend_selection
-      migration: '#1600 workspace.backend'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_DOCKER_BIN
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace/tooling config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_IMAGE
-      category: seeded_legacy
-      owner: platform-spec.yaml#workspace_model.runtime_image_packaging
-      migration: '#1600 workspace.image'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_HOST_ROOT
-      category: seeded_legacy
-      owner: platform-spec.yaml#workspace_model.workspace_backend_selection
-      migration: '#1600 workspace.host_root'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_VOLUMES_FROM
-      category: seeded_legacy
-      owner: platform-spec.yaml#workspace_model.data_source_authority
-      migration: '#1600 workspace volumes config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_NETWORK
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace network config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_DATA_MOUNT
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace mount config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_CONTRACTS_SOURCE
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace contracts source config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_WORKSPACE_CONTRACTS_MOUNT
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace contracts mount config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SCAFFOLD_CONTAINER
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SCAFFOLD_WORKDIR
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SCAFFOLD_VOLUME
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SYSTEM_CONTAINER
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SYSTEM_WORKDIR
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SYSTEM_ENTITIES_VOLUME
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SYSTEM_NGINX_VOLUME
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_SYSTEM_SYSTEMD_VOLUME
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_ENTITY_CONTAINER_PREFIX
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_ENTITY_WORKDIR
-      category: seeded_legacy
-      owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
-      migration: '#1600 workspace lifecycle config'
+      category: known_retired
+      owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
+      migration: retired
     - name: SWARM_RUNTIME_RECOVERY_ON_STARTUP
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
@@ -11958,32 +11958,32 @@ environment_source_authority:
   workspace_monitor_artifact_debug_slice:
     promoted_by: '#1640'
     parent_tracker: '#1600'
-    implementation_status: classification_spec_lock_only
+    implementation_status: classification_updated_by_1843
     canonical_owner: platform-spec.yaml#environment_source_authority.workspace_monitor_artifact_debug_slice
     scope: >
-      Merge-bearing classification authority for the retained #1640 first slice: workspace Docker/host environment sources,
-      local workspace image/bootstrap knobs, runtime-private artifact and monitor roots, prompt/spec helper path overrides,
-      and debug/test environment toggles. This owner records the current source-authority disposition and public-doc quarantine
-      for those envs. It does not implement unknown-env guarding, typed env delegation, doctor env reporting, generated-boundary
-      enforcement, or parent-wide accepted-set ownership; those are split to #1731.
+      Merge-bearing classification authority for the #1640 workspace/monitor/artifact/debug inventory. #1843 retired the
+      workspace Docker/host environment sources, local workspace image/bootstrap knobs, and legacy internal
+      scaffold/system/entity lifecycle rows from parent-process env authority. Runtime-private artifact and monitor roots,
+      prompt/spec helper path overrides, and debug/test environment toggles remain classified here until later children.
+      This owner records current source-authority disposition and public-doc quarantine for those envs; repo-wide
+      guard/doctor enforcement remains owned by #1731.
     classification_rule: >
-      Every env listed here is either governed by an existing typed owner, retained as first-slice production bootstrap /
-      deployment plumbing, retained as internal developer helper source, quarantined as debug/test-only, or explicitly governed
-      by another owner. Public docs and templates MUST NOT present these envs as normal setup. A future migration may move any
-      retained env into typed config or typed delegation only through a later gate; #1640 does not create env-over-config
-      precedence or dual semantic ownership.
+      Every env listed here is either retired by a later child, governed by an existing typed owner, retained as a tracked
+      residual helper/debug source, quarantined as debug/test-only, or explicitly governed by another owner. Public docs and
+      templates MUST NOT present these envs as normal setup. #1640 does not create env-over-config precedence or dual
+      semantic ownership.
     classifications:
       existing_config_owned_workspace_sources:
-        disposition: existing_config_owned_env_source
+        disposition: retired_by_1843_to_flags_or_typed_workspace_config
         owner: workspace_model.data_source_authority and workspace_model.workspace_backend_selection
         env_vars:
         - SWARM_WORKSPACE_DATA_SOURCE
         - SWARM_WORKSPACE_BACKEND
         rule: >
-          These envs already have canonical owners and source order. #1640 classifies them for the retained workspace env
-          inventory only; any removal, typed delegation, or accepted-set guard behavior belongs to #1731 or a later child.
+          These envs historically overlapped existing workspace owners. #1843 removes them from source order and accepted-set
+          seeded status: use `--data` / `workspace.data_source` and `--workspace-backend` / `workspace.backend` instead.
       production_bootstrap_or_deployment_plumbing:
-        disposition: keep_env_first_slice_bootstrap_or_deployment_plumbing
+        disposition: retired_by_1843_to_workspace_config_or_internal_defaults
         owner: workspace_model.runtime_image_packaging, workspace_model.local_workspace_image_build_authority, workspace_model.data_source_authority, workspace_model.workspace_backend_selection, and workspace lifecycle config construction
         env_vars:
         - SWARM_DOCKER_BIN
@@ -11995,14 +11995,13 @@ environment_source_authority:
         - SWARM_WORKSPACE_CONTRACTS_SOURCE
         - SWARM_WORKSPACE_CONTRACTS_MOUNT
         rule: >
-          These envs remain live first-slice workspace/bootstrap inputs because current local Docker/host workspace lifecycle
-          consumers read them before a single typed workspace runtime config owner exists. `SWARM_DOCKER_BIN` is production
-          host-tool bootstrap/plumbing, not debug/test. `SWARM_WORKSPACE_IMAGE` is the current local workspace image selector
-          consumed by startup and `swarm workspace build`. Mount/network/volumes envs are deployment plumbing and MUST NOT be
-          advertised as ordinary project setup. Promotion to typed config or typed env delegation is split to #1731 or later
-          accepted migration children.
+          #1843 removes these envs as live parent-process workspace/bootstrap inputs. `SWARM_DOCKER_BIN` moves to
+          `workspace.docker_bin` or explicit `--docker-bin` for `swarm workspace build`; `SWARM_WORKSPACE_IMAGE` moves to
+          `workspace.image` or explicit `--image`; host root, volumes-from, and network move to typed workspace config.
+          Data/contract mount destinations are internal generated defaults with no env replacement, and contracts source is
+          selected through the contracts path owner / `--contracts`.
       internal_workspace_lifecycle_names:
-        disposition: keep_env_first_slice_internal_runtime_plumbing
+        disposition: retired_by_1843_internal_generated_defaults
         owner: internal/runtime/workspace Docker lifecycle configuration
         env_vars:
         - SWARM_SCAFFOLD_CONTAINER
@@ -12016,9 +12015,9 @@ environment_source_authority:
         - SWARM_ENTITY_CONTAINER_PREFIX
         - SWARM_ENTITY_WORKDIR
         rule: >
-          These are internal local Docker lifecycle naming/workdir knobs. They are not product contract fields, public setup
-          guidance, or proof that container identity is semantically configurable by agents. They remain implementation
-          plumbing until a later typed deployment-config owner promotes or removes them.
+          #1843 removes these rows as live env inputs. They are fixed internal local Docker lifecycle naming/workdir defaults,
+          not product contract fields, public setup guidance, or proof that container identity is semantically configurable by
+          agents.
       runtime_private_storage_and_observability:
         disposition: keep_env_first_slice_runtime_private_storage_or_observability
         owner: runtime_storage.artifact_root and runtime monitor sink
@@ -12204,6 +12203,11 @@ configuration_source_authority:
             data_source: project_contained_path_or_elevated
             backend: project_safe
             allow_exec_on_host: elevated
+            image: elevated
+            docker_bin: elevated
+            host_root: elevated
+            volumes_from: elevated
+            network: elevated
           owner: workspace_model.workspace_backend_selection
         llm:
           trust: project_safe_unless_key_is_marked_elevated
@@ -12347,7 +12351,11 @@ configuration_source_authority:
         SWARM_DB_POOL_SIZE: database.pool_size
         SWARM_WORKSPACE_DATA_SOURCE: workspace.data_source
         SWARM_WORKSPACE_BACKEND: workspace.backend
-        SWARM_WORKSPACE_IMAGE: workspace.image, pending workspace schema child
+        SWARM_DOCKER_BIN: workspace.docker_bin or --docker-bin for workspace build
+        SWARM_WORKSPACE_IMAGE: workspace.image or --image for workspace build
+        SWARM_WORKSPACE_HOST_ROOT: workspace.host_root
+        SWARM_WORKSPACE_VOLUMES_FROM: workspace.volumes_from
+        SWARM_WORKSPACE_NETWORK: workspace.network
         SWARM_ARTIFACT_ROOT: paths.artifact_root
         SWARM_MONITOR_DIR: paths.monitor_dir
         SWARM_PROMPTS_DIR: paths.prompts_dir
@@ -12401,7 +12409,7 @@ workspace_model:
       `runtime.Caller` / Go source paths as a runtime asset root, or walk for `go.mod` to recover build material.
     mount_source_rule: >
       Host sources for `/data` and `/opt/swarm/contracts` MUST come from `workspace_model.data_source_authority`,
-      explicit deployment configuration, environment, config/CLI path resolution, or an already selected workflow/project
+      explicit deployment configuration, config/CLI path resolution, or an already selected workflow/project
       root passed by the command owner. Default workspace runtime configuration MUST NOT derive those mount sources from
       the Swarm source checkout except for the promoted `.swarm/data` managed local default owned by
       `workspace_model.data_source_authority`.
@@ -12418,7 +12426,7 @@ workspace_model:
       `claude_cli` proof flows. This owner is an explicit operator setup surface. It is separate from runtime startup:
       runtime startup consumes `workspace_model.runtime_image_packaging` and MUST remain fail-closed inspect-only when the
       configured image is missing or unusable.
-    command_surface: swarm workspace build --backend claude_cli [--image <tag>]
+    command_surface: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]
     build_plan_rule: >
       The command MUST use an embedded/materialized workspace Dockerfile or equivalent embedded build plan. It MUST NOT
       locate build material by walking for a source checkout, reading repo-root `Dockerfile.workspace`, using
@@ -12434,9 +12442,13 @@ workspace_model:
         source-authority change promotes explicit version flags.
     image_target_rule: >
       Without `--image`, the command MUST target the same configured workspace image consumed by `swarm serve` Docker
-      startup: `SWARM_WORKSPACE_IMAGE` when set, otherwise `swarm-workspace:latest`. `--image <tag>` is an explicit
-      setup-only override and MUST fail closed when empty or syntactically invalid. The override does not change runtime
-      configuration by itself; operators must still run serve with the matching configured image when overriding.
+      startup: `workspace.image` from an explicit config when provided, otherwise `swarm-workspace:latest`. `--image <tag>`
+      is an explicit setup-only override and MUST fail closed when empty or syntactically invalid. The override does not
+      change runtime configuration by itself; operators must still run serve with the matching configured image when
+      overriding.
+    docker_bin_rule: >
+      The command MUST use `--docker-bin` when provided, otherwise `workspace.docker_bin` from an explicit config when
+      provided, otherwise the built-in `docker` default. `SWARM_DOCKER_BIN` is retired and MUST NOT be read as a fallback.
     validation_rule: >
       The command MUST build into a temporary image tag first and MUST NOT publish/replace the configured runtime image
       tag until validation passes. After build, the command MUST validate the temporary image by running a harmless
@@ -12458,18 +12470,17 @@ workspace_model:
       cleanup remain split.
     cli_flag: --data
     config_key: workspace.data_source
-    env_var: SWARM_WORKSPACE_DATA_SOURCE
+    retired_env_var: SWARM_WORKSPACE_DATA_SOURCE
     source_order:
     - --data
     - workspace.data_source
-    - SWARM_WORKSPACE_DATA_SOURCE
     - project_default
     default_behavior: >
-      If no explicit path source is selected and no deployment alternate such as `SWARM_WORKSPACE_VOLUMES_FROM` is active,
+      If no explicit path source is selected and no deployment alternate such as `workspace.volumes_from` is active,
       the local runtime state resolver MUST select and create `<project-root>/.swarm/data` with mode 0755 only when the canonical
       contracts project root is the active repo root or is under it. If there is no project, or the command points at a borrowed
       contracts root outside the active repo root, startup MUST fail closed with guidance to pass `--data` or configure
-      `workspace.data_source`/`SWARM_WORKSPACE_DATA_SOURCE`; it MUST NOT create cwd-relative `.swarm/data` or pollute the
+      `workspace.data_source`; it MUST NOT create cwd-relative `.swarm/data` or pollute the
       borrowed contracts tree. The runtime MUST NOT synthesize `/data` from the Swarm source checkout or from a repo-local
       `data/` directory unless that path was explicitly selected through the authoritative source order.
     path_resolution_rule: >
@@ -12480,12 +12491,12 @@ workspace_model:
       invalid and MUST NOT fall through to environment or default sources. Default directory creation failures fail closed
       before workspace lifecycle construction.
     volumes_from_conflict_rule: >
-      `SWARM_WORKSPACE_VOLUMES_FROM` is an explicit Docker deployment alternate, not a fallback path source. If no explicit
-      `/data` path source is selected and `SWARM_WORKSPACE_VOLUMES_FROM` is active, the command resolver MUST NOT
+      `workspace.volumes_from` is an explicit Docker deployment alternate, not a fallback path source. If no explicit
+      `/data` path source is selected and `workspace.volumes_from` is active, the command resolver MUST NOT
       materialize or override with `.swarm/data`; Docker workspace validation consumes the alternate shared mounts instead.
-      `SWARM_WORKSPACE_VOLUMES_FROM` MUST NOT be combined with an explicit `/data` path source from `--data`,
-      `workspace.data_source`, or `SWARM_WORKSPACE_DATA_SOURCE`; startup must fail closed on that conflict. Host backend
-      startup continues to reject `SWARM_WORKSPACE_VOLUMES_FROM`.
+      `workspace.volumes_from` MUST NOT be combined with an explicit `/data` path source from `--data` or
+      `workspace.data_source`; startup must fail closed on that conflict. Host backend startup continues to reject
+      `workspace.volumes_from`.
     read_policy: >
       `/data` remains read-only, global, and opaque to the platform. Source authority does not permit indexing, mutating,
       validating contents beyond mount readability, or folding runtime `/data` into workflow bundle identity.
@@ -12499,6 +12510,8 @@ workspace_model:
     retired_non_authoritative_sources:
     - repoRoot/data derivation in cmd/swarm configuredWorkspaceLifecycle
     - lower-level Docker default ownership of SWARM_WORKSPACE_DATA_SOURCE
+    - parent-process SWARM_WORKSPACE_DATA_SOURCE
+    - parent-process SWARM_WORKSPACE_VOLUMES_FROM
     split_scope:
     - '#1137 Compose/Postgres onboarding and Compose ./data:/data:ro deployment shape'
     - '#1138/#1213 host workspace backend execution parity'
@@ -12519,12 +12532,11 @@ workspace_model:
     cli_flag: --workspace-backend <docker|host>
     config_key: workspace.backend
     unsafe_config_key: workspace.allow_exec_on_host
-    legacy_env_var: SWARM_WORKSPACE_BACKEND
+    retired_env_var: SWARM_WORKSPACE_BACKEND
     source_order:
     - loaded contract execution capability
     - --workspace-backend preference / unsafe host opt-out
     - workspace.backend preference plus workspace.allow_exec_on_host for persistent unsafe host opt-out
-    - SWARM_WORKSPACE_BACKEND legacy preference, not unsafe opt-out authority
     default_backend: capability-derived
     capability_classes:
       none:
@@ -12573,7 +12585,7 @@ workspace_model:
           semantics are explicitly promoted. `workspace.backend: host` alone is insufficient for exec-capable bundles; it
           must be paired with `workspace.allow_exec_on_host: true` and the runtime must print a loud warning every boot.
         workspace_root:
-          env_var: SWARM_WORKSPACE_HOST_ROOT
+          config_key: workspace.host_root
           default: ~/.swarm/workspaces
           rule: >
             The host workspace root is platform-managed and writable. Startup MUST create/validate required workspace roots and
@@ -12583,13 +12595,13 @@ workspace_model:
             host workspace root.
     failure_behavior:
     - Unsupported backend names fail closed before runtime construction.
-    - Empty explicit backend sources from the flag, config, or legacy environment fail closed instead of falling through.
-    - Host backend MUST reject `SWARM_WORKSPACE_VOLUMES_FROM`; the host backend consumes explicit path authorities, not Docker
+    - Empty explicit backend sources from the flag or config fail closed instead of falling through.
+    - Host backend MUST reject `workspace.volumes_from`; the host backend consumes explicit path authorities, not Docker
       volume inheritance.
     - Host backend MUST fail closed for Claude CLI/provider execution unless a future gate promotes that support. Host native
       command execution is supported only as trusted/unsafe explicit host-mode execution through
       `workspace_execution_target_capability`; unsupported native tool execution MUST still fail closed.
-    - A legacy environment value such as `SWARM_WORKSPACE_BACKEND=host` MUST NOT act as the unsafe host opt-out for
+    - A retired environment value such as `SWARM_WORKSPACE_BACKEND=host` MUST NOT act as the unsafe host opt-out for
       exec-capable bundles.
     - conversation.fork_chat MUST consume the same decision owner. It MUST NOT preserve implicit primary-workspace
       inheritance or discover required isolation only by failing inside the LLM process startup path.
@@ -14420,7 +14432,7 @@ cli_specification:
         failures MUST fail closed with an actionable startup diagnostic naming the
         configured Claude CLI command, the resolved container, the configured
         workspace image, and remediation to build or pull an image containing the
-        Claude CLI, remove stale workspace containers, or set SWARM_WORKSPACE_IMAGE
+        Claude CLI, remove stale workspace containers, or set `workspace.image`
         to a compatible image.
       consumers:
       - 'local `swarm serve` runtime startup for agent-present `cli_test` bundles'
@@ -15172,8 +15184,7 @@ cli_specification:
         source_order:
         - --data
         - workspace.data_source
-        - SWARM_WORKSPACE_DATA_SOURCE
-        - SWARM_WORKSPACE_VOLUMES_FROM deployment alternate
+        - workspace.volumes_from deployment alternate
         - project_default
         project_default: <project-root>/.swarm/data
         rule: >
@@ -15767,17 +15778,18 @@ cli_specification:
         through entity.get
       - no live LLM credentials, ProviderContract mock/local activation, or cataloge2e private scenario format is required
     workspace_build:
-      command: swarm workspace build --backend claude_cli [--image <tag>]
+      command: swarm workspace build --backend claude_cli [--config <path>] [--image <tag>] [--docker-bin <path>]
       group: getting_started
       tier: should_have
       implementation_status: implemented_first_slice
       owner: workspace_model.local_workspace_image_build_authority
       behavior: >
         Builds and validates the local Docker workspace image for `claude_cli` proof flows using the embedded/materialized
-        workspace build plan. The command uses `SWARM_DOCKER_BIN` when set, builds into a temporary image tag, targets
-        `SWARM_WORKSPACE_IMAGE` or `swarm-workspace:latest` by default, accepts explicit `--image <tag>` for setup-only
-        override, passes the approved `claude_cli` build args, validates that the temporary image can execute
-        `claude --version`, and only then tags the validated image as the configured target.
+        workspace build plan. The command uses `--docker-bin` when set, otherwise `workspace.docker_bin` from explicit
+        config, otherwise the built-in `docker` default. It builds into a temporary image tag, targets `--image`,
+        `workspace.image`, or `swarm-workspace:latest` by default, passes the approved `claude_cli` build args, validates
+        that the temporary image can execute `claude --version`, and only then tags the validated image as the configured
+        target. `SWARM_DOCKER_BIN` and `SWARM_WORKSPACE_IMAGE` are retired and must not be read as fallback sources.
       boundaries:
       - no runtime startup auto-build
       - no source-checkout Dockerfile lookup or go.mod walk
@@ -15905,7 +15917,7 @@ cli_specification:
         owner: workspace_model.data_source_authority
         flag: --data <path>
         config_key: workspace.data_source
-        env_var: SWARM_WORKSPACE_DATA_SOURCE
+        retired_env_var: SWARM_WORKSPACE_DATA_SOURCE
         rule: >
           `swarm serve` MUST resolve the agent-visible `/data` source through
           `workspace_model.data_source_authority` before constructing any workspace lifecycle. The command MUST NOT
@@ -15925,14 +15937,15 @@ cli_specification:
         flag: --workspace-backend <docker|host>
         config_key: workspace.backend
         unsafe_config_key: workspace.allow_exec_on_host
-        legacy_env_var: SWARM_WORKSPACE_BACKEND
+        retired_env_var: SWARM_WORKSPACE_BACKEND
         default_backend: capability-derived
         rule: >
           `swarm serve` MUST resolve the effective workspace backend requirement through
           `workspace_model.workspace_backend_selection` after loading the selected contract source and before constructing
           any workspace lifecycle. No-agent bundles default to no workspace lifecycle, non-exec API/runtime-mediated bundles
           default to host, and exec-capable bundles require Docker unless the operator takes the explicit loud unsafe host
-          opt-out. `SWARM_WORKSPACE_BACKEND` is a legacy preference input and MUST NOT be the unsafe host opt-out authority.
+          opt-out. `SWARM_WORKSPACE_BACKEND` is retired and MUST NOT be read as a backend preference or unsafe host opt-out
+          authority.
         consumers:
         - serve boot workspace lifecycle
         - local foreground run start

@@ -108,7 +108,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	}
 	addToGroup(commandGroupStart,
 		newDoctorCommand(ctx, repo),
-		newWorkspaceCommand(ctx),
+		newWorkspaceCommand(ctx, opts.repoRoot),
 		newContextCommand(ctx, opts),
 		newServeCommand(ctx, repo, opts.runServe),
 		newVersionCommand(opts),

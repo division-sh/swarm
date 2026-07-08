@@ -15,8 +15,6 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
-const EnvHostWorkspaceRoot = "SWARM_WORKSPACE_HOST_ROOT"
-
 type HostConfig struct {
 	WorkspaceRoot       string
 	SharedDataSource    string
@@ -35,11 +33,11 @@ type HostManager struct {
 
 func DefaultHostConfig() HostConfig {
 	return HostConfig{
-		WorkspaceRoot:       EnvOrDefault(EnvHostWorkspaceRoot, defaultHostWorkspaceRoot()),
+		WorkspaceRoot:       defaultHostWorkspaceRoot(),
 		SharedDataSource:    "",
-		DataMountPoint:      EnvOrDefault("SWARM_WORKSPACE_DATA_MOUNT", "/data"),
-		ContractsSource:     EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_SOURCE", ""),
-		ContractsMountPoint: EnvOrDefault("SWARM_WORKSPACE_CONTRACTS_MOUNT", "/opt/swarm/contracts"),
+		DataMountPoint:      "/data",
+		ContractsSource:     "",
+		ContractsMountPoint: "/opt/swarm/contracts",
 	}
 }
 

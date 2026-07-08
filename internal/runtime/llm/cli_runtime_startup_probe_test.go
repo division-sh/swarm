@@ -46,9 +46,9 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
 
 	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
 
@@ -127,10 +127,10 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-startup-
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
 	t.Setenv("CAPTURE_PATH", capturePath)
 
 	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
 
@@ -181,7 +181,6 @@ func TestClaudeCLIRuntimeProbeStartupVisibleToolSurface_MissingWorkspaceCLIIsAct
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:8081")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "gateway-token")
-	t.Setenv("SWARM_WORKSPACE_IMAGE", "swarm-workspace:test")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
@@ -195,9 +194,10 @@ exit 127
 	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker script: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", scriptPath)
 
 	cfg := &config.Config{}
+	cfg.Workspace.DockerBin = scriptPath
+	cfg.Workspace.Image = "swarm-workspace:test"
 	cfg.LLM.ClaudeCLI.OutputFormat = "stream-json"
 	cfg.LLM.ClaudeCLI.Command = "claude"
 
@@ -230,7 +230,7 @@ exit 127
 		`"swarm-agent-market-research"`,
 		`"swarm-workspace:test"`,
 		"remove stale workspace containers",
-		"set SWARM_WORKSPACE_IMAGE",
+		"set workspace.image",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("ProbeStartupVisibleToolSurface error missing %q:\n%v", want, err)

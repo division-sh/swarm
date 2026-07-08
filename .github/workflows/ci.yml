@@ -33,13 +33,12 @@ jobs:
         run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
 
       - name: Prove no-selector SQLite local run
-        env:
-          SWARM_WORKSPACE_DATA_SOURCE: ${{ github.workspace }}/data
         run: |
           payload=$(mktemp)
           printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > "$payload"
           ./swarm run start \
             --contracts tests/tier1-primitives/test-emits-single \
+            --data "${{ github.workspace }}/data" \
             --event item.received \
             --payload "$payload" \
             --api-port 18091

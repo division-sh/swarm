@@ -11,29 +11,32 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/platform"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/spf13/cobra"
 )
 
 const workspaceBuildClaudeCommand = "claude"
 
 type workspaceBuildOptions struct {
-	backend string
-	image   string
+	backend    string
+	configPath string
+	repoRoot   string
+	image      string
+	dockerBin  string
 }
 
-func newWorkspaceCommand(ctx context.Context) *cobra.Command {
+func newWorkspaceCommand(ctx context.Context, repoRoot string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workspace",
 		Short: "Manage local workspace setup.",
 	}
-	cmd.AddCommand(newWorkspaceBuildCommand(ctx))
+	cmd.AddCommand(newWorkspaceBuildCommand(ctx, repoRoot))
 	return cmd
 }
 
-func newWorkspaceBuildCommand(ctx context.Context) *cobra.Command {
-	opts := workspaceBuildOptions{}
+func newWorkspaceBuildCommand(ctx context.Context, repoRoot string) *cobra.Command {
+	opts := workspaceBuildOptions{repoRoot: strings.TrimSpace(repoRoot)}
 	cmd := &cobra.Command{
 		Use:   "build --backend claude_cli [--image <tag>]",
 		Short: "Build and validate a local workspace image.",
@@ -47,6 +50,13 @@ func newWorkspaceBuildCommand(ctx context.Context) *cobra.Command {
 				return fmt.Errorf("unsupported workspace build backend %q; only claude_cli is supported", strings.TrimSpace(opts.backend))
 			}
 			opts.backend = backend
+			if cmd.Flags().Changed("docker-bin") {
+				dockerBin, err := normalizeWorkspaceBuildDockerBin(opts.dockerBin, "--docker-bin")
+				if err != nil {
+					return err
+				}
+				opts.dockerBin = dockerBin
+			}
 			if cmd.Flags().Changed("image") {
 				image, err := normalizeWorkspaceBuildImage(opts.image, "--image")
 				if err != nil {
@@ -65,15 +75,29 @@ func newWorkspaceBuildCommand(ctx context.Context) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&opts.backend, "backend", opts.backend, "Workspace image build backend to materialize: claude_cli")
-	cmd.Flags().StringVar(&opts.image, "image", opts.image, "Workspace image tag to build; defaults to SWARM_WORKSPACE_IMAGE or swarm-workspace:latest")
+	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Optional path to Swarm runtime config for workspace.image/workspace.docker_bin")
+	cmd.Flags().StringVar(&opts.image, "image", opts.image, "Workspace image tag to build; defaults to workspace.image or swarm-workspace:latest")
+	cmd.Flags().StringVar(&opts.dockerBin, "docker-bin", opts.dockerBin, "Docker-compatible CLI binary; defaults to workspace.docker_bin or docker")
 	return cmd
 }
 
 func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspaceBuildOptions) error {
+	var cfg *config.Config
+	if configPath := strings.TrimSpace(opts.configPath); configPath != "" {
+		cfgResult, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: opts.repoRoot, ExplicitPath: configPath})
+		if err != nil {
+			return fmt.Errorf("workspace image build failed: load config: %w", err)
+		}
+		cfg = cfgResult.Config
+	}
 	image := strings.TrimSpace(opts.image)
 	if image == "" {
 		var err error
-		image, err = normalizeWorkspaceBuildImage(workspace.ConfiguredWorkspaceImageFromEnv(), "SWARM_WORKSPACE_IMAGE")
+		image, err = workspaceImageFromRuntimeConfigOrDefault(cfg)
+		if err != nil {
+			return fmt.Errorf("workspace image build failed: %w", err)
+		}
+		image, err = normalizeWorkspaceBuildImage(image, "workspace.image")
 		if err != nil {
 			return err
 		}
@@ -88,9 +112,16 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 	}
 	defer cleanup()
 
-	dockerBin := workspace.EnvOrDefault("SWARM_DOCKER_BIN", "docker")
+	dockerBin := strings.TrimSpace(opts.dockerBin)
+	if dockerBin == "" {
+		var err error
+		dockerBin, err = workspaceDockerBinFromRuntimeConfigOrDefault(cfg)
+		if err != nil {
+			return fmt.Errorf("workspace image build failed: %w", err)
+		}
+	}
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, "version", "--format", "{{.Server.Version}}"); err != nil {
-		return fmt.Errorf("workspace image build failed: Docker is not available via %q; start Docker or set SWARM_DOCKER_BIN to a working Docker-compatible CLI: %w", dockerBin, err)
+		return fmt.Errorf("workspace image build failed: Docker is not available via %q; start Docker, set workspace.docker_bin, or pass --docker-bin: %w", dockerBin, err)
 	}
 
 	if out != nil {
@@ -119,7 +150,7 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		"-lc", `command -v -- "$1" >/dev/null && "$1" --version >/dev/null`,
 		"swarm-cli-proof", workspaceBuildClaudeCommand,
 	); err != nil {
-		return fmt.Errorf("workspace image validation failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, or set SWARM_WORKSPACE_IMAGE/--image to a compatible image: %w", workspaceBuildClaudeCommand, image, err)
+		return fmt.Errorf("workspace image validation failed: configured Claude CLI command %q cannot execute in workspace image %q; build or pull a workspace image that includes a runnable Claude CLI, set workspace.image, or pass --image with a compatible image: %w", workspaceBuildClaudeCommand, image, err)
 	}
 	if _, err := runWorkspaceBuildDocker(ctx, dockerBin, "tag", tempImage, image); err != nil {
 		return fmt.Errorf("workspace image build failed to publish validated image %q: %w", image, err)
@@ -128,6 +159,17 @@ func runWorkspaceBuildCommand(ctx context.Context, out io.Writer, opts workspace
 		fmt.Fprintf(out, "Workspace image %s is ready for claude_cli\n", image)
 	}
 	return nil
+}
+
+func normalizeWorkspaceBuildDockerBin(raw, source string) (string, error) {
+	dockerBin := strings.TrimSpace(raw)
+	if dockerBin == "" {
+		return "", fmt.Errorf("workspace docker binary from %s must be non-empty", source)
+	}
+	if strings.ContainsAny(dockerBin, "\r\n") {
+		return "", fmt.Errorf("workspace docker binary from %s must not contain newlines", source)
+	}
+	return dockerBin, nil
 }
 
 func temporaryWorkspaceBuildImageTag() string {

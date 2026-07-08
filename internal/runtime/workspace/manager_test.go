@@ -369,9 +369,6 @@ func TestResolveWorkspace_FailsClosedWithoutInjectedSourceForWorkspaceClassScope
 }
 
 func TestDefaultDockerConfigDoesNotDeriveSourceRootMounts(t *testing.T) {
-	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", "")
-	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", "")
-
 	cfg := DefaultDockerConfig()
 	if cfg.SharedDataSource != "" {
 		t.Fatalf("SharedDataSource = %q, want no source-root default", cfg.SharedDataSource)
@@ -382,17 +379,12 @@ func TestDefaultDockerConfigDoesNotDeriveSourceRootMounts(t *testing.T) {
 }
 
 func TestDefaultDockerConfigLeavesDataSourceToCommandResolver(t *testing.T) {
-	dataDir := t.TempDir()
-	contractsDir := t.TempDir()
-	t.Setenv("SWARM_WORKSPACE_DATA_SOURCE", dataDir)
-	t.Setenv("SWARM_WORKSPACE_CONTRACTS_SOURCE", contractsDir)
-
 	cfg := DefaultDockerConfig()
 	if cfg.SharedDataSource != "" {
-		t.Fatalf("SharedDataSource = %q, want command-level resolver to own SWARM_WORKSPACE_DATA_SOURCE", cfg.SharedDataSource)
+		t.Fatalf("SharedDataSource = %q, want command-level resolver to own workspace.data_source", cfg.SharedDataSource)
 	}
-	if cfg.ContractsSource != contractsDir {
-		t.Fatalf("ContractsSource = %q, want %q", cfg.ContractsSource, contractsDir)
+	if cfg.ContractsSource != "" {
+		t.Fatalf("ContractsSource = %q, want command-level resolver to own contracts source", cfg.ContractsSource)
 	}
 }
 
@@ -429,7 +421,7 @@ func TestEnsurePrereqs_CreatesMissingNetworkAndFailsClosedForMissingImage(t *tes
 	if !strings.Contains(err.Error(), "workspace image test-image:latest is not available") {
 		t.Fatalf("EnsurePrereqs error = %v, want missing image diagnostic", err)
 	}
-	if !strings.Contains(err.Error(), "set SWARM_WORKSPACE_IMAGE") {
+	if !strings.Contains(err.Error(), "set workspace.image") {
 		t.Fatalf("EnsurePrereqs error = %v, want configured image remediation", err)
 	}
 

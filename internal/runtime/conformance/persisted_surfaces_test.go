@@ -424,7 +424,6 @@ printf '{"result":"ok"}'
 	if err := os.WriteFile(fakeDocker, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake docker: %v", err)
 	}
-	t.Setenv("SWARM_DOCKER_BIN", fakeDocker)
 	t.Setenv("SWARM_FAKE_DOCKER_STATE", dockerState)
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
@@ -434,6 +433,9 @@ printf '{"result":"ok"}'
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	runtime := runtimellm.NewClaudeCLIRuntimeWithOptions(&config.Config{
+		Workspace: config.WorkspaceConfig{
+			DockerBin: fakeDocker,
+		},
 		LLM: config.LLMConfig{
 			ClaudeCLI: config.ClaudeCLIConfig{
 				Command:      "claude",
