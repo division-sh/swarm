@@ -213,7 +213,7 @@ func outputPinKeyCarriesSourceType(source semanticview.Source, flowID string, pi
 		return "", fmt.Errorf("producer output pin %s must declare key before it can supply %s", pin.PinName(), expr)
 	}
 	if field != key {
-		return "", fmt.Errorf("source expression %s does not match producer output pin key %s; renamed-key adapters are tracked by #1546", expr, key)
+		return "", fmt.Errorf("source expression %s does not match producer output pin key %s; renamed-key adapters are not supported", expr, key)
 	}
 	carries := outputPinCarries(pin)
 	if !outputPinStringSetContains(carries, key) {

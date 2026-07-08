@@ -563,7 +563,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		},
 		{
 			Name:        "read_only_inspection",
-			Status:      "implemented_#1614",
+			Status:      "implemented",
 			Fallthrough: "may use selected/global/default target only outside a project or when a project has no known context; stale/mismatched/corrupt/multiple project contexts fail closed",
 			Commands: []string{
 				"swarm run list",
@@ -597,7 +597,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		},
 		{
 			Name:        "mutating_runtime_state",
-			Status:      "implemented_#1614",
+			Status:      "implemented",
 			Fallthrough: "must not fall through to selected/global/default from inside a project with no live project context; requires explicit target or live project context",
 			Commands: []string{
 				"swarm event publish",
@@ -619,7 +619,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 		},
 		{
 			Name:        "control_destructive",
-			Status:      "implemented_#1614",
+			Status:      "implemented",
 			Fallthrough: "requires explicit or unambiguous selected target plus existing command confirmation rules",
 			Commands:    []string{"swarm control pause", "swarm control stop", "swarm control nuke"},
 		},
@@ -634,9 +634,9 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 
 func doctorTargetSplitSiblings() []string {
 	return []string{
-		"#1614 project-scoped serve/API command targeting",
-		"#1615 store/data migration and swarm run start semantics (implemented)",
-		"#1576 transport-aware descriptors and IPC/ephemeral-port direction",
+		"project-scoped serve/API command targeting remains a broader targeting follow-up",
+		"store/data migration and swarm run start semantics are implemented",
+		"transport-aware descriptors and IPC/ephemeral-port direction remain broader targeting follow-up",
 	}
 }
 

@@ -340,8 +340,8 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"store_path: " + filepath.Join(canonicalRepo, ".swarm", "stores", "dev.db"),
 		"data_dir: " + filepath.Join(canonicalRepo, ".swarm", "data"),
 		"command_classes:",
-		"#1614",
-		"#1615 store/data migration and swarm run start semantics (implemented)",
+		"read_only_inspection: implemented",
+		"store/data migration and swarm run start semantics are implemented",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor target output missing %q:\n%s", want, stdout.String())

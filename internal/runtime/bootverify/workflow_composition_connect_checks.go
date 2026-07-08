@@ -414,7 +414,7 @@ func compositionConnectTargetIndexed(source semanticview.Source, flowID, expr st
 			return nil
 		}
 		if strings.Contains(fieldPath, ".") {
-			return fmt.Errorf("receiver target %s uses a nested entity path; #1479 supports only top-level indexed entity fields as descriptor/index route evidence", expr)
+			return fmt.Errorf("receiver target %s uses a nested entity path; descriptor/index route evidence supports only top-level indexed entity fields", expr)
 		}
 		contract, ok := entityruntime.ResolveForFlow(source, flowID)
 		if !ok {

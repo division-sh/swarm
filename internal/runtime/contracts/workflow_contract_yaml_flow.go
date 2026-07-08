@@ -66,7 +66,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		case "policy":
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q would create a second policy-sheet authoring owner; enhance rules in place", key)
 		case "temporal", "join", "loop", "collection", "schedule":
-			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is outside the #1713 selection-row scope", key)
+			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is outside the promoted selection-row scope", key)
 		}
 		if _, ok := allowed[key]; !ok {
 			return fmt.Errorf("UNDEFINED-FIELD: rule field %q not in platform spec", key)

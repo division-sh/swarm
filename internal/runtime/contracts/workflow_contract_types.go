@@ -1699,7 +1699,7 @@ func validateAgentRegistryEntryYAMLFields(value *yaml.Node) (map[string]bool, er
 			case "subscribes_to":
 				return nil, fmt.Errorf("RETIRED: agent field subscribes_to is retired for agents.yaml; use subscriptions")
 			case "profile", "agent_defaults", "agent_profiles", "runtime_id_template":
-				return nil, fmt.Errorf("UNSUPPORTED: agent field %s is reserved for a later #1685/#1703 gate and is not accepted by Layer 1 platform defaults", field)
+				return nil, fmt.Errorf("UNSUPPORTED: agent field %s is reserved for future agent-defaults/profile support and is not accepted by Layer 1 platform defaults", field)
 			default:
 				if !supportedAgentRegistryEntryField(field) {
 					return nil, fmt.Errorf("UNDEFINED-FIELD: agent field %s is not supported", field)

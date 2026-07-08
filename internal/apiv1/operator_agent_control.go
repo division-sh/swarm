@@ -130,7 +130,7 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 
 func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
 	if multiRuntimeContextMode(opts) {
-		return nil, runtimeContextRequiredError(req.Method, "agent restart is ambiguous in multi-context DB-loaded mode; per-context agent control is split to #1176")
+		return nil, runtimeContextRequiredError(req.Method, "agent restart is not supported in multi-context DB-loaded mode without an explicit runtime context")
 	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
@@ -174,7 +174,7 @@ func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOpti
 
 func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
 	if multiRuntimeContextMode(opts) {
-		return nil, runtimeContextRequiredError(req.Method, "agent backlog replay is ambiguous in multi-context DB-loaded mode; per-context agent control is split to #1176")
+		return nil, runtimeContextRequiredError(req.Method, "agent backlog replay is not supported in multi-context DB-loaded mode without an explicit runtime context")
 	}
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {

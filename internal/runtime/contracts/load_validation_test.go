@@ -592,8 +592,8 @@ func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *test
 		body     string
 		contains string
 	}{
-		{name: "profile", body: "profile: cheap\n", contains: "reserved for a later #1685/#1703 gate"},
-		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "reserved for a later #1685/#1703 gate"},
+		{name: "profile", body: "profile: cheap\n", contains: "reserved for future agent-defaults/profile support"},
+		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "reserved for future agent-defaults/profile support"},
 		{name: "unknown", body: "surprise_field: true\n", contains: "UNDEFINED-FIELD"},
 	}
 	for _, tt := range tests {

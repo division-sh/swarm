@@ -579,9 +579,9 @@ func TestSwarmEnvGuardBlocksRetiredRuntimeLLMConfigEnv(t *testing.T) {
 		{name: "SWARM_CLAUDE_CLI_TIMEOUT", value: "1s", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_TIMEOUT", "llm.claude_cli.timeout"}},
 		{name: "SWARM_CLAUDE_CLI_OUTPUT_FORMAT", value: "bad", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_OUTPUT_FORMAT", "llm.claude_cli.output_format"}},
 		{name: "SWARM_CLAUDE_TIMEOUT_SECONDS", value: "1", want: []string{"env/known_retired @ SWARM_CLAUDE_TIMEOUT_SECONDS", "llm.claude_cli.timeout"}},
-		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_RETRIES", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.retries"}},
-		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.no_session_persistence"}},
-		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_USE_TMUX", "no supported replacement", "#1803"}, notWant: []string{"llm.claude_cli.use_tmux"}},
+		{name: "SWARM_CLAUDE_CLI_RETRIES", value: "7", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_RETRIES", "no supported replacement"}, notWant: []string{"llm.claude_cli.retries", "#1803"}},
+		{name: "SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_NO_SESSION_PERSISTENCE", "no supported replacement"}, notWant: []string{"llm.claude_cli.no_session_persistence", "#1803"}},
+		{name: "SWARM_CLAUDE_CLI_USE_TMUX", value: "true", want: []string{"env/known_retired @ SWARM_CLAUDE_CLI_USE_TMUX", "no supported replacement"}, notWant: []string{"llm.claude_cli.use_tmux", "#1803"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -840,8 +840,11 @@ func TestDoctorTargetReportsRuntimeConfigEnvRejectors(t *testing.T) {
 			assertDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
 			if envName == "SWARM_CLAUDE_CLI_RETRIES" {
 				finding := findDoctorTargetEnvFinding(t, report, string(swarmEnvCategoryKnownRetired), envName)
-				if !strings.Contains(finding.Message, "no supported replacement") || !strings.Contains(finding.Message, "#1803") {
-					t.Fatalf("retired inert finding message = %q, want #1803/no replacement", finding.Message)
+				if !strings.Contains(finding.Message, "no supported replacement") {
+					t.Fatalf("retired inert finding message = %q, want no replacement guidance", finding.Message)
+				}
+				if strings.Contains(finding.Message+finding.Remediation, "#1803") {
+					t.Fatalf("retired inert finding leaks internal issue ref: %#v", finding)
 				}
 				if strings.Contains(finding.Message+finding.Remediation, "llm.claude_cli.retries") {
 					t.Fatalf("retired inert finding advertises fake replacement: %#v", finding)
