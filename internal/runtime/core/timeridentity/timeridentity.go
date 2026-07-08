@@ -1,6 +1,7 @@
 package timeridentity
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,6 +39,7 @@ type TimerHandle struct {
 type AccumulatorBucketRef struct {
 	NodeID    string
 	EventType string
+	Window    string
 }
 
 func ParseStartTrigger(raw string) (Trigger, error) {
@@ -222,6 +224,12 @@ func NewAccumulatorBucketRef(nodeID, eventType string) AccumulatorBucketRef {
 	}
 }
 
+func NewAccumulatorWindowBucketRef(nodeID, eventType, window string) AccumulatorBucketRef {
+	ref := NewAccumulatorBucketRef(nodeID, eventType)
+	ref.Window = strings.TrimSpace(window)
+	return ref
+}
+
 func ParseAccumulatorBucketRef(payload map[string]any) (AccumulatorBucketRef, bool) {
 	handle, ok := ParseTimerHandle(payload)
 	if !ok || handle.Kind != TimerHandleAccumulationTimeout {
@@ -235,16 +243,25 @@ func ParseAccumulatorBucketKey(key string) (AccumulatorBucketRef, bool) {
 	if key == "" {
 		return AccumulatorBucketRef{}, false
 	}
+	window := ""
+	if base, encoded, ok := strings.Cut(key, "@window="); ok {
+		key = strings.TrimSpace(base)
+		decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			return AccumulatorBucketRef{}, false
+		}
+		window = string(decoded)
+	}
 	nodeID, eventType, ok := strings.Cut(key, ":")
 	if !ok {
 		return AccumulatorBucketRef{}, false
 	}
-	bucket := NewAccumulatorBucketRef(nodeID, eventType)
+	bucket := NewAccumulatorWindowBucketRef(nodeID, eventType, window)
 	return bucket, bucket.Valid()
 }
 
 func (r AccumulatorBucketRef) Normalize() AccumulatorBucketRef {
-	return NewAccumulatorBucketRef(r.NodeID, r.EventType)
+	return NewAccumulatorWindowBucketRef(r.NodeID, r.EventType, r.Window)
 }
 
 func (r AccumulatorBucketRef) Valid() bool {
@@ -256,7 +273,11 @@ func (r AccumulatorBucketRef) Key() string {
 	if !r.Valid() {
 		return ""
 	}
-	return r.NodeID + ":" + r.EventType
+	key := r.NodeID + ":" + r.EventType
+	if r.Window == "" {
+		return key
+	}
+	return key + "@window=" + base64.RawURLEncoding.EncodeToString([]byte(r.Window))
 }
 
 func (r AccumulatorBucketRef) PayloadValue() map[string]any {
@@ -264,10 +285,14 @@ func (r AccumulatorBucketRef) PayloadValue() map[string]any {
 	if !r.Valid() {
 		return nil
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"node_id":    r.NodeID,
 		"event_type": r.EventType,
 	}
+	if r.Window != "" {
+		payload["window"] = r.Window
+	}
+	return payload
 }
 
 func stringAnyMap(value any) (map[string]any, bool) {
@@ -283,7 +308,7 @@ func bucketFromAny(value any) (AccumulatorBucketRef, bool) {
 	if !ok {
 		return AccumulatorBucketRef{}, false
 	}
-	bucket := NewAccumulatorBucketRef(asString(payload["node_id"]), asString(payload["event_type"]))
+	bucket := NewAccumulatorWindowBucketRef(asString(payload["node_id"]), asString(payload["event_type"]), asString(payload["window"]))
 	return bucket, bucket.Valid()
 }
 

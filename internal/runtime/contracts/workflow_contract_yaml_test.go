@@ -2802,7 +2802,7 @@ source: payload.items
 	if got := diagnostic.Problem; got != `accumulate field "source" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown accumulate field problem", got)
 	}
-	want := []string{"completion", "dedup_by", "description", "expected_from", "from", "into", "on_complete", "on_timeout", "threshold", "timeout_ms"}
+	want := []string{"completion", "dedup_by", "description", "expected_from", "from", "into", "on_complete", "on_timeout", "threshold", "timeout_ms", "window"}
 	if !reflect.DeepEqual(diagnostic.ValidOptions, want) {
 		t.Fatalf("diagnostic valid options = %#v, want %#v", diagnostic.ValidOptions, want)
 	}

@@ -94,6 +94,28 @@ func TestAccumulationTimeoutHandleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAccumulationTimeoutHandleRoundTripWithWindow(t *testing.T) {
+	bucket := NewAccumulatorWindowBucketRef("collector", "item.arrived", "2026-Q1:closed")
+	handle := AccumulationTimeoutHandle(bucket)
+	parsedHandle, ok := ParseTimerHandle(handle.PayloadMetadata())
+	if !ok {
+		t.Fatal("expected windowed accumulation timeout handle payload to round trip")
+	}
+	if parsedHandle.Bucket != bucket {
+		t.Fatalf("parsed bucket = %#v, want %#v", parsedHandle.Bucket, bucket)
+	}
+	parsedBucket, ok := ParseAccumulatorBucketKey(bucket.Key())
+	if !ok {
+		t.Fatalf("ParseAccumulatorBucketKey(%q) failed", bucket.Key())
+	}
+	if parsedBucket != bucket {
+		t.Fatalf("parsed bucket key = %#v, want %#v", parsedBucket, bucket)
+	}
+	if got := handle.TaskID(); got == "accumulate_timeout:collector:item.arrived" {
+		t.Fatalf("windowed TaskID() = %q, want distinct from unwindowed bucket", got)
+	}
+}
+
 func TestParseAccumulatorBucketKey(t *testing.T) {
 	bucket, ok := ParseAccumulatorBucketKey("collector:item.arrived")
 	if !ok {

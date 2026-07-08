@@ -106,6 +106,13 @@ type ConnectRoutePlanInstanceKeyMapping struct {
 	Explicit bool
 }
 
+type ConnectRoutePlanFanIn struct {
+	Aggregation string
+	Window      string
+	DedupBy     []string
+	Singleton   string
+}
+
 type ConnectRoutePlan struct {
 	PackageKey                string
 	Source                    ConnectRoutePlanEndpoint
@@ -116,6 +123,7 @@ type ConnectRoutePlan struct {
 	ResolutionKind            ConnectRoutePlanResolutionKind
 	Address                   *ConnectRoutePlanAddress
 	InstanceKey               *ConnectRoutePlanInstanceKey
+	FanIn                     *ConnectRoutePlanFanIn
 	Map                       []ConnectRoutePlanMapEntry
 	Reply                     map[string]string
 	Target                    events.RouteIdentity
@@ -211,6 +219,10 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	if instanceKeyIssue.Failure != "" {
 		return ConnectRoutePlan{}, instanceKeyIssue
 	}
+	fanIn, fanInIssue := connectFanIn(source, connect, inputPin, delivery, to.FlowID)
+	if fanInIssue.Failure != "" {
+		return ConnectRoutePlan{}, fanInIssue
+	}
 	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && delivery != ConnectDeliveryBroadcast {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: to.FlowID}
 	}
@@ -237,11 +249,15 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		),
 		Address:     address,
 		InstanceKey: instanceKey,
+		FanIn:       fanIn,
 		Map:         connectMapEntries(connect.Map),
 		Reply:       cloneStringMap(connect.Reply),
 	}
 	if !receiverRequiresRuntimeResolution(receiverScope) {
 		route := staticConnectRoute(source, to.FlowID)
+		if fanIn != nil {
+			route = fanInSingletonRoute(to.FlowID, fanIn.Singleton)
+		}
 		if !route.Empty() {
 			switch targetKind {
 			case ConnectTargetKindTarget, ConnectTargetKindReply:
@@ -645,9 +661,72 @@ func connectResolutionInstanceKey(source semanticview.Source, connect runtimecon
 		return connectCreateResolutionInstanceKey(source, connect, resolution, delivery, receiverFlowID)
 	case runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
 		return connectCarriedKeyResolutionInstanceKey(source, connect, inputPin, resolution, delivery, receiverFlowID)
+	case runtimecontracts.FlowInputResolutionModeFanIn:
+		return nil, ConnectRoutePlanIssue{}
 	default:
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode)}
 	}
+}
+
+func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanFanIn, ConnectRoutePlanIssue) {
+	if inputPin.Resolution.Empty() || inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
+		return nil, ConnectRoutePlanIssue{}
+	}
+	resolution := inputPin.Resolution
+	if delivery != ConnectDeliveryOne {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "resolution mode fan-in requires delivery one"}
+	}
+	if !resolution.InstanceKey.Empty() || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries"}
+	}
+	if resolution.Aggregation != "stream" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in supports only aggregation: stream in this slice, got %q", resolution.Aggregation)}
+	}
+	window := strings.TrimSpace(resolution.Window)
+	if window == "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in stream requires window"}
+	}
+	dedupBy := normalizedStringList(resolution.DedupBy)
+	if len(dedupBy) == 0 {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in stream requires dedup_by; sender identity is not an implicit default"}
+	}
+	if len(dedupBy) != 1 {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in stream supports exactly one dedup_by field in this slice, got %v", dedupBy)}
+	}
+	if !connectFanInDedupSupported(dedupBy[0]) {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in dedup_by %q must be event.id or one top-level payload field", dedupBy[0])}
+	}
+	if !connectFanInPayloadFieldSupported(window) {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in window %q must be one top-level payload field", window)}
+	}
+	singleton := strings.Trim(strings.TrimSpace(resolution.Singleton), "/")
+	if singleton == "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in stream requires explicit singleton receiver identity"}
+	}
+	scopeKey := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, receiverFlowID)), "/")
+	if scopeKey != "" && singleton != scopeKey && !strings.HasPrefix(singleton, scopeKey+"/") {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in singleton %q must be the receiver singleton route or a child of %q", singleton, scopeKey)}
+	}
+	return &ConnectRoutePlanFanIn{
+		Aggregation: resolution.Aggregation,
+		Window:      window,
+		DedupBy:     dedupBy,
+		Singleton:   singleton,
+	}, ConnectRoutePlanIssue{}
+}
+
+func connectFanInDedupSupported(dedup string) bool {
+	dedup = strings.TrimSpace(dedup)
+	return dedup == "event.id" || connectFanInPayloadFieldSupported(dedup)
+}
+
+func connectFanInPayloadFieldSupported(path string) bool {
+	path = strings.TrimSpace(path)
+	if !strings.HasPrefix(path, "payload.") {
+		return false
+	}
+	field := strings.TrimSpace(strings.TrimPrefix(path, "payload."))
+	return field != "" && !strings.Contains(field, ".")
 }
 
 func connectCreateResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
@@ -935,6 +1014,18 @@ func staticConnectRoute(source semanticview.Source, flowID string) events.RouteI
 		FlowID:       strings.TrimSpace(flowID),
 		FlowInstance: flowInstance,
 		EntityID:     runtimeflowidentity.EntityID(flowInstance),
+	}.Normalized()
+}
+
+func fanInSingletonRoute(flowID, singleton string) events.RouteIdentity {
+	singleton = strings.Trim(strings.TrimSpace(singleton), "/")
+	if strings.TrimSpace(flowID) == "" || singleton == "" {
+		return events.RouteIdentity{}
+	}
+	return events.RouteIdentity{
+		FlowID:       strings.TrimSpace(flowID),
+		FlowInstance: singleton,
+		EntityID:     runtimeflowidentity.EntityID(singleton),
 	}.Normalized()
 }
 

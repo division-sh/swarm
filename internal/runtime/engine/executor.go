@@ -847,6 +847,7 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	frame.result.AccumulatorCompletionDiagnostics.CompletionMode = spec.Completion.String()
 	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
 	frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationNotAttempted
+	current := e.currentContext(frame)
 	bucketRef := handlerAccumulatorBucketRef(frame.req)
 	if isAccumulationTimeoutEvent(frame.req.Event.Type()) {
 		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
@@ -854,6 +855,12 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 			return false, nil
 		}
 		bucketRef = parsed
+	} else {
+		var err error
+		bucketRef, err = handlerAccumulatorBucketRefForSpec(frame.req, current, frame.state, spec)
+		if err != nil {
+			return false, err
+		}
 	}
 	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if !ok {
@@ -862,7 +869,6 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if strings.TrimSpace(acc.StartedAt) == "" {
 		acc.StartedAt = frame.req.Event.CreatedAt().UTC().Format(time.RFC3339Nano)
 	}
-	current := e.currentContext(frame)
 	expectedIDs, expectedCount := expectedAccumulatorTargets(current, frame.state, spec.ExpectedPath, spec.ExpectedFrom)
 	if len(expectedIDs) > 0 {
 		acc.Expected = append([]string{}, expectedIDs...)
@@ -1035,7 +1041,11 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	if spec == nil {
 		return nil
 	}
-	acc, _ := loadAccumulatorForBucket(frame.state.State, handlerAccumulatorBucketRef(frame.req))
+	bucketRef, bucketErr := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, frame.req.Handler.Accumulate)
+	if bucketErr != nil {
+		return bucketErr
+	}
+	acc, _ := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	var (
 		value any
 		err   error
@@ -1781,7 +1791,11 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		}
 		return nil
 	}
-	acc, ok := loadAccumulatorForBucket(frame.state.State, handlerAccumulatorBucketRef(frame.req))
+	bucketRef, bucketErr := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, frame.req.Handler.Accumulate)
+	if bucketErr != nil {
+		return bucketErr
+	}
+	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if !ok {
 		return fmt.Errorf("accumulator projection source missing for node %s event %s", frame.req.NodeID.String(), string(handlerEventType))
 	}

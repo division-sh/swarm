@@ -155,6 +155,7 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		ExpectedFrom string    `yaml:"expected_from"`
 		From         string    `yaml:"from"`
 		Description  string    `yaml:"description"`
+		Window       string    `yaml:"window"`
 		DedupBy      string    `yaml:"dedup_by"`
 		Threshold    int       `yaml:"threshold"`
 		TimeoutMS    int       `yaml:"timeout_ms"`
@@ -170,6 +171,8 @@ func (a *AccumulateSpec) UnmarshalYAML(node *yaml.Node) error {
 		ExpectedFrom: strings.TrimSpace(aux.ExpectedFrom),
 		From:         strings.TrimSpace(aux.From),
 		Description:  strings.TrimSpace(aux.Description),
+		Window:       strings.TrimSpace(aux.Window),
+		WindowPath:   paths.Parse(aux.Window),
 		ExpectedPath: paths.Parse(aux.ExpectedFrom),
 		DedupBy:      strings.TrimSpace(aux.DedupBy),
 		DedupPath:    paths.Parse(aux.DedupBy),
@@ -208,6 +211,7 @@ var accumulateFieldOptions = map[string]struct{}{
 	"expected_from": {},
 	"from":          {},
 	"description":   {},
+	"window":        {},
 	"dedup_by":      {},
 	"threshold":     {},
 	"timeout_ms":    {},
