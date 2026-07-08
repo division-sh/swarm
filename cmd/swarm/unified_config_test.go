@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,103 @@ func TestUnifiedConfigExplicitPathBeatsSWARMCONFIGLocator(t *testing.T) {
 	}
 	if got.CLI.APIServer != "http://127.0.0.1:2222" || got.Source != string(unifiedLayerExplicit) {
 		t.Fatalf("api_server/source = %q/%q, want explicit config", got.CLI.APIServer, got.Source)
+	}
+}
+
+func TestGeneratedUnifiedConfigExampleMatchesCommittedFile(t *testing.T) {
+	got, err := os.ReadFile(filepath.Join(repoRoot(), "swarm.example.yaml"))
+	if err != nil {
+		t.Fatalf("read swarm.example.yaml: %v", err)
+	}
+	want := generatedUnifiedConfigExample()
+	if string(got) != want {
+		t.Fatalf("swarm.example.yaml drifted from generated unified config metadata:\n%s", firstStringDiff(string(got), want))
+	}
+}
+
+func firstStringDiff(got, want string) string {
+	max := len(got)
+	if len(want) < max {
+		max = len(want)
+	}
+	for i := 0; i < max; i++ {
+		if got[i] != want[i] {
+			return fmt.Sprintf("first diff at byte %d\ngot:  %q\nwant: %q", i, got[i:unifiedConfigTestMin(i+120, len(got))], want[i:unifiedConfigTestMin(i+120, len(want))])
+		}
+	}
+	return fmt.Sprintf("length differs: got %d want %d", len(got), len(want))
+}
+
+func unifiedConfigTestMin(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func TestGeneratedUnifiedConfigExampleValidationSampleLoads(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, path, generatedUnifiedConfigValidationSample())
+	if _, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: path}); err != nil {
+		t.Fatalf("generated validation sample failed unified parser: %v\n%s", err, generatedUnifiedConfigValidationSample())
+	}
+}
+
+func TestGeneratedUnifiedConfigExampleMetadataCoversSupportedRules(t *testing.T) {
+	entries := map[string]unifiedConfigExampleEntry{}
+	for _, entry := range unifiedConfigExampleEntries() {
+		if entry.Path == "" || entry.Value == "" || entry.Description == "" {
+			t.Fatalf("incomplete example metadata: %#v", entry)
+		}
+		if _, exists := entries[entry.Path]; exists {
+			t.Fatalf("duplicate example metadata for %q", entry.Path)
+		}
+		entries[entry.Path] = entry
+		if entry.RequiresRuleLookup {
+			rule, ok := unifiedConfigRule(strings.Split(entry.Path, "."))
+			if !ok {
+				t.Fatalf("example metadata path %q is not accepted by unified config rules", entry.Path)
+			}
+			if rule.Split != "" || rule.OldShape != "" || rule.InlineSecret {
+				t.Fatalf("example metadata path %q is not a supported configurable leaf: %#v", entry.Path, rule)
+			}
+		}
+	}
+	for path, rule := range unifiedConfigRules() {
+		if !rule.supportedExampleLeaf() {
+			continue
+		}
+		if _, ok := entries[path]; !ok {
+			t.Fatalf("supported unified config key %q missing generated example metadata", path)
+		}
+	}
+}
+
+func TestGeneratedUnifiedConfigExampleOmitsSplitUnsupportedAndPlaintextSecrets(t *testing.T) {
+	text := generatedUnifiedConfigExample()
+	for _, forbidden := range []string{
+		"runtime.max_concurrent_agents",
+		"runtime.event_poll_interval",
+		"llm.runtime_mode",
+		"llm.claude_api.default_model",
+		"llm.claude_api.haiku_model",
+		"llm.claude_cli.retries",
+		"llm.claude_cli.no_session_persistence",
+		"llm.claude_cli.use_tmux",
+		"llm.openai_compatible.default_model",
+		"llm.openai_compatible.low_cost_model",
+		"sharding",
+		"\n#   password:",
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("generated example exposes unsupported or plaintext-secret key %q:\n%s", forbidden, text)
+		}
+	}
+	for _, want := range []string{"password_secret_key", "password_file", "password_env", "never store plaintext secrets"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("generated example missing secret-reference guidance %q:\n%s", want, text)
+		}
 	}
 }
 

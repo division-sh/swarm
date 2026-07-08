@@ -12,9 +12,8 @@ workflows.
   artifact.
 - Use [SECURITY.md](SECURITY.md) for suspected vulnerabilities. Do not report
   security issues in public GitHub issues.
-- Use [config.example.yaml](config.example.yaml) and
-  [runtime-config.example.yaml](runtime-config.example.yaml) for non-secret
-  local setup examples. Use `swarm secrets` for contract credentials. Repo
+- Use [swarm.example.yaml](swarm.example.yaml) as the unified non-secret
+  `swarm.yaml` setup reference. Use `swarm secrets` for contract credentials. Repo
   `.env` files are non-authoritative and are not loaded by Swarm commands.
 
 ## Local Checks

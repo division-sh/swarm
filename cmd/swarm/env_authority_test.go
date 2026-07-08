@@ -114,7 +114,7 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 			t.Fatalf(".env.example still advertises authoritative assignment %q:\n%s", forbidden, envText)
 		}
 	}
-	for _, want := range []string{"non-authoritative", "config.example.yaml", "swarm secrets"} {
+	for _, want := range []string{"non-authoritative", "swarm.example.yaml", "swarm secrets"} {
 		if !strings.Contains(envText, want) {
 			t.Fatalf(".env.example missing guidance %q:\n%s", want, envText)
 		}
@@ -147,22 +147,63 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 			t.Fatalf("public docs still advertise #1640 env %q as normal setup", forbidden)
 		}
 	}
-	for _, want := range []string{"config.example.yaml", "swarm secrets"} {
+	for _, want := range []string{"swarm.example.yaml", "swarm secrets"} {
 		if !strings.Contains(publicDocs, want) {
 			t.Fatalf("public docs missing replacement setup guidance %q", want)
 		}
 	}
 
-	runtimeConfig, err := os.ReadFile(filepath.Join(root, "runtime-config.example.yaml"))
+	example, err := os.ReadFile(filepath.Join(root, "swarm.example.yaml"))
 	if err != nil {
-		t.Fatalf("read runtime-config.example.yaml: %v", err)
+		t.Fatalf("read swarm.example.yaml: %v", err)
 	}
-	runtimeConfigText := string(runtimeConfig)
-	if strings.Contains(runtimeConfigText, "\n  data_source:") {
-		t.Fatalf("runtime-config.example.yaml sets an explicit data_source that fresh repos may not have:\n%s", runtimeConfigText)
+	exampleText := string(example)
+	for _, want := range []string{"Generated from cmd/swarm unified config metadata", "Project-safe keys", "Elevated/local-only keys", "Secret references"} {
+		if !strings.Contains(exampleText, want) {
+			t.Fatalf("swarm.example.yaml missing generated guidance %q:\n%s", want, exampleText)
+		}
 	}
-	if !strings.Contains(runtimeConfigText, "default project data directory") {
-		t.Fatalf("runtime-config.example.yaml missing default data directory guidance:\n%s", runtimeConfigText)
+	for _, forbidden := range []string{"config.example.yaml", "runtime-config.example.yaml", "llm.claude_cli.retries", "\n#   password:"} {
+		if strings.Contains(exampleText, forbidden) {
+			t.Fatalf("swarm.example.yaml still exposes forbidden guidance %q:\n%s", forbidden, exampleText)
+		}
+	}
+}
+
+func TestPublicConfigGuidanceUsesUnifiedSwarmYAML(t *testing.T) {
+	root := repoRoot()
+	publicFiles := []string{
+		".env.example",
+		"README.md",
+		"CONTRIBUTING.md",
+		filepath.Join("cmd", "swarm", "cli.go"),
+		filepath.Join("cmd", "swarm", "doctor.go"),
+		filepath.Join("cmd", "swarm", "env_guard.go"),
+		filepath.Join("cmd", "swarm", "local_preflight.go"),
+		filepath.Join("cmd", "swarm", "run_command.go"),
+		filepath.Join("cmd", "swarm", "workspace_build.go"),
+	}
+	for _, rel := range publicFiles {
+		body, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		text := string(body)
+		for _, forbidden := range []string{
+			"config.example.yaml",
+			"runtime-config.example.yaml",
+			"Optional path to Swarm runtime config",
+			"Path to Swarm runtime config",
+			"unified swarm.yaml/runtime config",
+			"the runtime config",
+			"load runtime config through",
+			"workspace.docker_bin in runtime config",
+			"CLI config file",
+		} {
+			if strings.Contains(text, forbidden) {
+				t.Fatalf("%s still teaches stale public config-source guidance %q", rel, forbidden)
+			}
+		}
 	}
 }
 

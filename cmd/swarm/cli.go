@@ -347,7 +347,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Optional path to Swarm runtime config")
+	cmd.Flags().StringVar(&opts.ConfigPath, "config", opts.ConfigPath, "Optional path to unified Swarm config (swarm.yaml)")
 	cmd.Flags().StringVar(&opts.Backend, "backend", opts.Backend, "LLM backend profile for local runtime startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.ContractsPath, "contracts", opts.ContractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.DataSource, "data", opts.DataSource, "Path to agent-visible read-only /data reference directory")

@@ -1,0 +1,109 @@
+# Generated from cmd/swarm unified config metadata.
+# Do not hand-maintain key lists here; update the generator metadata and drift test.
+# Copy selected keys into ./swarm.yaml for project-safe settings, .swarm/swarm.yaml for local-operator settings, or a file passed with --config for explicit full-trust settings.
+# All example entries are commented so this file is documentation, not active project config.
+# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the schema owns that reference.
+
+# Project-safe keys: safe in checked-in ./swarm.yaml
+# These keys express portable runtime behavior.
+# budget:
+#   global_monthly_cap: 0 # Global monthly budget cap; zero leaves enforcement disabled.
+#   human_tasks:
+#     auto_expire_hours: 168 # Human task auto-expiration window in hours.
+#     budget_reset: monday # Weekly human-task budget reset day.
+#     categories_enabled: ["ops"] # Human task categories enabled for budget policy.
+#     max_tasks_per_week: 0 # Human task weekly cap; zero leaves enforcement disabled.
+#   per_entity_monthly_cap: 0 # Per-entity monthly budget cap; zero leaves enforcement disabled.
+#   system_monthly_cap: 0 # System actor monthly budget cap; zero leaves enforcement disabled.
+# llm:
+#   backend: anthropic # Active LLM backend profile.
+#   claude_api:
+#     max_retries: 1 # Anthropic API retry count.
+#     retry_backoff: 2s # Anthropic API retry backoff.
+#   claude_cli:
+#     output_format: stream-json # Claude CLI output format.
+#     timeout: 1h # Claude CLI request timeout.
+#   models:
+#     regular:
+#       anthropic: claude-3-5-sonnet # Provider-specific model alias override.
+#   provider_limits:
+#     anthropic:
+#       max_concurrency: 2 # Provider-wide concurrency limit.
+#       max_concurrency_max_wait: 30s # Maximum wait for provider-wide concurrency limiting.
+#       models:
+#         claude-3-5-sonnet:
+#           rate_limit: 10/m # Model-specific request rate limit.
+#           rate_limit_max_wait: 30s # Maximum wait for model-specific rate limiting.
+#       rate_limit: 30/m # Provider-wide request rate limit.
+#       rate_limit_max_wait: 30s # Maximum wait for provider-wide rate limiting.
+#   session:
+#     lock_ttl: 10s # Session lock lease TTL.
+#     rotate_after_turns: 40 # Rotate an LLM session after this many turns.
+#     rotate_on_parse_failures: 3 # Rotate an LLM session after repeated parse failures.
+# runtime:
+#   recovery_on_startup: false # Recover persisted runtime state on startup.
+# serve:
+#   api_listen_addr: "127.0.0.1:8081" # Loopback API listener. Public or wildcard binds require local/operator config or a flag.
+#   mcp_listen_addr: "127.0.0.1:8082" # Loopback MCP listener. Public or wildcard binds require local/operator config or a flag.
+# workspace:
+#   backend: docker # Workspace backend preference; actual isolation still follows capability policy.
+
+# Project-contained paths: relative paths under the project when used in ./swarm.yaml
+# Project config may use these only as relative paths that stay inside the project root.
+# paths:
+#   agent_config_map_file: ./agent-config-map.yaml # Project-contained agent config map file.
+#   contracts_path: ./contracts # Project-contained contract bundle root.
+#   prompts_dir: ./prompts # Project-contained prompt directory.
+#   tooling_lock_file: ./tooling.lock # Project-contained tooling lock file.
+#   verification_gates_file: ./verification-gates.yaml # Project-contained verification gates file.
+# provider_triggers:
+#   packs:
+#     external_dirs: ["./provider-packs"] # Project-contained provider trigger pack directories.
+# workspace:
+#   data_source: ./.swarm/data # Project-contained workspace data source.
+
+# Elevated/local-only keys: use .swarm/swarm.yaml, user-global config, explicit --config, or flags
+# These keys are machine/operator-specific or unsafe if committed to a shared project file.
+# connection:
+#   api_server: http://127.0.0.1:8081 # CLI API target. Keep out of checked-in project config.
+# database:
+#   host: 127.0.0.1 # Postgres host for postgres store deployments.
+#   name: swarm # Postgres database name.
+#   pool_size: 5 # Postgres connection pool size.
+#   port: 5432 # Postgres port for postgres store deployments.
+#   sslmode: disable # Postgres SSL mode.
+#   user: postgres # Postgres user.
+# llm:
+#   claude_cli:
+#     command: claude # Claude CLI executable path/name.
+#   openai_compatible:
+#     base_url: https://api.example.com/v1 # OpenAI-compatible endpoint base URL.
+#   openai_responses:
+#     base_url: https://api.openai.com/v1 # OpenAI Responses endpoint base URL.
+# paths:
+#   artifact_root: .swarm/artifacts # Runtime artifact root.
+#   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
+#   platform_spec_path: platform-spec.yaml # Platform spec path override.
+#   swarm_dir: .swarm # Swarm state directory.
+# store:
+#   backend: sqlite # Runtime store backend.
+#   sqlite:
+#     path: .swarm/dev.db # SQLite runtime store path.
+# workspace:
+#   allow_exec_on_host: false # Unsafe host execution opt-in; requires local/operator config or a flag.
+#   docker_bin: docker # Docker executable path/name.
+#   host_root: ~/.swarm/workspaces # Host workspace root for local/operator use.
+#   image: swarm-workspace:latest # Workspace image for Docker-backed execution.
+#   network: swarm # Docker network for workspaces.
+#   volumes_from: swarm-orchestrator # Container volume source for orchestrated deployments.
+
+# Secret references: never store plaintext secrets in config
+# These keys point at secret material; the secret value itself belongs in the secrets store, a token file, a mounted secret file, or an explicitly delegated env var.
+# connection:
+#   api_token_file: .swarm/api-token # CLI API bearer-token file reference; never inline the token.
+# database:
+#   password_env: DB_PASSWORD # Explicit env delegation for orchestrator-injected database password.
+#   password_file: /run/secrets/postgres-password # Database password file for orchestrator-mounted secrets.
+#   password_secret_key: postgres_password # Database password key in the Swarm secrets store.
+# serve:
+#   api_token_file: .swarm/serve-api-token # Serve API bearer-token file reference; never inline the token.

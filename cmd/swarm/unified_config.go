@@ -600,6 +600,10 @@ type unifiedConfigKeyRule struct {
 	OldShape             string
 }
 
+func (r unifiedConfigKeyRule) supportedExampleLeaf() bool {
+	return !r.Container && r.Split == "" && r.OldShape == "" && !r.InlineSecret
+}
+
 func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	path := strings.Join(pathParts, ".")
 	if remediation, ok := unifiedOldFlatKeyRemediation()[path]; ok {
