@@ -435,11 +435,15 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 
 func stageDescriptionsForFlow(source semanticview.Source, flowID string) map[string]string {
 	out := map[string]string{}
+	if source == nil {
+		return out
+	}
 	flowID = strings.TrimSpace(flowID)
-	for _, stage := range source.WorkflowStages() {
-		if strings.TrimSpace(stage.Phase) != flowID {
-			continue
-		}
+	schema, ok := stageDescriptionSchemaForFlow(source, flowID)
+	if !ok || !schema.StageDeclarations.Declared {
+		return out
+	}
+	for _, stage := range schema.StageDeclarations.Entries {
 		id := strings.TrimSpace(stage.ID)
 		if id == "" {
 			continue
@@ -447,6 +451,20 @@ func stageDescriptionsForFlow(source semanticview.Source, flowID string) map[str
 		out[id] = strings.TrimSpace(stage.Description)
 	}
 	return out
+}
+
+type stageDescriptionRootSchemaProvider interface {
+	RootFlowSchema() (runtimecontracts.FlowSchemaDocument, bool)
+}
+
+func stageDescriptionSchemaForFlow(source semanticview.Source, flowID string) (runtimecontracts.FlowSchemaDocument, bool) {
+	if flowID == "" {
+		if provider, ok := source.(stageDescriptionRootSchemaProvider); ok {
+			return provider.RootFlowSchema()
+		}
+		return runtimecontracts.FlowSchemaDocument{}, false
+	}
+	return source.FlowSchemaByID(flowID)
 }
 
 func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphEdgeView {
