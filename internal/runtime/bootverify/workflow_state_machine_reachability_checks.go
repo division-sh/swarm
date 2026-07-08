@@ -167,21 +167,7 @@ func authoredStateGraphEdgesFiltered(
 }
 
 func authoredReachabilityTargets(handler runtimecontracts.SystemNodeEventHandler) []string {
-	out := make([]string, 0, len(handler.Rules)+len(handler.OnComplete)+1)
-	if target := strings.TrimSpace(handler.AdvancesTo); target != "" {
-		out = append(out, target)
-	}
-	for _, rule := range handler.OnComplete {
-		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
-			out = append(out, target)
-		}
-	}
-	for _, rule := range handler.Rules {
-		if target := strings.TrimSpace(rule.AdvancesTo); target != "" {
-			out = append(out, target)
-		}
-	}
-	return out
+	return runtimecontracts.HandlerAdvanceTargets(handler)
 }
 
 func authoredNonTerminalStates(source semanticview.Source, flowID string, declaredStates map[string]struct{}) []string {

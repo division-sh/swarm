@@ -55,6 +55,44 @@ func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) 
 	}
 }
 
+func TestWorkflowSemanticsDerivesTopLevelAndAccumulateCompletionTransitions(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		Nodes: map[string]SystemNodeContract{
+			"fan-in-node": {
+				EventHandlers: map[string]SystemNodeEventHandler{
+					"component.scaffolded": {
+						OnComplete: []HandlerRuleEntry{{
+							ID:         "top-complete",
+							Condition:  "true",
+							AdvancesTo: "top_review",
+						}},
+						Accumulate: &AccumulateSpec{
+							OnComplete: []HandlerRuleEntry{{
+								ID:         "accumulate-complete",
+								Condition:  "accumulated.count >= 3",
+								AdvancesTo: "launch_review",
+							}},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	populateWorkflowSemantics(bundle)
+
+	transitions := map[string]WorkflowTransitionContract{}
+	for _, transition := range bundle.WorkflowTransitions() {
+		transitions[transition.ID] = transition
+	}
+	if got := transitions["top-complete"].To; got != "top_review" {
+		t.Fatalf("top-level on_complete transition To = %q, want top_review; transitions=%#v", got, transitions)
+	}
+	if got := transitions["accumulate-complete"].To; got != "launch_review" {
+		t.Fatalf("accumulate.on_complete transition To = %q, want launch_review; transitions=%#v", got, transitions)
+	}
+}
+
 func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{

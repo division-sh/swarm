@@ -5347,10 +5347,11 @@ engine:
       cancel_state_reachability: >
         For timers started by state:<name> or event:<name>, cancel_on state:<name> must be reachable after every possible
         timer activation context in the authored transition graph. start_on state:<name> uses that state as the activation
-        context. start_on event:<name> derives activation states from same-flow handlers for that event: explicit advances_to,
-        on_complete advances_to, and rules advances_to targets are post-handler activation states; a handler with no authored
-        state target uses its authored source states. The timer's own fire event is not valid proof of a pre-fire cancellation
-        path. The activation state itself is not sufficient proof unless an authored post-activation transition reaches the
+        context. start_on event:<name> derives activation states from same-flow handlers for that event: handler-level advances_to,
+        on_complete advances_to, rules advances_to, accumulate.on_complete advances_to, and accumulate.on_timeout advances_to
+        targets are post-handler activation states; a handler with no authored state target uses its authored source states.
+        The timer's own fire event is not valid proof of a pre-fire cancellation path. The activation state itself is not
+        sufficient proof unless an authored post-activation transition reaches the
         cancel state from that activation state. Missing activation proof or any derived activation state with no
         post-activation path is a boot error. start_on boot state-cancel reachability is left to explicit boot-start
         scheduling semantics and is not closed by this rule.
@@ -7543,6 +7544,7 @@ flow_model:
         graph_rule: >
           `swarm describe --graph` renders the per-flow lifecycle stage graph
           from the canonical lowered lifecycle owner and the existing transition
+          carriers, including accumulator completion and timeout `advances_to`
           carriers. It must show flow namespace, nodes, initial/terminal markers,
           edges, and edge source. It is projection-only and MUST NOT introduce a
           second transition-authoring owner.
@@ -13426,6 +13428,7 @@ static_analyzer:
     - handler_specification.handler_fields.advances_to
     - handler_specification.handler_fields.on_complete
     - handler_specification.handler_fields.rules
+    - handler_specification.handler_fields.accumulate
     - contract_formats.flow_schema
     scope:
       description: For every stateful flow, verify that each declared state is reachable from initial_state in the authored
@@ -13444,6 +13447,10 @@ static_analyzer:
         rule: on_complete branches with advances_to contribute possible edges.
       rules_branches:
         rule: rules branches with advances_to contribute possible edges.
+      accumulate_on_complete_branches:
+        rule: accumulate.on_complete branches with advances_to contribute possible edges.
+      accumulate_on_timeout_branch:
+        rule: accumulate.on_timeout with advances_to contributes a possible edge.
     source_state_derivation:
       create_entity_handlers:
         rule: create_entity handlers source from initial_state only.

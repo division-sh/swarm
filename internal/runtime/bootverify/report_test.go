@@ -14,6 +14,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
@@ -2668,7 +2669,7 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	}
 }
 
-func TestRun_DoesNotUseAccumulateOnCompleteAsReachabilityProof(t *testing.T) {
+func TestRun_DoesNotWarnWhenAccumulateOnCompleteBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 	node := bundle.Nodes["support-node"]
@@ -2684,8 +2685,54 @@ func TestRun_DoesNotUseAccumulateOnCompleteAsReachabilityProof(t *testing.T) {
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-	if !reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
-		t.Fatalf("expected semantic_drift_unreachable_state warning when only accumulate.on_complete reaches review, got %#v", report.Warnings())
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("unexpected semantic_drift_unreachable_state warning when accumulate.on_complete reaches review, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_DoesNotWarnWhenAccumulateOnTimeoutBranchReachesDeclaredState(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{
+		Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
+		TimeoutMS:  1000,
+		OnTimeout: &runtimecontracts.HandlerRuleEntry{
+			Condition:  "true",
+			AdvancesTo: "review",
+		},
+	}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("unexpected semantic_drift_unreachable_state warning when accumulate.on_timeout reaches review, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidAccumulateTimeoutTargetExists(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{
+		Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
+		TimeoutMS:  1000,
+		OnTimeout: &runtimecontracts.HandlerRuleEntry{
+			Condition:  "true",
+			AdvancesTo: "bogus_state",
+		},
+	}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "state_machine_coherence", "bogus_state") {
+		t.Fatalf("expected state_machine_coherence error for invalid accumulate.on_timeout target, got %#v", report.Errors())
 	}
 }
 
@@ -6689,6 +6736,48 @@ func TestRun_AllowsTimerCancelStateReachableFromEventStartContext(t *testing.T) 
 	report := Run(context.Background(), semanticview.Wrap(loadFixtureBundleAt(t, repoRoot, root, platformSpec)), Options{})
 	if reportContains(report.Errors(), "timer_validation", "cancel_on state done is not reachable") {
 		t.Fatalf("unexpected timer_validation event-start cancel-state reachability error, got %#v", report.Errors())
+	}
+}
+
+func TestTimerReachabilityConsumesAccumulatorTransitionCarriers(t *testing.T) {
+	root := writeStateReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+	node := bundle.Nodes["support-node"]
+	handler := node.EventHandlers["ticket.closed"]
+	handler.Accumulate = &runtimecontracts.AccumulateSpec{
+		Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
+		TimeoutMS:  1000,
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{
+			Condition:  "true",
+			AdvancesTo: "review",
+		}},
+		OnTimeout: &runtimecontracts.HandlerRuleEntry{
+			Condition:  "true",
+			AdvancesTo: "active",
+		},
+	}
+	node.EventHandlers["ticket.closed"] = handler
+	bundle.Nodes["support-node"] = node
+
+	source := semanticview.Wrap(bundle)
+	declaredStates := map[string]struct{}{"waiting": {}, "active": {}, "review": {}, "done": {}}
+	trigger, err := timeridentity.ParseStartTrigger("event:ticket.closed")
+	if err != nil {
+		t.Fatalf("ParseStartTrigger: %v", err)
+	}
+	activationStates := timerActivationStates(source, runtimecontracts.WorkflowTimerContract{FlowID: "support"}, trigger, "waiting", declaredStates)
+	for _, want := range []string{"active", "review"} {
+		if _, ok := activationStates[want]; !ok {
+			t.Fatalf("timer activation states = %#v, want accumulator carrier target %s", activationStates, want)
+		}
+	}
+
+	edges := timerCancelStateGraphEdges(source, runtimecontracts.WorkflowTimerContract{FlowID: "support", Event: "timer.reminder"}, "waiting", declaredStates)
+	if _, ok := edges["waiting"]["review"]; !ok {
+		t.Fatalf("timer cancel graph edges = %#v, want accumulator on_complete edge to review", edges)
+	}
+	if _, ok := edges["waiting"]["active"]; !ok {
+		t.Fatalf("timer cancel graph edges = %#v, want accumulator on_timeout edge to active", edges)
 	}
 }
 
