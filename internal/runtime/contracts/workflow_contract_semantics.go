@@ -66,9 +66,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		if flowID == "" {
 			continue
 		}
-		semantics.FlowInitial[flowID] = strings.TrimSpace(schema.InitialState)
-		semantics.FlowStates[flowID] = append([]string{}, schema.States...)
-		semantics.FlowTerminal[flowID] = append([]string{}, schema.TerminalStates...)
+		semantics.FlowInitial[flowID] = schema.LoweredInitialState()
+		semantics.FlowStates[flowID] = schema.LoweredStates()
+		semantics.FlowTerminal[flowID] = schema.LoweredTerminalStates()
 		assignedNamespace := strings.TrimSpace(flowAssignedNamespace(bundle.Paths.Flows, flowID))
 		if assignedNamespace == "" {
 			assignedNamespace = strings.TrimSpace(schema.NamespacePrefix)
@@ -657,23 +657,20 @@ func rootSchemaInitialStage(root *FlowSchemaDocument) string {
 	if root == nil {
 		return ""
 	}
-	return strings.TrimSpace(root.InitialState)
+	return root.LoweredInitialState()
 }
 
 func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []WorkflowStageContract {
 	out := make([]WorkflowStageContract, 0)
 	seen := make(map[string]struct{})
 	if root != nil {
-		for _, state := range root.States {
-			state = strings.TrimSpace(state)
-			if state == "" {
+		for _, stage := range root.LoweredWorkflowStages("") {
+			key := workflowStageScopeKey("", stage.ID)
+			if _, exists := seen[key]; exists {
 				continue
 			}
-			if _, exists := seen[state]; exists {
-				continue
-			}
-			seen[state] = struct{}{}
-			out = append(out, WorkflowStageContract{ID: state})
+			seen[key] = struct{}{}
+			out = append(out, stage)
 		}
 	}
 	for _, flow := range paths {
@@ -682,29 +679,27 @@ func deriveWorkflowStages(root *FlowSchemaDocument, paths []FlowContractPaths, s
 		if !ok {
 			continue
 		}
-		for _, state := range schema.States {
-			state = strings.TrimSpace(state)
-			if state == "" {
+		for _, stage := range schema.LoweredWorkflowStages(flowID) {
+			key := workflowStageScopeKey(flowID, stage.ID)
+			if _, exists := seen[key]; exists {
 				continue
 			}
-			if _, exists := seen[state]; exists {
-				continue
-			}
-			seen[state] = struct{}{}
-			out = append(out, WorkflowStageContract{
-				ID:    state,
-				Phase: flowID,
-			})
+			seen[key] = struct{}{}
+			out = append(out, stage)
 		}
 	}
 	return out
+}
+
+func workflowStageScopeKey(flowID, stageID string) string {
+	return strings.TrimSpace(flowID) + "\x00" + strings.TrimSpace(stageID)
 }
 
 func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContractPaths, schemas map[string]FlowSchemaDocument) []string {
 	out := make([]string, 0)
 	seen := make(map[string]struct{})
 	if root != nil {
-		for _, state := range root.TerminalStates {
+		for _, state := range root.LoweredTerminalStates() {
 			state = strings.TrimSpace(state)
 			if state == "" {
 				continue
@@ -722,7 +717,7 @@ func deriveWorkflowTerminalStages(root *FlowSchemaDocument, paths []FlowContract
 		if !ok {
 			continue
 		}
-		for _, state := range schema.TerminalStates {
+		for _, state := range schema.LoweredTerminalStates() {
 			state = strings.TrimSpace(state)
 			if state == "" {
 				continue

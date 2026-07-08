@@ -40,6 +40,59 @@ func TestFlowStatesRootScopeExcludesChildFlowStates(t *testing.T) {
 	}
 }
 
+func TestAuthoredStagesLowerPerFlowScopedLifecycle(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		Package: ProjectPackageDocument{Name: "root-workflow", Version: "1.0.0"},
+		RootSchema: &FlowSchemaDocument{
+			StageDeclarations: FlowStageDeclarations{
+				Declared: true,
+				Entries: []FlowStageDeclaration{
+					{ID: "ready", Initial: true},
+					{ID: "done", Terminal: true},
+				},
+			},
+		},
+		Paths: ContractPaths{Flows: []FlowContractPaths{
+			{ID: "child", Flow: "child"},
+		}},
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"child": {
+				StageDeclarations: FlowStageDeclarations{
+					Declared: true,
+					Entries: []FlowStageDeclaration{
+						{ID: "ready", Initial: true},
+						{ID: "done", Terminal: true},
+					},
+				},
+			},
+		},
+	}
+	populateWorkflowSemantics(bundle)
+
+	if got, want := bundle.FlowInitialStage(""), "ready"; got != want {
+		t.Fatalf("FlowInitialStage(root) = %q, want %q", got, want)
+	}
+	if got, want := bundle.FlowStates(""), []string{"ready", "done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FlowStates(root) = %#v, want %#v", got, want)
+	}
+	if got, want := bundle.FlowTerminalStages("child"), []string{"done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("FlowTerminalStages(child) = %#v, want %#v", got, want)
+	}
+	stages := bundle.WorkflowStages()
+	if len(stages) != 4 {
+		t.Fatalf("WorkflowStages length = %d, want root+child scoped duplicates", len(stages))
+	}
+	var childReady bool
+	for _, stage := range stages {
+		if stage.ID == "ready" && stage.Phase == "child" {
+			childReady = true
+		}
+	}
+	if !childReady {
+		t.Fatalf("WorkflowStages = %#v, want child-scoped ready stage", stages)
+	}
+}
+
 func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t *testing.T) {
 	producer := FlowContractView{
 		Paths: FlowContractPaths{ID: "producer", Flow: "producer"},

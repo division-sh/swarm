@@ -48,6 +48,9 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*d = FlowSchemaDocument(aux)
+	d.InitialStateDeclared = hasYAMLMappingKey(node, "initial_state")
+	d.StatesDeclared = hasYAMLMappingKey(node, "states")
+	d.TerminalStatesDeclared = hasYAMLMappingKey(node, "terminal_states")
 	d.RequiredAgentsDeclared = hasYAMLMappingKey(node, "required_agents")
 	return nil
 }
@@ -61,6 +64,7 @@ func validateFlowSchemaDocumentFields(node *yaml.Node) error {
 		"initial_state":       {},
 		"terminal_states":     {},
 		"states":              {},
+		"stages":              {},
 		"pins":                {},
 		"tool_surface":        {},
 		"required_agents":     {},

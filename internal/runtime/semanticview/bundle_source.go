@@ -104,6 +104,14 @@ func (s bundleSource) FlowSchemaEntries() map[string]runtimecontracts.FlowSchema
 	}
 	return out
 }
+
+func (s bundleSource) RootFlowSchema() (runtimecontracts.FlowSchemaDocument, bool) {
+	if s.bundle == nil || s.bundle.RootSchema == nil {
+		return runtimecontracts.FlowSchemaDocument{}, false
+	}
+	return *s.bundle.RootSchema, true
+}
+
 func (s bundleSource) FlowInitialStage(flowID string) string {
 	return s.bundle.FlowInitialStage(flowID)
 }

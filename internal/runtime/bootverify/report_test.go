@@ -2578,6 +2578,58 @@ func TestRun_WarnsWhenDeclaredStateIsUnreachable(t *testing.T) {
 	}
 }
 
+func TestRun_ErrorsWhenDeclaredStageIsUnreachable(t *testing.T) {
+	root := writeStagedReachabilityFixture(t)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "semantic_drift_unreachable_state", "declares stage review but no transition path from initial stage waiting reaches review") {
+		t.Fatalf("expected hard semantic_drift_unreachable_state error for staged lifecycle, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+	if reportContains(report.Warnings(), "semantic_drift_unreachable_state", "review") {
+		t.Fatalf("unexpected staged lifecycle warning; want hard error, got %#v", report.Warnings())
+	}
+}
+
+func TestRun_ErrorsWhenStagesMixWithLegacyLifecycleFields(t *testing.T) {
+	root := writeStagedLifecycleFixture(t, `
+name: support
+initial_state: waiting
+stages:
+  waiting:
+    initial: true
+  done:
+    terminal: true
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "state_machine_coherence", "declares stages and legacy lifecycle fields") {
+		t.Fatalf("expected mixed lifecycle owner error, got %#v", report.Errors())
+	}
+}
+
+func TestRun_ErrorsWhenStagesMissInitialOrTerminal(t *testing.T) {
+	root := writeStagedLifecycleFixture(t, `
+name: support
+stages:
+  waiting: {}
+  done: {}
+`)
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "state_machine_coherence", "must declare exactly one initial stage") {
+		t.Fatalf("expected missing initial stage error, got %#v", report.Errors())
+	}
+	if !reportContains(report.Errors(), "state_machine_coherence", "must declare at least one terminal stage") {
+		t.Fatalf("expected missing terminal stage error, got %#v", report.Errors())
+	}
+}
+
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -7449,6 +7501,67 @@ initial_state: waiting
 terminal_states: [done]
 states: [waiting, active, review, done]
 `)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
+ticket: {}
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+ticket.opened:
+  entity_id: string
+ticket.closed:
+  entity_id: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.opened
+    - ticket.closed
+  event_handlers:
+    ticket.opened:
+      create_entity: true
+      advances_to: active
+    ticket.closed:
+      advances_to: done
+`)
+
+	return root
+}
+
+func writeStagedReachabilityFixture(t *testing.T) string {
+	return writeStagedLifecycleFixture(t, `
+name: support
+stages:
+  waiting:
+    initial: true
+  active: {}
+  review: {}
+  done:
+    terminal: true
+`)
+}
+
+func writeStagedLifecycleFixture(t *testing.T, schema string) string {
+	t.Helper()
+	root := t.TempDir()
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: staged-lifecycle
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: support
+    flow: support
+    mode: static
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), schema)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
 ticket: {}
 `)

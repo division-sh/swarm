@@ -174,6 +174,81 @@ func TestDescribeCommandJSONRendersRootPrimaryEntity(t *testing.T) {
 	}
 }
 
+func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
+	contractsRoot := writeDescribeStageGraphContracts(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe",
+		"--contracts", contractsRoot,
+		"--graph",
+		"--json",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe --graph --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var output describeCommandOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		t.Fatalf("decode describe graph json: %v\n%s", err, stdout.String())
+	}
+	if len(output.StageGraphs) != 1 {
+		t.Fatalf("stage graphs = %#v, want one support graph", output.StageGraphs)
+	}
+	graph := output.StageGraphs[0]
+	if graph.FlowID != "support" || graph.FlowPath != "support" {
+		t.Fatalf("graph identity = %#v, want support namespace", graph)
+	}
+	if len(graph.Nodes) != 3 {
+		t.Fatalf("graph nodes = %#v, want waiting/active/done", graph.Nodes)
+	}
+	if !graph.Nodes[0].Initial || graph.Nodes[0].ID != "waiting" {
+		t.Fatalf("first graph node = %#v, want waiting initial", graph.Nodes[0])
+	}
+	var terminalDone bool
+	for _, node := range graph.Nodes {
+		if node.ID == "done" && node.Terminal {
+			terminalDone = true
+		}
+	}
+	if !terminalDone {
+		t.Fatalf("graph nodes = %#v, want terminal done", graph.Nodes)
+	}
+	if len(graph.Edges) == 0 {
+		t.Fatalf("graph edges missing: %#v", graph)
+	}
+	var foundOpenedAdvance bool
+	for _, edge := range graph.Edges {
+		if edge.Source == "handler.advances_to" && edge.NodeID == "support-node" && edge.EventType == "ticket.opened" && edge.To == "active" {
+			foundOpenedAdvance = true
+		}
+	}
+	if !foundOpenedAdvance {
+		t.Fatalf("graph edges = %#v, want ticket.opened handler.advances_to edge to active", graph.Edges)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe",
+		"--contracts", contractsRoot,
+		"--graph",
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("describe --graph code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	text := stdout.String()
+	for _, want := range []string{
+		"stage graph:",
+		"flow support (support):",
+		"waiting [initial]",
+		"done [terminal]",
+		"handler.advances_to support-node on ticket.opened",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("describe --graph output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func writeDescribeDefaultedTemplatePolicyContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
@@ -211,6 +286,61 @@ pins:
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
 account:
   account_id: uuid
+`)
+	return root
+}
+
+func writeDescribeStageGraphContracts(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	writeDescribeTestFile(t, filepath.Join(root, "package.yaml"), `
+name: stage-graph
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: support
+    flow: support
+`)
+	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: stage-graph\n")
+	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
+name: support
+stages:
+  waiting:
+    initial: true
+  active: {}
+  done:
+    terminal: true
+`)
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "tools.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
+ticket.opened:
+  entity_id: string
+ticket.closed:
+  entity_id: string
+`)
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
+ticket: {}
+`)
+	writeDescribeTestFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), `
+support-node:
+  id: support-node
+  execution_type: system_node
+  subscribes_to:
+    - ticket.opened
+    - ticket.closed
+  event_handlers:
+    ticket.opened:
+      create_entity: true
+      advances_to: active
+    ticket.closed:
+      advances_to: done
 `)
 	return root
 }

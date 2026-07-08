@@ -16,6 +16,7 @@ type describeCommandOptions struct {
 	contractsPath    string
 	platformSpecPath string
 	configPath       string
+	graph            bool
 	output           cliOutputOptions
 	logging          cliLoggingOptions
 }
@@ -58,6 +59,7 @@ func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOp
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
 	return cmd
@@ -111,7 +113,7 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 	}
 	workspaceBackendDetail := workspaceBackendDecisionDetail(workspaceBackend)
 	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
-	view, err := authoringview.Build(ctx, source, authoringview.BuildOptions{BootReport: &report})
+	view, err := authoringview.Build(ctx, source, authoringview.BuildOptions{BootReport: &report, IncludeStageGraph: opts.graph})
 	if err != nil {
 		if errOut != nil {
 			fmt.Fprintf(errOut, "describe failed: %v\n", err)
@@ -171,6 +173,56 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 		fmt.Fprintln(out, "connect route plans:")
 		for _, plan := range view.ConnectRoutePlans {
 			fmt.Fprintf(out, "  - %s.%s -> %s.%s resolution=%s delivery=%s\n", plan.Source.FlowID, plan.Source.Pin, plan.Receiver.FlowID, plan.Receiver.Pin, plan.ResolutionKind, plan.Delivery)
+		}
+	}
+	if len(view.StageGraphs) > 0 {
+		fmt.Fprintln(out, "stage graph:")
+		for _, graph := range view.StageGraphs {
+			label := strings.TrimSpace(graph.FlowID)
+			if label == "" {
+				label = "root"
+			}
+			if strings.TrimSpace(graph.FlowPath) != "" {
+				label += " (" + strings.TrimSpace(graph.FlowPath) + ")"
+			}
+			fmt.Fprintf(out, "  flow %s:\n", label)
+			if len(graph.Nodes) > 0 {
+				fmt.Fprintln(out, "    nodes:")
+				for _, node := range graph.Nodes {
+					markers := make([]string, 0, 2)
+					if node.Initial {
+						markers = append(markers, "initial")
+					}
+					if node.Terminal {
+						markers = append(markers, "terminal")
+					}
+					suffix := ""
+					if len(markers) > 0 {
+						suffix = " [" + strings.Join(markers, ",") + "]"
+					}
+					if strings.TrimSpace(node.Description) != "" {
+						suffix += " - " + strings.TrimSpace(node.Description)
+					}
+					fmt.Fprintf(out, "      - %s%s\n", node.ID, suffix)
+				}
+			}
+			if len(graph.Edges) > 0 {
+				fmt.Fprintln(out, "    edges:")
+				for _, edge := range graph.Edges {
+					from := strings.Join(edge.From, ",")
+					if from == "" {
+						from = "<none>"
+					}
+					detail := strings.TrimSpace(edge.Source)
+					if strings.TrimSpace(edge.NodeID) != "" {
+						detail += " " + strings.TrimSpace(edge.NodeID)
+					}
+					if strings.TrimSpace(edge.EventType) != "" {
+						detail += " on " + strings.TrimSpace(edge.EventType)
+					}
+					fmt.Fprintf(out, "      - %s -> %s (%s)\n", from, edge.To, strings.TrimSpace(detail))
+				}
+			}
 		}
 	}
 	if len(view.Diagnostics) > 0 {

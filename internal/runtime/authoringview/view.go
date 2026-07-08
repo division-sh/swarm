@@ -20,6 +20,7 @@ type View struct {
 	SourceAuthority   string                 `json:"source_authority"`
 	Root              RootView               `json:"root"`
 	Flows             []FlowView             `json:"flows"`
+	StageGraphs       []StageGraphView       `json:"stage_graphs,omitempty"`
 	ConnectRoutePlans []ConnectRoutePlanView `json:"connect_route_plans"`
 	RoutePlanIssues   []RoutePlanIssueView   `json:"route_plan_issues,omitempty"`
 	Diagnostics       []DiagnosticView       `json:"diagnostics,omitempty"`
@@ -71,6 +72,28 @@ type FlowSourceFiles struct {
 	Nodes    string `json:"nodes,omitempty"`
 	Events   string `json:"events,omitempty"`
 	Agents   string `json:"agents,omitempty"`
+}
+
+type StageGraphView struct {
+	FlowID   string               `json:"flow_id"`
+	FlowPath string               `json:"flow_path,omitempty"`
+	Nodes    []StageGraphNodeView `json:"nodes"`
+	Edges    []StageGraphEdgeView `json:"edges"`
+}
+
+type StageGraphNodeView struct {
+	ID          string `json:"id"`
+	Initial     bool   `json:"initial,omitempty"`
+	Terminal    bool   `json:"terminal,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type StageGraphEdgeView struct {
+	From      []string `json:"from,omitempty"`
+	To        string   `json:"to"`
+	Source    string   `json:"source"`
+	NodeID    string   `json:"node_id,omitempty"`
+	EventType string   `json:"event_type,omitempty"`
 }
 
 type RequiredAgentsView struct {
@@ -241,7 +264,8 @@ type DiagnosticView struct {
 }
 
 type BuildOptions struct {
-	BootReport *runtimebootverify.Report
+	BootReport        *runtimebootverify.Report
+	IncludeStageGraph bool
 }
 
 func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (View, error) {
@@ -271,6 +295,9 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 				"runtime/bootverify.Report",
 			},
 		},
+	}
+	if opts.IncludeStageGraph {
+		view.StageGraphs = buildStageGraphs(source, bundle)
 	}
 	return view, nil
 }
@@ -354,6 +381,176 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 		}
 		item.ContainedOperations = opsByFlow[flowID]
 		out = append(out, item)
+	}
+	return out
+}
+
+func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) []StageGraphView {
+	if source == nil || bundle == nil {
+		return nil
+	}
+	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
+	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 {
+		graphs = append(graphs, graph)
+	}
+	for _, flow := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(flow.Paths.ID)
+		if flowID == "" {
+			continue
+		}
+		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
+		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 {
+			graphs = append(graphs, graph)
+		}
+	}
+	return graphs
+}
+
+func buildStageGraphForFlow(source semanticview.Source, flowID, label, path string) StageGraphView {
+	initial := strings.TrimSpace(source.FlowInitialStage(flowID))
+	terminalSet := authoringStringSet(source.FlowTerminalStages(flowID))
+	states := source.FlowStates(flowID)
+	nodes := make([]StageGraphNodeView, 0, len(states))
+	stageDescriptions := stageDescriptionsForFlow(source, flowID)
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		_, terminal := terminalSet[state]
+		nodes = append(nodes, StageGraphNodeView{
+			ID:          state,
+			Initial:     initial != "" && state == initial,
+			Terminal:    terminal,
+			Description: strings.TrimSpace(stageDescriptions[state]),
+		})
+	}
+	return StageGraphView{
+		FlowID:   strings.TrimSpace(label),
+		FlowPath: strings.TrimSpace(path),
+		Nodes:    nodes,
+		Edges:    buildStageGraphEdgesForFlow(source, flowID, initial, states, terminalSet),
+	}
+}
+
+func stageDescriptionsForFlow(source semanticview.Source, flowID string) map[string]string {
+	out := map[string]string{}
+	flowID = strings.TrimSpace(flowID)
+	for _, stage := range source.WorkflowStages() {
+		if strings.TrimSpace(stage.Phase) != flowID {
+			continue
+		}
+		id := strings.TrimSpace(stage.ID)
+		if id == "" {
+			continue
+		}
+		out[id] = strings.TrimSpace(stage.Description)
+	}
+	return out
+}
+
+func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphEdgeView {
+	stateSet := authoringStringSet(states)
+	nonTerminal := make([]string, 0, len(states))
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		if _, ok := terminalSet[state]; ok {
+			continue
+		}
+		nonTerminal = append(nonTerminal, state)
+	}
+	edges := make([]StageGraphEdgeView, 0)
+	nodes := source.NodeEntries()
+	nodeIDs := make([]string, 0, len(nodes))
+	for nodeID := range nodes {
+		if nodeID = strings.TrimSpace(nodeID); nodeID != "" {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+	}
+	sort.Strings(nodeIDs)
+	for _, nodeID := range nodeIDs {
+		node := nodes[nodeID]
+		if nodeID == "" {
+			continue
+		}
+		sourceInfo, ok := source.NodeContractSource(nodeID)
+		if !ok || strings.TrimSpace(sourceInfo.FlowID) != strings.TrimSpace(flowID) {
+			continue
+		}
+		eventTypes := make([]string, 0, len(node.EventHandlers))
+		for eventType := range node.EventHandlers {
+			if eventType = strings.TrimSpace(eventType); eventType != "" {
+				eventTypes = append(eventTypes, eventType)
+			}
+		}
+		sort.Strings(eventTypes)
+		for _, eventType := range eventTypes {
+			handler := node.EventHandlers[eventType]
+			from := append([]string{}, nonTerminal...)
+			if handler.CreateEntity {
+				from = nil
+				if strings.TrimSpace(initial) != "" {
+					from = []string{strings.TrimSpace(initial)}
+				}
+			}
+			edges = appendStageGraphEdge(edges, from, handler.AdvancesTo, stateSet, "handler.advances_to", nodeID, eventType)
+			for _, rule := range handler.OnComplete {
+				edges = appendStageGraphEdge(edges, from, rule.AdvancesTo, stateSet, "handler.on_complete", nodeID, eventType)
+			}
+			for _, rule := range handler.Rules {
+				edges = appendStageGraphEdge(edges, from, rule.AdvancesTo, stateSet, "handler.rules", nodeID, eventType)
+			}
+		}
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		left := edges[i]
+		right := edges[j]
+		if strings.Join(left.From, "\x00") != strings.Join(right.From, "\x00") {
+			return strings.Join(left.From, "\x00") < strings.Join(right.From, "\x00")
+		}
+		if left.To != right.To {
+			return left.To < right.To
+		}
+		if left.Source != right.Source {
+			return left.Source < right.Source
+		}
+		if left.NodeID != right.NodeID {
+			return left.NodeID < right.NodeID
+		}
+		return left.EventType < right.EventType
+	})
+	return edges
+}
+
+func appendStageGraphEdge(edges []StageGraphEdgeView, from []string, target string, stateSet map[string]struct{}, source, nodeID, eventType string) []StageGraphEdgeView {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return edges
+	}
+	if len(stateSet) > 0 {
+		if _, ok := stateSet[target]; !ok {
+			return edges
+		}
+	}
+	return append(edges, StageGraphEdgeView{
+		From:      append([]string{}, from...),
+		To:        target,
+		Source:    strings.TrimSpace(source),
+		NodeID:    strings.TrimSpace(nodeID),
+		EventType: strings.TrimSpace(eventType),
+	})
+}
+
+func authoringStringSet(values []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = struct{}{}
+		}
 	}
 	return out
 }
