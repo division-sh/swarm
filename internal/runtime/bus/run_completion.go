@@ -31,7 +31,7 @@ func (eb *EventBus) normalRunCompletionTerminalStates() ([]string, map[string][]
 	if source == nil {
 		return nil, nil
 	}
-	workflowTerminals := normalizeRunCompletionStates(source.WorkflowTerminalStages())
+	workflowTerminals := normalizeRunCompletionStates(source.FlowTerminalStages(""))
 	flowTerminals := map[string][]string{}
 	addFlowTerminals := func(key string, states []string) {
 		key = strings.Trim(strings.TrimSpace(key), "/")

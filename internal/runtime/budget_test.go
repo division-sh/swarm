@@ -36,6 +36,31 @@ func TestBudgetTracker_KeepsTerminalStatesInstanceOwned(t *testing.T) {
 	}
 }
 
+func TestBudgetTrackerUsesRootTerminalStagesNotChildAggregate(t *testing.T) {
+	tracker := NewBudgetTracker(nil, nil, nil, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{
+				Declared: true,
+				Entries: []runtimecontracts.FlowStageDeclaration{
+					{ID: "ready", Initial: true},
+					{ID: "done"},
+					{ID: "archived", Terminal: true},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			TerminalStages: []string{"done", "archived"},
+			FlowTerminal: map[string][]string{
+				"child": {"done"},
+			},
+		},
+	}))
+
+	if got, want := tracker.TerminalInstanceStates(), []string{"archived"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("TerminalInstanceStates() = %#v, want root-only %#v", got, want)
+	}
+}
+
 func TestBudgetTracker_RecordLLMUsagePersistsUsageAccounting(t *testing.T) {
 	store := &budgetSpendStoreCapture{}
 	tracker := &BudgetTracker{store: store}

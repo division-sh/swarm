@@ -187,7 +187,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if !handler.CreateEntity && entityID != "" && originalEntityID != "" && originalEntityID != entityID && strings.TrimSpace(triggerCtx.State.EntityID) == "" {
 		triggerCtx.State.EntityID = entityID
 	}
-	if terminalStateHandlerRejected(pc, triggerCtx.State, handler) {
+	if terminalStateHandlerRejected(pc, flowID, triggerCtx.State, handler) {
 		outcome := &handlerExecutionOutcome{
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
@@ -436,7 +436,7 @@ func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerO
 	}
 }
 
-func terminalStateHandlerRejected(pc *PipelineCoordinator, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
+func terminalStateHandlerRejected(pc *PipelineCoordinator, flowID string, state WorkflowState, _ runtimecontracts.SystemNodeEventHandler) bool {
 	if pc == nil {
 		return false
 	}
@@ -444,18 +444,82 @@ func terminalStateHandlerRejected(pc *PipelineCoordinator, state WorkflowState, 
 	if currentState == "" {
 		return false
 	}
+	source := pc.SemanticSource()
+	if source != nil {
+		for _, candidateFlowID := range terminalStateFlowCandidates(source, flowID, state) {
+			if terminalStageContains(source.FlowTerminalStages(candidateFlowID), currentState) {
+				return true
+			}
+			if stageSetContains(source.FlowStates(candidateFlowID), currentState) {
+				return false
+			}
+		}
+	}
 	workflow := pc.WorkflowDefinition()
 	if workflow != nil {
 		if stage, ok := workflow.Stage(state.Stage); ok {
 			return stage.Terminal
 		}
 	}
-	source := pc.SemanticSource()
-	if source == nil {
+	return false
+}
+
+func terminalStateFlowCandidates(source semanticview.Source, flowID string, state WorkflowState) []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	add := func(candidate string) {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			return
+		}
+		if _, ok := seen[candidate]; ok {
+			return
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	add(flowIDForWorkflowState(source, state))
+	add(flowID)
+	return out
+}
+
+func flowIDForWorkflowState(source semanticview.Source, state WorkflowState) string {
+	if source == nil || len(state.Metadata) == 0 {
+		return ""
+	}
+	flowPath := strings.Trim(strings.TrimSpace(asString(state.Metadata["flow_path"])), "/")
+	if flowPath == "" {
+		return ""
+	}
+	bestID := ""
+	bestLen := -1
+	for _, scope := range source.FlowScopes() {
+		path := strings.Trim(strings.TrimSpace(scope.Path), "/")
+		if path == "" {
+			continue
+		}
+		if flowPath != path && !strings.HasPrefix(flowPath, path+"/") {
+			continue
+		}
+		if len(path) > bestLen {
+			bestLen = len(path)
+			bestID = strings.TrimSpace(scope.ID)
+		}
+	}
+	return bestID
+}
+
+func terminalStageContains(stages []string, current string) bool {
+	return stageSetContains(stages, current)
+}
+
+func stageSetContains(stages []string, current string) bool {
+	current = strings.TrimSpace(current)
+	if current == "" {
 		return false
 	}
-	for _, terminal := range source.WorkflowTerminalStages() {
-		if strings.EqualFold(strings.TrimSpace(terminal), currentState) {
+	for _, stage := range stages {
+		if strings.EqualFold(strings.TrimSpace(stage), current) {
 			return true
 		}
 	}

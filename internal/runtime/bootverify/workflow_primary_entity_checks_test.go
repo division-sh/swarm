@@ -53,6 +53,28 @@ pins:
 	}
 }
 
+func TestRun_RejectsMissingPrimaryEntityForStagedStatefulNormalFlow(t *testing.T) {
+	bundle := loadPrimaryEntityFixtureBundle(t, `
+name: scoring
+stages:
+  pending:
+    initial: true
+  done:
+    terminal: true
+pins:
+  inputs:
+    events: []
+  outputs:
+    events: []
+`, "")
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "primary_entity_validation", "has no declared entity types") {
+		t.Fatalf("expected missing primary_entity_validation error for staged stateful flow, got %#v", report.Errors())
+	}
+}
+
 func TestRun_AllowsStatelessFlowWithoutPrimaryEntity(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring

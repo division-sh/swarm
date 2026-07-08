@@ -41,7 +41,7 @@ func checkPrimaryEntityValidation(c *checkerContext) []Finding {
 		entities, _ := bundle.FlowEntityContractsByID(flowID)
 		hasEntityDeclaration := strings.TrimSpace(schema.Entity) != ""
 		hasEntityContracts := len(entities) > 0
-		statefulNormal := strings.TrimSpace(schema.InitialState) != "" && strings.TrimSpace(schema.Mode) == ""
+		statefulNormal := normalPrimaryEntityFlow(c.source, flowID, schema)
 		if !hasEntityDeclaration && !hasEntityContracts && !statefulNormal {
 			continue
 		}

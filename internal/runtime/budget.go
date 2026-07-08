@@ -64,6 +64,10 @@ type budgetThresholds struct {
 }
 
 func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source) *BudgetTracker {
+	var terminalStates []string
+	if source != nil {
+		terminalStates = source.FlowTerminalStages("")
+	}
 	return &BudgetTracker{
 		store:          store,
 		bus:            bus,
@@ -72,7 +76,7 @@ func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *co
 		mailbox:        mailbox,
 		mailboxFrom:    "runtime",
 		thresholds:     budgetThresholdsFromSource(source),
-		terminalStates: normalizeBudgetStateList(source.WorkflowTerminalStages()),
+		terminalStates: normalizeBudgetStateList(terminalStates),
 		lastState:      make(map[string]string),
 	}
 }

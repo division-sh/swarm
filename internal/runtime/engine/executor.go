@@ -3087,7 +3087,7 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 	case GuardFailureKill:
 		frame.result.Status = OutcomeKilled
 		frame.result.ActionsExecuted = append(frame.result.ActionsExecuted, "kill")
-		if killedState := e.killStateTarget(); killedState != "" {
+		if killedState := e.killStateTarget(frame.req.FlowID.String()); killedState != "" {
 			frame.result.NextState = killedState
 			frame.state.State.CurrentState = killedState
 			frame.result.StateMutation.NextState = killedState
@@ -3123,18 +3123,25 @@ func (e *Executor) applyGuardFailure(frame *executionFrame, spec *runtimecontrac
 	}
 }
 
-func (e *Executor) killStateTarget() string {
+func (e *Executor) killStateTarget(flowID string) string {
 	if e == nil || e.deps.Source == nil {
 		return ""
 	}
-	for _, stage := range e.deps.Source.WorkflowTerminalStages() {
+	flowID = strings.TrimSpace(flowID)
+	terminals := e.deps.Source.FlowTerminalStages(flowID)
+	states := e.deps.Source.FlowStates(flowID)
+	if flowID != "" && len(terminals) == 0 && len(states) == 0 {
+		terminals = e.deps.Source.FlowTerminalStages("")
+		states = e.deps.Source.FlowStates("")
+	}
+	for _, stage := range terminals {
 		if strings.EqualFold(strings.TrimSpace(stage), "killed") {
 			return strings.TrimSpace(stage)
 		}
 	}
-	for _, stage := range e.deps.Source.WorkflowStages() {
-		if strings.EqualFold(strings.TrimSpace(stage.ID), "killed") {
-			return strings.TrimSpace(stage.ID)
+	for _, stage := range states {
+		if strings.EqualFold(strings.TrimSpace(stage), "killed") {
+			return strings.TrimSpace(stage)
 		}
 	}
 	return ""

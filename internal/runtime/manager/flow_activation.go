@@ -81,7 +81,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("derive flow entity id for %s", flowPath)
 	}
 	parentEntityID := strings.TrimSpace(instance.ParentEntityID)
-	initialState := strings.TrimSpace(schema.InitialState)
+	initialState := strings.TrimSpace(schema.LoweredInitialState())
 	if initialState == "" {
 		initialState = strings.TrimSpace(req.InitialState)
 	}
