@@ -199,7 +199,7 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 			}
 		}
 	}
-	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) && containsEventType(n.Subscriptions(), events.EventType(eventType)) {
+	if !ok && isAccumulationTimeoutEvent(events.EventType(eventType)) {
 		if bucket, bucketOK := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload())); bucketOK && bucket.NodeID == n.NodeID() {
 			for candidateEventType, candidate := range n.contract.EventHandlers {
 				if strings.TrimSpace(candidateEventType) != bucket.EventType {

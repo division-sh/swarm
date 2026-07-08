@@ -26,6 +26,27 @@ func (r *recordingExecutionEngine) ExecuteHandlerSteps(_ context.Context, handle
 	return &HandlerOutcome{Handled: true}, nil
 }
 
+func timeoutSourceWithoutAuthoredAccumulatorTimeoutSubscription() semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"test-node": {
+				ID:           "test-node",
+				SubscribesTo: []string{"item.arrived"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"item.arrived": {
+						Accumulate: &runtimecontracts.AccumulateSpec{
+							Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
+							OnTimeout: &runtimecontracts.HandlerRuleEntry{
+								ID: "timeout",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+}
+
 func TestFindAccumulationTimeoutHandlerForBucket_OnTimeoutFixture(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-timeout")
@@ -49,6 +70,21 @@ func TestFindAccumulationTimeoutHandlerForBucket_OnTimeoutFixture(t *testing.T) 
 	}
 }
 
+func TestFindAccumulationTimeoutHandlerForBucket_DerivesTimeoutSubscription(t *testing.T) {
+	source := timeoutSourceWithoutAuthoredAccumulatorTimeoutSubscription()
+	subscriptions := source.NodeRuntimeSubscriptions("test-node")
+	if !containsString(subscriptions, "accumulate.timeout") {
+		t.Fatalf("runtime subscriptions = %#v, want derived accumulate.timeout", subscriptions)
+	}
+	handler, ok := findAccumulationTimeoutHandlerForBucket(source, timeridentity.NewAccumulatorBucketRef("test-node", "item.arrived"))
+	if !ok {
+		t.Fatal("expected timeout handler")
+	}
+	if handler.Accumulate == nil || handler.Accumulate.OnTimeout == nil {
+		t.Fatalf("handler missing accumulate on_timeout: %#v", handler.Accumulate)
+	}
+}
+
 func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-on-timeout")
@@ -60,6 +96,31 @@ func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandler(t *testin
 	entry := bundle.NodeEntries()["test-node"]
 	engine := &recordingExecutionEngine{}
 	node := NewNode(entry, semanticview.Wrap(bundle), engine, nil)
+	handled := node.Handle(context.Background(), eventtest.RootIngress("", "accumulate.timeout", "", "", mustJSON(map[string]any{
+		"timer_handle": map[string]any{
+			"kind": "accumulation_timeout",
+			"bucket": map[string]any{
+				"node_id":    "test-node",
+				"event_type": "item.arrived",
+			},
+		},
+	}), 0, "", "", events.EventEnvelope{}, time.Time{}))
+	if !handled {
+		t.Fatal("expected timeout event to be handled")
+	}
+	if !engine.called {
+		t.Fatal("expected execution engine to be called")
+	}
+	if got := engine.handlerEventKey; got != "item.arrived" {
+		t.Fatalf("handler event key = %q, want item.arrived", got)
+	}
+}
+
+func TestDeclarativeNodeHandleEvent_SelectsOnTimeoutAccumulatorHandlerWithoutAuthoredSubscription(t *testing.T) {
+	source := timeoutSourceWithoutAuthoredAccumulatorTimeoutSubscription()
+	entry := source.NodeEntries()["test-node"]
+	engine := &recordingExecutionEngine{}
+	node := NewNode(entry, source, engine, nil)
 	handled := node.Handle(context.Background(), eventtest.RootIngress("", "accumulate.timeout", "", "", mustJSON(map[string]any{
 		"timer_handle": map[string]any{
 			"kind": "accumulation_timeout",

@@ -151,7 +151,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	if got, want := effective.ExecutionType, SystemNodeExecutionType; got != want {
 		t.Fatalf("effective execution type = %q, want %q", got, want)
 	}
-	if got, want := effective.RuntimeSubscriptions, []string{"task.review", "task.rules", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
+	if got, want := effective.RuntimeSubscriptions, []string{"accumulate.timeout", "task.review", "task.rules", "task.start", "task.timeout"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("effective subscriptions = %#v, want %#v", got, want)
 	}
 	if got, want := effective.Produces, []string{"task.approved", "task.child", "task.done", "task.expired", "task.rules.else", "task.rules.then"}; !reflect.DeepEqual(got, want) {

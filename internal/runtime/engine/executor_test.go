@@ -1383,6 +1383,43 @@ func TestExecutor_AccumulatorProjectionSkipsDeclaredOnCompleteNoMatch(t *testing
 	}
 }
 
+func TestExecutor_AccumulatorOnCompleteMatchesWhenTopLevelOnCompleteDoesNot(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{bools: map[string]bool{
+		"payload.score > 100": false,
+	}})
+	handler := runtimecontracts.SystemNodeEventHandler{
+		OnComplete: []runtimecontracts.HandlerRuleEntry{{
+			ID:         "top-level",
+			Condition:  "payload.score > 100",
+			AdvancesTo: "top_review",
+		}},
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			ExpectedFrom: "entity.expected_dimensions",
+			ExpectedPath: runtimecontracts.RefExpression("entity.expected_dimensions").RefPath,
+			Completion:   runtimecontracts.ParseAccumulateCompletion("all"),
+			DedupBy:      "payload.dimension",
+			DedupPath:    runtimecontracts.RefExpression("payload.dimension").RefPath,
+			OnComplete: []runtimecontracts.HandlerRuleEntry{{
+				ID:         "accumulate-complete",
+				Condition:  "else",
+				AdvancesTo: "launch_review",
+			}},
+		},
+	}
+	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot(
+		"pending",
+		map[string]any{"expected_dimensions": []any{"market"}},
+		nil,
+		map[string]map[string]any{},
+	))
+	if got, want := result.RuleID, "accumulate-complete"; got != want {
+		t.Fatalf("RuleID = %q, want %q", got, want)
+	}
+	if got, want := result.NextState, "launch_review"; got != want {
+		t.Fatalf("NextState = %q, want %q", got, want)
+	}
+}
+
 func TestExecutor_AccumulatorProjectionSkipsIncompleteAccumulation(t *testing.T) {
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{

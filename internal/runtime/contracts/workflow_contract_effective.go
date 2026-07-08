@@ -238,7 +238,7 @@ func EffectiveSystemNodeExecutionType(node SystemNodeContract) string {
 
 func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	seen := make(map[string]struct{})
-	out := make([]string, 0, len(node.SubscribesTo)+len(node.EventHandlers))
+	out := make([]string, 0, len(node.SubscribesTo)+len(node.EventHandlers)+1)
 	appendSubscription := func(value string) {
 		value = eventidentity.Normalize(value)
 		if value == "" {
@@ -256,8 +256,21 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 	for eventType := range node.EventHandlers {
 		appendSubscription(eventType)
 	}
+	for _, handler := range node.EventHandlers {
+		if handlerRequiresAccumulatorTimeoutSubscription(handler) {
+			appendSubscription("accumulate.timeout")
+			break
+		}
+	}
 	sort.Strings(out)
 	return out
+}
+
+func handlerRequiresAccumulatorTimeoutSubscription(handler SystemNodeEventHandler) bool {
+	if handler.Accumulate == nil {
+		return false
+	}
+	return handler.Accumulate.Completion.Mode == AccumulateModeTimeout || handler.Accumulate.OnTimeout != nil
 }
 
 func EffectiveSystemNodeProduces(node SystemNodeContract) []string {
