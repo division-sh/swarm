@@ -178,6 +178,36 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 	if !participates {
 		return 0, nil
 	}
+	if lister, ok := eb.store.(interface {
+		ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
+	}); ok && lister != nil {
+		records, err := lister.ListEventsWithPendingDeliveriesForRun(ctx, runID, time.Now().Add(-lookback), limit)
+		if err != nil {
+			return 0, err
+		}
+		redelivered := 0
+		for _, record := range records {
+			evt := record.Event
+			if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
+				eb.markPipelineReceipt(ctx, evt.ID(), "error", replayErr)
+				continue
+			}
+			recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
+			if err != nil {
+				eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error())
+				return redelivered, err
+			}
+			if err := eb.publishPersistedRecipients(ctx, evt, recipients, true); err != nil {
+				if errors.Is(err, ErrRunDispatchBlocked) {
+					return redelivered, nil
+				}
+				return redelivered, err
+			}
+			eb.markPipelineReceipt(ctx, evt.ID(), "processed", "")
+			redelivered++
+		}
+		return redelivered, nil
+	}
 	lister, ok := eb.store.(interface {
 		ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
 	})

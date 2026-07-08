@@ -336,6 +336,20 @@ func (s *SQLiteRuntimeStore) ListEventsMissingPipelineReceiptForRun(ctx context.
 	return s.listSQLiteEventsMissingPipelineReceipt(ctx, "e.run_id = ? AND e.created_at >= ?", []any{runID, since.UTC()}, limit)
 }
 
+func (s *SQLiteRuntimeStore) ListEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-24 * time.Hour)
+	}
+	return s.listSQLiteEventsWithPendingDeliveriesForRun(ctx, runID, since.UTC(), limit)
+}
+
 func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.Context, where string, args []any, limit int) ([]events.PersistedReplayEvent, error) {
 	queryArgs := append([]any{}, args...)
 	queryArgs = append(queryArgs, diagnosticDirectReplayEventArgs()...)
@@ -422,6 +436,98 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read sqlite missing pipeline receipt events: %w", err)
+	}
+	return out, nil
+}
+
+func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	queryArgs := append([]any{runID, since}, diagnosticDirectReplayEventArgs()...)
+	queryArgs = append(queryArgs, limit)
+	rows, err := s.DB.QueryContext(ctx, `
+		SELECT
+			e.event_id,
+			COALESCE(e.run_id, ''),
+			e.event_name,
+			COALESCE(e.produced_by, ''),
+			COALESCE(e.entity_id, ''),
+			COALESCE(e.flow_instance, ''),
+			COALESCE(e.scope, 'global'),
+			e.payload,
+			e.created_at,
+			COALESCE(e.source_event_id, ''),
+			COALESCE(e.source_route, '{}'),
+			COALESCE(e.target_route, '{}'),
+			COALESCE(e.target_set, '[]')
+		FROM events e
+		WHERE e.run_id = ?
+		  AND e.created_at >= ?
+		  AND EXISTS (
+			SELECT 1
+			FROM event_deliveries d
+			WHERE d.event_id = e.event_id
+			  AND d.run_id = e.run_id
+			  AND d.status = 'pending'
+		  )
+		  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
+		ORDER BY e.created_at ASC, e.event_id ASC
+		LIMIT ?
+	`, queryArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("list sqlite events with pending deliveries: %w", err)
+	}
+	defer rows.Close()
+	out := make([]events.PersistedReplayEvent, 0, limit)
+	for rows.Next() {
+		var eventID, eventRunID, eventName, producedBy, sourceEventID string
+		var entityID, flowInstance, scope string
+		var payloadRaw, createdAtRaw, sourceRouteRaw, targetRouteRaw, targetSetRaw any
+		if err := rows.Scan(
+			&eventID,
+			&eventRunID,
+			&eventName,
+			&producedBy,
+			&entityID,
+			&flowInstance,
+			&scope,
+			&payloadRaw,
+			&createdAtRaw,
+			&sourceEventID,
+			&sourceRouteRaw,
+			&targetRouteRaw,
+			&targetSetRaw,
+		); err != nil {
+			return nil, fmt.Errorf("scan sqlite event with pending deliveries: %w", err)
+		}
+		payload := sqliteJSONRawMessage(payloadRaw)
+		var createdAt time.Time
+		if parsedCreatedAt, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
+			return nil, fmt.Errorf("scan sqlite pending-delivery event created_at: %w", err)
+		} else if ok {
+			createdAt = parsedCreatedAt.UTC()
+		}
+		sourceRoute := sqliteJSONRawMessage(sourceRouteRaw)
+		targetRoute := sqliteJSONRawMessage(targetRouteRaw)
+		targetSet := sqliteJSONRawMessage(targetSetRaw)
+		evt := events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			eventRunID,
+			sourceEventID,
+			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
+			createdAt,
+		)
+		record := events.PersistedReplayEvent{Event: evt}
+		if strings.TrimSpace(evt.RunID()) == "" {
+			record.ReplayError = "missing canonical run_id"
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read sqlite events with pending deliveries: %w", err)
 	}
 	return out, nil
 }
