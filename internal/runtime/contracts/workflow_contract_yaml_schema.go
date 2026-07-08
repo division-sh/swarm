@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"gopkg.in/yaml.v3"
 )
 
@@ -279,6 +280,14 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 		t.ManagedCredential.Header = strings.TrimSpace(t.ManagedCredential.Header)
 		t.ManagedCredential.Prefix = strings.TrimSpace(t.ManagedCredential.Prefix)
 		t.ManagedCredential.Scopes = normalizeStrings(t.ManagedCredential.Scopes)
+		t.ManagedCredential.GrantModel = managedcredentialmodel.NormalizeGrantModel(t.ManagedCredential.GrantModel)
+		if err := managedcredentialmodel.ValidateGrantModel(t.ManagedCredential.GrantModel); err != nil {
+			return err
+		}
+		t.ManagedCredential.TokenRequest = managedcredentialmodel.NormalizeTokenRequestProfile(t.ManagedCredential.TokenRequest)
+		if err := managedcredentialmodel.ValidateTokenRequestProfile(t.ManagedCredential.TokenRequest); err != nil {
+			return err
+		}
 	}
 	if t.HTTP != nil {
 		t.HTTP.Method = strings.TrimSpace(t.HTTP.Method)

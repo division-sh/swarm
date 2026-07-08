@@ -1,0 +1,22 @@
+id: provider.notion.connector
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: connector
+manifest_hash: sha256:6a72a8184ce201f496a183bd882c59768571764ed698ff0190ae5867618ec6e5
+provenance:
+  source: platform
+capabilities:
+  can:
+    call_provider_action: notion.append_block_children
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot:
+    - bypass activity_attempts
+    - retry non_idempotent_write automatically
+    - expose credential values
+requires:
+  managed_credentials:
+    - notion_oauth
+tests:
+  - providerconnectors/notion_pack
+  - runtime/notion_connector_managed_credential_supported_surface

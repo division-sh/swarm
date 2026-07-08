@@ -6,13 +6,16 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type Requirement struct {
-	Kind   string
-	Name   string
-	Scopes []string `json:"scopes,omitempty"`
+	Kind         string
+	Name         string
+	Scopes       []string                                   `json:"scopes,omitempty"`
+	GrantModel   string                                     `json:"grant_model,omitempty"`
+	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
 }
 
 type RequirementDescriptor struct {
@@ -57,7 +60,13 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 		if storeKey == "" {
 			continue
 		}
-		index[storeKey] = append(index[storeKey], Requirement{Kind: "tool", Name: name, Scopes: append([]string{}, entry.ManagedCredential.Scopes...)})
+		index[storeKey] = append(index[storeKey], Requirement{
+			Kind:         "tool",
+			Name:         name,
+			Scopes:       append([]string{}, entry.ManagedCredential.Scopes...),
+			GrantModel:   entry.ManagedCredential.GrantModel,
+			TokenRequest: entry.ManagedCredential.TokenRequest,
+		})
 	}
 }
 
@@ -117,6 +126,20 @@ func MissingOrUnusableRequired(ctx context.Context, store Store, source semantic
 			continue
 		}
 		for _, req := range desc.RequiredBy {
+			if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, req.GrantModel); err != nil {
+				scoped := desc
+				scoped.Status = StatusScopeInsufficient
+				scoped.Failure = "grant-model-insufficient: " + err.Error()
+				out = append(out, scoped)
+				break
+			}
+			if err := managedcredentialmodel.TokenRequestProfileCovers(desc.TokenRequest, req.TokenRequest); err != nil {
+				scoped := desc
+				scoped.Status = StatusScopeInsufficient
+				scoped.Failure = "token-request-insufficient: " + err.Error()
+				out = append(out, scoped)
+				break
+			}
 			if err := ensureScopes(desc.Scopes, req.Scopes); err != nil {
 				scoped := desc
 				scoped.Status = StatusScopeInsufficient
@@ -157,10 +180,12 @@ func normalizeRequirements(items []Requirement) []Requirement {
 		item.Kind = strings.TrimSpace(item.Kind)
 		item.Name = strings.TrimSpace(item.Name)
 		item.Scopes = normalizeStrings(item.Scopes)
+		item.GrantModel = managedcredentialmodel.NormalizeGrantModel(item.GrantModel)
+		item.TokenRequest = managedcredentialmodel.NormalizeTokenRequestProfile(item.TokenRequest)
 		if item.Kind == "" || item.Name == "" {
 			continue
 		}
-		key := item.Kind + "\x00" + item.Name + "\x00" + strings.Join(item.Scopes, "\x00")
+		key := item.Kind + "\x00" + item.Name + "\x00" + strings.Join(item.Scopes, "\x00") + "\x00" + item.GrantModel + "\x00" + managedcredentialmodel.TokenRequestProfileSummary(item.TokenRequest)
 		if _, ok := seen[key]; ok {
 			continue
 		}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"gopkg.in/yaml.v3"
 )
@@ -913,10 +914,12 @@ type HTTPToolSpec struct {
 	Retry          HTTPToolRetrySpec `yaml:"retry"`
 }
 type ManagedCredentialRef struct {
-	Key    string   `yaml:"key"`
-	Header string   `yaml:"header"`
-	Prefix string   `yaml:"prefix"`
-	Scopes []string `yaml:"scopes"`
+	Key          string                                     `yaml:"key"`
+	Header       string                                     `yaml:"header"`
+	Prefix       string                                     `yaml:"prefix"`
+	Scopes       []string                                   `yaml:"scopes"`
+	GrantModel   string                                     `yaml:"grant_model"`
+	TokenRequest managedcredentialmodel.TokenRequestProfile `yaml:"token_request"`
 }
 type ToolInputSchema struct {
 	Type                 string                     `yaml:"type"`

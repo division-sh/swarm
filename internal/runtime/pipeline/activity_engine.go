@@ -843,8 +843,10 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		HTTPClient: client,
 	}
 	token, record, err := tokenSource.AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
-		Key:    storeKey,
-		Scopes: ref.Scopes,
+		Key:          storeKey,
+		Scopes:       ref.Scopes,
+		GrantModel:   ref.GrantModel,
+		TokenRequest: ref.TokenRequest,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
