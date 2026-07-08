@@ -2046,6 +2046,8 @@ handler_specification:
   on_complete_vs_rules:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
     on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after accumulation/computation.
+      If handler-level on_complete and accumulate.on_complete are both declared, handler-level on_complete is evaluated first;
+      when no handler-level branch matches, accumulate.on_complete is evaluated as the accumulator-completion branch surface.
     rules: Current concrete spelling of the ordered policy-sheet authoring construct for handler-phase selection. Existing
       condition rules and typed selection rows lower to the canonical selected-branch owner. Retired `handler.branch`
       syntax is unsupported and must fail closed instead of being interpreted, lowered, or preserved as compatibility syntax.
@@ -3133,7 +3135,9 @@ handler_specification:
           as node-key-{instance_id} are subscriber naming templates, not a separate semantic node identity owner.
         execution_type: string — if omitted, defaults to "system_node"; any explicit non-system_node value is invalid.
         subscribes_to: list of event names this node receives. Exact handler-triggered subscriptions are derived from
-          event_handlers keys when omitted. Wildcard/import-boundary escape-hatch subscriptions remain explicit.
+          event_handlers keys when omitted. Accumulator timeout delivery is platform-owned; handlers with timeout-mode
+          accumulate or accumulate.on_timeout derive the intrinsic accumulate.timeout runtime subscription. Wildcard/import-boundary
+          escape-hatch subscriptions remain explicit.
         produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
           from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
           emits.
@@ -3145,7 +3149,8 @@ handler_specification:
       effective_semantics:
         id: YAML map key, with same-value explicit id accepted during migration
         execution_type: system_node
-        runtime_subscriptions: union of explicit subscribes_to entries and event_handlers keys
+        runtime_subscriptions: union of explicit subscribes_to entries, event_handlers keys, and intrinsic platform runtime
+          events required by declared handler primitives such as accumulate.timeout
         produces: events derived from supported declarative emit sites
     description: Complete specification for system nodes — the deterministic components that orchestrate state transitions.
       Every field used in nodes.yaml must be defined here.
@@ -3872,9 +3877,13 @@ engine:
       threshold: Proceed when received count reaches a configured number.
       timeout: Proceed when a timer fires, regardless of how many items arrived. Partial results available.
     on_complete: When completion condition is met, the handler continues to the remaining steps (compute, on_complete branches,
-      advances_to, emit). The accumulated data is available to these steps.
+      advances_to, emit). The accumulated data is available to these steps. Handler-level on_complete branches are evaluated
+      first; if no handler-level branch matches and accumulate.on_complete branches are declared, those accumulator-completion
+      branches are evaluated through the same selected-branch owner.
     on_timeout: If the handler declares accumulate.on_timeout, the platform executes that branch when the timer fires before
-      completion. Partial accumulated data is available. Typically used to proceed with whatever data arrived.
+      completion. Partial accumulated data is available. Typically used to proceed with whatever data arrived. The platform
+      emits and routes accumulate.timeout intrinsically to the owning handler bucket; authors do not declare accumulate.timeout
+      in subscribes_to to make the timeout branch deliverable.
     idempotency: Duplicate arrivals (same item, same entity) are ignored. The received list is a set, not a list. Crash recovery
       replays events through the same tracking — already-received items are skipped, accumulator state is consistent.
     cleanup: After completion fires and the handler commits, the accumulator record can be archived or deleted. The entity

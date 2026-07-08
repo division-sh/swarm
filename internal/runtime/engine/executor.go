@@ -1624,23 +1624,33 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 		frame.rule == frame.req.Handler.Accumulate.OnTimeout {
 		return nil
 	}
-	rules := frame.req.Handler.OnComplete
-	ruleSource := handlerRuleSourceOnComplete
-	if len(rules) == 0 && frame.req.Handler.Accumulate != nil {
-		rules = frame.req.Handler.Accumulate.OnComplete
-		ruleSource = handlerRuleSourceAccumulateOnComplete
+	topLevelRules := frame.req.Handler.OnComplete
+	var accumulateRules []runtimecontracts.HandlerRuleEntry
+	if frame.req.Handler.Accumulate != nil {
+		accumulateRules = frame.req.Handler.Accumulate.OnComplete
 	}
-	if frame.result.AccumulatorCompletionDiagnostics.Relevant && len(rules) > 0 {
+	if frame.result.AccumulatorCompletionDiagnostics.Relevant && (len(topLevelRules) > 0 || len(accumulateRules) > 0) {
 		frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = true
 	}
-	rule, err := e.selectRule(frame, rules)
+	ruleSource := handlerRuleSourceOnComplete
+	rule, err := e.selectRule(frame, topLevelRules)
 	if err != nil {
 		if frame.result.AccumulatorCompletionDiagnostics.Relevant {
 			frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationFailed
 		}
 		return err
 	}
-	if frame.result.AccumulatorCompletionDiagnostics.Relevant && len(rules) > 0 {
+	if rule == nil && len(accumulateRules) > 0 {
+		ruleSource = handlerRuleSourceAccumulateOnComplete
+		rule, err = e.selectRule(frame, accumulateRules)
+		if err != nil {
+			if frame.result.AccumulatorCompletionDiagnostics.Relevant {
+				frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationFailed
+			}
+			return err
+		}
+	}
+	if frame.result.AccumulatorCompletionDiagnostics.Relevant && (len(topLevelRules) > 0 || len(accumulateRules) > 0) {
 		frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationSucceeded
 	}
 	if rule != nil {
