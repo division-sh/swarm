@@ -280,6 +280,14 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin address: %w", err)
 			}
 			out.Address = &address
+		case "resolution":
+			if err := value.Decode(&out.Resolution); err != nil {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin resolution: %w", err)
+			}
+		case "carries":
+			if err := value.Decode(&out.Carries); err != nil {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin carries: %w", err)
+			}
 		default:
 			return FlowInputEventPin{}, fmt.Errorf("UNDEFINED-FIELD: input event pin field %q not in platform spec", key)
 		}
@@ -360,6 +368,170 @@ func decodeFlowOutputPinCarriesNode(node *yaml.Node) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("carries must be a string or sequence")
 	}
+}
+
+func (c *FlowInputPinCarries) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*c = nil
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("input pin carries must be a mapping")
+	}
+	out := FlowInputPinCarries{}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		name := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		if name == "" {
+			continue
+		}
+		var carry FlowInputPinCarry
+		if err := value.Decode(&carry); err != nil {
+			return fmt.Errorf("carry %s: %w", name, err)
+		}
+		out[name] = carry.normalized()
+	}
+	*c = out.normalized()
+	return nil
+}
+
+func (c *FlowInputPinCarry) UnmarshalYAML(node *yaml.Node) error {
+	if c == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*c = FlowInputPinCarry{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("input pin carry must be a mapping")
+	}
+	var out FlowInputPinCarry
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "from":
+			if err := value.Decode(&out.From); err != nil {
+				return fmt.Errorf("carry.from: %w", err)
+			}
+		case "type":
+			if err := value.Decode(&out.Type); err != nil {
+				return fmt.Errorf("carry.type: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: input event pin carry field %q not in platform spec", key)
+		}
+	}
+	*c = out.normalized()
+	return nil
+}
+
+func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
+	if r == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*r = FlowInputPinResolution{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("input pin resolution must be a mapping")
+	}
+	var out FlowInputPinResolution
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "mode":
+			if err := value.Decode(&out.Mode); err != nil {
+				return fmt.Errorf("resolution.mode: %w", err)
+			}
+		case "instance_key":
+			if err := value.Decode(&out.InstanceKey); err != nil {
+				return fmt.Errorf("resolution.instance_key: %w", err)
+			}
+		case "aggregation":
+			if err := value.Decode(&out.Aggregation); err != nil {
+				return fmt.Errorf("resolution.aggregation: %w", err)
+			}
+		case "window":
+			if err := value.Decode(&out.Window); err != nil {
+				return fmt.Errorf("resolution.window: %w", err)
+			}
+		case "dedup_by":
+			dedup, err := decodeFlowOutputPinCarriesNode(value)
+			if err != nil {
+				return fmt.Errorf("resolution.dedup_by: %w", err)
+			}
+			out.DedupBy = dedup
+		case "singleton":
+			if err := value.Decode(&out.Singleton); err != nil {
+				return fmt.Errorf("resolution.singleton: %w", err)
+			}
+		case "replies_to":
+			if err := value.Decode(&out.RepliesTo); err != nil {
+				return fmt.Errorf("resolution.replies_to: %w", err)
+			}
+		case "correlation_key":
+			if err := value.Decode(&out.CorrelationKey); err != nil {
+				return fmt.Errorf("resolution.correlation_key: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: input event pin resolution field %q not in platform spec", key)
+		}
+	}
+	*r = out.normalized()
+	return nil
+}
+
+func (k *FlowInputPinResolutionInstanceKey) UnmarshalYAML(node *yaml.Node) error {
+	if k == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*k = FlowInputPinResolutionInstanceKey{}
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode {
+		*k = (FlowInputPinResolutionInstanceKey{From: strings.TrimSpace(node.Value)}).normalized()
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("resolution.instance_key must be a string or mapping")
+	}
+	var out FlowInputPinResolutionInstanceKey
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		value := node.Content[i+1]
+		switch key {
+		case "":
+			continue
+		case "from":
+			if err := value.Decode(&out.From); err != nil {
+				return fmt.Errorf("instance_key.from: %w", err)
+			}
+		case "mint":
+			if err := value.Decode(&out.Mint); err != nil {
+				return fmt.Errorf("instance_key.mint: %w", err)
+			}
+		case "as":
+			if err := value.Decode(&out.As); err != nil {
+				return fmt.Errorf("instance_key.as: %w", err)
+			}
+		default:
+			return fmt.Errorf("UNDEFINED-FIELD: input event pin resolution.instance_key field %q not in platform spec", key)
+		}
+	}
+	*k = out.normalized()
+	return nil
 }
 
 func (a *FlowInputPinAddress) UnmarshalYAML(node *yaml.Node) error {

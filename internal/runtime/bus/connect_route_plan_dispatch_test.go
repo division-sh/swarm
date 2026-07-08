@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,20 +118,49 @@ func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runti
 		}
 	}
 	s.activations = append(s.activations, req)
-	verticalID, _ := req.Metadata["vertical_id"].(string)
 	s.flowInstances = append(s.flowInstances, ActiveFlowInstanceDescriptor{
 		InstanceID:    req.Instance.InstanceID,
 		EntityID:      req.Instance.EntityID,
 		FlowInstance:  req.Instance.InstancePath,
 		FlowTemplate:  req.Instance.TemplateID,
-		AddressFields: map[string]string{"entity.vertical_id": verticalID},
+		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
 	})
 	if s.bus == nil {
 		return nil
 	}
 	return s.bus.AddFlowInstanceRouteContext(ctx, FlowInstanceRouteMaterializationRequest{
-		Identity: req.Instance.Route(),
+		Identity:            req.Instance.Route(),
+		ActivationVariables: connectRoutePlanActivationVariables(req),
 	})
+}
+
+func connectRoutePlanActivationAddressFields(metadata map[string]any) map[string]string {
+	out := map[string]string{}
+	for key, raw := range metadata {
+		key = strings.TrimSpace(key)
+		if key == "" || key == "entity_type" || key == "instance_kind" || key == "last_source_event" {
+			continue
+		}
+		value := strings.TrimSpace(fmt.Sprint(raw))
+		if value != "" {
+			out["entity."+key] = value
+		}
+	}
+	return out
+}
+
+func connectRoutePlanActivationVariables(req runtimepipeline.FlowInstanceActivationRequest) map[string]string {
+	out := map[string]string{}
+	for _, values := range []map[string]any{req.Config, req.Metadata} {
+		for key, raw := range values {
+			key = strings.TrimSpace(key)
+			value := strings.TrimSpace(fmt.Sprint(raw))
+			if key != "" && value != "" {
+				out[key] = value
+			}
+		}
+	}
+	return out
 }
 
 func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error {
@@ -853,6 +884,130 @@ func TestEventBusPublish_ConnectRoutePlanCreatesTemplateInstanceOnMissingCreate(
 	}
 	if got := store.flowInstanceDescriptorCalls; got != 0 {
 		t.Fatalf("replay descriptor calls = %d, want 0 because lifecycle-created persisted route/scope is authoritative", got)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanCreateResolutionMintsUUIDAndCarriesInstanceKey(t *testing.T) {
+	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintUUID)
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
+		t.Fatalf("preflight failure/routes = %q/%#v, want one preview route", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("preflight activations = %d, want 0", got)
+	}
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %d, want 1", len(store.activations))
+	}
+	activation := store.activations[0]
+	minted, _ := activation.Metadata["validation_case_id"].(string)
+	if _, err := uuid.Parse(minted); err != nil {
+		t.Fatalf("minted validation_case_id = %q, want uuid: %v", minted, err)
+	}
+	if minted == eventID {
+		t.Fatalf("minted validation_case_id = source event id %q, want deterministic uuid mint distinct from event_id mint", minted)
+	}
+	if activation.Config["validation_case_id"] != minted || activation.Metadata["validation_case_id"] != minted {
+		t.Fatalf("activation config/metadata = %#v/%#v, want carried validation_case_id %q", activation.Config, activation.Metadata, minted)
+	}
+	if got := activation.Metadata["last_source_event"]; got != eventID {
+		t.Fatalf("last_source_event = %v, want %q", got, eventID)
+	}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "validator-node-" + minted,
+		Target: events.RouteIdentity{
+			FlowID:       "validator",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want create-resolution route %#v", store.routes[eventID], want)
+	}
+
+	replayTarget := eb.SubscribeInternal(want.SubscriberID)
+	store.flowInstanceDescriptorCalls = 0
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish same event retry: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("same-event retry activations = %d, want committed replay without a second activation", len(store.activations))
+	}
+	if got := store.flowInstanceDescriptorCalls; got != 0 {
+		t.Fatalf("same-event retry descriptor calls = %d, want committed replay without descriptor lookup", got)
+	}
+	replayed := requireBusEvent(t, replayTarget, "create resolution same-event committed replay")
+	if replayed.FlowInstance() != activation.Instance.InstancePath || replayed.EntityID() != activation.Instance.EntityID {
+		t.Fatalf("same-event replay target = flow_instance:%q entity:%q, want persisted %q/%q",
+			replayed.FlowInstance(), replayed.EntityID(), activation.Instance.InstancePath, activation.Instance.EntityID)
+	}
+}
+
+func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *testing.T) {
+	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintEventID)
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	eventID := uuid.NewString()
+	evt := eventtest.RootIngress(eventID,
+		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+
+	if err := eb.Publish(context.Background(), evt); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if len(store.activations) != 1 {
+		t.Fatalf("activations = %d, want 1", len(store.activations))
+	}
+	activation := store.activations[0]
+	if activation.Metadata["validation_case_id"] != eventID || activation.Config["validation_case_id"] != eventID {
+		t.Fatalf("activation config/metadata = %#v/%#v, want event_id-minted validation_case_id %q", activation.Config, activation.Metadata, eventID)
+	}
+	want := events.DeliveryRoute{
+		SubscriberType: "node",
+		SubscriberID:   "validator-node-" + eventID,
+		Target: events.RouteIdentity{
+			FlowID:       "validator",
+			FlowInstance: activation.Instance.InstancePath,
+			EntityID:     activation.Instance.EntityID,
+		},
+	}
+	if !deliveryRoutesContain(store.routes[eventID], want) || len(store.routes[eventID]) != 1 {
+		t.Fatalf("persisted delivery routes = %#v, want event_id create-resolution route %#v", store.routes[eventID], want)
 	}
 }
 
@@ -2018,8 +2173,102 @@ func connectRoutePlanInstanceKeyBroadcastSource(t testing.TB) semanticview.Sourc
 	return semanticview.Wrap(bundle)
 }
 
+func connectRoutePlanCreateResolutionSource(t testing.TB, mint string) semanticview.Source {
+	t.Helper()
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
+	root := writeConnectRoutePlanCreateResolutionFixture(t, mint)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func writeConnectRoutePlanInstanceKeyFixture(t testing.TB) string {
 	return writeConnectRoutePlanInstanceKeyFixtureWithDelivery(t, "one")
+}
+
+func writeConnectRoutePlanCreateResolutionFixture(t testing.TB, mint string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: create-resolution-connect-route-plan-bus
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: validator
+    flow: validator
+    mode: template
+connect:
+  - from: producer.validation_requested
+    to: validator.validation_requested
+    delivery: one
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: create-resolution-connect-route-plan-bus\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: string\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), `
+name: validator
+mode: template
+instance:
+  by: validation_case_id
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+        resolution:
+          mode: create
+          instance_key:
+            mint: `+mint+`
+            as: validation_case_id
+        carries:
+          validation_case_id:
+            from: instance.key.validation_case_id
+            type: uuid
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "events.yaml"), "validation.requested:\n  candidate: string\n  validation_case_id: uuid\n")
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "entities.yaml"), `
+validation_case:
+  validation_case_id:
+    type: uuid
+`)
+	writeConnectRoutePlanBusFixtureFile(t, filepath.Join(root, "flows", "validator", "nodes.yaml"), `
+validator-node:
+  id: validator-node-{validation_case_id}
+  execution_type: system_node
+  event_handlers:
+    validation.requested: {}
+`)
+	return root
 }
 
 func writeConnectRoutePlanRenamedInstanceKeyFixture(t testing.TB) string {

@@ -127,6 +127,60 @@ func TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey(t *testing.T) 
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansUsesCreateInputResolution(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeCreateResolutionConnectRoutePlanPackageFixture(t, runtimecontracts.FlowInputResolutionMintUUID)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 {
+		t.Fatalf("issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v, want one", plans)
+	}
+	plan := plans[0]
+	if plan.InstanceKey == nil {
+		t.Fatal("InstanceKey = nil, want create resolution instance-key evidence")
+	}
+	if got, want := plan.ResolutionKind, ConnectResolutionInstanceKey; got != want {
+		t.Fatalf("ResolutionKind = %q, want %q", got, want)
+	}
+	if plan.Source.Key != "" || len(plan.Source.Carries) != 0 {
+		t.Fatalf("Source key/carries = %q/%#v, want create resolution independent of producer output key", plan.Source.Key, plan.Source.Carries)
+	}
+	if got, want := plan.InstanceKey.Mode, runtimecontracts.FlowInputResolutionModeCreate; got != want {
+		t.Fatalf("InstanceKey.Mode = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.Mint, runtimecontracts.FlowInputResolutionMintUUID; got != want {
+		t.Fatalf("InstanceKey.Mint = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.As, "validation_case_id"; got != want {
+		t.Fatalf("InstanceKey.As = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.OnMissing, "create"; got != want {
+		t.Fatalf("InstanceKey.OnMissing = %q, want %q", got, want)
+	}
+	if got, want := plan.InstanceKey.OnConflict, "reuse"; got != want {
+		t.Fatalf("InstanceKey.OnConflict = %q, want %q", got, want)
+	}
+	eventID := "11111111-1111-4111-8111-111111111111"
+	material, failure := MintedInstanceKeyMaterialForConnectRoutePlan(plan, eventID)
+	if failure != "" {
+		t.Fatalf("MintedInstanceKeyMaterialForConnectRoutePlan failure = %q", failure)
+	}
+	if len(material.Keys) != 1 || material.Keys[0].Field != "validation_case_id" || material.Keys[0].Value == "" || material.Keys[0].Value == eventID {
+		t.Fatalf("minted material = %#v, want deterministic uuid material distinct from event id", material)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -957,6 +1011,72 @@ deployment:
 
 func writeInstanceKeyConnectRoutePlanPackageFixture(t *testing.T) string {
 	return writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t, "one")
+}
+
+func writeCreateResolutionConnectRoutePlanPackageFixture(t *testing.T, mint string) string {
+	t.Helper()
+	root := t.TempDir()
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: create-resolution-connect-route-plan-package
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: validator
+    flow: validator
+    mode: template
+connect:
+  - from: producer.validation_requested
+    to: validator.validation_requested
+    delivery: one
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: create-resolution-connect-route-plan-package\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFlowFixture(t, root, "producer", `
+pins:
+  outputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+`, "validation.requested:\n  candidate: string\n", "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), `
+name: validator
+mode: template
+instance:
+  by: validation_case_id
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+        resolution:
+          mode: create
+          instance_key:
+            mint: `+mint+`
+            as: validation_case_id
+        carries:
+          validation_case_id:
+            from: instance.key.validation_case_id
+            type: uuid
+`)
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "policy.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "agents.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "nodes.yaml"), "{}\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "events.yaml"), "validation.requested:\n  candidate: string\n  validation_case_id: uuid\n")
+	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "validator", "entities.yaml"), `
+validation_case:
+  validation_case_id:
+    type: uuid
+`)
+	return root
 }
 
 func writeInstanceKeyConnectRoutePlanPackageFixtureWithDelivery(t *testing.T, delivery string) string {

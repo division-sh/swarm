@@ -19,9 +19,11 @@ func (p FlowInputEventPin) EventType() string {
 
 func (p FlowInputEventPin) normalized() FlowInputEventPin {
 	out := FlowInputEventPin{
-		Name:   strings.TrimSpace(p.Name),
-		Event:  strings.TrimSpace(p.Event),
-		Source: strings.ToLower(strings.TrimSpace(p.Source)),
+		Name:       strings.TrimSpace(p.Name),
+		Event:      strings.TrimSpace(p.Event),
+		Source:     strings.ToLower(strings.TrimSpace(p.Source)),
+		Resolution: p.Resolution.normalized(),
+		Carries:    p.Carries.normalized(),
 	}
 	if out.Event == "" {
 		out.Event = out.Name
@@ -31,6 +33,78 @@ func (p FlowInputEventPin) normalized() FlowInputEventPin {
 		out.Address = &address
 	}
 	return out
+}
+
+func (c FlowInputPinCarries) normalized() FlowInputPinCarries {
+	if len(c) == 0 {
+		return nil
+	}
+	out := FlowInputPinCarries{}
+	keys := make([]string, 0, len(c))
+	for key := range c {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		name := strings.TrimSpace(key)
+		if name == "" {
+			continue
+		}
+		carry := c[key].normalized()
+		if carry.From == "" && carry.Type == "" {
+			continue
+		}
+		out[name] = carry
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (c FlowInputPinCarry) normalized() FlowInputPinCarry {
+	return FlowInputPinCarry{
+		From: strings.TrimSpace(c.From),
+		Type: strings.TrimSpace(c.Type),
+	}
+}
+
+func (r FlowInputPinResolution) Empty() bool {
+	r = r.normalized()
+	return r.Mode == "" &&
+		r.InstanceKey.Empty() &&
+		r.Aggregation == "" &&
+		r.Window == "" &&
+		len(r.DedupBy) == 0 &&
+		r.Singleton == "" &&
+		r.RepliesTo == "" &&
+		r.CorrelationKey == ""
+}
+
+func (r FlowInputPinResolution) normalized() FlowInputPinResolution {
+	return FlowInputPinResolution{
+		Mode:           strings.ToLower(strings.TrimSpace(r.Mode)),
+		InstanceKey:    r.InstanceKey.normalized(),
+		Aggregation:    strings.ToLower(strings.TrimSpace(r.Aggregation)),
+		Window:         strings.TrimSpace(r.Window),
+		DedupBy:        normalizeStringListPreserveOrder(r.DedupBy),
+		Singleton:      strings.TrimSpace(r.Singleton),
+		RepliesTo:      strings.TrimSpace(r.RepliesTo),
+		CorrelationKey: strings.TrimSpace(r.CorrelationKey),
+	}
+}
+
+func (k FlowInputPinResolutionInstanceKey) Empty() bool {
+	k = k.normalized()
+	return k.From == "" && k.Mint == "" && k.As == ""
+}
+
+func (k FlowInputPinResolutionInstanceKey) normalized() FlowInputPinResolutionInstanceKey {
+	return FlowInputPinResolutionInstanceKey{
+		From: strings.TrimSpace(k.From),
+		Mint: strings.ToLower(strings.TrimSpace(k.Mint)),
+		As:   strings.TrimSpace(k.As),
+	}
 }
 
 func (p FlowOutputEventPin) PinName() string {

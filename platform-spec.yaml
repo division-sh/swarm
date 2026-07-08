@@ -7945,6 +7945,140 @@ flow_model:
             handler lookup, direct delivery, producer target, producer
             broadcast:true, receiver select_entity/select_or_create_entity, and
             explicit create_flow_instance are not lifecycle authority.
+        implementation_slice_1835:
+          status: spec_locked_create_mode_runnable_remaining_modes_fail_closed
+          canonical_spec_owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835
+          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.templateInstanceLifecycleOwner + internal/runtime/bootverify.composition_connect_validation
+          rule: |
+            Receiver input pins may declare an explicit instance-resolution
+            contract under `resolution:{mode,...}`. This receiver-side contract
+            is the canonical authoring owner for new instance routing semantics;
+            route planning consumes it as typed contract data and lowers it into
+            ConnectRoutePlan evidence before EventBus delivery. Runtime must not
+            infer resolution authority from producer emit targets, live
+            subscribers, delivery rows, replay rows, route-table lookup before a
+            selected target, or handler lookup.
+
+            PR1 spec-locks every approved mode but only makes
+            `resolution.mode: create` runnable. All other locked modes are
+            recognized by contracts and verifier and fail closed as
+            design-locked/not-runnable until their implementation slices land.
+            Static root ingress, parent-connect static delivery, and
+            harness-injected inputs remain existing #1807 input-source / connect
+            behavior; they are not instance-resolution runtime modes.
+          authoring_shape: |
+            pins:
+              inputs:
+                events:
+                  - name: validation_requested
+                    event: validation.requested
+                    resolution:
+                      mode: create
+                      instance_key:
+                        mint: uuid
+                        as: validation_case_id
+                    carries:
+                      validation_case_id:
+                        from: instance.key.validation_case_id
+                        type: uuid
+          modes:
+            create:
+              status: runnable_in_1835_pr1
+              contract: >
+                `mode: create` mints the receiver template instance key at the
+                boundary, carries that key as `instance.key.<as>`, creates the
+                receiver instance if absent, and reuses the same keyed instance
+                on replay or duplicate delivery. The receiver flow MUST be
+                `mode: template`, MUST have a single `instance.by` field in this
+                slice, and `instance_key.as` MUST equal that field. The input pin
+                MUST declare a matching `carries.<field>.from:
+                instance.key.<field>` entry so downstream route rendering and
+                lifecycle activation consume the same canonical key material.
+              mint:
+                uuid: >
+                  Deterministically mints a UUID-shaped instance key from the
+                  source event id plus receiver flow, receiver pin, and
+                  `instance_key.as`. It is replay-stable: the same committed
+                  event resolves to the same receiver instance and does not
+                  create another instance.
+                event_id: >
+                  Carries the source event id directly as the receiver instance
+                  key. The source event id must be present and non-empty.
+              runtime_policy: >
+                The lowered plan internally uses create/reuse lifecycle
+                semantics for this new resolution surface. Legacy
+                `instance.on_missing/on_conflict` remains authoritative only for
+                legacy addressless template instance-key composition; it does
+                not override `resolution.mode:create`.
+              fail_closed:
+              - missing, empty, or unsupported mint
+              - missing instance_key.as
+              - instance_key.as not matching the receiver single instance.by
+              - missing carries.<as>.from: instance.key.<as>
+              - type-incompatible carried key
+              - combined legacy input address
+              - combined connect.using.instance or connect.map
+              - delivery topology other than one
+              - unavailable template lifecycle activator
+            select:
+              status: spec_locked_not_runnable_in_1835_pr1
+              contract: >
+                Select routes to exactly one existing receiver instance by an
+                explicit instance key. Missing or ambiguous target is invalid;
+                this mode never creates an instance.
+            select-or-create:
+              status: spec_locked_not_runnable_in_1835_pr1
+              contract: >
+                Select-or-create resolves by explicit key and atomically creates
+                exactly one receiver instance when absent. Concurrent deliveries
+                for the same key must converge on one instance or fail closed.
+            fan-in:
+              status: spec_locked_not_runnable_in_1835_pr1
+              contract: >
+                Fan-in routes many source deliveries into one receiver instance
+                or aggregation context. `aggregation: stream|barrier` is the
+                locked sub-semantics selector. Stream delivers each accepted
+                event into the receiver context; barrier waits for the declared
+                close condition/window before releasing an aggregate result.
+            fan-out:
+              status: spec_locked_not_runnable_in_1835_pr1
+              contract: >
+                Fan-out routes one input event to a concrete set of receiver
+                instances selected by the route plan. Producer-authored
+                `target:{flow,match}` and broadcast rescue remain invalid for
+                common package topology; the route plan owns target-set
+                materialization.
+            reply:
+              status: spec_locked_not_runnable_in_1835_pr1
+              contract: >
+                Reply routes a response back to the originating request
+                instance. By default the platform mints and threads origin
+                instance identity plus request correlation from stable request
+                event identity. An explicit correlation override is reserved for
+                provider-supplied request/idempotency ids.
+          legacy_same_concept_seams:
+            non_authoritative_for_new_resolution_surface:
+            - flow.instance.by/on_missing/on_conflict as authoring shorthand for `resolution`
+            - TemplateInstanceContract as a standalone resolution authoring surface
+            - connect.using.instance for receiver-declared `resolution`
+            - route planning reconstructed from producer output key/carries when `resolution` is declared
+            - templateInstanceLifecycleOwner as a separate syntax interpreter
+            - create_flow_instance action syntax
+            - select_entity / select_or_create_entity
+            - producer target.flow / target.match / broadcast:true
+            migration_note: >
+              These seams remain only as legacy or adjacent owners until #1738
+              and #1827 retire old routing mechanisms after the new resolution
+              model is proven. They may be consumed as implementation substrate
+              when explicitly named here, but they do not own the new
+              `resolution:{mode,...}` semantics.
+          proof_obligations:
+          - contracts decode every locked mode and reject unknown resolution fields fail-closed
+          - bootverify accepts valid create resolution and rejects non-create modes as not runnable in this slice
+          - route-plan lowering records create mode, mint kind, carried `as` field, create/reuse lifecycle policy, and does not require producer output key/carries
+          - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
+          - downstream receiver routes can render the carried minted instance key from activation variables
+          - same committed event replay reuses persisted delivery route/scope and does not create another receiver instance
         implementation_slice_1546:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings + internal/runtime/bus.connectRoutePlanResolver

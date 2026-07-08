@@ -61,6 +61,84 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 	}
 }
 
+func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
+	root := writeCreateResolutionCompositionConnectFixture(t, createResolutionCompositionFixtureOptions{
+		mode:         runtimecontracts.FlowInputResolutionModeCreate,
+		mint:         runtimecontracts.FlowInputResolutionMintUUID,
+		includeCarry: true,
+	})
+	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Errors(), "composition_connect_validation", "") {
+		t.Fatalf("unexpected composition_connect_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "template_instance_validation", "") {
+		t.Fatalf("unexpected template_instance_validation error: %#v", report.Errors())
+	}
+	if reportContains(report.Errors(), "input_pin_wiring", "validation.requested") {
+		t.Fatalf("parent connect should satisfy create-resolution input pin wiring proof, got %#v", report.Errors())
+	}
+}
+
+func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		opts createResolutionCompositionFixtureOptions
+		want string
+	}{
+		{
+			name: "non-create modes are design-locked but not runnable",
+			opts: createResolutionCompositionFixtureOptions{
+				mode:         runtimecontracts.FlowInputResolutionModeSelect,
+				mint:         runtimecontracts.FlowInputResolutionMintUUID,
+				includeCarry: true,
+			},
+			want: "instance_resolution_unimplemented",
+		},
+		{
+			name: "invalid mint",
+			opts: createResolutionCompositionFixtureOptions{
+				mode:         runtimecontracts.FlowInputResolutionModeCreate,
+				mint:         "random",
+				includeCarry: true,
+			},
+			want: "mint \"random\" must be uuid or event_id",
+		},
+		{
+			name: "missing carried instance key",
+			opts: createResolutionCompositionFixtureOptions{
+				mode: runtimecontracts.FlowInputResolutionModeCreate,
+				mint: runtimecontracts.FlowInputResolutionMintUUID,
+			},
+			want: "must carry validation_case_id from instance.key.validation_case_id",
+		},
+		{
+			name: "legacy connect using instance is incompatible",
+			opts: createResolutionCompositionFixtureOptions{
+				mode:          runtimecontracts.FlowInputResolutionModeCreate,
+				mint:          runtimecontracts.FlowInputResolutionMintUUID,
+				includeCarry:  true,
+				usingInstance: true,
+			},
+			want: "connect.using.instance is incompatible with input pin resolution",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeCreateResolutionCompositionConnectFixture(t, tc.opts)
+			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
 func TestRun_AllowsCompositeTemplateInstanceKeyCompositionConnectWithoutAddress(t *testing.T) {
 	root := writeCompositionConnectBootverifyFixture(t, compositionConnectFixtureOptions{
 		consumerMode:                   "template",
@@ -1001,6 +1079,124 @@ deployment:
     _unused_reason: composition connect topology proof field
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
+}
+
+type createResolutionCompositionFixtureOptions struct {
+	mode          string
+	mint          string
+	includeCarry  bool
+	usingInstance bool
+}
+
+func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createResolutionCompositionFixtureOptions) string {
+	t.Helper()
+	root := t.TempDir()
+	usingBlock := ""
+	if opts.usingInstance {
+		usingBlock = `
+    using:
+      instance:
+        source: validation_case_id
+        target: validation_case_id`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: create-resolution-composition-connect
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: validator
+    flow: validator
+    mode: template
+connect:
+  - from: producer.validation_requested
+    to: validator.validation_requested
+    delivery: one`+usingBlock+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: create-resolution-composition-connect\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "schema.yaml"), `
+name: producer
+mode: static
+pins:
+  outputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "entities.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
+validation.triggered:
+  candidate: string
+validation.requested:
+  candidate: string
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), `
+producer-node:
+  id: producer-node
+  execution_type: system_node
+  subscribes_to: [validation.triggered]
+  event_handlers:
+    validation.triggered:
+      emit:
+        event: validation.requested
+        fields:
+          candidate: payload.candidate
+`)
+	carriesBlock := ""
+	if opts.includeCarry {
+		carriesBlock = `
+        carries:
+          validation_case_id:
+            from: instance.key.validation_case_id
+            type: uuid`
+	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "schema.yaml"), `
+name: validator
+mode: template
+instance:
+  by: validation_case_id
+  on_missing: reject
+  on_conflict: reject
+pins:
+  inputs:
+    events:
+      - name: validation_requested
+        event: validation.requested
+        resolution:
+          mode: `+opts.mode+`
+          instance_key:
+            mint: `+opts.mint+`
+            as: validation_case_id`+carriesBlock+`
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "policy.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "events.yaml"), `
+validation.requested:
+  candidate: string
+  validation_case_id: uuid
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "entities.yaml"), `
+validation_case:
+  validation_case_id:
+    type: uuid
+`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "validator", "nodes.yaml"), `
+validator-node:
+  id: validator-node-{validation_case_id}
+  execution_type: system_node
+  event_handlers:
+    validation.requested: {}
+`)
+	return root
 }
 
 func writeCompositionConnectProducerFlow(t *testing.T, root string, opts compositionConnectFixtureOptions) {
