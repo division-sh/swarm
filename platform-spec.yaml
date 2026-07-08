@@ -14737,15 +14737,11 @@ cli_specification:
           log_level: >
             `--log-level`, config-file `log_level`, and universal/repeatable verbosity are not color controls.
             Their source-of-truth disposition is governed by cli_specification.foundations.cli_logging_policy.
-        consumers:
-        - version
-        - verify
-        - health
-        - runs
-        - status
-        - conversations_list
-        - conversation_view
-        - conversation_turn
+        consumer_registry: >
+          Current color-policy consumers are exactly
+          `cli_specification.foundations.output_contract.command_support.output_conformance_registry.rows`
+          entries classified as `shared_output`. Do not maintain a second consumer list here; the registry is the
+          living current-state owner.
       stdout_stderr_boundary: >
         Successful load-bearing output renders only to stdout. Errors, warnings, retired-namespace migration text,
         validation failures, auth failures, transport/API failures, and diagnostics render to stderr under
@@ -14889,137 +14885,481 @@ cli_specification:
           All implemented, non-retired CLI v2 command rows are output-mode eligible unless this contract or their
           command row declares an exception. Eligibility means a later implementation slice must either consume the
           shared output owner for the row or explicitly split the row before adding output-mode behavior.
-        currently_implemented_consumers:
-        - version
-        - verify
-        - runs
-        - status
-        - trace
-        - mailbox_list
-        - mailbox_view
-        - mailbox_approve
-        - mailbox_reject
-        - mailbox_defer
-        - health
-        - control_pause
-        - control_continue
-        - control_stop
-        - control_nuke
-        - agents_list
-        - agent_view
-        - agent_restart
-        - agent_replay
-        - agent_replay_backlog
-        - agent_directive
-        - events_list
-        - events_follow
-        - event_view
-        - event_replay
-        - event_publish
-        - logs
-        - incidents
-        - entities_list
-        - entity_view
-        - entity_aggregate
-        - conversations_list
-        - conversation_view
-        - conversation_turn
-        - run
-        implemented_output_mode_first_slice:
-          implemented_by: '#920'
-          failure_class: runtime.cli.v2.output_mode_renderer_first_slice_diagnostic_local_conversation_read_consumers
-          owner: cmd/swarm shared output-mode renderer
+        output_conformance_registry:
+          promoted_by: '#1821'
+          canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.command_support.output_conformance_registry
+          implementation_owner: cmd/swarm/cli_output_conformance_registry_test.go
           status: implemented
           rule: >
-            These currently implemented consumers accept `--json` and `--quiet` through the shared output-mode
-            owner. `--json` renders exactly one JSON document plus newline using canonical local/API result structs.
-            `--quiet` renders only the declared load-bearing values below. `--json --quiet` fails with CLI validation
-            exit 2 before local contract verification, API calls, runtime boot, or other side effects.
-          consumers:
+            This registry is the single living current-state authority for CLI command output-route conformance.
+            Every visible command surface must be classified as exactly one of `shared_output`, `exception`, or
+            `split`. The registry is a ratchet, not a migration: adding a visible command without a row fails
+            closed, new commands default to `shared_output`, and any command whose output would need to change to
+            pass must stay `split` with an owner issue until that owner lands.
+          classification_values:
+            shared_output: >
+              The command consumes the shared `cmd/swarm` output-mode/color owner for successful output. It accepts
+              `--json`, `--quiet`, and `--no-color` through the shared helper path.
+            exception: >
+              The command is an explicit help/process/retired-style surface that does not consume output modes and
+              is governed by an exception rule.
+            split: >
+              The command is implemented, but shared-output route-through, table rendering, argument formatting,
+              ID resolution, vocabulary, or another output class remains tracked by a named owner issue. Split rows
+              are removal candidates; they must shrink as owner children land.
+          ratchet_rules:
+            full_catalog_coverage: >
+              The conformance guard must cover every implemented, non-retired command_catalog row and every visible
+              Cobra command path. Unclassified rows fail closed.
+            new_command_default: >
+              New command paths must be classified as `shared_output` unless an explicit review decision adds a
+              narrower exception or split owner. Exception and split growth is reviewable churn, not a silent default.
+            split_owner_required: >
+              A split row must cite a real owner issue. A missing canonical owner is classified as split; the guard
+              must not require a missing formatter/resolver by implication.
+            no_output_byte_changes: >
+              This registry slice does not change command output bytes. A command that needs byte changes to pass
+              remains split and is migrated under its owner issue.
+          rows:
+            root:
+              command: swarm
+              classification: exception
+              exception_rule: root_help_completion
+            help:
+              command: swarm help
+              classification: exception
+              exception_rule: root_help_completion
+            completion:
+              command: swarm completion
+              classification: exception
+              exception_rule: root_help_completion
             version:
+              command: swarm version
+              classification: shared_output
               fact_owner: local binary metadata from injected release metadata, Go build info, and embedded platform-spec version; /v1/rpc health.check when --server is supplied
               json_shape: local binary metadata object with binary_version, module_version, platform_version, commit, built, go_version, goos, and goarch; with --server includes a server health.check object
               quiet_values:
               - binary_version
               - server_bundle_fingerprint when --server is supplied
+            doctor:
+              command: swarm doctor
+              classification: split
+              owner_issue: '#1712'
+              reason: doctor has typed diagnostic output and JSON mode, but has not been migrated to the shared successful-output mode owner.
+            test:
+              command: swarm test
+              classification: split
+              owner_issue: '#1712'
+              reason: deterministic scenario-runner output is implemented, but output-mode route-through remains part of the CLI output umbrella.
+            workspace:
+              command: swarm workspace
+              classification: exception
+              exception_rule: group_help
+            workspace_build:
+              command: swarm workspace build
+              classification: split
+              owner_issue: '#1712'
+              reason: workspace image build emits process-progress text and has no shared output-mode owner yet.
+            secrets:
+              command: swarm secrets
+              classification: exception
+              exception_rule: group_help
+            secrets_set:
+              command: swarm secrets set
+              classification: split
+              owner_issue: '#1712'
+              reason: local secret metadata output has not been migrated to the shared output-mode owner.
+            secrets_list:
+              command: swarm secrets list
+              classification: split
+              owner_issue: '#1814'
+              reason: secret list table/default text remains on the table-renderer migration path.
+            secrets_check:
+              command: swarm secrets check
+              classification: split
+              owner_issue: '#1712'
+              reason: manual JSON/default text remains outside the shared output-mode owner.
+            secrets_rm:
+              command: swarm secrets rm
+              classification: split
+              owner_issue: '#1712'
+              reason: local secret metadata output has not been migrated to the shared output-mode owner.
+            connections:
+              command: swarm connections
+              classification: exception
+              exception_rule: group_help
+            connections_connect:
+              command: swarm connections connect
+              classification: split
+              owner_issue: '#1712'
+              reason: managed-credential command output has not been migrated to the shared output-mode owner.
+            connections_callback:
+              command: swarm connections callback
+              classification: split
+              owner_issue: '#1712'
+              reason: managed-credential command output has not been migrated to the shared output-mode owner.
+            connections_status:
+              command: swarm connections status
+              classification: split
+              owner_issue: '#1814'
+              reason: status table/default text remains on the table-renderer migration path.
+            connections_disconnect:
+              command: swarm connections disconnect
+              classification: split
+              owner_issue: '#1712'
+              reason: managed-credential command output has not been migrated to the shared output-mode owner.
+            serve:
+              command: swarm serve
+              classification: exception
+              exception_rule: serve_daemon_process
+            run_group:
+              command: swarm run # live run command group help
+              classification: exception
+              exception_rule: group_help
+            run:
+              command: swarm run start
+              classification: split
+              owner_issue: '#1712'
+              reason: run start foreground/follow output is outside this zero-byte-change registry slice.
             verify:
+              command: swarm verify
+              classification: shared_output
               fact_owner: local contract verification
               json_shape: >
                 object with ok, contracts, workspace_backend, errors, warnings, and lint_evidence. `errors`, `warnings`,
                 and `lint_evidence` are arrays of structured boot verification findings with canonical `check_id`,
                 `severity`, `location`, and `message` fields plus optional additive `remediation` and `evidence` fields.
-                Existing fields are stable and MUST NOT be renamed; `message` remains the problem text. `--json` renders this same object for structured boot
-                verification failures with `ok: false` instead of requiring consumers to parse human stderr.
+                Existing fields are stable and MUST NOT be renamed; `message` remains the problem text. `--json` renders
+                this same object for structured boot verification failures with `ok: false` instead of requiring consumers
+                to parse human stderr.
               human_text_streams:
                 stdout: "successful load-bearing `verify ok: contracts=...` result only"
                 stderr: "analyzer diagnostics and advisory findings rendered as typed diagnostic lists with `[BLOCKER]`, `[WARN]`, or `[INFO]`; single command-outcome failures still use `ERROR:`/`WARNING:`"
               quiet_values:
               - ok
-            health:
-              fact_owner: /v1/rpc health.check
-              json_shape: health.check result object
-              quiet_values:
-              - healthy when alive, ready, db_ok, and runtime_ok are all true; unhealthy otherwise
             runs:
+              command: swarm run list
+              classification: shared_output
               fact_owner: /v1/rpc run.list
               json_shape: run.list result object
               quiet_values:
               - run_id, one per returned run, in API result order
             status:
+              command: swarm run status
+              classification: shared_output
               fact_owner: /v1/rpc run.diagnose; /v1/rpc run.get when --no-diagnose is supplied
               json_shape: run.diagnose result object, or run.get result object for --no-diagnose
               quiet_values:
               - run_id and operational_state for diagnose mode
               - run_id and run status for --no-diagnose mode
+            trace:
+              command: swarm run trace
+              classification: split
+              owner_issue: '#1814'
+              reason: trace table/follow rendering remains on the shared table/display migration path.
+            run_fork:
+              command: swarm run fork
+              classification: shared_output
+              fact_owner: /v1/rpc run.fork
+              json_shape: run.fork result object
+              quiet_values:
+              - forked run_id
+            mailbox:
+              command: swarm mailbox
+              classification: exception
+              exception_rule: group_help
+            mailbox_list:
+              command: swarm mailbox list
+              classification: split
+              owner_issue: '#1712'
+              reason: mailbox discovery output is implemented but not routed through the shared output-mode owner.
+            mailbox_view:
+              command: swarm mailbox view
+              classification: split
+              owner_issue: '#1712'
+              reason: mailbox detail output is implemented but not routed through the shared output-mode owner.
+            mailbox_approve:
+              command: swarm mailbox approve
+              classification: split
+              owner_issue: '#1712'
+              reason: mailbox decision output is implemented but not routed through the shared output-mode owner.
+            mailbox_reject:
+              command: swarm mailbox reject
+              classification: split
+              owner_issue: '#1712'
+              reason: mailbox decision output is implemented but not routed through the shared output-mode owner.
+            mailbox_defer:
+              command: swarm mailbox defer
+              classification: split
+              owner_issue: '#1712'
+              reason: mailbox decision output is implemented but not routed through the shared output-mode owner.
+            health:
+              command: swarm health
+              classification: shared_output
+              fact_owner: /v1/rpc health.check
+              json_shape: health.check result object
+              quiet_values:
+              - healthy when alive, ready, db_ok, and runtime_ok are all true; unhealthy otherwise
+            control:
+              command: swarm control
+              classification: exception
+              exception_rule: group_help
+            control_pause:
+              command: swarm control pause
+              classification: split
+              owner_issue: '#1712'
+              reason: run-control mutation output is implemented but not routed through the shared output-mode owner.
+            control_continue:
+              command: swarm control continue
+              classification: split
+              owner_issue: '#1712'
+              reason: run-control mutation output is implemented but not routed through the shared output-mode owner.
+            control_stop:
+              command: swarm control stop
+              classification: split
+              owner_issue: '#1712'
+              reason: run-control mutation output is implemented but not routed through the shared output-mode owner.
+            control_nuke:
+              command: swarm control nuke
+              classification: split
+              owner_issue: '#1712'
+              reason: destructive control output is implemented but not routed through the shared output-mode owner.
+            agent:
+              command: swarm agent
+              classification: exception
+              exception_rule: group_help
+            agents_list:
+              command: swarm agent list
+              classification: split
+              owner_issue: '#1814'
+              reason: agent list table/default text remains on the table-renderer migration path.
+            agent_view:
+              command: swarm agent view
+              classification: split
+              owner_issue: '#1817'
+              reason: agent detail vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+            agent_diagnose:
+              command: swarm agent diagnose
+              classification: split
+              owner_issue: '#1817'
+              reason: agent diagnostic vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+            agent_deliveries:
+              command: swarm agent deliveries
+              classification: split
+              owner_issue: '#1817'
+              reason: agent delivery detail vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+            agent_restart:
+              command: swarm agent restart
+              classification: split
+              owner_issue: '#1712'
+              reason: agent mutation output is implemented but not routed through the shared output-mode owner.
+            agent_replay:
+              command: swarm agent replay
+              classification: split
+              owner_issue: '#1712'
+              reason: agent mutation output is implemented but not routed through the shared output-mode owner.
+            agent_replay_backlog:
+              command: swarm agent replay-backlog
+              classification: split
+              owner_issue: '#1712'
+              reason: agent mutation output is implemented but not routed through the shared output-mode owner.
+            agent_directive:
+              command: swarm agent directive
+              classification: split
+              owner_issue: '#1712'
+              reason: agent directive output is implemented but not routed through the shared output-mode owner.
+            event:
+              command: swarm event
+              classification: exception
+              exception_rule: group_help
+            events_list:
+              command: swarm event list
+              classification: split
+              owner_issue: '#1814'
+              reason: event list table/default text remains on the table-renderer migration path.
+            events_follow:
+              command: swarm event follow
+              classification: split
+              owner_issue: '#1712'
+              reason: event follow stream output is implemented but not routed through the shared output-mode owner.
+            event_view:
+              command: swarm event view
+              classification: split
+              owner_issue: '#1814'
+              reason: event detail text remains on the display-policy migration path.
+            event_replay:
+              command: swarm event replay
+              classification: split
+              owner_issue: '#1712'
+              reason: event replay output is implemented but not routed through the shared output-mode owner.
+            event_publish:
+              command: swarm event publish
+              classification: split
+              owner_issue: '#1712'
+              reason: event publish output is implemented but not routed through the shared output-mode owner.
+            conversation:
+              command: swarm conversation
+              classification: exception
+              exception_rule: group_help
             conversations_list:
+              command: swarm conversation list
+              classification: shared_output
               fact_owner: /v1/rpc conversation.list
               json_shape: conversation.list result object
               quiet_values:
               - session_id, one per returned conversation, in API result order
             conversation_view:
+              command: swarm conversation view
+              classification: shared_output
               fact_owner: /v1/rpc conversation.get
               json_shape: conversation.get result object
               quiet_values:
               - session_id
             conversation_turn:
+              command: swarm conversation turn
+              classification: shared_output
               fact_owner: /v1/rpc conversation.get_turn
               json_shape: conversation.get_turn result object
               quiet_values:
               - session_id, turn_index, and outcome/status summary
-        implemented_color_policy_first_slice:
-          implemented_by: '#931'
-          failure_class: runtime.cli.v2.output_color_precedence_for_shared_renderer_consumers
-          owner: cmd/swarm shared output-mode/color policy renderer
-          status: implemented
-          rule: >
-            These consumers accept `--no-color` and consume non-empty `NO_COLOR` through the shared renderer owner.
-            The policy applies only to default human text. Machine-readable JSON/quiet output and error rendering
-            are not rewritten by the color policy. Unsupported surfaces remain fail-closed before side effects.
-          consumers:
-          - version
-          - verify
-          - health
-          - runs
-          - status
-          - conversations_list
-          - conversation_view
-          - conversation_turn
-        implemented_consumer_residuals:
-          logs: >
-            `swarm logs` is implemented for default-text snapshot and follow in #876 and is no longer an absent
-            command row. JSON/quiet/shared-renderer behavior remains governed by the output_contract and may be
-            implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #876 does not add
-            command-local output-mode flags or semantics.
-          incidents: >
-            `swarm incidents` is implemented for default-text read-only listing in #886 and is no longer an absent
-            command row. JSON/quiet/shared-renderer behavior remains governed by the output_contract and may be
-            implemented by the separate #794/#848/#735 output-mode/shared-renderer tail; #886 does not add
-            command-local output-mode flags or semantics.
-          entities: >
-            `swarm entity list`, `swarm entity view`, and `swarm entity aggregate` are implemented for
-            default-text read-only entity discovery in #892 and are no longer absent command rows. JSON/quiet/shared-renderer
-            behavior remains governed by the output_contract and may be implemented by the separate #794/#848/#735
-            output-mode/shared-renderer tail; #892 does not add command-local output-mode flags or semantics.
+            bundle:
+              command: swarm bundle
+              classification: exception
+              exception_rule: group_help
+            bundle_list:
+              command: swarm bundle list
+              classification: shared_output
+              fact_owner: local bundle inventory
+              json_shape: bundle list result object
+              quiet_values:
+              - bundle_hash, one per returned bundle
+            bundle_show:
+              command: swarm bundle show
+              classification: shared_output
+              fact_owner: local bundle inventory
+              json_shape: bundle detail result object
+              quiet_values:
+              - bundle_hash
+            bundle_agents:
+              command: swarm bundle agents
+              classification: shared_output
+              fact_owner: local bundle inventory
+              json_shape: bundle agents result object
+              quiet_values:
+              - agent id, one per returned agent
+            bundle_build:
+              command: swarm bundle build
+              classification: split
+              owner_issue: '#1712'
+              reason: bundle build report output is not yet routed through the shared output-mode owner.
+            bundle_register:
+              command: swarm bundle register
+              classification: shared_output
+              fact_owner: local bundle catalog registration
+              json_shape: bundle registration result object
+              quiet_values:
+              - bundle_hash
+            bundle_delete:
+              command: swarm bundle delete
+              classification: shared_output
+              fact_owner: local bundle catalog deletion
+              json_shape: bundle delete result object
+              quiet_values:
+              - bundle_hash
+            forkchat:
+              command: swarm forkchat
+              classification: exception
+              exception_rule: group_help
+            forkchat_new:
+              command: swarm forkchat new
+              classification: shared_output
+              fact_owner: /v1/rpc conversation.fork and optional /v1/rpc conversation.fork_chat
+              json_shape: forkchat new result object
+              quiet_values:
+              - fork_id
+            forkchat_resume:
+              command: swarm forkchat resume
+              classification: shared_output
+              fact_owner: /v1/rpc conversation.fork_chat
+              json_shape: forkchat resume result object
+              quiet_values:
+              - turn_id
+            forkchat_list:
+              command: swarm forkchat list
+              classification: shared_output
+              fact_owner: /v1/rpc conversation.fork_list
+              json_shape: forkchat list result object
+              quiet_values:
+              - fork_id, one per returned fork
+            forkchat_view:
+              command: swarm forkchat view
+              classification: shared_output
+              fact_owner: /v1/rpc conversation.fork_view
+              json_shape: forkchat view result object
+              quiet_values:
+              - fork_id
+            forkchat_delete:
+              command: swarm forkchat delete
+              classification: shared_output
+              fact_owner: /v1/rpc conversation.fork_delete
+              json_shape: forkchat delete result object
+              quiet_values:
+              - fork_id
+            entity:
+              command: swarm entity
+              classification: exception
+              exception_rule: group_help
+            entities_list:
+              command: swarm entity list
+              classification: split
+              owner_issue: '#1814'
+              reason: entity list table/default text remains on the table-renderer migration path.
+            entity_view:
+              command: swarm entity view
+              classification: split
+              owner_issue: '#1814'
+              reason: entity detail text remains on the display-policy migration path.
+            entity_aggregate:
+              command: swarm entity aggregate
+              classification: split
+              owner_issue: '#1814'
+              reason: entity aggregate table/default text remains on the table-renderer migration path.
+            logs:
+              command: swarm logs
+              classification: split
+              owner_issue: '#1819'
+              reason: logs formatting remains on the dedicated logs-formatting owner.
+            incidents:
+              command: swarm incidents
+              classification: split
+              owner_issue: '#1814'
+              reason: incident table/default text remains on the table-renderer migration path.
+            context:
+              command: swarm context
+              classification: exception
+              exception_rule: group_help
+            context_current:
+              command: swarm context current
+              classification: split
+              owner_issue: '#1712'
+              reason: context output has manual JSON/default text and no shared output-mode owner yet.
+            context_list:
+              command: swarm context list
+              classification: split
+              owner_issue: '#1814'
+              reason: context list output remains on the table/display migration path.
+            context_prune:
+              command: swarm context prune
+              classification: split
+              owner_issue: '#1712'
+              reason: context prune output has manual JSON/default text and no shared output-mode owner yet.
+            describe:
+              command: swarm describe
+              classification: shared_output
+              fact_owner: local authoring view
+              json_shape: describe authoring view result object
+              quiet_values:
+              - flow ids and summary values declared by the command implementation
       exception_rules:
         root_help_completion:
           commands:
@@ -15030,6 +15370,11 @@ cli_specification:
             Root help, help topics, and shell completion generation are default-text/script surfaces. They do not
             consume JSON/quiet output modes unless a later tracked spec row explicitly promotes that behavior.
             Unsupported output-mode flags on these surfaces fail before side effects with CLI validation exit 2.
+        group_help:
+          rule: >
+            Group-only command paths that exist to list child commands are default-text help/navigation surfaces.
+            They do not consume JSON/quiet output modes unless a later tracked command row explicitly promotes that
+            behavior. Their child commands are classified independently in the output conformance registry.
         serve_daemon_process:
           commands:
           - serve
