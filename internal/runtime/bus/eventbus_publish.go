@@ -1627,7 +1627,11 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
-	plan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ctx), evt, false)
+	ictx, evt, err := admitEventForPublish(ctx, evt, time.Now(), "")
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	plan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ictx), evt, false)
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}

@@ -968,6 +968,43 @@ func TestEventBusPublish_ConnectRoutePlanCreateResolutionMintsUUIDAndCarriesInst
 	}
 }
 
+func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanCreateResolutionAdmitsEmptyEventID(t *testing.T) {
+	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintUUID)
+	store := &connectRoutePlanLifecycleStore{
+		connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
+			targetRouteMemoryStore: newTargetRouteMemoryStore(),
+		},
+	}
+	eb, err := NewEventBusWithOptions(store, EventBusOptions{
+		ContractBundle:            source,
+		TemplateInstanceActivator: store.Activate,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	store.bus = eb
+	evt := eventtest.RootIngress("",
+		events.EventType("producer/validation.requested"), "", "", json.RawMessage(`{"candidate":"acct-1"}`), 0, "", "", events.EventEnvelope{}, time.Time{})
+
+	preflight, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
+	if err != nil {
+		t.Fatalf("CheckPublishRecipientPlan: %v", err)
+	}
+	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
+		t.Fatalf("preflight failure/routes = %q/%#v, want one admitted preview route", preflight.TargetFailure, preflight.DeliveryRoutes)
+	}
+	if got := len(store.activations); got != 0 {
+		t.Fatalf("preflight activations = %d, want 0", got)
+	}
+	previewTarget := preflight.DeliveryRoutes[0].Target
+	if previewTarget.FlowID != "validator" || previewTarget.FlowInstance == "" || previewTarget.EntityID == "" {
+		t.Fatalf("preview target = %#v, want minted validator route from admitted event id", previewTarget)
+	}
+	if routes := store.routes; len(routes) != 0 {
+		t.Fatalf("preflight persisted routes = %#v, want none", routes)
+	}
+}
+
 func TestEventBusPublish_ConnectRoutePlanCreateResolutionCanMintFromEventID(t *testing.T) {
 	source := connectRoutePlanCreateResolutionSource(t, runtimecontracts.FlowInputResolutionMintEventID)
 	store := &connectRoutePlanLifecycleStore{
