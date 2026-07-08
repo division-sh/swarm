@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ const (
 	rawSQLConstructionBoundary        rawSQLBoundaryClassification = "construction_boundary"
 	rawSQLDashboardDigestReadBoundary rawSQLBoundaryClassification = "dashboard_digest_read_boundary"
 	rawSQLRuntimeUnitOfWorkBoundary   rawSQLBoundaryClassification = "runtime_unit_of_work_boundary"
+	rawSQLOptionalProductBoundary     rawSQLBoundaryClassification = "optional_product_boundary"
 	rawSQLWorkspaceProcessBoundary    rawSQLBoundaryClassification = "workspace_process_boundary"
 	rawSQLTestSupportBoundary         rawSQLBoundaryClassification = "test_support_boundary"
 )
@@ -63,6 +65,29 @@ func unclassifiedProducer(ctx context.Context, db *sql.DB) error {
 	}
 }
 
+func TestSelectedRawSQLBoundaryRejectsUnclassifiedConcreteStoreFixture(t *testing.T) {
+	matches := rawSQLBoundaryMatchesFromSources(map[string]string{
+		"internal/runtime/unclassified_concrete_store_producer.go": `package runtime
+
+import (
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store"
+)
+
+func unclassifiedConcreteStoreProducer(pg *store.PostgresStore) *pipeline.PipelineCoordinator {
+	return pipeline.NewPipelineCoordinator(nil, pg.DB)
+}
+`,
+	})
+	failures := classifyRawSQLBoundaryMatches(matches, selectedRawSQLBoundaryLedger())
+	if len(failures) == 0 {
+		t.Fatal("expected unclassified concrete store producer fixture to fail")
+	}
+	if !strings.Contains(strings.Join(failures, "\n"), "internal/runtime/unclassified_concrete_store_producer.go") {
+		t.Fatalf("expected failure to name fixture path, got:\n%s", strings.Join(failures, "\n"))
+	}
+}
+
 func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 	return map[string]rawSQLBoundaryEntry{
 		"cmd/swarm/main.go": {
@@ -74,6 +99,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLConstructionBoundary,
 			Issue:          1783,
 			Reason:         "selected facade may expose named construction-time SQL exceptions such as workspace DB and Postgres-only RuntimeSQLDB",
+		},
+		"cmd/swarm/store_roles.go": {
+			Classification: rawSQLConstructionBoundary,
+			Issue:          1783,
+			Reason:         "compile-time selected store role assertions are construction/model proof, not producer-side concrete store capability authority",
 		},
 		"internal/dashboard/server/agents_sql.go": {
 			Classification: rawSQLDashboardDigestReadBoundary,
@@ -164,6 +194,21 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,
 			Reason:         "pipeline runtime interface names the selected pipeline mutation owner boundary",
+		},
+		"internal/runtime/runforkexecution/activation_gate.go": {
+			Classification: rawSQLOptionalProductBoundary,
+			Issue:          1386,
+			Reason:         "selected-contract run.fork activation is an optional Postgres-backed product seam; concrete store use remains split under #1386 until promoted behind selected owners",
+		},
+		"internal/runtime/runforkexecution/execution.go": {
+			Classification: rawSQLOptionalProductBoundary,
+			Issue:          1386,
+			Reason:         "selected-contract run.fork execution constructs a fork-local runtime pipeline from the Postgres store DB; this is an explicit optional product split, not backend-neutral selected capability authority",
+		},
+		"internal/runtime/runforkexecution/runtime_container.go": {
+			Classification: rawSQLOptionalProductBoundary,
+			Issue:          1386,
+			Reason:         "selected-contract fork-local runtime container uses the Postgres store DB for optional run.fork logging/pipeline support and remains classified under #1386",
 		},
 		"internal/runtime/pipeline/runtime_support.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
@@ -275,10 +320,12 @@ func collectRawSQLBoundaryMatches(root string) (map[string][]string, error) {
 }
 
 func rawSQLBoundaryMatchesFromSources(sources map[string]string) map[string][]string {
-	patterns := []string{
+	literalPatterns := []string{
 		`"database/sql"`,
 		"*sql.DB",
 		"*sql.Tx",
+		"*store.PostgresStore",
+		"*store.SQLiteRuntimeStore",
 		"QueryContext(",
 		"QueryRowContext(",
 		"ExecContext(",
@@ -289,11 +336,19 @@ func rawSQLBoundaryMatchesFromSources(sources map[string]string) map[string][]st
 		"RunRuntimeMutation",
 		"RunPipelineMutation",
 	}
+	regexPatterns := map[string]*regexp.Regexp{
+		".DB": regexp.MustCompile(`\.DB\b`),
+	}
 	out := map[string][]string{}
 	for path, src := range sources {
-		for _, pattern := range patterns {
+		for _, pattern := range literalPatterns {
 			if strings.Contains(src, pattern) {
 				out[path] = append(out[path], pattern)
+			}
+		}
+		for label, pattern := range regexPatterns {
+			if pattern.MatchString(src) {
+				out[path] = append(out[path], label)
 			}
 		}
 		if len(out[path]) > 0 {
