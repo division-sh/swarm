@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -107,6 +108,9 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+				if hasCtxDeadline && errors.Is(attemptErr, context.DeadlineExceeded) && !time.Now().Before(ctxDeadline) {
+					return context.DeadlineExceeded
+				}
 				return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 			}
 			return nil
@@ -114,6 +118,9 @@ func (s *SQLiteRuntimeStore) runRuntimeMutation(ctx context.Context, label strin
 		if attemptErr != nil {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if hasCtxDeadline && errors.Is(attemptErr, context.DeadlineExceeded) && !time.Now().Before(ctxDeadline) {
+				return context.DeadlineExceeded
 			}
 			return sqliteRuntimeMutationRetryBudgetError(label, lastErr)
 		}

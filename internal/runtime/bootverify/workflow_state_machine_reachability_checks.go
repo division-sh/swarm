@@ -18,9 +18,10 @@ func (c *checkerContext) stateReachability() []Finding {
 	}
 	c.stateReachabilityLoaded = true
 
-	for flowID := range c.source.FlowSchemaEntries() {
-		flowID = strings.TrimSpace(flowID)
-		if flowID == "" {
+	for _, entry := range lifecycleFlowSchemas(c.source) {
+		flowID := strings.TrimSpace(entry.flowID)
+		usesStages := flowUsesAuthoredStages(c.source, flowID)
+		if flowID == "" && !usesStages {
 			continue
 		}
 		initial := strings.TrimSpace(c.source.FlowInitialStage(flowID))
@@ -49,23 +50,47 @@ func (c *checkerContext) stateReachability() []Finding {
 
 		reachableList := strings.Join(sortedSetKeys(reachable), ", ")
 		unreachableList := strings.Join(sortedSetKeys(unreachable), ", ")
+		declaredNoun := "state"
+		ownerField := "states"
+		initialField := "initial_state"
+		if usesStages {
+			declaredNoun = "stage"
+			ownerField = "stages"
+			initialField = "initial stage"
+		}
 		for _, state := range sortedSetKeys(unreachable) {
+			message := fmt.Sprintf(
+				"flow %s declares %s %s but no transition path from %s %s reaches %s in the authored handler graph.\n\nReachable states: %s\nUnreachable states: %s",
+				validationFlowLabel(flowID),
+				declaredNoun,
+				state,
+				initialField,
+				initial,
+				state,
+				reachableList,
+				unreachableList,
+			)
+			remediation := fmt.Sprintf(
+				"If %s is intentionally unused, remove it from schema.yaml %s. If %s should be reachable, add a handler transition carrier that reaches %s.",
+				state,
+				ownerField,
+				state,
+				state,
+			)
+			if usesStages {
+				c.stateReachabilityFindings = append(c.stateReachabilityFindings, NewHardInvalidityFinding(
+					"semantic_drift_unreachable_state",
+					validationFlowLabel(flowID),
+					message,
+					remediation,
+				))
+				continue
+			}
 			c.stateReachabilityFindings = append(c.stateReachabilityFindings, Finding{
 				CheckID:  "semantic_drift_unreachable_state",
-				Severity: "warning",
-				Message: fmt.Sprintf(
-					"flow %s declares state %s but no transition path from initial_state %s reaches %s in the authored handler graph.\n\nReachable states: %s\nUnreachable states: %s\n\nIf %s is intentionally unused, remove it from schema.yaml states.\nIf %s should be reachable, add a handler with advances_to: %s.",
-					flowID,
-					state,
-					initial,
-					state,
-					reachableList,
-					unreachableList,
-					state,
-					state,
-					state,
-				),
-				Location: flowID,
+				Severity: SeveritySemanticDriftWarn,
+				Message:  message + "\n\n" + remediation,
+				Location: validationFlowLabel(flowID),
 			})
 		}
 	}

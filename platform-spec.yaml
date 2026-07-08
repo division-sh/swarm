@@ -206,10 +206,11 @@ contract_formats:
     rule: A flow with no agents needs no prompts/. A flow with no handlers needs no nodes.yaml. A flow with no events needs
       no events.yaml.
   flow_schema:
-    description: Canonical `schema.yaml` flow declaration surface for state machine and pin declarations.
+    description: Canonical `schema.yaml` flow declaration surface for lifecycle stage-node and pin declarations.
     owner_file: contracts/flows/<flow>/schema.yaml
     bundle_scope_exception: contracts/schema.yaml for the root flow
     owned_concepts:
+    - stages
     - initial_state
     - terminal_states
     - states
@@ -218,6 +219,24 @@ contract_formats:
     rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
       owner. Runtime liveness and temporal progress are separate runtime concerns. Entity ownership is not selected in
       schema.yaml for normal flows; the single flow-owned `entities.yaml` entry is authoritative.
+    stages_authoring:
+      status: merge_bearing_first_slice
+      implementation_tracker: '#1845'
+      rule: >
+        `stages:` is the canonical lifecycle node authoring owner for staged
+        bundles. It is a keyed mapping whose keys are per-flow stage IDs and
+        whose values carry declaration metadata such as `initial: true`,
+        `terminal: true`, and `description`. It lowers to the existing
+        `initial_state` / `states` / `terminal_states` kernel. It does not
+        replace transition-edge carriers; handlers still contribute edges
+        through `advances_to`, `rules`, and `on_complete` in this slice.
+      stateless_form: >
+        `stages: []` is the explicit stateless form for staged bundles.
+      mutual_exclusion: >
+        `stages:` is mutually exclusive with legacy lifecycle authoring fields
+        `initial_state`, `states`, and `terminal_states` in the same schema.
+        Legacy fields remain accepted as explicit legacy/kernel input until a
+        later migration removes them from public authoring.
   entity_schema:
     description: |
       `package.yaml.entity_schema` is retired. Authoritative entity
@@ -1934,8 +1953,10 @@ runtime_enforcement:
 state_machine_authority:
   description: |
     The flow state machine declared in schema.yaml is the authority for
-    entity lifecycle phase. State is flow-scoped, not per-entity-type,
-    and Wave 1 assumes one entity type per flow.
+    entity lifecycle phase. For staged bundles, `stages:` is the canonical
+    lifecycle node authoring owner and lowers to the existing state-machine
+    kernel. State is flow-scoped, not per-entity-type, and Wave 1 assumes one
+    entity type per flow.
   rules:
     state_field_is_implicit: |
       Authors do not declare a state_field anywhere. _entity.current_state is
@@ -1944,8 +1965,13 @@ state_machine_authority:
       named current_state remains ordinary business data and is read as
       entity.current_state; it is not the lifecycle state carrier.
     stateless_flows: |
-      Stateless flows declare initial_state: null, states: [], and
-      terminal_states: []. For them, _entity.current_state is null.
+      Staged stateless flows declare stages: []. Legacy stateless flows may
+      declare initial_state: null, states: [], and terminal_states: []. For
+      them, _entity.current_state is null.
+    stages_are_flat_and_flow_scoped: |
+      Stage IDs are scoped to the flow that declares them. Nested/statechart
+      hierarchy is not part of this slice. Flow composition owns hierarchy
+      between parent and child flow instances.
     not_field_presence_authority: |
       The state machine answers lifecycle questions, not field-write
       status questions.
@@ -3763,7 +3789,8 @@ engine:
       within the handler atomic boundary.
     entity_state:
       description: A single string value representing where the entity is in the flow lifecycle. Set by advances_to in handler
-        execution. Initial value from schema.yaml initial_state. Terminal values from schema.yaml terminal_states.
+        execution. For staged bundles, initial and terminal values are lowered from schema.yaml stages. For legacy bundles,
+        initial value comes from schema.yaml initial_state and terminal values from schema.yaml terminal_states.
       storage: Entity table, state column, indexed.
       mutation: Only via advances_to or on_complete branch. Never by agents directly.
     accumulator_state:
@@ -5484,7 +5511,10 @@ engine:
     - id: state_machine_coherence
       severity: error
       scope: per-flow
-      trigger: An advances_to target is not in the flow's declared states list. Or initial_state is not in states.
+      trigger: >-
+        An advances_to target is not in the flow's lowered declared state list. Or the lifecycle declaration is malformed:
+        legacy initial_state is not in states, staged lifecycle mixes stages with legacy lifecycle fields, a non-empty
+        stages mapping lacks exactly one initial stage, or a non-empty stages mapping declares no terminal stage.
       when: boot-only
     - id: required_agents_match
       severity: error
@@ -7476,8 +7506,15 @@ flow_model:
           instance declaration/policy, output pin `key`/`carries`, connect
           route plans, explicit and implicit key mappings,
           singleton/coordinator boundaries, typed contained-state operations,
-          and retired static multi-entity diagnostics without becoming a new
-          semantic owner or reimplementing verifier/runtime decisions.
+          lifecycle stage graphs requested with `--graph`, and retired static
+          multi-entity diagnostics without becoming a new semantic owner or
+          reimplementing verifier/runtime decisions.
+        graph_rule: >
+          `swarm describe --graph` renders the per-flow lifecycle stage graph
+          from the canonical lowered lifecycle owner and the existing transition
+          carriers. It must show flow namespace, nodes, initial/terminal markers,
+          edges, and edge source. It is projection-only and MUST NOT introduce a
+          second transition-authoring owner.
         source_location_rule: >
           Diagnostics in the expanded view must carry check_id, message,
           remediation/evidence when available from the verifier finding owner,
@@ -13355,7 +13392,8 @@ static_analyzer:
       terminal_states:
         rule: terminal states are sinks in this slice.
     rule: Emit warning when a declared state is unreachable from initial_state in the authored transition graph. Keep invalid
-      undeclared advances_to targets on hard-invalid state_machine_coherence.
+      undeclared advances_to targets on hard-invalid state_machine_coherence. For staged bundles, the same unreachable
+      lifecycle-node condition is hard-invalid because `stages:` is the canonical lifecycle node authoring owner.
   slice_5_dead_declared_event_schema_surface:
     id: semantic_drift_dead_event_schema
     domain: semantic_drift

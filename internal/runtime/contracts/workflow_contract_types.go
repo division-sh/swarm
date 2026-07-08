@@ -1111,10 +1111,14 @@ type FlowSchemaDocument struct {
 	Entity                 string                          `yaml:"entity"`
 	Instance               FlowTemplateInstanceDeclaration `yaml:"instance"`
 	InitialState           string                          `yaml:"initial_state"`
+	InitialStateDeclared   bool                            `yaml:"-"`
 	NamespacePrefix        string                          `yaml:"-"`
 	NamespaceRule          string                          `yaml:"-"`
 	TerminalStates         []string                        `yaml:"terminal_states"`
+	TerminalStatesDeclared bool                            `yaml:"-"`
 	States                 []string                        `yaml:"states"`
+	StatesDeclared         bool                            `yaml:"-"`
+	StageDeclarations      FlowStageDeclarations           `yaml:"stages"`
 	Pins                   FlowPins                        `yaml:"pins"`
 	ToolSurface            FlowToolSurfaceContract         `yaml:"tool_surface"`
 	RequiredAgents         []FlowRequiredAgent             `yaml:"required_agents"`

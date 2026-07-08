@@ -473,15 +473,7 @@ func flowStatesForTimer(source semanticview.Source, flowID string) []string {
 	if flowID != "" {
 		return source.FlowStates(flowID)
 	}
-	stages := source.WorkflowStages()
-	out := make([]string, 0, len(stages))
-	for _, stage := range stages {
-		name := strings.TrimSpace(stage.ID)
-		if name != "" {
-			out = append(out, name)
-		}
-	}
-	return out
+	return source.FlowStates("")
 }
 
 func participantExistsLocal(source semanticview.Source, participant string) bool {

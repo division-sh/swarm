@@ -125,6 +125,66 @@ requires:
 	}
 }
 
+func TestFlowSchemaDocumentDecodeStagesKeyedMap(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: validation
+stages:
+  queued:
+    initial: true
+    description: Waiting for work
+  approved:
+    terminal: true
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !doc.UsesAuthoredStages() {
+		t.Fatalf("UsesAuthoredStages = false, want true")
+	}
+	if got, want := doc.LoweredInitialState(), "queued"; got != want {
+		t.Fatalf("LoweredInitialState = %q, want %q", got, want)
+	}
+	if got, want := doc.LoweredStates(), []string{"queued", "approved"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoweredStates = %#v, want %#v", got, want)
+	}
+	if got, want := doc.LoweredTerminalStates(), []string{"approved"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("LoweredTerminalStates = %#v, want %#v", got, want)
+	}
+	stages := doc.LoweredWorkflowStages("validation")
+	if len(stages) != 2 || stages[0].ID != "queued" || stages[0].Phase != "validation" || stages[0].Description != "Waiting for work" {
+		t.Fatalf("LoweredWorkflowStages = %#v", stages)
+	}
+}
+
+func TestFlowSchemaDocumentDecodeStagesExplicitEmpty(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: discovery
+stages: []
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if !doc.UsesAuthoredStages() {
+		t.Fatalf("UsesAuthoredStages = false, want true")
+	}
+	if len(doc.LoweredStates()) != 0 || doc.LoweredInitialState() != "" || len(doc.LoweredTerminalStates()) != 0 {
+		t.Fatalf("lowered explicit stateless lifecycle = initial %q states %#v terminals %#v, want empty", doc.LoweredInitialState(), doc.LoweredStates(), doc.LoweredTerminalStates())
+	}
+}
+
+func TestFlowSchemaDocumentDecodeRejectsNonEmptyStageSequence(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: validation
+stages:
+  - id: queued
+    initial: true
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "stages must be a keyed mapping") {
+		t.Fatalf("yaml.Unmarshal error = %v, want keyed mapping rejection", err)
+	}
+}
+
 func TestProjectPackageDocumentDecode_ListPolicyRequiresAreRequiredNoDefault(t *testing.T) {
 	var doc ProjectPackageDocument
 	if err := yaml.Unmarshal([]byte(`

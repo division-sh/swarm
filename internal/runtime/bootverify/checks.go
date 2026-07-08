@@ -924,7 +924,13 @@ func (c *checkerContext) stateMachineCoherence() []Finding {
 		return c.stateFindings
 	}
 	c.stateLoaded = true
-	for flowID := range c.source.FlowSchemaEntries() {
+	for _, entry := range lifecycleFlowSchemas(c.source) {
+		flowID := entry.flowID
+		schema := entry.schema
+		c.stateFindings = append(c.stateFindings, stageDeclarationCoherenceFindings(flowID, schema)...)
+		if strings.TrimSpace(flowID) == "" && !schema.UsesAuthoredStages() {
+			continue
+		}
 		states := stringSet(c.source.FlowStates(flowID))
 		initial := strings.TrimSpace(c.source.FlowInitialStage(flowID))
 		if initial != "" {
@@ -1514,11 +1520,7 @@ func flowIsStateless(source semanticview.Source, flowID string) bool {
 	if source == nil {
 		return false
 	}
-	schema, ok := source.FlowSchemaByID(strings.TrimSpace(flowID))
-	if !ok {
-		return false
-	}
-	return strings.TrimSpace(schema.InitialState) == "" && len(schema.States) == 0
+	return strings.TrimSpace(source.FlowInitialStage(strings.TrimSpace(flowID))) == "" && len(source.FlowStates(strings.TrimSpace(flowID))) == 0
 }
 
 func nodeFlowID(source semanticview.Source, nodeID string) string {
@@ -1536,12 +1538,8 @@ func declaredStatesForFlow(source semanticview.Source, flowID string) map[string
 	var states []string
 	var terminals []string
 	if flowID == "" {
-		for _, stage := range source.WorkflowStages() {
-			if id := strings.TrimSpace(stage.ID); id != "" {
-				states = append(states, id)
-			}
-		}
-		terminals = source.WorkflowTerminalStages()
+		states = source.FlowStates("")
+		terminals = source.FlowTerminalStages("")
 	} else {
 		states = source.FlowStates(flowID)
 		terminals = source.FlowTerminalStages(flowID)
@@ -1553,6 +1551,87 @@ func declaredStatesForFlow(source semanticview.Source, flowID string) map[string
 		}
 	}
 	return out
+}
+
+type lifecycleFlowSchemaEntry struct {
+	flowID string
+	schema runtimecontracts.FlowSchemaDocument
+}
+
+type rootFlowSchemaProvider interface {
+	RootFlowSchema() (runtimecontracts.FlowSchemaDocument, bool)
+}
+
+func lifecycleFlowSchemas(source semanticview.Source) []lifecycleFlowSchemaEntry {
+	if source == nil {
+		return nil
+	}
+	out := make([]lifecycleFlowSchemaEntry, 0, len(source.FlowSchemaEntries())+1)
+	if provider, ok := source.(rootFlowSchemaProvider); ok {
+		if schema, ok := provider.RootFlowSchema(); ok {
+			out = append(out, lifecycleFlowSchemaEntry{flowID: "", schema: schema})
+		}
+	}
+	for flowID, schema := range source.FlowSchemaEntries() {
+		flowID = strings.TrimSpace(flowID)
+		if flowID == "" {
+			continue
+		}
+		out = append(out, lifecycleFlowSchemaEntry{flowID: flowID, schema: schema})
+	}
+	return out
+}
+
+func flowUsesAuthoredStages(source semanticview.Source, flowID string) bool {
+	flowID = strings.TrimSpace(flowID)
+	for _, entry := range lifecycleFlowSchemas(source) {
+		if strings.TrimSpace(entry.flowID) == flowID {
+			return entry.schema.UsesAuthoredStages()
+		}
+	}
+	return false
+}
+
+func stageDeclarationCoherenceFindings(flowID string, schema runtimecontracts.FlowSchemaDocument) []Finding {
+	if !schema.UsesAuthoredStages() {
+		return nil
+	}
+	label := validationFlowLabel(flowID)
+	location := strings.TrimSpace(flowID)
+	if location == "" {
+		location = "root"
+	}
+	findings := make([]Finding, 0, 3)
+	if schema.HasLegacyLifecycleFields() {
+		findings = append(findings, Finding{
+			CheckID:  "state_machine_coherence",
+			Severity: "error",
+			Message:  fmt.Sprintf("flow %s declares stages and legacy lifecycle fields; stages is mutually exclusive with initial_state, states, and terminal_states", label),
+			Location: location,
+		})
+	}
+	if len(schema.StageDeclarations.Entries) == 0 {
+		return findings
+	}
+	initialCount := schema.StageDeclarations.InitialCount()
+	if initialCount != 1 {
+		findings = append(findings, Finding{
+			CheckID:  "state_machine_coherence",
+			Severity: "error",
+			Message:  fmt.Sprintf("flow %s stages must declare exactly one initial stage; got %d", label, initialCount),
+			Location: location,
+		})
+	}
+	terminalCount := schema.StageDeclarations.TerminalCount()
+	if terminalCount == 0 {
+		findings = append(findings, Finding{
+			CheckID:  "state_machine_coherence",
+			Severity: "error",
+			Message:  fmt.Sprintf("flow %s stages must declare at least one terminal stage", label),
+			Location: location,
+		})
+	}
+	return findings
 }
 
 func validationFlowLabel(flowID string) string {
