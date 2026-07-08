@@ -14437,6 +14437,12 @@ cli_specification:
             The first line is concise and states the problem. Remediation, detail, and evidence belong on
             continuation lines or structured fields. This convention intentionally avoids a hard character cap; the
             shape carries readability, not a numeric limit.
+          capitalization_and_grammar: >
+            Command-outcome prefixes are uppercase with a colon: `ERROR:` and `WARNING:`. The problem statement uses
+            a lowercase initial word when grammar allows, names concrete values, is one sentence, and ends with a
+            period. Remediation lines are capitalized, imperative, and complete sentences. Diagnostics must not use
+            exclamation marks or decorative emoji/glyph flourishes; typed finding severity tokens remain the
+            bracketed text forms `[BLOCKER]`, `[WARN]`, and `[INFO]`.
           remediation: >
             Every error has actionable remediation when an action exists. Remediation is imperative and names exact
             commands, flags, files, or contract fields when possible.
