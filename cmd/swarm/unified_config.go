@@ -615,7 +615,7 @@ func unifiedConfigRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	if rule, ok := unifiedConfigProviderLimitRule(pathParts); ok {
 		return rule, true
 	}
-	if strings.HasPrefix(path, "sharding") {
+	if path == "sharding" || strings.HasPrefix(path, "sharding.") {
 		return unifiedConfigKeyRule{Split: "tracked split: runtime sharding has no supported production consumer; no supported replacement"}, true
 	}
 	return unifiedConfigKeyRule{}, false
