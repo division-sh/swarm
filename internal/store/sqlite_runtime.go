@@ -653,7 +653,7 @@ func (s *SQLiteRuntimeStore) sqliteRunControlTransition(ctx context.Context, req
 		case "continue":
 			state, err = sqliteContinueRunControl(txctx, tx, state, req)
 		case "stop":
-			state, err = sqliteStopRunControl(txctx, tx, state, req)
+			state, err = s.sqliteStopRunControl(txctx, tx, state, req)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}
