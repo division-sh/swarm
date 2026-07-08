@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,6 +65,25 @@ func TestGeneratedUnifiedConfigExampleValidationSampleLoads(t *testing.T) {
 	writeRuntimeConfigText(t, path, generatedUnifiedConfigValidationSample())
 	if _, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: path}); err != nil {
 		t.Fatalf("generated validation sample failed unified parser: %v\n%s", err, generatedUnifiedConfigValidationSample())
+	}
+}
+
+func TestGeneratedUnifiedConfigExampleAdvertisedDoctorCommandWorks(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"doctor", "--target", "--json"}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 {
+		t.Fatalf("doctor --target --json code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), `"mode": "target"`) {
+		t.Fatalf("doctor --target --json missing target mode:\n%s", stdout.String())
+	}
+	text := generatedUnifiedConfigExample()
+	if !strings.Contains(text, "swarm doctor --target") {
+		t.Fatalf("generated example missing advertised doctor command:\n%s", text)
+	}
+	if strings.Contains(text, "swarm doctor config") {
+		t.Fatalf("generated example advertises nonexistent doctor command:\n%s", text)
 	}
 }
 

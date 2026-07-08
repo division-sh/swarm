@@ -4644,31 +4644,42 @@ func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (run
 
 func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, backend string) (string, string) {
 	t.Helper()
+	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	deliveryID := uuid.NewString()
 	now := time.Now().UTC()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("seed %s run-control transaction: %v", backend, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
 	switch backend {
 	case "postgres":
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO runs (run_id, status, bundle_source, started_at)
 			VALUES ($1::uuid, 'running', 'legacy', $2)
 		`, runID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending run: %v", err)
 		}
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 			VALUES ($1::uuid, $2::uuid, 'control.stop.pending', 'global', '{}'::jsonb, 'test', 'agent', $3)
 		`, eventID, runID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending event: %v", err)
 		}
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
 				VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-pending', 'pending', $4)
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending delivery: %v", err)
 		}
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO event_receipts (
 					event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
 				)
@@ -4680,25 +4691,25 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 			t.Fatalf("seed postgres run-control pipeline receipt: %v", err)
 		}
 	case "sqlite":
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO runs (run_id, status, bundle_source, started_at)
 				VALUES (?, 'running', 'legacy', ?)
 			`, runID, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending run: %v", err)
 		}
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 			VALUES (?, ?, 'control.stop.pending', 'global', '{}', 'test', 'agent', ?)
 		`, eventID, runID, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending event: %v", err)
 		}
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
 				VALUES (?, ?, ?, 'agent', 'agent-pending', 'pending', ?)
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed sqlite run-control pending delivery: %v", err)
 		}
-		if _, err := db.ExecContext(context.Background(), `
+		if _, err := tx.ExecContext(ctx, `
 				INSERT INTO event_receipts (
 					receipt_id, event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
 				)
@@ -4711,6 +4722,13 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 		}
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit %s run-control pending seed: %v", backend, err)
+	}
+	committed = true
+	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
+		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
 	}
 	return runID, eventID
 }
@@ -4729,7 +4747,7 @@ func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, backend, even
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s stopped pending delivery %s/%s = %s/%s, want dead_letter/run_stopped", backend, eventID, subscriberID, lastStatus, lastReason)
+	t.Fatalf("%s stopped pending delivery %s/%s = %s/%s, want dead_letter/run_stopped\n%s", backend, eventID, subscriberID, lastStatus, lastReason, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
 }
 
 func servedDeliveryStatusReason(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string) (status, reason string) {
@@ -6447,7 +6465,28 @@ func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d", backend, eventID, subscriberType, subscriberID, outcome, got, want)
+	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
+}
+
+func servedEventPublishDebugSummaryForEvent(t *testing.T, db *sql.DB, backend, eventID string) string {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT run_id::text FROM events WHERE event_id = $1::uuid`
+		args = []any{eventID}
+	case "sqlite":
+		query = `SELECT run_id FROM events WHERE event_id = ?`
+		args = []any{eventID}
+	default:
+		return fmt.Sprintf("unknown proof backend %q", backend)
+	}
+	var runID string
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&runID); err != nil {
+		return fmt.Sprintf("%s event %s run lookup failed: %v", backend, eventID, err)
+	}
+	return servedEventPublishDebugSummary(t, db, backend, runID)
 }
 
 func servedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string) int {
