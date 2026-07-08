@@ -97,18 +97,6 @@ func (d pipelineActivityDispatcher) DispatchActivities(ctx context.Context, inte
 
 func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent) error {
 	intent = intent.Normalized()
-	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
-		return err
-	} else if ok {
-		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
-			"activity_id":       intent.ActivityID,
-			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"result_event_id":   recorded.EventID,
-			"result_event_type": recorded.EventType,
-		})
-		return nil
-	}
 	source := d.coordinator.SemanticSource()
 	if source == nil {
 		return fmt.Errorf("activity dispatcher requires semantic source")
@@ -130,6 +118,18 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return d.executeNonIdempotentActivityIntent(ctx, intent, tool)
+	}
+	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
+		return err
+	} else if ok {
+		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
+			"activity_id":       intent.ActivityID,
+			"tool":              intent.Tool,
+			"effect_class":      string(intent.EffectClass),
+			"result_event_id":   recorded.EventID,
+			"result_event_type": recorded.EventType,
+		})
+		return nil
 	}
 	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
 	var lastErr error
