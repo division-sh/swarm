@@ -206,8 +206,8 @@ func TestPlatformEventsCatalogSchemaAuthorityRefsResolve(t *testing.T) {
 
 	const prefix = "platform-spec.yaml#"
 	expectedSimpleRefs := map[string]string{
-		"platform.dead_letter": "platform-spec.yaml#engine.error_model.dead_letter_schema",
-		"platform.runtime_log": "platform-spec.yaml#platform_tables.diagnostics_encoding",
+		"platform.dead_letter":  "platform-spec.yaml#engine.error_model.dead_letter_schema",
+		"platform.runtime_log":  "platform-spec.yaml#platform_tables.diagnostics_encoding",
 		"mailbox.item_decided":  "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
 		"mailbox.item_deferred": "platform-spec.yaml#api_specification.conventions.mailbox.decision_event_payload_contract",
 	}
