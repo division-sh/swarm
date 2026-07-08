@@ -1,9 +1,7 @@
-# swarm.yaml - Swarm's config file. Copy keys you want to change into:
-#   ./swarm.yaml (project-safe), .swarm/swarm.yaml (this machine only), or --config <file>.
-# Everything here is commented out; uncommenting is how you override a default.
-# `swarm doctor --target` shows which config source and local target are in effect.
-# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the config file owns that reference.
-# (Contributors: generated file - edit the generator metadata, not this file; see drift test.)
+# swarm.yaml - Swarm's config file; copy keys into ./swarm.yaml, .swarm/swarm.yaml, or --config <file>.
+# Everything is commented out; uncomment to override a default. Run `swarm doctor --target` to inspect the active source.
+# Inline secret values are absent; use secret keys, token files, secret files, or explicit env delegation.
+# Contributors: generated file - edit the generator metadata, not this file; see drift test.
 
 # Project-safe keys: safe in checked-in ./swarm.yaml
 # These keys express portable runtime behavior.

@@ -107,12 +107,10 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 
 func generatedUnifiedConfigExample() string {
 	var b strings.Builder
-	b.WriteString("# swarm.yaml - Swarm's config file. Copy keys you want to change into:\n")
-	b.WriteString("#   ./swarm.yaml (project-safe), .swarm/swarm.yaml (this machine only), or --config <file>.\n")
-	b.WriteString("# Everything here is commented out; uncommenting is how you override a default.\n")
-	b.WriteString("# `swarm doctor --target` shows which config source and local target are in effect.\n")
-	b.WriteString("# Inline secret values are intentionally absent; use secret keys, token files, secret files, or explicit env delegation where the config file owns that reference.\n")
-	b.WriteString("# (Contributors: generated file - edit the generator metadata, not this file; see drift test.)\n\n")
+	b.WriteString("# swarm.yaml - Swarm's config file; copy keys into ./swarm.yaml, .swarm/swarm.yaml, or --config <file>.\n")
+	b.WriteString("# Everything is commented out; uncomment to override a default. Run `swarm doctor --target` to inspect the active source.\n")
+	b.WriteString("# Inline secret values are absent; use secret keys, token files, secret files, or explicit env delegation.\n")
+	b.WriteString("# Contributors: generated file - edit the generator metadata, not this file; see drift test.\n\n")
 
 	tiers := []unifiedConfigExampleTier{
 		unifiedConfigExampleTierProjectSafe,
