@@ -400,6 +400,33 @@ func (s *PostgresStore) ListEventsMissingPipelineReceiptForRun(ctx context.Conte
 	return s.listEventsMissingPipelineReceiptForRunSpec(ctx, caps, runID, since, limit)
 }
 
+func (s *PostgresStore) ListEventsWithPendingDeliveriesForRun(ctx context.Context, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	caps, err := s.schemaCapabilities(ctx)
+	if err != nil {
+		return nil, err
+	}
+	runID = nullUUIDString(runID)
+	if runID == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 200
+	}
+	if since.IsZero() {
+		since = time.Now().Add(-24 * time.Hour)
+	}
+	if caps.Events.Deliveries != SchemaFlavorCanonical || caps.Events.Log != SchemaFlavorCanonical {
+		if caps.Events.Deliveries != SchemaFlavorCanonical {
+			return nil, unsupportedSchemaCapability("event_deliveries", caps.Events.Deliveries)
+		}
+		return nil, unsupportedSchemaCapability("events", caps.Events.Log)
+	}
+	if !caps.Events.LogRunID {
+		return nil, fmt.Errorf("list pending run deliveries requires canonical events.run_id")
+	}
+	return s.listEventsWithPendingDeliveriesForRunSpec(ctx, caps, runID, since, limit)
+}
+
 func (s *PostgresStore) ClaimPipelineReplay(ctx context.Context, eventID string) (runtimeownership.Lease, bool, error) {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
@@ -1343,6 +1370,88 @@ func (s *PostgresStore) listEventsMissingPipelineReceiptForRunSpec(ctx context.C
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read run missing pipeline receipt events: %w", err)
+	}
+	return out, nil
+}
+
+func (s *PostgresStore) listEventsWithPendingDeliveriesForRunSpec(ctx context.Context, caps StoreSchemaCapabilities, runID string, since time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	routeSelect := ` '{}'::jsonb, '{}'::jsonb, '[]'::jsonb`
+	if caps.Events.LogRouteIdentity {
+		routeSelect = `COALESCE(e.source_route, '{}'::jsonb), COALESCE(e.target_route, '{}'::jsonb), COALESCE(e.target_set, '[]'::jsonb)`
+	}
+	exclusionArgs := diagnosticDirectReplayEventArgs()
+	limitPlaceholder := 3 + len(exclusionArgs)
+	args := append([]any{runID, since}, exclusionArgs...)
+	args = append(args, limit)
+	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
+		SELECT
+			e.event_id::text, COALESCE(e.run_id::text, ''), e.event_name, COALESCE(e.produced_by, ''),
+			COALESCE(e.entity_id::text, ''), COALESCE(e.flow_instance, ''), COALESCE(e.scope, 'global'),
+			e.payload, e.created_at, COALESCE(e.source_event_id::text, ''),
+			%s
+		FROM events e
+		WHERE e.run_id = $1::uuid
+		  AND e.created_at >= $2
+		  AND EXISTS (
+			SELECT 1
+			FROM event_deliveries d
+			WHERE d.event_id = e.event_id
+			  AND d.run_id = e.run_id
+			  AND d.status = 'pending'
+		  )
+		  AND %s
+		ORDER BY e.created_at ASC
+		LIMIT $%d
+	`, routeSelect, postgresDiagnosticDirectReplayExclusionSQL("e", 3), limitPlaceholder), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list run events with pending deliveries: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]events.PersistedReplayEvent, 0, limit)
+	for rows.Next() {
+		var eventID, eventRunID, eventName, producedBy, sourceEventID string
+		var payload json.RawMessage
+		var createdAt time.Time
+		var entityID, flowInstance, scope string
+		var sourceRoute, targetRoute, targetSet json.RawMessage
+		if err := rows.Scan(
+			&eventID,
+			&eventRunID,
+			&eventName,
+			&producedBy,
+			&entityID,
+			&flowInstance,
+			&scope,
+			&payload,
+			&createdAt,
+			&sourceEventID,
+			&sourceRoute,
+			&targetRoute,
+			&targetSet,
+		); err != nil {
+			return nil, fmt.Errorf("scan run event with pending deliveries: %w", err)
+		}
+		evt := events.NewProjectionEvent(
+			eventID,
+			events.EventType(eventName),
+			producedBy,
+			"",
+			payload,
+			0,
+			eventRunID,
+			sourceEventID,
+			eventEnvelopeFromStorage(entityID, flowInstance, scope, sourceRoute, targetRoute, targetSet),
+			createdAt,
+		)
+		record := events.PersistedReplayEvent{Event: evt}
+		if strings.TrimSpace(evt.RunID()) == "" {
+			record.ReplayError = "missing canonical run_id"
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read run events with pending deliveries: %w", err)
 	}
 	return out, nil
 }

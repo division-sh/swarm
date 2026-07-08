@@ -103,6 +103,69 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	}
 }
 
+func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t *testing.T) {
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	ctx := context.Background()
+	pg := &store.PostgresStore{DB: db}
+	eb, err := runtimebus.NewEventBus(pg)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	controller := runtimeruncontrol.NewController(pg, eb, runtimeruncontrol.Options{})
+	eb.SetRunDispatchGate(controller)
+
+	agentID := "agent-run-control-acked"
+	eventType := events.EventType("custom.run_control.acked")
+	seedActiveRuntimeBusAgent(t, ctx, pg, agentID)
+	ch := eb.Subscribe(agentID, eventType)
+	defer eb.Unsubscribe(agentID)
+
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := controller.Pause(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"}); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+
+	eventID := uuid.NewString()
+	if err := eb.Publish(ctx, eventtest.RootIngress(
+		eventID,
+		eventType,
+		"api.v1",
+		"",
+		[]byte(`{"entity_id":"21000000-0000-0000-0000-000000000004"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "21000000-0000-0000-0000-000000000004"),
+		time.Now().UTC(),
+	)); err != nil {
+		t.Fatalf("Publish paused run event: %v", err)
+	}
+	requireNoBusEvent(t, ch, "paused run with pipeline receipt before continue")
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+		t.Fatalf("UpsertPipelineReceipt queued event: %v", err)
+	}
+	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {
+		t.Fatalf("queued event pipeline receipts = %d, want 1", got)
+	}
+
+	result, err := controller.Continue(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test"})
+	if err != nil {
+		t.Fatalf("Continue: %v", err)
+	}
+	if result.ReleasedDeliveries != 1 {
+		t.Fatalf("released deliveries = %d, want 1", result.ReleasedDeliveries)
+	}
+	got := requireBusEvent(t, ch, "paused run release with existing pipeline receipt")
+	if got.ID() != eventID {
+		t.Fatalf("released event = %s, want %s", got.ID(), eventID)
+	}
+}
+
 func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
