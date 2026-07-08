@@ -454,6 +454,161 @@ pins:
 	}
 }
 
+func TestFlowSchemaDocumentDecode_PreservesInputPinResolutionModes(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: resolution-pins
+pins:
+  inputs:
+    events:
+      - name: create_requested
+        event: validation.requested
+        resolution:
+          mode: create
+          instance_key:
+            mint: uuid
+            as: validation_case_id
+        carries:
+          validation_case_id:
+            from: instance.key.validation_case_id
+            type: uuid
+      - name: select_requested
+        event: account.selected
+        resolution:
+          mode: select
+          instance_key: account_id
+      - name: select_or_create_requested
+        event: account.requested
+        resolution:
+          mode: select-or-create
+          instance_key:
+            from: payload.account_id
+      - name: fan_in_requested
+        event: report.ready
+        resolution:
+          mode: fan-in
+          aggregation: stream
+          window: report_period
+          dedup_by: [event.id, payload.operating_id]
+          singleton: portfolio/default
+      - name: fan_out_requested
+        event: operating.requested
+        resolution:
+          mode: fan-out
+          instance_key: operating_id
+      - name: reply_received
+        event: provider.replied
+        resolution:
+          mode: reply
+          replies_to: provider_requested
+          correlation_key: payload.provider_request_id
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	pins := doc.Pins.Inputs.EventPins
+	if len(pins) != 6 {
+		t.Fatalf("input EventPins len = %d, want 6", len(pins))
+	}
+	create := pins[0]
+	if got, want := create.Resolution.Mode, FlowInputResolutionModeCreate; got != want {
+		t.Fatalf("create Resolution.Mode = %q, want %q", got, want)
+	}
+	if got, want := create.Resolution.InstanceKey.Mint, FlowInputResolutionMintUUID; got != want {
+		t.Fatalf("create Resolution.InstanceKey.Mint = %q, want %q", got, want)
+	}
+	if got, want := create.Resolution.InstanceKey.As, "validation_case_id"; got != want {
+		t.Fatalf("create Resolution.InstanceKey.As = %q, want %q", got, want)
+	}
+	carry := create.Carries["validation_case_id"]
+	if got, want := carry.From, "instance.key.validation_case_id"; got != want {
+		t.Fatalf("create carry From = %q, want %q", got, want)
+	}
+	if got, want := carry.Type, "uuid"; got != want {
+		t.Fatalf("create carry Type = %q, want %q", got, want)
+	}
+	if got, want := pins[1].Resolution.InstanceKey.From, "account_id"; got != want {
+		t.Fatalf("select instance_key scalar = %q, want %q", got, want)
+	}
+	if got, want := pins[2].Resolution.InstanceKey.From, "payload.account_id"; got != want {
+		t.Fatalf("select-or-create instance_key.from = %q, want %q", got, want)
+	}
+	if got, want := pins[3].Resolution.Aggregation, "stream"; got != want {
+		t.Fatalf("fan-in aggregation = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(pins[3].Resolution.DedupBy, ","), "event.id,payload.operating_id"; got != want {
+		t.Fatalf("fan-in dedup_by = %q, want %q", got, want)
+	}
+	if got, want := pins[4].Resolution.Mode, FlowInputResolutionModeFanOut; got != want {
+		t.Fatalf("fan-out mode = %q, want %q", got, want)
+	}
+	if got, want := pins[5].Resolution.RepliesTo, "provider_requested"; got != want {
+		t.Fatalf("reply replies_to = %q, want %q", got, want)
+	}
+}
+
+func TestFlowSchemaDocumentDecode_RejectsUnsupportedInputPinResolutionFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "resolution",
+			body: `
+name: invalid-resolution
+pins:
+  inputs:
+    events:
+      - name: requested
+        event: work.requested
+        resolution:
+          mode: create
+          unsupported: true
+`,
+		},
+		{
+			name: "instance_key",
+			body: `
+name: invalid-resolution-instance-key
+pins:
+  inputs:
+    events:
+      - name: requested
+        event: work.requested
+        resolution:
+          mode: create
+          instance_key:
+            mint: uuid
+            as: work_id
+            unsupported: true
+`,
+		},
+		{
+			name: "carries",
+			body: `
+name: invalid-resolution-carries
+pins:
+  inputs:
+    events:
+      - name: requested
+        event: work.requested
+        carries:
+          work_id:
+            from: instance.key.work_id
+            unsupported: true
+`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc FlowSchemaDocument
+			err := yaml.Unmarshal([]byte(tc.body), &doc)
+			if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
+				t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+			}
+		})
+	}
+}
+
 func TestFlowSchemaDocumentDecode_RejectsUnsupportedOutputPinFields(t *testing.T) {
 	var doc FlowSchemaDocument
 	err := yaml.Unmarshal([]byte(`

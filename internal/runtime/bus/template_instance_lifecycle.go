@@ -124,7 +124,7 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	if plan.ResolutionKind != runtimepinrouting.ConnectResolutionInstanceKey || plan.InstanceKey == nil {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, false, nil
 	}
-	material, failure := runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, values)
+	material, failure := instanceKeyMaterialForTemplateLifecycle(evt, plan, values)
 	if failure != "" {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: failure}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
@@ -140,6 +140,10 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	}
 	onMissing := strings.TrimSpace(instanceContract.OnMissing)
 	onConflict := strings.TrimSpace(instanceContract.OnConflict)
+	if plan.InstanceKey != nil && strings.TrimSpace(plan.InstanceKey.Mode) == runtimecontracts.FlowInputResolutionModeCreate {
+		onMissing = "create"
+		onConflict = "reuse"
+	}
 	matches := runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, descriptors)
 	if len(matches) > 1 {
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetAmbiguous}, TemplateInstanceLifecycleDecision{}, true, nil
@@ -186,6 +190,13 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 	decision.InstancePath = matches[0].FlowInstance
 	decision.EntityID = matches[0].EntityID
 	return templateInstanceLifecycleMaterialization(plan, matches), decision, true, nil
+}
+
+func instanceKeyMaterialForTemplateLifecycle(evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) (runtimepinrouting.ConnectRoutePlanInstanceKeyMaterial, runtimepinrouting.ConnectRoutePlanFailure) {
+	if plan.InstanceKey != nil && strings.TrimSpace(plan.InstanceKey.Mint) != "" {
+		return runtimepinrouting.MintedInstanceKeyMaterialForConnectRoutePlan(plan, evt.ID())
+	}
+	return runtimepinrouting.InstanceKeyMaterialForConnectRoutePlan(plan, values)
 }
 
 func (o templateInstanceLifecycleOwner) resolveInstanceContract(plan runtimepinrouting.ConnectRoutePlan, material runtimepinrouting.ConnectRoutePlanInstanceKeyMaterial) (runtimecontracts.TemplateInstanceContract, runtimepinrouting.ConnectRoutePlanFailure) {

@@ -1119,6 +1119,20 @@ const (
 	FlowModeSingleton = "singleton"
 )
 
+const (
+	FlowInputResolutionModeCreate         = "create"
+	FlowInputResolutionModeSelect         = "select"
+	FlowInputResolutionModeSelectOrCreate = "select-or-create"
+	FlowInputResolutionModeFanIn          = "fan-in"
+	FlowInputResolutionModeFanOut         = "fan-out"
+	FlowInputResolutionModeReply          = "reply"
+)
+
+const (
+	FlowInputResolutionMintUUID    = "uuid"
+	FlowInputResolutionMintEventID = "event_id"
+)
+
 type FlowToolSurfaceContract struct {
 	RoleScopedEntityTools bool `yaml:"role_scoped_entity_tools"`
 }
@@ -1207,10 +1221,12 @@ type FlowOutputPins struct {
 	Writes    []string             `yaml:"writes"`
 }
 type FlowInputEventPin struct {
-	Name    string               `yaml:"name"`
-	Event   string               `yaml:"event"`
-	Source  string               `yaml:"source"`
-	Address *FlowInputPinAddress `yaml:"address"`
+	Name       string                 `yaml:"name"`
+	Event      string                 `yaml:"event"`
+	Source     string                 `yaml:"source"`
+	Address    *FlowInputPinAddress   `yaml:"address"`
+	Resolution FlowInputPinResolution `yaml:"resolution"`
+	Carries    FlowInputPinCarries    `yaml:"carries"`
 }
 type FlowOutputEventPin struct {
 	Name    string   `yaml:"name"`
@@ -1218,12 +1234,32 @@ type FlowOutputEventPin struct {
 	Key     string   `yaml:"key"`
 	Carries []string `yaml:"carries"`
 }
+type FlowInputPinCarries map[string]FlowInputPinCarry
+type FlowInputPinCarry struct {
+	From string `yaml:"from"`
+	Type string `yaml:"type"`
+}
 type FlowInputPinAddress struct {
 	By          string `yaml:"by"`
 	Source      string `yaml:"source"`
 	Target      string `yaml:"target"`
 	Cardinality string `yaml:"cardinality"`
 	Mode        string `yaml:"mode"`
+}
+type FlowInputPinResolution struct {
+	Mode           string                            `yaml:"mode"`
+	InstanceKey    FlowInputPinResolutionInstanceKey `yaml:"instance_key"`
+	Aggregation    string                            `yaml:"aggregation"`
+	Window         string                            `yaml:"window"`
+	DedupBy        []string                          `yaml:"dedup_by"`
+	Singleton      string                            `yaml:"singleton"`
+	RepliesTo      string                            `yaml:"replies_to"`
+	CorrelationKey string                            `yaml:"correlation_key"`
+}
+type FlowInputPinResolutionInstanceKey struct {
+	From string `yaml:"from"`
+	Mint string `yaml:"mint"`
+	As   string `yaml:"as"`
 }
 type FlowPackageConnect struct {
 	PackageKey string                           `yaml:"-"`
