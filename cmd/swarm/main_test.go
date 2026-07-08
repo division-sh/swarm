@@ -4112,6 +4112,227 @@ func TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle(t *testing.T) {
 	servedparity.Run(t, scenario, runServedDynamicAutoEmitBackendProof)
 }
 
+func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
+	scenarios := []servedparity.Scenario{
+		servedparity.MustScenario(servedparity.ScenarioRunPauseControlLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle),
+	}
+	servedparity.RunScenarioGroup(t, scenarios, runServedRunControlBackendProof)
+}
+
+func TestServedParityHarnessRuntimeIngressControlLifecycle(t *testing.T) {
+	scenarios := []servedparity.Scenario{
+		servedparity.MustScenario(servedparity.ScenarioRuntimePauseIngressLifecycle),
+		servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle),
+	}
+	servedparity.RunScenarioGroup(t, scenarios, runServedRuntimeIngressControlBackendProof)
+}
+
+type servedControlProofRuntime struct {
+	Endpoint   string
+	DB         *sql.DB
+	Backend    string
+	BundleHash string
+	Probe      *lifecycletest.Probe
+}
+
+func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+	t.Helper()
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		unsetStoreSelectorEnv(t)
+		stubServeRuntimeWorkspaceLifecycle(t)
+		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		contractsPath := writeServedEventPublishFollowUpFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+		oldBuildStores := buildStoresForServe
+		t.Cleanup(func() {
+			buildStoresForServe = oldBuildStores
+		})
+		var servedDB *sql.DB
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				servedDB = stores.SQLDB
+			}
+			return stores, err
+		}
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			ContractsPath:           contractsPath,
+			PlatformSpecPath:        defaultPlatformSpecPath,
+			APIListenAddr:           "127.0.0.1:0",
+			MCPListenAddr:           "127.0.0.1:0",
+			SelfCheck:               true,
+			RequireBundleMatch:      false,
+			NoRequireBundleMatch:    true,
+			Verbose:                 true,
+			TestLifecycleProbe:      probe,
+			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		})
+		if servedDB == nil {
+			t.Fatal("served sqlite SQLDB is required for control served parity proof")
+		}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe}
+	case servedparity.BackendExplicitPostgres:
+		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+			return serveRuntimeWorkspaceStub{}
+		})
+		contractsPath := writeServedEventPublishFollowUpFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+			ConfigPath:              writeServeRuntimeTestConfig(t),
+			ContractsPath:           contractsPath,
+			PlatformSpecPath:        defaultPlatformSpecPath,
+			StoreMode:               "postgres",
+			StoreModeSet:            true,
+			APIListenAddr:           "127.0.0.1:0",
+			MCPListenAddr:           "127.0.0.1:0",
+			SelfCheck:               true,
+			RequireBundleMatch:      false,
+			Verbose:                 true,
+			TestLifecycleProbe:      probe,
+			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		})
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe}
+	default:
+		t.Fatalf("unknown served control backend %q", backend)
+		return servedControlProofRuntime{}
+	}
+}
+
+func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	rt := startServedControlProofRuntime(t, backend)
+	runServedRunControlLifecycleProof(t, rt)
+}
+
+func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	t.Cleanup(runtimebus.ResumeRuntimeIngress)
+	rt := startServedControlProofRuntime(t, backend)
+	runServedRuntimeIngressControlLifecycleProof(t, rt)
+}
+
+func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release")
+
+	pauseKey := "issue-1864-" + rt.Backend + "-run-pause"
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
+		"run_id":          runID,
+		"idempotency_key": pauseKey,
+	})
+	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "paused", "paused")
+	requireServedRunStatus(t, rt.Endpoint, runID, "paused")
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
+		"run_id":          runID,
+		"idempotency_key": pauseKey,
+	})
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
+
+	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "thing.reviewed",
+		"run_id":          runID,
+		"source_event_id": initialEventID,
+		"payload":         map[string]any{"note": "queued while run paused"},
+		"idempotency_key": "issue-1864-" + rt.Backend + "-run-queued",
+	})
+	if queued.RunID != runID || queued.SourceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
+		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
+	}
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "entity-writer", "pending", 1)
+	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "entity-writer", "delivered", 250*time.Millisecond)
+
+	continueKey := "issue-1864-" + rt.Backend + "-run-continue"
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
+		"run_id":          runID,
+		"idempotency_key": continueKey,
+	})
+	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "running", "completed")
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
+		"run_id":          runID,
+		"idempotency_key": continueKey,
+	})
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "entity-writer", "delivered", 1)
+	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
+	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
+
+	stopRunID, pendingEventID := seedServedRunControlPendingRunWithAgentDelivery(t, rt.DB, rt.Backend)
+	stopKey := "issue-1864-" + rt.Backend + "-run-stop"
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
+		"run_id":          stopRunID,
+		"idempotency_key": stopKey,
+	})
+	requireServedRunControlState(t, rt.DB, rt.Backend, stopRunID, "stopped", "cancelled")
+	requireServedStoppedPendingDelivery(t, rt.DB, rt.Backend, pendingEventID, "agent-pending")
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
+		"run_id":          stopRunID,
+		"idempotency_key": stopKey,
+	})
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
+	requireServedRunStatus(t, rt.Endpoint, stopRunID, "cancelled")
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
+}
+
+func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	pauseKey := "issue-1864-" + rt.Backend + "-runtime-pause"
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
+		"idempotency_key": pauseKey,
+	})
+	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "paused", "platform.paused")
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.pause", pauseKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
+		"idempotency_key": pauseKey,
+	})
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.pause", pauseKey, 1)
+	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.paused", 1)
+	duplicatePause := requireServedJSONRPCError(t, rt.Endpoint, "runtime.pause", map[string]any{})
+	if duplicatePause.Data["code"] != apiv1.RuntimeAlreadyPausedCode {
+		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
+	}
+
+	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "thing.unhandled",
+		"bundle_hash":     rt.BundleHash,
+		"payload":         map[string]any{"note": "queued while runtime paused"},
+		"idempotency_key": "issue-1864-" + rt.Backend + "-runtime-queued",
+	})
+	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
+		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
+	}
+	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
+
+	resumeKey := "issue-1864-" + rt.Backend + "-runtime-resume"
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
+		"idempotency_key": resumeKey,
+	})
+	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "running", "platform.resumed")
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.resume", resumeKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
+		"idempotency_key": resumeKey,
+	})
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.resume", resumeKey, 1)
+	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.resumed", 1)
+	duplicateResume := requireServedJSONRPCError(t, rt.Endpoint, "runtime.resume", map[string]any{})
+	if duplicateResume.Data["code"] != apiv1.RuntimeNotPausedCode {
+		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
+	}
+
+	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
+	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
+}
+
 func runServedDynamicAutoEmitBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	switch backend {
@@ -4324,7 +4545,335 @@ func requireServedParitySettlementPostconditions(t *testing.T, endpoint, runID s
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("served parity scenario %s settlement did not quiesce for run %s: %#v", scenario.ID, runID, last.TestQuiescence)
+	t.Fatalf("served parity scenario %s settlement did not quiesce for run %s: ready=%v active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d",
+		scenario.ID,
+		runID,
+		boolPointerValue(last.TestQuiescence.Ready),
+		intPointerValue(last.TestQuiescence.ActiveDeliveries),
+		intPointerValue(last.TestQuiescence.UnsettledPipelineEvents),
+		intPointerValue(last.TestQuiescence.DueTimers),
+		intPointerValue(last.TestQuiescence.ActiveSessionLeases),
+	)
+}
+
+func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, suffix string) (runID, eventID, entityID string) {
+	t.Helper()
+	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "thing.created",
+		"bundle_hash":     rt.BundleHash,
+		"payload":         map[string]any{"amount": 7, "who": suffix},
+		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
+	})
+	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
+		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycle(t, rt.DB, rt.Backend, result.RunID, result.EventID, rt.Probe)
+	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
+	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
+	return result.RunID, result.EventID, entityID
+}
+
+func requireServedOKJSONRPC(t *testing.T, endpoint, method string, params map[string]any) {
+	t.Helper()
+	var result map[string]any
+	requireServedJSONRPCResult(t, endpoint, method, params, &result)
+	if result["ok"] != true {
+		t.Fatalf("%s result = %#v, want ok=true", method, result)
+	}
+}
+
+func requireServedControlAPIIdempotencyRows(t *testing.T, db *sql.DB, backend, method, key string, want int) {
+	t.Helper()
+	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, method, key); got != want {
+		t.Fatalf("%s api_idempotency rows for %s/%s = %d, want %d", backend, method, key, got, want)
+	}
+}
+
+func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, wantControlStatus string, allowedRunStatuses ...string) {
+	t.Helper()
+	allowed := map[string]bool{}
+	for _, status := range allowedRunStatuses {
+		status = strings.TrimSpace(status)
+		if status != "" {
+			allowed[status] = true
+		}
+	}
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var lastRunStatus, lastControlStatus, lastReason, lastControlledBy string
+	for time.Now().Before(deadline) {
+		runStatus, controlStatus, reason, controlledBy := servedRunControlState(t, db, backend, runID)
+		lastRunStatus, lastControlStatus, lastReason, lastControlledBy = runStatus, controlStatus, reason, controlledBy
+		if controlStatus == wantControlStatus && allowed[runStatus] {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s run_control_state for %s = run:%s control:%s reason:%s by:%s, want control=%s run in %v",
+		backend, runID, lastRunStatus, lastControlStatus, lastReason, lastControlledBy, wantControlStatus, allowedRunStatuses)
+}
+
+func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (runStatus, controlStatus, reason, controlledBy string) {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `
+			SELECT r.status, COALESCE(rc.control_status, ''), COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
+			FROM runs r
+			LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
+			WHERE r.run_id = $1::uuid
+		`
+		args = []any{runID}
+	case "sqlite":
+		query = `
+			SELECT r.status, COALESCE(rc.control_status, ''), COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
+			FROM runs r
+			LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
+			WHERE r.run_id = ?
+		`
+		args = []any{runID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+		t.Fatalf("%s load run control state for %s: %v", backend, runID, err)
+	}
+	return strings.TrimSpace(runStatus), strings.TrimSpace(controlStatus), strings.TrimSpace(reason), strings.TrimSpace(controlledBy)
+}
+
+func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, backend string) (string, string) {
+	t.Helper()
+	runID := uuid.NewString()
+	eventID := uuid.NewString()
+	deliveryID := uuid.NewString()
+	now := time.Now().UTC()
+	switch backend {
+	case "postgres":
+		if _, err := db.ExecContext(context.Background(), `
+			INSERT INTO runs (run_id, status, bundle_source, started_at)
+			VALUES ($1::uuid, 'running', 'legacy', $2)
+		`, runID, now); err != nil {
+			t.Fatalf("seed postgres run-control pending run: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `
+			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ($1::uuid, $2::uuid, 'control.stop.pending', 'global', '{}'::jsonb, 'test', 'agent', $3)
+		`, eventID, runID, now); err != nil {
+			t.Fatalf("seed postgres run-control pending event: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `
+				INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
+				VALUES ($1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-pending', 'pending', $4)
+			`, deliveryID, runID, eventID, now); err != nil {
+			t.Fatalf("seed postgres run-control pending delivery: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `
+				INSERT INTO event_receipts (
+					event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
+				)
+				VALUES (
+					$1::uuid, 'platform', 'pipeline', 'success', 'pipeline_persisted',
+					'{"manager_status":"processed","reason_code":"pipeline_persisted"}'::jsonb, $2
+				)
+			`, eventID, now); err != nil {
+			t.Fatalf("seed postgres run-control pipeline receipt: %v", err)
+		}
+	case "sqlite":
+		if _, err := db.ExecContext(context.Background(), `
+				INSERT INTO runs (run_id, status, bundle_source, started_at)
+				VALUES (?, 'running', 'legacy', ?)
+			`, runID, now); err != nil {
+			t.Fatalf("seed sqlite run-control pending run: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `
+			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES (?, ?, 'control.stop.pending', 'global', '{}', 'test', 'agent', ?)
+		`, eventID, runID, now); err != nil {
+			t.Fatalf("seed sqlite run-control pending event: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `
+				INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, created_at)
+				VALUES (?, ?, ?, 'agent', 'agent-pending', 'pending', ?)
+			`, deliveryID, runID, eventID, now); err != nil {
+			t.Fatalf("seed sqlite run-control pending delivery: %v", err)
+		}
+		if _, err := db.ExecContext(context.Background(), `
+				INSERT INTO event_receipts (
+					receipt_id, event_id, subscriber_type, subscriber_id, outcome, reason_code, side_effects, processed_at
+				)
+				VALUES (
+					?, ?, 'platform', 'pipeline', 'success', 'pipeline_persisted',
+					'{"manager_status":"processed","reason_code":"pipeline_persisted"}', ?
+				)
+			`, uuid.NewString(), eventID, now); err != nil {
+			t.Fatalf("seed sqlite run-control pipeline receipt: %v", err)
+		}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	return runID, eventID
+}
+
+func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, backend, eventID, subscriberID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var lastStatus, lastReason string
+	for time.Now().Before(deadline) {
+		status, reason := servedDeliveryStatusReason(t, db, backend, eventID, "agent", subscriberID)
+		lastStatus, lastReason = status, reason
+		if status == "dead_letter" && reason == "run_stopped" {
+			waitServedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "agent", subscriberID, "dead_letter", 1)
+			waitServedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success", 1)
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s stopped pending delivery %s/%s = %s/%s, want dead_letter/run_stopped", backend, eventID, subscriberID, lastStatus, lastReason)
+}
+
+func servedDeliveryStatusReason(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string) (status, reason string) {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `
+			SELECT status, COALESCE(reason_code, '')
+			FROM event_deliveries
+			WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3
+		`
+		args = []any{eventID, subscriberType, subscriberID}
+	case "sqlite":
+		query = `
+			SELECT status, COALESCE(reason_code, '')
+			FROM event_deliveries
+			WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?
+		`
+		args = []any{eventID, subscriberType, subscriberID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&status, &reason); err != nil {
+		t.Fatalf("%s load delivery status/reason for %s: %v", backend, eventID, err)
+	}
+	return strings.TrimSpace(status), strings.TrimSpace(reason)
+}
+
+func requireNoServedDeliveryStatusDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, status string, duration time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		if got := servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status); got != 0 {
+			t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d during blocked interval, want 0",
+				backend, eventID, subscriberType, subscriberID, status, got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func requireNoServedReceiptOutcomeDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(duration)
+	for time.Now().Before(deadline) {
+		if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
+			t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d during blocked interval, want 0",
+				backend, eventID, subscriberType, subscriberID, outcome, got)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func requireServedRuntimeIngressState(t *testing.T, db *sql.DB, backend, wantStatus, wantTransitionEventName string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var lastStatus, lastEventID, lastEventName string
+	for time.Now().Before(deadline) {
+		status, eventID := servedRuntimeIngressState(t, db, backend)
+		lastStatus, lastEventID = status, eventID
+		if eventID != "" {
+			lastEventName = servedEventNameByID(t, db, backend, eventID)
+		}
+		if status == wantStatus && (wantTransitionEventName == "" || lastEventName == wantTransitionEventName) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s runtime_ingress_state = status:%s transition_event:%s/%s, want %s/%s",
+		backend, lastStatus, lastEventID, lastEventName, wantStatus, wantTransitionEventName)
+}
+
+func servedRuntimeIngressState(t *testing.T, db *sql.DB, backend string) (status, transitionEventID string) {
+	t.Helper()
+	var query string
+	switch backend {
+	case "postgres":
+		query = `SELECT status, COALESCE(transition_event_id::text, '') FROM runtime_ingress_state WHERE id = 1`
+	case "sqlite":
+		query = `SELECT status, COALESCE(transition_event_id, '') FROM runtime_ingress_state WHERE id = 1`
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), query).Scan(&status, &transitionEventID); err != nil {
+		t.Fatalf("%s load runtime ingress state: %v", backend, err)
+	}
+	return strings.TrimSpace(status), strings.TrimSpace(transitionEventID)
+}
+
+func servedEventNameByID(t *testing.T, db *sql.DB, backend, eventID string) string {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT event_name FROM events WHERE event_id = $1::uuid`
+		args = []any{eventID}
+	case "sqlite":
+		query = `SELECT event_name FROM events WHERE event_id = ?`
+		args = []any{eventID}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var name string
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&name); err != nil {
+		t.Fatalf("%s load event name for %s: %v", backend, eventID, err)
+	}
+	return strings.TrimSpace(name)
+}
+
+func requireServedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var got int
+	for time.Now().Before(deadline) {
+		got = servedEventNameCount(t, db, backend, eventName)
+		if got == want {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s events named %s = %d, want %d", backend, eventName, got, want)
+}
+
+func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) int {
+	t.Helper()
+	var query string
+	var args []any
+	switch backend {
+	case "postgres":
+		query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
+		args = []any{eventName}
+	case "sqlite":
+		query = `SELECT COUNT(*) FROM events WHERE event_name = ?`
+		args = []any{eventName}
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+		t.Fatalf("%s count event name %s: %v", backend, eventName, err)
+	}
+	return count
 }
 
 func writeServedEventPublishFollowUpFixture(t *testing.T) string {
@@ -4341,7 +4890,7 @@ terminal_states: [done]
 states: [new, waiting, done]
 pins:
   inputs:
-    events: [thing.created]
+    events: [thing.created, thing.unhandled]
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 widget:
@@ -5775,6 +6324,21 @@ func waitServedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d, want %d", backend, eventID, subscriberType, subscriberID, status, got, want)
+}
+
+func waitServedEventPublishDeliveryStatusCountForRun(t *testing.T, db *sql.DB, backend, runID, eventID, subscriberType, subscriberID, status string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var got int
+	for time.Now().Before(deadline) {
+		got = servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status)
+		if got == want {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d, want %d\n%s",
+		backend, eventID, subscriberType, subscriberID, status, got, want, servedEventPublishDebugSummary(t, db, backend, runID))
 }
 
 func servedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string, statuses ...string) int {
