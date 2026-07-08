@@ -46,7 +46,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		plans:           append([]runtimepinrouting.ConnectRoutePlan(nil), plans...),
 		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		loadDescriptors: loadDescriptors,
-		lifecycle:       newTemplateInstanceLifecycleOwner(source, loadDescriptors, activator),
+		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, loadDescriptors, activator),
 	}
 }
 

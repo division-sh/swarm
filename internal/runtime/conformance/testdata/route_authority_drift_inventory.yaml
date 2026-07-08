@@ -71,6 +71,7 @@ search_dimensions:
     minimum_matching_files: 4
     required_paths:
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
@@ -82,6 +83,7 @@ search_dimensions:
     required_paths:
       - platform-spec.yaml
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/routing_derivation.go
@@ -404,6 +406,7 @@ seam_families:
     paths:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/runforkadmission/contract_frontier.go
       - internal/runtime/runforkadmission/selected_route_history.go
       - internal/runtime/runstart/root_inputs.go
@@ -412,13 +415,16 @@ seam_families:
       RouteTable.Resolve must be classified by role. EventBus lowered-connect
       use is post-identity receiver-carrier lookup; runstart/runfork uses are
       separate admission/readiness route-fact consumers, not publish-time route
-      authority.
+      authority. The template lifecycle owner uses this only after a failed
+      select-or-create activation to prove the matching descriptor is already
+      routable before treating the error as same-key convergence.
   - id: receiver_carrier_evidence
     layer: live_dispatch_non_authority
     classification: valid_consumer
     paths:
       - platform-spec.yaml
       - internal/runtime/bus/connect_route_plan_dispatch.go
+      - internal/runtime/bus/template_instance_lifecycle.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/routing_derivation.go
@@ -433,7 +439,9 @@ seam_families:
     notes: >
       Receiver carriers are concrete dispatch evidence after a lowered plan
       selects target identity. They must not repair or replace the route
-      authority decision.
+      authority decision. The template lifecycle owner may consume them only to
+      avoid swallowing a failed activation whose descriptor is visible but whose
+      receiver route was never installed.
   - id: descriptor_evidence_non_authority
     layer: descriptor_evidence_non_authority
     classification: non_authoritative_observer_projection

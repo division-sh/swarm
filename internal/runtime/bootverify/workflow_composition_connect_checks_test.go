@@ -169,15 +169,15 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 		for _, tc := range tests {
 			t.Run(mode+"/"+tc.name, func(t *testing.T) {
 				tc.opts.mode = mode
-			root := writeSelectResolutionCompositionConnectFixture(t, tc.opts)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
+				root := writeSelectResolutionCompositionConnectFixture(t, tc.opts)
+				bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+				report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
-			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
-				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
-			}
-		})
+				if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+					t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+				}
+			})
 		}
 	}
 }
