@@ -98,6 +98,11 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 			t.Fatalf("Claude CLI controls cleanup rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")))
 		}
 	}
+	for _, want := range []string{"dynamic map keys", "max_concurrency", "Unknown policy fields", "MUST fail closed"} {
+		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "provider_limits_shape")), want) {
+			t.Fatalf("provider limits shape rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "provider_limits_shape")))
+		}
+	}
 
 	budget := mustMappingValue(t, sections, "budget")
 	budgetKeys := mustMappingValue(t, budget, "keys")

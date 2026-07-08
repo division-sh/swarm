@@ -90,6 +90,8 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 		{name: "claude cli tmux split unsupported", body: "llm:\n  claude_cli:\n    use_tmux: true\n", want: "llm.claude_cli.use_tmux"},
 		{name: "unknown budget key", body: "budget:\n  not_a_real_key: 1\n", want: "unknown config key \"budget.not_a_real_key\""},
 		{name: "unknown human task budget typo", body: "budget:\n  human_tasks:\n    max_tasks_per_wek: 1\n", want: "unknown config key \"budget.human_tasks.max_tasks_per_wek\""},
+		{name: "unknown provider limit profile policy typo", body: "llm:\n  provider_limits:\n    anthropic:\n      max_concurency: 2\n", want: "unknown config key \"llm.provider_limits.anthropic.max_concurency\""},
+		{name: "unknown provider limit model policy typo", body: "llm:\n  provider_limits:\n    anthropic:\n      models:\n        sonnet:\n          rate_limt: 10/m\n", want: "unknown config key \"llm.provider_limits.anthropic.models.sonnet.rate_limt\""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -99,6 +101,30 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 				t.Fatalf("loadUnifiedConfig error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestUnifiedConfigAllowsProviderLimitsDynamicProfilesAndModels(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, path, strings.Join([]string{
+		"llm:",
+		"  provider_limits:",
+		"    anthropic:",
+		"      max_concurrency: 2",
+		"      max_concurrency_max_wait: 1s",
+		"      models:",
+		"        gpt-4.1:",
+		"          rate_limit: 30/m",
+		"          rate_limit_max_wait: 1s",
+	}, "\n")+"\n")
+
+	got, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: path})
+	if err != nil {
+		t.Fatalf("loadUnifiedConfig: %v", err)
+	}
+	if _, ok := got.Config.LLM.ProviderLimits["anthropic"].Models["gpt-4.1"]; !ok {
+		t.Fatalf("provider limit model key gpt-4.1 missing: %#v", got.Config.LLM.ProviderLimits["anthropic"].Models)
 	}
 }
 
