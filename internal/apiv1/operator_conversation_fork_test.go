@@ -120,6 +120,47 @@ func (f *fakeForkChatExecutor) ExecuteForkChat(_ context.Context, prepared store
 	return f.result, nil
 }
 
+func TestOperatorConversationForkHandlersSegregateReadAndLifecycleCapabilities(t *testing.T) {
+	readOnly := OperatorConversationForkHandlers(OperatorReadOptions{
+		ConversationForks: &fakeConversationForkLifecycleStore{},
+		Idempotency:       newMutatingProbeIdempotencyStore(),
+	})
+	for _, method := range []string{"conversation.fork_list", "conversation.fork_view"} {
+		if readOnly[method] == nil {
+			t.Fatalf("read-only fork capability missing %s", method)
+		}
+	}
+	for _, method := range []string{"conversation.fork", "conversation.fork_chat", "conversation.fork_delete"} {
+		if readOnly[method] != nil {
+			t.Fatalf("read-only fork capability unexpectedly registered mutating method %s", method)
+		}
+	}
+
+	lifecycleOnly := OperatorConversationForkHandlers(OperatorReadOptions{
+		ConversationForkLifecycle: &fakeConversationForkLifecycleStore{},
+		Idempotency:               newMutatingProbeIdempotencyStore(),
+	})
+	for _, method := range []string{"conversation.fork", "conversation.fork_chat", "conversation.fork_delete"} {
+		if lifecycleOnly[method] == nil {
+			t.Fatalf("lifecycle fork capability missing %s", method)
+		}
+	}
+	for _, method := range []string{"conversation.fork_list", "conversation.fork_view"} {
+		if lifecycleOnly[method] != nil {
+			t.Fatalf("lifecycle fork capability unexpectedly registered read method %s", method)
+		}
+	}
+
+	withoutIdempotency := OperatorConversationForkHandlers(OperatorReadOptions{
+		ConversationForkLifecycle: &fakeConversationForkLifecycleStore{},
+	})
+	for _, method := range []string{"conversation.fork", "conversation.fork_chat", "conversation.fork_delete"} {
+		if withoutIdempotency[method] != nil {
+			t.Fatalf("lifecycle fork capability without idempotency unexpectedly registered %s", method)
+		}
+	}
+}
+
 func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
 	sourceSessionID := "00000000-0000-0000-0000-000000000201"
@@ -216,10 +257,11 @@ func TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency(t *test
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:               func() time.Time { return now },
-			ConversationForks: forks,
-			ForkChatExecutor:  executor,
-			Idempotency:       newMutatingProbeIdempotencyStore(),
+			Now:                       func() time.Time { return now },
+			ConversationForks:         forks,
+			ConversationForkLifecycle: forks,
+			ForkChatExecutor:          executor,
+			Idempotency:               newMutatingProbeIdempotencyStore(),
 		}),
 	})
 
@@ -399,8 +441,9 @@ func TestOperatorConversationForkHandlersTypedErrors(t *testing.T) {
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
-					Now:               func() time.Time { return now },
-					ConversationForks: forks,
+					Now:                       func() time.Time { return now },
+					ConversationForks:         forks,
+					ConversationForkLifecycle: forks,
 					ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
 						AssistantMessage: "ok",
 					}},
@@ -627,9 +670,9 @@ func TestOperatorConversationForkRejectsInvalidForkPointBeforeOwner(t *testing.T
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},
 				Handlers: OperatorReadHandlers(OperatorReadOptions{
-					Now:               func() time.Time { return now },
-					ConversationForks: forks,
-					Idempotency:       newMutatingProbeIdempotencyStore(),
+					Now:                       func() time.Time { return now },
+					ConversationForkLifecycle: forks,
+					Idempotency:               newMutatingProbeIdempotencyStore(),
 				}),
 			})
 			resp := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"bad","method":"conversation.fork","params":{"source_session_id":"00000000-0000-0000-0000-000000000201","fork_point":`+tt.forkPoint+`}}`)
@@ -665,9 +708,9 @@ func TestOperatorConversationForkIdempotencyConflict(t *testing.T) {
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: OperatorReadHandlers(OperatorReadOptions{
-			Now:               func() time.Time { return now },
-			ConversationForks: forks,
-			Idempotency:       newMutatingProbeIdempotencyStore(),
+			Now:                       func() time.Time { return now },
+			ConversationForkLifecycle: forks,
+			Idempotency:               newMutatingProbeIdempotencyStore(),
 		}),
 	})
 	first := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"first","method":"conversation.fork","params":{"source_session_id":"`+sourceSessionID+`","fork_point":{"kind":"turn","turn_index":1},"idempotency_key":"fork-key"}}`)

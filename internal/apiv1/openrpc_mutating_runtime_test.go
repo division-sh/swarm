@@ -893,15 +893,16 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) OperatorReadOptions {
 	t.Helper()
 	source := semanticview.Wrap(testSetupValidationBundle(t))
 	return OperatorReadOptions{
-		RepoRoot:          t.TempDir(),
-		PlatformSpecPath:  testBundleRegistrationPlatformSpec(t),
-		Now:               func() time.Time { return s.now },
-		Ready:             func() bool { return true },
-		Database:          fakePinger{},
-		Runs:              s.runs,
-		Observability:     s.observability,
-		AgentControl:      s.agentControl,
-		ConversationForks: s.forks,
+		RepoRoot:                  t.TempDir(),
+		PlatformSpecPath:          testBundleRegistrationPlatformSpec(t),
+		Now:                       func() time.Time { return s.now },
+		Ready:                     func() bool { return true },
+		Database:                  fakePinger{},
+		Runs:                      s.runs,
+		Observability:             s.observability,
+		AgentControl:              s.agentControl,
+		ConversationForks:         s.forks,
+		ConversationForkLifecycle: s.forks,
 		ForkChatExecutor: &fakeForkChatExecutor{result: store.ConversationForkChatExecution{
 			AssistantMessage: "forkchat sandbox response: inspect fork",
 		}},
