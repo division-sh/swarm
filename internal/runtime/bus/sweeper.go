@@ -178,23 +178,30 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 	if !participates {
 		return 0, nil
 	}
+	since := time.Now().Add(-lookback)
+	redelivered := 0
+	seen := map[string]struct{}{}
 	if lister, ok := eb.store.(interface {
 		ListEventsWithPendingDeliveriesForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
 	}); ok && lister != nil {
-		records, err := lister.ListEventsWithPendingDeliveriesForRun(ctx, runID, time.Now().Add(-lookback), limit)
+		records, err := lister.ListEventsWithPendingDeliveriesForRun(ctx, runID, since, limit)
 		if err != nil {
 			return 0, err
 		}
-		redelivered := 0
 		for _, record := range records {
 			evt := record.Event
-			if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-				eb.markPipelineReceipt(ctx, evt.ID(), "error", replayErr)
+			eventID := strings.TrimSpace(evt.ID())
+			if eventID == "" {
 				continue
 			}
-			recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
+			seen[eventID] = struct{}{}
+			if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
+				eb.markPipelineReceipt(ctx, eventID, "error", replayErr)
+				continue
+			}
+			recipients, err := eb.authoritativeRecipientsForEvent(ctx, eventID)
 			if err != nil {
-				eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error())
+				eb.markPipelineReceipt(ctx, eventID, "error", err.Error())
 				return redelivered, err
 			}
 			if err := eb.publishPersistedRecipients(ctx, evt, recipients, true); err != nil {
@@ -203,24 +210,29 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 				}
 				return redelivered, err
 			}
-			eb.markPipelineReceipt(ctx, evt.ID(), "processed", "")
+			eb.markPipelineReceipt(ctx, eventID, "processed", "")
 			redelivered++
 		}
-		return redelivered, nil
 	}
 	lister, ok := eb.store.(interface {
 		ListEventsMissingPipelineReceiptForRun(context.Context, string, time.Time, int) ([]events.PersistedReplayEvent, error)
 	})
 	if !ok || lister == nil {
-		return 0, nil
+		return redelivered, nil
 	}
-	records, err := lister.ListEventsMissingPipelineReceiptForRun(ctx, runID, time.Now().Add(-lookback), limit)
+	records, err := lister.ListEventsMissingPipelineReceiptForRun(ctx, runID, since, limit)
 	if err != nil {
-		return 0, err
+		return redelivered, err
 	}
-	redelivered := 0
 	for _, record := range records {
 		evt := record.Event
+		eventID := strings.TrimSpace(evt.ID())
+		if eventID == "" {
+			continue
+		}
+		if _, exists := seen[eventID]; exists {
+			continue
+		}
 		lease, claimed, err := replayStore.ClaimPipelineReplay(ctx, evt.ID())
 		if err != nil {
 			return redelivered, err
