@@ -105,6 +105,29 @@ connect:
 	}
 }
 
+func TestToolSchemaEntryDecodeRejectsDuplicateManagedCredentialTokenHeadersBeforeCanonicalizing(t *testing.T) {
+	var tool ToolSchemaEntry
+	err := yaml.Unmarshal([]byte(`
+category: provider_connector
+handler_type: http
+managed_credential:
+  key: notion_oauth
+  token_request:
+    static_headers:
+      X-Provider-Version: "2026-03-11"
+      x-provider-version: "2026-04-01"
+http:
+  method: GET
+  url: https://example.invalid
+`), &tool)
+	if err == nil {
+		t.Fatal("yaml.Unmarshal error = nil, want duplicate token header rejection")
+	}
+	if !strings.Contains(err.Error(), "duplicate header") {
+		t.Fatalf("yaml.Unmarshal error = %v, want duplicate header rejection", err)
+	}
+}
+
 func TestProjectPackageDocumentDecode_PreservesPolicyRequiresDefaults(t *testing.T) {
 	var doc ProjectPackageDocument
 	if err := yaml.Unmarshal([]byte(`

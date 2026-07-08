@@ -57,18 +57,18 @@ func NormalizeTokenRequestProfile(profile TokenRequestProfile) TokenRequestProfi
 }
 
 func ValidateTokenRequestProfile(profile TokenRequestProfile) error {
-	profile = NormalizeTokenRequestProfile(profile)
-	switch profile.ClientAuth {
+	normalized := NormalizeTokenRequestProfile(profile)
+	switch normalized.ClientAuth {
 	case TokenClientAuthPost, TokenClientAuthBasic:
 	default:
-		return fmt.Errorf("token_request.client_auth %q is not supported; want %s or %s", profile.ClientAuth, TokenClientAuthPost, TokenClientAuthBasic)
+		return fmt.Errorf("token_request.client_auth %q is not supported; want %s or %s", normalized.ClientAuth, TokenClientAuthPost, TokenClientAuthBasic)
 	}
-	switch profile.Body {
+	switch normalized.Body {
 	case TokenBodyForm, TokenBodyJSON:
 	default:
-		return fmt.Errorf("token_request.body %q is not supported; want %s or %s", profile.Body, TokenBodyForm, TokenBodyJSON)
+		return fmt.Errorf("token_request.body %q is not supported; want %s or %s", normalized.Body, TokenBodyForm, TokenBodyJSON)
 	}
-	seen := map[string]string{}
+	seen := map[string]struct{}{}
 	for key, value := range profile.StaticHeaders {
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
@@ -77,10 +77,10 @@ func ValidateTokenRequestProfile(profile TokenRequestProfile) error {
 		}
 		canonical := http.CanonicalHeaderKey(key)
 		lower := strings.ToLower(canonical)
-		if previous, exists := seen[lower]; exists && previous != canonical {
+		if _, exists := seen[lower]; exists {
 			return fmt.Errorf("token_request.static_headers contains duplicate header %q", canonical)
 		}
-		seen[lower] = canonical
+		seen[lower] = struct{}{}
 		switch lower {
 		case "authorization", "content-type":
 			return fmt.Errorf("token_request.static_headers must not declare %s; token client auth and body encoding own that header", canonical)
