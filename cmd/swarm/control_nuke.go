@@ -140,7 +140,7 @@ func newControlNukeCommand(opts rootCommandOptions) *cobra.Command {
 func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runtimeNukeCommandOptions) error {
 	idempotencyKey, err := optionalNonBlankNukeFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
 	}
 	if !opts.dryRun && !opts.yes {
@@ -161,7 +161,7 @@ func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runt
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runtimeNukeErrorExitCode(err)}
 	}
 	params := map[string]any{"dry_run": opts.dryRun}
@@ -170,11 +170,11 @@ func runControlNukeCommand(ctx context.Context, out, errOut io.Writer, opts runt
 	}
 	var result runtimeNukeResult
 	if err := client.call(ctx, runtimeNukeMethod, params, &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runtimeNukeErrorExitCode(err)}
 	}
 	if err := validateRuntimeNukeResult(result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 3}
 	}
 	writeRuntimeNukeResult(out, result)

@@ -106,12 +106,12 @@ func controlCommandTitle(action string) string {
 func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []string, opts controlRunCommandOptions) error {
 	runID, err := validateControlRunTarget(args, opts.all)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: controlCommandExitCodeValidation}
 	}
 	idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: controlCommandExitCodeValidation}
 	}
 	if opts.all && opts.action == "stop" && idempotencyKey != "" {
@@ -129,7 +129,7 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: controlCommandErrorExitCode(err)}
 	}
 
@@ -142,7 +142,7 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 			return commandExitError{code: controlCommandExitCodeRuntimeError}
 		}
 		if err := callControlOK(ctx, client, opts.allMethod, controlRunParams("", idempotencyKey)); err != nil {
-			fmt.Fprintln(errOut, err)
+			writeCLIAPIError(errOut, err)
 			return commandExitError{code: controlCommandErrorExitCode(err)}
 		}
 		writeControlOK(out, opts.action, "runtime", "")
@@ -150,7 +150,7 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 	}
 
 	if err := callControlOK(ctx, client, opts.runMethod, controlRunParams(runID, idempotencyKey)); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: controlCommandErrorExitCode(err)}
 	}
 	writeControlOK(out, opts.action, "run", runID)
@@ -199,7 +199,7 @@ func callControlOK(ctx context.Context, client *cliAPIClient, method string, par
 func runControlStopAllCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient) error {
 	runIDs, err := listControlStopAllRunIDs(ctx, client)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: controlCommandErrorExitCode(err)}
 	}
 	failures := []controlStopAllFailure{}
@@ -332,8 +332,12 @@ func writeControlStopAllFailures(errOut io.Writer, failures []controlStopAllFail
 		return
 	}
 	for _, failure := range failures {
-		fmt.Fprintf(errOut, "control stop failed: run_id=%s error=%v\n", failure.runID, failure.err)
+		writeCLIAPIError(errOut, controlStopAllFailureError(failure))
 	}
+}
+
+func controlStopAllFailureError(failure controlStopAllFailure) error {
+	return fmt.Errorf("control stop failed: run_id=%s: %w", failure.runID, failure.err)
 }
 
 func controlStopAllExitCode(failures []controlStopAllFailure) int {

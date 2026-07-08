@@ -149,6 +149,7 @@ type eventSubscriptionNotification struct {
 
 type eventSubscription struct {
 	conn           *websocket.Conn
+	endpoint       string
 	subscriptionID string
 	events         chan eventFull
 	errs           chan error
@@ -291,21 +292,21 @@ func bindEventFilterFlags(cmd *cobra.Command, opts *eventFilterOptions) {
 func runEventListCommand(ctx context.Context, out, errOut io.Writer, opts eventListCommandOptions) error {
 	params, err := opts.params()
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationExitValidation}
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	var result eventListResult
 	if err := client.call(ctx, eventObservationMethodList, params, &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	if err := validateEventListResult(result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationExitRuntime}
 	}
 	writeEventListResult(out, result)
@@ -320,16 +321,16 @@ func runEventViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCo
 	}
 	client, err := newCLIAPIClient(opts)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	var result eventFull
 	if err := client.call(ctx, eventObservationMethodGet, map[string]any{"event_id": eventID}, &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	if err := validateEventFull("event.get result", result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationExitRuntime}
 	}
 	writeEventDetailResult(out, result)
@@ -339,21 +340,21 @@ func runEventViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCo
 func runEventReplayCommand(ctx context.Context, out, errOut io.Writer, args []string, opts eventReplayCommandOptions) error {
 	eventID, subscribers, err := validateEventReplayArgs(args, opts.subscribers)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventReplayExitValidation}
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventReplayErrorExitCode(err)}
 	}
 	var result eventReplayResult
 	if err := client.call(ctx, eventReplayMethod, opts.params(eventID, subscribers), &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventReplayErrorExitCode(err)}
 	}
 	if err := validateEventReplayResult(result, eventID); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventReplayExitRuntime}
 	}
 	writeEventReplayResult(out, result)
@@ -363,22 +364,22 @@ func runEventReplayCommand(ctx context.Context, out, errOut io.Writer, args []st
 func runEventFollowCommand(ctx context.Context, out, errOut io.Writer, opts eventFollowCommandOptions) error {
 	params, err := opts.params()
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationExitValidation}
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	wsEndpoint, err := runCommandWebSocketEndpoint(client.endpoint)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	sub, err := subscribeEvents(ctx, wsEndpoint, client.token, params)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: eventObservationErrorExitCode(err)}
 	}
 	defer sub.close()
@@ -392,7 +393,7 @@ func runEventFollowCommand(ctx context.Context, out, errOut io.Writer, opts even
 				select {
 				case err := <-sub.errs:
 					if err != nil {
-						fmt.Fprintln(errOut, err)
+						writeCLIAPIError(errOut, err)
 						return commandExitError{code: eventObservationErrorExitCode(err)}
 					}
 				default:
@@ -402,7 +403,7 @@ func runEventFollowCommand(ctx context.Context, out, errOut io.Writer, opts even
 			writeEventFollowEvent(out, event)
 		case err := <-sub.errs:
 			if err != nil {
-				fmt.Fprintln(errOut, err)
+				writeCLIAPIError(errOut, err)
 				return commandExitError{code: eventObservationErrorExitCode(err)}
 			}
 		}
@@ -742,9 +743,9 @@ func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[s
 	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, wsEndpoint, header)
 	if err != nil {
 		if resp != nil {
-			return nil, eventObservationWSHTTPError(resp)
+			return nil, cliAPIWebSocketHTTPError("runtime event stream", wsEndpoint, resp)
 		}
-		return nil, fmt.Errorf("v1 WS dial failed: %w", err)
+		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "dial", err: err}
 	}
 	requestID := "swarm-cli:" + eventObservationMethodSubscribe
 	if err := conn.WriteJSON(jsonRPCRequest{
@@ -754,20 +755,20 @@ func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[s
 		Params:  params,
 	}); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("write event.subscribe request: %w", err)
+		return nil, &cliAPITransportError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription request", err: err}
 	}
 	var envelope jsonRPCResponse
-	if err := conn.ReadJSON(&envelope); err != nil {
+	if err := cliAPIReadWebSocketJSON(conn, "runtime event stream", wsEndpoint, "subscription response", &envelope); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("read event.subscribe response: %w", err)
+		return nil, err
 	}
 	if envelope.JSONRPC != "2.0" {
 		conn.Close()
-		return nil, fmt.Errorf("malformed event.subscribe response: jsonrpc=%q", envelope.JSONRPC)
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("jsonrpc=%q", envelope.JSONRPC)}
 	}
 	if id, ok := envelope.ID.(string); !ok || id != requestID {
 		conn.Close()
-		return nil, fmt.Errorf("malformed event.subscribe response: id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription response", err: fmt.Errorf("id=%s, want %q", formatJSONRPCID(envelope.ID), requestID)}
 	}
 	if envelope.Error != nil {
 		conn.Close()
@@ -776,14 +777,15 @@ func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[s
 	var result eventSubscriptionResult
 	if err := json.Unmarshal(envelope.Result, &result); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("decode event.subscribe result: %w", err)
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: err}
 	}
 	if strings.TrimSpace(result.SubscriptionID) == "" {
 		conn.Close()
-		return nil, fmt.Errorf("malformed event.subscribe result: subscription_id is required")
+		return nil, &cliAPIProtocolError{surface: "runtime event stream", endpoint: wsEndpoint, operation: "subscription result", err: fmt.Errorf("subscription_id is required")}
 	}
 	sub := &eventSubscription{
 		conn:           conn,
+		endpoint:       wsEndpoint,
 		subscriptionID: result.SubscriptionID,
 		events:         make(chan eventFull, 16),
 		errs:           make(chan error, 1),
@@ -792,43 +794,28 @@ func subscribeEvents(ctx context.Context, wsEndpoint, token string, params map[s
 	return sub, nil
 }
 
-func eventObservationWSHTTPError(resp *http.Response) error {
-	if resp == nil {
-		return nil
-	}
-	message := http.StatusText(resp.StatusCode)
-	if resp.Body != nil {
-		defer resp.Body.Close()
-		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		if err == nil && strings.TrimSpace(string(raw)) != "" {
-			message = strings.TrimSpace(string(raw))
-		}
-	}
-	return &cliAPIHTTPError{surface: "v1 WS", statusCode: resp.StatusCode, message: message}
-}
-
 func (s *eventSubscription) readLoop() {
 	defer close(s.events)
 	for {
 		var notification eventSubscriptionNotification
-		if err := s.conn.ReadJSON(&notification); err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) || strings.Contains(err.Error(), "use of closed network connection") {
+		if err := cliAPIReadWebSocketJSON(s.conn, "runtime event stream", s.endpoint, "notification read", &notification); err != nil {
+			if cliAPIIsNormalWebSocketClose(err) {
 				return
 			}
-			s.reportError(fmt.Errorf("read event.subscribe notification: %w", err))
+			s.reportError(err)
 			return
 		}
 		if notification.JSONRPC != "2.0" || notification.Method != "rpc.subscription" {
-			s.reportError(fmt.Errorf("malformed event.subscribe notification"))
+			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("malformed event.subscribe notification")})
 			return
 		}
 		if notification.Params.Subscription != s.subscriptionID {
-			s.reportError(fmt.Errorf("malformed event.subscribe notification: subscription mismatch"))
+			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: fmt.Errorf("subscription mismatch")})
 			return
 		}
 		event := notification.Params.Result
 		if err := validateEventFull("event.subscribe notification", event); err != nil {
-			s.reportError(err)
+			s.reportError(&cliAPIProtocolError{surface: "runtime event stream", endpoint: s.endpoint, operation: "notification", err: err})
 			return
 		}
 		select {

@@ -584,7 +584,7 @@ func validateLocalContextEntry(ctx context.Context, entry localContextEntry, cal
 	identity, err := caller.callRuntimeIdentity(ctx, rpcEndpoint, token)
 	if err != nil {
 		entry.Status = classifyLocalContextIdentityError(err)
-		entry.Detail = err.Error()
+		entry.Detail = formatCLIAPITransportDetail(err)
 		return entry
 	}
 	if strings.TrimSpace(identity.RuntimeInstanceID) == "" {
@@ -634,6 +634,10 @@ func classifyLocalContextIdentityError(err error) string {
 		default:
 			return localContextStatusStaleDescriptor
 		}
+	}
+	var protocolErr *cliAPIProtocolError
+	if errors.As(err, &protocolErr) {
+		return localContextStatusStaleDescriptor
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) {

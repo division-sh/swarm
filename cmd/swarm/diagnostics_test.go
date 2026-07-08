@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1049,17 +1050,18 @@ func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
 	}
 }
 
-func TestTraceFollowClassifiesPlainEOFAsRetryableTransportClose(t *testing.T) {
-	for _, msg := range []string{
-		"read run.subscribe_trace response: EOF",
-		"read run.subscribe_trace notification: EOF",
-		"EOF",
-	} {
-		t.Run(msg, func(t *testing.T) {
-			if !traceFollowTransportErrorText(msg) {
-				t.Fatalf("traceFollowTransportErrorText(%q) = false, want true", msg)
-			}
-		})
+func TestTraceFollowClassifiesTypedTransportAsRetryable(t *testing.T) {
+	err := &cliAPITransportError{
+		surface:   "runtime event stream",
+		endpoint:  "ws://127.0.0.1:8081/v1/ws",
+		operation: "notification read",
+		err:       io.ErrUnexpectedEOF,
+	}
+	if !traceFollowRetryableSubscribeError(err) {
+		t.Fatal("traceFollowRetryableSubscribeError = false, want true")
+	}
+	if !traceFollowRetryableStreamError(err) {
+		t.Fatal("traceFollowRetryableStreamError = false, want true")
 	}
 }
 
@@ -1355,7 +1357,7 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 				_, _ = w.Write([]byte(`{"error":"invalid bearer token"}`))
 			},
 			wantCode:   4,
-			wantStderr: "v1 RPC HTTP 401",
+			wantStderr: "rejected the request with status 401",
 		},
 		{
 			name: "json rpc run not found",

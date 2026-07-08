@@ -60,23 +60,23 @@ func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
 func runAgentDirectiveCommand(ctx context.Context, out, errOut io.Writer, args []string, opts agentDirectiveCommandOptions) error {
 	agentID, directive, err := validateAgentDirectiveArgs(args)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentDirectiveExitValidation}
 	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentDirectiveErrorExitCode(err)}
 	}
 
 	var result agentDirectiveResult
 	if err := client.call(ctx, agentDirectiveMethod, opts.params(agentID, directive), &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentDirectiveErrorExitCode(err)}
 	}
 	if err := validateAgentDirectiveResult(result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentDirectiveExitRuntime}
 	}
 	writeAgentDirectiveResult(out, agentID, result)

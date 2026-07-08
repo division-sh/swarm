@@ -46,23 +46,23 @@ func newAgentRestartCommand(opts rootCommandOptions) *cobra.Command {
 func runAgentRestartCommand(ctx context.Context, out, errOut io.Writer, args []string, opts agentRestartCommandOptions) error {
 	agentID, err := validateAgentRestartArgs(args)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentRestartExitValidation}
 	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentRestartErrorExitCode(err)}
 	}
 
 	var result agentRestartResult
 	if err := client.call(ctx, agentRestartMethod, opts.params(agentID), &result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentRestartErrorExitCode(err)}
 	}
 	if err := validateAgentRestartResult(result); err != nil {
-		fmt.Fprintln(errOut, err)
+		writeCLIAPIError(errOut, err)
 		return commandExitError{code: agentRestartExitRuntime}
 	}
 	writeAgentRestartResult(out, agentID)
