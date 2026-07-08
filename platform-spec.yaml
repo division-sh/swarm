@@ -15229,21 +15229,21 @@ cli_specification:
             bundle_list:
               command: swarm bundle list
               classification: shared_output
-              fact_owner: local bundle inventory
+              fact_owner: /v1/rpc bundle.list
               json_shape: bundle list result object
               quiet_values:
               - bundle_hash, one per returned bundle
             bundle_show:
               command: swarm bundle show
               classification: shared_output
-              fact_owner: local bundle inventory
+              fact_owner: /v1/rpc bundle.get
               json_shape: bundle detail result object
               quiet_values:
               - bundle_hash
             bundle_agents:
               command: swarm bundle agents
               classification: shared_output
-              fact_owner: local bundle inventory
+              fact_owner: /v1/rpc bundle.agents
               json_shape: bundle agents result object
               quiet_values:
               - agent id, one per returned agent
@@ -15255,14 +15255,14 @@ cli_specification:
             bundle_register:
               command: swarm bundle register
               classification: shared_output
-              fact_owner: local bundle catalog registration
+              fact_owner: /v1/rpc bundle.register
               json_shape: bundle registration result object
               quiet_values:
               - bundle_hash
             bundle_delete:
               command: swarm bundle delete
               classification: shared_output
-              fact_owner: local bundle catalog deletion
+              fact_owner: /v1/rpc bundle.delete
               json_shape: bundle delete result object
               quiet_values:
               - bundle_hash
@@ -15394,8 +15394,7 @@ cli_specification:
             resurrect legacy behavior, make API/runtime calls, or convert migration messages into successful
             machine-readable output.
         absent_command_rows:
-          commands:
-          - forkchat
+          commands: []
           rule: >
             Absent or blocked command rows do not receive output-mode implementation from #848. Their future
             implementation children consume this contract only after their command/API/runtime owner is promoted.
