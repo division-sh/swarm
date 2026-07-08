@@ -158,7 +158,7 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 		t.Fatalf("read swarm.example.yaml: %v", err)
 	}
 	exampleText := string(example)
-	for _, want := range []string{"swarm.yaml - Swarm's config file", "Project-safe keys", "Settings for this machine only", "Secret references", "swarm doctor config"} {
+	for _, want := range []string{"swarm.yaml - Swarm's config file", "Project-safe keys", "Settings for this machine only", "Secret references", "swarm doctor --target"} {
 		if !strings.Contains(exampleText, want) {
 			t.Fatalf("swarm.example.yaml missing generated guidance %q:\n%s", want, exampleText)
 		}
