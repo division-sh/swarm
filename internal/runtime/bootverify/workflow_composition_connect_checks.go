@@ -202,8 +202,11 @@ func compositionReceiverAddressRequired(schema runtimecontracts.FlowSchemaDocume
 func validateCompositionConnectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, outputPin runtimecontracts.FlowOutputEventPin, inputPin runtimecontracts.FlowInputEventPin, producerFlowID, receiverFlowID string) []Finding {
 	adapter := connect.Using.Instance
 	if !inputPin.Resolution.Empty() {
-		if inputPin.Resolution.Mode == runtimecontracts.FlowInputResolutionModeCreate && strings.TrimSpace(connect.Delivery) != "" && strings.TrimSpace(connect.Delivery) != "one" {
-			return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", "resolution mode create requires delivery one", receiverFlowID)}
+		switch inputPin.Resolution.Mode {
+		case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect:
+			if strings.TrimSpace(connect.Delivery) != "" && strings.TrimSpace(connect.Delivery) != "one" {
+				return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires delivery one", inputPin.Resolution.Mode), receiverFlowID)}
+			}
 		}
 		if adapter.Declared {
 			return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", "connect.using.instance is incompatible with input pin resolution", receiverFlowID)}
@@ -309,8 +312,9 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 	switch resolution.Mode {
 	case runtimecontracts.FlowInputResolutionModeCreate:
 		return validateCreateInputPinResolution(source, flowID, pin)
-	case runtimecontracts.FlowInputResolutionModeSelect,
-		runtimecontracts.FlowInputResolutionModeSelectOrCreate,
+	case runtimecontracts.FlowInputResolutionModeSelect:
+		return validateSelectInputPinResolution(source, flowID, pin)
+	case runtimecontracts.FlowInputResolutionModeSelectOrCreate,
 		runtimecontracts.FlowInputResolutionModeFanIn,
 		runtimecontracts.FlowInputResolutionModeFanOut,
 		runtimecontracts.FlowInputResolutionModeReply:
@@ -319,6 +323,53 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution.mode is required", location))
 	default:
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", resolution.Mode), location))
+	}
+	return findings
+}
+
+func validateSelectInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+	var findings []Finding
+	resolution := pin.Resolution
+	location := flowID
+	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" || resolution.InstanceKey.Mint != "" || resolution.InstanceKey.As != "" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode select may only declare instance_key and carries", location))
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_unavailable", "receiver instance key owner is unavailable for input pin resolution", location))
+	}
+	instance, err := bundle.ResolveFlowTemplateInstance(flowID)
+	if err != nil {
+		return append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_invalid", err.Error(), location))
+	}
+	key := strings.TrimSpace(resolution.InstanceKey.From)
+	if key == "" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode select requires instance_key to name a carried field", location))
+		return findings
+	}
+	if len(instance.By) != 1 {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode select requires exactly one receiver instance.by field, got %v", instance.By), location))
+		return findings
+	}
+	if strings.TrimSpace(instance.By[0]) != key {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode select instance_key %q must match the receiver's single instance.by field %v", key, instance.By), location))
+	}
+	carry, ok := pin.Carries[key]
+	if !ok {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode select instance_key %s must name a declared carries.%s field", key, key), location))
+		return findings
+	}
+	wantFrom := "payload." + key
+	if strings.TrimSpace(carry.From) != wantFrom {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("carry %s must use from: %s for resolution mode select", key, wantFrom), location))
+	}
+	if carry.Type != "" {
+		targetType, err := compositionConnectTargetType(source, flowID, "entity."+key)
+		if err != nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "receiver_instance_key_invalid", err.Error(), location))
+		} else if !compositionConnectTypesCompatible(carry.Type, targetType) {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "key_types_incompatible", fmt.Sprintf("carry %s type %s is incompatible with receiver entity.%s type %s", key, carry.Type, key, targetType), location))
+		}
 	}
 	return findings
 }

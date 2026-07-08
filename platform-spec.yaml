@@ -7976,7 +7976,7 @@ flow_model:
             broadcast:true, receiver select_entity/select_or_create_entity, and
             explicit create_flow_instance are not lifecycle authority.
         implementation_slice_1835:
-          status: spec_locked_create_mode_runnable_remaining_modes_fail_closed
+          status: spec_locked_create_and_select_modes_runnable_remaining_modes_fail_closed
           canonical_spec_owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835
           canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.templateInstanceLifecycleOwner + internal/runtime/bootverify.composition_connect_validation
           rule: |
@@ -7989,13 +7989,15 @@ flow_model:
             subscribers, delivery rows, replay rows, route-table lookup before a
             selected target, or handler lookup.
 
-            PR1 spec-locks every approved mode but only makes
-            `resolution.mode: create` runnable. All other locked modes are
-            recognized by contracts and verifier and fail closed as
-            design-locked/not-runnable until their implementation slices land.
-            Static root ingress, parent-connect static delivery, and
-            harness-injected inputs remain existing #1807 input-source / connect
-            behavior; they are not instance-resolution runtime modes.
+            PR1 spec-locks every approved mode and makes
+            `resolution.mode: create` runnable. PR2 makes
+            `resolution.mode: select` runnable for a single declared carried
+            key. All other locked modes are recognized by contracts and
+            verifier and fail closed as design-locked/not-runnable until their
+            implementation slices land. Static root ingress, parent-connect
+            static delivery, and harness-injected inputs remain existing #1807
+            input-source / connect behavior; they are not instance-resolution
+            runtime modes.
           authoring_shape: |
             pins:
               inputs:
@@ -8051,11 +8053,37 @@ flow_model:
               - delivery topology other than one
               - unavailable template lifecycle activator
             select:
-              status: spec_locked_not_runnable_in_1835_pr1
+              status: runnable_in_1835_pr2
               contract: >
-                Select routes to exactly one existing receiver instance by an
-                explicit instance key. Missing or ambiguous target is invalid;
-                this mode never creates an instance.
+                Select routes to exactly one existing receiver template
+                instance by a declared carried key. The input pin declares the
+                seam identity once under `carries.<field>`, and
+                `resolution.instance_key` MUST name that carried field. In this
+                slice the receiver flow MUST be `mode: template`, MUST have a
+                single `instance.by` field, and that field MUST equal
+                `resolution.instance_key`. The carry MUST use `from:
+                payload.<field>` and may declare a type compatible with the
+                receiver `entity.<field>`. The lowered route plan records
+                `Mode: select`, the single field mapping, runtime descriptor
+                resolution, and reject/reject lifecycle policy. Missing or
+                ambiguous target is invalid; this mode never creates an
+                instance and receiver legacy `on_missing:create` does not
+                override select semantics. Target-failure diagnostics MUST name
+                the receiver flow, key field, key value when available, and an
+                imperative remediation.
+              fail_closed:
+              - missing or empty instance_key
+              - instance_key not naming declared carries.<field>
+              - receiver not mode: template
+              - receiver instance.by missing, composite, or not equal to instance_key
+              - carry source not payload.<field>
+              - type-incompatible carried key
+              - combined legacy input address
+              - combined connect.using.instance or connect.map
+              - delivery topology other than one
+              - missing target instance
+              - ambiguous target instance
+              - any activation attempt for a missing target
             select-or-create:
               status: spec_locked_not_runnable_in_1835_pr1
               contract: >
@@ -8104,11 +8132,16 @@ flow_model:
               `resolution:{mode,...}` semantics.
           proof_obligations:
           - contracts decode every locked mode and reject unknown resolution fields fail-closed
-          - bootverify accepts valid create resolution and rejects non-create modes as not runnable in this slice
+          - bootverify accepts valid create/select resolution and rejects other non-create modes as not runnable in this slice
           - route-plan lowering records create mode, mint kind, carried `as` field, create/reuse lifecycle policy, and does not require producer output key/carries
           - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
           - downstream receiver routes can render the carried minted instance key from activation variables
           - same committed event replay reuses persisted delivery route/scope and does not create another receiver instance
+          - route-plan lowering records select mode, declared carried key mapping, runtime descriptor resolution, and reject/reject lifecycle policy
+          - EventBus publish/preflight for select routes to exactly one existing receiver instance
+          - missing/ambiguous select target failures fail closed with receiver/key/value/remediation detail and no activation
+          - same committed select event replay reuses persisted delivery route/scope and does not reselect after descriptor drift
+          - standalone #1828 `template-select-existing` conformance fixture verifies and materializes through the canonical select route plan
         implementation_slice_1546:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings + internal/runtime/bus.connectRoutePlanResolver

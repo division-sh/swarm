@@ -640,9 +640,17 @@ func connectInstanceKey(source semanticview.Source, connect runtimecontracts.Flo
 }
 
 func connectResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
-	if resolution.Mode != runtimecontracts.FlowInputResolutionModeCreate {
+	switch resolution.Mode {
+	case runtimecontracts.FlowInputResolutionModeCreate:
+		return connectCreateResolutionInstanceKey(source, connect, resolution, delivery, receiverFlowID)
+	case runtimecontracts.FlowInputResolutionModeSelect:
+		return connectSelectResolutionInstanceKey(source, connect, inputPin, resolution, delivery, receiverFlowID)
+	default:
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode)}
 	}
+}
+
+func connectCreateResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
 	if delivery != ConnectDeliveryOne {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "resolution mode create requires delivery one"}
 	}
@@ -672,6 +680,46 @@ func connectResolutionInstanceKey(source semanticview.Source, connect runtimecon
 		As:         as,
 		OnMissing:  "create",
 		OnConflict: "reuse",
+	}, ConnectRoutePlanIssue{}
+}
+
+func connectSelectResolutionInstanceKey(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, resolution runtimecontracts.FlowInputPinResolution, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
+	if delivery != ConnectDeliveryOne {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureDeliveryTopologyInvalid, Detail: "resolution mode select requires delivery one"}
+	}
+	if strings.TrimSpace(resolution.InstanceKey.Mint) != "" || strings.TrimSpace(resolution.InstanceKey.As) != "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode select may not declare instance_key.mint or instance_key.as"}
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureLifecycleUnavailable, Detail: "receiver instance contract owner is unavailable"}
+	}
+	instance, err := bundle.ResolveFlowTemplateInstance(receiverFlowID)
+	if err != nil {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
+	}
+	fields := normalizedStringList(instance.By)
+	key := strings.TrimSpace(resolution.InstanceKey.From)
+	if key == "" {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode select requires instance_key to name a carried field"}
+	}
+	if len(fields) != 1 || fields[0] != key {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode select instance_key %q must match the receiver's single instance.by field %v", key, fields)}
+	}
+	carry, ok := inputPin.Carries[key]
+	if !ok {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode select instance_key %s must name declared carries.%s", key, key)}
+	}
+	wantFrom := "payload." + key
+	if strings.TrimSpace(carry.From) != wantFrom {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode select carry %s must use from: %s", key, wantFrom)}
+	}
+	return &ConnectRoutePlanInstanceKey{
+		Mode:       runtimecontracts.FlowInputResolutionModeSelect,
+		Fields:     fields,
+		Mappings:   []ConnectRoutePlanInstanceKeyMapping{{Source: key, Target: key, Explicit: true}},
+		OnMissing:  "reject",
+		OnConflict: "reject",
 	}, ConnectRoutePlanIssue{}
 }
 
