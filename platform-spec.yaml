@@ -12307,9 +12307,9 @@ configuration_source_authority:
             claude_cli.command: elevated
             claude_cli.timeout: project_safe
             claude_cli.output_format: project_safe
-            claude_cli.retries: project_safe
-            claude_cli.no_session_persistence: project_safe
-            claude_cli.use_tmux: project_safe
+            claude_cli.retries: split_unsupported
+            claude_cli.no_session_persistence: split_unsupported
+            claude_cli.use_tmux: split_unsupported
             openai_compatible.base_url: elevated
             openai_compatible.default_model: split_unsupported
             openai_compatible.low_cost_model: split_unsupported
@@ -12322,9 +12322,9 @@ configuration_source_authority:
             `llm.models`; this spec does not re-admit them as accepted project-safe keys.
           claude_cli_control_cleanup: >
             `llm.claude_cli.retries`, `llm.claude_cli.use_tmux`, and
-            `llm.claude_cli.no_session_persistence` are accepted as current wired Claude CLI config fields by the
-            #1858 parser/discovery slice. Any cleanup of their runtime value, naming, or UX belongs to #1803; #1858
-            does not classify those accepted current fields as split-unsupported.
+            `llm.claude_cli.no_session_persistence` remain split_unsupported until #1803 or a later explicitly
+            gated production runtime owner promotes real behavior. Field presence/default seeding is not proof of
+            supported config semantics, and #1858 MUST keep these controls fail-closed with no supported replacement.
         provider_triggers:
           trust: project_contained_path_or_elevated
           keys:
@@ -12453,7 +12453,7 @@ configuration_source_authority:
       provider_triggers_packs_external_dirs: consumed_by_unified_owner
       budget_human_tasks_inline_extension: consumed_by_unified_owner_code_migration_split
       llm_retired_model_selection_keys: split_unsupported_retired_use_llm.models
-      llm_claude_cli_current_controls: accepted_current_schema_residual_cleanup_tracked_by_1803
+      llm_claude_cli_current_controls: split_unsupported_tracked_by_1803
       sharding_inline_extension: split_unsupported_retired
       context_descriptors: different_semantic_owner_local_target_context_registry
       token_and_secret_material: different_semantic_owner_secret_or_token_file_reference_only

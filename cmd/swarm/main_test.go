@@ -8799,8 +8799,6 @@ llm:
     command: true
     timeout: 2s
     output_format: json
-    retries: 1
-    no_session_persistence: false
 `, values["host"], values["port"], values["dbname"], values["user"], values["sslmode"]))
 }
 
@@ -8937,8 +8935,6 @@ func TestLoadRuntimeConfigWithOptions_PreservesRuntimeLLMTypedConfigValues(t *te
 		"    command: echo",
 		"    timeout: 44s",
 		"    output_format: json",
-		"    retries: 1",
-		"    no_session_persistence: false",
 	}, "\n")+"\n")
 
 	result, err := loadRuntimeConfigWithOptions(runtimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
@@ -8977,8 +8973,6 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 		"    command: true",
 		"    timeout: 2s",
 		"    output_format: json",
-		"    retries: 1",
-		"    no_session_persistence: false",
 	}, "\n")+"\n")
 	explicitPath := filepath.Join(repo, "runtime.yaml")
 	writeRuntimeConfigText(t, explicitPath, strings.Join([]string{

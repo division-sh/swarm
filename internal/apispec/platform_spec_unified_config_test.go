@@ -84,8 +84,8 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"claude_cli.no_session_persistence",
 		"claude_cli.use_tmux",
 	} {
-		if got := scalarValue(mustMappingValue(t, llmKeys, key)); got != "project_safe" {
-			t.Fatalf("llm.%s = %q, want project_safe", key, got)
+		if got := scalarValue(mustMappingValue(t, llmKeys, key)); got != "split_unsupported" {
+			t.Fatalf("llm.%s = %q, want split_unsupported", key, got)
 		}
 	}
 	for _, want := range []string{"retired model-selection inputs", "keep rejecting", "llm.models"} {
@@ -93,7 +93,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 			t.Fatalf("retired model-selection rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "retired_model_selection_keys")))
 		}
 	}
-	for _, want := range []string{"#1803", "accepted as current wired Claude CLI config fields", "does not classify"} {
+	for _, want := range []string{"#1803", "remain split_unsupported", "no supported replacement"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")), want) {
 			t.Fatalf("Claude CLI controls cleanup rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, llm, "claude_cli_control_cleanup")))
 		}
@@ -148,7 +148,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"provider_triggers_packs_external_dirs": "consumed_by_unified_owner",
 		"sharding_inline_extension":             "split_unsupported_retired",
 		"llm_retired_model_selection_keys":      "split_unsupported_retired_use_llm.models",
-		"llm_claude_cli_current_controls":       "accepted_current_schema_residual_cleanup_tracked_by_1803",
+		"llm_claude_cli_current_controls":       "split_unsupported_tracked_by_1803",
 		"context_descriptors":                   "different_semantic_owner_local_target_context_registry",
 		"token_and_secret_material":             "different_semantic_owner_secret_or_token_file_reference_only",
 	}
