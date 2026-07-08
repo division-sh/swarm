@@ -421,13 +421,14 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 		t.Fatal("sqlite apiCapabilities missing BundleCatalog pure operator-read owner")
 	}
 	classifiedOut := map[string]any{
-		"ConversationForks":   apiCaps.ConversationForks,
-		"BundleDelete":        apiCaps.BundleDelete,
-		"RunForkAvailability": apiCaps.RunForkAvailability,
-		"RunFork":             apiCaps.RunFork,
-		"ResetCoordinator":    apiCaps.ResetCoordinator,
-		"ResetQuiescer":       apiCaps.ResetQuiescer,
-		"ResetCleaner":        apiCaps.ResetCleaner,
+		"ConversationForks":         apiCaps.ConversationForks,
+		"ConversationForkLifecycle": apiCaps.ConversationForkLifecycle,
+		"BundleDelete":              apiCaps.BundleDelete,
+		"RunForkAvailability":       apiCaps.RunForkAvailability,
+		"RunFork":                   apiCaps.RunFork,
+		"ResetCoordinator":          apiCaps.ResetCoordinator,
+		"ResetQuiescer":             apiCaps.ResetQuiescer,
+		"ResetCleaner":              apiCaps.ResetCleaner,
 	}
 	for name, capability := range classifiedOut {
 		if capability != nil {
@@ -585,7 +586,8 @@ func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadCo
 		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},
 		{Name: "BundleCatalog", Classification: "wired_both", Reason: "bundle.list/get/agents read owner was promoted by #1782/#1805"},
 		{Name: "BundleDelete", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "bundle.delete is a mutating/destructive bundle lifecycle capability, not operator-read parity"},
-		{Name: "ConversationForks", Classification: "split_with_issue_ref", Issue: 1783, RequiresPostgresBaseline: true, Reason: "ConversationForkLifecycleStore mixes fork_list/view reads with fork/fork_chat/fork_delete mutations and needs interface segregation"},
+		{Name: "ConversationForks", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "conversation.fork_list/view now consume a read-only fork capability; SQLite read parity remains a local-dev parity split until a real SQLite read owner is promoted"},
+		{Name: "ConversationForkLifecycle", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "conversation.fork/fork_chat/fork_delete are mutating fork lifecycle capabilities split from operator-read parity"},
 		{Name: "RunForkAvailability", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "run.fork availability is a product/mutating lifecycle seam split from operator reads"},
 		{Name: "RunFork", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "run.fork execution is a product/mutating lifecycle seam split from operator reads"},
 		{Name: "RuntimeContexts", Classification: "split_with_issue_ref", Issue: 1239, Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},

@@ -242,20 +242,22 @@ operator_read_api_parity_ledger:
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
   - method: conversation.fork_list
     classification: split_with_issue_ref
-    split_issue: 1783
+    split_issue: 1239
     proof_refs:
-      - {kind: tracker, issue: 1783, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      - {kind: tracker, issue: 1239, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
     notes: >
-      Current ConversationForkLifecycleStore also carries fork/fork_chat/fork_delete
-      mutations; read promotion requires #1783 interface segregation first.
+      conversation.fork_list now consumes a read-only fork capability segregated
+      from fork/fork_chat/fork_delete lifecycle mutation; SQLite read-owner
+      parity remains split until local-dev fork read support is promoted.
   - method: conversation.fork_view
     classification: split_with_issue_ref
-    split_issue: 1783
+    split_issue: 1239
     proof_refs:
-      - {kind: tracker, issue: 1783, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      - {kind: tracker, issue: 1239, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
     notes: >
-      Current ConversationForkLifecycleStore also carries fork/fork_chat/fork_delete
-      mutations; read promotion requires #1783 interface segregation first.
+      conversation.fork_view now consumes a read-only fork capability segregated
+      from fork/fork_chat/fork_delete lifecycle mutation; SQLite read-owner
+      parity remains split until local-dev fork read support is promoted.
   - method: conversation.get
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]

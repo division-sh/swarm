@@ -4113,6 +4113,8 @@ engine:
         owner: selectedRuntimeStoreFacade selected optional capability accessors
         capabilities:
         - bundle catalog read/write
+        - conversation fork read surface
+        - conversation fork lifecycle/chat/delete
         - run bundle availability
         - selected-contract run.fork
         - bundle delete
@@ -4120,7 +4122,7 @@ engine:
         - startup recovery
         - run-stalled read
         - runtime contexts
-        rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks.
+        rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks. Mixed read/lifecycle roles must be segregated; conversation.fork_list and conversation.fork_view consume a read-only fork capability, while conversation.fork, conversation.fork_chat, and conversation.fork_delete consume a lifecycle capability so read promotion cannot silently enable unproven mutation.
       - name: workspace_and_process_db_capabilities
         owner: cmd/swarm workspace lifecycle and process health construction
         capabilities:
@@ -4173,6 +4175,8 @@ engine:
         classification: typed public-surface capability consumers
       - dependency: dashboard SQL readers and local PostgresStore wrappers
         classification: producer-facing raw/concrete escapes to classify and migrate under #1401/#1402 unless independently gated
+      - dependency: ConversationForkReadStore and ConversationForkLifecycleStore
+        classification: segregated optional capabilities; fork read availability must not imply fork lifecycle/chat/delete availability
       - dependency: selected-contract run.fork PostgresStore internals
         classification: optional product capability with current concrete escape; migrate under #1401/#1403 or a run-fork child
       - dependency: RunRuntimeMutation, RunEventMutation, RunPipelineMutation, and backend-local direct transaction helpers

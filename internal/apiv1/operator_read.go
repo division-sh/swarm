@@ -75,40 +75,41 @@ type TestSetupStore interface {
 }
 
 type OperatorReadOptions struct {
-	Now                    func() time.Time
-	Ready                  func() bool
-	RepoRoot               string
-	PlatformSpecPath       string
-	Database               Pinger
-	Runs                   RunReadStore
-	Observability          ObservabilityReadStore
-	Entities               EntityReadStore
-	AgentConversations     AgentConversationReadStore
-	AgentDeliveryLifecycle AgentDeliveryLifecycleReadStore
-	AgentUsage             AgentUsageReadStore
-	BundleCatalog          BundleCatalogReadStore
-	BundleDelete           BundleDeleteExecutor
-	ConversationForks      ConversationForkLifecycleStore
-	ForkChatExecutor       ForkChatExecutor
-	RunBundleContext       RunBundleContextStore
-	RunForkAvailability    RunForkAvailabilityStore
-	RunFork                RunForkExecutor
-	AgentControl           AgentControlController
-	Mailbox                MailboxAPIStore
-	TestSetup              TestSetupStore
-	Idempotency            APIIdempotencyStore
-	Events                 EventPublisher
-	RunControl             RunControlController
-	RuntimeIngress         RuntimeIngressController
-	RuntimeContexts        *swruntime.RuntimeContextManager
-	ResetCoordinator       DestructiveResetCoordinator
-	ResetQuiescer          DestructiveResetQuiescer
-	ResetCleaner           DestructiveResetCleaner
-	ResetContainers        DestructiveResetContainerStopper
-	Source                 semanticview.Source
-	MailboxApprovalRoutes  map[string]string
-	Bundle                 runtimecontracts.BundleIdentity
-	RuntimeIdentity        RuntimeIdentityResult
+	Now                       func() time.Time
+	Ready                     func() bool
+	RepoRoot                  string
+	PlatformSpecPath          string
+	Database                  Pinger
+	Runs                      RunReadStore
+	Observability             ObservabilityReadStore
+	Entities                  EntityReadStore
+	AgentConversations        AgentConversationReadStore
+	AgentDeliveryLifecycle    AgentDeliveryLifecycleReadStore
+	AgentUsage                AgentUsageReadStore
+	BundleCatalog             BundleCatalogReadStore
+	BundleDelete              BundleDeleteExecutor
+	ConversationForks         ConversationForkReadStore
+	ConversationForkLifecycle ConversationForkLifecycleStore
+	ForkChatExecutor          ForkChatExecutor
+	RunBundleContext          RunBundleContextStore
+	RunForkAvailability       RunForkAvailabilityStore
+	RunFork                   RunForkExecutor
+	AgentControl              AgentControlController
+	Mailbox                   MailboxAPIStore
+	TestSetup                 TestSetupStore
+	Idempotency               APIIdempotencyStore
+	Events                    EventPublisher
+	RunControl                RunControlController
+	RuntimeIngress            RuntimeIngressController
+	RuntimeContexts           *swruntime.RuntimeContextManager
+	ResetCoordinator          DestructiveResetCoordinator
+	ResetQuiescer             DestructiveResetQuiescer
+	ResetCleaner              DestructiveResetCleaner
+	ResetContainers           DestructiveResetContainerStopper
+	Source                    semanticview.Source
+	MailboxApprovalRoutes     map[string]string
+	Bundle                    runtimecontracts.BundleIdentity
+	RuntimeIdentity           RuntimeIdentityResult
 }
 
 type healthPingResult struct {

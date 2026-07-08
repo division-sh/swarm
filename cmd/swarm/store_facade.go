@@ -45,22 +45,23 @@ type selectedSchemaCapabilityBinder interface {
 }
 
 type selectedAPICapabilities struct {
-	Database            apiv1.Pinger
-	Runs                apiv1.RunReadStore
-	Entities            apiv1.EntityReadStore
-	AgentConversations  apiv1.AgentConversationReadStore
-	Observability       apiv1.ObservabilityReadStore
-	RunBundleContext    apiv1.RunBundleContextStore
-	TestSetup           apiv1.TestSetupStore
-	BundleCatalog       apiv1.BundleCatalogReadStore
-	BundleDelete        apiv1.BundleDeleteExecutor
-	ConversationForks   apiv1.ConversationForkLifecycleStore
-	RunForkAvailability apiv1.RunForkAvailabilityStore
-	RunFork             apiv1.RunForkExecutor
-	RuntimeContexts     *runtime.RuntimeContextManager
-	ResetCoordinator    apiv1.DestructiveResetCoordinator
-	ResetQuiescer       apiv1.DestructiveResetQuiescer
-	ResetCleaner        apiv1.DestructiveResetCleaner
+	Database                  apiv1.Pinger
+	Runs                      apiv1.RunReadStore
+	Entities                  apiv1.EntityReadStore
+	AgentConversations        apiv1.AgentConversationReadStore
+	Observability             apiv1.ObservabilityReadStore
+	RunBundleContext          apiv1.RunBundleContextStore
+	TestSetup                 apiv1.TestSetupStore
+	BundleCatalog             apiv1.BundleCatalogReadStore
+	BundleDelete              apiv1.BundleDeleteExecutor
+	ConversationForks         apiv1.ConversationForkReadStore
+	ConversationForkLifecycle apiv1.ConversationForkLifecycleStore
+	RunForkAvailability       apiv1.RunForkAvailabilityStore
+	RunFork                   apiv1.RunForkExecutor
+	RuntimeContexts           *runtime.RuntimeContextManager
+	ResetCoordinator          apiv1.DestructiveResetCoordinator
+	ResetQuiescer             apiv1.DestructiveResetQuiescer
+	ResetCleaner              apiv1.DestructiveResetCleaner
 }
 
 type selectedAPICapabilityRequest struct {
@@ -186,6 +187,7 @@ func (f selectedRuntimeStoreFacade) apiCapabilities(req selectedAPICapabilityReq
 	caps.BundleCatalog = optional.BundleCatalog
 	caps.BundleDelete = optional.BundleDelete
 	caps.ConversationForks = optional.ConversationForks
+	caps.ConversationForkLifecycle = optional.ConversationForkLifecycle
 	caps.RunForkAvailability = optional.RunForkAvailability
 	caps.RunFork = optional.RunFork
 	caps.RuntimeContexts = optional.RuntimeContexts
