@@ -901,7 +901,7 @@ func decisionForMailboxStatus(status string) string {
 func testRootCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts := defaultRootCommandOptions()
 	hasTokenSource := strings.TrimSpace(opts.apiTokenFile) != ""
-	if cfg, err := loadCLIAPIConfigFile(); err == nil && strings.TrimSpace(cfg.APITokenFile) != "" {
+	if cfg, err := loadCLICommandConfig(); err == nil && strings.TrimSpace(cfg.Connection.APITokenFile) != "" {
 		hasTokenSource = true
 	}
 	if !hasTokenSource {

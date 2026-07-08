@@ -33,7 +33,7 @@ type unifiedConfigLoadOptions struct {
 
 type unifiedConfigLoadResult struct {
 	Config      *config.Config
-	CLI         cliAPIConfigFile
+	CLI         cliCommandConfig
 	Source      string
 	Path        string
 	Layers      []unifiedConfigLayer
@@ -472,24 +472,30 @@ type unifiedCLIYAML struct {
 	} `yaml:"paths"`
 }
 
-func decodeUnifiedCLIConfig(node *yaml.Node) (cliAPIConfigFile, error) {
+func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
 	if node == nil || len(node.Content) == 0 {
-		return cliAPIConfigFile{}, nil
+		return cliCommandConfig{}, nil
 	}
 	var decoded unifiedCLIYAML
 	if err := node.Decode(&decoded); err != nil {
-		return cliAPIConfigFile{}, err
+		return cliCommandConfig{}, err
 	}
-	return cliAPIConfigFile{
-		APIServer:          decoded.Connection.APIServer,
-		APITokenFile:       decoded.Connection.APITokenFile,
-		SwarmDir:           decoded.Paths.SwarmDir,
-		SwarmDirSet:        yamlPathExists(node, "paths", "swarm_dir"),
-		ContractsPath:      decoded.Paths.ContractsPath,
-		PlatformSpecPath:   decoded.Paths.PlatformSpecPath,
-		ServeAPIListenAddr: decoded.Serve.APIListenAddr,
-		ServeMCPListenAddr: decoded.Serve.MCPListenAddr,
-		ServeAPITokenFile:  decoded.Serve.APITokenFile,
+	return cliCommandConfig{
+		Connection: cliConnectionConfig{
+			APIServer:    decoded.Connection.APIServer,
+			APITokenFile: decoded.Connection.APITokenFile,
+		},
+		Serve: cliServeConfig{
+			APIListenAddr: decoded.Serve.APIListenAddr,
+			MCPListenAddr: decoded.Serve.MCPListenAddr,
+			APITokenFile:  decoded.Serve.APITokenFile,
+		},
+		Paths: cliPathsConfig{
+			SwarmDir:         decoded.Paths.SwarmDir,
+			SwarmDirSet:      yamlPathExists(node, "paths", "swarm_dir"),
+			ContractsPath:    decoded.Paths.ContractsPath,
+			PlatformSpecPath: decoded.Paths.PlatformSpecPath,
+		},
 	}, nil
 }
 
@@ -745,7 +751,7 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"paths":                                 section,
 		"paths.swarm_dir":                       {Elevated: true},
 		"paths.contracts_path":                  {ProjectContainedPath: true},
-		"paths.platform_spec_path":              {Elevated: true},
+		"paths.platform_spec_path":              {ProjectContainedPath: true},
 		"paths.prompts_dir":                     {ProjectContainedPath: true},
 		"paths.artifact_root":                   {Elevated: true},
 		"paths.monitor_dir":                     {Elevated: true},

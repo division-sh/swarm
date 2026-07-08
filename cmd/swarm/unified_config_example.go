@@ -68,6 +68,7 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("workspace.data_source", "./.swarm/data", "Project-contained workspace data source.", unifiedConfigExampleTierProjectContainedPath),
 		e("provider_triggers.packs.external_dirs", `["./provider-packs"]`, "Project-contained provider trigger pack directories.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.contracts_path", "./contracts", "Project-contained contract bundle root.", unifiedConfigExampleTierProjectContainedPath),
+		e("paths.platform_spec_path", "platform-spec.yaml", "Project-contained platform spec path override.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.prompts_dir", "./prompts", "Project-contained prompt directory.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Project-contained agent config map file.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.verification_gates_file", "./verification-gates.yaml", "Project-contained verification gates file.", unifiedConfigExampleTierProjectContainedPath),
@@ -95,7 +96,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("llm.openai_compatible.base_url", "https://api.example.com/v1", "OpenAI-compatible endpoint base URL.", unifiedConfigExampleTierElevated),
 		e("llm.openai_responses.base_url", "https://api.openai.com/v1", "OpenAI Responses endpoint base URL.", unifiedConfigExampleTierElevated),
 		e("paths.swarm_dir", ".swarm", "Swarm state directory.", unifiedConfigExampleTierElevated),
-		e("paths.platform_spec_path", "platform-spec.yaml", "Platform spec path override.", unifiedConfigExampleTierElevated),
 		e("paths.artifact_root", ".swarm/artifacts", "Runtime artifact root.", unifiedConfigExampleTierElevated),
 		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory.", unifiedConfigExampleTierElevated),
 

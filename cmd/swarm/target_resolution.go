@@ -31,20 +31,20 @@ type cliSwarmDirResolution struct {
 }
 
 func resolveCLISwarmDir(opts cliSwarmDirOptions) (cliSwarmDirResolution, error) {
-	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{})
 	if err != nil {
 		return cliSwarmDirResolution{}, err
 	}
 	return resolveCLISwarmDirFromConfig(opts, cfg)
 }
 
-func resolveCLISwarmDirFromConfig(opts cliSwarmDirOptions, cfg cliAPIConfigFile) (cliSwarmDirResolution, error) {
+func resolveCLISwarmDirFromConfig(opts cliSwarmDirOptions, cfg cliCommandConfig) (cliSwarmDirResolution, error) {
 	if opts.SwarmDirFlagSet {
 		path, err := normalizeCLISwarmDir(opts.SwarmDir, "--swarm-dir")
 		return cliSwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
-	if cfg.SwarmDirSet {
-		path, err := normalizeCLISwarmDir(cfg.SwarmDir, "config paths.swarm_dir")
+	if cfg.Paths.SwarmDirSet {
+		path, err := normalizeCLISwarmDir(cfg.Paths.SwarmDir, "config paths.swarm_dir")
 		return cliSwarmDirResolution{Path: path, Source: "config paths.swarm_dir"}, err
 	}
 	path, err := defaultCLISwarmDir()
@@ -144,12 +144,12 @@ type doctorTargetCommandClass struct {
 func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions) error {
 	envFindings := doctorSwarmEnvFindings(repo, opts.configPath)
 	envReport := doctorTargetEnvReport(envFindings)
-	cfg, err := loadCLIAPIConfigFileWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
 	if err != nil {
 		if !envReport.HasBlockers() {
 			return returnCLIValidationError(cmd.ErrOrStderr(), err)
 		}
-		cfg = cliAPIConfigFile{}
+		cfg = cliCommandConfig{}
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
 	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfg)
@@ -199,7 +199,7 @@ func doctorTargetEnvReport(findings []swarmEnvFinding) localPreflightReport {
 	return report.finalize()
 }
 
-func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
+func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliCommandConfig, swarmDir cliSwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
 	api, err := resolveDoctorTargetAPI(repo, opts, cfg, swarmDir)
 	if err != nil {
 		return doctorTargetReport{}, err
@@ -305,7 +305,7 @@ func rootSwarmDirFlag(cmd *cobra.Command) (string, bool) {
 	return flag.Value.String(), flag.Changed
 }
 
-func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFile, swarmDir cliSwarmDirResolution) (doctorTargetAPI, error) {
+func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliCommandConfig, swarmDir cliSwarmDirResolution) (doctorTargetAPI, error) {
 	targetOpts := rootCommandOptions{
 		apiServer:       opts.apiOptions.apiServer,
 		apiTokenFile:    opts.apiOptions.apiTokenFile,
@@ -344,7 +344,7 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliAPIConfigFil
 	}, nil
 }
 
-func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliAPIConfigFile, target cliAPITargetResolution) (cliAPITokenResolution, error) {
+func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, target cliAPITargetResolution) (cliAPITokenResolution, error) {
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
 		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
 	}
@@ -358,9 +358,9 @@ func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliAPICon
 	return cliAPITokenResolution{token: token, source: "context descriptor " + target.descriptor.Auth.Mode}, nil
 }
 
-func resolveDoctorTargetCLIToken(cfg cliAPIConfigFile, rpcEndpoint string) (cliAPITokenResolution, error) {
-	if tokenFile := strings.TrimSpace(cfg.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "config connection.api_token_file")
+func resolveDoctorTargetCLIToken(cfg cliCommandConfig, rpcEndpoint string) (cliAPITokenResolution, error) {
+	if tokenFile := strings.TrimSpace(cfg.Connection.APITokenFile); tokenFile != "" {
+		return readCLIAPIExplicitTokenFile(tokenFile, cliAPIConfigTokenFileSource)
 	}
 	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return cliAPITokenResolution{
@@ -412,14 +412,14 @@ func doctorTargetAPIReason(source string) string {
 		return "live project-scoped context wins before selected context and config"
 	case "selected context":
 		return "selected context wins before typed config when no live project context is selected"
-	case "config api_server":
+	case cliAPIConfigServerSource:
 		return "typed config API source wins after explicit target and context resolution"
 	default:
 		return "when no explicit API source is configured, API-backed commands resolve project context, selected context, or built-in loopback according to command class"
 	}
 }
 
-func resolveDoctorTargetProject(repo string, opts doctorOptions, cfg cliAPIConfigFile) doctorTargetProject {
+func resolveDoctorTargetProject(repo string, opts doctorOptions, cfg cliCommandConfig) doctorTargetProject {
 	contractsPath, source := firstDoctorTargetContractsPath(repo, opts, cfg)
 	if strings.TrimSpace(contractsPath) == "" {
 		return doctorTargetProject{
@@ -440,14 +440,14 @@ func resolveDoctorTargetProject(repo string, opts doctorOptions, cfg cliAPIConfi
 	}
 }
 
-func firstDoctorTargetContractsPath(repo string, opts doctorOptions, cfg cliAPIConfigFile) (string, string) {
+func firstDoctorTargetContractsPath(repo string, opts doctorOptions, cfg cliCommandConfig) (string, string) {
 	if path := strings.TrimSpace(opts.contractsPath); path != "" {
 		return resolvePath(repo, path), "--contracts"
 	}
 	if path := strings.TrimSpace(os.Getenv(cliContractsPathEnv)); path != "" {
 		return resolvePath(repo, path), cliContractsPathEnv
 	}
-	if path := strings.TrimSpace(cfg.ContractsPath); path != "" {
+	if path := strings.TrimSpace(cfg.Paths.ContractsPath); path != "" {
 		return resolvePath(repo, path), "config paths.contracts_path"
 	}
 	if path := discoverRepoContractsPath(repo); path != "" {
