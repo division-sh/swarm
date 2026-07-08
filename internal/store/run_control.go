@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 )
@@ -260,30 +261,35 @@ func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *s
 		return 0, fmt.Errorf("run stop requires canonical event_deliveries.run_id")
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT d.event_id::text, d.subscriber_id
+		SELECT d.delivery_id::text, d.event_id::text, d.subscriber_type, d.subscriber_id, COALESCE(d.retry_count, 0)
 		FROM event_deliveries d
 		WHERE d.run_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
 		  AND d.status = 'pending'
-		ORDER BY d.event_id::text ASC, d.subscriber_id ASC
+		ORDER BY d.event_id::text ASC, d.subscriber_type ASC, d.subscriber_id ASC, d.delivery_id::text ASC
+		FOR UPDATE
 	`, runID)
 	if err != nil {
 		return 0, fmt.Errorf("query pending run deliveries: %w", err)
 	}
 	defer rows.Close()
 	type target struct {
-		eventID string
-		agentID string
+		deliveryID     string
+		eventID        string
+		subscriberType string
+		subscriberID   string
+		retryCount     int
 	}
 	targets := []target{}
 	for rows.Next() {
 		var item target
-		if err := rows.Scan(&item.eventID, &item.agentID); err != nil {
+		if err := rows.Scan(&item.deliveryID, &item.eventID, &item.subscriberType, &item.subscriberID, &item.retryCount); err != nil {
 			return 0, fmt.Errorf("scan pending run delivery: %w", err)
 		}
+		item.deliveryID = strings.TrimSpace(item.deliveryID)
 		item.eventID = strings.TrimSpace(item.eventID)
-		item.agentID = strings.TrimSpace(item.agentID)
-		if item.eventID != "" && item.agentID != "" {
+		item.subscriberType = strings.TrimSpace(item.subscriberType)
+		item.subscriberID = strings.TrimSpace(item.subscriberID)
+		if item.deliveryID != "" && item.eventID != "" && item.subscriberType != "" && item.subscriberID != "" {
 			targets = append(targets, item)
 		}
 	}
@@ -293,19 +299,12 @@ func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *s
 	eventsTouched := map[string]struct{}{}
 	abandoned := 0
 	for _, item := range targets {
-		delivery, err := s.lockAgentDeliveryTx(ctx, tx, item.eventID, item.agentID)
+		applied, err := s.abandonPendingRunDeliveryTx(ctx, tx, item.deliveryID, item.eventID, item.subscriberType, item.subscriberID, item.retryCount)
 		if err != nil {
 			return 0, err
 		}
-		if !delivery.found || strings.TrimSpace(delivery.status) != "pending" {
+		if !applied {
 			continue
-		}
-		if _, err := s.applyDeliveryBackedTerminalTransitionTx(ctx, tx, item.eventID, item.agentID, delivery, deliveryBackedTerminalTransitionRequest{
-			reasonCode:   "run_stopped",
-			errorText:    "run stopped",
-			retryAdvance: 0,
-		}); err != nil {
-			return 0, fmt.Errorf("abandon stopped run delivery: %w", err)
 		}
 		eventsTouched[item.eventID] = struct{}{}
 		abandoned++
@@ -343,4 +342,75 @@ func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *s
 		}
 	}
 	return abandoned, nil
+}
+
+func (s *PostgresStore) abandonPendingRunDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID, eventID, subscriberType, subscriberID string, retryCount int) (bool, error) {
+	reasonCode := "run_stopped"
+	errorText := "run stopped"
+	res, err := tx.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'dead_letter',
+		    retry_count = $2,
+		    reason_code = $3,
+		    last_error = $4,
+		    active_session_id = NULL,
+		    started_at = COALESCE(started_at, created_at),
+		    delivered_at = now()
+		WHERE delivery_id = $1::uuid
+		  AND status = 'pending'
+	`, deliveryID, retryCount, reasonCode, errorText)
+	if err != nil {
+		return false, fmt.Errorf("abandon stopped run delivery %s: %w", deliveryID, err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return false, nil
+	}
+	switch subscriberType {
+	case "agent":
+		state := agentReceiptWriteState{
+			finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
+			retryCount:   retryCount,
+			reasonCode:   reasonCode,
+			errorText:    errorText,
+			deliveryCode: "dead_letter",
+		}
+		if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, subscriberID, state); err != nil {
+			return false, fmt.Errorf("abandon stopped run agent receipt: %w", err)
+		}
+	case "node":
+		if err := s.upsertStoppedRunNodeReceiptTx(ctx, tx, eventID, subscriberID, reasonCode); err != nil {
+			return false, err
+		}
+	default:
+		return false, fmt.Errorf("unsupported stopped run delivery subscriber_type %q", subscriberType)
+	}
+	return true, nil
+}
+
+func (s *PostgresStore) upsertStoppedRunNodeReceiptTx(ctx context.Context, tx *sql.Tx, eventID, nodeID, reasonCode string) error {
+	res, err := tx.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, processed_at
+		)
+		SELECT
+			e.event_id, 'node', $2, e.entity_id, e.flow_instance,
+			'dead_letter', NULLIF($3, ''), '{}'::jsonb, now()
+		FROM events e
+		WHERE e.event_id = $1::uuid
+		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
+			entity_id = EXCLUDED.entity_id,
+			flow_instance = EXCLUDED.flow_instance,
+			outcome = EXCLUDED.outcome,
+			reason_code = EXCLUDED.reason_code,
+			side_effects = EXCLUDED.side_effects,
+			processed_at = now()
+	`, eventID, nodeID, reasonCode)
+	if err != nil {
+		return fmt.Errorf("upsert stopped run node receipt: %w", err)
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("upsert stopped run node receipt: event %s not found", eventID)
+	}
+	return nil
 }

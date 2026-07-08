@@ -247,7 +247,8 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	deliveryID := uuid.NewString()
+	agentDeliveryID := uuid.NewString()
+	nodeDeliveryID := uuid.NewString()
 	now := time.Now().UTC()
 	if _, err := store.DB.ExecContext(ctx, `
 		INSERT INTO runs (run_id, status, bundle_source, started_at)
@@ -264,8 +265,14 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	if _, err := store.DB.ExecContext(ctx, `
 		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at)
 		VALUES (?, ?, ?, 'agent', 'agent-pending', 'pending', ?, ?)
-	`, deliveryID, runID, eventID, uuid.NewString(), now); err != nil {
-		t.Fatalf("seed sqlite pending delivery: %v", err)
+	`, agentDeliveryID, runID, eventID, uuid.NewString(), now); err != nil {
+		t.Fatalf("seed sqlite pending agent delivery: %v", err)
+	}
+	if _, err := store.DB.ExecContext(ctx, `
+		INSERT INTO event_deliveries (delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at)
+		VALUES (?, ?, ?, 'node', 'node-pending', 'pending', ?, ?)
+	`, nodeDeliveryID, runID, eventID, uuid.NewString(), now); err != nil {
+		t.Fatalf("seed sqlite pending node delivery: %v", err)
 	}
 
 	state, err := store.StopRunControl(ctx, runtimeruncontrol.TransitionRequest{
@@ -277,8 +284,8 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StopRunControl: %v", err)
 	}
-	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 1 {
-		t.Fatalf("stop state = %+v, want cancelled/stopped/1", state)
+	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 2 {
+		t.Fatalf("stop state = %+v, want cancelled/stopped/2", state)
 	}
 
 	var deliveryStatus, reasonCode, lastError, activeSession string
@@ -293,6 +300,18 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || lastError != "run stopped" || activeSession != "" {
 		t.Fatalf("stopped sqlite delivery = %s/%s/%q active=%q, want dead_letter/run_stopped/run stopped/no active session", deliveryStatus, reasonCode, lastError, activeSession)
 	}
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(active_session_id, '')
+		FROM event_deliveries
+		WHERE event_id = ?
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-pending'
+	`, eventID).Scan(&deliveryStatus, &reasonCode, &lastError, &activeSession); err != nil {
+		t.Fatalf("load stopped sqlite node delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" || lastError != "run stopped" || activeSession != "" {
+		t.Fatalf("stopped sqlite node delivery = %s/%s/%q active=%q, want dead_letter/run_stopped/run stopped/no active session", deliveryStatus, reasonCode, lastError, activeSession)
+	}
 
 	var agentOutcome, agentReason string
 	if err := store.DB.QueryRowContext(ctx, `
@@ -306,6 +325,19 @@ func TestSQLiteRuntimeStore_RunControlStopAbandonsPendingWork(t *testing.T) {
 	}
 	if agentOutcome != "dead_letter" || agentReason != "run_stopped" {
 		t.Fatalf("stopped sqlite agent receipt = %s/%s, want dead_letter/run_stopped", agentOutcome, agentReason)
+	}
+	var nodeOutcome, nodeReason string
+	if err := store.DB.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = ?
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-pending'
+	`, eventID).Scan(&nodeOutcome, &nodeReason); err != nil {
+		t.Fatalf("load stopped sqlite node receipt: %v", err)
+	}
+	if nodeOutcome != "dead_letter" || nodeReason != "run_stopped" {
+		t.Fatalf("stopped sqlite node receipt = %s/%s, want dead_letter/run_stopped", nodeOutcome, nodeReason)
 	}
 
 	var pipelineOutcome string

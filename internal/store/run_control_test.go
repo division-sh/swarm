@@ -31,7 +31,13 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
 		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-pending', 'pending', now())
 	`, runID, eventID); err != nil {
-		t.Fatalf("seed pending delivery: %v", err)
+		t.Fatalf("seed pending agent delivery: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, created_at)
+		VALUES ($1::uuid, $2::uuid, 'node', 'node-pending', 'pending', now())
+	`, runID, eventID); err != nil {
+		t.Fatalf("seed pending node delivery: %v", err)
 	}
 
 	if _, err := pg.PauseRunControl(ctx, runtimeruncontrol.TransitionRequest{RunID: runID, Reason: "test", ControlledBy: "test", Now: time.Now().UTC()}); err != nil {
@@ -44,8 +50,8 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	if err != nil {
 		t.Fatalf("StopRunControl: %v", err)
 	}
-	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 1 {
-		t.Fatalf("stop state = %+v, want cancelled/stopped/1", state)
+	if state.Status != "cancelled" || state.ControlStatus != "stopped" || state.AbandonedDeliveries != 2 {
+		t.Fatalf("stop state = %+v, want cancelled/stopped/2", state)
 	}
 
 	var deliveryStatus, reasonCode string
@@ -59,6 +65,31 @@ func TestPostgresStore_RunControlTransitionsAndStopAbandonsPendingWork(t *testin
 	}
 	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" {
 		t.Fatalf("stopped delivery = %s/%s, want dead_letter/run_stopped", deliveryStatus, reasonCode)
+	}
+	if err := db.QueryRowContext(ctx, `
+		SELECT status, COALESCE(reason_code, '')
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-pending'
+	`, eventID).Scan(&deliveryStatus, &reasonCode); err != nil {
+		t.Fatalf("load stopped node delivery: %v", err)
+	}
+	if deliveryStatus != "dead_letter" || reasonCode != "run_stopped" {
+		t.Fatalf("stopped node delivery = %s/%s, want dead_letter/run_stopped", deliveryStatus, reasonCode)
+	}
+	var nodeReceiptOutcome, nodeReceiptReason string
+	if err := db.QueryRowContext(ctx, `
+		SELECT outcome, COALESCE(reason_code, '')
+		FROM event_receipts
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = 'node-pending'
+	`, eventID).Scan(&nodeReceiptOutcome, &nodeReceiptReason); err != nil {
+		t.Fatalf("load stopped node receipt: %v", err)
+	}
+	if nodeReceiptOutcome != "dead_letter" || nodeReceiptReason != "run_stopped" {
+		t.Fatalf("stopped node receipt = %s/%s, want dead_letter/run_stopped", nodeReceiptOutcome, nodeReceiptReason)
 	}
 	var receiptCount int
 	if err := db.QueryRowContext(ctx, `

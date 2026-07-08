@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -543,30 +544,34 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 
 func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT event_id, subscriber_id
+		SELECT delivery_id, event_id, subscriber_type, subscriber_id, COALESCE(retry_count, 0)
 		FROM event_deliveries
 		WHERE run_id = ?
-		  AND subscriber_type = 'agent'
 		  AND status = 'pending'
-		ORDER BY event_id ASC, subscriber_id ASC
+		ORDER BY event_id ASC, subscriber_type ASC, subscriber_id ASC, delivery_id ASC
 	`, runID)
 	if err != nil {
 		return 0, fmt.Errorf("query sqlite pending run deliveries: %w", err)
 	}
 	defer rows.Close()
 	type target struct {
-		eventID string
-		agentID string
+		deliveryID     string
+		eventID        string
+		subscriberType string
+		subscriberID   string
+		retryCount     int
 	}
 	targets := []target{}
 	for rows.Next() {
 		var item target
-		if err := rows.Scan(&item.eventID, &item.agentID); err != nil {
+		if err := rows.Scan(&item.deliveryID, &item.eventID, &item.subscriberType, &item.subscriberID, &item.retryCount); err != nil {
 			return 0, fmt.Errorf("scan sqlite pending run delivery: %w", err)
 		}
+		item.deliveryID = strings.TrimSpace(item.deliveryID)
 		item.eventID = strings.TrimSpace(item.eventID)
-		item.agentID = strings.TrimSpace(item.agentID)
-		if item.eventID != "" && item.agentID != "" {
+		item.subscriberType = strings.TrimSpace(item.subscriberType)
+		item.subscriberID = strings.TrimSpace(item.subscriberID)
+		if item.deliveryID != "" && item.eventID != "" && item.subscriberType != "" && item.subscriberID != "" {
 			targets = append(targets, item)
 		}
 	}
@@ -577,19 +582,12 @@ func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Con
 	eventsTouched := map[string]struct{}{}
 	abandoned := 0
 	for _, item := range targets {
-		delivery, err := s.sqliteLockAgentDeliveryTx(ctx, tx, item.eventID, item.agentID)
+		applied, err := s.sqliteAbandonPendingRunDeliveryTx(ctx, tx, item.deliveryID, item.eventID, item.subscriberType, item.subscriberID, item.retryCount)
 		if err != nil {
 			return 0, err
 		}
-		if !delivery.found || strings.TrimSpace(delivery.status) != "pending" {
+		if !applied {
 			continue
-		}
-		if _, err := s.applySQLiteDeliveryBackedTerminalTransitionTx(ctx, tx, item.eventID, item.agentID, delivery, deliveryBackedTerminalTransitionRequest{
-			reasonCode:   "run_stopped",
-			errorText:    "run stopped",
-			retryAdvance: 0,
-		}); err != nil {
-			return 0, fmt.Errorf("abandon sqlite stopped run delivery: %w", err)
 		}
 		eventsTouched[item.eventID] = struct{}{}
 		abandoned++
@@ -627,4 +625,100 @@ func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Con
 		}
 	}
 	return abandoned, nil
+}
+
+func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID, eventID, subscriberType, subscriberID string, retryCount int) (bool, error) {
+	reasonCode := "run_stopped"
+	errorText := "run stopped"
+	now := s.now()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE event_deliveries
+		SET status = 'dead_letter',
+		    retry_count = ?,
+		    reason_code = ?,
+		    last_error = ?,
+		    active_session_id = NULL,
+		    started_at = COALESCE(started_at, created_at),
+		    delivered_at = ?
+		WHERE delivery_id = ?
+		  AND status = 'pending'
+	`, retryCount, reasonCode, errorText, now, deliveryID)
+	if err != nil {
+		return false, fmt.Errorf("abandon sqlite stopped run delivery %s: %w", deliveryID, err)
+	}
+	if rows, _ := res.RowsAffected(); rows == 0 {
+		return false, nil
+	}
+	switch subscriberType {
+	case "agent":
+		state := agentReceiptWriteState{
+			finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
+			retryCount:   retryCount,
+			reasonCode:   reasonCode,
+			errorText:    errorText,
+			deliveryCode: "dead_letter",
+		}
+		if err := s.upsertSQLiteStoppedRunAgentReceiptTx(ctx, tx, eventID, subscriberID, state, now); err != nil {
+			return false, err
+		}
+	case "node":
+		if err := s.upsertSQLiteStoppedRunNodeReceiptTx(ctx, tx, eventID, subscriberID, reasonCode, now); err != nil {
+			return false, err
+		}
+	default:
+		return false, fmt.Errorf("unsupported sqlite stopped run delivery subscriber_type %q", subscriberType)
+	}
+	return true, nil
+}
+
+func (s *SQLiteRuntimeStore) upsertSQLiteStoppedRunAgentReceiptTx(ctx context.Context, tx *sql.Tx, eventID, agentID string, state agentReceiptWriteState, now time.Time) error {
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount, state.errorText))
+	if err != nil {
+		return fmt.Errorf("marshal sqlite stopped run agent receipt side effects: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, processed_at
+		)
+		SELECT
+			?, e.event_id, 'agent', ?, e.entity_id, e.flow_instance,
+			?, ?, ?, ?
+		FROM events e
+		WHERE e.event_id = ?
+		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
+			entity_id = excluded.entity_id,
+			flow_instance = excluded.flow_instance,
+			outcome = excluded.outcome,
+			reason_code = excluded.reason_code,
+			side_effects = excluded.side_effects,
+			processed_at = excluded.processed_at
+	`, uuid.NewString(), agentID, mapManagerReceiptStatusToOutcome(state.finalStatus), sqliteNullString(state.reasonCode), string(sideEffects), now, eventID); err != nil {
+		return fmt.Errorf("upsert sqlite stopped run agent receipt: %w", err)
+	}
+	return nil
+}
+
+func (s *SQLiteRuntimeStore) upsertSQLiteStoppedRunNodeReceiptTx(ctx context.Context, tx *sql.Tx, eventID, nodeID, reasonCode string, now time.Time) error {
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO event_receipts (
+			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
+			outcome, reason_code, side_effects, processed_at
+		)
+		SELECT
+			?, e.event_id, 'node', ?, e.entity_id, e.flow_instance,
+			'dead_letter', ?, '{}', ?
+		FROM events e
+		WHERE e.event_id = ?
+		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
+			entity_id = excluded.entity_id,
+			flow_instance = excluded.flow_instance,
+			outcome = excluded.outcome,
+			reason_code = excluded.reason_code,
+			side_effects = excluded.side_effects,
+			processed_at = excluded.processed_at
+	`, uuid.NewString(), nodeID, sqliteNullString(reasonCode), now, eventID); err != nil {
+		return fmt.Errorf("upsert sqlite stopped run node receipt: %w", err)
+	}
+	return nil
 }
