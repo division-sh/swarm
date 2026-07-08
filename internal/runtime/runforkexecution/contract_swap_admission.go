@@ -38,7 +38,7 @@ func BuildContractSwapBootResumeAdmission(req ContractSwapBootResumeAdmissionReq
 	}
 	blockers = appendRunForkUnsupportedBlocker(blockers, store.RunForkUnsupportedBlocker{
 		Code:    store.RunForkBlockerContractSwapBootResumeAdmissionNonMutating,
-		Message: "contract-swap boot/resume admission is non-mutating; full historical replay/resume remains separately gated",
+		Message: "contract-swap boot/resume admission is non-mutating; bounded fork re-execution remains separately gated",
 	})
 	if req.RouteRecovery == nil {
 		blockers = appendRunForkUnsupportedBlocker(blockers, store.RunForkUnsupportedBlocker{
@@ -194,7 +194,7 @@ func contractSwapBootResumeBlockedSiblings() []store.RunForkSelectedContractExec
 		{
 			Concept:     "sessions_turns_audits",
 			Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
-			Reason:      "source session, turn, and audit reconstruction remains under historical replay/resume siblings",
+			Reason:      "source session, turn, and audit reconstruction remains under bounded fork re-execution siblings",
 		},
 		{
 			Concept:     "node_system_non_agent_execution",

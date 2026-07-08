@@ -1,0 +1,428 @@
+version: 1
+kind: fork_replay_resume_design_record
+issue: 1723
+parent_issue: 564
+source_refs:
+  pre_audit_comment: https://github.com/division-sh/swarm/issues/1723#issuecomment-4917732636
+  gate_comment: https://github.com/division-sh/swarm/issues/1723#issuecomment-4917849951
+  locked_design_comment: https://github.com/division-sh/swarm/issues/1723#issuecomment-4917722298
+  platform_spec: platform-spec.yaml
+policy:
+  closure_level: spec_design_conformance_closure
+  claims_runtime_behavior_change: false
+  claims_full_historical_resume: false
+  runtime_behavior_change_allowed: false
+  required_full_test_command: go test ./...
+watchlist:
+  node: timestamp_fork_replay_resume_ownership
+  private_repo: swarm-docs
+  external_repair_owner: lead_after_merge
+  mapping: "#1723 closes #564 product promise by bounded re-execution; #1721 and #1722 stay successor tripwires."
+stale_language_policy:
+  forbidden_phrases:
+    - full historical resume
+    - historical resume
+    - full historical replay/resume
+    - future full historical
+    - product-complete historical replay/resume
+    - system knows what was unfinished
+  forbidden_public_readback_keys:
+    - historical_replay_supported
+    - historical_replay_required
+    - historical_replay_blocked
+    - full_replay_resume_supported
+  legacy_identifier_sentinels:
+    - identifier: RunForkHistoricalReplayExecutionOwner
+      reason: "Legacy-named bounded owner retained to avoid broad internal migration; current closure is delivery_event_replay_ready plus approved bounded children only."
+    - identifier: RunForkHistoricalReplayExecutionAdmissionOwner
+      reason: "Legacy-named admission owner retained as non-mutating matrix owner."
+    - identifier: RunForkHistoricalReplayContractSwapBootResumeOwner
+      reason: "Legacy-named selected-contract child retained; bounded to selected-frontier delivery_event_replay_ready."
+    - identifier: RunForkHistoricalReplayTimerReconstructionOwner
+      reason: "Legacy-named timer child retained for approved active-at-T timer reconstruction."
+    - identifier: RunForkHistoricalReplayFact*
+      reason: "Legacy-named fact-family constants retained as internal matrix vocabulary."
+    - identifier: RunForkHistoricalReplayAdmission*
+      reason: "Legacy-named admission disposition constants retained as internal matrix vocabulary."
+    - identifier: runtime.run_fork.historical_replay_execution*
+      reason: "Legacy string owner prefix retained as internal owner sentinel; spec defines it as bounded re-execution, not full resume."
+successors:
+  - issue: 1721
+    role: reserved_sixth_classification
+    concept: memoized agent-turn re-execution for byte-identical inputs
+  - issue: 1722
+    role: split_successor
+    concept: fleet fork and divergence reporting
+rows:
+  - id: entity_state_snapshot
+    fact: entity_state_snapshot
+    disposition: fail_closed_or_reconstruct
+    owner: runtime.run_fork.materialized_entity_snapshot_metadata
+    blocker_codes: [entity_snapshot_metadata_unproven]
+    enforcement_point: internal/store/run_fork_materializer.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations}
+      - {kind: go_test, name: TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming}
+    rationale: "Current entity state is reconstructed from append-only entity_mutations and materialized only after metadata proof."
+
+  - id: delivery_completed_history
+    fact: delivery_completed_history
+    disposition: lineage_only
+    owner: store.run_fork.replay_resume_admission
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork}
+      - {kind: go_test, name: TestRunForkPlanner_SuppressesPostForkTerminalMetadata}
+    rationale: "Completed source deliveries and receipts are lineage/proof only; they are not re-delivered into the fork."
+
+  - id: delivery_pending_history
+    fact: delivery_pending_history
+    disposition: fork_replay
+    owner: store.run_fork.replay_resume_admission
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady}
+      - {kind: go_test, name: TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage}
+    rationale: "Only pending unstarted agent deliveries with no session/receipt/start metadata enter delivery_event_replay_ready."
+
+  - id: delivery_in_progress_history
+    fact: delivery_in_progress_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [delivery_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkActivation_FailsClosedForInProgressDeliveryAndMissingLineage}
+      - {kind: go_test, name: TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers}
+    rationale: "In-progress delivery state is not append-only replay truth and cannot be resumed from current rows."
+
+  - id: delivery_failed_history
+    fact: delivery_failed_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [delivery_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers}
+    rationale: "Failed/retryable delivery state needs retry/idempotency ownership and is not admitted by the M0 primitive."
+
+  - id: delivery_dead_letter_history
+    fact: delivery_dead_letter_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [delivery_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery}
+    rationale: "Dead-letter source outcomes are source-run lineage and do not suppress or authorize fork work."
+
+  - id: committed_replay_scope
+    fact: committed_replay_scope
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [committed_replay_scope_replay_unsupported]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_ReplayScopeMarkerRemainsCommittedReplayBlocker}
+      - {kind: go_test, name: TestSelectedContractExecutionMaterializationTreatsSourceReplayScopeMarkersAsLineage}
+    rationale: "Committed same-run replay markers are proof lineage, not timestamp-fork executable work."
+
+  - id: timer_history
+    fact: timer_history
+    disposition: fail_closed_or_reconstruct
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [timer_history_unproven]
+    enforcement_point: internal/store/run_fork_timer_reconstruction.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers}
+      - {kind: go_test, name: TestSelectedContractExecutionMaterializationReconstructsActiveTimer}
+      - {kind: go_test, name: TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory}
+    rationale: "Timer current rows block by default; approved active-at-T timer reconstruction writes fresh fork-local timer rows."
+
+  - id: flow_route_history
+    fact: flow_route_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [flow_route_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers}
+      - {kind: go_test, name: TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence}
+    rationale: "Source/current route rows are not copied; fork-local route proof is a separately gated sibling."
+
+  - id: session_history
+    fact: session_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [session_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage}
+    rationale: "Source sessions are never copied or reused as fork-local runtime truth."
+
+  - id: conversation_audit_history
+    fact: conversation_audit_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [conversation_audit_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_ActiveConversationAuditRemainsPolicyBlocker}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage}
+    rationale: "Source audit rows lack fork-point termination proof and remain lineage-only under selected policies."
+
+  - id: active_turn_history
+    fact: active_turn_history
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes: [active_turn_history_unproven]
+    enforcement_point: internal/store/run_fork_replay_resume_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers}
+    rationale: "Active turns cannot be reconstructed from current rows and are not resumed."
+
+  - id: source_advanced_after_fork_point
+    fact: source_advanced_after_fork_point
+    disposition: fail_closed_or_lineage
+    owner: runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy
+    blocker_codes:
+      - source_events_advanced_after_fork_point
+      - source_timers_advanced_after_fork_point
+      - source_routes_advanced_after_fork_point
+      - source_committed_replay_scope_advanced_after_fork_point
+      - source_active_conversation_session_coupling_after_fork_point
+    enforcement_point: internal/store/run_fork_selected_contract_execution_mutation.go
+    proof_refs:
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkBranchesWhenSourceAdvancedAfterForkPoint}
+      - {kind: go_test, name: TestPostTSourceTimerFailsClosedForSelectedContractActivation}
+      - {kind: go_test, name: TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation}
+    rationale: "Post-T source advancement is branch-divergence lineage only where a selected owner admits it; otherwise it blocks."
+
+  - id: fork_replay_state
+    fact: fork_replay_state
+    disposition: fail_closed_blocker
+    owner: store.run_fork.activation
+    blocker_codes:
+      - fork_events_already_exist
+      - fork_sessions_already_exist
+      - fork_conversation_audits_already_exist
+      - fork_turns_already_exist
+    enforcement_point: internal/store/run_fork_activation.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy}
+      - {kind: go_test, name: TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState}
+    rationale: "Activation cannot resume a fork that already contains fork-local runtime state outside the admitted owner."
+
+  - id: contract_swap
+    fact: contract_swap
+    disposition: split_sibling
+    owner: runtime.run_fork.contract_swap_boot_resume_admission
+    blocker_codes:
+      - contract_swap_boot_resume_admission_non_mutating
+      - contract_swap_route_recovery_missing
+    enforcement_point: internal/runtime/runforkexecution/contract_swap_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionConsumesCanonicalPrerequisites}
+      - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionFailsClosedWithoutRouteRecovery}
+    rationale: "Contract-swap readiness is non-mutating prerequisite evidence; mutation is limited to admitted selected-frontier work."
+
+  - id: historical_replay_execution
+    fact: historical_replay_execution
+    disposition: split_sibling
+    owner: runtime.run_fork.historical_replay_execution_admission
+    blocker_codes: [historical_replay_execution_admission_non_mutating]
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionConsumesAdmissionForDeliveryEventReplayMutation}
+    rationale: "Legacy-named runtime owner validates the matrix and admits only bounded delivery_event_replay_ready work today."
+
+  - id: source_events
+    fact: source_events
+    disposition: lineage_only_evidence
+    owner: runtime.run_fork.historical_replay_execution_admission
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+    rationale: "Source events are payload/lineage evidence; fork execution mints new fork-local events."
+
+  - id: event_deliveries
+    fact: event_deliveries
+    disposition: executable_fork_work
+    owner: runtime.run_fork.historical_replay_execution
+    blocker_codes:
+      - delivery_history_unproven
+      - non_agent_delivery_replay_unsupported
+      - committed_replay_scope_replay_unsupported
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsReplayablePrimitiveWithoutMutation}
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionRejectsTaxonomyReadyWithoutOwnerWork}
+    rationale: "Only owner-authorized delivery_event_replay_ready work becomes executable; all other delivery histories block or become lineage."
+
+  - id: receipts
+    fact: receipts
+    disposition: lineage_only_evidence
+    owner: runtime.run_fork.historical_replay_execution_admission
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+    rationale: "Source receipts are outcomes, not fork suppressors."
+
+  - id: dead_letters
+    fact: dead_letters
+    disposition: lineage_only_evidence
+    owner: runtime.run_fork.historical_replay_execution_admission
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+    rationale: "Source dead letters are source outcomes and never suppress fork-local work."
+
+  - id: retry_idempotency
+    fact: retry_idempotency
+    disposition: split_sibling
+    owner: runtime.run_fork.historical_replay_execution_admission
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+    rationale: "Retry/idempotency semantics need a later owner; source state cannot be reused as fork truth."
+
+  - id: emitted_follow_ups
+    fact: emitted_follow_ups
+    disposition: split_sibling
+    owner: runtime.run_fork.historical_replay_execution_admission
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionClassifiesFactsAndConsumesOwners}
+    rationale: "Follow-ups are regenerated by fork-local execution when supported, not copied."
+
+  - id: timers
+    fact: timers
+    disposition: reconstructed_fork_local_state
+    owner: runtime.run_fork.historical_replay_execution.timer_reconstruction
+    blocker_codes: [timer_history_unproven]
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsTimerReconstructionOwner}
+      - {kind: go_test, name: TestSelectedContractTimerReconstructionFailsClosedForInvalidPayload}
+    rationale: "Only active source timers with approved lineage can be reconstructed as fresh fork-local rows."
+
+  - id: routes
+    fact: routes
+    disposition: split_sibling
+    owner: runtime.run_fork.selected_contract_route_recovery
+    blocker_codes:
+      - flow_route_history_unproven
+      - selected_contract_route_admission_non_mutating
+      - selected_contract_route_topology_non_mutating
+      - selected_contract_dynamic_route_topology_unproven
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildContractSwapBootResumeAdmissionFailsClosedWithoutRouteRecovery}
+      - {kind: go_test, name: TestRecordRunForkSelectedContractRouteRecoveryRoundTripsForkLocalEvidence}
+    rationale: "Route truth remains a separate fork-local owner; source/current route rows are not copied."
+
+  - id: sessions
+    fact: sessions
+    disposition: lineage_only_evidence
+    owner: runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy
+    blocker_codes: [session_history_unproven]
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner}
+    rationale: "Source sessions may be lineage/no-action evidence only under selected policies."
+
+  - id: turns
+    fact: turns
+    disposition: lineage_only_evidence
+    owner: runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy
+    blocker_codes: [active_turn_history_unproven]
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner}
+    rationale: "Source turns are not copied or resumed."
+
+  - id: audits
+    fact: audits
+    disposition: lineage_only_evidence
+    owner: runtime.run_fork.historical_replay_execution.selected_contract_session_turn_audit_lineage_policy
+    blocker_codes: [conversation_audit_history_unproven]
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractConversationLineageOwner}
+    rationale: "Source audit rows are lineage/no-action evidence only."
+
+  - id: non_agent_node_system_work
+    fact: non_agent_node_system_work
+    disposition: fail_closed_blocker
+    owner: store.run_fork.replay_resume_admission
+    blocker_codes:
+      - non_agent_delivery_replay_unsupported
+      - selected_contract_agent_handler_materialization_unsupported
+      - selected_contract_source_replay_unsupported
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkPlanner_NodePendingDeliveryRemainsBlocked}
+      - {kind: go_test, name: TestRunForkPlanner_NonAgentDeliveryStatesRemainNamedBlockers}
+    rationale: "Node/system/non-agent replay needs handler, idempotency, receipt, and side-effect semantics outside this closure."
+
+  - id: source_advanced_post_t_facts
+    fact: source_advanced_post_t_facts
+    disposition: fail_closed_or_lineage
+    owner: runtime.run_fork.selected_contract_execution.source_advanced_conversation_history_policy
+    blocker_codes:
+      - source_events_advanced_after_fork_point
+      - source_timers_advanced_after_fork_point
+      - source_routes_advanced_after_fork_point
+      - source_committed_replay_scope_advanced_after_fork_point
+      - source_active_conversation_session_coupling_after_fork_point
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestBuildHistoricalReplayExecutionAdmissionReportsSelectedContractSourceAdvancedConversationHistoryOwner}
+      - {kind: go_test, name: TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBranchDivergence}
+    rationale: "Post-T source facts are source-run divergence evidence, not fork suppressors."
+
+  - id: runtime_restart_recovery
+    fact: runtime_restart_recovery
+    disposition: split_sibling
+    owner: runtime.run_fork.historical_replay_execution.delivery_event_replay_ready_recovery
+    enforcement_point: internal/runtime/runforkexecution/historical_replay_admission.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage}
+    rationale: "Restart recovery consumes fresh fork-local rows for admitted delivery_event_replay_ready work only."
+
+  - id: cli_api_dashboard_operator_consumers
+    fact: cli_api_dashboard_operator_consumers
+    disposition: split_sibling
+    owner: store.run_fork.replay_resume_admission
+    enforcement_point: cmd/swarm/main.go
+    proof_refs:
+      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_DryRunJSONReportsDeliveryEventReplayReady}
+      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_ActivateUsesCanonicalStoreOwnerJSON}
+    rationale: "Operator surfaces are readback consumers only and must not compute fork admission semantics."
+
+  - id: selected_contract_prerequisite_blockers
+    fact: selected_contract_prerequisite_blockers
+    disposition: fail_closed_blocker
+    owner: runtime.run_fork.selected_contract_execution_admission
+    blocker_codes:
+      - selected_contract_execution_model_non_mutating
+      - selected_contract_execution_admission_non_mutating
+      - selected_contract_recipient_planning_non_mutating
+      - contract_frontier_execution_unsupported
+      - contract_frontier_route_unresolved
+    enforcement_point: internal/runtime/runforkexecution/activation_gate.go
+    proof_refs:
+      - {kind: go_test, name: TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation}
+      - {kind: go_test, name: TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmissionJSON}
+    rationale: "Selected-contract prerequisite failures remain blockers/readback; this PR does not promote them to execution."
+
+  - id: memoized_reexecution_reserved
+    fact: memoized_reexecution_reserved
+    disposition: reserved_future
+    owner: "#1721"
+    enforcement_point: issue-tracker
+    proof_refs:
+      - {kind: issue, issue: 1721}
+    rationale: "Reserved sixth classification for byte-identical agent-turn memoized re-execution; not implemented here."

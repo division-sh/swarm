@@ -30,7 +30,7 @@ type RunForkActivation struct {
 	ForkPoint                 RunForkPoint                             `json:"fork_point"`
 	Activated                 bool                                     `json:"activated"`
 	SourceFrozen              bool                                     `json:"source_frozen"`
-	HistoricalReplayBlocked   bool                                     `json:"historical_replay_blocked"`
+	ReplayResumeBlocked       bool                                     `json:"replay_resume_blocked"`
 	ReplayResumeAdmission     RunForkReplayResumeAdmission             `json:"replay_resume_admission"`
 	UnsupportedBlockers       []RunForkUnsupportedBlocker              `json:"unsupported_blockers,omitempty"`
 	MaterializedEntityCount   int                                      `json:"materialized_entity_count"`
@@ -122,7 +122,7 @@ func (s *PostgresStore) ActivateRunFork(ctx context.Context, req RunForkActivate
 		ForkRunStatus:           lineage.ForkStatus,
 		SourceRunStatus:         lineage.SourceRunStatus,
 		ForkPoint:               RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime},
-		HistoricalReplayBlocked: true,
+		ReplayResumeBlocked:     true,
 		MaterializedEntityCount: len(lineage.EntityIDs),
 	}
 	if lineage.ForkStatus != RunForkMaterializedStatus {

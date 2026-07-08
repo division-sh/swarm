@@ -134,8 +134,8 @@ func validateContractSwapHistoricalReplayExecution(admission store.RunForkHistor
 		strings.TrimSpace(execution.ForkEventID) != strings.TrimSpace(admission.ForkEventID) {
 		return fmt.Errorf("contract-swap historical replay execution parent execution identity mismatch")
 	}
-	if execution.FullReplayResumeSupported {
-		return fmt.Errorf("contract-swap historical replay execution first slice cannot consume full replay/resume execution")
+	if !execution.FullReplayUnsupported {
+		return fmt.Errorf("contract-swap historical replay execution first slice cannot consume broader source-run replay execution")
 	}
 	if !execution.DeliveryEventReplayReady ||
 		execution.EventDeliveriesAdmission.Fact != store.RunForkHistoricalReplayFactEventDeliveries ||

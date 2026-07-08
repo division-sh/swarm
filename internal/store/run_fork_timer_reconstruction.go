@@ -78,7 +78,7 @@ func runForkReplayResumeAdmissionWithTimerReconstruction(admission RunForkReplay
 		admission.Dispositions[i].Classification = RunForkHistoricalReplayAdmissionReconstructedForkState
 		admission.Dispositions[i].Message = fmt.Sprintf("%s reconstructs %d active fork-local timer(s) under the fork run_id", RunForkHistoricalReplayTimerReconstructionOwner, len(reconstruction.Rows))
 	}
-	admission.HistoricalReplaySupported = len(admission.UnsupportedBlockers) == 0
+	admission.BoundedReplaySupported = len(admission.UnsupportedBlockers) == 0
 	return admission
 }
 

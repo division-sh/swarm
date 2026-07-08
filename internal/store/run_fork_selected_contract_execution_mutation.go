@@ -291,7 +291,7 @@ func (s *PostgresStore) ActivateRunForkForSelectedContractExecution(ctx context.
 		ForkRunStatus:           lineage.ForkStatus,
 		SourceRunStatus:         lineage.SourceRunStatus,
 		ForkPoint:               RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime},
-		HistoricalReplayBlocked: true,
+		ReplayResumeBlocked:     true,
 		MaterializedEntityCount: len(lineage.EntityIDs),
 	}
 	if lineage.ForkStatus != RunForkMaterializedStatus {

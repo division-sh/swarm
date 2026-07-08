@@ -132,7 +132,7 @@ func BuildHistoricalReplayExecution(req HistoricalReplayExecutionRequest) (store
 		SourceRunID:                strings.TrimSpace(admission.SourceRunID),
 		ForkEventID:                strings.TrimSpace(admission.ForkEventID),
 		ClosureLevel:               "canonical_owner_promotion_with_delivery_event_replay_ready_only",
-		FullReplayResumeSupported:  false,
+		FullReplayUnsupported:      true,
 		DeliveryEventReplayReady:   true,
 		EventDeliveriesAdmission:   eventDeliveries,
 		FactAdmissions:             append([]store.RunForkHistoricalReplayFactAdmission(nil), admission.FactAdmissions...),
@@ -174,7 +174,7 @@ func BuildHistoricalReplayExecutionAdmission(req HistoricalReplayExecutionAdmiss
 	}
 	blockers = appendRunForkUnsupportedBlocker(blockers, store.RunForkUnsupportedBlocker{
 		Code:    store.RunForkBlockerHistoricalReplayExecutionAdmissionNonMutating,
-		Message: "historical replay execution admission is non-mutating; full replay/resume mutation remains separately gated",
+		Message: "historical replay execution admission is non-mutating; bounded fork re-execution mutation remains separately gated",
 	})
 
 	var routeTopologyOwner, recipientPlanningOwner string
@@ -582,7 +582,7 @@ func historicalReplayExecutionBlockedSiblings(items []store.RunForkSelectedContr
 		Concept:     "full_historical_replay_execution",
 		Disposition: store.RunForkSelectedContractDispositionBlockedSibling,
 		Owner:       store.RunForkHistoricalReplayExecutionOwner,
-		Reason:      "this child mutates only delivery_event_replay_ready; full replay/resume remains under #564",
+		Reason:      "this child mutates only delivery_event_replay_ready; broader source-run replay remains under successor ownership",
 	})
 	return out
 }
@@ -655,7 +655,7 @@ func historicalReplayRequiredConsumers() []store.RunForkSelectedContractExecutio
 			Concept:     "selected_contract_execution",
 			Disposition: store.RunForkSelectedContractDispositionPrerequisite,
 			Owner:       store.RunForkSelectedContractExecutionOwner,
-			Reason:      "supported selected-contract execution remains a prerequisite proof, not a replacement for full replay/resume",
+			Reason:      "supported selected-contract execution remains a prerequisite proof, not a replacement for broader source-run replay",
 		},
 		{
 			Concept:     "event_bus_publish",
@@ -733,7 +733,7 @@ func historicalReplayInvalidPaths() []store.RunForkSelectedContractExecutionBoun
 		{
 			Concept:     "selected_frontier_execution_as_full_replay",
 			Disposition: store.RunForkSelectedContractDispositionInvalid,
-			Reason:      "supported selected frontier execution does not prove full historical replay/resume",
+			Reason:      "supported selected frontier execution does not prove broader source-run resumption",
 		},
 		{
 			Concept:     "cli_api_dashboard_owned_replay",
