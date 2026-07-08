@@ -978,8 +978,18 @@ type ProjectPackageDocument struct {
 	Children        []ProjectPackageRef  `yaml:"children"`
 	Subpackages     []ProjectPackageRef  `yaml:"subpackages"`
 	Connect         []FlowPackageConnect `yaml:"connect"`
+	ConnectorPacks  ConnectorPackImports `yaml:"connector_packs"`
 	Handoffs        []ProjectHandoff     `yaml:"handoffs"`
 	EntitySchema    EntitySchema         `yaml:"entity_schema"`
+}
+
+type ConnectorPackImports struct {
+	Imports []ConnectorPackImport `yaml:"imports"`
+}
+
+type ConnectorPackImport struct {
+	Provider string `yaml:"provider"`
+	Tool     string `yaml:"tool"`
 }
 
 type TypeCatalogDocument struct {

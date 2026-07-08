@@ -32,6 +32,12 @@ func Bundle(source Source) (*runtimecontracts.WorkflowContractBundle, bool) {
 		}
 		return typed.bundle, true
 	default:
+		type baseSourceProvider interface {
+			BaseSemanticSource() Source
+		}
+		if provider, ok := source.(baseSourceProvider); ok && provider.BaseSemanticSource() != nil {
+			return Bundle(provider.BaseSemanticSource())
+		}
 		return nil, false
 	}
 }

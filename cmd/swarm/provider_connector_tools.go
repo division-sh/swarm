@@ -14,6 +14,12 @@ func appendProviderConnectorToolSurfaceFindings(ctx context.Context, report *loc
 	if report == nil || source == nil {
 		return
 	}
+	var err error
+	source, err = providerconnectors.SourceWithConnectorPackImports(source)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "provider_connector_pack_import_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider connector pack imports")
+		return
+	}
 	discovered, err := providerconnectors.Surfaces(ctx, source, nil)
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "provider_connector_surface_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider connector tool declarations")

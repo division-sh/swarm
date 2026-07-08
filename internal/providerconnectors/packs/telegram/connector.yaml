@@ -1,0 +1,27 @@
+provider: telegram
+tools:
+  telegram.send_message:
+    category: provider_connector
+    description: send Telegram messages
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials:
+      - telegram_bot_token
+    input_schema:
+      type: object
+      properties:
+        chat_id:
+          type: string
+        text:
+          type: string
+      required:
+        - chat_id
+        - text
+    output_schema:
+      type: object
+    http:
+      method: POST
+      url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage
+      body:
+        chat_id: "{{input.chat_id}}"
+        text: "{{input.text}}"

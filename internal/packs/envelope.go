@@ -18,10 +18,12 @@ import (
 )
 
 const (
-	EnvelopeFileName = "pack.yaml"
-	ManifestFileName = "trigger.yaml"
+	EnvelopeFileName          = "pack.yaml"
+	TriggerManifestFileName   = "trigger.yaml"
+	ConnectorManifestFileName = "connector.yaml"
 
-	TypeTrigger = "trigger"
+	TypeTrigger   = "trigger"
+	TypeConnector = "connector"
 
 	ProvenancePlatform = "platform"
 	ProvenanceExternal = "external"
@@ -51,10 +53,13 @@ type Capabilities struct {
 }
 
 type CanCapabilities struct {
-	ReceiveHTTPSRoute    string   `yaml:"receive_https_route" json:"receive_https_route"`
-	VerifySecret         string   `yaml:"verify_secret,omitempty" json:"verify_secret,omitempty"`
-	EmitEvents           []string `yaml:"emit_events" json:"emit_events"`
-	PersistDedupeMarkers bool     `yaml:"persist_dedupe_markers" json:"persist_dedupe_markers"`
+	ReceiveHTTPSRoute       string   `yaml:"receive_https_route,omitempty" json:"receive_https_route,omitempty"`
+	VerifySecret            string   `yaml:"verify_secret,omitempty" json:"verify_secret,omitempty"`
+	EmitEvents              []string `yaml:"emit_events,omitempty" json:"emit_events,omitempty"`
+	PersistDedupeMarkers    bool     `yaml:"persist_dedupe_markers,omitempty" json:"persist_dedupe_markers,omitempty"`
+	CallProviderAction      string   `yaml:"call_provider_action,omitempty" json:"call_provider_action,omitempty"`
+	LowerThroughActivity    bool     `yaml:"lower_through_activity,omitempty" json:"lower_through_activity,omitempty"`
+	JournalActivityAttempts bool     `yaml:"journal_activity_attempts,omitempty" json:"journal_activity_attempts,omitempty"`
 }
 
 type Requires struct {
@@ -91,14 +96,29 @@ func Load(fsys fs.FS, dir, runningPlatformVersion string) (Loaded, error) {
 	if err := envelope.ValidateCommon(runningPlatformVersion); err != nil {
 		return Loaded{}, err
 	}
-	manifestBody, err := fs.ReadFile(fsys, path.Join(dir, ManifestFileName))
+	manifestFile := ManifestFileNameForType(envelope.Type)
+	if manifestFile == "" {
+		return Loaded{}, fmt.Errorf("pack %q has unsupported type %q", envelope.ID, envelope.Type)
+	}
+	manifestBody, err := fs.ReadFile(fsys, path.Join(dir, manifestFile))
 	if err != nil {
-		return Loaded{}, fmt.Errorf("read pack manifest %q: %w", path.Join(dir, ManifestFileName), err)
+		return Loaded{}, fmt.Errorf("read pack manifest %q: %w", path.Join(dir, manifestFile), err)
 	}
 	if err := envelope.VerifyManifestHash(manifestBody); err != nil {
 		return Loaded{}, err
 	}
 	return Loaded{Envelope: envelope, ManifestBody: manifestBody, Directory: dir}, nil
+}
+
+func ManifestFileNameForType(packType string) string {
+	switch strings.TrimSpace(packType) {
+	case TypeTrigger:
+		return TriggerManifestFileName
+	case TypeConnector:
+		return ConnectorManifestFileName
+	default:
+		return ""
+	}
 }
 
 func ParseEnvelope(body []byte) (Envelope, error) {
@@ -128,7 +148,9 @@ func (e Envelope) ValidateCommon(runningPlatformVersion string) error {
 	if err := platform.ValidateProductPlatformVersion(e.PlatformVersion, runningPlatformVersion); err != nil {
 		return fmt.Errorf("pack %q platform_version is incompatible: %w", id, err)
 	}
-	if strings.TrimSpace(e.Type) != TypeTrigger {
+	switch strings.TrimSpace(e.Type) {
+	case TypeTrigger, TypeConnector:
+	default:
 		return fmt.Errorf("pack %q has unsupported type %q", id, e.Type)
 	}
 	if strings.TrimSpace(e.ManifestHash) == "" {
@@ -139,7 +161,7 @@ func (e Envelope) ValidateCommon(runningPlatformVersion string) error {
 	default:
 		return fmt.Errorf("pack %q has unsupported provenance source %q", id, e.Provenance.Source)
 	}
-	if err := e.Capabilities.Validate(id); err != nil {
+	if err := e.Capabilities.ValidateForType(id, strings.TrimSpace(e.Type)); err != nil {
 		return err
 	}
 	if err := e.Requires.Validate(id); err != nil {
@@ -178,8 +200,26 @@ func (e Envelope) VerifyManifestHash(manifestBody []byte) error {
 }
 
 func (c Capabilities) Validate(packID string) error {
+	return c.ValidateForType(packID, TypeTrigger)
+}
+
+func (c Capabilities) ValidateForType(packID, packType string) error {
+	switch strings.TrimSpace(packType) {
+	case TypeTrigger:
+		return c.validateTrigger(packID)
+	case TypeConnector:
+		return c.validateConnector(packID)
+	default:
+		return fmt.Errorf("pack %q has unsupported type %q", packID, packType)
+	}
+}
+
+func (c Capabilities) validateTrigger(packID string) error {
 	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) == "" {
 		return fmt.Errorf("pack %q capabilities.can.receive_https_route is required", packID)
+	}
+	if strings.TrimSpace(c.Can.CallProviderAction) != "" || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
+		return fmt.Errorf("pack %q trigger capabilities must not declare connector capability fields", packID)
 	}
 	if len(c.Can.EmitEvents) == 0 {
 		return fmt.Errorf("pack %q capabilities.can.emit_events is required", packID)
@@ -191,6 +231,30 @@ func (c Capabilities) Validate(packID string) error {
 	}
 	if !c.Can.PersistDedupeMarkers {
 		return fmt.Errorf("pack %q capabilities.can.persist_dedupe_markers must be true", packID)
+	}
+	if len(c.Cannot) == 0 {
+		return fmt.Errorf("pack %q capabilities.cannot is required", packID)
+	}
+	for _, item := range c.Cannot {
+		if strings.TrimSpace(item) == "" {
+			return fmt.Errorf("pack %q capabilities.cannot must not contain empty entries", packID)
+		}
+	}
+	return nil
+}
+
+func (c Capabilities) validateConnector(packID string) error {
+	if strings.TrimSpace(c.Can.CallProviderAction) == "" {
+		return fmt.Errorf("pack %q capabilities.can.call_provider_action is required", packID)
+	}
+	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) > 0 || c.Can.PersistDedupeMarkers {
+		return fmt.Errorf("pack %q connector capabilities must not declare trigger capability fields", packID)
+	}
+	if !c.Can.LowerThroughActivity {
+		return fmt.Errorf("pack %q capabilities.can.lower_through_activity must be true", packID)
+	}
+	if !c.Can.JournalActivityAttempts {
+		return fmt.Errorf("pack %q capabilities.can.journal_activity_attempts must be true", packID)
 	}
 	if len(c.Cannot) == 0 {
 		return fmt.Errorf("pack %q capabilities.cannot is required", packID)
@@ -227,17 +291,27 @@ func RequiresEqual(a, b Requires) bool {
 }
 
 func (e Envelope) Surface(boundSecrets map[string]bool) CapabilitySurface {
-	can := []string{
-		"receive HTTPS route " + strings.TrimSpace(e.Capabilities.Can.ReceiveHTTPSRoute),
-	}
-	if secret := strings.TrimSpace(e.Capabilities.Can.VerifySecret); secret != "" {
-		can = append(can, "verify named secret "+secret)
-	}
-	for _, event := range e.Capabilities.Can.EmitEvents {
-		can = append(can, "emit named event "+strings.TrimSpace(event))
-	}
-	if e.Capabilities.Can.PersistDedupeMarkers {
-		can = append(can, "persist dedupe markers")
+	can := []string{}
+	switch strings.TrimSpace(e.Type) {
+	case TypeConnector:
+		can = append(can, "call provider action "+strings.TrimSpace(e.Capabilities.Can.CallProviderAction))
+		if e.Capabilities.Can.LowerThroughActivity {
+			can = append(can, "lower through platform.activity_requested")
+		}
+		if e.Capabilities.Can.JournalActivityAttempts {
+			can = append(can, "journal non-idempotent attempts in activity_attempts")
+		}
+	default:
+		can = append(can, "receive HTTPS route "+strings.TrimSpace(e.Capabilities.Can.ReceiveHTTPSRoute))
+		if secret := strings.TrimSpace(e.Capabilities.Can.VerifySecret); secret != "" {
+			can = append(can, "verify named secret "+secret)
+		}
+		for _, event := range e.Capabilities.Can.EmitEvents {
+			can = append(can, "emit named event "+strings.TrimSpace(event))
+		}
+		if e.Capabilities.Can.PersistDedupeMarkers {
+			can = append(can, "persist dedupe markers")
+		}
 	}
 	cannot := append([]string(nil), e.Capabilities.Cannot...)
 	sort.Strings(cannot)

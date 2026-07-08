@@ -56,6 +56,11 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if source == nil {
 		return result, fmt.Errorf("semantic source is required")
 	}
+	var err error
+	source, err = providerconnectors.SourceWithConnectorPackImports(source)
+	if err != nil {
+		return result, fmt.Errorf("provider connector pack import failed: %w", err)
+	}
 
 	result.BootReport = runtimebootverify.Run(ctx, source, runtimebootverify.Options{
 		Credentials:             opts.Credentials,
