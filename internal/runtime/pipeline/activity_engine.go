@@ -973,7 +973,7 @@ func redactActivityError(err error, secrets []string) error {
 func resolveActivityTemplateTree(value any, env map[string]any) (any, error) {
 	switch typed := value.(type) {
 	case string:
-		return resolveActivityTemplateString(typed, env)
+		return resolveActivityTemplateValue(typed, env)
 	case map[string]any:
 		out := make(map[string]any, len(typed))
 		for key, value := range typed {
@@ -997,6 +997,22 @@ func resolveActivityTemplateTree(value any, env map[string]any) (any, error) {
 	default:
 		return value, nil
 	}
+}
+
+func resolveActivityTemplateValue(template string, env map[string]any) (any, error) {
+	out := strings.TrimSpace(template)
+	matches, err := activityTemplateMatches(out)
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 1 && matches[0].start == 0 && matches[0].end == len(out) {
+		value, ok := workflowExpressionLookupPath(env, matches[0].expr)
+		if !ok {
+			return nil, fmt.Errorf("activity template expression %q did not resolve", matches[0].expr)
+		}
+		return value, nil
+	}
+	return resolveActivityTemplateString(out, env)
 }
 
 func resolveActivityTemplateString(template string, env map[string]any) (string, error) {

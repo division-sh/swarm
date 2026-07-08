@@ -108,6 +108,9 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	if got := microsoftGraphConnectorString(firstCall.body["message"]); !strings.Contains(got, "send first mail") || !strings.Contains(got, "recipient@example.com") {
 		t.Fatalf("%s first Graph message = %#v, want subject/body/recipient from activity input", backend.name, firstCall.body["message"])
 	}
+	if recipients := microsoftGraphMessageRecipients(firstCall.body); len(recipients) != 1 {
+		t.Fatalf("%s first Graph toRecipients = %#v, want one JSON array recipient", backend.name, microsoftGraphMessageValue(firstCall.body, "toRecipients"))
+	}
 	firstInboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "323456789")
 	firstAttempt := waitForMicrosoftGraphTerminalActivityAttempt(t, backend, firstInboundEventID)
 	if firstAttempt.Status != runtimepipeline.ActivityAttemptStatusSucceeded {
@@ -251,6 +254,10 @@ func newFakeMicrosoftGraphConnectorServer(t *testing.T) *fakeMicrosoftGraphConne
 		var body map[string]any
 		if err := json.Unmarshal(raw, &body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if recipients := microsoftGraphMessageRecipients(body); len(recipients) != 1 {
+			http.Error(w, "toRecipients must be a JSON array", http.StatusBadRequest)
 			return
 		}
 		auth := r.Header.Get("Authorization")
@@ -608,8 +615,20 @@ func countMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManage
 }
 
 func microsoftGraphMessageSubject(body map[string]any) string {
+	return slackManagedConnectorString(microsoftGraphMessageValue(body, "subject"))
+}
+
+func microsoftGraphMessageRecipients(body map[string]any) []any {
+	recipients, _ := microsoftGraphMessageValue(body, "toRecipients").([]any)
+	return recipients
+}
+
+func microsoftGraphMessageValue(body map[string]any, key string) any {
 	message, _ := body["message"].(map[string]any)
-	return slackManagedConnectorString(message["subject"])
+	if message == nil {
+		return nil
+	}
+	return message[key]
 }
 
 func microsoftGraphConnectorString(value any) string {
