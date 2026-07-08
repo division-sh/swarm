@@ -4219,9 +4219,10 @@ func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedpari
 
 func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release")
+	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release-"+uuid.NewString())
+	keyPrefix := "issue-1864-" + rt.Backend + "-" + runID
 
-	pauseKey := "issue-1864-" + rt.Backend + "-run-pause"
+	pauseKey := keyPrefix + "-run-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
 		"run_id":          runID,
 		"idempotency_key": pauseKey,
@@ -4240,7 +4241,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		"run_id":          runID,
 		"source_event_id": initialEventID,
 		"payload":         map[string]any{"note": "queued while run paused"},
-		"idempotency_key": "issue-1864-" + rt.Backend + "-run-queued",
+		"idempotency_key": keyPrefix + "-run-queued",
 	})
 	if queued.RunID != runID || queued.SourceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
@@ -4248,7 +4249,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "entity-writer", "pending", 1)
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "entity-writer", "delivered", 250*time.Millisecond)
 
-	continueKey := "issue-1864-" + rt.Backend + "-run-continue"
+	continueKey := keyPrefix + "-run-continue"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
 		"run_id":          runID,
 		"idempotency_key": continueKey,
@@ -4266,7 +4267,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 
 	stopRunID, pendingEventID := seedServedRunControlPendingRunWithAgentDelivery(t, rt.DB, rt.Backend)
-	stopKey := "issue-1864-" + rt.Backend + "-run-stop"
+	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
 		"run_id":          stopRunID,
 		"idempotency_key": stopKey,
@@ -4285,7 +4286,8 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 
 func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	pauseKey := "issue-1864-" + rt.Backend + "-runtime-pause"
+	keyPrefix := "issue-1864-" + rt.Backend + "-" + uuid.NewString()
+	pauseKey := keyPrefix + "-runtime-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
 		"idempotency_key": pauseKey,
 	})
@@ -4305,14 +4307,14 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 		"event_name":      "thing.unhandled",
 		"bundle_hash":     rt.BundleHash,
 		"payload":         map[string]any{"note": "queued while runtime paused"},
-		"idempotency_key": "issue-1864-" + rt.Backend + "-runtime-queued",
+		"idempotency_key": keyPrefix + "-runtime-queued",
 	})
 	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
 		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
 	}
 	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
 
-	resumeKey := "issue-1864-" + rt.Backend + "-runtime-resume"
+	resumeKey := keyPrefix + "-runtime-resume"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
 		"idempotency_key": resumeKey,
 	})
