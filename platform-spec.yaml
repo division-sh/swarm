@@ -2273,6 +2273,10 @@ handler_specification:
         on_complete: handler fields to execute when done
         on_timeout: handler fields to execute on timeout
         description: string — human-readable note
+        window: 'string — optional field path for partitioning one logical accumulator into bounded windows (for
+          example payload.period_id). When declared, the runtime resolves the path on each arrival and stores/reads
+          the accumulator under a bucket identity scoped by that window value. Missing or empty runtime window values
+          fail closed for that handler execution.'
         dedup_by: 'string — field path for deduplication. Default: "sender" (sender session ID). Set to a payload field path
           (e.g., "payload.dimension") when accumulating items identified by content rather than sender. Duplicate arrivals
           with the same dedup key are ignored.'
@@ -3899,7 +3903,9 @@ engine:
         event type remains event provenance and must be retained on accumulated
         item metadata and diagnostics. Timeout bucket handles, compute reads,
         and `materialize_from` projection reads must consume the same selected
-        handler event key.
+        handler event key. If `accumulate.window` is declared, the window value
+        is part of the accumulator bucket identity; unwindowed accumulators keep
+        the existing node/event bucket key.
       arrival: 'Each event arrival is identified by its dedup_by key. Default: sender session ID. Can be overridden to a payload
         field (e.g., payload.dimension). If the key was already received, the arrival is ignored (idempotent). If not, it
         is added to the received set and persisted.'
@@ -8275,9 +8281,9 @@ flow_model:
             broadcast:true, receiver select_entity/select_or_create_entity, and
             explicit create_flow_instance are not lifecycle authority.
         implementation_slice_1835:
-          status: spec_locked_create_select_and_select_or_create_modes_runnable_remaining_modes_fail_closed
+          status: spec_locked_create_select_select_or_create_and_fan_in_stream_modes_runnable_remaining_modes_fail_closed
           canonical_spec_owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering.implementation_slice_1835
-          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey + internal/runtime/bus.templateInstanceLifecycleOwner + internal/runtime/bootverify.composition_connect_validation
+          canonical_code_owner: internal/runtime/contracts.FlowInputPinResolution + internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey/FanIn + internal/runtime/bus.templateInstanceLifecycleOwner/connectRoutePlanResolver + internal/runtime/engine.AccumulateSpec + internal/runtime/bootverify.composition_connect_validation
           rule: |
             Receiver input pins may declare an explicit instance-resolution
             contract under `resolution:{mode,...}`. This receiver-side contract
@@ -8294,8 +8300,11 @@ flow_model:
             key. PR3 makes `resolution.mode: select-or-create` runnable for
             the same single declared carried-key boundary, with lifecycle/store
             convergence on exactly one receiver instance for concurrent same-key
-            missing deliveries. All other locked modes are recognized by
-            contracts and verifier and fail closed as
+            missing deliveries. PR4 makes `resolution.mode: fan-in` runnable
+            only for `aggregation: stream` / bounded windowed delivery into an
+            explicit singleton/coordinator receiver. All other locked modes and
+            fan-in barrier semantics are recognized by contracts and verifier
+            and fail closed as
             design-locked/not-runnable until their implementation slices land.
             Static root ingress, parent-connect static delivery, and
             harness-injected inputs remain existing #1807 input-source /
@@ -8418,13 +8427,48 @@ flow_model:
               - unavailable template lifecycle activator
               - activation/create race that cannot reload exactly one matching instance
             fan-in:
-              status: spec_locked_not_runnable_in_1835_pr1
+              status: stream_windowed_runnable_in_1835_pr4_barrier_fail_closed
               contract: >
                 Fan-in routes many source deliveries into one receiver instance
                 or aggregation context. `aggregation: stream|barrier` is the
                 locked sub-semantics selector. Stream delivers each accepted
                 event into the receiver context; barrier waits for the declared
                 close condition/window before releasing an aggregate result.
+                In the PR4 runnable subset, only `aggregation: stream` is
+                executable. The receiver input pin MUST declare `window`,
+                `dedup_by`, and `singleton`. `singleton` is the explicit
+                receiver route path for the singleton/coordinator instance and
+                MUST be the receiver route or a child of the receiver route; it
+                is never inferred from the sender/source instance. `dedup_by`
+                is required and may be only `event.id` or one top-level
+                `payload.<field>` in this slice; tuple/composite dedup remains
+                fail-closed until evidence requires it. `window` is required and
+                must be one top-level payload field. The route plan reuses
+                singular target delivery and carries fan-in metadata for proof;
+                it MUST NOT introduce a new fan-in target kind. Dedup/window
+                ownership is split deliberately: the pin declares the seam,
+                bootverify proves the receiving handler accumulator uses the
+                same `dedup_by` and `window`, and the accumulate kernel enforces
+                idempotency and window partitioning. EventBus/delivery MUST NOT
+                add an independent fan-in dedup/window owner.
+              fail_closed:
+              - aggregation other than stream, including barrier
+              - missing or empty singleton
+              - singleton outside the receiver route path
+              - missing or empty window
+              - window not naming one top-level payload field
+              - missing or empty dedup_by
+              - dedup_by list/tuple/composite beyond one field
+              - dedup_by other than event.id or one top-level payload field
+              - receiver not mode: singleton/coordinator
+              - missing receiver handler for the input event
+              - receiver handler missing accumulate
+              - receiver accumulate.dedup_by not matching pin dedup_by
+              - receiver accumulate.window not matching pin window
+              - combined legacy input address
+              - combined connect.using.instance or connect.map
+              - delivery topology other than one
+              - producer target.flow / target.match / broadcast rescue
             fan-out:
               status: spec_locked_not_runnable_in_1835_pr1
               contract: >
@@ -8459,7 +8503,7 @@ flow_model:
               `resolution:{mode,...}` semantics.
           proof_obligations:
           - contracts decode every locked mode and reject unknown resolution fields fail-closed
-          - bootverify accepts valid create/select/select-or-create resolution and rejects other non-runnable modes as not runnable in this slice
+          - bootverify accepts valid create/select/select-or-create/fan-in stream resolution and rejects other non-runnable modes as not runnable in this slice
           - route-plan lowering records create mode, mint kind, carried `as` field, create/reuse lifecycle policy, and does not require producer output key/carries
           - EventBus publish/preflight creates a missing receiver instance through the canonical lifecycle path
           - downstream receiver routes can render the carried minted instance key from activation variables
@@ -8476,6 +8520,12 @@ flow_model:
           - ambiguous select-or-create target failures fail closed with receiver/key/value/remediation detail and no activation
           - same committed select-or-create event replay reuses persisted delivery route/scope and does not reselect or recreate after descriptor drift
           - standalone #1828 `template-select-or-create` conformance fixture verifies and materializes through the canonical select-or-create route plan
+          - route-plan lowering records fan-in stream metadata, required singleton/window/dedup_by, singular target delivery, and no new target kind
+          - bootverify proves fan-in pin dedup/window declarations match the receiving accumulate handler declarations
+          - EventBus publish/preflight for fan-in stream routes multiple source contributions to the same explicit singleton/coordinator receiver route
+          - receiver accumulator kernel enforces declared dedup_by idempotency and partitions arrivals by declared window
+          - same committed fan-in stream event replay reuses persisted delivery route/scope and does not re-infer receiver identity from sender/source state
+          - standalone #1828 `template-fan-in` conformance fixture verifies and materializes through the canonical fan-in stream route plan
         implementation_slice_1546:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/core/pinrouting.ConnectRoutePlan.InstanceKey.Mappings + internal/runtime/bus.connectRoutePlanResolver

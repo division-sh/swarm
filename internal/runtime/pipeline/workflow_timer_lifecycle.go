@@ -304,7 +304,7 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	if entityID == "" || nodeID == "" {
 		return nil
 	}
-	bucketRef, ok := accumulationTimeoutBucketRef(evt, nodeID, handlerEventKey)
+	bucketRef, ok := accumulationTimeoutBucketRef(evt, nodeID, handlerEventKey, spec)
 	if !ok {
 		return nil
 	}
@@ -344,7 +344,7 @@ func workflowTimerShouldStartOnTransition(timer runtimecontracts.WorkflowTimerCo
 	return ok && workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent)
 }
 
-func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string) (timeridentity.AccumulatorBucketRef, bool) {
+func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, bool) {
 	nodeID = strings.TrimSpace(nodeID)
 	if nodeID == "" {
 		return timeridentity.AccumulatorBucketRef{}, false
@@ -355,6 +355,13 @@ func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string) (ti
 			eventType = strings.TrimSpace(string(evt.Type()))
 		}
 		bucket := timeridentity.NewAccumulatorBucketRef(nodeID, eventType)
+		if spec != nil && strings.TrimSpace(spec.Window) != "" {
+			window, ok := accumulationTimeoutWindowValue(parsePayloadMap(evt.Payload()), spec.Window)
+			if !ok {
+				return timeridentity.AccumulatorBucketRef{}, false
+			}
+			bucket = timeridentity.NewAccumulatorWindowBucketRef(nodeID, eventType, window)
+		}
 		return bucket, bucket.Valid()
 	}
 	bucket, ok := timeridentity.ParseAccumulatorBucketRef(parsePayloadMap(evt.Payload()))
@@ -362,6 +369,21 @@ func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string) (ti
 		return timeridentity.AccumulatorBucketRef{}, false
 	}
 	return bucket, true
+}
+
+func accumulationTimeoutWindowValue(payload map[string]any, window string) (string, bool) {
+	window = strings.TrimSpace(window)
+	if window == "" {
+		return "", false
+	}
+	if strings.HasPrefix(window, "payload.") {
+		window = strings.TrimPrefix(window, "payload.")
+	}
+	if strings.Contains(window, ".") || window == "" {
+		return "", false
+	}
+	value := strings.TrimSpace(asString(payload[window]))
+	return value, value != ""
 }
 
 func accumulationTimeoutStartedAt(stateBuckets map[string]any, bucketRef timeridentity.AccumulatorBucketRef) (time.Time, bool) {

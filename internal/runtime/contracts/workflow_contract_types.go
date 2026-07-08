@@ -458,6 +458,8 @@ type AccumulateSpec struct {
 	ExpectedFrom string               `yaml:"expected_from"`
 	From         string               `yaml:"from"`
 	Description  string               `yaml:"description"`
+	Window       string               `yaml:"window"`
+	WindowPath   paths.Path           `yaml:"-"`
 	ExpectedPath paths.Path           `yaml:"-"`
 	DedupBy      string               `yaml:"dedup_by"`
 	DedupPath    paths.Path           `yaml:"-"`

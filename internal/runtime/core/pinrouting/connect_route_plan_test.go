@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T) {
@@ -46,6 +47,63 @@ func TestLowerCompositionConnectRoutePlansFromLoadedPackageFixture(t *testing.T)
 	}
 	if plan.Target.FlowInstance != "consumer" {
 		t.Fatalf("Target = %#v, want concrete static consumer route", plan.Target)
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansUsesFanInStreamSingularTarget(t *testing.T) {
+	source := templatefanin.LoadSource(t, templatefanin.Options{})
+
+	plans, issues := LowerCompositionConnectRoutePlans(source)
+
+	if len(issues) != 0 {
+		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one fan-in route plan", plans)
+	}
+	plan := plans[0]
+	if plan.FanIn == nil {
+		t.Fatalf("fan-in metadata = nil in %#v", plan)
+	}
+	if plan.FanIn.Aggregation != "stream" || plan.FanIn.Window != "payload.period_id" || len(plan.FanIn.DedupBy) != 1 || plan.FanIn.DedupBy[0] != "payload.report_id" {
+		t.Fatalf("fan-in metadata = %#v, want stream/window/dedup", plan.FanIn)
+	}
+	if plan.TargetKind != ConnectTargetKindTarget || plan.ResolutionKind != ConnectResolutionStatic || plan.Delivery != ConnectDeliveryOne {
+		t.Fatalf("fan-in routing shape = delivery:%s target_kind:%s resolution:%s, want one/target/static", plan.Delivery, plan.TargetKind, plan.ResolutionKind)
+	}
+	if plan.Target.FlowID != templatefanin.ReceiverFlowID || plan.Target.FlowInstance != templatefanin.ReceiverFlowInstance {
+		t.Fatalf("fan-in target = %#v, want receiver singleton %s", plan.Target, templatefanin.ReceiverFlowInstance)
+	}
+}
+
+func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    templatefanin.Options
+		failure ConnectRoutePlanFailure
+		detail  string
+	}{
+		{name: "missing dedup", opts: templatefanin.Options{MissingDedup: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires dedup_by"},
+		{name: "dedup tuple", opts: templatefanin.Options{DedupTuple: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "exactly one dedup_by"},
+		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires window"},
+		{name: "barrier", opts: templatefanin.Options{BarrierAggregation: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "aggregation: stream"},
+		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "must be the receiver singleton route or a child"},
+		{name: "delivery many", opts: templatefanin.Options{DeliveryMany: true}, failure: ConnectFailureDeliveryTopologyInvalid, detail: "requires delivery one"},
+		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "connect.map is incompatible"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := templatefanin.LoadSource(t, tc.opts)
+
+			_, issues := LowerCompositionConnectRoutePlans(source)
+
+			if len(issues) != 1 {
+				t.Fatalf("issues = %#v, want one", issues)
+			}
+			if issues[0].Failure != tc.failure || !strings.Contains(issues[0].Detail, tc.detail) {
+				t.Fatalf("issue = %#v, want failure %s containing %q", issues[0], tc.failure, tc.detail)
+			}
+		})
 	}
 }
 

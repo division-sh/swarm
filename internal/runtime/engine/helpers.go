@@ -302,6 +302,22 @@ func handlerAccumulatorBucketRef(req ExecutionRequest) timeridentity.Accumulator
 	return accumulatorBucketRef(req.NodeID, handlerAccumulatorEventType(req))
 }
 
+func handlerAccumulatorBucketRefForSpec(req ExecutionRequest, base BaseContext, state ExecutionState, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, error) {
+	bucket := handlerAccumulatorBucketRef(req)
+	if spec == nil || strings.TrimSpace(spec.Window) == "" {
+		return bucket, nil
+	}
+	value, ok := resolveContractPath(base, state, spec.WindowPath, spec.Window)
+	if !ok {
+		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q did not resolve for node %s event %s", spec.Window, req.NodeID.String(), string(handlerAccumulatorEventType(req)))
+	}
+	window := strings.TrimSpace(fmt.Sprint(value))
+	if window == "" {
+		return timeridentity.AccumulatorBucketRef{}, fmt.Errorf("accumulate.window %q resolved empty for node %s event %s", spec.Window, req.NodeID.String(), string(handlerAccumulatorEventType(req)))
+	}
+	return timeridentity.NewAccumulatorWindowBucketRef(bucket.NodeID, bucket.EventType, window), nil
+}
+
 func loadAccumulator(state StateSnapshot, nodeID identity.NodeID, eventType events.EventType) (*Accumulator, bool) {
 	return loadAccumulatorForBucket(state, accumulatorBucketRef(nodeID, eventType))
 }

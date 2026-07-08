@@ -323,7 +323,9 @@ rows:
       - {kind: issue, issue: 1494}
       - {kind: issue, issue: 1545}
       - {kind: issue, issue: 1546}
+      - {kind: issue, issue: 1890}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesTemplateInstanceKey}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesFanInStreamSingularTarget}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansPreservesAddressedTemplateRoute}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansBroadcastBeatsInstanceKey}
       - {kind: go_test, name: TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter}
@@ -336,6 +338,7 @@ rows:
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForTemplateInstanceKeyGaps}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForRenamedTemplateInstanceKeySourceGap}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanFailsClosedForUnsupportedBusinessFieldTarget}
+      - {kind: go_test, name: TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup}
     notes: >
       ConnectRoutePlan is a typed route-intent input, not an untracked string
       fallback. #1545 records the selected route authority in ResolutionKind so

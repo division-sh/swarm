@@ -8,6 +8,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 func TestRun_AllowsParentCompositionConnectAsVerifyRouteProof(t *testing.T) {
@@ -191,7 +192,7 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 		{
 			name: "non-runnable modes are design-locked but not runnable",
 			opts: createResolutionCompositionFixtureOptions{
-				mode:         runtimecontracts.FlowInputResolutionModeFanIn,
+				mode:         runtimecontracts.FlowInputResolutionModeFanOut,
 				mint:         runtimecontracts.FlowInputResolutionMintUUID,
 				includeCarry: true,
 			},
@@ -234,6 +235,46 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 
 			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
 				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
+func TestRun_AllowsFanInStreamInputResolution(t *testing.T) {
+	source := templatefanin.LoadSource(t, templatefanin.Options{})
+
+	report := Run(context.Background(), source, Options{})
+
+	if got := reportContains(report.Errors(), "composition_connect_validation", "fan-in"); got {
+		t.Fatalf("fan-in stream fixture composition_connect_validation errors = %#v, want none", report.Errors())
+	}
+}
+
+func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
+	tests := []struct {
+		name string
+		opts templatefanin.Options
+		want string
+	}{
+		{name: "missing dedup", opts: templatefanin.Options{MissingDedup: true}, want: "requires dedup_by"},
+		{name: "dedup tuple", opts: templatefanin.Options{DedupTuple: true}, want: "supports exactly one dedup_by field"},
+		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, want: "requires window"},
+		{name: "barrier remains unrunnable", opts: templatefanin.Options{BarrierAggregation: true}, want: "supports only aggregation: stream"},
+		{name: "missing singleton", opts: templatefanin.Options{MissingSingleton: true}, want: "requires explicit singleton"},
+		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, want: "must be the receiver singleton route or a child"},
+		{name: "accumulator dedup mismatch", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by"},
+		{name: "accumulator window mismatch", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window"},
+		{name: "wrong delivery", opts: templatefanin.Options{DeliveryMany: true}, want: "requires delivery one"},
+		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, want: "connect.map is incompatible with input pin resolution"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := templatefanin.LoadSource(t, tc.opts)
+
+			report := Run(context.Background(), source, Options{})
+
+			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
+				t.Fatalf("expected fan-in composition_connect_validation %q, got %#v", tc.want, report.Errors())
 			}
 		})
 	}

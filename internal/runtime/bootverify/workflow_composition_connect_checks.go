@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -203,7 +204,7 @@ func validateCompositionConnectInstanceKey(source semanticview.Source, connect r
 	adapter := connect.Using.Instance
 	if !inputPin.Resolution.Empty() {
 		switch inputPin.Resolution.Mode {
-		case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
+		case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate, runtimecontracts.FlowInputResolutionModeFanIn:
 			if strings.TrimSpace(connect.Delivery) != "" && strings.TrimSpace(connect.Delivery) != "one" {
 				return []Finding{compositionConnectFinding(connect, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s requires delivery one", inputPin.Resolution.Mode), receiverFlowID)}
 			}
@@ -314,8 +315,9 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 		return validateCreateInputPinResolution(source, flowID, pin)
 	case runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
 		return validateCarriedKeyInputPinResolution(source, flowID, pin, resolution.Mode)
-	case runtimecontracts.FlowInputResolutionModeFanIn,
-		runtimecontracts.FlowInputResolutionModeFanOut,
+	case runtimecontracts.FlowInputResolutionModeFanIn:
+		return validateFanInInputPinResolution(source, flowID, pin)
+	case runtimecontracts.FlowInputResolutionModeFanOut,
 		runtimecontracts.FlowInputResolutionModeReply:
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode), location))
 	case "":
@@ -324,6 +326,146 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", resolution.Mode), location))
 	}
 	return findings
+}
+
+func validateFanInInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+	var findings []Finding
+	resolution := pin.Resolution
+	location := flowID
+	if !resolution.InstanceKey.Empty() || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries", location))
+	}
+	if resolution.Aggregation != "stream" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in supports only aggregation: stream in this slice, got %q", resolution.Aggregation), location))
+	}
+	window := strings.TrimSpace(resolution.Window)
+	if window == "" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in stream requires window", location))
+	} else if !validTopLevelPayloadPath(window) {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in window %q must be one top-level payload field", window), location))
+	} else if !inputPinPayloadFieldExists(source, flowID, pin, window) {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in window field %q is not declared on the receiver input event payload", window), location))
+	}
+	dedup, dedupOK, dedupDetail := validateFanInDedupBy(source, flowID, pin, resolution.DedupBy)
+	if !dedupOK {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", dedupDetail, location))
+	}
+	singleton := strings.Trim(strings.TrimSpace(resolution.Singleton), "/")
+	if singleton == "" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in stream requires explicit singleton receiver identity", location))
+	} else {
+		bundle, ok := semanticview.Bundle(source)
+		if !ok || bundle == nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "receiver_singleton_unavailable", "receiver singleton coordinator owner is unavailable for input pin resolution", location))
+		} else if _, err := bundle.ResolveFlowSingletonCoordinator(flowID); err != nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "receiver_singleton_invalid", err.Error(), location))
+		}
+		scopeKey := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, flowID)), "/")
+		if scopeKey != "" && singleton != scopeKey && !strings.HasPrefix(singleton, scopeKey+"/") {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in singleton %q must be the receiver singleton route or a child of %q", singleton, scopeKey), location))
+		}
+	}
+	if dedupOK && window != "" {
+		findings = append(findings, validateFanInAccumulatorConsistency(source, flowID, pin, dedup, window)...)
+	}
+	return findings
+}
+
+func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, dedupBy []string) (string, bool, string) {
+	dedupBy = normalizedConnectAdapterFields(dedupBy)
+	if len(dedupBy) == 0 {
+		return "", false, "resolution mode fan-in stream requires dedup_by; sender identity is not an implicit default"
+	}
+	if len(dedupBy) != 1 {
+		return "", false, fmt.Sprintf("resolution mode fan-in stream supports exactly one dedup_by field in this slice, got %v", dedupBy)
+	}
+	dedup := strings.TrimSpace(dedupBy[0])
+	if dedup == "event.id" {
+		return dedup, true, ""
+	}
+	if !validTopLevelPayloadPath(dedup) {
+		return "", false, fmt.Sprintf("resolution mode fan-in dedup_by %q must be event.id or one top-level payload field", dedup)
+	}
+	if !inputPinPayloadFieldExists(source, flowID, pin, dedup) {
+		return "", false, fmt.Sprintf("resolution mode fan-in dedup_by field %q is not declared on the receiver input event payload", dedup)
+	}
+	return dedup, true, ""
+}
+
+func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, dedup, window string) []Finding {
+	var findings []Finding
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return []Finding{inputPinResolutionFinding(flowID, pin, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", flowID), flowID)}
+	}
+	matchedHandler := false
+	for nodeID := range scope.Nodes {
+		for handlerEvent, handler := range source.NodeEventHandlers(nodeID) {
+			if !fanInHandlerMatchesInputEvent(source, flowID, handlerEvent, pin.EventType()) {
+				continue
+			}
+			matchedHandler = true
+			if handler.Accumulate == nil {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s for fan-in input must declare accumulate", nodeID, handlerEvent), flowID))
+				continue
+			}
+			if strings.TrimSpace(handler.Accumulate.DedupBy) != dedup {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.dedup_by %q must match fan-in dedup_by %q", nodeID, handlerEvent, handler.Accumulate.DedupBy, dedup), flowID))
+			}
+			if strings.TrimSpace(handler.Accumulate.Window) != window {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.window %q must match fan-in window %q", nodeID, handlerEvent, handler.Accumulate.Window, window), flowID))
+			}
+		}
+	}
+	if !matchedHandler {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s has no handler for fan-in input event %s", flowID, pin.EventType()), flowID))
+	}
+	return findings
+}
+
+func fanInHandlerMatchesInputEvent(source semanticview.Source, flowID, handlerEvent, inputEvent string) bool {
+	handlerEvent = strings.TrimSpace(handlerEvent)
+	inputEvent = strings.TrimSpace(inputEvent)
+	if handlerEvent == "" || inputEvent == "" {
+		return false
+	}
+	if source.FlowEventMatches(flowID, handlerEvent, inputEvent) {
+		return true
+	}
+	resolvedInput := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputEvent))
+	return eventidentity.Normalize(handlerEvent) == resolvedInput || eventidentity.Normalize(handlerEvent) == eventidentity.Normalize(inputEvent)
+}
+
+func validTopLevelPayloadPath(path string) bool {
+	path = strings.TrimSpace(path)
+	if !strings.HasPrefix(path, "payload.") {
+		return false
+	}
+	field := strings.TrimSpace(strings.TrimPrefix(path, "payload."))
+	return field != "" && !strings.Contains(field, ".")
+}
+
+func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, path string) bool {
+	field := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(path), "payload."))
+	if field == "" || strings.Contains(field, ".") {
+		return false
+	}
+	if carry, ok := pin.Carries[field]; ok && strings.TrimSpace(carry.From) == "payload."+field {
+		return true
+	}
+	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, pin.EventType())
+	if !ok {
+		return false
+	}
+	if _, ok := entry.Payload.Properties[field]; ok {
+		return true
+	}
+	for _, required := range append(entry.Required, entry.Payload.Required...) {
+		if strings.TrimSpace(required) == field {
+			return true
+		}
+	}
+	return false
 }
 
 func validateCarriedKeyInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, mode string) []Finding {

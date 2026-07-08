@@ -236,13 +236,29 @@ func (r connectRoutePlanResolver) resolveSelectedReceiverCarriers(plan runtimepi
 	out := make([]Subscriber, 0, len(keys))
 	for _, key := range keys {
 		for _, subscriber := range r.routeTable.Resolve(key) {
-			if !connectSubscriberMatchesTarget(subscriber, target) {
+			if !connectSubscriberMatchesPlanTarget(plan, subscriber, target) {
 				continue
 			}
 			out = append(out, subscriber)
 		}
 	}
 	return dedupeSubscribers(out)
+}
+
+func connectSubscriberMatchesPlanTarget(plan runtimepinrouting.ConnectRoutePlan, subscriber Subscriber, target events.RouteIdentity) bool {
+	if connectSubscriberMatchesTarget(subscriber, target) {
+		return true
+	}
+	if plan.FanIn == nil {
+		return false
+	}
+	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
+	receiverPath := strings.Trim(strings.TrimSpace(plan.Receiver.FlowPath), "/")
+	targetPath := strings.Trim(strings.TrimSpace(target.FlowInstance), "/")
+	if path == "" || receiverPath == "" || targetPath == "" || path != receiverPath {
+		return false
+	}
+	return targetPath == receiverPath || strings.HasPrefix(targetPath, receiverPath+"/")
 }
 
 func (r connectRoutePlanResolver) connectIssueMatchesEvent(issue runtimepinrouting.ConnectRoutePlanIssue, evt events.Event) bool {
