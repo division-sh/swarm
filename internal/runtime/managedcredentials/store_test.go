@@ -349,6 +349,87 @@ func TestTokenSourceClientCredentialsRefreshBeforeUseAndFailureEvidence(t *testi
 	}
 }
 
+func TestTokenSourceClientCredentialsUsesMicrosoftDefaultScopeAndNeverRefreshToken(t *testing.T) {
+	ctx := context.Background()
+	var requests []url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm: %v", err)
+		}
+		form := url.Values{}
+		for key, values := range r.Form {
+			form[key] = append([]string(nil), values...)
+		}
+		requests = append(requests, form)
+		token := "graph-first-token"
+		if len(requests) > 1 {
+			token = "graph-second-token"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": token,
+			"expires_in":   1,
+		})
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	source := TokenSource{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+	}
+	record, err := source.ConnectClientCredentials(ctx, ClientCredentialsRequest{
+		Key:          "microsoft_graph_app",
+		Provider:     "microsoft_graph",
+		TokenURL:     server.URL,
+		ClientID:     "graph-client",
+		ClientSecret: "graph-secret",
+		Scopes:       []string{"https://graph.microsoft.com/.default"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectClientCredentials: %v", err)
+	}
+	if record.RefreshToken != "" {
+		t.Fatalf("client_credentials record refresh_token = %q, want none", record.RefreshToken)
+	}
+	now = now.Add(2 * time.Second)
+	token, record, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:    "microsoft_graph_app",
+		Scopes: []string{"https://graph.microsoft.com/.default"},
+	})
+	if err != nil {
+		t.Fatalf("AccessToken re-acquire: %v", err)
+	}
+	if token != "graph-second-token" || record.AccessToken != "graph-second-token" {
+		t.Fatalf("re-acquired token = (%q, %q), want graph-second-token", token, record.AccessToken)
+	}
+	if record.RefreshToken != "" {
+		t.Fatalf("re-acquired client_credentials record refresh_token = %q, want none", record.RefreshToken)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("token endpoint requests = %d, want 2", len(requests))
+	}
+	for i, form := range requests {
+		if got := form.Get("grant_type"); got != "client_credentials" {
+			t.Fatalf("request %d grant_type = %q, want client_credentials", i+1, got)
+		}
+		if got := form.Get("client_id"); got != "graph-client" {
+			t.Fatalf("request %d client_id = %q, want graph-client", i+1, got)
+		}
+		if got := form.Get("client_secret"); got != "graph-secret" {
+			t.Fatalf("request %d client_secret = %q, want graph-secret", i+1, got)
+		}
+		if got := form.Get("scope"); got != "https://graph.microsoft.com/.default" {
+			t.Fatalf("request %d scope = %q, want Graph .default resource scope", i+1, got)
+		}
+		if got := form.Get("refresh_token"); got != "" {
+			t.Fatalf("request %d refresh_token = %q, want none for client_credentials", i+1, got)
+		}
+	}
+}
+
 func TestTokenSourceRefreshUsesBasicJSONTokenRequestProfileAndRotatesRefreshToken(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

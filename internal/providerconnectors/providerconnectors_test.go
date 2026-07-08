@@ -382,6 +382,37 @@ func TestDefaultPackRegistryLoadsNotionManagedCredentialPack(t *testing.T) {
 	}
 }
 
+func TestDefaultPackRegistryLoadsMicrosoftGraphManagedCredentialPack(t *testing.T) {
+	tool, ok := BuiltinTool("microsoft_graph", "microsoft_graph.send_mail")
+	if !ok {
+		t.Fatal("BuiltinTool microsoft_graph.send_mail not found")
+	}
+	if !isProviderConnector(tool) {
+		t.Fatalf("builtin Microsoft Graph tool category = %q, want %q", tool.Category, Category)
+	}
+	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "microsoft_graph_app" {
+		t.Fatalf("builtin Microsoft Graph managed credential = %#v, want microsoft_graph_app", tool.ManagedCredential)
+	}
+	if got := strings.Join(tool.ManagedCredential.Scopes, " "); got != "https://graph.microsoft.com/.default" {
+		t.Fatalf("builtin Microsoft Graph scopes = %q, want Graph .default resource scope", got)
+	}
+	if managedcredentialmodel.NormalizeGrantModel(tool.ManagedCredential.GrantModel) != managedcredentialmodel.GrantModelScope {
+		t.Fatalf("builtin Microsoft Graph grant_model = %q, want scope_grant", tool.ManagedCredential.GrantModel)
+	}
+	if !managedcredentialmodel.TokenRequestProfileEqual(tool.ManagedCredential.TokenRequest, managedcredentialmodel.DefaultTokenRequestProfile()) {
+		t.Fatalf("builtin Microsoft Graph token_request = %#v, want default post/form", tool.ManagedCredential.TokenRequest)
+	}
+	if tool.HTTP == nil || tool.HTTP.Method != "POST" || !strings.Contains(tool.HTTP.URL, "/v1.0/users/{{input.user_id}}/sendMail") {
+		t.Fatalf("builtin Microsoft Graph http = %#v, want sendMail POST endpoint", tool.HTTP)
+	}
+	if len(tool.Credentials) != 0 {
+		t.Fatalf("builtin Microsoft Graph static credentials = %#v, want none", tool.Credentials)
+	}
+	if strings.Contains(tool.HTTP.URL, "secret") || strings.Contains(tool.HTTP.URL, "token") {
+		t.Fatal("builtin Microsoft Graph tool leaked a concrete credential value")
+	}
+}
+
 func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
@@ -427,6 +458,57 @@ func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *t
 	}
 	if len(mismatch) != 1 || len(mismatch[0].Requires) != 1 || mismatch[0].Requires[0].Bound || mismatch[0].Requires[0].Status != "SCOPE_INSUFFICIENT" {
 		t.Fatalf("mismatch requirement = %#v, want fail-closed token profile mismatch", mismatch)
+	}
+}
+
+func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirement(t *testing.T) {
+	ctx := context.Background()
+	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "microsoft_graph", "microsoft_graph.send_mail"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+
+	unbound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions unbound: %v", err)
+	}
+	if len(unbound) != 1 || len(unbound[0].Requires) != 1 {
+		t.Fatalf("unbound surfaces = %#v, want one Microsoft Graph managed credential requirement", unbound)
+	}
+	requirement := unbound[0].Requires[0]
+	if requirement.Kind != "managed_credential" || requirement.Name != "microsoft_graph_app" || requirement.Bound || requirement.Status != "UNBOUND" {
+		t.Fatalf("unbound requirement = %#v, want unbound microsoft_graph_app", requirement)
+	}
+	if requirement.GrantModel != managedcredentialmodel.GrantModelScope || !managedcredentialmodel.TokenRequestProfileEqual(requirement.TokenRequest, managedcredentialmodel.DefaultTokenRequestProfile()) {
+		t.Fatalf("unbound requirement shape = %#v, want scope_grant post/form", requirement)
+	}
+	if got := strings.Join(requirement.Scopes, " "); got != "https://graph.microsoft.com/.default" {
+		t.Fatalf("unbound requirement scopes = %q, want Graph .default resource scope", got)
+	}
+
+	matchingStore := runtimemanagedcredentials.NewMemoryStore(microsoftGraphConnectedRecord())
+	bound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: matchingStore})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions bound: %v", err)
+	}
+	if len(bound) != 1 || len(bound[0].Requires) != 1 || !bound[0].Requires[0].Bound || bound[0].Requires[0].Status != "CONNECTED" {
+		t.Fatalf("bound requirement = %#v, want connected Microsoft Graph credential", bound)
+	}
+
+	wrongScope := microsoftGraphConnectedRecord()
+	wrongScope.Scopes = []string{"Mail.Send"}
+	wrongScopeStore := runtimemanagedcredentials.NewMemoryStore(wrongScope)
+	mismatch, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: wrongScopeStore})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions mismatch: %v", err)
+	}
+	if len(mismatch) != 1 || len(mismatch[0].Requires) != 1 || mismatch[0].Requires[0].Bound || mismatch[0].Requires[0].Status != "SCOPE_INSUFFICIENT" {
+		t.Fatalf("mismatch requirement = %#v, want fail-closed .default scope mismatch", mismatch)
 	}
 }
 
@@ -739,6 +821,23 @@ func notionConnectedRecord() runtimemanagedcredentials.Record {
 		},
 		AccessToken:  "notion-access-secret",
 		RefreshToken: "notion-refresh-secret",
+		Status:       runtimemanagedcredentials.StatusConnected,
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+}
+
+func microsoftGraphConnectedRecord() runtimemanagedcredentials.Record {
+	return runtimemanagedcredentials.Record{
+		Key:          "microsoft_graph_app",
+		Provider:     "microsoft_graph",
+		GrantType:    runtimemanagedcredentials.GrantClientCredentials,
+		TokenURL:     "https://login.microsoftonline.com/tenant/oauth2/v2.0/token",
+		ClientID:     "graph-client",
+		ClientSecret: "graph-secret",
+		Scopes:       []string{"https://graph.microsoft.com/.default"},
+		GrantModel:   managedcredentialmodel.GrantModelScope,
+		TokenRequest: managedcredentialmodel.DefaultTokenRequestProfile(),
+		AccessToken:  "graph-access-secret",
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(time.Hour),
 	}
