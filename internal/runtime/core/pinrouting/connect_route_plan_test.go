@@ -285,6 +285,33 @@ func TestLowerCompositionConnectRoutePlansRejectsExtraSelectResolutionFields(t *
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansRejectsSelectCarryTypeMismatch(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+	root := writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t, selectResolutionConnectRoutePlanFixtureOptions{
+		accountIDEntityType: "integer",
+		accountIDCarryType:  "string",
+	})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+
+	plans, issues := LowerCompositionConnectRoutePlans(semanticview.Wrap(bundle))
+	if len(plans) != 0 {
+		t.Fatalf("plans = %#v, want none for invalid select resolution", plans)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("issues = %#v, want one fail-closed issue", issues)
+	}
+	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
+		t.Fatalf("issue = %#v, want instance resolution invalid for select carry type mismatch", issues[0])
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansUsesRenamedInstanceKeyAdapter(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -1184,11 +1211,29 @@ validation_case:
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixture(t *testing.T) string {
-	return writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t, "")
+	return writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t, selectResolutionConnectRoutePlanFixtureOptions{})
 }
 
 func writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t *testing.T, extraResolution string) string {
+	return writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t, selectResolutionConnectRoutePlanFixtureOptions{extraResolution: extraResolution})
+}
+
+type selectResolutionConnectRoutePlanFixtureOptions struct {
+	extraResolution     string
+	accountIDEntityType string
+	accountIDCarryType  string
+}
+
+func writeSelectResolutionConnectRoutePlanPackageFixtureWithOptions(t *testing.T, options selectResolutionConnectRoutePlanFixtureOptions) string {
 	t.Helper()
+	accountIDEntityType := strings.TrimSpace(options.accountIDEntityType)
+	if accountIDEntityType == "" {
+		accountIDEntityType = "string"
+	}
+	accountIDCarryType := strings.TrimSpace(options.accountIDCarryType)
+	if accountIDCarryType == "" {
+		accountIDCarryType = "string"
+	}
 	root := t.TempDir()
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: select-resolution-connect-route-plan-package
@@ -1234,11 +1279,11 @@ pins:
         resolution:
           mode: select
           instance_key: account_id
-`+extraResolution+`
+`+options.extraResolution+`
         carries:
           account_id:
             from: payload.account_id
-            type: string
+            type: `+accountIDCarryType+`
 `)
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "policy.yaml"), "{}\n")
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "agents.yaml"), "{}\n")
@@ -1247,7 +1292,7 @@ pins:
 	writeConnectRoutePlanFixtureFile(t, filepath.Join(root, "flows", "account", "entities.yaml"), `
 account_state:
   account_id:
-    type: string
+    type: `+accountIDEntityType+`
 `)
 	return root
 }

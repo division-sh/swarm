@@ -714,6 +714,15 @@ func connectSelectResolutionInstanceKey(source semanticview.Source, connect runt
 	if strings.TrimSpace(carry.From) != wantFrom {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode select carry %s must use from: %s", key, wantFrom)}
 	}
+	if strings.TrimSpace(carry.Type) != "" {
+		targetType, err := connectResolutionReceiverEntityFieldType(source, receiverFlowID, key)
+		if err != nil {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
+		}
+		if !connectResolutionTypesCompatible(carry.Type, targetType) {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("key_types_incompatible: carry %s type %s is incompatible with receiver entity.%s type %s", key, carry.Type, key, targetType)}
+		}
+	}
 	return &ConnectRoutePlanInstanceKey{
 		Mode:       runtimecontracts.FlowInputResolutionModeSelect,
 		Fields:     fields,
@@ -721,6 +730,38 @@ func connectSelectResolutionInstanceKey(source semanticview.Source, connect runt
 		OnMissing:  "reject",
 		OnConflict: "reject",
 	}, ConnectRoutePlanIssue{}
+}
+
+func connectResolutionReceiverEntityFieldType(source semanticview.Source, receiverFlowID, field string) (string, error) {
+	contract, ok := entityruntime.ResolveForFlow(source, receiverFlowID)
+	if !ok {
+		return "", fmt.Errorf("receiver flow %s has no entity contract for entity.%s", receiverFlowID, field)
+	}
+	resolved, err := entityruntime.ResolveLeafField(contract, field)
+	if err != nil {
+		return "", fmt.Errorf("receiver entity.%s is invalid: %v", field, err)
+	}
+	return resolved.Type, nil
+}
+
+func connectResolutionTypesCompatible(sourceType, targetType string) bool {
+	sourceType = connectResolutionTypeFamily(sourceType)
+	targetType = connectResolutionTypeFamily(targetType)
+	return sourceType != "" && targetType != "" && sourceType == targetType
+}
+
+func connectResolutionTypeFamily(raw string) string {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	switch raw {
+	case "string", "text", "uuid", "timestamp":
+		return "string"
+	case "integer", "number", "numeric", "float", "double", "real":
+		return "number"
+	case "boolean", "bool":
+		return "boolean"
+	default:
+		return raw
+	}
 }
 
 func connectInstanceKeyMaterializationMappings(instanceKey *ConnectRoutePlanInstanceKey) []ConnectRoutePlanInstanceKeyMapping {
