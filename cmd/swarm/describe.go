@@ -15,6 +15,7 @@ import (
 type describeCommandOptions struct {
 	contractsPath    string
 	platformSpecPath string
+	configPath       string
 	output           cliOutputOptions
 	logging          cliLoggingOptions
 }
@@ -30,7 +31,7 @@ func defaultDescribeCommandOptions() describeCommandOptions {
 	}
 }
 
-func newDescribeCommand(ctx context.Context, repo string) *cobra.Command {
+func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultDescribeCommandOptions()
 	cmd := &cobra.Command{
 		Use:   "describe",
@@ -44,6 +45,9 @@ func newDescribeCommand(ctx context.Context, repo string) *cobra.Command {
 			}
 			if len(args) > 0 {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			}
+			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
+				opts.configPath = rootOpts.rootFlags.configPath
 			}
 			code := runDescribeCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
@@ -75,6 +79,7 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
 		ContractsPath:    opts.contractsPath,
 		PlatformSpecPath: opts.platformSpecPath,
+		ConfigPath:       opts.configPath,
 	})
 	if err != nil {
 		if errOut != nil {

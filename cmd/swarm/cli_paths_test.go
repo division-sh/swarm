@@ -163,7 +163,7 @@ func TestResolveCLIContractPlatformSpecPathsFailClosedOnUnsupportedConfigKey(t *
 	if err == nil {
 		t.Fatal("resolve paths returned nil error")
 	}
-	if !strings.Contains(err.Error(), `unsupported CLI config key "retry"`) {
+	if !strings.Contains(err.Error(), `unknown config key "retry"`) {
 		t.Fatalf("err = %q", err.Error())
 	}
 }
@@ -224,7 +224,7 @@ func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.
 		t.Fatalf("serve unexpectedly succeeded: %s", out.String())
 	}
 	if !strings.Contains(out.String(), "contracts="+configContracts) {
-		t.Fatalf("serve boot output did not use config contracts_path %q:\n%s", configContracts, out.String())
+		t.Fatalf("serve boot output did not use config paths.contracts_path %q:\n%s", configContracts, out.String())
 	}
 	if !strings.Contains(out.String(), "bundle_load") || !strings.Contains(out.String(), "FAILED") {
 		t.Fatalf("serve did not reach bundle_load failure proof:\n%s", out.String())

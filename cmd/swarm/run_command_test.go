@@ -63,6 +63,9 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	opts := testRunCommandOptions(server)
 	repo := t.TempDir()
 	configPath := filepath.Join(repo, "runtime.yaml")
+	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 	opts.runServe = func(ctx context.Context, repo string, serveOpts serveOptions) int {
 		serveCalled.Add(1)
 		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "reference-data" || serveOpts.PlatformSpecPath != filepath.Join(repo, "platform.yaml") {

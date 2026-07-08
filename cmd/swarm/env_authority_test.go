@@ -679,7 +679,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	}
 }
 
-func TestSwarmEnvGuardAllowsExecutableAdjacentTypedDatabasePasswordEnvDelegation(t *testing.T) {
+func TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
 	binDir := t.TempDir()
@@ -703,11 +703,16 @@ func TestSwarmEnvGuardAllowsExecutableAdjacentTypedDatabasePasswordEnvDelegation
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, opts)
-	if code != cliExitOK {
-		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitOK, stdout.String(), stderr.String())
+	if code != cliExitValidation {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitValidation, stdout.String(), stderr.String())
 	}
-	if !called {
-		t.Fatalf("serve callback was not called; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	if called {
+		t.Fatalf("serve callback was called after executable-adjacent config delegated env; stdout=%s stderr=%s", stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"SWARM_DB_PASSWORD", "database.password_env", "known_retired"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q:\n%s", want, stderr.String())
+		}
 	}
 }
 

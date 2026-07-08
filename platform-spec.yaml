@@ -4551,8 +4551,8 @@ engine:
         - Environment variables never select the backend profile. Provider secrets resolve from swarm secrets; provider env
           names remain only deprecated shadow diagnostics. Pragmatic infra/connection env overrides are allowed only when
           explicitly owned by their configuration sections.
-        - Commands that need runtime/operator config discover explicit --config first, config.yaml beside the running binary
-          when present second, and built-in/default config last.
+        - "Commands that need runtime/operator config consume the unified `swarm.yaml` resolver: explicit --config,
+          local-operator, project, user-global, then built-in/default config."
         - The platform must not infer backend profile from credential, endpoint, model, or tool-gateway env presence.
         - Unsupported backend profiles and retired selector fields fail closed.
       backend_profile_identity:
@@ -11679,8 +11679,8 @@ environment_source_authority:
     accepted_env:
     - name: SWARM_CONFIG
       category: bootstrap
-      owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
-      migration: keep bootstrap locator
+      owner: platform-spec.yaml#configuration_source_authority.unified_swarm_config
+      migration: keep bootstrap locator for unified swarm.yaml; --config wins when present
     - name: SWARM_API_SERVER
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
@@ -11712,7 +11712,7 @@ environment_source_authority:
     - name: SWARM_CONTRACTS_PATH
       category: seeded_legacy
       owner: platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution
-      migration: config contracts_path or --contracts
+      migration: config paths.contracts_path or --contracts
     - name: SWARM_CONTRACTS_DIR
       category: known_retired
       owner: platform-spec.yaml#environment_source_authority.repo_wide_swarm_env_accepted_set
@@ -12164,14 +12164,16 @@ configuration_source_authority:
     related_trackers:
     - '#1731'
     - '#1748'
-    implementation_status: spec_lock_only
+    implementation_status: parser_discovery_first_slice_implemented
     canonical_owner: platform-spec.yaml#configuration_source_authority.unified_swarm_config
     scope: >
       Merge-bearing authority for the unified `swarm.yaml` configuration model. This owner defines the final
       schema sections, source layers, trust tiers, source precedence, strict/old-shape handling, deep-merge and
-      provenance semantics, and #1600 env-drain destinations. It is a spec lock only: parser/discovery implementation,
-      old reader deletion, examples migration, provider-trigger runtime behavior changes, sharding runtime promotion,
-      and seeded env-row shrinkage remain split to later children.
+      provenance semantics, and #1600 env-drain destinations. The #1858 parser/discovery first slice implements the
+      unified parser, layered discovery, global explicit config selection, `SWARM_CONFIG` locator behavior,
+      executable-adjacent `config.yaml` invalidation, and minimum doctor provenance. Examples migration,
+      provider-trigger runtime behavior changes, sharding runtime promotion, serve/connection family cleanup, and
+      seeded env-row shrinkage remain split to later children.
     invariant: >
       Swarm configuration is explicit, typed, and provenance-bearing. Environment variables are never a normal
       precedence layer; they are accepted only as the `SWARM_CONFIG` config-file locator/replacement, as a
@@ -12196,7 +12198,8 @@ configuration_source_authority:
           individual values or creates env-over-config precedence.
         local_operator_config: >
           A gitignored `.swarm/swarm.yaml` under the current project root is the local operator layer. It may set
-          runtime behavior and local overrides but not connection/auth values or other explicitly elevated keys.
+          runtime behavior and local overrides but not connection/auth values. Individual elevated runtime keys may be
+          admitted from local-operator config only when their owning section allows local machine-specific overrides.
         project_config: >
           A checked-in `./swarm.yaml` is the low-trust project layer. It may set only project-safe runtime behavior.
           It cannot set connection/auth keys, non-loopback or wildcard listener binds, serve token files,
@@ -12304,9 +12307,9 @@ configuration_source_authority:
             claude_cli.command: elevated
             claude_cli.timeout: project_safe
             claude_cli.output_format: project_safe
-            claude_cli.retries: split_unsupported
-            claude_cli.no_session_persistence: split_unsupported
-            claude_cli.use_tmux: split_unsupported
+            claude_cli.retries: project_safe
+            claude_cli.no_session_persistence: project_safe
+            claude_cli.use_tmux: project_safe
             openai_compatible.base_url: elevated
             openai_compatible.default_model: split_unsupported
             openai_compatible.low_cost_model: split_unsupported
@@ -12317,11 +12320,11 @@ configuration_source_authority:
             `llm.openai_compatible.default_model`, and `llm.openai_compatible.low_cost_model`
             are retired model-selection inputs. Unified config migration MUST keep rejecting them with guidance to use
             `llm.models`; this spec does not re-admit them as accepted project-safe keys.
-          inert_claude_cli_controls: >
+          claude_cli_control_cleanup: >
             `llm.claude_cli.retries`, `llm.claude_cli.use_tmux`, and
-            `llm.claude_cli.no_session_persistence` are tracked by #1803 as inert or unsupported Claude CLI config
-            surfaces. Unified config migration MUST NOT accept them as ordinary supported config keys unless a later
-            gate deliberately promotes a real production runtime owner.
+            `llm.claude_cli.no_session_persistence` are accepted as current wired Claude CLI config fields by the
+            #1858 parser/discovery slice. Any cleanup of their runtime value, naming, or UX belongs to #1803; #1858
+            does not classify those accepted current fields as split-unsupported.
         provider_triggers:
           trust: project_contained_path_or_elevated
           keys:
@@ -12442,30 +12445,31 @@ configuration_source_authority:
         SWARM_CREDENTIALS_FILE: secrets file owner, not inline config secret
         SWARM_MANAGED_CREDENTIALS_FILE: managed credential store owner, not inline config secret
     consumer_matrix:
-      flat_cli_config: superseded_by_unified_owner_implementation_split
-      xdg_config_yaml: superseded_by_user_global_swarm_yaml_implementation_split
-      runtime_config_loader: consumed_by_unified_owner_implementation_split
-      executable_adjacent_config_yaml: invalid_ambient_reader_removal_split
+      flat_cli_config: superseded_by_unified_owner_first_slice_implemented
+      xdg_config_yaml: invalid_legacy_discovery_replaced_by_user_global_swarm_yaml_by_1858
+      runtime_config_loader: consumed_by_unified_owner_first_slice_implemented
+      executable_adjacent_config_yaml: invalid_ambient_reader_removed_by_1858
+      env_guard_delegated_env_sources: consumed_by_unified_owner_first_slice_implemented
       provider_triggers_packs_external_dirs: consumed_by_unified_owner
       budget_human_tasks_inline_extension: consumed_by_unified_owner_code_migration_split
       llm_retired_model_selection_keys: split_unsupported_retired_use_llm.models
-      llm_claude_cli_inert_controls: split_unsupported_tracked_by_1803
+      llm_claude_cli_current_controls: accepted_current_schema_residual_cleanup_tracked_by_1803
       sharding_inline_extension: split_unsupported_retired
       context_descriptors: different_semantic_owner_local_target_context_registry
       token_and_secret_material: different_semantic_owner_secret_or_token_file_reference_only
       env_accepted_set_seeded_rows: migration_backlog_to_unified_keys_or_secret_owners
     legacy_spec_commitments_superseded:
     - owner: cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
-      commitment: root/global --config rejected and XDG flat config.yaml accepted
+      commitment: historical root/global --config rejection and XDG flat config.yaml acceptance
       superseded_by: configuration_source_authority.unified_swarm_config
     - owner: cli_specification.command_catalog.serve.runtime_config_backend_selection
-      commitment: command-local --config plus executable-adjacent config.yaml runtime config discovery
+      commitment: historical command-local --config plus executable-adjacent config.yaml runtime config discovery
       superseded_by: configuration_source_authority.unified_swarm_config
     - owner: cli_specification.command_catalog.serve.listener_topology_v2_1
       commitment: listener env/config keys as flat CLI config keys
       superseded_by: configuration_source_authority.unified_swarm_config serve section
     split_siblings:
-    - '#1801 unified parser and layered discovery implementation'
+    - '#1858 unified parser and layered discovery first-slice implementation'
     - '#1803 inert/unsupported Claude CLI config-surface cleanup'
     - '#1600 seeded env-row family migrations'
     - '#1799 runtime/LLM config-default env-row retirement consumes this owner for final key-path guidance'
@@ -15081,21 +15085,21 @@ cli_specification:
       swarm_dir:
         accepted_sources:
           flag: --swarm-dir <path>
-          config_key: swarm_dir
+          config_key: paths.swarm_dir
           built_in_default: ~/.swarm
         source_order:
         - --swarm-dir
-        - config swarm_dir
+        - config paths.swarm_dir
         - default ~/.swarm
         rejected_sources:
           --datadir: Not promoted; too easily confused with the agent-visible `--data` directory.
           SWARM_DIR: Not promoted in this slice; adding environment state-dir authority requires a later gate.
           SWARM_HOME: Not promoted in this slice; adding environment state-dir authority requires a later gate.
           '<swarm-dir>/config.yaml': >
-            Not a bootstrap config owner. Static bootstrap config remains governed by `SWARM_CONFIG` and the XDG config
-            default in cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file.
+            Not a bootstrap config owner. Static bootstrap config remains governed by
+            configuration_source_authority.unified_swarm_config.
         normalization_rule: >
-          Explicit relative `--swarm-dir` and config `swarm_dir` paths are resolved to clean absolute filesystem paths
+          Explicit relative `--swarm-dir` and config `paths.swarm_dir` paths are resolved to clean absolute filesystem paths
           without creating the directory. Blank explicit values fail closed before target diagnostics or runtime action.
       project_root_resolution:
         source_owner: cli_specification.foundations.contract_platform_spec_path_resolution
@@ -15219,7 +15223,7 @@ cli_specification:
       - '#1615 store/data migration and swarm run start semantics (implemented)'
       - '#1576 transport-aware descriptors and IPC/ephemeral-port direction'
       implementation_boundaries:
-      - 'The shared CLI config parser may accept `swarm_dir`, but API connection/auth resolution must ignore it.'
+      - 'The unified config parser may accept `paths.swarm_dir`, but API connection/auth resolution must ignore it.'
       - 'No `SWARM_DIR`, `SWARM_HOME`, `--datadir`, or `<swarm-dir>/config.yaml` bootstrap source is promoted.'
       - 'Descriptor registry primitives are written and validated only through local_context_registry_authority.'
       - 'API-backed commands consume project/global contexts through the shared #1614 CLI API target resolver only.'
@@ -15418,18 +15422,18 @@ cli_specification:
       scope: >
         Merge-bearing authority for CLI API base URL selection, bearer-token selection, and CLI config-file
         discovery for API-backed commands. API-backed command leaves consume `--api-server`, `--api-token-file`,
-        project/selected context descriptors, `SWARM_CONFIG`, XDG config, typed config, and built-in defaults
+        project/selected context descriptors, unified `swarm.yaml` connection config, and built-in defaults
         through one shared resolver. `SWARM_API_SERVER`, `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are removed as
         client-side API target/auth sources and fail closed with replacement guidance when present. When no explicit
         token source is configured, the shared resolver may
         use the fixed built-in dev API token only for numeric loopback API targets. This contract does not add OpenRPC behavior, retry behavior,
-        output rendering, root/global `--config`, inline token flags, or serve listener binding.
+        output rendering, inline token flags, or serve listener binding.
       applies_to:
       - Runtime-state CLI commands that call the platform JSON-RPC or WebSocket API.
       - '`swarm version --server` when it queries the platform API.'
       - '`swarm run start --connect` only for shared API client/auth error categories; run mode and follow semantics remain #743.'
       not_applies_to:
-      - '`swarm serve` runtime configuration such as the existing command-local `--config` runtime-config path.'
+      - '`swarm serve` runtime configuration except for shared unified config discovery and the `connection.*` handoff.'
       - '`swarm verify` contract-file validation, except for contract/platform-spec path resolution governed by
         cli_specification.foundations.contract_platform_spec_path_resolution.'
       - Output mode, logging verbosity, retry, and color.
@@ -15442,12 +15446,12 @@ cli_specification:
         accepted_sources:
           flag: --api-server <url>
           context_descriptor: project/selected context descriptor api_server
-          config_key: api_server
+          config_key: connection.api_server
           built_in_default: http://127.0.0.1:8081
         rejected_sources:
           SWARM_API_SERVER: >
             Removed by #1636. Client-side API target env is hidden mutable source authority; use `--api-server`,
-            `--context`, a project/selected context, or config `api_server`.
+            `--context`, a project/selected context, or config `connection.api_server`.
         value_model: >
           The configured value is an API server base URL, not a direct `/v1/rpc` endpoint. It MUST include an
           `http` or `https` scheme and host, MUST NOT include query or fragment components, and SHOULD use an
@@ -15461,20 +15465,20 @@ cli_specification:
         accepted_sources:
           flag_file: --api-token-file <path>
           context_descriptor: project/selected context descriptor auth
-          config_file_key: api_token_file
+          config_file_key: connection.api_token_file
         source_order:
         - --api-token-file
         - context descriptor auth
-        - config api_token_file
+        - config connection.api_token_file
         - built-in loopback default
         rejected_sources:
           SWARM_API_TOKEN: >
             Removed as a client-side API token source by #1636. Use `--api-token-file`, context descriptor auth, or
-            config `api_token_file`. Server-side `swarm serve` API auth source ownership is a separate seam tracked by
-            #1647.
+            config `connection.api_token_file`. Server-side `swarm serve` API auth source ownership is a separate seam
+            tracked by #1647.
           SWARM_API_TOKEN_FILE: >
             Removed as a client-side API token-file source by #1636. Use `--api-token-file`, context descriptor auth,
-            or config `api_token_file`.
+            or config `connection.api_token_file`.
           --api-token: >
             Not promoted. Inline token flags leak secrets into shell history and process listings; operators
             must use token-file, context descriptor, or future secure-source owners for file-backed credentials.
@@ -15488,7 +15492,7 @@ cli_specification:
           token_value: swarm-dev-loopback-api-token
           source: built-in-loopback-default
           applies_when: >
-            Applies only after `--api-token-file`, context descriptor auth, and config `api_token_file` are all
+            Applies only after `--api-token-file`, context descriptor auth, and config `connection.api_token_file` are all
             absent, and only when the API target host is numeric loopback.
           allowed_target_hosts:
           - 127.0.0.0/8
@@ -15504,44 +15508,46 @@ cli_specification:
       cli_config_file:
         owner: platform-spec.yaml#cli_specification.foundations.api_connection_auth_config_precedence.cli_config_file
         unified_config_supersession: >
-          #1804 supersedes this flat CLI config-file model with
-          configuration_source_authority.unified_swarm_config. The current implementation remains until the parser/CLI
-          migration child replaces XDG `config.yaml`, promotes global `--config`, and moves flat keys under
-          `connection`, `serve`, and `paths`.
+          #1804 superseded this flat CLI config-file model with
+          configuration_source_authority.unified_swarm_config. #1858 implements the parser/discovery first slice:
+          global `--config` and `SWARM_CONFIG` select a unified `swarm.yaml`, user-global config is
+          `${XDG_CONFIG_HOME:-$HOME/.config}/swarm/swarm.yaml`, and old flat `config.yaml` discovery is invalid.
         accepted_sources:
-          environment: SWARM_CONFIG
-          xdg_default: '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
+          flag: --config <path>
+          environment: SWARM_CONFIG locator only when --config is absent
+          xdg_default: '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/swarm.yaml'
         rejected_sources:
-          --config: >
-            Not promoted as a root/global CLI config flag in this first slice. The current `swarm serve
-            --config` flag is command-local runtime configuration, so promoting root `--config` now would create
-            dual semantic ownership. If a flag override is needed later, prefer a separately gated `--cli-config`
-            or an explicit rename/migration of the serve runtime-config flag.
+          '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml': >
+            Flat CLI config discovery is retired by #1858. Move values to unified `swarm.yaml` under `connection`,
+            `serve`, or `paths`.
+          executable_adjacent_config.yaml: >
+            Executable-adjacent runtime config is ambient file authority and is retired by #1858. Use global
+            `--config`, `SWARM_CONFIG`, `.swarm/swarm.yaml`, `./swarm.yaml`, or user-global `swarm.yaml`.
         accepted_keys:
-          api_server: API server base URL consumed by API-backed commands.
-          api_token_file: Path to a file containing the bearer token.
+          connection.api_server: API server base URL consumed by API-backed commands.
+          connection.api_token_file: Path to a file containing the bearer token.
         shared_non_api_keys:
-          swarm_dir: >
+          paths.swarm_dir: >
             Accepted by the shared CLI config parser for
             cli_specification.foundations.local_target_resolution_authority; ignored by the API connection and auth
             resolver.
-          contracts_path: >
+          paths.contracts_path: >
             Accepted by the shared CLI config parser for
             cli_specification.foundations.contract_platform_spec_path_resolution; ignored by the API connection
             and auth resolver.
-          platform_spec_path: >
+          paths.platform_spec_path: >
             Accepted by the shared CLI config parser for
             cli_specification.foundations.contract_platform_spec_path_resolution; ignored by the API connection
             and auth resolver.
-          serve_api_listen_addr: >
+          serve.api_listen_addr: >
             Accepted by the shared CLI config parser for
             cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence; ignored by the API
             connection and auth resolver.
-          serve_mcp_listen_addr: >
+          serve.mcp_listen_addr: >
             Accepted by the shared CLI config parser for
             cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence; ignored by the API
             connection and auth resolver.
-          serve_api_token_file: >
+          serve.api_token_file: >
             Accepted by the shared CLI config parser for
             cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence.server_api_auth; ignored
             by the API connection and auth resolver. This key is server-side `swarm serve` auth only and MUST NOT be
@@ -15581,7 +15587,7 @@ cli_specification:
       - 'API-backed command leaves consume one cmd/swarm resolver for this owner.'
       - 'Client-side `SWARM_API_SERVER`, `SWARM_API_TOKEN`, and `SWARM_API_TOKEN_FILE` are invalid sources after #1636.'
       - 'Server-side `swarm serve` API auth token sourcing remains split to #1647.'
-      - 'No root/global --config, inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
+      - 'Global --config is implemented only as unified config-file selection; no inline --api-token, OpenRPC, output renderer, retry, or listener behavior changes are implied by this owner.'
       - 'Future API-backed CLI commands MUST consume this owner rather than the ignored review artifact.'
     contract_platform_spec_path_resolution:
       promoted_by: '#844'
@@ -15591,7 +15597,7 @@ cli_specification:
         Merge-bearing CLI v2 authority for selecting the local workflow contract bundle path and the platform
         spec YAML path. This owner covers the currently implemented local file-contract surfaces only: `swarm
         verify`, `swarm serve`, and local foreground `swarm run start` before it starts the serve owner. It does not add
-        API connection behavior, OpenRPC methods, root/global config flags, serve listener binding, retry/follow
+        API connection behavior, OpenRPC methods, serve listener binding, retry/follow
         policy, output rendering, or absent command families.
       applies_to:
       - '`swarm verify` local contract-file validation.'
@@ -15602,19 +15608,18 @@ cli_specification:
         contract/platform-spec path overrides.'
       - '`swarm run start --reattach` because reattach consumes existing run/server state and MUST NOT accept local
         contract/platform-spec path overrides.'
-      - 'root/global `--config`; the shared CLI config file remains discovered through `SWARM_CONFIG` or XDG only.'
       - 'inline `--api-token`, API auth/config resolver behavior, output/color/logging, retry/follow, and serve
         listener/runtime binding.'
       contracts_path:
         accepted_sources:
           flag: --contracts <path>
           environment: SWARM_CONTRACTS_PATH
-          config_key: contracts_path
+          config_key: paths.contracts_path
           discovered_default: repo-local contracts/package.yaml when present
         source_order:
         - --contracts
         - SWARM_CONTRACTS_PATH
-        - config contracts_path
+        - config paths.contracts_path
         - repo contracts/package.yaml
         rejected_sources:
           SWARM_CONTRACTS_DIR: >
@@ -15625,7 +15630,7 @@ cli_specification:
           command fails closed during local contract resolution with the promoted missing-contracts-source error.
           There is no implicit contracts root default without a discovered package file.
         explicit_source_validation_rule: >
-          Values from `--contracts`, `SWARM_CONTRACTS_PATH`, and config `contracts_path` are explicit operator
+          Values from `--contracts`, `SWARM_CONTRACTS_PATH`, and config `paths.contracts_path` are explicit operator
           inputs. After normal relative-path resolution, the resolver MUST validate the named value itself as either
           a directory containing `package.yaml` or that directory's `package.yaml` file shorthand. It MUST NOT walk
           upward or fall back to a parent directory to satisfy a typo/non-root child path. Repo-local
@@ -15633,11 +15638,11 @@ cli_specification:
       platform_spec_path:
         accepted_sources:
           flag: --platform-spec <path>
-          config_key: platform_spec_path
+          config_key: paths.platform_spec_path
           built_in_default: platform-spec.yaml
         source_order:
         - --platform-spec
-        - config platform_spec_path
+        - config paths.platform_spec_path
         - embedded tracked platform spec
         rejected_sources:
           SWARM_PLATFORM_SPEC_PATH: >
@@ -15652,15 +15657,15 @@ cli_specification:
           normal filesystem semantics from the current working directory. Absolute values are preserved.
       cli_config_file:
         shared_parser: >
-          `SWARM_CONFIG` and the XDG default config path are shared with
-          cli_specification.foundations.api_connection_auth_config_precedence. The parser accepts this owner's
-          path keys plus API connection/auth keys, while each semantic resolver consumes only its own keys.
+          Global `--config`, `SWARM_CONFIG`, and user-global/project/local-operator `swarm.yaml` discovery are owned by
+          configuration_source_authority.unified_swarm_config. The parser accepts this owner's `paths.*` keys plus
+          API connection/auth keys, while each semantic resolver consumes only its own keys.
         unified_config_supersession: >
-          #1804 moves `contracts_path` and `platform_spec_path` under the unified config model's `paths` section.
-          This current shared flat parser remains implementation state until the parser/discovery child lands.
+          #1804 moved `contracts_path` and `platform_spec_path` under the unified config model's `paths` section.
+          #1858 implements the parser/discovery first slice and rejects old flat keys with migration guidance.
         accepted_keys:
-          contracts_path: Consumed only by this contract path resolver.
-          platform_spec_path: Consumed only by this platform spec path resolver.
+          paths.contracts_path: Consumed only by this contract path resolver.
+          paths.platform_spec_path: Consumed only by this platform spec path resolver.
         rejected_keys:
           SWARM_CONTRACTS_DIR: Environment variable, not config-file key, and not a CLI source.
           SWARM_PLATFORM_SPEC_PATH: Environment variable, not config-file key, and not promoted.
@@ -15819,10 +15824,10 @@ cli_specification:
         directly.
       flags:
       - name: --contracts <path>
-        behavior: Contract package root used for bundle loading and scenario discovery. Omitted uses config contracts_path,
+        behavior: Contract package root used for bundle loading and scenario discovery. Omitted uses config paths.contracts_path,
           then repo-local contracts when present, then the repo root.
       - name: --platform-spec <path>
-        behavior: platform-spec.yaml path used for bundle loading. Omitted uses config platform_spec_path, then the repo-local
+        behavior: platform-spec.yaml path used for bundle loading. Omitted uses config paths.platform_spec_path, then the repo-local
           default platform-spec.yaml.
       - name: --timeout <duration>
         behavior: Positive safety deadline for test quiescence waits. Reaching it fails the scenario with diagnostic context.
@@ -15981,13 +15986,13 @@ cli_specification:
         backend_flag: --backend <anthropic|claude_cli|openai_compatible|openai_responses>
         owner: engine.agent_session_management.llm_provider_selection_config_authority
         unified_config_supersession: >
-          #1804 supersedes command-local runtime config discovery with
-          configuration_source_authority.unified_swarm_config. Current `--config` and executable-adjacent
-          `config.yaml` loading are implementation state only until the parser/discovery child promotes global
-          `--config`, layered `swarm.yaml`, and executable-adjacent removal atomically.
+          #1804 superseded command-local runtime config discovery with
+          configuration_source_authority.unified_swarm_config. #1858 implements global `--config`, layered
+          `swarm.yaml`, and executable-adjacent `config.yaml` invalidation atomically.
         rule: >
-          `swarm serve` consumes the shared runtime config resolver: explicit --config first, config.yaml beside the
-          running binary second when present, built-in/default config last, then --backend overrides config llm.backend.
+          `swarm serve` consumes the unified runtime config resolver: explicit --config first, then local-operator
+          `.swarm/swarm.yaml`, project `./swarm.yaml`, user-global `swarm.yaml`, and built-in/default config. The
+          `--backend` flag overrides config `llm.backend` only after the configured backend itself has been validated.
           SWARM_LLM_BACKEND, SWARM_LLM_RUNTIME_MODE, llm.runtime_mode, and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired
           selector/connection-owner seams and must fail closed.
       workspace_data_source_authority:
@@ -16105,8 +16110,8 @@ cli_specification:
           Final CLI v2.1 `swarm serve` topology uses two independently configurable HTTP listeners: one API
           listener and one MCP listener. This is the merge-bearing final topology decision. Runtime binding and
           listener source precedence now consume `--api-listen-addr <host:port>`, `--mcp-listen-addr <host:port>`,
-          `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve_api_listen_addr`, and
-          `serve_mcp_listen_addr`; historical `--health-addr` remains migration evidence only.
+          `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve.api_listen_addr`, and
+          `serve.mcp_listen_addr`; historical `--health-addr` remains migration evidence only.
         listeners:
           api:
             enabled_by_default: true
@@ -16161,75 +16166,81 @@ cli_specification:
           - '`swarm serve` MCP listener bind address.'
           not_applies_to:
           - '`swarm run start` local foreground listener startup.'
-          - API client connection/auth configuration such as `--api-server`, context descriptors, and `api_server`.
-          - '`swarm serve --config`, which remains command-local runtime configuration.'
+          - API client connection/auth configuration such as `--api-server`, context descriptors, and
+            `connection.api_server`.
+          - Unified config discovery/precedence itself, which is owned by configuration_source_authority.unified_swarm_config.
           unified_config_supersession: >
-            #1804 moves serve listener and server API token-file config under
-            configuration_source_authority.unified_swarm_config `serve`. Flat CLI config listener keys and listener
-            env rows remain current implementation/migration state until their #1600 family migration lands.
+            #1804 moved serve listener and server API token-file config under
+            configuration_source_authority.unified_swarm_config `serve`. #1858 implements the unified config parser
+            and accepts `serve.*` keys; listener env rows remain current migration state until their #1600 family
+            migration lands.
           source_order:
           - flag
           - environment
-          - cli_config_file
+          - unified_config
           - built_in_default
           api_listen_addr:
             flag: --api-listen-addr <host:port>
             environment: SWARM_API_LISTEN_ADDR
-            config_key: serve_api_listen_addr
+            config_key: serve.api_listen_addr
             built_in_default: 127.0.0.1:8081
           mcp_listen_addr:
             flag: --mcp-listen-addr <host:port>
             environment: SWARM_MCP_LISTEN_ADDR
-            config_key: serve_mcp_listen_addr
+            config_key: serve.mcp_listen_addr
             built_in_default: 127.0.0.1:8082
           server_api_auth:
             accepted_sources:
               flag_file: --api-token-file <path>
-              config_file_key: serve_api_token_file
+              config_file_key: serve.api_token_file
               built_in_loopback_default: built-in-loopback-default
             source_order:
             - --api-token-file
-            - config serve_api_token_file
+            - config serve.api_token_file
             - built-in loopback default
             rejected_sources:
               SWARM_API_TOKEN: >
                 Removed as a server-side `swarm serve` API auth source by #1647. Raw env is hidden mutable token
-                authority; use `swarm serve --api-token-file` or config `serve_api_token_file`.
+                authority; use `swarm serve --api-token-file` or config `serve.api_token_file`.
               SWARM_API_TOKEN_FILE: >
                 Not promoted as a server-side `swarm serve` API auth source. Use `swarm serve --api-token-file` or
-                config `serve_api_token_file`.
-              config api_token_file: >
+                config `serve.api_token_file`.
+              config connection.api_token_file: >
                 Client-side API auth only, governed by
                 cli_specification.foundations.api_connection_auth_config_precedence. Server-side `swarm serve` auth
-                uses config `serve_api_token_file` to avoid client/server source ownership ambiguity.
+                uses config `serve.api_token_file` to avoid client/server source ownership ambiguity.
               config api_token: >
                 Not promoted. Inline bearer tokens in config files leak secret material into durable plaintext config.
             token_file_rule: >
               Token-file sources are read once during `swarm serve` startup. Missing, unreadable, or blank token-file
               contents fail closed and MUST NOT fall back to the built-in loopback default.
-          cli_config_file:
+          unified_config_file:
             accepted_sources:
+            - global --config <path>
             - SWARM_CONFIG
-            - '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
+            - '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/swarm.yaml'
+            - './swarm.yaml'
+            - '.swarm/swarm.yaml'
             rejected_sources:
-            - '`swarm serve --config` runtime-config path'
+            - executable-adjacent config.yaml
+            - '${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml'
           independence_rule: >
             API and MCP source resolution is per-listener. A source for one listener MUST NOT infer, mutate,
             or default the other listener.
           validation_rule: >
-            Values from flags, environment, and CLI config MUST use the host:port address_format above and
+            Values from flags, environment, and unified config MUST use the host:port address_format above and
             fail before runtime startup if invalid.
           api_auth_coupling_rule: >
             If no explicit token-file source is configured for `swarm serve`, the API listener may start only when
             its host is numeric loopback (`127.0.0.0/8` or `::1`). `localhost`, wildcard, empty, routable IP, and
-            DNS hosts require `swarm serve --api-token-file` or config `serve_api_token_file`. The built-in API token is never valid for a
+            DNS hosts require `swarm serve --api-token-file` or config `serve.api_token_file`. The built-in API token is never valid for a
             non-loopback API listener. This rule applies to the API listener only; MCP listener and tool-gateway
             tokens remain owned by local_cli_test_gateway_startup.
           rejected_sources:
             SWARM_API_PORT: 'Not promoted; port-only configuration cannot express bind interface/IP.'
             SWARM_MCP_PORT: 'Not promoted; port-only configuration cannot express bind interface/IP.'
-            api_listen_addr: 'Not promoted as a CLI config key; use serve_api_listen_addr.'
-            mcp_listen_addr: 'Not promoted as a CLI config key; use serve_mcp_listen_addr.'
+            api_listen_addr: 'Not promoted as a unified config key; use serve.api_listen_addr.'
+            mcp_listen_addr: 'Not promoted as a unified config key; use serve.mcp_listen_addr.'
         interaction_rules:
           independent_bind_addresses: >
             API and MCP listener addresses are independent. Supplying one listener address never mutates or
@@ -16254,7 +16265,7 @@ cli_specification:
             rule: >
               If the API listener would use the built-in loopback default token on a non-loopback host,
               `swarm serve` MUST fail closed before readiness with a diagnostic naming that non-loopback API binds
-              require `--api-token-file` or config `serve_api_token_file`. Raw `SWARM_API_TOKEN` MUST NOT satisfy this
+              require `--api-token-file` or config `serve.api_token_file`. Raw `SWARM_API_TOKEN` MUST NOT satisfy this
               requirement.
         flag_disposition:
           --health-addr:
@@ -16308,7 +16319,7 @@ cli_specification:
         implementation_boundaries:
         - '#884 promoted the source-of-truth repair only.'
         - '#992 implements Cobra/runtime binding for `--api-listen-addr` and `--mcp-listen-addr`, route partitioning, listener address validation, listener bind failure exit 3 before readiness, `--health-addr` retirement, MCP gateway URL alignment, and `swarm run start --api-port` as an API listener consumer.'
-        - '#844 implements `swarm serve` listener source precedence for `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve_api_listen_addr`, and `serve_mcp_listen_addr`.'
+        - '#844 implements `swarm serve` listener source precedence for `SWARM_API_LISTEN_ADDR`, `SWARM_MCP_LISTEN_ADDR`, `serve.api_listen_addr`, and `serve.mcp_listen_addr`.'
         - '`swarm run start --mcp-port` remains fail-closed until a later child explicitly promotes local foreground MCP listener control.'
         - 'API/MCP enable-disable implementation may be a later child if not absorbed with listener implementation.'
         - '`--log-level` is governed by cli_specification.foundations.cli_logging_policy, not listener topology.'

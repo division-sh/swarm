@@ -78,7 +78,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		if err == nil {
 			t.Fatal("newCLIAPIClient returned nil error")
 		}
-		if !strings.Contains(err.Error(), "SWARM_API_TOKEN_FILE") || !strings.Contains(err.Error(), "config api_token_file") {
+		if !strings.Contains(err.Error(), "SWARM_API_TOKEN_FILE") || !strings.Contains(err.Error(), "config connection.api_token_file") {
 			t.Fatalf("err = %q, want SWARM_API_TOKEN_FILE replacement guidance", err.Error())
 		}
 	})
@@ -225,8 +225,8 @@ func TestCLISwarmDirResolutionPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve config swarm dir: %v", err)
 	}
-	if got.Path != configDir || got.Source != "config swarm_dir" {
-		t.Fatalf("config swarm dir = %#v, want %q from config swarm_dir", got, configDir)
+	if got.Path != configDir || got.Source != "config paths.swarm_dir" {
+		t.Fatalf("config swarm dir = %#v, want %q from config paths.swarm_dir", got, configDir)
 	}
 
 	t.Setenv("SWARM_CONFIG", "")
@@ -244,27 +244,27 @@ func TestCLISwarmDirResolutionPrecedence(t *testing.T) {
 
 func TestCLISwarmDirConfigValidation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("swarm_dir: [bad]\n"), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(path, []byte("paths:\n  swarm_dir: [bad]\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("SWARM_CONFIG", path)
 
-	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "CLI config swarm_dir must be a string") {
-		t.Fatalf("resolveCLISwarmDir err = %v, want non-string swarm_dir validation", err)
+	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "decode unified CLI config") {
+		t.Fatalf("resolveCLISwarmDir err = %v, want unified CLI decode validation", err)
 	}
 }
 
 func TestCLISwarmDirBlankConfigFailsClosed(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("swarm_dir: \"  \"\n"), 0o600); err != nil {
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	if err := os.WriteFile(path, []byte("paths:\n  swarm_dir: \"  \"\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("SWARM_CONFIG", path)
 
-	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "config swarm_dir must be non-empty") {
-		t.Fatalf("resolveCLISwarmDir err = %v, want blank config swarm_dir validation", err)
+	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "config paths.swarm_dir must be non-empty") {
+		t.Fatalf("resolveCLISwarmDir err = %v, want blank config paths.swarm_dir validation", err)
 	}
 }
 
@@ -305,7 +305,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  "read SWARM_CONFIG",
+			wantErr:  "read unified config",
 		},
 		{
 			name: "malformed config",
@@ -319,7 +319,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  "parse CLI config",
+			wantErr:  "parse unified config",
 		},
 		{
 			name: "unsupported inline config token",
@@ -332,7 +332,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 				return rootCommandOptions{}
 			},
 			wantExit: cliExitValidation,
-			wantErr:  `unsupported CLI config key "api_token"`,
+			wantErr:  `unknown config key "api_token"`,
 		},
 		{
 			name: "missing token file",
@@ -1174,15 +1174,45 @@ func writeCLIAPITokenFile(t *testing.T, token string) string {
 func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 	t.Helper()
 	var body strings.Builder
-	for _, key := range []string{"api_server", "api_token_file", "swarm_dir", "contracts_path", "platform_spec_path", "serve_api_listen_addr", "serve_mcp_listen_addr", "serve_api_token_file"} {
-		if value, ok := values[key]; ok {
-			body.WriteString(key)
-			body.WriteString(": ")
-			body.WriteString(strconvQuoteYAML(value))
-			body.WriteString("\n")
+	writeSection := func(section string, keys []string, names map[string]string) {
+		var sectionBody strings.Builder
+		for _, key := range keys {
+			value, ok := values[key]
+			if !ok {
+				continue
+			}
+			name := names[key]
+			if name == "" {
+				name = key
+			}
+			sectionBody.WriteString("  ")
+			sectionBody.WriteString(name)
+			sectionBody.WriteString(": ")
+			sectionBody.WriteString(strconvQuoteYAML(value))
+			sectionBody.WriteString("\n")
 		}
+		if sectionBody.Len() == 0 {
+			return
+		}
+		body.WriteString(section)
+		body.WriteString(":\n")
+		body.WriteString(sectionBody.String())
 	}
-	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeSection("connection", []string{"api_server", "api_token_file"}, map[string]string{
+		"api_server":     "api_server",
+		"api_token_file": "api_token_file",
+	})
+	writeSection("paths", []string{"swarm_dir", "contracts_path", "platform_spec_path"}, map[string]string{
+		"swarm_dir":          "swarm_dir",
+		"contracts_path":     "contracts_path",
+		"platform_spec_path": "platform_spec_path",
+	})
+	writeSection("serve", []string{"serve_api_listen_addr", "serve_mcp_listen_addr", "serve_api_token_file"}, map[string]string{
+		"serve_api_listen_addr": "api_listen_addr",
+		"serve_mcp_listen_addr": "mcp_listen_addr",
+		"serve_api_token_file":  "api_token_file",
+	})
+	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
