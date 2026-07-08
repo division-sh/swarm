@@ -148,6 +148,9 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		case runtimecontracts.FlowInputResolutionModeSelect:
 			onMissing = "reject"
 			onConflict = "reject"
+		case runtimecontracts.FlowInputResolutionModeSelectOrCreate:
+			onMissing = "create"
+			onConflict = "reuse"
 		}
 	}
 	matches := runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, descriptors)
@@ -180,6 +183,19 @@ func (o templateInstanceLifecycleOwner) Materialize(ctx context.Context, evt eve
 		return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: failure}, TemplateInstanceLifecycleDecision{}, true, nil
 	}
 	if err := o.activate(ctx, req); err != nil {
+		if templateInstanceLifecycleCanReuseAfterActivationError(plan, onMissing, onConflict) {
+			refreshed, refreshErr := o.reloadDescriptors(ctx)
+			if refreshErr != nil {
+				return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, refreshErr
+			}
+			matches = runtimepinrouting.InstanceKeyDescriptorRoutesForConnectRoutePlan(plan, keyMaterial, refreshed)
+			if len(matches) == 1 {
+				return templateInstanceLifecycleMaterialization(plan, matches), o.decision(plan, evt, keyMaterial, onMissing, onConflict, matches[0], templateInstanceLifecycleActionReused), true, nil
+			}
+			if len(matches) > 1 {
+				return runtimepinrouting.ConnectRoutePlanMaterialization{Failure: runtimepinrouting.ConnectFailureTargetAmbiguous}, decision, true, nil
+			}
+		}
 		return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, true, fmt.Errorf("activate connect-time template instance %s: %w", req.Instance.InstancePath, err)
 	}
 	refreshed, err := o.reloadDescriptors(ctx)
@@ -324,6 +340,13 @@ func templateInstanceLifecycleExistingAction(onMissing, onConflict string) strin
 		return templateInstanceLifecycleActionReused
 	}
 	return templateInstanceLifecycleActionSelectedExisting
+}
+
+func templateInstanceLifecycleCanReuseAfterActivationError(plan runtimepinrouting.ConnectRoutePlan, onMissing, onConflict string) bool {
+	if plan.InstanceKey == nil || strings.TrimSpace(plan.InstanceKey.Mode) != runtimecontracts.FlowInputResolutionModeSelectOrCreate {
+		return false
+	}
+	return strings.TrimSpace(onMissing) == "create" && strings.TrimSpace(onConflict) == "reuse"
 }
 
 func templateInstanceLifecycleParentRoute(evt events.Event, plan runtimepinrouting.ConnectRoutePlan) runtimeflowidentity.ParentRoute {
