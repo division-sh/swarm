@@ -75,9 +75,10 @@ func TestCLICommandCatalogRowsDeclareContractBearingGroups(t *testing.T) {
 func TestCLIVerifyJSONShapeIncludesStructuredFailureFindings(t *testing.T) {
 	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
 	commandSupport := mustMappingValue(t, outputContract, "command_support")
-	implemented := mustMappingValue(t, commandSupport, "implemented_output_mode_first_slice")
-	consumers := mustMappingValue(t, implemented, "consumers")
-	verify := mustMappingValue(t, consumers, "verify")
+	registry := mustMappingValue(t, commandSupport, "output_conformance_registry")
+	rows := mustMappingValue(t, registry, "rows")
+	verify := mustMappingValue(t, rows, "verify")
+	assertScalarValue(t, mustMappingValue(t, verify, "classification"), "shared_output")
 	jsonShape := mustMappingValue(t, verify, "json_shape")
 
 	for _, want := range []string{
@@ -107,6 +108,38 @@ func TestCLIVerifyJSONShapeIncludesStructuredFailureFindings(t *testing.T) {
 	} {
 		assertScalarContains(t, mustMappingValue(t, humanStreams, "stderr"), want)
 	}
+}
+
+func TestCLIOutputConformanceRegistryPromotedAsCurrentStateOwner(t *testing.T) {
+	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
+	commandSupport := mustMappingValue(t, outputContract, "command_support")
+	if mappingValue(commandSupport, "currently_implemented_consumers") != nil {
+		t.Fatal("command_support.currently_implemented_consumers must not remain as a second output-conformance registry")
+	}
+	if mappingValue(commandSupport, "implemented_output_mode_first_slice") != nil {
+		t.Fatal("command_support.implemented_output_mode_first_slice must not remain as a second output-conformance registry")
+	}
+	if mappingValue(commandSupport, "implemented_color_policy_first_slice") != nil {
+		t.Fatal("command_support.implemented_color_policy_first_slice must not remain as a second output-conformance registry")
+	}
+
+	registry := mustMappingValue(t, commandSupport, "output_conformance_registry")
+	assertScalarValue(t, mustMappingValue(t, registry, "promoted_by"), "#1821")
+	assertScalarValue(t, mustMappingValue(t, registry, "canonical_owner"), "platform-spec.yaml#cli_specification.foundations.output_contract.command_support.output_conformance_registry")
+	assertScalarValue(t, mustMappingValue(t, registry, "implementation_owner"), "cmd/swarm/cli_output_conformance_registry_test.go")
+	assertScalarContains(t, mustMappingValue(t, registry, "rule"), "single living current-state authority")
+	assertScalarContains(t, mustMappingValue(t, mustMappingValue(t, registry, "ratchet_rules"), "full_catalog_coverage"), "Unclassified rows fail closed")
+	assertScalarContains(t, mustMappingValue(t, mustMappingValue(t, registry, "ratchet_rules"), "no_output_byte_changes"), "does not change command output bytes")
+
+	values := mustMappingValue(t, registry, "classification_values")
+	for _, key := range []string{"shared_output", "exception", "split"} {
+		if mappingValue(values, key) == nil {
+			t.Fatalf("output_conformance_registry.classification_values missing %s", key)
+		}
+	}
+
+	color := mustMappingValue(t, outputContract, "color_control")
+	assertScalarContains(t, mustMappingValue(t, color, "consumer_registry"), "output_conformance_registry")
 }
 
 func TestCLIDiagnosticConventionPromotedToOutputContract(t *testing.T) {
