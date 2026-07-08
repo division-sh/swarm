@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -119,7 +120,15 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 
 	source, contractsRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths)
 	if err != nil {
-		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix the selected --contracts and --platform-spec paths")
+		message := err.Error()
+		remediation := "fix the selected --contracts and --platform-spec paths"
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			message = diagnostic.Problem
+			if strings.TrimSpace(diagnostic.Remediation) != "" {
+				remediation = diagnostic.Remediation
+			}
+		}
+		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
 		return report.finalize()
 	}
 	appendProviderConnectorToolSurfaceFindings(ctx, &report, source)
@@ -348,7 +357,7 @@ func (r *localPreflightReport) checkWorkspace(ctx context.Context, cfg *config.C
 func loadLocalPreflightSource(repo string, paths cliContractPlatformSpecPaths) (semanticview.Source, string, error) {
 	contractsRoot, err := normalizeContractsRoot(paths.ContractsPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve contracts: %w", err)
+		return nil, "", err
 	}
 	_, bundle, err := newSwarmWorkflowModule(assetCommandRepoRoot(repo), contractsRoot, paths.PlatformSpecPath)
 	if err != nil {

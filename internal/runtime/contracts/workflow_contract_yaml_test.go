@@ -9,6 +9,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing.T) {
 	var doc ProjectPackageDocument
 	if err := yaml.Unmarshal([]byte(`
@@ -252,7 +261,7 @@ func TestProjectPackageDocumentDecode_RejectsStrictSelfFactDrift(t *testing.T) {
 name: invalid
 category: examples
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: "not supported",
 		},
 		{
 			name: "unknown homepage",
@@ -260,7 +269,7 @@ category: examples
 name: invalid
 homepage: https://division.sh
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: "not supported",
 		},
 		{
 			name: "unknown capabilities",
@@ -268,7 +277,7 @@ homepage: https://division.sh
 name: invalid
 capabilities: []
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: "not supported",
 		},
 		{
 			name: "loose license alias",
@@ -371,7 +380,7 @@ requires:
     provider.threshold:
       fallback: 0.8
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: `requires.policy field "fallback" is not supported.`,
 		},
 		{
 			name: "policy requirement must be mapping",
@@ -390,7 +399,7 @@ name: invalid
 requires:
   inputz: [work.requested]
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: `requires field "inputz" is not supported.`,
 		},
 		{
 			name: "bind inputs must be mapping",
@@ -413,7 +422,7 @@ packages:
     bind:
       credential: {}
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: `bind field "credential" is not supported.`,
 		},
 		{
 			name: "unknown connect field",
@@ -424,7 +433,7 @@ connect:
     to: consumer.ready
     topic: unsupported
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: `connect field "topic" is not supported.`,
 		},
 	}
 	for _, tc := range tests {
@@ -509,8 +518,8 @@ pins:
           by: vertical_id
           unsupported: nope
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `input event pin address field "unsupported" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed address field rejection", err)
 	}
 }
 
@@ -662,8 +671,8 @@ pins:
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := yaml.Unmarshal([]byte(tc.body), &doc)
-			if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-				t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+			if err == nil || !strings.Contains(err.Error(), "is not supported") {
+				t.Fatalf("yaml.Unmarshal error = %v, want typed field rejection", err)
 			}
 		})
 	}
@@ -680,21 +689,22 @@ pins:
         event: deploy.done
         unknown: nope
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("yaml.Unmarshal error = %v, want unsupported field", err)
 	}
 }
 
 func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *testing.T) {
 	tests := []struct {
-		name    string
-		field   string
-		wantErr string
+		name         string
+		field        string
+		wantErr      string
+		wantDiagCode string
 	}{
 		{name: "namespace_prefix", field: "namespace_prefix: worker", wantErr: "RETIRED"},
 		{name: "namespace_rule", field: "namespace_rule: path", wantErr: "RETIRED"},
-		{name: "namespace", field: "namespace: worker", wantErr: "UNDEFINED-FIELD"},
-		{name: "unknown", field: "legacy_owner: worker", wantErr: "UNDEFINED-FIELD"},
+		{name: "namespace", field: "namespace: worker", wantErr: "schema field \"namespace\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
+		{name: "unknown", field: "legacy_owner: worker", wantErr: "schema field \"legacy_owner\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -702,6 +712,29 @@ func TestFlowSchemaDocumentDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 			err := yaml.Unmarshal([]byte("name: invalid-schema\n"+tc.field+"\n"), &doc)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+			if tc.wantDiagCode == "" {
+				return
+			}
+			diagnostic, ok := AsLoaderDiagnostic(err)
+			if !ok {
+				t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+			}
+			if diagnostic.Code != tc.wantDiagCode {
+				t.Fatalf("diagnostic code = %q, want %q", diagnostic.Code, tc.wantDiagCode)
+			}
+			if len(diagnostic.ValidOptions) == 0 {
+				t.Fatalf("diagnostic valid options empty: %#v", diagnostic)
+			}
+			foundTerminalStates := false
+			for _, option := range diagnostic.ValidOptions {
+				if option == "terminal_states" {
+					foundTerminalStates = true
+					break
+				}
+			}
+			if !foundTerminalStates {
+				t.Fatalf("diagnostic valid options = %#v, want terminal_states", diagnostic.ValidOptions)
 			}
 		})
 	}
@@ -841,8 +874,8 @@ instance:
   on_conflict: reject
   fallback: legacy
 `), &doc)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `template instance field "fallback" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed template instance field rejection", err)
 	}
 }
 
@@ -854,8 +887,8 @@ compute:
   store_as: entity.composite
   expression: "weighted_average(accumulated.scores, accumulated.weights)"
 `), &rule)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `compute field "expression" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed compute field rejection", err)
 	}
 }
 
@@ -908,8 +941,15 @@ rules:
     condition: "else"
     sets_gate: approved
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), `UNDEFINED-FIELD: rule field "sets_gate"`) {
+	if err == nil || !strings.Contains(err.Error(), `rule field "sets_gate" is not supported.`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want rule-level sets_gate rejection", err)
+	}
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok {
+		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if !containsString(diagnostic.ValidOptions, "advances_to") || !containsString(diagnostic.ValidOptions, "emit") {
+		t.Fatalf("diagnostic valid options = %#v, want rule options", diagnostic.ValidOptions)
 	}
 }
 
@@ -1651,8 +1691,8 @@ compute:
   keys:
     numeric_keys: [score]
 `), &rule)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `compute field "output_field" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed compute field rejection", err)
 	}
 }
 
@@ -1888,15 +1928,16 @@ func TestFlowSchemaDocumentDecode_TracksRequiredAgentsPresence(t *testing.T) {
 
 func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *testing.T) {
 	tests := []struct {
-		name    string
-		field   string
-		wantErr string
+		name         string
+		field        string
+		wantErr      string
+		wantDiagCode string
 	}{
 		{name: "permissions", field: "permissions: [create_flow_instance]", wantErr: "RETIRED"},
 		{name: "implementation", field: "implementation: builtin", wantErr: "RETIRED"},
 		{name: "owned_transitions", field: "owned_transitions: [ticket-open]", wantErr: "RETIRED"},
 		{name: "idempotency_table", field: "idempotency_table: worker_idempotency", wantErr: "RETIRED"},
-		{name: "unknown", field: "legacy_owner: worker", wantErr: "UNDEFINED-FIELD"},
+		{name: "unknown", field: "legacy_owner: worker", wantErr: "node field \"legacy_owner\" is not supported.", wantDiagCode: "contract_loader.undefined_field"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1904,6 +1945,29 @@ func TestSystemNodeContractDecode_RejectsRetiredAndUnsupportedTopLevelFields(t *
 			err := yaml.Unmarshal([]byte("id: worker\n"+tc.field+"\n"), &node)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
+			}
+			if tc.wantDiagCode == "" {
+				return
+			}
+			diagnostic, ok := AsLoaderDiagnostic(err)
+			if !ok {
+				t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+			}
+			if diagnostic.Code != tc.wantDiagCode {
+				t.Fatalf("diagnostic code = %q, want %q", diagnostic.Code, tc.wantDiagCode)
+			}
+			if len(diagnostic.ValidOptions) == 0 {
+				t.Fatalf("diagnostic valid options empty: %#v", diagnostic)
+			}
+			foundEventHandlers := false
+			for _, option := range diagnostic.ValidOptions {
+				if option == "event_handlers" {
+					foundEventHandlers = true
+					break
+				}
+			}
+			if !foundEventHandlers {
+				t.Fatalf("diagnostic valid options = %#v, want event_handlers", diagnostic.ValidOptions)
 			}
 		})
 	}
@@ -1996,6 +2060,29 @@ emit:
 `), &spec)
 	if err == nil || !strings.Contains(err.Error(), `fan_out field "target" is retired`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want retired fan_out target rejection", err)
+	}
+}
+
+func TestFanOutSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: payload.items
+foreach: payload.items
+emit:
+  event: routed.item
+`), &spec)
+	if err == nil {
+		t.Fatal("expected unknown fan_out field rejection")
+	}
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok {
+		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if got := diagnostic.Problem; got != `fan_out field "foreach" is not supported.` {
+		t.Fatalf("diagnostic problem = %q, want unknown fan_out field problem", got)
+	}
+	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"emit", "items_from"}) {
+		t.Fatalf("diagnostic valid options = %#v, want emit/items_from", diagnostic.ValidOptions)
 	}
 }
 
@@ -2270,8 +2357,8 @@ select_entity:
   where:
     vertical_id: payload.vertical_id
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `select_entity field "where" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed select_entity field rejection", err)
 	}
 }
 
@@ -2307,8 +2394,8 @@ select_or_create_entity:
   where:
     repo_id: payload.repo_id
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `select_or_create_entity field "where" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed select_or_create_entity field rejection", err)
 	}
 }
 
@@ -2545,7 +2632,7 @@ check: payload.score >= policy.threshold
 on_fail:
   reject: true
 `,
-			wantErr: "UNDEFINED-FIELD",
+			wantErr: `guard.on_fail field "reject" is not supported.`,
 		},
 	}
 	for _, tc := range tests {
@@ -2556,6 +2643,51 @@ on_fail:
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestGuardSpecDecode_RejectsUnknownOnFailFieldWithCanonicalOptions(t *testing.T) {
+	var spec GuardSpec
+	err := yaml.Unmarshal([]byte(`
+id: score_check
+check: payload.score >= policy.threshold
+on_fail:
+  reject: true
+`), &spec)
+	if err == nil {
+		t.Fatal("expected unknown guard.on_fail field rejection")
+	}
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok {
+		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if got := diagnostic.Problem; got != `guard.on_fail field "reject" is not supported.` {
+		t.Fatalf("diagnostic problem = %q, want unknown guard.on_fail field problem", got)
+	}
+	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"escalate"}) {
+		t.Fatalf("diagnostic valid options = %#v, want only escalate", diagnostic.ValidOptions)
+	}
+}
+
+func TestAccumulateSpecDecode_RejectsUnknownFieldWithCanonicalOptions(t *testing.T) {
+	var spec AccumulateSpec
+	err := yaml.Unmarshal([]byte(`
+into: entity.items
+source: payload.items
+`), &spec)
+	if err == nil {
+		t.Fatal("expected unknown accumulate field rejection")
+	}
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok {
+		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if got := diagnostic.Problem; got != `accumulate field "source" is not supported.` {
+		t.Fatalf("diagnostic problem = %q, want unknown accumulate field problem", got)
+	}
+	want := []string{"completion", "dedup_by", "description", "expected_from", "from", "into", "on_complete", "on_timeout", "threshold", "timeout_ms"}
+	if !reflect.DeepEqual(diagnostic.ValidOptions, want) {
+		t.Fatalf("diagnostic valid options = %#v, want %#v", diagnostic.ValidOptions, want)
 	}
 }
 
@@ -3049,8 +3181,8 @@ instance_id_from: payload.worker_id
 config_from:
   policy_keys: [priority_profile]
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `config_from field "policy_keys" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed config_from field rejection", err)
 	}
 }
 
@@ -3123,8 +3255,8 @@ action:
       literal: Review validation package
     implicit_payload: true
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `mailbox field "implicit_payload" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed mailbox field rejection", err)
 	}
 }
 
@@ -3260,8 +3392,8 @@ action:
     provider: local_git
     shell: git commit
 `), &handler)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `artifact_repo field "shell" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed artifact_repo field rejection", err)
 	}
 }
 
@@ -3359,7 +3491,14 @@ dedup_by: payload.dimension
 	err := yaml.Unmarshal([]byte(`
 legacy_buffer: dimensions_received
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") {
-		t.Fatalf("yaml.Unmarshal error = %v, want UNDEFINED-FIELD", err)
+	if err == nil || !strings.Contains(err.Error(), `accumulate field "legacy_buffer" is not supported.`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want typed accumulate field rejection", err)
+	}
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok {
+		t.Fatalf("yaml.Unmarshal error = %T %v, want LoaderDiagnostic", err, err)
+	}
+	if !containsString(diagnostic.ValidOptions, "into") || !containsString(diagnostic.ValidOptions, "on_complete") {
+		t.Fatalf("diagnostic valid options = %#v, want accumulate options", diagnostic.ValidOptions)
 	}
 }

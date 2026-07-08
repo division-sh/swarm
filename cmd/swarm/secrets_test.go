@@ -258,7 +258,7 @@ func TestSecretsCheckMissingContractsIsValidationExit(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("secrets check missing contracts stdout = %q, want empty", stdout)
 	}
-	if !strings.Contains(stderr, "resolve contracts: contracts path is required") {
+	if !strings.Contains(stderr, "ERROR: a contracts directory is required.") || !strings.Contains(stderr, "Remediation: Pass a contracts directory") {
 		t.Fatalf("secrets check missing contracts stderr = %q", stderr)
 	}
 }

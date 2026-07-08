@@ -131,6 +131,18 @@ func TestCLIAPITransportDiagnosticPreservesWrapperContext(t *testing.T) {
 	}
 }
 
+func TestCLIAPIErrorDoesNotClassifyGenericYAMLAsContractLoaderDiagnostic(t *testing.T) {
+	err := errors.New("load runtime config: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `oops` into config.Config")
+
+	got := formatCLIAPIError(err)
+	if got != err.Error() {
+		t.Fatalf("diagnostic = %q, want original error %q", got, err.Error())
+	}
+	if strings.Contains(got, "contract YAML has a value with the wrong shape") {
+		t.Fatalf("diagnostic misclassified generic YAML as contract loader error: %q", got)
+	}
+}
+
 func TestJSONRPCErrorRendersStandardErrorDiagnostics(t *testing.T) {
 	data, err := json.Marshal(map[string]any{
 		"correlation_id": "corr-event-publish",

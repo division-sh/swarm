@@ -155,10 +155,11 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
-			switch key {
-			case "", "event", "from", "fields", "target", "broadcast":
-			default:
-				return fmt.Errorf("UNDEFINED-FIELD: emit field %q not in platform spec", key)
+			if key == "" {
+				continue
+			}
+			if _, ok := emitFieldOptions[key]; !ok {
+				return NewUndefinedFieldDiagnostic("emit", key, emitFieldOptions)
 			}
 		}
 		var event string
@@ -215,6 +216,93 @@ func (e *EmitSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
+var emitFieldOptions = map[string]struct{}{
+	"event":     {},
+	"from":      {},
+	"fields":    {},
+	"target":    {},
+	"broadcast": {},
+}
+
+var onSuccessFieldOptions = map[string]struct{}{
+	"emit": {},
+}
+
+var activityFieldOptions = map[string]struct{}{
+	"id":    {},
+	"tool":  {},
+	"input": {},
+}
+
+var emitTargetFieldOptions = map[string]struct{}{
+	"instance_id":  {},
+	"flow":         {},
+	"match":        {},
+	"allow_fanout": {},
+}
+
+var mailboxFieldOptions = map[string]struct{}{
+	"item_type":     {},
+	"severity":      {},
+	"summary":       {},
+	"entity_id":     {},
+	"flow_instance": {},
+	"payload":       {},
+}
+
+var artifactRepoFieldOptions = map[string]struct{}{
+	"provider":        {},
+	"repo_id":         {},
+	"namespace":       {},
+	"partition_key":   {},
+	"display_slug":    {},
+	"request_id":      {},
+	"author":          {},
+	"provenance":      {},
+	"allowed_paths":   {},
+	"files":           {},
+	"output":          {},
+	"limits":          {},
+	"success_event":   {},
+	"success_payload": {},
+	"failure_event":   {},
+	"failure_payload": {},
+}
+
+var artifactRepoFilesFieldOptions = map[string]struct{}{
+	"path":         {},
+	"content":      {},
+	"content_type": {},
+	"schema":       {},
+	"max_bytes":    {},
+}
+
+var artifactRepoFilesSchemaFieldOptions = map[string]struct{}{
+	"type":            {},
+	"required_fields": {},
+}
+
+var artifactRepoOutputFieldOptions = map[string]struct{}{
+	"repo_url":             {},
+	"current_ref":          {},
+	"file_manifest":        {},
+	"status":               {},
+	"failure_reason":       {},
+	"last_request_id":      {},
+	"last_source_event_id": {},
+}
+
+var artifactRepoLimitsFieldOptions = map[string]struct{}{
+	"max_yaml_bytes":     {},
+	"max_markdown_bytes": {},
+	"max_text_bytes":     {},
+	"max_repo_bytes":     {},
+}
+
+var entitySelectionFieldOptions = map[string]struct{}{
+	"by": {},
+}
+
 func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 	if s == nil {
 		return nil
@@ -228,10 +316,11 @@ func (s *HandlerOnSuccessSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
-		switch key {
-		case "", "emit":
-		default:
-			return fmt.Errorf("UNDEFINED-FIELD: on_success field %q not in platform spec", key)
+		if key == "" {
+			continue
+		}
+		if _, ok := onSuccessFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("on_success", key, onSuccessFieldOptions)
 		}
 	}
 	var aux struct {
@@ -260,10 +349,11 @@ func (a *ActivitySpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
-		switch key {
-		case "", "id", "tool", "input":
-		default:
-			return fmt.Errorf("UNDEFINED-FIELD: activity field %q not in platform spec", key)
+		if key == "" {
+			continue
+		}
+		if _, ok := activityFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("activity", key, activityFieldOptions)
 		}
 	}
 	var out ActivitySpec
@@ -332,10 +422,11 @@ func decodeEmitTargetNode(node *yaml.Node) (EmitTargetSpec, error) {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
-			switch key {
-			case "", "instance_id", "flow", "match", "allow_fanout":
-			default:
-				return EmitTargetSpec{}, fmt.Errorf("UNDEFINED-FIELD: emit.target field %q not in platform spec", key)
+			if key == "" {
+				continue
+			}
+			if _, ok := emitTargetFieldOptions[key]; !ok {
+				return EmitTargetSpec{}, NewUndefinedFieldDiagnostic("emit.target", key, emitTargetFieldOptions)
 			}
 		}
 		var out EmitTargetSpec
@@ -422,21 +513,13 @@ func (m *MailboxWriteSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("INVALID-MAILBOX-WRITE: mailbox must be a mapping")
 	}
-	allowed := map[string]struct{}{
-		"item_type":     {},
-		"severity":      {},
-		"summary":       {},
-		"entity_id":     {},
-		"flow_instance": {},
-		"payload":       {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: mailbox field %q not in platform spec", key)
+		if _, ok := mailboxFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("mailbox", key, mailboxFieldOptions)
 		}
 	}
 	var out MailboxWriteSpec
@@ -515,31 +598,13 @@ func (s *ArtifactRepoSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo must be a mapping")
 	}
-	allowed := map[string]struct{}{
-		"provider":        {},
-		"repo_id":         {},
-		"namespace":       {},
-		"partition_key":   {},
-		"display_slug":    {},
-		"request_id":      {},
-		"author":          {},
-		"provenance":      {},
-		"allowed_paths":   {},
-		"files":           {},
-		"output":          {},
-		"limits":          {},
-		"success_event":   {},
-		"success_payload": {},
-		"failure_event":   {},
-		"failure_payload": {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo field %q not in platform spec", key)
+		if _, ok := artifactRepoFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("artifact_repo", key, artifactRepoFieldOptions)
 		}
 	}
 	type alias ArtifactRepoSpec
@@ -562,20 +627,13 @@ func (f *ArtifactRepoFileSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.files entries must be mappings")
 	}
-	allowed := map[string]struct{}{
-		"path":         {},
-		"content":      {},
-		"content_type": {},
-		"schema":       {},
-		"max_bytes":    {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.files field %q not in platform spec", key)
+		if _, ok := artifactRepoFilesFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("artifact_repo.files", key, artifactRepoFilesFieldOptions)
 		}
 	}
 	type alias ArtifactRepoFileSpec
@@ -598,17 +656,13 @@ func (s *ArtifactRepoSchemaSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.files.schema must be a mapping")
 	}
-	allowed := map[string]struct{}{
-		"type":            {},
-		"required_fields": {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.files.schema field %q not in platform spec", key)
+		if _, ok := artifactRepoFilesSchemaFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("artifact_repo.files.schema", key, artifactRepoFilesSchemaFieldOptions)
 		}
 	}
 	type alias ArtifactRepoSchemaSpec
@@ -631,22 +685,13 @@ func (o *ArtifactRepoOutputSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.output must be a mapping")
 	}
-	allowed := map[string]struct{}{
-		"repo_url":             {},
-		"current_ref":          {},
-		"file_manifest":        {},
-		"status":               {},
-		"failure_reason":       {},
-		"last_request_id":      {},
-		"last_source_event_id": {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.output field %q not in platform spec", key)
+		if _, ok := artifactRepoOutputFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("artifact_repo.output", key, artifactRepoOutputFieldOptions)
 		}
 	}
 	type alias ArtifactRepoOutputSpec
@@ -669,19 +714,13 @@ func (l *ArtifactRepoLimitsSpec) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("INVALID-ARTIFACT-REPO: artifact_repo.limits must be a mapping")
 	}
-	allowed := map[string]struct{}{
-		"max_yaml_bytes":     {},
-		"max_markdown_bytes": {},
-		"max_text_bytes":     {},
-		"max_repo_bytes":     {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: artifact_repo.limits field %q not in platform spec", key)
+		if _, ok := artifactRepoLimitsFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("artifact_repo.limits", key, artifactRepoLimitsFieldOptions)
 		}
 	}
 	type alias ArtifactRepoLimitsSpec
@@ -1101,46 +1140,47 @@ func decodeAdvancesToNode(node *yaml.Node) (string, error) {
 	return decodeScalarStringNode(node)
 }
 
+var handlerFieldOptions = map[string]struct{}{
+	"action":                  {},
+	"activity":                {},
+	"description":             {},
+	"_note":                   {},
+	"evidence_target":         {},
+	"create_entity":           {},
+	"select_entity":           {},
+	"select_or_create_entity": {},
+	"emit":                    {},
+	"on_success":              {},
+	"guard":                   {},
+	"advances_to":             {},
+	"sets_gate":               {},
+	"clear_gates":             {},
+	"data_accumulation":       {},
+	"condition":               {},
+	"completion_rule":         {},
+	"logic":                   {},
+	"policy_ref":              {},
+	"on_complete":             {},
+	"rules":                   {},
+	"accumulate":              {},
+	"compute":                 {},
+	"query":                   {},
+	"fan_out":                 {},
+	"group_by":                {},
+	"filter":                  {},
+	"reduce":                  {},
+	"count":                   {},
+	"clear":                   {},
+	"template":                {},
+	"instance_id_from":        {},
+	"config_from":             {},
+	"from":                    {},
+	"dedup_by":                {},
+}
+
 func validateHandlerFieldNodes(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
-	}
-	allowed := map[string]struct{}{
-		"action":                  {},
-		"activity":                {},
-		"description":             {},
-		"_note":                   {},
-		"evidence_target":         {},
-		"create_entity":           {},
-		"select_entity":           {},
-		"select_or_create_entity": {},
-		"emit":                    {},
-		"on_success":              {},
-		"guard":                   {},
-		"advances_to":             {},
-		"sets_gate":               {},
-		"clear_gates":             {},
-		"data_accumulation":       {},
-		"condition":               {},
-		"completion_rule":         {},
-		"logic":                   {},
-		"policy_ref":              {},
-		"on_complete":             {},
-		"rules":                   {},
-		"accumulate":              {},
-		"compute":                 {},
-		"query":                   {},
-		"fan_out":                 {},
-		"group_by":                {},
-		"filter":                  {},
-		"reduce":                  {},
-		"count":                   {},
-		"clear":                   {},
-		"template":                {},
-		"instance_id_from":        {},
-		"config_from":             {},
-		"from":                    {},
-		"dedup_by":                {},
 	}
 	deprecated := map[string]struct{}{
 		"condition":          {},
@@ -1168,8 +1208,8 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		if key == "on_complete" && node.Content[i+1].Kind == yaml.MappingNode {
 			return fmt.Errorf("DIALECT-OC-ORDER: on_complete is dict, must be ordered list")
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: handler field %q not in platform spec", key)
+		if _, ok := handlerFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("handler", key, handlerFieldOptions)
 		}
 	}
 	return nil
@@ -1384,16 +1424,13 @@ func decodeEntitySelectionSpecNode(node *yaml.Node, label string) (*SelectEntity
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("INVALID-SELECT-ENTITY: %s must be a mapping", label)
 	}
-	allowed := map[string]struct{}{
-		"by": {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; !ok {
-			return nil, fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", label, key)
+		if _, ok := entitySelectionFieldOptions[key]; !ok {
+			return nil, NewUndefinedFieldDiagnostic(label, key, entitySelectionFieldOptions)
 		}
 	}
 	var aux struct {
@@ -1440,6 +1477,15 @@ func (a *ActionSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+var actionFieldOptions = map[string]struct{}{
+	"id":               {},
+	"template":         {},
+	"instance_id_from": {},
+	"config_from":      {},
+	"mailbox":          {},
+	"artifact_repo":    {},
+}
+
 func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 	if node == nil || node.Kind == 0 {
 		return ActionSpec{}, nil
@@ -1455,27 +1501,19 @@ func decodeActionSpecNode(node *yaml.Node) (ActionSpec, error) {
 		}
 		return ActionSpec{ID: actionID}, nil
 	case yaml.MappingNode:
-		allowed := map[string]struct{}{
-			"id":               {},
-			"template":         {},
-			"instance_id_from": {},
-			"config_from":      {},
-			"mailbox":          {},
-			"artifact_repo":    {},
-		}
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key := strings.TrimSpace(node.Content[i].Value)
 			if key == "" {
 				continue
 			}
-			if _, ok := allowed[key]; ok {
+			if _, ok := actionFieldOptions[key]; ok {
 				continue
 			}
 			switch key {
 			case "type", "flow_template", "instance_id":
 				return ActionSpec{}, fmt.Errorf("DEPRECATED: legacy action field %q is not supported; use action: create_flow_instance with template, instance_id_from, and config_from siblings", key)
 			default:
-				return ActionSpec{}, fmt.Errorf("UNDEFINED-FIELD: action field %q not in platform spec", key)
+				return ActionSpec{}, NewUndefinedFieldDiagnostic("action", key, actionFieldOptions)
 			}
 		}
 		var aux struct {
@@ -1540,7 +1578,7 @@ func decodeConfigFromSpecNode(node *yaml.Node) (*ConfigFromSpec, error) {
 	}
 	spec := &ConfigFromSpec{Bindings: map[string]string{}}
 	if hasYAMLMappingKey(node, "policy_keys") {
-		return nil, fmt.Errorf("UNDEFINED-FIELD: config_from field %q not in platform spec", "policy_keys")
+		return nil, NewUndefinedFieldDiagnostic("config_from", "policy_keys", nil)
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)

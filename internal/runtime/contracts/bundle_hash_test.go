@@ -401,8 +401,9 @@ func TestBundleCatalogRuntimeLoaderRejectsUnknownPackageManifestField(t *testing
 		ContentYAML: contentYAML,
 		DataBlob:    projection.DataBlob,
 	})
-	if err == nil || !strings.Contains(err.Error(), "UNDEFINED-FIELD") || !strings.Contains(err.Error(), "homepage") {
-		t.Fatalf("LoadBundleCatalogRuntimeSource error = %v, want homepage UNDEFINED-FIELD", err)
+	diagnostic, ok := AsLoaderDiagnostic(err)
+	if !ok || diagnostic.Code != "contract_loader.undefined_field" || !strings.Contains(diagnostic.Problem, "homepage") {
+		t.Fatalf("LoadBundleCatalogRuntimeSource error = %v, want homepage loader diagnostic", err)
 	}
 }
 

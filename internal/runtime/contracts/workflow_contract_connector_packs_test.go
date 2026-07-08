@@ -35,7 +35,7 @@ connector_packs:
       tool: telegram.send_message
       shadow: true
 `), &invalid)
-	if err == nil || !strings.Contains(err.Error(), `connector_packs.imports field "shadow" not in platform spec`) {
+	if err == nil || !strings.Contains(err.Error(), `connector_packs.imports field "shadow" is not supported.`) {
 		t.Fatalf("Unmarshal invalid connector_packs error = %v, want strict field failure", err)
 	}
 }

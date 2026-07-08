@@ -242,6 +242,14 @@ func buildBundleRegistrationProjection(params bundleRegistrationParams, runtimeC
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
 	if err != nil {
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			return runtimecontracts.BundleCatalogProjection{}, NewInvalidParamsError(map[string]any{
+				"field":       "content_yaml",
+				"reason":      diagnostic.Problem,
+				"remediation": diagnostic.Remediation,
+				"diagnostic":  diagnostic,
+			})
+		}
 		return runtimecontracts.BundleCatalogProjection{}, NewInvalidParamsError(map[string]any{"field": "content_yaml", "reason": "bundle registration envelope does not materialize a valid workflow contract bundle", "error": err.Error()})
 	}
 	if err := runtimecontracts.ValidateBundlePlatformVersionCompatibility(bundle); err != nil {

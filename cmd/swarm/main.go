@@ -591,7 +591,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 	}
 	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {
-		return serveRuntimeBundle{}, fmt.Errorf("resolve contracts: %w", err)
+		return serveRuntimeBundle{}, err
 	}
 	module, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
 	if err != nil {
@@ -908,8 +908,14 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts)
 	if err != nil {
-		reporter.emit(4, "bundle_load", "FAILED", err.Error())
-		log.Printf("load Swarm contracts: %v", err)
+		detail := err.Error()
+		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			detail = formatCLIAPIError(err)
+			log.Print(detail)
+		} else {
+			log.Printf("load Swarm contracts: %v", err)
+		}
+		reporter.emit(4, "bundle_load", "FAILED", detail)
 		return 1
 	}
 	if len(loadedBundles) == 0 {
@@ -1393,10 +1399,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 	contractsRoot, err := normalizeContractsRoot(resolvedContractsPath)
 	if err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: resolve contracts: %v\n", err)
-		}
-		return 1
+		writeCLIAPIError(errOut, err)
+		return cliExitValidation
 	}
 	validationOpts, err := verifyWorkflowContractValidationOptions(repo)
 	if err != nil {
@@ -1406,10 +1410,8 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		return 1
 	}
 	if _, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPlatformSpecPath); err != nil {
-		if errOut != nil {
-			fmt.Fprintf(errOut, "verify failed: load Swarm contracts: %v\n", err)
-		}
-		return 1
+		writeCLIAPIError(errOut, err)
+		return cliExitValidation
 	} else {
 		source := semanticview.Wrap(bundle)
 		workspaceBackend, err := resolveWorkspaceBackendDiagnostic(repo, source)
@@ -1722,17 +1724,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
 			contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, contracts))
 			if err != nil {
-				if out != nil {
-					fmt.Fprintf(out, "fork failed: resolve contracts: %v\n", err)
-				}
-				return 1
+				writeForkContractLoadError(out, "fork failed: resolve contracts", err)
+				return cliExitValidation
 			}
 			_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvePath(repo, *platformSpecPath))
 			if err != nil {
-				if out != nil {
-					fmt.Fprintf(out, "fork failed: load selected contracts: %v\n", err)
-				}
-				return 1
+				writeForkContractLoadError(out, "fork failed: load selected contracts", err)
+				return cliExitValidation
 			}
 			source := semanticview.Wrap(bundle)
 			selection := runtimerunforkadmission.SelectedContractSelection(source, contractsRoot)
@@ -1764,17 +1762,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	if modeCount == 0 && selectedContractsRequested {
 		contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, *contractsPath))
 		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "fork failed: resolve contracts: %v\n", err)
-			}
-			return 1
+			writeForkContractLoadError(out, "fork failed: resolve contracts", err)
+			return cliExitValidation
 		}
 		_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvePath(repo, *platformSpecPath))
 		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "fork failed: load selected contracts: %v\n", err)
-			}
-			return 1
+			writeForkContractLoadError(out, "fork failed: load selected contracts", err)
+			return cliExitValidation
 		}
 		source := semanticview.Wrap(bundle)
 		credentialStore, err := buildCredentialStore()
@@ -1889,17 +1883,13 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 
 		contractsRoot, err := normalizeContractsRoot(resolveContractsPath(repo, contracts))
 		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "fork failed: resolve contracts: %v\n", err)
-			}
-			return 1
+			writeForkContractLoadError(out, "fork failed: resolve contracts", err)
+			return cliExitValidation
 		}
 		_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvePath(repo, *platformSpecPath))
 		if err != nil {
-			if out != nil {
-				fmt.Fprintf(out, "fork failed: load selected contracts: %v\n", err)
-			}
-			return 1
+			writeForkContractLoadError(out, "fork failed: load selected contracts", err)
+			return cliExitValidation
 		}
 		source := semanticview.Wrap(bundle)
 		admission, err := runtimerunforkadmission.AdmitContractFrontier(runtimerunforkadmission.ContractFrontierRequest{
@@ -1972,6 +1962,17 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	}
 	printRunForkPlan(out, plan)
 	return 0
+}
+
+func writeForkContractLoadError(out io.Writer, prefix string, err error) {
+	if out == nil || err == nil {
+		return
+	}
+	if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+		writeCLIAPIError(out, err)
+		return
+	}
+	fmt.Fprintf(out, "%s: %v\n", strings.TrimSpace(prefix), err)
 }
 
 func printRunForkActivation(w io.Writer, result store.RunForkActivation) {
@@ -2559,7 +2560,7 @@ func rejectUnsupportedRuntimeControlEnv() error {
 func normalizeContractsRoot(path string) (string, error) {
 	root := strings.TrimSpace(path)
 	if root == "" {
-		return "", errors.New("contracts path is required")
+		return "", runtimecontracts.NewContractsPathRequiredDiagnostic()
 	}
 	root = filepath.Clean(root)
 	if regularFileExists(filepath.Join(root, "package.yaml")) {
@@ -2568,7 +2569,7 @@ func normalizeContractsRoot(path string) (string, error) {
 	if filepath.Base(root) == "package.yaml" && regularFileExists(root) {
 		return filepath.Dir(root), nil
 	}
-	return "", fmt.Errorf("no package.yaml found under %s", path)
+	return "", runtimecontracts.NewMissingPackageDiagnostic(path)
 }
 
 func asString(v any) string {

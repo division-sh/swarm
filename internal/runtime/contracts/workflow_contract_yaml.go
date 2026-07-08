@@ -37,7 +37,7 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 		return nil
 	}
 	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("flow schema document must be a mapping")
+		return NewSchemaDocumentMappingDiagnostic(nil)
 	}
 	if err := validateFlowSchemaDocumentFields(node); err != nil {
 		return err
@@ -55,22 +55,23 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+var flowSchemaDocumentFields = map[string]struct{}{
+	"name":                {},
+	"mode":                {},
+	"entity":              {},
+	"instance":            {},
+	"initial_state":       {},
+	"terminal_states":     {},
+	"states":              {},
+	"stages":              {},
+	"pins":                {},
+	"tool_surface":        {},
+	"required_agents":     {},
+	"instance_variables":  {},
+	"auto_emit_on_create": {},
+}
+
 func validateFlowSchemaDocumentFields(node *yaml.Node) error {
-	allowed := map[string]struct{}{
-		"name":                {},
-		"mode":                {},
-		"entity":              {},
-		"instance":            {},
-		"initial_state":       {},
-		"terminal_states":     {},
-		"states":              {},
-		"stages":              {},
-		"pins":                {},
-		"tool_surface":        {},
-		"required_agents":     {},
-		"instance_variables":  {},
-		"auto_emit_on_create": {},
-	}
 	retired := map[string]string{
 		"namespace_prefix": "schema namespace_prefix is retired; flow namespace is derived from the package tree",
 		"namespace_rule":   "schema namespace_rule is retired; namespace override semantics require a separate spec owner",
@@ -83,8 +84,8 @@ func validateFlowSchemaDocumentFields(node *yaml.Node) error {
 		if reason, ok := retired[key]; ok {
 			return fmt.Errorf("RETIRED: schema field %q is retired; %s", key, reason)
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: schema field %q not in platform spec", key)
+		if _, ok := flowSchemaDocumentFields[key]; !ok {
+			return NewUndefinedFieldDiagnostic("schema", key, flowSchemaDocumentFields)
 		}
 	}
 	return nil
@@ -113,19 +114,20 @@ func (n *SystemNodeContract) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+var systemNodeContractFields = map[string]struct{}{
+	"id":             {},
+	"description":    {},
+	"execution_type": {},
+	"subscribes_to":  {},
+	"produces":       {},
+	"state_table":    {},
+	"timers":         {},
+	"event_handlers": {},
+	"state_schema":   {},
+	"gate_state":     {},
+}
+
 func validateSystemNodeContractFields(node *yaml.Node) error {
-	allowed := map[string]struct{}{
-		"id":             {},
-		"description":    {},
-		"execution_type": {},
-		"subscribes_to":  {},
-		"produces":       {},
-		"state_table":    {},
-		"timers":         {},
-		"event_handlers": {},
-		"state_schema":   {},
-		"gate_state":     {},
-	}
 	retired := map[string]string{
 		"permissions":       "node permissions are not public node YAML authority",
 		"implementation":    "executor binding is not public node YAML authority",
@@ -140,8 +142,8 @@ func validateSystemNodeContractFields(node *yaml.Node) error {
 		if reason, ok := retired[key]; ok {
 			return fmt.Errorf("RETIRED: node field %q is retired; %s", key, reason)
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: node field %q not in platform spec", key)
+		if _, ok := systemNodeContractFields[key]; !ok {
+			return NewUndefinedFieldDiagnostic("node", key, systemNodeContractFields)
 		}
 	}
 	return nil

@@ -1197,7 +1197,7 @@ func validatePolicySheetMappingKeys(node *yaml.Node, label string, allowed map[s
 			continue
 		}
 		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: %s field %q not in platform spec", label, key)
+			return NewUndefinedFieldDiagnostic(label, key, allowed)
 		}
 	}
 	return nil

@@ -19,6 +19,12 @@ type FlowStageDeclaration struct {
 	Description string `yaml:"description"`
 }
 
+var stageDeclarationFieldOptions = map[string]struct{}{
+	"initial":     {},
+	"terminal":    {},
+	"description": {},
+}
+
 func (d *FlowStageDeclarations) UnmarshalYAML(node *yaml.Node) error {
 	if d == nil {
 		return nil
@@ -76,15 +82,10 @@ func (s *FlowStageDeclaration) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("stage declaration must be a mapping")
 	}
-	allowed := map[string]struct{}{
-		"initial":     {},
-		"terminal":    {},
-		"description": {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: stage field %q not in platform spec", key)
+		if _, ok := stageDeclarationFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("stage", key, stageDeclarationFieldOptions)
 		}
 	}
 	type alias FlowStageDeclaration

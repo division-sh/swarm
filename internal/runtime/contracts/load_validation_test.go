@@ -367,7 +367,7 @@ func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *te
 			name:        "schema namespace is not public schema YAML",
 			schemaExtra: "namespace: legacy\n",
 			nodes:       "{}\n",
-			wantErr:     "UNDEFINED-FIELD",
+			wantErr:     "schema field \"namespace\" is not supported",
 		},
 		{
 			name:        "node idempotency table is retired public YAML",
@@ -594,7 +594,7 @@ func TestAgentRegistryEntryRejectsUnsupportedLayerSyntaxAndUnknownFields(t *test
 	}{
 		{name: "profile", body: "profile: cheap\n", contains: "reserved for future agent-defaults/profile support"},
 		{name: "runtime_id_template", body: "runtime_id_template: worker-{entity_id}\n", contains: "reserved for future agent-defaults/profile support"},
-		{name: "unknown", body: "surprise_field: true\n", contains: "UNDEFINED-FIELD"},
+		{name: "unknown", body: "surprise_field: true\n", contains: `agent field "surprise_field" is not supported.`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -949,7 +949,7 @@ func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 		{name: "advances_to list", fixture: "test-boot-advances-to-list", contains: "DIALECT-ADV-LIST"},
 		{name: "guard scalar", fixture: "test-boot-dialect-guard", contains: "DIALECT-GUARD"},
 		{name: "on_complete dict", fixture: "test-boot-on-complete-dict", contains: "DIALECT-OC-ORDER"},
-		{name: "undefined handler field", fixture: "test-boot-handler-field-undefined", contains: "UNDEFINED-FIELD"},
+		{name: "undefined handler field", fixture: "test-boot-handler-field-undefined", contains: "handler field \"custom_logic\" is not supported"},
 		{name: "deprecated handler field", fixture: "test-boot-deprecated-field", contains: "DEPRECATED"},
 	}
 	for _, tc := range cases {

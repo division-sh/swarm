@@ -153,7 +153,7 @@ summary:
 payload:
   interest_score: payload
 `), &spec)
-	if err == nil || !strings.Contains(err.Error(), `UNDEFINED-FIELD: mailbox field "from"`) {
+	if err == nil || !strings.Contains(err.Error(), `mailbox field "from" is not supported.`) {
 		t.Fatalf("yaml.Unmarshal error = %v, want mailbox from-field rejection", err)
 	}
 }

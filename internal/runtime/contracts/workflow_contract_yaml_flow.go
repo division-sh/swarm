@@ -31,26 +31,6 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
-	allowed := map[string]struct{}{
-		"id":                {},
-		"description":       {},
-		"condition":         {},
-		"when":              {},
-		"case":              {},
-		"range":             {},
-		"lookup":            {},
-		"validate":          {},
-		"compute_module":    {},
-		"else":              {},
-		"default":           {},
-		"advances_to":       {},
-		"emit":              {},
-		"action":            {},
-		"activity":          {},
-		"data_accumulation": {},
-		"compute":           {},
-		"fan_out":           {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
@@ -68,11 +48,38 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 		case "temporal", "join", "loop", "collection", "schedule":
 			return fmt.Errorf("UNSUPPORTED-POLICY-SHEET-ROW: rule field %q is outside the promoted selection-row scope", key)
 		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("UNDEFINED-FIELD: rule field %q not in platform spec", key)
+		if _, ok := ruleFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("rule", key, ruleFieldOptions)
 		}
 	}
 	return nil
+}
+
+var ruleFieldOptions = map[string]struct{}{
+	"id":                {},
+	"description":       {},
+	"condition":         {},
+	"when":              {},
+	"case":              {},
+	"range":             {},
+	"lookup":            {},
+	"validate":          {},
+	"compute_module":    {},
+	"else":              {},
+	"default":           {},
+	"advances_to":       {},
+	"emit":              {},
+	"action":            {},
+	"activity":          {},
+	"data_accumulation": {},
+	"compute":           {},
+	"fan_out":           {},
+}
+
+var templateInstanceFieldOptions = map[string]struct{}{
+	"by":          {},
+	"on_missing":  {},
+	"on_conflict": {},
 }
 
 func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
@@ -165,7 +172,7 @@ func (i *FlowTemplateInstanceDeclaration) UnmarshalYAML(node *yaml.Node) error {
 			}
 			out.OnConflict = strings.TrimSpace(out.OnConflict)
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: template instance field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("template instance", key, templateInstanceFieldOptions)
 		}
 	}
 	*i = out
@@ -241,6 +248,61 @@ func decodeFlowOutputPinEventsNode(node *yaml.Node) ([]string, []FlowOutputEvent
 	return events, pins, nil
 }
 
+var inputEventPinFieldOptions = map[string]struct{}{
+	"name":       {},
+	"event":      {},
+	"source":     {},
+	"address":    {},
+	"resolution": {},
+	"carries":    {},
+}
+
+var outputEventPinFieldOptions = map[string]struct{}{
+	"name":    {},
+	"event":   {},
+	"key":     {},
+	"carries": {},
+}
+
+var inputEventPinCarryFieldOptions = map[string]struct{}{
+	"from": {},
+	"type": {},
+}
+
+var inputEventPinResolutionFieldOptions = map[string]struct{}{
+	"mode":            {},
+	"instance_key":    {},
+	"aggregation":     {},
+	"window":          {},
+	"dedup_by":        {},
+	"singleton":       {},
+	"replies_to":      {},
+	"correlation_key": {},
+}
+
+var inputEventPinResolutionInstanceKeyFieldOptions = map[string]struct{}{
+	"from": {},
+	"mint": {},
+	"as":   {},
+}
+
+var inputEventPinAddressFieldOptions = map[string]struct{}{
+	"by":          {},
+	"source":      {},
+	"target":      {},
+	"cardinality": {},
+	"mode":        {},
+}
+
+var computeFieldOptions = map[string]struct{}{
+	"operation":   {},
+	"tiers":       {},
+	"keys":        {},
+	"params":      {},
+	"store_as":    {},
+	"description": {},
+}
+
 func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 	if node == nil || node.Kind == 0 {
 		return FlowInputEventPin{}, nil
@@ -289,12 +351,18 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin carries: %w", err)
 			}
 		default:
-			return FlowInputEventPin{}, fmt.Errorf("UNDEFINED-FIELD: input event pin field %q not in platform spec", key)
+			return FlowInputEventPin{}, NewUndefinedFieldDiagnostic("input event pin", key, inputEventPinFieldOptions)
 		}
 	}
 	out = out.normalized()
 	if out.PinName() == "" {
-		return FlowInputEventPin{}, fmt.Errorf("input event pin name is required")
+		return FlowInputEventPin{}, NewExpectedShapeDiagnostic(
+			"contract_loader.input_event_pin_name_required",
+			"schema.yaml.pins.inputs.events",
+			"input event pins must name the pin or use a scalar event name.",
+			"Use `events: [item.received]` or `events: [{name: item_received, event: item.received, source: external}]`.",
+			nil,
+		)
 	}
 	return out, nil
 }
@@ -336,12 +404,12 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 			}
 			out.Carries = carries
 		default:
-			return FlowOutputEventPin{}, fmt.Errorf("UNDEFINED-FIELD: output event pin field %q not in platform spec", key)
+			return FlowOutputEventPin{}, NewUndefinedFieldDiagnostic("output event pin", key, outputEventPinFieldOptions)
 		}
 	}
 	out = out.normalized()
 	if out.PinName() == "" {
-		return FlowOutputEventPin{}, fmt.Errorf("output event pin name is required")
+		return FlowOutputEventPin{}, NewOutputEventPinNameRequiredDiagnostic(nil)
 	}
 	return out, nil
 }
@@ -425,7 +493,7 @@ func (c *FlowInputPinCarry) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("carry.type: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: input event pin carry field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("input event pin carry", key, inputEventPinCarryFieldOptions)
 		}
 	}
 	*c = out.normalized()
@@ -485,7 +553,7 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("resolution.correlation_key: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: input event pin resolution field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("input event pin resolution", key, inputEventPinResolutionFieldOptions)
 		}
 	}
 	*r = out.normalized()
@@ -527,7 +595,7 @@ func (k *FlowInputPinResolutionInstanceKey) UnmarshalYAML(node *yaml.Node) error
 				return fmt.Errorf("instance_key.as: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: input event pin resolution.instance_key field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("input event pin resolution.instance_key", key, inputEventPinResolutionInstanceKeyFieldOptions)
 		}
 	}
 	*k = out.normalized()
@@ -573,7 +641,7 @@ func (a *FlowInputPinAddress) UnmarshalYAML(node *yaml.Node) error {
 				return fmt.Errorf("address.mode: %w", err)
 			}
 		default:
-			return fmt.Errorf("UNDEFINED-FIELD: input event pin address field %q not in platform spec", key)
+			return NewUndefinedFieldDiagnostic("input event pin address", key, inputEventPinAddressFieldOptions)
 		}
 	}
 	*a = out.normalized()
@@ -642,23 +710,15 @@ func validateComputeFieldNodes(node *yaml.Node) error {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil
 	}
-	allowed := map[string]struct{}{
-		"operation":   {},
-		"tiers":       {},
-		"keys":        {},
-		"params":      {},
-		"store_as":    {},
-		"description": {},
-	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		if key == "" {
 			continue
 		}
-		if _, ok := allowed[key]; ok {
+		if _, ok := computeFieldOptions[key]; ok {
 			continue
 		}
-		return fmt.Errorf("UNDEFINED-FIELD: compute field %q not in platform spec", key)
+		return NewUndefinedFieldDiagnostic("compute", key, computeFieldOptions)
 	}
 	return nil
 }
