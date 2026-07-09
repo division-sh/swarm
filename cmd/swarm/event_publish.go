@@ -12,6 +12,7 @@ import (
 
 const (
 	eventPublishMethod         = "event.publish"
+	eventPublishUse            = "publish <event-name>"
 	eventPublishExitValidation = 2
 	eventPublishExitRuntime    = 3
 	eventPublishExitAuth       = 4
@@ -70,10 +71,10 @@ type eventPublishDelivery struct {
 func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
 	publishOpts := eventPublishCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:     "publish <event-name>",
+		Use:     eventPublishUse,
 		Short:   "Publish an event onto the bus.",
 		Example: `  swarm event publish account.scan_requested --payload-json '{"handle": "@acme"}'`,
-		Args:    cobra.ExactArgs(1),
+		Args:    cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			publishOpts.payloadJSONSet = cmd.Flags().Changed("payload-json")
 			publishOpts.runIDSet = cmd.Flags().Changed("run-id")
@@ -129,7 +130,7 @@ func runEventPublishCommand(ctx context.Context, out, errOut io.Writer, args []s
 
 func (opts eventPublishCommandOptions) params(args []string) (string, map[string]any, error) {
 	if len(args) != 1 {
-		return "", nil, fmt.Errorf("event publish requires <event-name>")
+		return "", nil, newCLIArgCountDiagnosticFromUse("swarm event publish", "publish", eventPublishUse, args, cliArgCountRule{exact: 1}, "")
 	}
 	eventName := strings.TrimSpace(args[0])
 	if eventName == "" {

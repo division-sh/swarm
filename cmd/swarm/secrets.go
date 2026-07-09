@@ -88,7 +88,7 @@ func newSecretsSetCommand(ctx context.Context, repo string) *cobra.Command {
 			if len(args) > 1 {
 				return fmt.Errorf("secret values must be provided through hidden prompt or stdin, not argv")
 			}
-			return fmt.Errorf("secret key is required")
+			return newCLIArgCountDiagnostic(cmd, args, cliArgCountRule{exact: 1})
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, err := readSecretValue(cmd.InOrStdin(), cmd.ErrOrStderr(), stdin)
@@ -226,7 +226,7 @@ func newSecretsRemoveCommand(ctx context.Context, repo string) *cobra.Command {
 		Use:     "rm <key>",
 		Aliases: []string{"remove"},
 		Short:   "Remove a secret from the local file tier.",
-		Args:    cobra.ExactArgs(1),
+		Args:    cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := buildCredentialStore()
 			if err != nil {
@@ -246,6 +246,7 @@ func newSecretsRemoveCommand(ctx context.Context, repo string) *cobra.Command {
 			return nil
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List secret keys with `swarm secrets list`.")
 	return cmd
 }
 

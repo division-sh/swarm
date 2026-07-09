@@ -165,10 +165,10 @@ func TestAgentDeliveriesRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing id", args: []string{"agent", "deliveries"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing id", args: []string{"agent", "deliveries"}, wantStderr: "requires <agent-id>"},
 		{name: "blank id", args: []string{"agent", "deliveries", "  "}, wantStderr: "agent id is required"},
 		{name: "invalid id", args: []string{"agent", "deliveries", "bad id!"}, wantStderr: "agent id must match OpaqueId pattern"},
-		{name: "extra arg", args: []string{"agent", "deliveries", "agent-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "extra arg", args: []string{"agent", "deliveries", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "deliveries", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
 		{name: "limit too small", args: []string{"agent", "deliveries", "agent-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 200"},
 		{name: "limit too large", args: []string{"agent", "deliveries", "agent-1", "--limit", "201"}, wantStderr: "--limit must be between 1 and 200"},

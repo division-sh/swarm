@@ -197,11 +197,12 @@ func newMailboxViewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view <mailbox-item-id>",
 		Short: "View one mailbox item.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMailboxViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List mailbox item ids with `swarm mailbox list`.")
 	bindCLIAPIConnectionFlags(cmd, &apiOpts)
 	return cmd
 }
@@ -215,7 +216,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "approve <mailbox-item-id>",
 		Short: "Approve a pending mailbox item.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := actionOpts
 			runOpts.decisionPayloadFileSet = cmd.Flags().Changed("decision-payload")
@@ -223,6 +224,7 @@ func newMailboxApproveCommand(opts rootCommandOptions) *cobra.Command {
 			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List mailbox item ids with `swarm mailbox list`.")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	cmd.Flags().StringVar(&actionOpts.decisionPayloadFile, "decision-payload", "", "Read optional terminal decision event JSON object from file")
@@ -240,11 +242,12 @@ func newMailboxRejectCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reject <mailbox-item-id>",
 		Short: "Reject a pending mailbox item.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List mailbox item ids with `swarm mailbox list`.")
 	cmd.Flags().StringVar(&actionOpts.reason, "reason", "", "Required rejection reason")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -261,11 +264,12 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "defer <mailbox-item-id>",
 		Short: "Defer a pending mailbox item.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runMailboxDecisionCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List mailbox item ids with `swarm mailbox list`.")
 	cmd.Flags().StringVar(&actionOpts.until, "until", "", "Required RFC3339 timestamp")
 	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")

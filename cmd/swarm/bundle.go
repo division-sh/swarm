@@ -193,7 +193,7 @@ func newBundleShowCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <bundle-hash>",
 		Short: "Show one bundle's details.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := showOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -201,6 +201,7 @@ func newBundleShowCommand(opts rootCommandOptions) *cobra.Command {
 			return runBundleShowCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), showOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List bundle hashes with `swarm bundle list`.")
 	bindCLIOutputFlags(cmd, &showOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &showOpts.apiOptions)
 	return cmd
@@ -211,7 +212,7 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents <bundle-hash>",
 		Short: "List the agents a bundle declares.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := agentsOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -219,6 +220,7 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 			return runBundleAgentsCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), agentsOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List bundle hashes with `swarm bundle list`.")
 	bindCLIOutputFlags(cmd, &agentsOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &agentsOpts.apiOptions)
 	return cmd
@@ -240,12 +242,22 @@ func newBundleBuildCommand(repoRoot string) *cobra.Command {
 	return cmd
 }
 
+const bundleRegisterUse = "register <registration-envelope-yaml> | register --contracts <contracts-directory>"
+
 func newBundleRegisterCommand(repoRoot string, opts rootCommandOptions) *cobra.Command {
 	registerOpts := bundleRegisterCommandOptions{apiOptions: opts, repoRoot: repoRoot}
 	cmd := &cobra.Command{
-		Use:   "register <registration-envelope-yaml> | register --contracts <contracts-directory>",
+		Use:   bundleRegisterUse,
 		Short: "Register a contract bundle with the runtime.",
-		Args:  cobra.ArbitraryArgs,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("contracts") {
+				if len(args) == 0 {
+					return nil
+				}
+				return newCLIArgCountDiagnostic(cmd, args, cliArgCountRule{max: 0})
+			}
+			return cliExactArgs(1)(cmd, args)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			registerOpts.dataBlobSet = cmd.Flags().Changed("data-blob")
 			registerOpts.contractsSet = cmd.Flags().Changed("contracts")
@@ -270,7 +282,7 @@ func newBundleDeleteCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <bundle-hash>",
 		Short: "Delete a registered bundle.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deleteOpts.forceSet = cmd.Flags().Changed("force")
 			deleteOpts.dryRunSet = cmd.Flags().Changed("dry-run")
@@ -281,6 +293,7 @@ func newBundleDeleteCommand(opts rootCommandOptions) *cobra.Command {
 			return runBundleDeleteCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), deleteOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List bundle hashes with `swarm bundle list`.")
 	cmd.Flags().BoolVar(&deleteOpts.force, "force", false, "Force bundle deletion by quiescing affected active work before deleting")
 	cmd.Flags().BoolVar(&deleteOpts.dryRun, "dry-run", false, "Plan bundle deletion without applying destructive changes")
 	cmd.Flags().StringVar(&deleteOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for bundle.delete")
@@ -512,7 +525,7 @@ func (opts bundleRegisterCommandOptions) params(args []string) (map[string]any, 
 		return opts.contractsDirectoryParams(args)
 	}
 	if len(args) != 1 {
-		return nil, fmt.Errorf("register requires <registration-envelope-yaml> or --contracts <contracts-directory>")
+		return nil, newCLIArgCountDiagnosticFromUse("swarm bundle register", "register", bundleRegisterUse, args, cliArgCountRule{exact: 1}, "")
 	}
 	return opts.preparedEnvelopeParams(args[0])
 }
@@ -540,7 +553,7 @@ func (opts bundleRegisterCommandOptions) preparedEnvelopeParams(envelopePath str
 
 func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string) (map[string]any, error) {
 	if len(args) != 0 {
-		return nil, fmt.Errorf("--contracts cannot be combined with a registration envelope argument")
+		return nil, newCLIArgCountDiagnosticFromUse("swarm bundle register", "register", bundleRegisterUse, args, cliArgCountRule{max: 0}, "")
 	}
 	if opts.dataBlobSet {
 		return nil, fmt.Errorf("--data-blob cannot be used with --contracts")

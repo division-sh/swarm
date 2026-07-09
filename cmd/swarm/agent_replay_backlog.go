@@ -11,6 +11,7 @@ import (
 
 const (
 	agentReplayBacklogMethod         = "agent.replay_backlog"
+	agentReplayBacklogUse            = "replay-backlog <agent-id>"
 	agentReplayBacklogExitValidation = 2
 	agentReplayBacklogExitRuntime    = 3
 	agentReplayBacklogExitAuth       = 4
@@ -31,13 +32,14 @@ type agentReplayBacklogResult struct {
 func newAgentReplayBacklogCommand(opts rootCommandOptions) *cobra.Command {
 	replayOpts := agentReplayBacklogCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "replay-backlog <agent-id>",
+		Use:   agentReplayBacklogUse,
 		Short: "Replay an agent's undelivered event backlog.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentReplayBacklogCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, replayOpts)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &replayOpts.apiOptions, cliAPICommandClassMutating, "swarm agent replay-backlog")
@@ -72,7 +74,7 @@ func runAgentReplayBacklogCommand(ctx context.Context, out, errOut io.Writer, ar
 
 func validateAgentReplayBacklogArgs(args []string) (string, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("agent replay-backlog requires <agent-id>")
+		return "", newCLIArgCountDiagnosticFromUse("swarm agent replay-backlog", "replay-backlog", agentReplayBacklogUse, args, cliArgCountRule{exact: 1}, "List agent ids with `swarm agent list`.")
 	}
 	agentID := strings.TrimSpace(args[0])
 	if agentID == "" {

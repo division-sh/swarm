@@ -289,7 +289,7 @@ func TestEntityCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "list invalid limit low", args: []string{"entity", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
 		{name: "list invalid run id", args: []string{"entity", "list", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},
 		{name: "list blank flow", args: []string{"entity", "list", "--flow", " "}, wantStderr: "--flow must not be empty"},
-		{name: "view missing id", args: []string{"entity", "view"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "view missing id", args: []string{"entity", "view"}, wantStderr: "requires <entity-id>"},
 		{name: "view blank id", args: []string{"entity", "view", " "}, wantStderr: "entity id is required"},
 		{name: "view invalid id", args: []string{"entity", "view", "bad id!"}, wantStderr: "entity id must match OpaqueId pattern"},
 		{name: "view invalid run id", args: []string{"entity", "view", "entity-1", "--run-id", "bad id!"}, wantStderr: "--run-id must match OpaqueId pattern"},

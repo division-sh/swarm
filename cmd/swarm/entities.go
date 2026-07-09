@@ -161,12 +161,13 @@ func newEntityViewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view <entity-id>",
 		Short: "View one entity's state.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			viewOpts.runIDSet = cmd.Flags().Changed("run-id")
 			return runEntityViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], viewOpts)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List entity ids with `swarm entity list`.")
 	cmd.Flags().StringVar(&viewOpts.runID, "run-id", "", "Disambiguate entities reused across runs")
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	return cmd

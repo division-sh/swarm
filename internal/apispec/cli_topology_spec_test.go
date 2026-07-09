@@ -196,6 +196,18 @@ func TestCLIDiagnosticConventionPromotedToOutputContract(t *testing.T) {
 	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "good"), "[BLOCKER] accumulator_input_producer_path")
 	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "bad"), "v1 RPC request failed")
 	assertSequenceContainsSubstring(t, mustMappingValue(t, examples, "bad"), "test_quiescence_ready")
+
+	argCount := mustMappingValue(t, convention, "arg_count_diagnostics")
+	assertScalarValue(t, mustMappingValue(t, argCount, "promoted_by"), "#1818")
+	assertScalarValue(t, mustMappingValue(t, argCount, "canonical_owner"), "platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention.arg_count_diagnostics")
+	assertScalarValue(t, mustMappingValue(t, argCount, "implementation_owner"), "cmd/swarm/cli_arg_count.go")
+	assertScalarContains(t, mustMappingValue(t, argCount, "scope"), "raw Cobra")
+	assertScalarContains(t, mustMappingValue(t, argCount, "scope"), "command-local `len(args)` checks")
+	assertScalarContains(t, mustMappingValue(t, argCount, "structural_rule"), "shared arg-count validator/formatter")
+	assertScalarContains(t, mustMappingValue(t, argCount, "structural_rule"), "`Use` metadata")
+	assertScalarContains(t, mustMappingValue(t, argCount, "rendering_rule"), "quote the received positional")
+	assertScalarContains(t, mustMappingValue(t, argCount, "secret_material_split"), "MUST NOT use the generic quoted-token evidence path")
+	assertScalarContains(t, mustMappingValue(t, argCount, "conformance_guard"), "cobra.ExactArgs")
 }
 
 func TestCLITopologyRevisionV22IsImplementedHistoricalRecord(t *testing.T) {

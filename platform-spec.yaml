@@ -15069,6 +15069,35 @@ cli_specification:
           - 'v1 RPC request failed: Post "http://127.0.0.1:1/v1/rpc": dial tcp 127.0.0.1:1: connect: connection refused'
           - 'run status: test_quiescence_ready=true heuristics=none blocking_layer='
           - 'renamed-key adapters are tracked by an internal issue'
+        arg_count_diagnostics:
+          promoted_by: '#1818'
+          canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.diagnostic_convention.arg_count_diagnostics
+          implementation_owner: cmd/swarm/cli_arg_count.go
+          scope: >
+            Shared source authority for public positional argument-count diagnostics on promoted CLI commands. This
+            covers too-few and too-many positional args for commands that previously used raw Cobra
+            `ExactArgs`/`MaximumNArgs` or equivalent command-local `len(args)` checks. It does not govern unknown
+            flags, unsupported enum values, domain flag conflicts, ID-prefix resolution, or secret-material argv
+            safety diagnostics.
+          structural_rule: >
+            Promoted positional commands MUST use the shared arg-count validator/formatter owner instead of raw
+            Cobra arg-count validators or hand-written count strings. The formatter derives the command path and
+            one-line positional usage from the command's `Use` metadata; per-command code may only declare a true
+            discovery hint through the command annotation consumed by the formatter.
+          rendering_rule: >
+            Human stderr uses one concise `ERROR:` problem line, a one-line `Usage: swarm ...` positional
+            signature, and an optional true discovery hint. Too-many diagnostics quote the received positional
+            tokens. Too-few diagnostics name the missing positional; when some earlier positionals were supplied,
+            the diagnostic also states which positionals were already present. Validation exits with code 2 before
+            runtime/API side effects.
+          secret_material_split: >
+            `swarm secrets set <key>` missing-key validation is arg-count. Extra argv values for secret material are
+            a safety diagnostic and MUST NOT use the generic quoted-token evidence path because that would echo
+            secret material.
+          conformance_guard: >
+            `cmd/swarm/cli_output_conformance_registry_test.go` structurally rejects raw
+            `cobra.ExactArgs`/`cobra.MaximumNArgs`/`cobra.MinimumNArgs`/`cobra.RangeArgs` uses and stale raw Cobra
+            `accepts N arg(s)` expectations for promoted CLI arg-count diagnostics.
       modes:
         default_text:
           invocation: no output-mode flag
@@ -15147,7 +15176,8 @@ cli_specification:
         - Broad short-ID adoption and ID-prefix drillability remain owned by #1815.
         - Run-trace business-event fidelity and runtime-log hiding remain owned by #1816.
         - Vocabulary/status/detail-depth rewrites remain owned by #1817/#1820.
-        - Arg/Cobra error rendering remains owned by #1818.
+        - Unknown flags, unsupported enum values, domain flag conflicts, and non-positional validation remain
+          outside #1818 arg-count diagnostics unless separately promoted.
         - Mutation summaries and streaming/follow rendering are not table/display closure proof for #1814.
         canonical_fact_rule: >
           Runtime-state commands render facts returned by their canonical API owner at /v1/rpc or /v1/ws. They

@@ -314,7 +314,7 @@ func TestEventPublishRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing event name", args: []string{"event", "publish", "--payload-json", "{}"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing event name", args: []string{"event", "publish", "--payload-json", "{}"}, wantStderr: "requires <event-name>"},
 		{name: "blank event name", args: []string{"event", "publish", "  ", "--payload-json", "{}"}, wantStderr: "event name is required"},
 		{name: "missing payload", args: []string{"event", "publish", "scan.requested"}, wantStderr: "requires --payload-json"},
 		{name: "blank payload", args: []string{"event", "publish", "scan.requested", "--payload-json", "  "}, wantStderr: "requires --payload-json"},

@@ -504,7 +504,7 @@ func newCompletionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion <bash|zsh|fish|powershell>",
 		Short: "Generate shell completion scripts.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := cmd.Root()
 			switch strings.ToLower(strings.TrimSpace(args[0])) {

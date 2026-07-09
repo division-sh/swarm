@@ -91,9 +91,9 @@ func TestAgentReplayBacklogRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing id", args: []string{"agent", "replay-backlog"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing id", args: []string{"agent", "replay-backlog"}, wantStderr: "requires <agent-id>"},
 		{name: "blank id", args: []string{"agent", "replay-backlog", "  "}, wantStderr: "agent id is required"},
-		{name: "extra arg", args: []string{"agent", "replay-backlog", "agent-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "extra arg", args: []string{"agent", "replay-backlog", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported event id flag", args: []string{"agent", "replay-backlog", "agent-1", "--event-id", "event-1"}, wantStderr: "unknown flag"},
 		{name: "unsupported flag", args: []string{"agent", "replay-backlog", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
 	} {
