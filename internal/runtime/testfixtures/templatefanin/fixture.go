@@ -94,7 +94,7 @@ func deliveryYAML(opts Options) string {
 	if opts.DeliveryMany {
 		return "    delivery: many\n"
 	}
-	return "    delivery: one\n"
+	return ""
 }
 
 func legacyMapYAML(opts Options) string {
@@ -201,14 +201,10 @@ portfolio-collector:
   subscribes_to: [operating.reported]
   event_handlers:
     operating.reported:
-      select_entity:
-        by:
-          portfolio_id: payload.portfolio_id
       accumulate:
         into: operating_reports
         from: payload
-        window: `+accumulateWindowYAML(opts)+`
-        dedup_by: `+accumulateDedupYAML(opts)+`
+`+accumulateWindowYAML(opts)+accumulateDedupYAML(opts)+`
 `)
 }
 
@@ -265,19 +261,16 @@ func singletonYAML(opts Options) string {
 
 func accumulateWindowYAML(opts Options) string {
 	if opts.AccumulateWindowMismatch {
-		return "payload.operating_id"
+		return "        window: payload.operating_id\n"
 	}
-	return "payload.period_id"
+	return ""
 }
 
 func accumulateDedupYAML(opts Options) string {
 	if opts.AccumulateDedupMismatch {
-		return "payload.operating_id"
+		return "        dedup_by: payload.operating_id\n"
 	}
-	if opts.EventIDDedup {
-		return "event.id"
-	}
-	return "payload.report_id"
+	return ""
 }
 
 func repoRoot(t testing.TB) string {

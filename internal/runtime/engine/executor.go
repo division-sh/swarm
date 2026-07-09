@@ -846,6 +846,10 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	if spec == nil {
 		return false, nil
 	}
+	spec, err := e.effectiveAccumulatorSpec(frame, spec)
+	if err != nil {
+		return false, err
+	}
 	frame.result.AccumulatorCompletionDiagnostics.Relevant = true
 	frame.result.AccumulatorCompletionDiagnostics.CompletionMode = spec.Completion.String()
 	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
@@ -1037,7 +1041,11 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	if spec == nil {
 		return nil
 	}
-	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, frame.req.Handler.Accumulate)
+	accumulateSpec, effectiveErr := e.effectiveAccumulatorSpec(frame, frame.req.Handler.Accumulate)
+	if effectiveErr != nil {
+		return effectiveErr
+	}
+	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, accumulateSpec)
 	if bucketErr != nil {
 		return bucketErr
 	}
@@ -1790,7 +1798,11 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		}
 		return nil
 	}
-	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, frame.req.Handler.Accumulate)
+	accumulateSpec, effectiveErr := e.effectiveAccumulatorSpec(frame, frame.req.Handler.Accumulate)
+	if effectiveErr != nil {
+		return effectiveErr
+	}
+	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, accumulateSpec)
 	if bucketErr != nil {
 		return bucketErr
 	}
@@ -1863,6 +1875,98 @@ func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runt
 	frame.accumulatorBucketRef = bucketRef
 	frame.hasAccumulatorBucketRef = true
 	return bucketRef, true, nil
+}
+
+func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (*runtimecontracts.AccumulateSpec, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	pin, ok, err := e.fanInInputPinForFrame(frame)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return spec, nil
+	}
+	if dedup := strings.TrimSpace(spec.DedupBy); dedup != "" {
+		return nil, fmt.Errorf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", frame.req.NodeID.String(), string(handlerAccumulatorEventType(frame.req)), dedup)
+	}
+	if window := strings.TrimSpace(spec.Window); window != "" {
+		return nil, fmt.Errorf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", frame.req.NodeID.String(), string(handlerAccumulatorEventType(frame.req)), window)
+	}
+	resolution := pin.Resolution
+	window := strings.TrimSpace(resolution.Window)
+	if window == "" {
+		return nil, fmt.Errorf("resolution mode fan-in stream requires window for receiver input pin %s.%s", frame.req.FlowID.String(), pin.PinName())
+	}
+	dedupBy := normalizedStringList(resolution.DedupBy)
+	if len(dedupBy) == 0 {
+		return nil, fmt.Errorf("resolution mode fan-in stream requires dedup_by for receiver input pin %s.%s; sender identity is not an implicit default", frame.req.FlowID.String(), pin.PinName())
+	}
+	if len(dedupBy) != 1 {
+		return nil, fmt.Errorf("resolution mode fan-in stream supports exactly one dedup_by field in this slice for receiver input pin %s.%s, got %v", frame.req.FlowID.String(), pin.PinName(), dedupBy)
+	}
+	effective := *spec
+	effective.Window = window
+	effective.WindowPath = paths.Parse(window)
+	effective.DedupBy = dedupBy[0]
+	effective.DedupPath = paths.Parse(dedupBy[0])
+	return &effective, nil
+}
+
+func (e *Executor) fanInInputPinForFrame(frame *executionFrame) (runtimecontracts.FlowInputEventPin, bool, error) {
+	if e == nil || e.deps.Source == nil || frame == nil {
+		return runtimecontracts.FlowInputEventPin{}, false, nil
+	}
+	flowID := strings.TrimSpace(frame.req.FlowID.String())
+	if flowID == "" {
+		return runtimecontracts.FlowInputEventPin{}, false, nil
+	}
+	handlerEvent := string(handlerAccumulatorEventType(frame.req))
+	var matched runtimecontracts.FlowInputEventPin
+	var matchedPins []string
+	for _, pin := range e.deps.Source.FlowInputEventPins(flowID) {
+		if pin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
+			continue
+		}
+		if e.fanInInputPinMatchesHandlerEvent(flowID, pin, handlerEvent) {
+			matched = pin
+			matchedPins = append(matchedPins, pin.PinName())
+		}
+	}
+	if len(matchedPins) > 1 {
+		return runtimecontracts.FlowInputEventPin{}, false, fmt.Errorf("receiver handler %s.%s matches multiple fan-in input pins %v; fan-in accumulator semantics require exactly one receiver input pin owner", frame.req.NodeID.String(), handlerEvent, matchedPins)
+	}
+	if len(matchedPins) == 1 {
+		return matched, true, nil
+	}
+	return runtimecontracts.FlowInputEventPin{}, false, nil
+}
+
+func (e *Executor) fanInInputPinMatchesHandlerEvent(flowID string, pin runtimecontracts.FlowInputEventPin, handlerEvent string) bool {
+	handlerEvent = strings.TrimSpace(handlerEvent)
+	inputEvent := strings.TrimSpace(pin.EventType())
+	if handlerEvent == "" || inputEvent == "" {
+		return false
+	}
+	if e.deps.Source.FlowEventMatches(flowID, handlerEvent, inputEvent) {
+		return true
+	}
+	resolvedInput := runtimeeventidentity.Normalize(e.deps.Source.ResolveFlowEventReference(flowID, inputEvent))
+	handler := runtimeeventidentity.Normalize(handlerEvent)
+	return handler == resolvedInput || handler == runtimeeventidentity.Normalize(inputEvent) || handler == runtimeeventidentity.Normalize(pin.PinName())
+}
+
+func normalizedStringList(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out = append(out, value)
+	}
+	return out
 }
 
 func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {
