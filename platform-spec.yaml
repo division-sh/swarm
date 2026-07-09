@@ -15397,9 +15397,11 @@ cli_specification:
         conformance_guard: >
           `cmd/swarm/cli_identifier_registry_test.go` compares this registry with the production registry, inventories
           visible Cobra positional signatures and direct/indirect string flags, requires explicit different-concept
-          accounting instead of an identifier-name regex, binds resolver callsites to non-safety resolver rows, requires
+          accounting instead of an identifier-name regex, rejects unsupported family-policy enums and invalid
+          family/source/scope/normalization combinations, binds resolver callsites to non-safety resolver rows, requires
           identifier-bearing shared-table columns to declare their family, rejects direct identifier short-slice
-          bypasses, and prevents display shortening while any family row is full-only, unresolved, or split.
+          bypasses, and prevents display shortening while any family row is full-only, unresolved, or split. Resolver
+          normalization also fails closed if an unsupported mode reaches execution.
       modes:
         default_text:
           invocation: no output-mode flag

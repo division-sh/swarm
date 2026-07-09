@@ -61,7 +61,10 @@ func resolveCLIIdentifier(ctx context.Context, client *cliAPIClient, request cli
 	if err != nil {
 		return "", err
 	}
-	exact, matches := matchCLIIdentifierCandidates(policy, value, candidates)
+	exact, matches, err := matchCLIIdentifierCandidates(policy, value, candidates)
+	if err != nil {
+		return "", err
+	}
 	if exact != "" {
 		return exact, nil
 	}
@@ -214,13 +217,19 @@ func listAllCLIIdentifierCandidatePages(
 	}
 }
 
-func matchCLIIdentifierCandidates(policy cliIdentifierFamilyPolicy, value string, candidates []cliIdentifierCandidate) (string, []cliIdentifierCandidate) {
-	normalized := normalizeCLIIdentifierLookup(policy, value)
+func matchCLIIdentifierCandidates(policy cliIdentifierFamilyPolicy, value string, candidates []cliIdentifierCandidate) (string, []cliIdentifierCandidate, error) {
+	normalized, err := normalizeCLIIdentifierLookup(policy, value)
+	if err != nil {
+		return "", nil, err
+	}
 	matches := make([]cliIdentifierCandidate, 0)
 	for _, candidate := range candidates {
-		candidateValue := normalizeCLIIdentifierLookup(policy, candidate.ID)
+		candidateValue, err := normalizeCLIIdentifierLookup(policy, candidate.ID)
+		if err != nil {
+			return "", nil, err
+		}
 		if normalized == candidateValue {
-			return candidate.ID, nil
+			return candidate.ID, nil, nil
 		}
 		if policy.NormalizationMode == cliIdentifierNormalizeBundleDigest {
 			digest := strings.TrimPrefix(candidateValue, "bundle-v1:sha256:")
@@ -234,19 +243,19 @@ func matchCLIIdentifierCandidates(policy cliIdentifierFamilyPolicy, value string
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool { return matches[i].ID < matches[j].ID })
-	return "", matches
+	return "", matches, nil
 }
 
-func normalizeCLIIdentifierLookup(policy cliIdentifierFamilyPolicy, value string) string {
+func normalizeCLIIdentifierLookup(policy cliIdentifierFamilyPolicy, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	switch policy.NormalizationMode {
 	case cliIdentifierNormalizeCaseSensitive, cliIdentifierNormalizeFlowPath:
-		return value
+		return value, nil
 	case cliIdentifierNormalizeBundleDigest:
 		value = strings.ToLower(value)
-		return strings.TrimPrefix(value, "sha256:")
+		return strings.TrimPrefix(value, "sha256:"), nil
 	default:
-		return value
+		return "", fmt.Errorf("identifier family %q has unsupported normalization mode %q", policy.Family, policy.NormalizationMode)
 	}
 }
 

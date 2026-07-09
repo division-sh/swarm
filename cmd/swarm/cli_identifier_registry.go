@@ -313,14 +313,68 @@ func cliIdentifierFamilyPolicyFor(family cliIdentifierFamily) (cliIdentifierFami
 	return policy, ok
 }
 
+func expectedCLIIdentifierFamilyPolicyModes(family cliIdentifierFamily) (cliIdentifierCandidateSource, cliIdentifierScopeMode, cliIdentifierNormalizationMode, bool) {
+	switch family {
+	case cliIdentifierFamilyAgent:
+		return cliIdentifierSourceAgentList, cliIdentifierScopeGlobalBounded, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyBundle:
+		return cliIdentifierSourceBundleList, cliIdentifierScopeBoundedCatalog, cliIdentifierNormalizeBundleDigest, true
+	case cliIdentifierFamilyRun:
+		return cliIdentifierSourceRunList, cliIdentifierScopeUnboundedFull, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyEntity:
+		return cliIdentifierSourceEntityList, cliIdentifierScopeFullRunRequired, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyEvent:
+		return cliIdentifierSourceEventList, cliIdentifierScopeUnboundedFull, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilySession:
+		return cliIdentifierSourceConversation, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyFork:
+		return cliIdentifierSourceForkList, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyMailbox:
+		return cliIdentifierSourceMailboxList, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyFlowInstance:
+		return cliIdentifierSourceUnpromoted, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeFlowPath, true
+	case cliIdentifierFamilyContext:
+		return cliIdentifierSourceLocalContext, cliIdentifierScopeLocalBounded, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilySubscriber:
+		return cliIdentifierSourcePolymorphic, cliIdentifierScopePolymorphicFull, cliIdentifierNormalizeCaseSensitive, true
+	default:
+		return "", "", "", false
+	}
+}
+
+func validateCLIIdentifierFamilyPolicy(family cliIdentifierFamily, policy cliIdentifierFamilyPolicy) error {
+	expectedSource, expectedScope, expectedNormalization, ok := expectedCLIIdentifierFamilyPolicyModes(family)
+	if !ok {
+		return fmt.Errorf("identifier family policy %q has unsupported family", family)
+	}
+	if policy.Family != family {
+		return fmt.Errorf("identifier family policy %q has mismatched family %q", family, policy.Family)
+	}
+	if strings.TrimSpace(policy.ScopeRule) == "" || strings.TrimSpace(policy.NormalizationRule) == "" {
+		return fmt.Errorf("identifier family policy %q is incomplete", family)
+	}
+	if policy.CandidateSource != expectedSource || policy.ScopeMode != expectedScope || policy.NormalizationMode != expectedNormalization {
+		return fmt.Errorf(
+			"identifier family policy %q has unsupported source/scope/normalization combination %q/%q/%q",
+			family,
+			policy.CandidateSource,
+			policy.ScopeMode,
+			policy.NormalizationMode,
+		)
+	}
+	switch policy.DisplayProjection {
+	case cliIdentifierDisplayFull:
+	default:
+		return fmt.Errorf("identifier family policy %q has unsupported display projection %q", family, policy.DisplayProjection)
+	}
+	return nil
+}
+
 func validateCLIIdentifierRegistry() error {
 	seen := map[string]struct{}{}
 	for family, policy := range cliIdentifierFamilyRegistry {
-		if family == cliIdentifierFamilyNone || policy.Family != family {
-			return fmt.Errorf("identifier family policy %q has mismatched family %q", family, policy.Family)
-		}
-		if policy.CandidateSource == "" || policy.ScopeMode == "" || strings.TrimSpace(policy.ScopeRule) == "" || policy.NormalizationMode == "" || strings.TrimSpace(policy.NormalizationRule) == "" || policy.DisplayProjection == "" {
-			return fmt.Errorf("identifier family policy %q is incomplete", family)
+		if err := validateCLIIdentifierFamilyPolicy(family, policy); err != nil {
+			return err
 		}
 	}
 	for _, row := range cliIdentifierInputRegistry {
