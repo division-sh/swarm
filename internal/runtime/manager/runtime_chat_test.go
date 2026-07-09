@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ type chatTestAgent struct {
 	runID           string
 	directiveEvent  string
 	directiveSource string
+	err             error
 	calls           int
 }
 
@@ -33,6 +35,9 @@ func (a *chatTestAgent) BoardStep(_ context.Context, directive runtimeagentcontr
 	a.runID = directive.Event.RunID()
 	a.directiveEvent = directive.Event.ID()
 	a.directiveSource = string(directive.Event.Type())
+	if a.err != nil {
+		return "", a.err
+	}
 	return "ok", nil
 }
 
@@ -100,11 +105,26 @@ func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLo
 }
 
 type directiveEventStore struct {
-	events []events.Event
+	events   []events.Event
+	receipts []directivePipelineReceipt
+}
+
+type directivePipelineReceipt struct {
+	eventID    string
+	outcome    string
+	reasonCode string
 }
 
 func (s *directiveEventStore) AppendEvent(_ context.Context, evt events.Event) error {
 	s.events = append(s.events, evt)
+	return nil
+}
+func (s *directiveEventStore) UpsertPipelineReceipt(_ context.Context, eventID, outcome, reasonCode string) error {
+	s.receipts = append(s.receipts, directivePipelineReceipt{
+		eventID:    eventID,
+		outcome:    outcome,
+		reasonCode: reasonCode,
+	})
 	return nil
 }
 func (*directiveEventStore) InsertEventDeliveries(context.Context, string, []string) error {
@@ -144,6 +164,9 @@ func TestAgentManager_ChatWithAgentPersistsDirectiveEventBeforeBoardStep(t *test
 	}
 	if bus.store.events[0].ID() != agent.directiveEvent || bus.store.events[0].RunID() != agent.runID {
 		t.Fatalf("persisted directive event = %#v, board saw event=%q run=%q", bus.store.events[0], agent.directiveEvent, agent.runID)
+	}
+	if len(bus.store.receipts) != 1 || bus.store.receipts[0].eventID != agent.directiveEvent || bus.store.receipts[0].outcome != "processed" {
+		t.Fatalf("directive receipts = %#v, want processed receipt for %s", bus.store.receipts, agent.directiveEvent)
 	}
 }
 
@@ -192,6 +215,46 @@ func TestAgentManager_SendDirectivePersistsCanonicalDirectiveEventBeforeBoardSte
 	}
 	if agent.calls != 1 || agent.runID != runID || agent.directiveEvent != evt.ID() {
 		t.Fatalf("board step saw calls=%d run=%q event=%q, want event %q", agent.calls, agent.runID, agent.directiveEvent, evt.ID())
+	}
+	if len(bus.store.receipts) != 1 || bus.store.receipts[0].eventID != evt.ID() || bus.store.receipts[0].outcome != "processed" {
+		t.Fatalf("directive receipts = %#v, want processed receipt for %s", bus.store.receipts, evt.ID())
+	}
+}
+
+func TestAgentManager_SendDirectiveDoesNotMarkDirectiveProcessedWhenBoardStepFails(t *testing.T) {
+	runID := "00000000-0000-0000-0000-000000000702"
+	bus := &directiveTestBus{}
+	store := &directiveTargetStore{
+		target: runtimeagentcontrol.RunTargetResolution{
+			RunID: runID,
+			Mode:  runtimeagentcontrol.RunResolutionActiveSession,
+			ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{
+				SessionID: "00000000-0000-0000-0000-000000000802",
+				RunID:     runID,
+			}},
+		},
+	}
+	agent := &chatTestAgent{id: "campaign-coordinator", err: errors.New("board failed")}
+	am := NewAgentManager(bus, nil, store)
+	am.agents[agent.id] = agent
+
+	_, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:    agent.id,
+		Directive:  "run corpus",
+		Source:     runtimeagentcontrol.DirectiveSourceV1RPC,
+		OperatorID: "operator-token",
+	})
+	if err == nil || err.Error() != "board failed" {
+		t.Fatalf("SendDirective error = %v, want board failed", err)
+	}
+	if agent.calls != 1 || agent.runID != runID || agent.directiveEvent == "" {
+		t.Fatalf("board step saw calls=%d run=%q event=%q, want persisted directive attempt", agent.calls, agent.runID, agent.directiveEvent)
+	}
+	if bus.store == nil || len(bus.store.events) != 1 || bus.store.events[0].ID() != agent.directiveEvent {
+		t.Fatalf("persisted directive events = %#v, want event seen by failed BoardStep", bus.store)
+	}
+	if len(bus.store.receipts) != 0 {
+		t.Fatalf("directive receipts after failed BoardStep = %#v, want none", bus.store.receipts)
 	}
 }
 

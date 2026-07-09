@@ -410,6 +410,9 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
+	if err := am.markAgentDirectivePipelineReceipt(ctx, directiveEvent); err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
 	return runtimeagentcontrol.SendDirectiveResult{
 		AgentID:            agentID,
 		Response:           response,
@@ -470,14 +473,11 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 			if err := mutation.UpsertCommittedReplayScope(mutationCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 				return err
 			}
-			return mutation.UpsertPipelineReceipt(mutationCtx, evt.ID(), "processed", "")
+			return nil
 		})
 	}
 	if atomicStore, ok := eventStore.(runtimebus.AtomicEventReplayScopePersistence); ok && atomicStore != nil {
-		if err := atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-			return err
-		}
-		return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
+		return atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect)
 	}
 	if atomicStore, ok := eventStore.(runtimebus.AtomicEventPersistence); ok && atomicStore != nil {
 		if err := atomicStore.PersistEventWithDeliveries(eventCtx, evt, nil); err != nil {
@@ -488,7 +488,7 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 				return err
 			}
 		}
-		return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
+		return nil
 	}
 	if err := eventStore.AppendEvent(eventCtx, evt); err != nil {
 		return err
@@ -497,6 +497,21 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 		if err := scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (am *AgentManager) markAgentDirectivePipelineReceipt(ctx context.Context, evt events.Event) error {
+	if am.bus == nil {
+		return nil
+	}
+	eventStore := am.bus.Store()
+	if eventStore == nil {
+		return errors.New("event store is required for agent directive receipt persistence")
+	}
+	eventCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), strings.TrimSpace(evt.RunID()))
+	if owner, ok := am.bus.(bundleFingerprintContextOwner); ok && owner != nil {
+		eventCtx = owner.WithBundleFingerprint(eventCtx)
 	}
 	return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
 }
