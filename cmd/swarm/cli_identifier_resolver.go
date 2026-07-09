@@ -27,6 +27,9 @@ type cliIdentifierResolveRequest struct {
 }
 
 func resolveCLIIdentifier(ctx context.Context, client *cliAPIClient, request cliIdentifierResolveRequest) (string, error) {
+	if err := validateCLIIdentifierRegistry(); err != nil {
+		return "", err
+	}
 	row, ok := cliIdentifierRegistration(request.Command, request.Selector)
 	if !ok {
 		return "", fmt.Errorf("identifier input %s %s is not registered", request.Command, request.Selector)
@@ -34,11 +37,15 @@ func resolveCLIIdentifier(ctx context.Context, client *cliAPIClient, request cli
 	if row.Mode != cliIdentifierModeResolverBounded && row.Mode != cliIdentifierModeResolverScoped {
 		return "", fmt.Errorf("identifier input %s %s is not resolver-backed", request.Command, request.Selector)
 	}
+	policy, ok := cliIdentifierFamilyPolicyFor(row.Family)
+	if !ok {
+		return "", fmt.Errorf("identifier family %q is not registered", row.Family)
+	}
 	value := strings.TrimSpace(request.Value)
 	if value == "" {
 		return "", &cliAPIValidationError{message: fmt.Sprintf("ERROR: %s is required.", cliIdentifierSelectorName(request.Selector))}
 	}
-	if row.Family == cliIdentifierFamilyBundle {
+	if policy.NormalizationMode == cliIdentifierNormalizeBundleDigest {
 		if exact, err := validateBundleHashArg("bundle hash", value); err == nil {
 			return exact, nil
 		}
@@ -50,11 +57,11 @@ func resolveCLIIdentifier(ctx context.Context, client *cliAPIClient, request cli
 		return "", fmt.Errorf("identifier resolver requires an API client")
 	}
 
-	candidates, err := cliIdentifierCandidates(ctx, client, row, request.Scope)
+	candidates, err := cliIdentifierCandidates(ctx, client, policy, request.Scope)
 	if err != nil {
 		return "", err
 	}
-	exact, matches := matchCLIIdentifierCandidates(row.Family, value, candidates)
+	exact, matches := matchCLIIdentifierCandidates(policy, value, candidates)
 	if exact != "" {
 		return exact, nil
 	}
@@ -104,9 +111,29 @@ func validateBundleIdentifierPrefix(value string) error {
 	return nil
 }
 
-func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, row cliIdentifierInputRegistration, scope map[string]string) ([]cliIdentifierCandidate, error) {
-	switch row.Family {
-	case cliIdentifierFamilyAgent:
+func validateBundleIdentifierInput(value string) error {
+	value = strings.TrimSpace(value)
+	if _, err := validateBundleHashArg("bundle hash", value); err == nil {
+		return nil
+	}
+	return validateBundleIdentifierPrefix(value)
+}
+
+func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy cliIdentifierFamilyPolicy, scope map[string]string) ([]cliIdentifierCandidate, error) {
+	runID := ""
+	switch policy.ScopeMode {
+	case cliIdentifierScopeGlobalBounded, cliIdentifierScopeBoundedCatalog:
+	case cliIdentifierScopeFullRunRequired:
+		runID = strings.TrimSpace(scope["run_id"])
+		if runID == "" {
+			return nil, &cliAPIValidationError{message: "ERROR: entity prefixes require a full run ID.\n  Pass --run-id <full-run-id>, or use the full entity ID."}
+		}
+	default:
+		return nil, fmt.Errorf("identifier family %q scope %q is not resolver-backed", policy.Family, policy.ScopeMode)
+	}
+
+	switch policy.CandidateSource {
+	case cliIdentifierSourceAgentList:
 		var result agentListResult
 		if err := client.call(ctx, "agent.list", map[string]any{}, &result); err != nil {
 			return nil, err
@@ -119,16 +146,12 @@ func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, row cliI
 			out = append(out, cliIdentifierCandidate{ID: agent.AgentID, Status: agent.Status})
 		}
 		return out, nil
-	case cliIdentifierFamilyBundle:
+	case cliIdentifierSourceBundleList:
 		return listAllBundleIdentifierCandidates(ctx, client)
-	case cliIdentifierFamilyEntity:
-		runID := strings.TrimSpace(scope["run_id"])
-		if runID == "" {
-			return nil, &cliAPIValidationError{message: "ERROR: entity prefixes require a full run ID.\n  Pass --run-id <full-run-id>, or use the full entity ID."}
-		}
+	case cliIdentifierSourceEntityList:
 		return listAllEntityIdentifierCandidates(ctx, client, runID)
 	default:
-		return nil, fmt.Errorf("identifier family %q has no resolver candidate source", row.Family)
+		return nil, fmt.Errorf("identifier family %q candidate source %q is not resolver-backed", policy.Family, policy.CandidateSource)
 	}
 }
 
@@ -191,15 +214,15 @@ func listAllCLIIdentifierCandidatePages(
 	}
 }
 
-func matchCLIIdentifierCandidates(family cliIdentifierFamily, value string, candidates []cliIdentifierCandidate) (string, []cliIdentifierCandidate) {
-	normalized := normalizeCLIIdentifierLookup(family, value)
+func matchCLIIdentifierCandidates(policy cliIdentifierFamilyPolicy, value string, candidates []cliIdentifierCandidate) (string, []cliIdentifierCandidate) {
+	normalized := normalizeCLIIdentifierLookup(policy, value)
 	matches := make([]cliIdentifierCandidate, 0)
 	for _, candidate := range candidates {
-		candidateValue := normalizeCLIIdentifierLookup(family, candidate.ID)
+		candidateValue := normalizeCLIIdentifierLookup(policy, candidate.ID)
 		if normalized == candidateValue {
 			return candidate.ID, nil
 		}
-		if family == cliIdentifierFamilyBundle {
+		if policy.NormalizationMode == cliIdentifierNormalizeBundleDigest {
 			digest := strings.TrimPrefix(candidateValue, "bundle-v1:sha256:")
 			if strings.HasPrefix(candidateValue, normalized) || strings.HasPrefix(digest, normalized) {
 				matches = append(matches, candidate)
@@ -214,13 +237,17 @@ func matchCLIIdentifierCandidates(family cliIdentifierFamily, value string, cand
 	return "", matches
 }
 
-func normalizeCLIIdentifierLookup(family cliIdentifierFamily, value string) string {
+func normalizeCLIIdentifierLookup(policy cliIdentifierFamilyPolicy, value string) string {
 	value = strings.TrimSpace(value)
-	if family != cliIdentifierFamilyBundle {
+	switch policy.NormalizationMode {
+	case cliIdentifierNormalizeCaseSensitive, cliIdentifierNormalizeFlowPath:
+		return value
+	case cliIdentifierNormalizeBundleDigest:
+		value = strings.ToLower(value)
+		return strings.TrimPrefix(value, "sha256:")
+	default:
 		return value
 	}
-	value = strings.ToLower(value)
-	return strings.TrimPrefix(value, "sha256:")
 }
 
 func newCLIIdentifierNoMatchError(row cliIdentifierInputRegistration, value string) error {

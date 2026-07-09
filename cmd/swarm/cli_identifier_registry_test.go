@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,8 +29,21 @@ type cliIdentifierSpecRow struct {
 	ScopeRule string
 }
 
+type cliIdentifierSpecFamily struct {
+	CandidateSource           string
+	ScopeMode                 string
+	ScopeRule                 string
+	NormalizationMode         string
+	NormalizationRule         string
+	DisplayProjection         string
+	DisplayShorteningEligible bool
+}
+
 func TestCLIIdentifierRegistryMatchesAuthoritativeSpec(t *testing.T) {
-	specRows, familyEligibility := cliIdentifierSpecRows(t)
+	specRows, specFamilies := cliIdentifierSpecRows(t)
+	if err := validateCLIIdentifierRegistry(); err != nil {
+		t.Fatalf("production identifier registry is invalid: %v", err)
+	}
 	productionRows := map[string]cliIdentifierInputRegistration{}
 	for _, row := range cliIdentifierInputRegistry {
 		key := cliIdentifierRegistryKey(row.Command, row.Selector)
@@ -43,13 +61,29 @@ func TestCLIIdentifierRegistryMatchesAuthoritativeSpec(t *testing.T) {
 			t.Errorf("production identifier row missing from spec: %s %s", row.Command, row.Selector)
 			continue
 		}
-		if specRow.Family != string(row.Family) || specRow.Mode != string(row.Mode) || specRow.Safety != row.Safety || specRow.ScopeRule != row.ScopeRule {
+		if specRow.Family != string(row.Family) || specRow.Mode != string(row.Mode) || specRow.Safety != string(row.Safety) || specRow.ScopeRule != row.ScopeRule {
 			t.Errorf("identifier row %s %s differs: spec=%+v production=%+v", row.Command, row.Selector, specRow, row)
 		}
 	}
-	for family := range cliIdentifierFamilyRegistry {
-		if got, want := cliIdentifierFamilyDisplayEligible(family), familyEligibility[string(family)]; got != want {
-			t.Errorf("family %s display eligibility=%t, spec=%t", family, got, want)
+	if len(specFamilies) != len(cliIdentifierFamilyRegistry) {
+		t.Fatalf("identifier family count: spec=%d production=%d", len(specFamilies), len(cliIdentifierFamilyRegistry))
+	}
+	for family, policy := range cliIdentifierFamilyRegistry {
+		specFamily, ok := specFamilies[string(family)]
+		if !ok {
+			t.Errorf("production identifier family missing from spec: %s", family)
+			continue
+		}
+		if specFamily.CandidateSource != string(policy.CandidateSource) ||
+			specFamily.ScopeMode != string(policy.ScopeMode) ||
+			specFamily.ScopeRule != policy.ScopeRule ||
+			specFamily.NormalizationMode != string(policy.NormalizationMode) ||
+			specFamily.NormalizationRule != policy.NormalizationRule ||
+			specFamily.DisplayProjection != string(policy.DisplayProjection) {
+			t.Errorf("identifier family %s differs: spec=%+v production=%+v", family, specFamily, policy)
+		}
+		if got := cliIdentifierFamilyDisplayEligible(family); got != specFamily.DisplayShorteningEligible {
+			t.Errorf("family %s display eligibility=%t, spec=%t", family, got, specFamily.DisplayShorteningEligible)
 		}
 	}
 }
@@ -118,6 +152,187 @@ func TestCLIIdentifierRegistryRowsReferToLiveInputs(t *testing.T) {
 	for key := range cliIdentifierNonResourceStringFlags {
 		parts := strings.SplitN(key, "\x00", 2)
 		assertLive(parts[0], parts[1], "non-resource flag ledger")
+	}
+}
+
+func TestCLIIdentifierResolverCallsitesUseRegisteredReadRows(t *testing.T) {
+	count := 0
+	for _, path := range productionCLIGoFiles(t) {
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			name, ok := call.Fun.(*ast.Ident)
+			if !ok || (name.Name != "resolveCLIIdentifier" && name.Name != "resolveCLIIdentifierAfterNotFound") || len(call.Args) < 3 {
+				return true
+			}
+			request, ok := call.Args[2].(*ast.CompositeLit)
+			if !ok {
+				return true // shared helper forwarding its already-checked request
+			}
+			command, selector := cliIdentifierRequestLiteral(request)
+			if command == "" || selector == "" {
+				t.Errorf("%s resolver call must use literal Command and Selector", fileSet.Position(call.Pos()))
+				return true
+			}
+			row, ok := cliIdentifierRegistration(command, selector)
+			if !ok {
+				t.Errorf("%s resolver call is not registered: %s %s", fileSet.Position(call.Pos()), command, selector)
+				return true
+			}
+			if row.Mode != cliIdentifierModeResolverBounded && row.Mode != cliIdentifierModeResolverScoped {
+				t.Errorf("%s resolver call uses non-resolver mode %s: %s %s", fileSet.Position(call.Pos()), row.Mode, command, selector)
+			}
+			if row.Safety != "" {
+				t.Errorf("%s resolver call uses safety-classified row %s: %s %s", fileSet.Position(call.Pos()), row.Safety, command, selector)
+			}
+			count++
+			return true
+		})
+	}
+	if count != 6 {
+		t.Fatalf("literal production resolver callsites=%d, want 6", count)
+	}
+}
+
+func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
+	expected := map[string]cliIdentifierFamily{
+		"agents.go\x00AGENT_ID":              cliIdentifierFamilyAgent,
+		"agents.go\x00EVENT_ID":              cliIdentifierFamilyEvent,
+		"agents.go\x00RUN":                   cliIdentifierFamilyRun,
+		"agents.go\x00ENTITY":                cliIdentifierFamilyEntity,
+		"bundle.go\x00BUNDLE":                cliIdentifierFamilyBundle,
+		"bundle.go\x00AGENT":                 cliIdentifierFamilyAgent,
+		"bundle.go\x00FLOW_INSTANCE":         cliIdentifierFamilyFlowInstance,
+		"context_command.go\x00NAME":         cliIdentifierFamilyContext,
+		"control_mailbox.go\x00MAILBOX_ID":   cliIdentifierFamilyMailbox,
+		"control_mailbox.go\x00SOURCE_EVENT": cliIdentifierFamilyEvent,
+		"control_mailbox.go\x00ENTITY":       cliIdentifierFamilyEntity,
+		"conversations.go\x00SESSION_ID":     cliIdentifierFamilySession,
+		"conversations.go\x00AGENT":          cliIdentifierFamilyAgent,
+		"conversations.go\x00RUN":            cliIdentifierFamilyRun,
+		"conversations.go\x00EVENT_ID":       cliIdentifierFamilyEvent,
+		"diagnostics.go\x00RUN ID":           cliIdentifierFamilyRun,
+		"diagnostics.go\x00ID":               cliIdentifierFamilyEvent,
+		"diagnostics.go\x00SUBSCRIBER":       cliIdentifierFamilySubscriber,
+		"diagnostics.go\x00SESSION":          cliIdentifierFamilySession,
+		"diagnostics.go\x00EVENT ID":         cliIdentifierFamilyEvent,
+		"entities.go\x00ENTITY_ID":           cliIdentifierFamilyEntity,
+		"entities.go\x00RUN_ID":              cliIdentifierFamilyRun,
+		"entities.go\x00FLOW":                cliIdentifierFamilyFlowInstance,
+		"events.go\x00EVENT ID":              cliIdentifierFamilyEvent,
+		"events.go\x00RUN":                   cliIdentifierFamilyRun,
+		"events.go\x00ENTITY":                cliIdentifierFamilyEntity,
+		"forkchat.go\x00FORK_ID":             cliIdentifierFamilyFork,
+		"forkchat.go\x00SOURCE_SESSION":      cliIdentifierFamilySession,
+		"forkchat.go\x00SOURCE_AGENT":        cliIdentifierFamilyAgent,
+	}
+	seen := map[string]int{}
+	keyColumnExceptions := map[string]bool{
+		"agents.go\x00DELIVERY_ID":      true,
+		"connections.go\x00KEY":         true,
+		"conversations.go\x00TURN_ID":   true,
+		"diagnostics.go\x00DELIVERY ID": true,
+		"forkchat.go\x00TURN_ID":        true,
+		"incidents.go\x00INCIDENT ID":   true,
+		"secrets.go\x00KEY":             true,
+	}
+
+	for _, path := range productionCLIGoFiles(t) {
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		base := filepath.Base(path)
+		ast.Inspect(file, func(node ast.Node) bool {
+			literal, ok := node.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			header, family, keyColumn := cliIdentifierTableColumnLiteral(literal)
+			if header == "" {
+				return true
+			}
+			key := base + "\x00" + header
+			if want, ok := expected[key]; ok {
+				seen[key]++
+				if family != want {
+					t.Errorf("%s table column %q family=%s, want %s", base, header, family, want)
+				}
+			} else if family != cliIdentifierFamilyNone {
+				t.Errorf("%s table column %q declares unaccounted identifier family %s", base, header, family)
+			}
+			if keyColumn && family == cliIdentifierFamilyNone && cliIdentifierLikeHeader(header) && !keyColumnExceptions[key] {
+				t.Errorf("%s key column %q must declare IdentifierFamily or an explicit non-resource/result-only exception", base, header)
+			}
+			return true
+		})
+	}
+	for key := range expected {
+		if seen[key] == 0 {
+			t.Errorf("expected identifier display column %q was not found", key)
+		}
+	}
+}
+
+func TestCLIIdentifierDisplayHasNoDirectShortSliceBypass(t *testing.T) {
+	for _, path := range productionCLIGoFiles(t) {
+		fileSet := token.NewFileSet()
+		file, err := parser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			slice, ok := node.(*ast.SliceExpr)
+			if !ok || slice.High == nil || !cliIdentifierLikeExpression(slice.X) {
+				return true
+			}
+			high, ok := slice.High.(*ast.BasicLit)
+			if !ok || high.Kind != token.INT {
+				return true
+			}
+			limit, err := strconv.Atoi(high.Value)
+			if err == nil && limit <= 16 {
+				t.Errorf("%s directly short-slices an identifier-like expression; route display through formatCLIIdentifierForDisplay", fileSet.Position(slice.Pos()))
+			}
+			return true
+		})
+	}
+}
+
+func TestCLIIdentifierSafetyRowsCannotBecomeResolverBacked(t *testing.T) {
+	original := cliIdentifierInputRegistry
+	defer func() { cliIdentifierInputRegistry = original }()
+	cliIdentifierInputRegistry = append(append([]cliIdentifierInputRegistration{}, original...), cliIdentifierInputRegistration{
+		Command: "swarm unsafe-test", Selector: "arg:agent-id", Family: cliIdentifierFamilyAgent,
+		Mode: cliIdentifierModeResolverBounded, Safety: "mutating",
+	})
+	if err := validateCLIIdentifierRegistry(); err == nil || !strings.Contains(err.Error(), "must be full_only") {
+		t.Fatalf("unsafe resolver registry validation error=%v", err)
+	}
+	if cliIdentifierFamilyDisplayEligible(cliIdentifierFamilyAgent) {
+		t.Fatal("invalid safety row must fail display eligibility closed")
+	}
+	if got := formatCLIIdentifierForDisplay(cliIdentifierFamilyAgent, "agent-alpha"); got != "agent-alpha" {
+		t.Fatalf("invalid registry display=%q, want full identifier", got)
+	}
+}
+
+func TestCLIIdentifierResolverRejectsFullOnlyAndSplitRows(t *testing.T) {
+	for _, request := range []cliIdentifierResolveRequest{
+		{Command: "swarm agent restart", Selector: "arg:agent-id", Value: "agent-a"},
+		{Command: "swarm forkchat view", Selector: "arg:fork-id", Value: "fork-a"},
+	} {
+		if _, err := resolveCLIIdentifier(context.Background(), nil, request); err == nil || !strings.Contains(err.Error(), "is not resolver-backed") {
+			t.Errorf("%s %s error=%v, want non-resolver rejection", request.Command, request.Selector, err)
+		}
 	}
 }
 
@@ -555,7 +770,7 @@ func TestCLIIdentifierUnscopedEntityDoesNotEnumerate(t *testing.T) {
 	}
 }
 
-func cliIdentifierSpecRows(t *testing.T) (map[string]cliIdentifierSpecRow, map[string]bool) {
+func cliIdentifierSpecRows(t *testing.T) (map[string]cliIdentifierSpecRow, map[string]cliIdentifierSpecFamily) {
 	t.Helper()
 	spec := loadCLISpecification(t)
 	identifierResolution := driftMappingValue(driftMappingValue(driftMappingValue(spec, "foundations"), "output_contract"), "identifier_resolution")
@@ -580,14 +795,22 @@ func cliIdentifierSpecRows(t *testing.T) (map[string]cliIdentifierSpecRow, map[s
 		}
 		out[key] = row
 	}
-	eligibility := map[string]bool{}
+	specFamilies := map[string]cliIdentifierSpecFamily{}
 	families := driftMappingValue(identifierResolution, "family_registry")
 	for i := 0; i+1 < len(families.Content); i += 2 {
 		family := families.Content[i].Value
-		value := cliOutputRegistryScalar(families.Content[i+1], "display_shortening_eligible")
-		eligibility[family] = value == "true"
+		node := families.Content[i+1]
+		specFamilies[family] = cliIdentifierSpecFamily{
+			CandidateSource:           cliOutputRegistryScalar(node, "candidate_source"),
+			ScopeMode:                 cliOutputRegistryScalar(node, "scope_mode"),
+			ScopeRule:                 cliOutputRegistryScalar(node, "scope_rule"),
+			NormalizationMode:         cliOutputRegistryScalar(node, "normalization_mode"),
+			NormalizationRule:         cliOutputRegistryScalar(node, "normalization"),
+			DisplayProjection:         cliOutputRegistryScalar(node, "display_projection"),
+			DisplayShorteningEligible: cliOutputRegistryScalar(node, "display_shortening_eligible") == "true",
+		}
 	}
-	return out, eligibility
+	return out, specFamilies
 }
 
 var cliUseAnglePositionals = regexp.MustCompile(`<([a-z0-9-|]+)>`)
@@ -767,4 +990,101 @@ func writeIdentifierRPCError(t *testing.T, w http.ResponseWriter, id, code strin
 	}); err != nil {
 		t.Fatalf("write error response: %v", err)
 	}
+}
+
+func productionCLIGoFiles(t *testing.T) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(repoRoot(), "cmd", "swarm", "*.go"))
+	if err != nil {
+		t.Fatalf("glob production CLI files: %v", err)
+	}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if !strings.HasSuffix(path, "_test.go") {
+			out = append(out, path)
+		}
+	}
+	return out
+}
+
+func cliIdentifierRequestLiteral(literal *ast.CompositeLit) (string, string) {
+	values := map[string]string{}
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		name, ok := field.Key.(*ast.Ident)
+		if !ok || (name.Name != "Command" && name.Name != "Selector") {
+			continue
+		}
+		value, ok := field.Value.(*ast.BasicLit)
+		if !ok || value.Kind != token.STRING {
+			continue
+		}
+		values[name.Name], _ = strconv.Unquote(value.Value)
+	}
+	return values["Command"], values["Selector"]
+}
+
+func cliIdentifierTableColumnLiteral(literal *ast.CompositeLit) (string, cliIdentifierFamily, bool) {
+	header := ""
+	family := cliIdentifierFamilyNone
+	keyColumn := false
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		name, ok := field.Key.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		switch name.Name {
+		case "Header":
+			value, ok := field.Value.(*ast.BasicLit)
+			if ok && value.Kind == token.STRING {
+				header, _ = strconv.Unquote(value.Value)
+			}
+		case "IdentifierFamily":
+			value, ok := field.Value.(*ast.Ident)
+			if ok {
+				family = cliIdentifierFamily(strings.TrimPrefix(value.Name, "cliIdentifierFamily"))
+				family = cliIdentifierFamily(strings.ToLower(string(family)))
+				if family == "flowinstance" {
+					family = cliIdentifierFamilyFlowInstance
+				}
+			}
+		case "KeyColumn":
+			value, ok := field.Value.(*ast.Ident)
+			keyColumn = ok && value.Name == "true"
+		}
+	}
+	return header, family, keyColumn
+}
+
+func cliIdentifierLikeHeader(header string) bool {
+	header = strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(header), "_", " "))
+	return header == "ID" || header == "KEY" || header == "BUNDLE" || strings.HasSuffix(header, " ID")
+}
+
+func cliIdentifierLikeExpression(expression ast.Expr) bool {
+	var names []string
+	ast.Inspect(expression, func(node ast.Node) bool {
+		switch value := node.(type) {
+		case *ast.Ident:
+			names = append(names, strings.ToLower(value.Name))
+		case *ast.SelectorExpr:
+			names = append(names, strings.ToLower(value.Sel.Name))
+		}
+		return true
+	})
+	for _, name := range names {
+		for _, marker := range []string{"id", "hash", "agent", "bundle", "context", "entity", "event", "fork", "mailbox", "run", "session", "subscriber"} {
+			if strings.Contains(name, marker) {
+				return true
+			}
+		}
+	}
+	return false
 }

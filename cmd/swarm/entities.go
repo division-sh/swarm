@@ -504,9 +504,9 @@ func writeEntityListResult(out io.Writer, result entityListResult) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "ENTITY_ID", KeyColumn: true},
-			{Header: "RUN_ID", KeyColumn: true},
-			{Header: "FLOW"},
+			{Header: "ENTITY_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEntity},
+			{Header: "RUN_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyRun},
+			{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 			{Header: "TYPE"},
 			{Header: "STATE"},
 			{Header: "REVISION"},

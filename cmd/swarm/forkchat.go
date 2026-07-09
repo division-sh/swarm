@@ -889,9 +889,9 @@ func writeForkChatListResult(out io.Writer, result forkChatListResult) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "FORK_ID", KeyColumn: true},
-			{Header: "SOURCE_SESSION"},
-			{Header: "SOURCE_AGENT"},
+			{Header: "FORK_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyFork},
+			{Header: "SOURCE_SESSION", IdentifierFamily: cliIdentifierFamilySession},
+			{Header: "SOURCE_AGENT", IdentifierFamily: cliIdentifierFamilyAgent},
 			{Header: "STATE"},
 			{Header: "TURNS"},
 			{Header: "EXPIRES_AT"},

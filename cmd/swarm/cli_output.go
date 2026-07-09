@@ -60,9 +60,10 @@ type cliDisplayPolicyProvider interface {
 }
 
 type cliTableColumn struct {
-	Header      string
-	KeyColumn   bool
-	Truncatable bool
+	Header           string
+	KeyColumn        bool
+	Truncatable      bool
+	IdentifierFamily cliIdentifierFamily
 }
 
 type cliTable struct {
@@ -175,7 +176,7 @@ func writeCLITable(out io.Writer, table cliTable) {
 		normalized := make([]string, len(columns))
 		for i := range columns {
 			if i < len(row) {
-				normalized[i] = cliDisplayDash(row[i])
+				normalized[i] = formatCLIIdentifierForDisplay(columns[i].IdentifierFamily, cliDisplayDash(row[i]))
 			} else {
 				normalized[i] = "-"
 			}
