@@ -873,7 +873,7 @@ func mailboxV1Decision(status, decision string) string {
 		return "approved"
 	case "reject":
 		return "rejected"
-	case "approved", "rejected", "deferred", "expired":
+	case "approved", "rejected", "expired":
 		return decision
 	}
 	if status == "expired" || status == "cancelled" {

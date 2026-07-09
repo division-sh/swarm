@@ -4337,7 +4337,9 @@ engine:
         SQLite supports explicit local-dev runtime tool entity reads, searches, CEL-backed query/metrics filtering, entity
         creation, entity field updates with mutation-log rows, generated role-scoped current-entity tools, human_task_request
         mailbox row creation, and human_task_decide decision/requeue/weekly-budget reads through the same executor behavior
-        owner used by Postgres. Backend-specific SQL belongs to the store implementations; the runtime tool executor must
+        owner used by Postgres. Deferred human-task decisions share the platform mailbox defer storage model: status remains
+        pending, decision remains unset, requeue_date is persisted as deferred_until, and defer after expiry fails closed.
+        Backend-specific SQL belongs to the store implementations; the runtime tool executor must
         not receive a raw SQLite SQL handle as a compatibility seam for these surfaces.
       excludes:
       - public operator mailbox API decisions owned by api_specification.method_catalog.mailbox.*
