@@ -591,6 +591,57 @@ func TestTokenSourceGitHubAppInstallationExchangeErrorRedactsGeneratedJWT(t *tes
 	}
 }
 
+func TestTokenSourceGitHubAppInstallationHTTPErrorBodyRedactsGeneratedJWT(t *testing.T) {
+	ctx := context.Background()
+	privateKeyPEM, _ := testGitHubAppPrivateKey(t)
+	var rawAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": "provider echoed Authorization=" + rawAuth,
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore(Record{
+		Key:            "github_app",
+		Provider:       "github",
+		GrantType:      GrantGitHubAppInstallation,
+		APIBaseURL:     server.URL,
+		ClientID:       "github-app-client-id",
+		InstallationID: "1001",
+		PrivateKey:     privateKeyPEM,
+		GrantModel:     managedcredentialmodel.GrantModelInstallation,
+		AccessToken:    "expired-install-token",
+		Status:         StatusConnected,
+		ExpiresAt:      time.Now().Add(-time.Hour),
+	})
+	source := TokenSource{Store: store}
+	_, _, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:            "github_app",
+		GrantType:      GrantGitHubAppInstallation,
+		InstallationID: "1001",
+	})
+	if err == nil {
+		t.Fatal("AccessToken error = nil, want provider HTTP failure")
+	}
+	jwt := strings.TrimPrefix(rawAuth, "Bearer ")
+	if jwt == "" || jwt == rawAuth {
+		t.Fatalf("captured auth header = %q, want bearer GitHub App JWT", rawAuth)
+	}
+	if strings.Contains(err.Error(), jwt) || strings.Contains(err.Error(), rawAuth) {
+		t.Fatalf("AccessToken error leaked generated JWT: %v", err)
+	}
+	stored, ok, getErr := store.Get(ctx, "github_app")
+	if getErr != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, getErr)
+	}
+	if strings.Contains(stored.Failure, jwt) || strings.Contains(stored.Failure, rawAuth) {
+		t.Fatalf("stored failure leaked generated JWT: %q", stored.Failure)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
