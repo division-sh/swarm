@@ -165,9 +165,7 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 		t.Fatalf("%s 429 attempt error = %q, want Graph TooManyRequests fixture shape", backend.name, rateLimitAttempt.Error)
 	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, rateLimitAttempt.ResultEventID, rateLimitAttempt.ResultEventType)
-	if got := countMicrosoftGraphFailureEventsForSource(t, backend, rateLimitInboundEventID); got != 1 {
-		t.Fatalf("%s 429 failure events = %d, want 1", backend.name, got)
-	}
+	waitForMicrosoftGraphFailureEventsForSource(t, backend, rateLimitInboundEventID, 1, "429")
 
 	assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t, backend, fake, "missing credential", "323456792", runtimemanagedcredentials.NewMemoryStore())
 	unconnected := microsoftGraphClientCredentialsRecord(fake.server.URL, "", time.Now().Add(time.Hour))
@@ -466,9 +464,7 @@ func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, ba
 	if got := countMicrosoftGraphActivityAttemptsForSource(t, backend, inboundEventID); got != 0 {
 		t.Fatalf("%s %s activity attempts = %d, want 0", backend.name, label, got)
 	}
-	if got := countMicrosoftGraphFailureEventsForSource(t, backend, inboundEventID); got != 1 {
-		t.Fatalf("%s %s failure events = %d, want 1", backend.name, label, got)
-	}
+	waitForMicrosoftGraphFailureEventsForSource(t, backend, inboundEventID, 1, label)
 }
 
 func waitForMicrosoftGraphTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {
@@ -612,6 +608,22 @@ func countMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManage
 		t.Fatalf("%s count failure events for source event %s: %v", backend.name, sourceEventID, err)
 	}
 	return count
+}
+
+func waitForMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string, want int, label string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var got int
+	for {
+		got = countMicrosoftGraphFailureEventsForSource(t, backend, sourceEventID)
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s %s failure events for source %s = %d, want %d", backend.name, label, sourceEventID, got, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func microsoftGraphMessageSubject(body map[string]any) string {
