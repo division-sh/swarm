@@ -112,6 +112,9 @@ func TestTestPostgresDSNRejectsNonTransportableSemantics(t *testing.T) {
 	}
 	pq.RegisterGSSProvider(func() (pq.GSS, error) { return nil, nil })
 	t.Cleanup(func() { pq.RegisterGSSProvider(nil) })
+	if _, err := parseTestPostgresDSN("host=127.0.0.1 user=tester password=secret sslmode=disable"); err != nil {
+		t.Fatalf("registered but unused GSS provider changed password-auth DSN acceptance: %v", err)
+	}
 
 	tests := []struct {
 		name     string

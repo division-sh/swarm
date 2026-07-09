@@ -34,6 +34,28 @@ func TestSharedPostgresStateRejectsBadDSNWithoutDockerFallback(t *testing.T) {
 	}
 }
 
+func TestSharedPostgresStateRejectsUnreachableDSNWithoutDockerFallback(t *testing.T) {
+	var output bytes.Buffer
+	state := &sharedPostgresState{reportWriter: &output}
+	err := state.startLockedWithDSN("host=127.0.0.1 port=1 user=tester password=secret dbname=postgres sslmode=disable connect_timeout=1")
+	if err == nil {
+		t.Fatal("expected unreachable DSN failure")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"SWARM_TEST_POSTGRES_DSN is set but unusable",
+		"Docker fallback is disabled",
+		"external postgres not ready",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error %q missing %q", message, want)
+		}
+	}
+	if output.Len() != 0 {
+		t.Fatalf("unreachable explicit DSN announced Docker fallback: %q", output.String())
+	}
+}
+
 func TestSharedPostgresStateReportsDockerFallbackOnce(t *testing.T) {
 	var output bytes.Buffer
 	state := &sharedPostgresState{reportWriter: &output}
