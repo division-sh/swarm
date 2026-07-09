@@ -71,8 +71,8 @@ func TestLowerCompositionConnectRoutePlansUsesFanInStreamSingularTarget(t *testi
 	if plan.TargetKind != ConnectTargetKindTarget || plan.ResolutionKind != ConnectResolutionStatic || plan.Delivery != ConnectDeliveryOne {
 		t.Fatalf("fan-in routing shape = delivery:%s target_kind:%s resolution:%s, want one/target/static", plan.Delivery, plan.TargetKind, plan.ResolutionKind)
 	}
-	if plan.Target.FlowID != templatefanin.ReceiverFlowID || plan.Target.FlowInstance != templatefanin.ReceiverFlowInstance {
-		t.Fatalf("fan-in target = %#v, want receiver singleton %s", plan.Target, templatefanin.ReceiverFlowInstance)
+	if plan.Target.FlowID != templatefanin.ReceiverFlowID || plan.Target.FlowInstance != templatefanin.ReceiverFlowInstance || plan.Target.EntityID != flowidentity.EntityID(templatefanin.ReceiverFlowInstance) {
+		t.Fatalf("fan-in target = %#v, want receiver singleton %s with entity %s", plan.Target, templatefanin.ReceiverFlowInstance, flowidentity.EntityID(templatefanin.ReceiverFlowInstance))
 	}
 }
 

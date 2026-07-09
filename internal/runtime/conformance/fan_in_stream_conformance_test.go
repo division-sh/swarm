@@ -11,6 +11,7 @@ import (
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -55,13 +56,13 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	}
 
 	state := runtimeengine.StateSnapshot{
-		EntityID:     "portfolio-entity",
 		CurrentState: "active",
 		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
 	}
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
+		EntityID:     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
 	}.Normalized()
 	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-a", "operating/a", "report-1", "2026-Q1", 100)
 	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
@@ -121,13 +122,13 @@ func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
 	}
 
 	state := runtimeengine.StateSnapshot{
-		EntityID:     "portfolio-entity",
 		CurrentState: "active",
 		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
 	}
 	target := events.RouteIdentity{
 		FlowID:       templatefanin.ReceiverFlowID,
 		FlowInstance: templatefanin.ReceiverFlowInstance,
+		EntityID:     runtimeflowidentity.EntityID(templatefanin.ReceiverFlowInstance),
 	}.Normalized()
 
 	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/a", "report-1", "2026-Q1", 100)
@@ -228,8 +229,12 @@ func fanInStreamPublishAndExecute(
 	if err := eb.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish(%s): %v", evt.ID(), err)
 	}
-	if !fanInStreamRoutesContain(store.deliveryRoutes[evt.ID()], target) {
+	deliveryTarget, ok := fanInStreamTargetRoute(store.deliveryRoutes[evt.ID()], target)
+	if !ok {
 		t.Fatalf("persisted routes for %s = %#v, want singleton target %#v", evt.ID(), store.deliveryRoutes[evt.ID()], target)
+	}
+	if deliveryTarget.EntityID == "" {
+		t.Fatalf("persisted route for %s has empty entity_id: %#v", evt.ID(), deliveryTarget)
 	}
 	if got := store.scopes[evt.ID()]; got != runtimereplayclaim.CommittedReplayScopeSubscribed {
 		t.Fatalf("committed replay scope for %s = %q, want subscribed", evt.ID(), got)
@@ -237,15 +242,20 @@ func fanInStreamPublishAndExecute(
 	if err := eb.PublishPersistedRecipients(ctx, evt, nil); err != nil {
 		t.Fatalf("PublishPersistedRecipients(%s): %v", evt.ID(), err)
 	}
+	delivered := eventtest.TargetRouted(evt, deliveryTarget)
+	if got := delivered.EntityID(); got != deliveryTarget.EntityID {
+		t.Fatalf("delivered event %s entity_id = %q, want delivery target entity %q", evt.ID(), got, deliveryTarget.EntityID)
+	}
+	executionState := state
+	executionState.EntityID = ""
 	result, err := exec.Execute(ctx, runtimeengine.ExecutionRequest{
-		EntityID:        state.EntityID,
 		NodeID:          runtimeidentity.NodeID(templatefanin.ReceiverNodeID),
 		FlowID:          runtimeidentity.FlowID(templatefanin.ReceiverFlowID),
-		Event:           evt,
+		Event:           delivered,
 		HandlerEventKey: templatefanin.ReceiverEvent,
 		Handler:         handler,
 		ProducerRoute:   target,
-		State:           state,
+		State:           executionState,
 		MaxDepth:        10,
 		ChainDepth:      0,
 		ExecutionID:     evt.ID(),
@@ -254,7 +264,7 @@ func fanInStreamPublishAndExecute(
 		t.Fatalf("Execute(%s): %v", evt.ID(), err)
 	}
 	return runtimeengine.StateSnapshot{
-		EntityID:     state.EntityID,
+		EntityID:     runtimeidentity.EntityID(deliveryTarget.EntityID),
 		CurrentState: state.CurrentState,
 		StateCarrier: result.StateMutation.StateCarrier,
 	}
@@ -287,14 +297,20 @@ func fanInStreamEvent(eventType, id, flowInstance, reportID, periodID string, re
 }
 
 func fanInStreamRoutesContain(routes []events.DeliveryRoute, target events.RouteIdentity) bool {
+	_, ok := fanInStreamTargetRoute(routes, target)
+	return ok
+}
+
+func fanInStreamTargetRoute(routes []events.DeliveryRoute, target events.RouteIdentity) (events.RouteIdentity, bool) {
 	target = target.Normalized()
 	for _, route := range events.NormalizeDeliveryRoutes(routes) {
 		if route.SubscriberType == "node" && route.SubscriberID == templatefanin.ReceiverNodeID &&
-			route.Target.FlowID == target.FlowID && route.Target.FlowInstance == target.FlowInstance {
-			return true
+			route.Target.FlowID == target.FlowID && route.Target.FlowInstance == target.FlowInstance &&
+			route.Target.EntityID == target.EntityID {
+			return route.Target, true
 		}
 	}
-	return false
+	return events.RouteIdentity{}, false
 }
 
 func fanInStreamAccumulatorItemCount(t *testing.T, buckets map[string]map[string]any, window string) int {

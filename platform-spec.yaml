@@ -8445,12 +8445,16 @@ flow_model:
                 fail-closed until evidence requires it. `window` is required and
                 must be one top-level payload field. The route plan reuses
                 singular target delivery and carries fan-in metadata for proof;
-                it MUST NOT introduce a new fan-in target kind. Dedup/window
-                ownership is split deliberately: the pin declares the seam,
-                bootverify proves the receiving handler accumulator uses the
-                same `dedup_by` and `window`, and the accumulate kernel enforces
-                idempotency and window partitioning. EventBus/delivery MUST NOT
-                add an independent fan-in dedup/window owner.
+                it MUST NOT introduce a new fan-in target kind. The receiver
+                input pin is the only authoring owner for fan-in `dedup_by` and
+                `window` semantics. The receiving handler accumulator declares
+                only the accumulator target/source; handler redeclaration of
+                `accumulate.dedup_by` or `accumulate.window` for a fan-in input
+                is invalid. Runtime derives the effective accumulator
+                dedup/window from the matched receiver input pin, and the
+                accumulate kernel enforces idempotency and window partitioning
+                from those derived values. EventBus/delivery MUST NOT add an
+                independent fan-in dedup/window owner.
               fail_closed:
               - aggregation other than stream, including barrier
               - missing or empty singleton
@@ -8463,8 +8467,8 @@ flow_model:
               - receiver not mode: singleton/coordinator
               - missing receiver handler for the input event
               - receiver handler missing accumulate
-              - receiver accumulate.dedup_by not matching pin dedup_by
-              - receiver accumulate.window not matching pin window
+              - receiver handler redeclares accumulate.dedup_by for fan-in
+              - receiver handler redeclares accumulate.window for fan-in
               - combined legacy input address
               - combined connect.using.instance or connect.map
               - delivery topology other than one
@@ -8521,9 +8525,10 @@ flow_model:
           - same committed select-or-create event replay reuses persisted delivery route/scope and does not reselect or recreate after descriptor drift
           - standalone #1828 `template-select-or-create` conformance fixture verifies and materializes through the canonical select-or-create route plan
           - route-plan lowering records fan-in stream metadata, required singleton/window/dedup_by, singular target delivery, and no new target kind
-          - bootverify proves fan-in pin dedup/window declarations match the receiving accumulate handler declarations
+          - bootverify rejects fan-in receiver handler redeclaration of accumulate.dedup_by or accumulate.window
           - EventBus publish/preflight for fan-in stream routes multiple source contributions to the same explicit singleton/coordinator receiver route
-          - receiver accumulator kernel enforces declared dedup_by idempotency and partitions arrivals by declared window
+          - executor derives effective fan-in accumulator dedup/window from the matched receiver input pin, with no handler-local redeclaration
+          - receiver accumulator kernel enforces pin-declared dedup_by idempotency and partitions arrivals by pin-declared window
           - same committed fan-in stream event replay reuses persisted delivery route/scope and does not re-infer receiver identity from sender/source state
           - standalone #1828 `template-fan-in` conformance fixture verifies and materializes through the canonical fan-in stream route plan
         implementation_slice_1546:
