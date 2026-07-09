@@ -309,7 +309,15 @@ func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCo
 	}
 	var result agentDetailResult
 	if err := client.call(ctx, "agent.get", map[string]any{"agent_id": agentID}, &result); err != nil {
-		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
+		agentID, err = resolveCLIIdentifierAfterNotFound(ctx, client, cliIdentifierResolveRequest{
+			Command: "swarm agent view", Selector: "arg:agent-id", Value: agentID,
+		}, err, "AGENT_NOT_FOUND")
+		if err != nil {
+			return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
+		}
+		if err := client.call(ctx, "agent.get", map[string]any{"agent_id": agentID}, &result); err != nil {
+			return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
+		}
 	}
 	if err := validateAgentDetailResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
@@ -329,7 +337,16 @@ func runAgentDeliveriesCommand(ctx context.Context, out, errOut io.Writer, opts 
 	}
 	var result agentDeliveryLifecycleListResult
 	if err := client.call(ctx, "agent.delivery_lifecycle", params, &result); err != nil {
-		return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
+		resolvedAgentID, resolveErr := resolveCLIIdentifierAfterNotFound(ctx, client, cliIdentifierResolveRequest{
+			Command: "swarm agent deliveries", Selector: "arg:agent-id", Value: agentID,
+		}, err, "AGENT_NOT_FOUND")
+		if resolveErr != nil {
+			return returnCLIAPIError(errOut, resolveErr, agentDeliveryLifecycleAPIErrorClassifier())
+		}
+		params["agent_id"] = resolvedAgentID
+		if err := client.call(ctx, "agent.delivery_lifecycle", params, &result); err != nil {
+			return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
+		}
 	}
 	if err := validateAgentDeliveryLifecycleListResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
@@ -355,7 +372,16 @@ func runAgentDiagnoseCommand(ctx context.Context, out, errOut io.Writer, opts ag
 	}
 	var result agentDiagnosisResult
 	if err := client.call(ctx, "agent.diagnose", params, &result); err != nil {
-		return returnCLIAPIError(errOut, err, agentDiagnoseAPIErrorClassifier())
+		resolvedAgentID, resolveErr := resolveCLIIdentifierAfterNotFound(ctx, client, cliIdentifierResolveRequest{
+			Command: "swarm agent diagnose", Selector: "arg:agent-id", Value: agentID,
+		}, err, "AGENT_NOT_FOUND")
+		if resolveErr != nil {
+			return returnCLIAPIError(errOut, resolveErr, agentDiagnoseAPIErrorClassifier())
+		}
+		params["agent_id"] = resolvedAgentID
+		if err := client.call(ctx, "agent.diagnose", params, &result); err != nil {
+			return returnCLIAPIError(errOut, err, agentDiagnoseAPIErrorClassifier())
+		}
 	}
 	if err := validateAgentDiagnosisResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, agentDiagnoseAPIErrorClassifier())
