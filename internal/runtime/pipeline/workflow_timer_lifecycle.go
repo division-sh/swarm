@@ -45,7 +45,7 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source)))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source, timer.FlowID)))
 		}
 		for _, timer := range source.WorkflowTimers() {
 			if !workflowTimerShouldStartOnTransition(timer, nextStage, sourceEvent) {
@@ -54,7 +54,7 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
 				continue
 			}
-			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source))
+			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source, timer.FlowID))
 			if !ok {
 				continue
 			}
@@ -66,7 +66,7 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 				StartedBy: "state:" + nextStage,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source)))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source, timer.FlowID)))
 		}
 	}); err != nil {
 		return err
@@ -242,7 +242,7 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 				continue
 			}
 			timerState.Cancelled = true
-			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source)))
+			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source, timer.FlowID)))
 		}
 		for _, timer := range source.WorkflowTimers() {
 			if timer.StageOwned {
@@ -255,7 +255,7 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
 				continue
 			}
-			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source))
+			fireAt, ok := workflowTimerFireAt(timer, now, workflowTimerPolicy(source, timer.FlowID))
 			if !ok {
 				continue
 			}
@@ -267,7 +267,7 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 				StartedBy: "event:" + sourceEvent,
 				Recurring: timer.Recurring,
 			})
-			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source)))
+			toSchedule = append(toSchedule, workflowTimerSchedule(timer, entityID, instance.StorageRef, fireAt, workflowTimerPolicy(source, timer.FlowID)))
 		}
 	}); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_event_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
@@ -468,11 +468,11 @@ func workflowTimerRenderedDelay(delay string, policy map[string]any) string {
 	})
 }
 
-func workflowTimerPolicy(source semanticview.Source) map[string]any {
+func workflowTimerPolicy(source semanticview.Source, flowID string) map[string]any {
 	if source == nil {
 		return nil
 	}
-	return policyDocumentToMap(source.ResolvedPolicyForFlow(""))
+	return policyDocumentToMap(source.ResolvedPolicyForFlow(strings.TrimSpace(flowID)))
 }
 
 func workflowTimerSchedule(timer runtimecontracts.WorkflowTimerContract, entityID, flowInstance string, fireAt time.Time, policy map[string]any) Schedule {

@@ -117,6 +117,7 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	)
 	triggerCtx := workflowTriggerContext{Event: trigger}
 	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	beforeCreate := time.Now().UTC()
 
 	err := pc.createFlowInstance(ctx, triggerCtx, handlerExecutionPlan{
 		Template:       "review",
@@ -137,6 +138,10 @@ func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
 	assertWorkflowTimerState(t, instance, "review.awaiting_review.expired", false)
 	if got := len(schedules.schedules); got != 1 {
 		t.Fatalf("persisted schedules = %d, want 1: %#v", got, schedules.schedules)
+	}
+	scheduledAt := schedules.schedules[0].At
+	if scheduledAt.Before(beforeCreate.Add(2*time.Hour)) || scheduledAt.After(time.Now().UTC().Add(2*time.Hour+time.Second)) {
+		t.Fatalf("schedule At = %s, want child-flow policy rendered delay near 2h after create", scheduledAt)
 	}
 }
 

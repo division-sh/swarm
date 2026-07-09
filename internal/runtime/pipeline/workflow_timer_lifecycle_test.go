@@ -139,6 +139,9 @@ func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundl
 	review := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
 		Path:  "review",
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"sla_hours": {Value: 2},
+		}},
 	}
 	return &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
@@ -174,7 +177,7 @@ func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundl
 					FlowID:     "review",
 					StageOwned: true,
 					AdvancesTo: "expired",
-					Delay:      "72h",
+					Delay:      "{{sla_hours}}h",
 					StartOn:    "state:awaiting_review",
 				},
 			},

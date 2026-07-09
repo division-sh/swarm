@@ -82,6 +82,9 @@ func (d *FlowStageDeclarations) UnmarshalYAML(node *yaml.Node) error {
 		}
 		out = append(out, stage)
 	}
+	if err := validateStageTimerIDNamespace(out); err != nil {
+		return err
+	}
 	d.Entries = out
 	return nil
 }
@@ -175,6 +178,24 @@ func (s *FlowStageDeclaration) normalizeTimerIDs() error {
 			return fmt.Errorf("timers contains duplicate id %q; add explicit id values to disambiguate", timer.ID)
 		}
 		seen[timer.ID] = struct{}{}
+	}
+	return nil
+}
+
+func validateStageTimerIDNamespace(stages []FlowStageDeclaration) error {
+	seen := map[string]string{}
+	for _, stage := range stages {
+		stageID := strings.TrimSpace(stage.ID)
+		for _, timer := range stage.Timers {
+			id := strings.TrimSpace(timer.ID)
+			if id == "" {
+				continue
+			}
+			if previousStage, ok := seen[id]; ok {
+				return fmt.Errorf("stage timer id %q is declared in both stage %q and stage %q; timer ids must be unique within a flow", id, previousStage, stageID)
+			}
+			seen[id] = stageID
+		}
 	}
 	return nil
 }
