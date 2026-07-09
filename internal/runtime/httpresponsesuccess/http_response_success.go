@@ -57,6 +57,16 @@ func Validate(check runtimecontracts.HTTPResponseSuccess) error {
 	}
 }
 
+func Equivalent(a, b runtimecontracts.HTTPResponseSuccess) bool {
+	if NormalizeKind(a.Kind) != NormalizeKind(b.Kind) || strings.TrimSpace(a.Path) != strings.TrimSpace(b.Path) {
+		return false
+	}
+	if a.Equals == nil || b.Equals == nil {
+		return a.Equals == nil && b.Equals == nil
+	}
+	return valuesEqual(a.Equals, b.Equals) && valuesEqual(b.Equals, a.Equals)
+}
+
 func Evaluate(subject string, check *runtimecontracts.HTTPResponseSuccess, responseEnv map[string]any, secrets []string) error {
 	if check == nil {
 		return nil

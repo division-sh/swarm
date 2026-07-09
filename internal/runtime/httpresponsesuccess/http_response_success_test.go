@@ -87,3 +87,25 @@ func TestEvaluateHTTPStatusFailsClosed(t *testing.T) {
 		t.Fatalf("Evaluate error = %v, want HTTP 2xx failure", err)
 	}
 }
+
+func TestEquivalentPreservesScalarKinds(t *testing.T) {
+	tests := []struct {
+		name string
+		a    runtimecontracts.HTTPResponseSuccess
+		b    runtimecontracts.HTTPResponseSuccess
+		want bool
+	}{
+		{name: "same boolean", a: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.ok", Equals: true}, b: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.ok", Equals: true}, want: true},
+		{name: "boolean and string differ", a: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.ok", Equals: true}, b: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.ok", Equals: "true"}},
+		{name: "numeric and string differ", a: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.count", Equals: 1}, b: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.count", Equals: "1"}},
+		{name: "numeric representations agree", a: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.count", Equals: 1}, b: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.count", Equals: json.Number("1.0")}, want: true},
+		{name: "different path", a: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.count", Equals: 1}, b: runtimecontracts.HTTPResponseSuccess{Kind: KindJSONFieldEquals, Path: "response.body.other", Equals: 1}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Equivalent(tc.a, tc.b); got != tc.want {
+				t.Fatalf("Equivalent = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packs"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -204,6 +205,33 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 			want: "profile hash mismatch",
 		},
 		{
+			name: "source path evidence drift with repaired manifest hash",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				mutateGeneratedGitHubManifest(t, files, func(manifest *ConnectorManifest) {
+					manifest.Generation.Source.Path = "catalog/sources/other.json"
+				})
+			},
+			want: "source evidence does not match indexed profile",
+		},
+		{
+			name: "source version evidence drift with repaired manifest hash",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				mutateGeneratedGitHubManifest(t, files, func(manifest *ConnectorManifest) {
+					manifest.Generation.Source.OpenAPIVersion = "3.1.0"
+				})
+			},
+			want: "source evidence does not match indexed profile",
+		},
+		{
+			name: "source hash evidence drift with repaired manifest hash",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				mutateGeneratedGitHubManifest(t, files, func(manifest *ConnectorManifest) {
+					manifest.Generation.Source.SHA256 = "sha256:" + strings.Repeat("0", 64)
+				})
+			},
+			want: "source evidence does not match indexed profile",
+		},
+		{
 			name: "generated builtin absent from index",
 			mutate: func(t *testing.T, files fstest.MapFS) {
 				var index GeneratedPackIndex
@@ -248,6 +276,20 @@ func TestGeneratedConformanceRejectsStaleOrIncompleteEvidence(t *testing.T) {
 			want: "freshness binding",
 		},
 		{
+			name: "resolved header drift",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceMapFile(t, files, "catalog/conformance/acme/widgets-create.yaml", "Authorization: Bearer fixture-acme-api-key", "Authorization: Bearer wrong-key")
+			},
+			want: "expected resolved headers",
+		},
+		{
+			name: "missing fixture credential context",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceMapFile(t, files, "catalog/conformance/acme/widgets-create.yaml", "credentials:\n  acme_api_key: fixture-acme-api-key", "credentials: {}")
+			},
+			want: `credential "acme_api_key" is unavailable`,
+		},
+		{
 			name: "missing fixture",
 			mutate: func(t *testing.T, files fstest.MapFS) {
 				delete(files, "catalog/conformance/acme/widgets-create.yaml")
@@ -273,6 +315,57 @@ func TestGeneratedConformanceRejectsStaleOrIncompleteEvidence(t *testing.T) {
 			err = ValidateCatalogConformance(files, artifacts)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("ValidateCatalogConformance error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGenerationEvidenceResponseSuccessBindingPreservesScalarKinds(t *testing.T) {
+	tests := []struct {
+		name     string
+		evidence any
+		tool     any
+		wantErr  bool
+	}{
+		{name: "boolean and string differ", evidence: true, tool: "true", wantErr: true},
+		{name: "numeric and string differ", evidence: 1, tool: "1", wantErr: true},
+		{name: "numeric representations agree", evidence: 1, tool: 1.0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			evidencePolicy := runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.value", Equals: tc.evidence}
+			toolPolicy := runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.value", Equals: tc.tool}
+			evidence := GenerationEvidence{
+				SchemaVersion:    CatalogSchemaVersion,
+				GeneratorVersion: CatalogGeneratorVersion,
+				Source: GenerationSourceEvidence{
+					Path:           "catalog/sources/acme.json",
+					OpenAPIVersion: "3.0.3",
+					SHA256:         "sha256:" + strings.Repeat("0", 64),
+				},
+				Profile: GenerationProfileEvidence{
+					Path:          "catalog/generator-profiles/acme.yaml",
+					SchemaVersion: CatalogSchemaVersion,
+					SHA256:        "sha256:" + strings.Repeat("1", 64),
+				},
+				Operations: []GenerationOperationEvidence{{
+					OperationID:     "widgets/create",
+					ToolID:          "acme.create_widget",
+					Permissions:     []GenerationPermission{{ID: "widgets:write", Note: "write widgets"}},
+					ResponseSuccess: evidencePolicy,
+					FixtureID:       "acme/widgets-create",
+					FixtureStatus:   GenerationFixturePassing,
+					ReviewStatus:    GenerationReviewApproved,
+				}},
+			}
+			err := evidence.Validate("acme", map[string]runtimecontracts.ToolSchemaEntry{
+				"acme.create_widget": {ResponseSuccess: &toolPolicy},
+			})
+			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "response_success does not match")) {
+				t.Fatalf("Validate error = %v, want type-preserving mismatch", err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Validate: %v", err)
 			}
 		})
 	}
@@ -373,6 +466,16 @@ func rewritePackManifestHash(t *testing.T, files fstest.MapFS, name string, mani
 	mustYAMLUnmarshal(t, files[name].Data, &envelope)
 	envelope.ManifestHash = sha256String(manifestBody)
 	files[name].Data = mustYAMLMarshal(t, envelope)
+}
+
+func mutateGeneratedGitHubManifest(t *testing.T, files fstest.MapFS, mutate func(*ConnectorManifest)) {
+	t.Helper()
+	var manifest ConnectorManifest
+	mustYAMLUnmarshal(t, files["packs/github/connector.yaml"].Data, &manifest)
+	mutate(&manifest)
+	body := mustYAMLMarshal(t, manifest)
+	files["packs/github/connector.yaml"].Data = body
+	rewritePackManifestHash(t, files, "packs/github/pack.yaml", body)
 }
 
 func mustYAMLUnmarshal(t *testing.T, body []byte, target any) {

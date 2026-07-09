@@ -10,11 +10,13 @@ review_status: approved
 input:
   account_id: acct-42
   name: Catalog widget
+credentials:
+  acme_api_key: fixture-acme-api-key
 expected:
   method: POST
   url: https://api.acme.test/accounts/acct-42/widgets
   headers:
-    Authorization: Bearer {{credentials.acme_api_key}}
+    Authorization: Bearer fixture-acme-api-key
     X-Acme-Version: "2026-07-09"
   body:
     name: Catalog widget

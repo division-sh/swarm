@@ -13,6 +13,7 @@ input:
   repo: hello-world
   issue_number: 42
   body: Generated comment
+credentials: {}
 expected:
   method: POST
   url: https://api.github.com/repos/octocat/hello-world/issues/42/comments

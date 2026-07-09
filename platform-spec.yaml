@@ -6649,7 +6649,9 @@ tool_model:
         Duplicate ids, duplicate profile bindings, duplicate outputs, unknown builtin ids, provider/profile mismatch,
         unindexed generator profiles, or builtin bodies carrying generated evidence without index identity fail closed.
         Indexed generated packs MUST carry matching generation evidence; removing that evidence and recomputing the exact
-        pack manifest hash does not downgrade the pack to handwritten status.
+        pack manifest hash does not downgrade the pack to handwritten status. Builtin admission parses the exact indexed
+        profile and requires the body evidence source path, OpenAPI version, and source hash to equal that profile; repairing
+        only connector bytes and the envelope hash cannot substitute another source identity.
       evidence_chain: >
         Generated connector bodies carry schema/generator versions, exact source path/version/hash, exact profile path/
         schema/hash, and one operation record per generated tool. Each operation binds operation id, tool id, reviewed
@@ -6659,9 +6661,11 @@ tool_model:
       conformance_owner: >
         Strict fixtures under `internal/providerconnectors/catalog/conformance` are keyed by provider + operation id + tool
         id and bind source/profile/manifest hashes, fixture/review status, exact resolved request method/URL/headers/body,
-        and response-success policy. Missing, duplicate, stale, malformed, or unreferenced fixtures fail the generator
-        check. The synthetic write additionally executes through the normal HTTP activity path and proves replay reuses the
-        canonical activity_attempt result without a second provider dispatch.
+        and type-preserving response-success policy. Static credential values in this corpus are explicit fake fixture
+        context only; generated credential templates are resolved against that context before expected headers are compared.
+        Missing, extra, duplicate, stale, malformed, unresolved, or unreferenced fixtures fail the generator check. The
+        synthetic write additionally executes through the normal HTTP activity path and proves replay reuses the canonical
+        activity_attempt result without a second provider dispatch.
       non_goals:
       - read-only provider connector admission
       - external connector-pack directories or marketplace publication
