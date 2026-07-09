@@ -18,13 +18,26 @@ workflows.
 
 ## Local Checks
 
-Use direct public commands and Go tooling rather than private helper scripts:
+Use direct public commands and Go tooling rather than private helper scripts.
+For routine local iteration, run the changed-package selector first. It uses
+the git diff against `origin/master`, expands in-repository reverse
+dependencies, prints the selected packages, and then runs the exact `go test`
+command it reports:
 
 ```bash
 go build ./cmd/swarm
+go run ./cmd/swarm-test-changed
+go run ./cmd/swarm-test-changed -dry-run
 go test ./...
 go run ./cmd/swarm-openrpc-gen --check
 ```
+
+Routine PRs can cite scoped local proof from `swarm-test-changed` plus any
+named package families required by the touched surface; CI remains responsible
+for the full-truth push/manual/scheduled runs. Do not habitually force
+`-count=1` for every local iteration because it defeats Go's local test cache.
+High-risk semantic/runtime migrations still require full local
+`go test ./... -count=1` when the issue gate or reviewer asks for it.
 
 If you change API/spec authority, update the authoritative root artifact in the
 same pull request as the implementation that makes it true.
