@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 )
 
 type persistentStateRepo struct {
@@ -305,6 +306,73 @@ func TestExecutor_AccumulateOnTimeoutAppliesRule(t *testing.T) {
 	}
 	if repo.snapshot.CurrentState != "partial" {
 		t.Fatalf("persisted CurrentState = %q", repo.snapshot.CurrentState)
+	}
+}
+
+func TestExecutor_AccumulateOnTimeoutComputeReadsWindowedTimerBucket(t *testing.T) {
+	bucket := timeridentity.NewAccumulatorWindowBucketRef("node-1", "item.arrived", "2026-W10")
+	repo := &persistentStateRepo{
+		found: true,
+		snapshot: StateSnapshot{
+			EntityID:     "entity-1",
+			CurrentState: "collecting",
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
+		},
+	}
+	storeAccumulatorForBucket(&repo.snapshot, bucket, &Accumulator{
+		ExpectedCount: 3,
+		Received: map[string]bool{
+			"evt-a": true,
+			"evt-b": true,
+		},
+		Items: []map[string]any{
+			{"event_id": "evt-a"},
+			{"event_id": "evt-b"},
+		},
+		StartedAt: "2026-03-15T00:00:00Z",
+	})
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:     stubSource(),
+		StateRepo:  repo,
+		TxRunner:   stubRunner{},
+		Locker:     stubLocker{},
+		Outbox:     stubOutbox{},
+		Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.Execute(context.Background(), ExecutionRequest{
+		EntityID:        "entity-1",
+		NodeID:          "node-1",
+		HandlerEventKey: "item.arrived",
+		Event: eventtest.RootIngress("timeout-1",
+			events.EventType("accumulate.timeout"), "", "", mustEncodeJSON(t, map[string]any{
+				"timer_handle": map[string]any{
+					"kind":   string(timeridentity.TimerHandleAccumulationTimeout),
+					"bucket": bucket.PayloadValue(),
+				},
+			}), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			Accumulate: &runtimecontracts.AccumulateSpec{
+				Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+				Window:     "payload.window_id",
+				OnTimeout: &runtimecontracts.HandlerRuleEntry{
+					ID: "timeout",
+					Compute: &runtimecontracts.ComputeSpec{
+						Operation: runtimecontracts.ComputeOpCount,
+						StoreAs:   "computed.timed_out_count",
+					},
+				},
+			},
+		},
+		State: repo.snapshot,
+	})
+	if err != nil {
+		t.Fatalf("Execute timeout accumulate: %v", err)
+	}
+	if got := result.Computed["timed_out_count"]; got != 2 {
+		t.Fatalf("timed_out_count = %#v, want 2", got)
 	}
 }
 
