@@ -584,9 +584,9 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				covered.Classification = "split_with_issue_ref"
 				covered.Backends = nil
 				covered.Scenario = ""
-				covered.SplitIssue = 1910
+				covered.SplitIssue = 1927
 				covered.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "tracker", Issue: 1910, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
+					{Kind: "tracker", Issue: 1927, Watchlist: "runtime_operations.shutdown_and_runtime_lifecycle"},
 				}
 
 				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
@@ -776,8 +776,8 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1386, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1386 runtime_store_backend_default_and_sqlite_portability")
 	}
-	if _, ok := activeTrackers[trackerKey(1910, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
-		problems = append(problems, "active_trackers must not include closed #1910 runtime_store_backend_default_and_sqlite_portability")
+	if _, ok := activeTrackers[trackerKey(1927, "runtime_operations.shutdown_and_runtime_lifecycle")]; !ok {
+		problems = append(problems, "active_trackers missing #1927 shutdown_and_runtime_lifecycle")
 	}
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")
