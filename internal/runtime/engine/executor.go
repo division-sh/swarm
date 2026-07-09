@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/accprojection"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
@@ -1881,92 +1882,16 @@ func (e *Executor) effectiveAccumulatorSpec(frame *executionFrame, spec *runtime
 	if spec == nil {
 		return nil, nil
 	}
-	pin, ok, err := e.fanInInputPinForFrame(frame)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
+	if e == nil || e.deps.Source == nil || frame == nil {
 		return spec, nil
 	}
-	if dedup := strings.TrimSpace(spec.DedupBy); dedup != "" {
-		return nil, fmt.Errorf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", frame.req.NodeID.String(), string(handlerAccumulatorEventType(frame.req)), dedup)
-	}
-	if window := strings.TrimSpace(spec.Window); window != "" {
-		return nil, fmt.Errorf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", frame.req.NodeID.String(), string(handlerAccumulatorEventType(frame.req)), window)
-	}
-	resolution := pin.Resolution
-	window := strings.TrimSpace(resolution.Window)
-	if window == "" {
-		return nil, fmt.Errorf("resolution mode fan-in stream requires window for receiver input pin %s.%s", frame.req.FlowID.String(), pin.PinName())
-	}
-	dedupBy := normalizedStringList(resolution.DedupBy)
-	if len(dedupBy) == 0 {
-		return nil, fmt.Errorf("resolution mode fan-in stream requires dedup_by for receiver input pin %s.%s; sender identity is not an implicit default", frame.req.FlowID.String(), pin.PinName())
-	}
-	if len(dedupBy) != 1 {
-		return nil, fmt.Errorf("resolution mode fan-in stream supports exactly one dedup_by field in this slice for receiver input pin %s.%s, got %v", frame.req.FlowID.String(), pin.PinName(), dedupBy)
-	}
-	effective := *spec
-	effective.Window = window
-	effective.WindowPath = paths.Parse(window)
-	effective.DedupBy = dedupBy[0]
-	effective.DedupPath = paths.Parse(dedupBy[0])
-	return &effective, nil
-}
-
-func (e *Executor) fanInInputPinForFrame(frame *executionFrame) (runtimecontracts.FlowInputEventPin, bool, error) {
-	if e == nil || e.deps.Source == nil || frame == nil {
-		return runtimecontracts.FlowInputEventPin{}, false, nil
-	}
-	flowID := strings.TrimSpace(frame.req.FlowID.String())
-	if flowID == "" {
-		return runtimecontracts.FlowInputEventPin{}, false, nil
-	}
-	handlerEvent := string(handlerAccumulatorEventType(frame.req))
-	var matched runtimecontracts.FlowInputEventPin
-	var matchedPins []string
-	for _, pin := range e.deps.Source.FlowInputEventPins(flowID) {
-		if pin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
-			continue
-		}
-		if e.fanInInputPinMatchesHandlerEvent(flowID, pin, handlerEvent) {
-			matched = pin
-			matchedPins = append(matchedPins, pin.PinName())
-		}
-	}
-	if len(matchedPins) > 1 {
-		return runtimecontracts.FlowInputEventPin{}, false, fmt.Errorf("receiver handler %s.%s matches multiple fan-in input pins %v; fan-in accumulator semantics require exactly one receiver input pin owner", frame.req.NodeID.String(), handlerEvent, matchedPins)
-	}
-	if len(matchedPins) == 1 {
-		return matched, true, nil
-	}
-	return runtimecontracts.FlowInputEventPin{}, false, nil
-}
-
-func (e *Executor) fanInInputPinMatchesHandlerEvent(flowID string, pin runtimecontracts.FlowInputEventPin, handlerEvent string) bool {
-	handlerEvent = strings.TrimSpace(handlerEvent)
-	inputEvent := strings.TrimSpace(pin.EventType())
-	if handlerEvent == "" || inputEvent == "" {
-		return false
-	}
-	if e.deps.Source.FlowEventMatches(flowID, handlerEvent, inputEvent) {
-		return true
-	}
-	resolvedInput := runtimeeventidentity.Normalize(e.deps.Source.ResolveFlowEventReference(flowID, inputEvent))
-	handler := runtimeeventidentity.Normalize(handlerEvent)
-	return handler == resolvedInput || handler == runtimeeventidentity.Normalize(inputEvent) || handler == runtimeeventidentity.Normalize(pin.PinName())
-}
-
-func normalizedStringList(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		out = append(out, value)
-	}
-	return out
+	return runtimeaccumulator.EffectiveSpecForHandler(
+		e.deps.Source,
+		frame.req.FlowID.String(),
+		frame.req.NodeID.String(),
+		string(handlerAccumulatorEventType(frame.req)),
+		spec,
+	)
 }
 
 func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {

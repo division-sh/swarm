@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1070,6 +1071,104 @@ func TestReconcileAccumulationTimeoutScheduleUsesMatchedHandlerEventKey(t *testi
 	}
 	if _, ok := findAccumulationTimeoutHandlerForBucket(semanticview.Wrap(bundle), handle.Bucket); !ok {
 		t.Fatalf("timeout handler did not resolve for scheduled bucket %#v", handle.Bucket)
+	}
+}
+
+func TestReconcileAccumulationTimeoutScheduleUsesFanInPinDerivedWindow(t *testing.T) {
+	bundle := templatefanin.LoadBundle(t, templatefanin.Options{})
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	start := time.Now().UTC()
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:       "operating_reports",
+			From:       "payload",
+			Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
+			TimeoutMS:  5000,
+		},
+	}
+	wantBucket := timeridentity.NewAccumulatorWindowBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, "2026-Q1")
+	stateBuckets := map[string]any{
+		templatefanin.ReceiverNodeID: map[string]any{
+			"handler_accumulators": map[string]any{
+				wantBucket.Key(): map[string]any{
+					"started_at": start.Format(time.RFC3339Nano),
+				},
+			},
+		},
+	}
+	evt := eventtest.RootIngress(
+		"evt-operating-2026-q1",
+		events.EventType(templatefanin.ReceiverEvent),
+		"cataloge2e",
+		"",
+		[]byte(`{"portfolio_id":"portfolio/default","report_id":"report-1","period_id":"2026-Q1","operating_id":"opco-a","revenue":42}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, templatefanin.ReceiverFlowInstance), templatefanin.ReceiverFlowInstance),
+		start,
+	)
+
+	ctx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), templatefanin.ReceiverFlowID)
+	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, templatefanin.ReceiverFlowInstance, templatefanin.ReceiverNodeID, handler, evt, templatefanin.ReceiverEvent, stateBuckets, true); err != nil {
+		t.Fatalf("reconcileAccumulationTimeoutSchedule: %v", err)
+	}
+	if len(store.schedules) != 1 {
+		t.Fatalf("registered schedules = %d, want 1 for pin-derived window bucket %s", len(store.schedules), wantBucket.Key())
+	}
+	got := store.schedules[0]
+	wantHandle := timeridentity.AccumulationTimeoutHandle(wantBucket)
+	if got.TaskID != wantHandle.TaskID() {
+		t.Fatalf("scheduled task_id = %q, want %q", got.TaskID, wantHandle.TaskID())
+	}
+	if got.At.Before(start.Add(4900*time.Millisecond)) || got.At.After(start.Add(5100*time.Millisecond)) {
+		t.Fatalf("scheduled at = %s, want about %s", got.At.Format(time.RFC3339Nano), start.Add(5*time.Second).Format(time.RFC3339Nano))
+	}
+	payload := parsePayloadMap(got.Payload)
+	handle, ok := timeridentity.ParseTimerHandle(payload)
+	if !ok || handle.Kind != timeridentity.TimerHandleAccumulationTimeout {
+		t.Fatalf("scheduled payload = %#v", payload)
+	}
+	if handle.Bucket.Key() != wantBucket.Key() {
+		t.Fatalf("scheduled payload bucket = %#v, want %s", handle.Bucket, wantBucket.Key())
+	}
+
+	timeoutEvt := eventtest.RootIngress(
+		"evt-timeout-2026-q1",
+		events.EventType("accumulate.timeout"),
+		runtimeWorkflowID,
+		"",
+		mustJSON(map[string]any{
+			"entity_id":     templatefanin.ReceiverFlowInstance,
+			"timer_handle":  handle.PayloadMetadata()["timer_handle"],
+			"timeout_ms":    5000,
+			"flow_instance": templatefanin.ReceiverFlowInstance,
+		}),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, templatefanin.ReceiverFlowInstance), templatefanin.ReceiverFlowInstance),
+		start.Add(5*time.Second),
+	)
+	if err := pc.reconcileAccumulationTimeoutSchedule(ctx, templatefanin.ReceiverFlowInstance, templatefanin.ReceiverNodeID, handler, timeoutEvt, templatefanin.ReceiverEvent, stateBuckets, false); err != nil {
+		t.Fatalf("reconcileAccumulationTimeoutSchedule timeout cancel: %v", err)
+	}
+	if len(store.cancels) != 1 {
+		t.Fatalf("cancelled schedules = %d, want 1 for pin-derived window bucket %s", len(store.cancels), wantBucket.Key())
+	}
+	if got := store.cancels[0].TaskID; got != wantHandle.TaskID() {
+		t.Fatalf("cancelled task_id = %q, want %q", got, wantHandle.TaskID())
 	}
 }
 
