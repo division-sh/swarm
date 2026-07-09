@@ -13,6 +13,7 @@ input:
   repo: hello-world
   title: Generated issue
   body: Generated from the catalog fixture.
+credentials: {}
 expected:
   method: POST
   url: https://api.github.com/repos/octocat/hello-world/issues

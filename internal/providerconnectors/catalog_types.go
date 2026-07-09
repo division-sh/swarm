@@ -125,7 +125,7 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 		if err := httpresponsesuccess.Validate(operation.ResponseSuccess); err != nil {
 			return fmt.Errorf("generation operation %q: %w", operationID, err)
 		}
-		if tool.ResponseSuccess == nil || !responseSuccessEqual(*tool.ResponseSuccess, operation.ResponseSuccess) {
+		if tool.ResponseSuccess == nil || !httpresponsesuccess.Equivalent(*tool.ResponseSuccess, operation.ResponseSuccess) {
 			return fmt.Errorf("generation operation %q response_success does not match tool %q", operationID, toolID)
 		}
 		if strings.TrimSpace(operation.FixtureID) == "" || strings.TrimSpace(operation.FixtureStatus) != GenerationFixturePassing {
@@ -299,6 +299,15 @@ func validateGeneratedPackIdentity(fsys fs.FS, pack LoadedPack, expected Generat
 	if got, want := sha256String(profileBody), "sha256:"+normalizeSHA(pack.Manifest.Generation.Profile.SHA256); got != want {
 		return fmt.Errorf("generated connector pack %q profile hash mismatch: got %s want %s", pack.Envelope.ID, got, want)
 	}
+	profile, err := ParseGeneratorProfile(profileBody)
+	if err != nil {
+		return fmt.Errorf("generated connector pack %q parse indexed profile: %w", pack.Envelope.ID, err)
+	}
+	if strings.TrimSpace(profile.Source.Path) != strings.TrimSpace(pack.Manifest.Generation.Source.Path) ||
+		strings.TrimSpace(profile.Source.OpenAPIVersion) != strings.TrimSpace(pack.Manifest.Generation.Source.OpenAPIVersion) ||
+		normalizeSHA(profile.Source.SHA256) != normalizeSHA(pack.Manifest.Generation.Source.SHA256) {
+		return fmt.Errorf("generated connector pack %q source evidence does not match indexed profile", pack.Envelope.ID)
+	}
 	return nil
 }
 
@@ -316,11 +325,4 @@ func validateSHA256(context, value string) error {
 func sha256String(body []byte) string {
 	sum := sha256.Sum256(body)
 	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-func responseSuccessEqual(a, b runtimecontracts.HTTPResponseSuccess) bool {
-	if httpresponsesuccess.NormalizeKind(a.Kind) != httpresponsesuccess.NormalizeKind(b.Kind) || strings.TrimSpace(a.Path) != strings.TrimSpace(b.Path) {
-		return false
-	}
-	return fmt.Sprint(a.Equals) == fmt.Sprint(b.Equals)
 }
