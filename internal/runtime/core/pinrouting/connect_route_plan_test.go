@@ -76,6 +76,23 @@ func TestLowerCompositionConnectRoutePlansUsesFanInStreamSingularTarget(t *testi
 	}
 }
 
+func TestLowerCompositionConnectRoutePlansAllowsFanInStreamEventIDDedup(t *testing.T) {
+	source := templatefanin.LoadSource(t, templatefanin.Options{EventIDDedup: true})
+
+	plans, issues := LowerCompositionConnectRoutePlans(source)
+
+	if len(issues) != 0 {
+		t.Fatalf("LowerCompositionConnectRoutePlans issues = %#v, want none", issues)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("LowerCompositionConnectRoutePlans = %#v, want one fan-in route plan", plans)
+	}
+	plan := plans[0]
+	if plan.FanIn == nil || len(plan.FanIn.DedupBy) != 1 || plan.FanIn.DedupBy[0] != "event.id" {
+		t.Fatalf("fan-in metadata = %#v, want event.id dedup", plan.FanIn)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -88,6 +105,7 @@ func TestLowerCompositionConnectRoutePlansFailsClosedForInvalidFanInStream(t *te
 		{name: "missing window", opts: templatefanin.Options{MissingWindow: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "requires window"},
 		{name: "barrier", opts: templatefanin.Options{BarrierAggregation: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "aggregation: stream"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "must be the receiver singleton route or a child"},
+		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "is not mode: singleton"},
 		{name: "delivery many", opts: templatefanin.Options{DeliveryMany: true}, failure: ConnectFailureDeliveryTopologyInvalid, detail: "requires delivery one"},
 		{name: "legacy map", opts: templatefanin.Options{LegacyConnectMap: true}, failure: ConnectFailureInstanceResolutionInvalid, detail: "connect.map is incompatible"},
 	}
