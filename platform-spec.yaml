@@ -15211,8 +15211,8 @@ cli_specification:
             secrets_list:
               command: swarm secrets list
               classification: split
-              owner_issue: '#1821'
-              reason: secret list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: secret list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             secrets_check:
               command: swarm secrets check
               classification: split
@@ -15240,8 +15240,8 @@ cli_specification:
             connections_status:
               command: swarm connections status
               classification: split
-              owner_issue: '#1821'
-              reason: connection status table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: connection status table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             connections_disconnect:
               command: swarm connections disconnect
               classification: split
@@ -15294,8 +15294,8 @@ cli_specification:
             trace:
               command: swarm run trace
               classification: split
-              owner_issue: '#1816'
-              reason: trace tables consume the shared display renderer; trace fidelity/follow behavior remains on the dedicated trace owner before full shared-output classification.
+              owner_issue: '#1913'
+              reason: trace fidelity and display rendering have landed, but trace does not yet consume the full shared output-mode owner for successful output.
             run_fork:
               command: swarm run fork
               classification: shared_output
@@ -15370,8 +15370,8 @@ cli_specification:
             agents_list:
               command: swarm agent list
               classification: split
-              owner_issue: '#1821'
-              reason: agent list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: agent list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             agent_view:
               command: swarm agent view
               classification: split
@@ -15414,8 +15414,8 @@ cli_specification:
             events_list:
               command: swarm event list
               classification: split
-              owner_issue: '#1821'
-              reason: event list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: event list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             events_follow:
               command: swarm event follow
               classification: split
@@ -15424,8 +15424,8 @@ cli_specification:
             event_view:
               command: swarm event view
               classification: split
-              owner_issue: '#1821'
-              reason: event detail shell consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: event detail shell consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             event_replay:
               command: swarm event replay
               classification: split
@@ -15551,18 +15551,18 @@ cli_specification:
             entities_list:
               command: swarm entity list
               classification: split
-              owner_issue: '#1821'
-              reason: entity list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: entity list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             entity_view:
               command: swarm entity view
               classification: split
-              owner_issue: '#1821'
-              reason: entity detail shell consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: entity detail shell consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             entity_aggregate:
               command: swarm entity aggregate
               classification: split
-              owner_issue: '#1821'
-              reason: entity aggregate table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: entity aggregate table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             logs:
               command: swarm logs
               classification: split
@@ -15571,8 +15571,8 @@ cli_specification:
             incidents:
               command: swarm incidents
               classification: split
-              owner_issue: '#1821'
-              reason: incident table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: incident table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             context:
               command: swarm context
               classification: exception
@@ -15585,8 +15585,8 @@ cli_specification:
             context_list:
               command: swarm context list
               classification: split
-              owner_issue: '#1821'
-              reason: context list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
+              owner_issue: '#1913'
+              reason: context list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             context_prune:
               command: swarm context prune
               classification: split
