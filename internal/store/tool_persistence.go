@@ -388,32 +388,78 @@ func (s *PostgresStore) DecideHumanTask(ctx context.Context, rec runtimetools.Hu
 		return fmt.Errorf("postgres human-task persistence store is required")
 	}
 	rec = normalizeHumanTaskDecisionRecord(rec)
-	res, err := s.DB.ExecContext(ctx, `
-		UPDATE mailbox
-		SET status = CASE WHEN $2 = 'timed_out' THEN 'expired' ELSE 'decided' END,
-		    decision = $2,
-		    decision_notes = COALESCE(NULLIF($3, ''), decision_notes),
-		    decided_by = NULLIF($4,''),
-		    decided_at = $5,
-		    payload = CASE
-				WHEN $2 = 'deferred' THEN
-					jsonb_set(
-						COALESCE(payload, '{}'::jsonb),
-						'{requeue_count}',
-						to_jsonb(COALESCE((payload->>'requeue_count')::int, 0) + 1),
-						true
-					)
-				ELSE payload
-			END
+	deferUntil, err := humanTaskDeferUntil(rec)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin postgres human task decision: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	var expiresAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, `
+		SELECT expires_at
+		FROM mailbox
 		WHERE item_id = $1::uuid
 		  AND item_type = 'human_task'
-	`, rec.TaskID, rec.Status, rec.Reason, rec.ActorID, rec.DecidedAt)
+		FOR UPDATE
+	`, rec.TaskID).Scan(&expiresAt); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("human task not found: %s", rec.TaskID)
+		}
+		return fmt.Errorf("load postgres human task: %w", err)
+	}
+	if err := validateHumanTaskDeferUntil(rec, deferUntil, expiresAt); err != nil {
+		return err
+	}
+	var res sql.Result
+	if rec.Status == "deferred" {
+		res, err = tx.ExecContext(ctx, `
+			UPDATE mailbox
+			SET status = 'pending',
+			    decision = NULL,
+			    decision_notes = COALESCE(NULLIF($2, ''), decision_notes),
+			    decided_by = NULLIF($3,''),
+			    decided_at = $4,
+			    deferred_until = $5,
+			    payload = jsonb_set(
+					COALESCE(payload, '{}'::jsonb),
+					'{requeue_count}',
+					to_jsonb(COALESCE((payload->>'requeue_count')::int, 0) + 1),
+					true
+				)
+			WHERE item_id = $1::uuid
+			  AND item_type = 'human_task'
+		`, rec.TaskID, rec.Reason, rec.ActorID, rec.DecidedAt, deferUntil)
+	} else {
+		res, err = tx.ExecContext(ctx, `
+			UPDATE mailbox
+			SET status = CASE WHEN $2 = 'timed_out' THEN 'expired' ELSE 'decided' END,
+			    decision = $2,
+			    decision_notes = COALESCE(NULLIF($3, ''), decision_notes),
+			    decided_by = NULLIF($4,''),
+			    decided_at = $5,
+			    deferred_until = NULL
+			WHERE item_id = $1::uuid
+			  AND item_type = 'human_task'
+		`, rec.TaskID, rec.Status, rec.Reason, rec.ActorID, rec.DecidedAt)
+	}
 	if err != nil {
 		return fmt.Errorf("decide postgres human task: %w", err)
 	}
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return fmt.Errorf("human task not found: %s", rec.TaskID)
 	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit postgres human task decision: %w", err)
+	}
+	committed = true
 	return nil
 }
 
@@ -422,14 +468,28 @@ func (s *SQLiteRuntimeStore) DecideHumanTask(ctx context.Context, rec runtimetoo
 		return fmt.Errorf("sqlite human-task persistence store is required")
 	}
 	rec = normalizeHumanTaskDecisionRecord(rec)
+	deferUntil, err := humanTaskDeferUntil(rec)
+	if err != nil {
+		return err
+	}
 	return s.runRuntimeMutation(ctx, "sqlite human task decision", func(txctx context.Context, tx *sql.Tx) error {
 		var payloadRaw any
+		var expiresAtRaw any
 		if err := tx.QueryRowContext(txctx, `
-			SELECT COALESCE(payload, '{}')
+			SELECT COALESCE(payload, '{}'), expires_at
 			FROM mailbox
 			WHERE item_id = ? AND item_type = 'human_task'
-		`, rec.TaskID).Scan(&payloadRaw); err != nil {
+		`, rec.TaskID).Scan(&payloadRaw, &expiresAtRaw); err != nil {
 			return fmt.Errorf("load sqlite human task payload: %w", err)
+		}
+		expiresAt := sql.NullTime{}
+		if parsed, ok, err := sqliteTimeValue(expiresAtRaw); err != nil {
+			return fmt.Errorf("decode sqlite human task expiry: %w", err)
+		} else if ok {
+			expiresAt = sql.NullTime{Time: parsed, Valid: true}
+		}
+		if err := validateHumanTaskDeferUntil(rec, deferUntil, expiresAt); err != nil {
+			return err
 		}
 		payload, err := toolDecodeJSONMap(payloadRaw)
 		if err != nil {
@@ -446,16 +506,32 @@ func (s *SQLiteRuntimeStore) DecideHumanTask(ctx context.Context, rec runtimetoo
 		if rec.Status == "timed_out" {
 			rowStatus = "expired"
 		}
-		res, err := tx.ExecContext(txctx, `
-			UPDATE mailbox
-			SET status = ?,
-			    decision = ?,
-			    decision_notes = COALESCE(NULLIF(?, ''), decision_notes),
-			    decided_by = ?,
-			    decided_at = ?,
-			    payload = ?
-			WHERE item_id = ? AND item_type = 'human_task'
-		`, rowStatus, rec.Status, rec.Reason, sqliteNullString(rec.ActorID), rec.DecidedAt.UTC(), string(payloadJSON), rec.TaskID)
+		var res sql.Result
+		if rec.Status == "deferred" {
+			res, err = tx.ExecContext(txctx, `
+				UPDATE mailbox
+				SET status = 'pending',
+				    decision = NULL,
+				    decision_notes = COALESCE(NULLIF(?, ''), decision_notes),
+				    decided_by = ?,
+				    decided_at = ?,
+				    deferred_until = ?,
+				    payload = ?
+				WHERE item_id = ? AND item_type = 'human_task'
+			`, rec.Reason, sqliteNullString(rec.ActorID), rec.DecidedAt.UTC(), deferUntil.UTC(), string(payloadJSON), rec.TaskID)
+		} else {
+			res, err = tx.ExecContext(txctx, `
+				UPDATE mailbox
+				SET status = ?,
+				    decision = ?,
+				    decision_notes = COALESCE(NULLIF(?, ''), decision_notes),
+				    decided_by = ?,
+				    decided_at = ?,
+				    deferred_until = NULL,
+				    payload = ?
+				WHERE item_id = ? AND item_type = 'human_task'
+			`, rowStatus, rec.Status, rec.Reason, sqliteNullString(rec.ActorID), rec.DecidedAt.UTC(), string(payloadJSON), rec.TaskID)
+		}
 		if err != nil {
 			return fmt.Errorf("decide sqlite human task: %w", err)
 		}
@@ -988,6 +1064,35 @@ func normalizeHumanTaskDecisionRecord(rec runtimetools.HumanTaskDecisionRecord) 
 		rec.DecidedAt = rec.DecidedAt.UTC()
 	}
 	return rec
+}
+
+func humanTaskDeferUntil(rec runtimetools.HumanTaskDecisionRecord) (time.Time, error) {
+	if strings.TrimSpace(rec.Status) != "deferred" {
+		return time.Time{}, nil
+	}
+	raw := strings.TrimSpace(rec.RequeueDate)
+	if raw == "" {
+		return time.Time{}, fmt.Errorf("deferred human task requires requeue_date")
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid human task requeue_date (expected RFC3339): %w", err)
+	}
+	parsed = parsed.UTC()
+	if !parsed.After(rec.DecidedAt.UTC()) {
+		return time.Time{}, fmt.Errorf("human task requeue_date must be after decision time")
+	}
+	return parsed, nil
+}
+
+func validateHumanTaskDeferUntil(rec runtimetools.HumanTaskDecisionRecord, deferUntil time.Time, expiresAt sql.NullTime) error {
+	if strings.TrimSpace(rec.Status) != "deferred" || !expiresAt.Valid {
+		return nil
+	}
+	if deferUntil.After(expiresAt.Time.UTC()) {
+		return fmt.Errorf("human task requeue_date must not be after task expiry")
+	}
+	return nil
 }
 
 func toolIntValue(raw any) int {

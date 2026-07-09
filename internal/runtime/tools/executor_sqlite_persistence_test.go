@@ -28,6 +28,7 @@ import (
 type humanTaskToolStore interface {
 	runtimetools.HumanTaskPersistence
 	runtimetools.MailboxPersistence
+	GetV1MailboxItem(ctx context.Context, id string) (store.MailboxV1ItemDetail, error)
 }
 
 type allowHumanTaskAuthority struct{}
@@ -288,12 +289,35 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 			if got := strings.TrimSpace(asString(out.(map[string]any)["status"])); got != "deferred" {
 				t.Fatalf("second human task status = %q, want deferred", got)
 			}
+			assertHumanTaskDeferredProjection(t, tc.store, secondID)
 			requeueCount, err := tc.store.HumanTaskRequeueCount(context.Background(), secondID)
 			if err != nil {
 				t.Fatalf("load second human task requeue count: %v", err)
 			}
 			if requeueCount != 1 {
 				t.Fatalf("second human task requeue count = %d, want 1", requeueCount)
+			}
+			explicitID := createHumanTaskWithExecutor(t, exec, requester)
+			explicitUntil := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+			out, err = exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+				"task_id":      explicitID,
+				"decision":     "defer",
+				"reason":       "wait for operator context",
+				"requeue_date": explicitUntil.Format(time.RFC3339),
+			})
+			if err != nil {
+				t.Fatalf("explicit defer human task: %v", err)
+			}
+			if got := strings.TrimSpace(asString(out.(map[string]any)["status"])); got != "deferred" {
+				t.Fatalf("explicit human task status = %q, want deferred", got)
+			}
+			assertHumanTaskDeferredProjection(t, tc.store, explicitID)
+			missingDateID := createHumanTaskWithExecutor(t, exec, requester)
+			if _, err := exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
+				"task_id":  missingDateID,
+				"decision": "defer",
+			}); err == nil {
+				t.Fatal("defer human task without requeue_date error = nil")
 			}
 			out, err = exec.ExecHumanTaskDecideDirect(context.Background(), decider, map[string]any{
 				"task_id":  secondID,
@@ -306,6 +330,23 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 				t.Fatalf("requeued human task status = %q, want approved", got)
 			}
 		})
+	}
+}
+
+func assertHumanTaskDeferredProjection(t *testing.T, store humanTaskToolStore, taskID string) {
+	t.Helper()
+	detail, err := store.GetV1MailboxItem(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("get v1 deferred human task: %v", err)
+	}
+	if detail.Item.Status != "deferred" || detail.Item.Decision != "" || detail.Item.DeferredUntil == "" {
+		t.Fatalf("deferred human task projection = %#v, want status deferred, no terminal decision, deferred_until set", detail.Item)
+	}
+	if _, err := time.Parse(time.RFC3339Nano, detail.Item.DeferredUntil); err != nil {
+		t.Fatalf("deferred_until %q is not RFC3339Nano: %v", detail.Item.DeferredUntil, err)
+	}
+	if len(detail.History) < 2 || detail.History[len(detail.History)-1].Action != "deferred" {
+		t.Fatalf("deferred human task history = %#v", detail.History)
 	}
 }
 
