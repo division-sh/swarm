@@ -104,7 +104,10 @@ func TestPlanChangedDocsOnlySelectsNoPackages(t *testing.T) {
 	pkgs := []Package{
 		{ImportPath: "github.com/division-sh/swarm", RelDir: "."},
 	}
-	plan, err := PlanChanged(".", pkgs, []ChangedFile{{Path: "README.md", Status: "M"}})
+	plan, err := PlanChanged(".", pkgs, []ChangedFile{
+		{Path: "README.md", Status: "M"},
+		{Path: "docs/local-testing.md", Status: "M"},
+	})
 	if err != nil {
 		t.Fatalf("plan changed: %v", err)
 	}
@@ -116,6 +119,31 @@ func TestPlanChangedDocsOnlySelectsNoPackages(t *testing.T) {
 	}
 	if got := TestCommand(plan, nil); got != nil {
 		t.Fatalf("command = %#v, want nil", got)
+	}
+}
+
+func TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite(t *testing.T) {
+	path := "tests/tier7-composition/test-agent-emits-to-node/prompts/test-agent.md"
+	pkgs := []Package{
+		{ImportPath: "github.com/division-sh/swarm/internal/runtime/swarmflowtest", RelDir: "internal/runtime/swarmflowtest"},
+		{ImportPath: "github.com/division-sh/swarm/internal/runtime/cataloge2e", RelDir: "internal/runtime/cataloge2e"},
+		{ImportPath: "github.com/division-sh/swarm/internal/runtime/runforkexecution", RelDir: "internal/runtime/runforkexecution"},
+	}
+	plan, err := PlanChanged(".", pkgs, []ChangedFile{{Path: path, Status: "M"}})
+	if err != nil {
+		t.Fatalf("plan changed: %v", err)
+	}
+	if plan.DocsOnly {
+		t.Fatalf("DocsOnly = true, want false")
+	}
+	if !plan.FullSuite {
+		t.Fatalf("FullSuite = false, want true")
+	}
+	if got, want := plan.FullSuiteReasons, []string{path + " has no owning Go package"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("full suite reasons = %#v, want %#v", got, want)
+	}
+	if got, want := TestCommand(plan, nil), []string{"go", "test", "./..."}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
 	}
 }
 
