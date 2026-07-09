@@ -6541,7 +6541,7 @@ tool_model:
       - "`rate_limit` and `rate_limit_max_wait`; connector admission/rate limiting is split until specified."
       - "direct runtime provider adapter code or bespoke connector dispatch."
     connector_pack_profile:
-      status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, Notion Basic+JSON workspace-grant connector proof, Microsoft Graph client_credentials `.default` connector proof, and GitHub App installation-token issue-comment connector proof"
+      status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, Notion Basic+JSON workspace-grant connector proof, Microsoft Graph client_credentials `.default` connector proof, and GitHub App installation-token issue/comment multi-action connector proof"
       body_file: connector.yaml
       import_syntax: >
         package.yaml `connector_packs.imports[]` entries name `provider` and `tool`. The import is an explicit enablement
@@ -6553,11 +6553,13 @@ tool_model:
       verification_rule: >
         The envelope hash is over the exact connector.yaml bytes. The loader parses the envelope with strict known fields,
         verifies the exact byte hash, parses connector.yaml through the normal tool schema owner, validates the
-        provider_connector profile, derives connector capabilities/requires mechanically from the tool declaration, and
-        rejects any declared capability or requirement drift.
+        provider_connector profile, derives connector capabilities/requires mechanically from every tool declaration in
+        deterministic tool-id order, and rejects any declared capability or requirement drift. Connector envelopes declare
+        action capability truth as `capabilities.can.call_provider_actions`, a non-empty list of the exact packed tool ids;
+        the former scalar action form is non-authoritative.
       capability_surface: >
         Connector pack CAN/CANNOT/readback is kind-specific. Connector CAN rows include calling the declared provider
-        action, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in
+        action or actions, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in
         `activity_attempts`. Connector CANNOT rows include bypassing `activity_attempts`, automatically retrying
         non-idempotent writes, or exposing credential values. Requirement rows are typed: static secret requirements render
         BOUND/UNBOUND from the static credential store, while managed credential requirements render managed credential

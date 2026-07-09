@@ -478,6 +478,35 @@ func TestDefaultPackRegistryLoadsGitHubAppInstallationPack(t *testing.T) {
 	if strings.Contains(tool.HTTP.URL, "secret") || strings.Contains(tool.HTTP.URL, "token") {
 		t.Fatal("builtin GitHub tool leaked a concrete credential value")
 	}
+
+	createIssue, ok := BuiltinTool("github", "github.create_issue")
+	if !ok {
+		t.Fatal("BuiltinTool github.create_issue not found")
+	}
+	if !isProviderConnector(createIssue) || createIssue.ManagedCredential == nil || createIssue.ManagedCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+		t.Fatalf("builtin GitHub create issue tool = %#v, want provider connector with github_app_installation", createIssue)
+	}
+	if createIssue.HTTP == nil || createIssue.HTTP.Method != "POST" || !strings.Contains(createIssue.HTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues") {
+		t.Fatalf("builtin GitHub create issue http = %#v, want create issue endpoint", createIssue.HTTP)
+	}
+
+	addLabels, ok := BuiltinTool("github", "github.add_labels_to_issue")
+	if !ok {
+		t.Fatal("BuiltinTool github.add_labels_to_issue not found")
+	}
+	if !isProviderConnector(addLabels) || addLabels.ManagedCredential == nil || addLabels.ManagedCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+		t.Fatalf("builtin GitHub add labels tool = %#v, want provider connector with github_app_installation", addLabels)
+	}
+	if addLabels.HTTP == nil || addLabels.HTTP.Method != "POST" || !strings.Contains(addLabels.HTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels") {
+		t.Fatalf("builtin GitHub add labels http = %#v, want issue labels endpoint", addLabels.HTTP)
+	}
+	bodyMap, ok := addLabels.HTTP.Body.(map[string]any)
+	if !ok {
+		t.Fatalf("builtin GitHub add labels body = %#v, want object body", addLabels.HTTP.Body)
+	}
+	if body, ok := bodyMap["labels"].(string); !ok || body != "{{input.labels}}" {
+		t.Fatalf("builtin GitHub add labels body = %#v, want whole-field labels template", addLabels.HTTP.Body)
+	}
 }
 
 func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *testing.T) {
@@ -578,6 +607,59 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 	}
 }
 
+func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
+	ctx := context.Background()
+	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			{
+				Key: ".",
+				Manifest: runtimecontracts.ProjectPackageDocument{
+					ConnectorPacks: runtimecontracts.ConnectorPackImports{
+						Imports: []runtimecontracts.ConnectorPackImport{
+							{Provider: "github", Tool: "github.add_labels_to_issue"},
+							{Provider: "github", Tool: "github.create_issue"},
+							{Provider: "github", Tool: "github.create_issue_comment"},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+	tools := source.ToolEntries()
+	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
+		tool, ok := tools[toolID]
+		if !ok {
+			t.Fatalf("imported tool %s missing", toolID)
+		}
+		if !isProviderConnector(tool) || tool.ManagedCredential == nil || tool.ManagedCredential.Key != "github_app" {
+			t.Fatalf("imported GitHub tool %s = %#v, want github_app provider connector", toolID, tool)
+		}
+	}
+	surfaces, err := SurfacesWithOptions(ctx, source, SurfaceOptions{})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions: %v", err)
+	}
+	if len(surfaces) != 3 {
+		t.Fatalf("surfaces = %#v, want three GitHub action surfaces", surfaces)
+	}
+	seen := map[string]bool{}
+	for _, surface := range surfaces {
+		seen[surface.ToolID] = true
+		if len(surface.Requires) != 1 || surface.Requires[0].Kind != "managed_credential" || surface.Requires[0].Name != "github_app" || surface.Requires[0].Bound {
+			t.Fatalf("surface %s requirements = %#v, want unbound github_app managed credential", surface.ToolID, surface.Requires)
+		}
+	}
+	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
+		if !seen[toolID] {
+			t.Fatalf("surface for %s missing in %#v", toolID, surfaces)
+		}
+	}
+}
+
 func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
@@ -653,7 +735,7 @@ func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 		{
 			name: "capability declaration drift",
 			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_action: telegram.send_message", "call_provider_action: telegram.other")
+				replaceConnectorPackFile(t, files, "pack.yaml", "- telegram.send_message", "- telegram.other")
 			},
 			want: "capabilities do not match",
 		},

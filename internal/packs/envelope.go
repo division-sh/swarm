@@ -57,7 +57,7 @@ type CanCapabilities struct {
 	VerifySecret            string   `yaml:"verify_secret,omitempty" json:"verify_secret,omitempty"`
 	EmitEvents              []string `yaml:"emit_events,omitempty" json:"emit_events,omitempty"`
 	PersistDedupeMarkers    bool     `yaml:"persist_dedupe_markers,omitempty" json:"persist_dedupe_markers,omitempty"`
-	CallProviderAction      string   `yaml:"call_provider_action,omitempty" json:"call_provider_action,omitempty"`
+	CallProviderActions     []string `yaml:"call_provider_actions,omitempty" json:"call_provider_actions,omitempty"`
 	LowerThroughActivity    bool     `yaml:"lower_through_activity,omitempty" json:"lower_through_activity,omitempty"`
 	JournalActivityAttempts bool     `yaml:"journal_activity_attempts,omitempty" json:"journal_activity_attempts,omitempty"`
 }
@@ -221,7 +221,7 @@ func (c Capabilities) validateTrigger(packID string) error {
 	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) == "" {
 		return fmt.Errorf("pack %q capabilities.can.receive_https_route is required", packID)
 	}
-	if strings.TrimSpace(c.Can.CallProviderAction) != "" || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
+	if len(c.Can.CallProviderActions) > 0 || c.Can.LowerThroughActivity || c.Can.JournalActivityAttempts {
 		return fmt.Errorf("pack %q trigger capabilities must not declare connector capability fields", packID)
 	}
 	if len(c.Can.EmitEvents) == 0 {
@@ -247,8 +247,19 @@ func (c Capabilities) validateTrigger(packID string) error {
 }
 
 func (c Capabilities) validateConnector(packID string) error {
-	if strings.TrimSpace(c.Can.CallProviderAction) == "" {
-		return fmt.Errorf("pack %q capabilities.can.call_provider_action is required", packID)
+	if len(c.Can.CallProviderActions) == 0 {
+		return fmt.Errorf("pack %q capabilities.can.call_provider_actions is required", packID)
+	}
+	seenActions := map[string]struct{}{}
+	for _, action := range c.Can.CallProviderActions {
+		action = strings.TrimSpace(action)
+		if action == "" {
+			return fmt.Errorf("pack %q capabilities.can.call_provider_actions must not contain empty entries", packID)
+		}
+		if _, exists := seenActions[action]; exists {
+			return fmt.Errorf("pack %q capabilities.can.call_provider_actions contains duplicate %q", packID, action)
+		}
+		seenActions[action] = struct{}{}
 	}
 	if strings.TrimSpace(c.Can.ReceiveHTTPSRoute) != "" || strings.TrimSpace(c.Can.VerifySecret) != "" || len(c.Can.EmitEvents) > 0 || c.Can.PersistDedupeMarkers {
 		return fmt.Errorf("pack %q connector capabilities must not declare trigger capability fields", packID)
@@ -312,7 +323,11 @@ func (e Envelope) SurfaceWithRequirements(boundSecrets, boundManagedCredentials 
 	can := []string{}
 	switch strings.TrimSpace(e.Type) {
 	case TypeConnector:
-		can = append(can, "call provider action "+strings.TrimSpace(e.Capabilities.Can.CallProviderAction))
+		actions := append([]string(nil), e.Capabilities.Can.CallProviderActions...)
+		sort.Strings(actions)
+		for _, action := range actions {
+			can = append(can, "call provider action "+strings.TrimSpace(action))
+		}
 		if e.Capabilities.Can.LowerThroughActivity {
 			can = append(can, "lower through platform.activity_requested")
 		}

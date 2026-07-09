@@ -4502,6 +4502,7 @@ func runServedMailboxApproveDecisionLifecycleProof(t *testing.T, rt servedContro
 	requireServedMailboxRawTerminalState(t, rt.DB, rt.Backend, fixture.ApproveID, "approved")
 	requireServedMailboxDetailState(t, rt.Endpoint, fixture.ApproveID, "decided", "approved", "approved")
 	requireServedMailboxTerminalEvent(t, rt.DB, rt.Backend, fixture, approved.DownstreamEventID, fixture.ApproveID, "approved", "", map[string]any{"approved": true})
+	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, approved.DownstreamEventID, "platform", "pipeline", "success", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.approve", approveKey, 1)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.ApproveID, 1)
 	approveReplay := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.approve", map[string]any{
@@ -4536,6 +4537,7 @@ func runServedMailboxRejectDecisionLifecycleProof(t *testing.T, rt servedControl
 	requireServedMailboxRawTerminalState(t, rt.DB, rt.Backend, fixture.RejectID, "rejected")
 	requireServedMailboxDetailState(t, rt.Endpoint, fixture.RejectID, "decided", "rejected", "rejected")
 	requireServedMailboxTerminalEvent(t, rt.DB, rt.Backend, fixture, rejected.DownstreamEventID, fixture.RejectID, "rejected", "not enough evidence", nil)
+	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, rejected.DownstreamEventID, "platform", "pipeline", "success", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.reject", rejectKey, 1)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.RejectID, 1)
 	rejectReplay := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.reject", map[string]any{
@@ -4563,6 +4565,7 @@ func runServedMailboxDeferDecisionLifecycleProof(t *testing.T, rt servedControlP
 	requireServedMailboxRawDeferredState(t, rt.DB, rt.Backend, fixture)
 	requireServedMailboxDetailState(t, rt.Endpoint, fixture.DeferID, "deferred", "", "deferred")
 	requireServedMailboxDeferredEvent(t, rt.DB, rt.Backend, fixture, deferred.DownstreamEventID)
+	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, deferred.DownstreamEventID, "platform", "pipeline", "success", 1)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.defer", deferKey, 1)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_deferred", fixture.DeferID, 1)
 	deferReplay := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.defer", map[string]any{

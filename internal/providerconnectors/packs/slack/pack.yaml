@@ -7,7 +7,8 @@ provenance:
   source: platform
 capabilities:
   can:
-    call_provider_action: slack.post_message
+    call_provider_actions:
+      - slack.post_message
     lower_through_activity: true
     journal_activity_attempts: true
   cannot:
