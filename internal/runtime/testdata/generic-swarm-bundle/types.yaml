@@ -1,3 +1,5 @@
 types:
   GateState:
     open_gates: [text]
+  IntakeItem:
+    id: text

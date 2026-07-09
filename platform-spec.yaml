@@ -2729,10 +2729,32 @@ handler_specification:
     fan_out:
       field: fan_out
       type: object
-      purpose: For each item in a list, emit one ordinary event through the normal emit pipeline.
+      purpose: For each item in a bounded collection, emit one ordinary event through the normal emit pipeline.
       sub_fields:
-        items_from: string — source list (payload field or entity field)
-        emit: string or object — per-item event to emit, optionally with local fields payload construction
+        items_from: string — source collection at exactly one declared top-level payload.* or entity.* field.
+          Nested paths are unsupported in this slice and fail closed until the schema owner can prove the complete
+          terminal path is itself a collection.
+        as: string — required simple identifier that binds the current item for this row's emit.fields expressions.
+          `fan_out.item`, bare `item`, and `fan_out.identity` are not authoring namespaces.
+        identity: string — required expression over the item alias that declares the stable per-item key. It is
+          verification metadata, not a second expression namespace. Bootverify must prove `fan_out.emit.fields`
+          carries this exact expression so downstream join/dedup contracts can bind to the emitted payload.
+        max_items: optional positive integer tightening the platform ceiling. An authored zero is invalid; only omission
+          selects the platform ceiling. The platform ceiling is always enforced even when authors omit max_items.
+        emit: string or object — per-item event to emit, optionally with local fields payload construction. During
+          fan_out.emit.fields only, the item alias and platform-provided `fan_out.index` are available.
+      platform_ceiling:
+        max_items: 1000
+        overrun: >
+          Runtime evaluates items_from once per handler activation and checks the resulting count before any
+          per-item emit. If the count exceeds the effective limit, the handler fails closed with non-retryable
+          typed platform error `platform.fan_out_bound_exceeded`. The runtime must not silently truncate and
+          must not emit a partial prefix.
+      empty_collection: >
+        An empty collection emits zero events and still completes the fan_out row. Handler `advances_to` runs once
+        after fan_out completion, including the empty path, and `fan_out.count` is 0 for later data_accumulation.
+      transition_order: Handler `advances_to` fires once after per-item emission, not once per item.
+      graph_surface: describe --graph renders multiplicity-bearing fan-out edges such as `waiting ->xN line_item.requested`.
       route_authority: >
         `fan_out.emit` is a normal authored emit site. When it emits a
         pin-declared output event, routing is owned by the same output pin,
@@ -2754,11 +2776,13 @@ handler_specification:
         authored agent, that agent emits a batch-completed event, and the
         coordinator fans out result rows with target-less `fan_out.emit` to
         pin-declared outputs. Each row must construct the output pin key/carries
-        payload fields from the current `fan_out.item`, and parent connect
+        payload fields from the required item alias and declared `identity`
+        expression, and parent connect
         routes each emitted event to the intended flow instance by correlation
         key. No `batch_agent`, `map_agent`, inline runtime LLM invocation, or
         runtime-owned JSON result contract is part of this pattern.
-      side_effect: Writes fan_out.count to handler context (available for data_accumulation).
+      side_effect: Writes fan_out.count to handler context (available for data_accumulation). `fan_out.index`
+        is scoped to per-item emit field evaluation and is not a durable handler value.
     query:
       field: query
       type: object or list of objects
@@ -3103,7 +3127,8 @@ handler_specification:
           writing the entity field and are not addressable as `source.*`.
       fan_out:
         resolves_to: 'Handler context produced by the fan_out step. fan_out.count is the number of items
-          that were dispatched. Populated after fan_out executes, before data_accumulation.'
+          that were dispatched. Populated after fan_out executes, before data_accumulation. fan_out.index is
+          scoped to fan_out.emit.fields only.'
         available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
           state. Example: expression: fan_out.count writes the dispatch count to an entity field for
           downstream accumulation tracking (expected_from: entity.search_expected_count).'
@@ -5492,7 +5517,8 @@ engine:
       payload: Current event payload fields
       event: Current runtime-owned event envelope/context fields
       policy: Policy values from flow policy.yaml merged with root policy.yaml
-      fan_out: Available after fan_out step (e.g., fan_out.count)
+      fan_out: Available after fan_out step for count metadata (fan_out.count). fan_out.index is available only
+        while evaluating fan_out.emit.fields for one item.
       accumulated: Available inside on_complete after accumulation (list of received items)
     ambient_time: >
       CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or

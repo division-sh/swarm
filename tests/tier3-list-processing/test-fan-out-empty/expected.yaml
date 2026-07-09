@@ -4,7 +4,7 @@ trigger:
     items: []
 
 expected:
-
+  runtime_only: true
   handler_outcome: success
   entity_state: scanning
   emitted_events: []

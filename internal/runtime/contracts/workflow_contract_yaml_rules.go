@@ -229,17 +229,44 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 	}
 	var aux struct {
 		ItemsFrom string   `yaml:"items_from"`
+		As        string   `yaml:"as"`
+		Identity  string   `yaml:"identity"`
+		MaxItems  *int     `yaml:"max_items"`
 		Emit      EmitSpec `yaml:"emit"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
+	if err := ValidateFanOutAlias(aux.As); err != nil {
+		return fmt.Errorf("fan_out.%w", err)
+	}
+	if strings.TrimSpace(aux.Identity) == "" {
+		return fmt.Errorf("fan_out.identity is required")
+	}
+	maxItems := 0
+	maxItemsSet := hasYAMLMappingKey(node, "max_items")
+	if maxItemsSet && aux.MaxItems == nil {
+		return fmt.Errorf("fan_out.max_items must be a positive integer when set")
+	}
+	if aux.MaxItems != nil {
+		maxItems = *aux.MaxItems
+	}
 	*f = FanOutSpec{
-		ItemsFrom: strings.TrimSpace(aux.ItemsFrom),
-		Emit:      aux.Emit,
+		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
+		As:          strings.TrimSpace(aux.As),
+		Identity:    strings.TrimSpace(aux.Identity),
+		MaxItems:    maxItems,
+		MaxItemsSet: maxItemsSet,
+		Emit:        aux.Emit,
 	}
 	f.ItemsFrom = strings.TrimSpace(f.ItemsFrom)
 	f.ItemsPath = paths.Parse(f.ItemsFrom)
+	if _, err := ValidateFanOutItemsSource(*f); err != nil {
+		return err
+	}
+	if err := ValidateFanOutMaxItems(*f); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -269,6 +296,9 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 
 var fanOutFieldOptions = map[string]struct{}{
 	"items_from": {},
+	"as":         {},
+	"identity":   {},
+	"max_items":  {},
 	"emit":       {},
 }
 

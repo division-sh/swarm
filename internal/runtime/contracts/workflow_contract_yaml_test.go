@@ -2198,8 +2198,76 @@ emit:
 	if got := diagnostic.Problem; got != `fan_out field "foreach" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown fan_out field problem", got)
 	}
-	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"emit", "items_from"}) {
-		t.Fatalf("diagnostic valid options = %#v, want emit/items_from", diagnostic.ValidOptions)
+	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"as", "emit", "identity", "items_from", "max_items"}) {
+		t.Fatalf("diagnostic valid options = %#v, want canonical fan_out options", diagnostic.ValidOptions)
+	}
+}
+
+func TestFanOutSpecDecode_RejectsExplicitZeroMaxItems(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: payload.items
+as: line_item
+identity: line_item.id
+max_items: 0
+emit:
+  event: routed.item
+  fields:
+    item_id: line_item.id
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "fan_out.max_items must be a positive integer when set") {
+		t.Fatalf("yaml.Unmarshal error = %v, want explicit zero max_items rejection", err)
+	}
+}
+
+func TestFanOutSpecDecode_RejectsExplicitNullMaxItems(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: payload.items
+as: line_item
+identity: line_item.id
+max_items: null
+emit:
+  event: routed.item
+  fields:
+    item_id: line_item.id
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "fan_out.max_items must be a positive integer when set") {
+		t.Fatalf("yaml.Unmarshal error = %v, want explicit null max_items rejection", err)
+	}
+}
+
+func TestFanOutSpecDecode_RejectsNestedItemsSource(t *testing.T) {
+	var spec FanOutSpec
+	err := yaml.Unmarshal([]byte(`
+items_from: payload.items.missing
+as: line_item
+identity: line_item.id
+emit:
+  event: routed.item
+  fields:
+    item_id: line_item.id
+`), &spec)
+	if err == nil || !strings.Contains(err.Error(), "must reference exactly one declared top-level collection field") {
+		t.Fatalf("yaml.Unmarshal error = %v, want nested items_from rejection", err)
+	}
+}
+
+func TestFanOutSpecDecode_DistinguishesOmittedMaxItems(t *testing.T) {
+	var spec FanOutSpec
+	if err := yaml.Unmarshal([]byte(`
+items_from: payload.items
+as: line_item
+identity: line_item.id
+emit:
+  event: routed.item
+  fields:
+    item_id: line_item.id
+`), &spec); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if spec.MaxItemsSet || spec.MaxItems != 0 {
+		t.Fatalf("decoded max_items = %d set=%v, want omitted", spec.MaxItems, spec.MaxItemsSet)
 	}
 }
 
@@ -2830,6 +2898,12 @@ func TestHandlerRuleEntryDecode_PreservesRuleLevelFanOut(t *testing.T) {
 condition: "payload.mode == 'parallel'"
 fan_out:
   items_from: payload.items
+  as: line_item
+  identity: line_item.id
+  emit:
+    event: item.done
+    fields:
+      item_id: line_item.id
 data_accumulation:
   writes:
     - target_field: dispatch_count
@@ -3163,6 +3237,8 @@ rules:
     emit: rule.done
 fan_out:
   items_from: payload.items
+  as: line_item
+  identity: line_item.id
   emit: item.done
 `,
 			contains: "not supported with fan_out",
@@ -3177,6 +3253,8 @@ rules:
     condition: "else"
     fan_out:
       items_from: payload.items
+      as: line_item
+      identity: line_item.id
       emit: item.done
 `,
 			contains: "not supported with rules[0].fan_out",

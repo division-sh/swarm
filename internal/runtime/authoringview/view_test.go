@@ -251,6 +251,61 @@ func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
 	}
 }
 
+func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{
+				Declared: true,
+				Entries: []runtimecontracts.FlowStageDeclaration{
+					{ID: "waiting", Initial: true},
+					{ID: "awaiting_line_items"},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "waiting",
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"dispatcher": {
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+					"order.accepted": {
+						CreateEntity: true,
+						FanOut: &runtimecontracts.FanOutSpec{
+							ItemsFrom: "payload.line_items",
+							As:        "line_item",
+							Identity:  "line_item.id",
+							Emit:      runtimecontracts.EmitSpec{Event: "line_item.requested"},
+						},
+						AdvancesTo: "awaiting_line_items",
+					},
+				},
+			},
+		},
+	}
+
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(view.StageGraphs) != 1 {
+		t.Fatalf("StageGraphs = %#v, want one root graph", view.StageGraphs)
+	}
+	graph := view.StageGraphs[0]
+	if len(graph.FanOuts) != 1 {
+		t.Fatalf("graph fan_outs = %#v, want one fan-out edge", graph.FanOuts)
+	}
+	got := graph.FanOuts[0]
+	if got.Emit != "line_item.requested" || got.ItemsFrom != "payload.line_items" || got.ItemAlias != "line_item" || got.Identity != "line_item.id" {
+		t.Fatalf("fan-out view = %#v, want multiplicity metadata", got)
+	}
+	if len(got.From) != 1 || got.From[0] != "waiting" {
+		t.Fatalf("fan-out from = %#v, want initial stage", got.From)
+	}
+	if got.Source != "handler.fan_out" || got.NodeID != "dispatcher" || got.EventType != "order.accepted" {
+		t.Fatalf("fan-out source = %#v, want handler fan_out dispatcher/order.accepted", got)
+	}
+}
+
 func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path: "analysis",

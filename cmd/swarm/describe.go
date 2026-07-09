@@ -244,6 +244,36 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
 				}
 			}
+			if len(graph.FanOuts) > 0 {
+				fmt.Fprintln(out, "    fan_out:")
+				for _, fanOut := range graph.FanOuts {
+					from := strings.Join(fanOut.From, ",")
+					if from == "" {
+						from = "<none>"
+					}
+					parts := []string{
+						fmt.Sprintf("%s ->xN %s", from, strings.TrimSpace(fanOut.Emit)),
+						"items_from " + strings.TrimSpace(fanOut.ItemsFrom),
+					}
+					if strings.TrimSpace(fanOut.ItemAlias) != "" {
+						parts = append(parts, "as "+strings.TrimSpace(fanOut.ItemAlias))
+					}
+					if strings.TrimSpace(fanOut.Identity) != "" {
+						parts = append(parts, "identity "+strings.TrimSpace(fanOut.Identity))
+					}
+					detail := strings.TrimSpace(fanOut.Source)
+					if strings.TrimSpace(fanOut.NodeID) != "" {
+						detail += " " + strings.TrimSpace(fanOut.NodeID)
+					}
+					if strings.TrimSpace(fanOut.EventType) != "" {
+						detail += " on " + strings.TrimSpace(fanOut.EventType)
+					}
+					if detail != "" {
+						parts = append(parts, "("+strings.TrimSpace(detail)+")")
+					}
+					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
+				}
+			}
 		}
 	}
 	if len(view.Diagnostics) > 0 {

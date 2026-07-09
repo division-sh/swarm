@@ -2,5 +2,7 @@ batch.submitted:
   items: array
 routed.a:
   item: FanOutItem
+  item_id: text
 routed.b:
   item: FanOutItem
+  item_id: text

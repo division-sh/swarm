@@ -271,7 +271,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 								Emit:      EmitSpec{Event: "task.rules.else"},
 							},
 						},
-						FanOut: &FanOutSpec{Emit: EmitSpec{Event: "task.child"}},
+						FanOut: &FanOutSpec{ItemsFrom: "payload.items", As: "task_item", Identity: "task_item", Emit: EmitSpec{Event: "task.child"}},
 					},
 				},
 			},

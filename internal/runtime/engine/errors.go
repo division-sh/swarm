@@ -17,4 +17,5 @@ var (
 	ErrEmitPayloadContractViolation = errors.New("engine: emit payload contract violation")
 	ErrInvalidConfig                = errors.New("engine: invalid config")
 	ErrNotImplemented               = errors.New("engine: not implemented")
+	ErrFanOutBoundExceeded          = errors.New("engine: fan_out bound exceeded")
 )

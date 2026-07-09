@@ -520,9 +520,7 @@ func assertSlackManagedConnectorMissingCredential(t *testing.T, backend slackMan
 	if got := countSlackManagedConnectorActivityAttemptsForSource(t, backend, inboundEventID); got != 0 {
 		t.Fatalf("%s missing managed credential activity attempts = %d, want 0", backend.name, got)
 	}
-	if got := countSlackManagedConnectorFailureEventsForSource(t, backend, inboundEventID); got != 1 {
-		t.Fatalf("%s missing managed credential failure events = %d, want 1", backend.name, got)
-	}
+	requireManagedConnectorFailureEventCountEventually(t, backend, "missing managed credential", inboundEventID, countSlackManagedConnectorFailureEventsForSource)
 }
 
 func loadSlackManagedConnectorInboundEventID(t *testing.T, backend slackManagedConnectorBackend, providerEventID string) string {
@@ -710,6 +708,22 @@ func requireSlackManagedConnectorResultEventEventually(t *testing.T, backend sla
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("%s event row for %s/%s not found", backend.name, eventID, eventType)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func requireManagedConnectorFailureEventCountEventually(t *testing.T, backend slackManagedConnectorBackend, label, sourceEventID string, countFn func(*testing.T, slackManagedConnectorBackend, string) int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var got int
+	for {
+		got = countFn(t, backend, sourceEventID)
+		if got == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s %s failure events = %d, want 1", backend.name, label, got)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

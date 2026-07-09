@@ -248,6 +248,13 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	if len(graph.Timers) != 2 {
 		t.Fatalf("graph timers = %#v, want emit and advance stage timers", graph.Timers)
 	}
+	if len(graph.FanOuts) != 1 {
+		t.Fatalf("graph fan_outs = %#v, want ticket.opened collection fan-out", graph.FanOuts)
+	}
+	fanOut := graph.FanOuts[0]
+	if fanOut.Emit != "line_item.requested" || fanOut.ItemsFrom != "payload.line_items" || fanOut.ItemAlias != "line_item" || fanOut.Identity != "line_item" {
+		t.Fatalf("graph fan_out = %#v, want line_item multiplicity metadata", fanOut)
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -271,6 +278,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
 		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
 		"active after 72h advances_to timed_out (timer support.active.timed_out)",
+		"waiting ->xN line_item.requested items_from payload.line_items as line_item identity line_item (handler.fan_out support-node on ticket.opened)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)
@@ -385,6 +393,7 @@ ticket.opened:
   swarm:
     source: external
   entity_id: string
+  line_items: "[text]"
 ticket.closed:
   swarm:
     source: external
@@ -393,6 +402,11 @@ ticket.sla_escalated:
   swarm:
     consumer: [operator]
   entity_id: string
+line_item.requested:
+  swarm:
+    consumer: [worker]
+  line_item_id: string
+  line_item_index: integer
 accumulate.timeout:
   swarm:
     source: platform
@@ -410,6 +424,15 @@ support-node:
   event_handlers:
     ticket.opened:
       create_entity: true
+      fan_out:
+        items_from: payload.line_items
+        as: line_item
+        identity: line_item
+        emit:
+          event: line_item.requested
+          fields:
+            line_item_id: line_item
+            line_item_index: fan_out.index
       advances_to: active
     ticket.closed:
       advances_to: done

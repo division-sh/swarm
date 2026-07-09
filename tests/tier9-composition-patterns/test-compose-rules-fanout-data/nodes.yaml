@@ -5,15 +5,12 @@ dispatcher:
   produces: [batch.dispatched]
   event_handlers:
     batch.requested:
+      count:
+        items_from: payload.items
+        store_as: entity.dispatch_count
       rules:
         - id: parallel
           condition: "payload.mode == 'parallel'"
-          fan_out:
-            items_from: payload.items
-          data_accumulation:
-            writes:
-              - target_field: dispatch_count
-                expression: fan_out.count
           advances_to: dispatched
           emit:
             event: batch.dispatched

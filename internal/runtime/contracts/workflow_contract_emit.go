@@ -12,6 +12,7 @@ type HandlerDeclarativeEmitSite struct {
 	RuleID    string
 	RuleIndex int
 	Spec      EmitSpec
+	ItemAlias string
 }
 
 func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
@@ -65,9 +66,13 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 
 func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclarativeEmitSite {
 	out := make([]HandlerDeclarativeEmitSite, 0, 8)
-	add := func(source, siteKey, ruleID string, ruleIndex int, spec EmitSpec) {
+	add := func(source, siteKey, ruleID string, ruleIndex int, spec EmitSpec, itemAlias ...string) {
 		if spec.Empty() {
 			return
+		}
+		alias := ""
+		if len(itemAlias) > 0 {
+			alias = strings.TrimSpace(itemAlias[0])
 		}
 		out = append(out, HandlerDeclarativeEmitSite{
 			Source:    strings.TrimSpace(source),
@@ -75,6 +80,7 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 			RuleID:    strings.TrimSpace(ruleID),
 			RuleIndex: ruleIndex,
 			Spec:      cloneEmitSpec(spec),
+			ItemAlias: alias,
 		})
 	}
 	templateSites := HandlerRuleEmitTemplateSites(handler)
@@ -83,7 +89,7 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 		for idx, rule := range handler.Rules {
 			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, idx, rule.Emit)
 			if rule.FanOut != nil {
-				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit)
+				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 			}
 		}
 	} else {
@@ -93,25 +99,25 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 	for idx, rule := range handler.OnComplete {
 		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
 		if rule.FanOut != nil {
-			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit)
+			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 		}
 	}
 	if handler.Accumulate != nil {
 		for idx, rule := range handler.Accumulate.OnComplete {
 			add("handler.accumulate.on_complete.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
 			if rule.FanOut != nil {
-				add("handler.accumulate.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit)
+				add("handler.accumulate.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.accumulate.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
 			}
 		}
 		if handler.Accumulate.OnTimeout != nil {
 			add("handler.accumulate.on_timeout.emit", "handler.accumulate.on_timeout.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.Emit)
 			if handler.Accumulate.OnTimeout.FanOut != nil {
-				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit)
+				add("handler.accumulate.on_timeout.fan_out.emit", "handler.accumulate.on_timeout.fan_out.emit", handler.Accumulate.OnTimeout.ID, 0, handler.Accumulate.OnTimeout.FanOut.Emit, handler.Accumulate.OnTimeout.FanOut.As)
 			}
 		}
 	}
 	if handler.FanOut != nil {
-		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit)
+		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit, handler.FanOut.As)
 	}
 	return out
 }

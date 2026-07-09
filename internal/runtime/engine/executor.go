@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
+	"github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -99,6 +100,7 @@ type executionFrame struct {
 	topLevelDataWritesApplied bool
 	ruleDataWritesApplied     bool
 	projectionApplied         bool
+	transitionApplied         bool
 }
 
 type handlerRuleSource string
@@ -1547,11 +1549,25 @@ func specialHandlerClearTarget(target string) bool {
 }
 
 func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
-	spec := e.selectedFanOut(frame)
-	if spec == nil {
+	active := e.selectedFanOut(frame)
+	if active.Spec == nil {
 		return false, nil
 	}
-	itemsValue, _ := resolveContractPath(frame.base, frame.state, spec.ItemsPath, spec.ItemsFrom)
+	spec := active.Spec
+	if err := runtimecontracts.ValidateFanOutAlias(spec.As); err != nil {
+		return false, fmt.Errorf("%w: fan_out.%v", ErrInvalidConfig, err)
+	}
+	if strings.TrimSpace(spec.Identity) == "" {
+		return false, fmt.Errorf("%w: fan_out.identity is required", ErrInvalidConfig)
+	}
+	itemsPath, err := runtimecontracts.ValidateFanOutItemsSource(*spec)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	if err := runtimecontracts.ValidateFanOutMaxItems(*spec); err != nil {
+		return false, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
+	}
+	itemsValue, _ := resolveContractPath(frame.base, frame.state, itemsPath, spec.ItemsFrom)
 	items := sliceFromAny(itemsValue)
 	frame.result.FanOutCount = len(items)
 	frame.state.FanOut = map[string]any{}
@@ -1560,8 +1576,20 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	// entity write target.
 	frame.state.State.SetMetadata("fan_out_count", len(items))
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
-	if len(items) == 0 {
-		return false, nil
+	limit := runtimecontracts.EffectiveFanOutMaxItems(*spec)
+	if len(items) > limit {
+		return false, rterrors.WrapRuntimeError(
+			runtimecontracts.FanOutBoundExceededCode,
+			"runtime.engine",
+			string(StepFanOut),
+			false,
+			ErrFanOutBoundExceeded,
+			"%s fan_out over %s resolved %d item(s), exceeding limit %d",
+			strings.TrimSpace(string(active.Source)),
+			strings.TrimSpace(spec.ItemsFrom),
+			len(items),
+			limit,
+		)
 	}
 	if err := e.stepDataWrites(frame); err != nil {
 		return false, err
@@ -1569,20 +1597,21 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if err := e.stepProjection(frame); err != nil {
 		return false, err
 	}
-	for _, item := range items {
+	for index, item := range items {
 		eventType := fanOutEventType(spec)
 		if eventType == "" {
 			continue
 		}
 		eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
-		emitSpec, err := e.lowerEmitSpecForFrame(frame, "handler.fan_out.emit", spec.Emit)
+		emitSpec, err := e.lowerEmitSpecForFrame(frame, string(active.EmitSource()), spec.Emit)
 		if err != nil {
 			return false, err
 		}
 		emitSpec.Event = eventType
 		frame.state.SetFanOut("item", item)
+		frame.state.SetFanOut("index", index)
 		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{AllowBareItem: true})
+		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{ItemAlias: spec.As})
 		if err != nil {
 			return false, err
 		}
@@ -1598,7 +1627,11 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 		}
 	}
 	if len(frame.result.EmitIntents) == 0 && len(frame.result.DeadLetterIntents) == 0 {
-		return false, nil
+		if err := e.stepAdvancesTo(frame); err != nil {
+			return false, err
+		}
+		frame.result.Status = OutcomeFannedOut
+		return true, nil
 	}
 	if err := e.stepAdvancesTo(frame); err != nil {
 		return false, err
@@ -1712,6 +1745,9 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 }
 
 func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
+	if frame.transitionApplied {
+		return nil
+	}
 	next := strings.TrimSpace(frame.req.Handler.AdvancesTo)
 	if frame.rule != nil && strings.TrimSpace(frame.rule.AdvancesTo) != "" {
 		next = strings.TrimSpace(frame.rule.AdvancesTo)
@@ -1728,6 +1764,7 @@ func (e *Executor) stepAdvancesTo(frame *executionFrame) error {
 	frame.result.NextState = next
 	frame.state.State.CurrentState = next
 	frame.result.StateMutation.NextState = next
+	frame.transitionApplied = true
 	frame.result.ActionsExecuted = append(frame.result.ActionsExecuted,
 		identity.ActionRecordStateChange.String(),
 		identity.ActionUpdateState.String(),
@@ -2767,11 +2804,31 @@ func (e *Executor) selectedCompute(frame *executionFrame) *runtimecontracts.Comp
 	return frame.req.Handler.Compute
 }
 
-func (e *Executor) selectedFanOut(frame *executionFrame) *runtimecontracts.FanOutSpec {
-	if frame.rule != nil && frame.rule.FanOut != nil {
-		return frame.rule.FanOut
+type activeFanOutSpec struct {
+	Spec   *runtimecontracts.FanOutSpec
+	Source handlerRuleSource
+}
+
+func (a activeFanOutSpec) EmitSource() string {
+	switch a.Source {
+	case handlerRuleSourceRules:
+		return "handler.rules.fan_out.emit"
+	case handlerRuleSourceOnComplete:
+		return "handler.on_complete.fan_out.emit"
+	case handlerRuleSourceAccumulateOnComplete:
+		return "handler.accumulate.on_complete.fan_out.emit"
+	case handlerRuleSourceAccumulateOnTimeout:
+		return "handler.accumulate.on_timeout.fan_out.emit"
+	default:
+		return "handler.fan_out.emit"
 	}
-	return frame.req.Handler.FanOut
+}
+
+func (e *Executor) selectedFanOut(frame *executionFrame) activeFanOutSpec {
+	if frame.rule != nil && frame.rule.FanOut != nil {
+		return activeFanOutSpec{Spec: frame.rule.FanOut, Source: frame.ruleSource}
+	}
+	return activeFanOutSpec{Spec: frame.req.Handler.FanOut}
 }
 
 type activeDeclarativeEmitSpec struct {

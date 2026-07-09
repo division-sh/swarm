@@ -1,10 +1,13 @@
 item.created:
   emitter:
     - control-plane
+  item_id: string
+  items: "[IntakeItem]"
 item.processed:
   emitter:
     - worker-a
     - worker-b
+  item_id: string
 item.review_requested:
   emitter:
     - intake-router

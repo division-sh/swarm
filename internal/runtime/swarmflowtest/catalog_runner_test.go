@@ -158,7 +158,7 @@ type catalogSystemNodeEventHandler struct {
 	Rules            catalogRuleList                           `yaml:"rules"`
 	Accumulate       *catalogAccumulateSpec                    `yaml:"accumulate"`
 	Compute          *catalogComputeSpec                       `yaml:"compute"`
-	FanOut           *catalogFanOutSpec                        `yaml:"fan_out"`
+	FanOut           *runtimecontracts.FanOutSpec              `yaml:"fan_out"`
 	Filter           *runtimecontracts.FilterSpec              `yaml:"filter"`
 	Reduce           *runtimecontracts.ReduceSpec              `yaml:"reduce"`
 	Count            *runtimecontracts.CountSpec               `yaml:"count"`
@@ -239,12 +239,6 @@ type catalogAccumulateSpec struct {
 type catalogComputeSpec struct {
 	StoreAs     string `yaml:"store_as"`
 	OutputField string `yaml:"output_field"`
-}
-
-type catalogFanOutSpec struct {
-	ItemsFrom string                    `yaml:"items_from"`
-	Target    string                    `yaml:"target"`
-	Emit      runtimecontracts.EmitSpec `yaml:"emit"`
 }
 
 type catalogActionParams struct {
@@ -2093,6 +2087,9 @@ func catalogCaseExecutableNowForDir(dir string, expected catalogExpectedDocument
 
 func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandler, step catalogTriggerStep, entity map[string]any, policy map[string]any, result catalogRunResult) catalogRunResult {
 	t.Helper()
+	if handler.FanOut != nil {
+		t.Fatalf("private catalog harness does not interpret fan_out; mark expected.runtime_only and use cataloge2e real-runtime proof")
+	}
 	payload := cloneStringAnyMapCatalog(step.Payload)
 	result.handlerOutcome = "success"
 	if !catalogGuardPasses(handler.Guard, payload, entity, policy, result.entityState) {
@@ -2159,7 +2156,6 @@ func executeCatalogHandlerStep(t testing.TB, handler catalogSystemNodeEventHandl
 	}
 	applyCatalogDataAccumulation(handler.DataAccumulation, payload, entity)
 	applyCatalogCompute(handler.Compute, entity)
-	applyCatalogFanOut(handler.FanOut, payload, entity, &result)
 	applyCatalogFilter(handler.Filter, payload, entity, policy, result.entityState)
 	applyCatalogReduce(handler.Reduce, payload, entity)
 	applyCatalogCount(handler.Count, payload, entity, policy, result.entityState)
@@ -2329,23 +2325,6 @@ func applyCatalogCompute(spec *catalogComputeSpec, entity map[string]any) {
 		return
 	}
 	catalogSetEntityPath(entity, field, "computed_value")
-}
-
-func applyCatalogFanOut(spec *catalogFanOutSpec, payload, entity map[string]any, result *catalogRunResult) {
-	if spec == nil || result == nil {
-		return
-	}
-	rawItems := resolveCatalogPath(paths.Parse(strings.TrimSpace(spec.ItemsFrom)), strings.TrimSpace(spec.ItemsFrom), entity, map[string]any{"payload": payload, "entity": entity})
-	items := catalogSlice(rawItems)
-	entity["fan_out_count"] = len(items)
-	if len(items) == 0 {
-		return
-	}
-	for range items {
-		if emit := strings.TrimSpace(spec.Emit.EventType()); emit != "" {
-			result.emittedEvents = append(result.emittedEvents, emit)
-		}
-	}
 }
 
 func applyCatalogClear(spec *runtimecontracts.ClearSpec, entity map[string]any) {

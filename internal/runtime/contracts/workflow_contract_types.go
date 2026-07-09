@@ -531,11 +531,97 @@ type ComputeKeyConfig struct {
 	ScoreKeys    []string `yaml:"score_keys"`
 	NumericKeys  []string `yaml:"numeric_keys"`
 }
+
+const (
+	DefaultFanOutMaxItems       = 1000
+	FanOutBoundExceededCode     = "platform.fan_out_bound_exceeded"
+	FanOutValidationCheckID     = "fan_out_validation"
+	FanOutPlatformIndexName     = "fan_out.index"
+	FanOutLegacyItemName        = "fan_out.item"
+	FanOutLegacyBareItemName    = "item"
+	FanOutUnsupportedIdentityNS = "fan_out.identity"
+)
+
 type FanOutSpec struct {
-	ItemsFrom string     `yaml:"items_from"`
-	ItemsPath paths.Path `yaml:"-"`
-	Emit      EmitSpec   `yaml:"emit"`
+	ItemsFrom   string     `yaml:"items_from"`
+	ItemsPath   paths.Path `yaml:"-"`
+	As          string     `yaml:"as"`
+	Identity    string     `yaml:"identity"`
+	MaxItems    int        `yaml:"max_items"`
+	MaxItemsSet bool       `yaml:"-"`
+	Emit        EmitSpec   `yaml:"emit"`
 }
+
+func EffectiveFanOutMaxItems(spec FanOutSpec) int {
+	if spec.MaxItems > 0 && spec.MaxItems < DefaultFanOutMaxItems {
+		return spec.MaxItems
+	}
+	return DefaultFanOutMaxItems
+}
+
+func ValidateFanOutItemsSource(spec FanOutSpec) (paths.Path, error) {
+	path := spec.ItemsPath
+	if path.IsZero() {
+		path = paths.Parse(spec.ItemsFrom)
+	}
+	raw := strings.TrimSpace(spec.ItemsFrom)
+	if raw == "" || path.IsZero() {
+		return paths.Path{}, fmt.Errorf("fan_out.items_from is required")
+	}
+	if !path.HasExplicitRoot() {
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must use an explicit payload.* or entity.* root", raw)
+	}
+	if path.Root != paths.RootPayload && path.Root != paths.RootEntity {
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must read a declared payload.* or entity.* collection", raw)
+	}
+	if len(path.Segments) != 1 || strings.TrimSpace(path.Segments[0]) == "" {
+		return paths.Path{}, fmt.Errorf("fan_out.items_from %q must reference exactly one declared top-level collection field", raw)
+	}
+	return path, nil
+}
+
+func ValidateFanOutMaxItems(spec FanOutSpec) error {
+	if spec.MaxItems < 0 || (spec.MaxItemsSet && spec.MaxItems == 0) {
+		return fmt.Errorf("fan_out.max_items must be a positive integer when set")
+	}
+	if spec.MaxItems > DefaultFanOutMaxItems {
+		return fmt.Errorf("fan_out.max_items %d exceeds platform ceiling %d; max_items may only tighten the ceiling", spec.MaxItems, DefaultFanOutMaxItems)
+	}
+	return nil
+}
+
+func ValidateFanOutAlias(alias string) error {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return fmt.Errorf("as is required")
+	}
+	if !simpleFanOutIdentifier(alias) {
+		return fmt.Errorf("as %q must be a simple identifier", alias)
+	}
+	switch alias {
+	case "payload", "entity", "_entity", "event", "policy", "computed", "fan_out", "accumulated", "query_entities", FanOutLegacyBareItemName:
+		return fmt.Errorf("as %q collides with a reserved expression root", alias)
+	}
+	return nil
+}
+
+func simpleFanOutIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		switch {
+		case r == '_':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 type HandlerOnSuccessSpec struct {
 	Emit EmitSpec `yaml:"emit"`
 }

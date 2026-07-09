@@ -47,6 +47,7 @@ type ValueContext struct {
 
 type ValueExpressionOptions struct {
 	AllowBareItem bool
+	ItemAlias     string
 }
 
 func ValidateValueExpression(expression string) error {
@@ -62,8 +63,17 @@ func ValidateValueExpressionWithOptions(expression string, opts ValueExpressionO
 	if expression == "" {
 		return fmt.Errorf("workflow data expression is empty")
 	}
-	if expressionReferencesRetiredFanOutTarget(expression) {
-		return fmt.Errorf("fan_out.target is retired; use fan_out.item for per-item values or fan_out.count for fan-out count")
+	if expressionReferencesFanOutField(expression, "target") {
+		return fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
+	}
+	if expressionReferencesFanOutField(expression, "identity") {
+		return fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
+	}
+	if expressionReferencesFanOutField(expression, "item") {
+		return fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
+	}
+	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(expression, "index") {
+		return fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
 	if err := ValidateEventReferences(expression); err != nil {
 		return err
@@ -88,8 +98,17 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	if normalized == "" {
 		return nil, fmt.Errorf("workflow data expression is empty")
 	}
-	if expressionReferencesRetiredFanOutTarget(normalized) {
-		return nil, fmt.Errorf("fan_out.target is retired; use fan_out.item for per-item values or fan_out.count for fan-out count")
+	if expressionReferencesFanOutField(normalized, "target") {
+		return nil, fmt.Errorf("fan_out.target is retired; use the current fan_out emit item alias for per-item values or fan_out.count for fan-out count")
+	}
+	if expressionReferencesFanOutField(normalized, "identity") {
+		return nil, fmt.Errorf("fan_out.identity is not supported; use the declared fan_out identity expression directly through the item alias")
+	}
+	if expressionReferencesFanOutField(normalized, "item") {
+		return nil, fmt.Errorf("fan_out.item is retired from authored fan_out expressions; use the required fan_out item alias")
+	}
+	if strings.TrimSpace(opts.ItemAlias) == "" && expressionReferencesFanOutField(normalized, "index") {
+		return nil, fmt.Errorf("fan_out.index is only available inside fan_out.emit fields")
 	}
 	if err := ValidateEventReferences(normalized); err != nil {
 		return nil, err
@@ -117,6 +136,9 @@ func EvalValueExpressionWithOptions(expression string, ctx ValueContext, opts Va
 	if opts.AllowBareItem {
 		activation["item"] = NormalizeCELValue(ctx.FanOut["item"])
 	}
+	if alias := strings.TrimSpace(opts.ItemAlias); alias != "" {
+		activation[alias] = NormalizeCELValue(ctx.FanOut["item"])
+	}
 	out, _, err := program.Eval(activation)
 	if err != nil {
 		return nil, err
@@ -128,9 +150,14 @@ func ExpressionReferencesEntity(expression string) bool {
 	return len(EntityReferences(expression)) > 0
 }
 
-func expressionReferencesRetiredFanOutTarget(expression string) bool {
+func ExpressionReferencesFanOutFieldForValidation(expression, field string) bool {
+	return expressionReferencesFanOutField(expression, field)
+}
+
+func expressionReferencesFanOutField(expression, field string) bool {
 	expression = strings.TrimSpace(expression)
-	if expression == "" {
+	field = strings.TrimSpace(field)
+	if expression == "" || field == "" {
 		return false
 	}
 	for i := 0; i < len(expression); i++ {
@@ -159,8 +186,8 @@ func expressionReferencesRetiredFanOutTarget(expression string) bool {
 		switch expression[pos] {
 		case '.':
 			pos = skipExpressionWhitespace(expression, pos+1)
-			if strings.HasPrefix(expression[pos:], "target") {
-				end := pos + len("target")
+			if strings.HasPrefix(expression[pos:], field) {
+				end := pos + len(field)
 				if end >= len(expression) || !isIdentifierPart(expression[end]) {
 					return true
 				}
@@ -172,7 +199,7 @@ func expressionReferencesRetiredFanOutTarget(expression string) bool {
 				continue
 			}
 			next = skipExpressionWhitespace(expression, next)
-			if next < len(expression) && expression[next] == ']' && value == "target" {
+			if next < len(expression) && expression[next] == ']' && value == field {
 				return true
 			}
 		}
@@ -689,19 +716,22 @@ func NormalizeCELInputMap(source map[string]any) map[string]any {
 }
 
 func dataExpressionEnvForContext(opts ValueExpressionOptions) (*cel.Env, error) {
+	if strings.TrimSpace(opts.ItemAlias) != "" {
+		return newDataExpressionEnv(false, strings.TrimSpace(opts.ItemAlias))
+	}
 	if opts.AllowBareItem {
 		dataExpressionWithBareItemEnvOnce.Do(func() {
-			dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr = newDataExpressionEnv(true)
+			dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr = newDataExpressionEnv(true, "")
 		})
 		return dataExpressionWithBareItemEnv, dataExpressionWithBareItemEnvErr
 	}
 	dataExpressionEnvOnce.Do(func() {
-		dataExpressionEnv, dataExpressionEnvErr = newDataExpressionEnv(false)
+		dataExpressionEnv, dataExpressionEnvErr = newDataExpressionEnv(false, "")
 	})
 	return dataExpressionEnv, dataExpressionEnvErr
 }
 
-func newDataExpressionEnv(allowBareItem bool) (*cel.Env, error) {
+func newDataExpressionEnv(allowBareItem bool, itemAlias string) (*cel.Env, error) {
 	variables := []cel.EnvOption{
 		cel.Variable("entity", cel.DynType),
 		cel.Variable("_entity", cel.DynType),
@@ -713,6 +743,9 @@ func newDataExpressionEnv(allowBareItem bool) (*cel.Env, error) {
 	}
 	if allowBareItem {
 		variables = append(variables, cel.Variable("item", cel.DynType))
+	}
+	if itemAlias = strings.TrimSpace(itemAlias); itemAlias != "" {
+		variables = append(variables, cel.Variable(itemAlias, cel.DynType))
 	}
 	return cel.NewEnv(variables...)
 }

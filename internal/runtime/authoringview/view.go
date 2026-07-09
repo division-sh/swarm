@@ -75,11 +75,12 @@ type FlowSourceFiles struct {
 }
 
 type StageGraphView struct {
-	FlowID   string                `json:"flow_id"`
-	FlowPath string                `json:"flow_path,omitempty"`
-	Nodes    []StageGraphNodeView  `json:"nodes"`
-	Edges    []StageGraphEdgeView  `json:"edges"`
-	Timers   []StageGraphTimerView `json:"timers,omitempty"`
+	FlowID   string                 `json:"flow_id"`
+	FlowPath string                 `json:"flow_path,omitempty"`
+	Nodes    []StageGraphNodeView   `json:"nodes"`
+	Edges    []StageGraphEdgeView   `json:"edges"`
+	Timers   []StageGraphTimerView  `json:"timers,omitempty"`
+	FanOuts  []StageGraphFanOutView `json:"fan_outs,omitempty"`
 }
 
 type StageGraphNodeView struct {
@@ -106,6 +107,17 @@ type StageGraphTimerView struct {
 	After      string `json:"after"`
 	Emit       string `json:"emit,omitempty"`
 	AdvancesTo string `json:"advances_to,omitempty"`
+}
+
+type StageGraphFanOutView struct {
+	From      []string `json:"from,omitempty"`
+	Emit      string   `json:"emit"`
+	ItemsFrom string   `json:"items_from"`
+	ItemAlias string   `json:"as"`
+	Identity  string   `json:"identity"`
+	Source    string   `json:"source"`
+	NodeID    string   `json:"node_id,omitempty"`
+	EventType string   `json:"event_type,omitempty"`
 }
 
 type RequiredAgentsView struct {
@@ -402,7 +414,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 		return nil
 	}
 	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
-	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 {
+	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 {
 		graphs = append(graphs, graph)
 	}
 	for _, flow := range bundle.FlowViews() {
@@ -411,7 +423,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
-		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 {
+		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 || len(graph.FanOuts) > 0 {
 			graphs = append(graphs, graph)
 		}
 	}
@@ -443,6 +455,7 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		Nodes:    nodes,
 		Edges:    buildStageGraphEdgesForFlow(source, flowID, initial, states, terminalSet),
 		Timers:   buildStageGraphTimersForFlow(source, flowID),
+		FanOuts:  buildStageGraphFanOutsForFlow(source, flowID, initial, states, terminalSet),
 	}
 }
 
@@ -507,8 +520,7 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 		if nodeID == "" {
 			continue
 		}
-		sourceInfo, ok := source.NodeContractSource(nodeID)
-		if !ok || strings.TrimSpace(sourceInfo.FlowID) != strings.TrimSpace(flowID) {
+		if !authoringNodeBelongsToFlow(source, nodeID, flowID) {
 			continue
 		}
 		eventTypes := make([]string, 0, len(node.EventHandlers))
@@ -627,6 +639,133 @@ func buildStageGraphTimersForFlow(source semanticview.Source, flowID string) []S
 		return out[i].TimerID < out[j].TimerID
 	})
 	return out
+}
+
+func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial string, states []string, terminalSet map[string]struct{}) []StageGraphFanOutView {
+	if source == nil {
+		return nil
+	}
+	nonTerminal := make([]string, 0, len(states))
+	for _, state := range states {
+		state = strings.TrimSpace(state)
+		if state == "" {
+			continue
+		}
+		if _, ok := terminalSet[state]; ok {
+			continue
+		}
+		nonTerminal = append(nonTerminal, state)
+	}
+	out := make([]StageGraphFanOutView, 0)
+	nodes := source.NodeEntries()
+	for _, nodeID := range sortedAuthoringNodeIDs(nodes) {
+		node := nodes[nodeID]
+		if !authoringNodeBelongsToFlow(source, nodeID, flowID) {
+			continue
+		}
+		eventTypes := make([]string, 0, len(node.EventHandlers))
+		for eventType := range node.EventHandlers {
+			if eventType = strings.TrimSpace(eventType); eventType != "" {
+				eventTypes = append(eventTypes, eventType)
+			}
+		}
+		sort.Strings(eventTypes)
+		for _, eventType := range eventTypes {
+			handler := node.EventHandlers[eventType]
+			from := append([]string{}, nonTerminal...)
+			if handler.CreateEntity {
+				from = nil
+				if strings.TrimSpace(initial) != "" {
+					from = []string{strings.TrimSpace(initial)}
+				}
+			}
+			out = append(out, fanOutViewsForHandler(from, strings.TrimSpace(nodeID), eventType, handler)...)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := out[i]
+		right := out[j]
+		if strings.Join(left.From, "\x00") != strings.Join(right.From, "\x00") {
+			return strings.Join(left.From, "\x00") < strings.Join(right.From, "\x00")
+		}
+		if left.Emit != right.Emit {
+			return left.Emit < right.Emit
+		}
+		if left.Source != right.Source {
+			return left.Source < right.Source
+		}
+		if left.NodeID != right.NodeID {
+			return left.NodeID < right.NodeID
+		}
+		return left.EventType < right.EventType
+	})
+	return out
+}
+
+func authoringNodeBelongsToFlow(source semanticview.Source, nodeID, flowID string) bool {
+	sourceInfo, ok := source.NodeContractSource(nodeID)
+	if ok {
+		return strings.TrimSpace(sourceInfo.FlowID) == strings.TrimSpace(flowID)
+	}
+	return strings.TrimSpace(flowID) == ""
+}
+
+func fanOutViewsForHandler(from []string, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []StageGraphFanOutView {
+	out := make([]StageGraphFanOutView, 0, 5)
+	add := func(source string, spec *runtimecontracts.FanOutSpec) {
+		if spec == nil {
+			return
+		}
+		emit := strings.TrimSpace(spec.Emit.EventType())
+		if emit == "" {
+			return
+		}
+		out = append(out, StageGraphFanOutView{
+			From:      append([]string{}, from...),
+			Emit:      emit,
+			ItemsFrom: strings.TrimSpace(spec.ItemsFrom),
+			ItemAlias: strings.TrimSpace(spec.As),
+			Identity:  strings.TrimSpace(spec.Identity),
+			Source:    strings.TrimSpace(source),
+			NodeID:    strings.TrimSpace(nodeID),
+			EventType: strings.TrimSpace(eventType),
+		})
+	}
+	add("handler.fan_out", handler.FanOut)
+	for idx := range handler.Rules {
+		add(indexedHandlerGraphSource("handler.rules", idx, handler.Rules[idx].ID)+".fan_out", handler.Rules[idx].FanOut)
+	}
+	for idx := range handler.OnComplete {
+		add(indexedHandlerGraphSource("handler.on_complete", idx, handler.OnComplete[idx].ID)+".fan_out", handler.OnComplete[idx].FanOut)
+	}
+	if handler.Accumulate != nil {
+		for idx := range handler.Accumulate.OnComplete {
+			add(indexedHandlerGraphSource("handler.accumulate.on_complete", idx, handler.Accumulate.OnComplete[idx].ID)+".fan_out", handler.Accumulate.OnComplete[idx].FanOut)
+		}
+		if handler.Accumulate.OnTimeout != nil {
+			add(indexedHandlerGraphSource("handler.accumulate.on_timeout", 0, handler.Accumulate.OnTimeout.ID)+".fan_out", handler.Accumulate.OnTimeout.FanOut)
+		}
+	}
+	return out
+}
+
+func sortedAuthoringNodeIDs(nodes map[string]runtimecontracts.SystemNodeContract) []string {
+	nodeIDs := make([]string, 0, len(nodes))
+	for nodeID := range nodes {
+		if nodeID = strings.TrimSpace(nodeID); nodeID != "" {
+			nodeIDs = append(nodeIDs, nodeID)
+		}
+	}
+	sort.Strings(nodeIDs)
+	return nodeIDs
+}
+
+func indexedHandlerGraphSource(prefix string, idx int, id string) string {
+	id = strings.TrimSpace(id)
+	if id != "" {
+		return fmt.Sprintf("%s[%d:%s]", strings.TrimSpace(prefix), idx, id)
+	}
+	return fmt.Sprintf("%s[%d]", strings.TrimSpace(prefix), idx)
 }
 
 func authoringStringSet(values []string) map[string]struct{} {
