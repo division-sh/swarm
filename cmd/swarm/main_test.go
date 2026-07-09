@@ -5720,7 +5720,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	if got := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s thing.agent_hold events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
 
 	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-replay")
 	agentReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-agent-replay"
@@ -5753,7 +5753,7 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	if got := servedEventNameCount(t, rt.DB, rt.Backend, "thing.agent_hold"); got != beforeHoldEvents+1 {
 		t.Fatalf("%s thing.agent_hold events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
 }
 
 func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -5787,7 +5787,7 @@ func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProof
 		t.Fatalf("%s agent.send_directive idempotent result = %#v, want directive_event_id=%s", rt.Backend, directiveAgain, directive.DirectiveEventID)
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", directiveKey, 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, directive.RunID, servedparity.MustScenario(servedparity.ScenarioAgentSendDirectiveLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, directive.RunID, servedparity.MustScenario(servedparity.ScenarioAgentSendDirectiveLiveAgentLifecycle))
 
 	restartKey := "issue-1910-" + rt.Backend + "-" + uuid.NewString() + "-agent-restart"
 	requireServedOKJSONRPC(t, rt.Endpoint, "agent.restart", map[string]any{
@@ -5810,7 +5810,7 @@ func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProof
 	restartRunID, restartInitialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1910-agent-restart-"+uuid.NewString())
 	restartHold := publishServedLiveAgentHoldEvent(t, rt, restartRunID, restartInitialEventID, "post-restart")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, restartRunID, restartHold.EventID, "agent", "load-agent", "delivered", 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, restartRunID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, restartRunID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLiveAgentLifecycle))
 
 	backlogRunID, backlogEventID := seedServedLiveAgentPendingBacklogDelivery(t, rt.DB, rt.Backend)
 	backlogKey := "issue-1910-" + rt.Backend + "-" + backlogRunID + "-agent-replay-backlog"
@@ -5834,7 +5834,7 @@ func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProof
 		t.Fatalf("%s agent.replay_backlog idempotent result = %#v, want replayed_count=%d", rt.Backend, backlogAgain, backlog.ReplayedCount)
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay_backlog", backlogKey, 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, backlogRunID, servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, backlogRunID, servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle))
 }
 
 type servedAgentLoopRestartProof struct {
