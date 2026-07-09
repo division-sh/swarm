@@ -4338,6 +4338,13 @@ type servedMailboxDecisionFixture struct {
 
 func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
+	runServedMailboxApproveDecisionLifecycleProof(t, rt)
+	runServedMailboxRejectDecisionLifecycleProof(t, rt)
+	runServedMailboxDeferDecisionLifecycleProof(t, rt)
+}
+
+func runServedMailboxApproveDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
 	fixture := seedServedMailboxDecisionFixture(t, rt.DB, rt.Backend)
 	keyPrefix := "issue-1885-" + rt.Backend + "-" + fixture.RunID
 
@@ -4367,6 +4374,13 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	if already.Data["code"] != apiv1.MailboxAlreadyDecidedCode {
 		t.Fatalf("%s mailbox.reject already-decided data = %#v, want %s", rt.Backend, already.Data, apiv1.MailboxAlreadyDecidedCode)
 	}
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxApproveDecisionLifecycle))
+}
+
+func runServedMailboxRejectDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	fixture := seedServedMailboxDecisionFixture(t, rt.DB, rt.Backend)
+	keyPrefix := "issue-1885-" + rt.Backend + "-" + fixture.RunID
 
 	rejectKey := keyPrefix + "-reject"
 	rejected := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.reject", map[string]any{
@@ -4387,6 +4401,13 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	})
 	requireServedMailboxReplay(t, rejectReplay, rejected)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.RejectID, 1)
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxRejectDecisionLifecycle))
+}
+
+func runServedMailboxDeferDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	fixture := seedServedMailboxDecisionFixture(t, rt.DB, rt.Backend)
+	keyPrefix := "issue-1885-" + rt.Backend + "-" + fixture.RunID
 
 	deferKey := keyPrefix + "-defer"
 	deferred := requireServedMailboxDecisionResult(t, rt.Endpoint, "mailbox.defer", map[string]any{
@@ -4407,14 +4428,7 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	})
 	requireServedMailboxReplay(t, deferReplay, deferred)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_deferred", fixture.DeferID, 1)
-
-	for _, scenarioID := range []string{
-		servedparity.ScenarioMailboxApproveDecisionLifecycle,
-		servedparity.ScenarioMailboxRejectDecisionLifecycle,
-		servedparity.ScenarioMailboxDeferDecisionLifecycle,
-	} {
-		requireServedParitySettlementPostconditions(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(scenarioID))
-	}
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxDeferDecisionLifecycle))
 }
 
 func seedServedMailboxDecisionFixture(t *testing.T, db *sql.DB, backend string) servedMailboxDecisionFixture {
