@@ -346,7 +346,7 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 	} else if !inputPinPayloadFieldExists(source, flowID, pin, window) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in window field %q is not declared on the receiver input event payload", window), location))
 	}
-	dedup, dedupOK, dedupDetail := validateFanInDedupBy(source, flowID, pin, resolution.DedupBy)
+	_, dedupOK, dedupDetail := validateFanInDedupBy(source, flowID, pin, resolution.DedupBy)
 	if !dedupOK {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", dedupDetail, location))
 	}
@@ -366,7 +366,7 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 		}
 	}
 	if dedupOK && window != "" {
-		findings = append(findings, validateFanInAccumulatorConsistency(source, flowID, pin, dedup, window)...)
+		findings = append(findings, validateFanInAccumulatorConsistency(source, flowID, pin)...)
 	}
 	return findings
 }
@@ -392,7 +392,7 @@ func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtime
 	return dedup, true, ""
 }
 
-func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, dedup, window string) []Finding {
+func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
 	var findings []Finding
 	scope, ok := source.FlowScopeByID(flowID)
 	if !ok {
@@ -409,11 +409,11 @@ func validateFanInAccumulatorConsistency(source semanticview.Source, flowID stri
 				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s for fan-in input must declare accumulate", nodeID, handlerEvent), flowID))
 				continue
 			}
-			if strings.TrimSpace(handler.Accumulate.DedupBy) != dedup {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.dedup_by %q must match fan-in dedup_by %q", nodeID, handlerEvent, handler.Accumulate.DedupBy, dedup), flowID))
+			if dedup := strings.TrimSpace(handler.Accumulate.DedupBy); dedup != "" {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", nodeID, handlerEvent, dedup), flowID))
 			}
-			if strings.TrimSpace(handler.Accumulate.Window) != window {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.window %q must match fan-in window %q", nodeID, handlerEvent, handler.Accumulate.Window, window), flowID))
+			if window := strings.TrimSpace(handler.Accumulate.Window); window != "" {
+				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", nodeID, handlerEvent, window), flowID))
 			}
 		}
 	}

@@ -597,6 +597,9 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if handler.SelectOrCreateEntity != nil && !handler.SelectOrCreateEntity.Empty() {
 					continue
 				}
+				if flowInputHandlerUsesResolutionMode(c.source, validationScope.semanticFlowID, eventType, runtimecontracts.FlowInputResolutionModeFanIn) {
+					continue
+				}
 				c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 					CheckID:  "flow_boundary_create_entity_validation",
 					Severity: "error",
@@ -705,6 +708,36 @@ func flowInputEventDeclaresPayloadField(source semanticview.Source, flowID, even
 	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)
 	return eventEntryDeclaresPayloadField(proof.Entry, field)
+}
+
+func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, handlerEvent, mode string) bool {
+	if source == nil {
+		return false
+	}
+	handlerEvent = strings.TrimSpace(handlerEvent)
+	mode = strings.TrimSpace(mode)
+	if handlerEvent == "" || mode == "" {
+		return false
+	}
+	for _, pin := range source.FlowInputEventPins(flowID) {
+		if strings.TrimSpace(pin.Resolution.Mode) != mode {
+			continue
+		}
+		pinEvent := strings.TrimSpace(pin.EventType())
+		if pinEvent == "" {
+			continue
+		}
+		if source.FlowEventMatches(flowID, handlerEvent, pinEvent) {
+			return true
+		}
+		handler := eventidentity.Normalize(handlerEvent)
+		if handler == eventidentity.Normalize(source.ResolveFlowEventReference(flowID, pinEvent)) ||
+			handler == eventidentity.Normalize(pinEvent) ||
+			handler == eventidentity.Normalize(pin.PinName()) {
+			return true
+		}
+	}
+	return false
 }
 
 func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {
