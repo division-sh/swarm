@@ -927,7 +927,7 @@
     },
     {
       "name": "agent.restart",
-      "description": "Restart an agent's session. Existing in-flight turn is killed; agent re-initializes.",
+      "description": "Restart an agent's session. The runtime cancels the current manager loop generation, waits for that generation to exit, and installs exactly one replacement generation before returning success. It persists an agent_loop_restarted runtime diagnostic with previous_generation and generation so the transition is observable. Idempotency replay returns the original success without performing another generation transition.\n",
       "params": [
         {
           "name": "agent_id",
