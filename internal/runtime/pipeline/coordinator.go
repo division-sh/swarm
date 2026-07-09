@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
@@ -213,13 +214,20 @@ func (pc *PipelineCoordinator) Intercept(ctx context.Context, evt events.Event) 
 	if eventType == "" {
 		return true, nil, nil
 	}
+	stageTimer, firedStageTimer, err := pc.handleWorkflowStageTimerFire(ctx, evt)
+	if err != nil {
+		return false, nil, err
+	}
+	if stageTimer && (!firedStageTimer || eventType == runtimecontracts.WorkflowStageTimerInternalEvent) {
+		return false, nil, nil
+	}
 	consume, handled := pc.interceptPolicy(ctx, eventType, evt)
 	if !handled {
 		return true, nil, nil
 	}
 	emitted := make([]events.Event, 0, 4)
 	ictx := context.WithValue(ctx, pipelineEmitCollectorKey{}, &emitted)
-	handled, err := pc.handleEventResult(ictx, evt)
+	handled, err = pc.handleEventResult(ictx, evt)
 	if evt.Type() == activityRequestEventType && err != nil {
 		return false, emitted, err
 	}

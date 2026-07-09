@@ -1421,6 +1421,8 @@ type WorkflowTimerContract struct {
 	Owner        string `yaml:"owner"`
 	FlowID       string `yaml:"-"`
 	NodeID       string `yaml:"-"`
+	StageOwned   bool   `yaml:"-"`
+	AdvancesTo   string `yaml:"-"`
 	Action       string `yaml:"action"`
 	Cancellation string `yaml:"cancellation"`
 	Delay        string `yaml:"delay"`

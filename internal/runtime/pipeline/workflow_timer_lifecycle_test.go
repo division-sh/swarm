@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -91,6 +92,66 @@ func newTimerLifecycleCoordinator(bus Bus, db *sql.DB, module WorkflowModule, st
 	return NewPipelineCoordinatorWithOptions(bus, db, opts)
 }
 
+func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
+	return &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{
+				Declared: true,
+				Entries: []runtimecontracts.FlowStageDeclaration{
+					{ID: "awaiting_review", Initial: true},
+					{ID: "expired", Terminal: true},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{
+				{
+					ID:         "awaiting_review.review.sla_escalated",
+					Stage:      "awaiting_review",
+					Event:      "review.sla_escalated",
+					Owner:      "runtime",
+					StageOwned: true,
+					Delay:      "48h",
+					StartOn:    "state:awaiting_review",
+				},
+				{
+					ID:         "awaiting_review.expired",
+					Stage:      "awaiting_review",
+					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
+					Owner:      "runtime",
+					StageOwned: true,
+					AdvancesTo: "expired",
+					Delay:      "72h",
+					StartOn:    "state:awaiting_review",
+				},
+			},
+		},
+	}
+}
+
+func assertWorkflowTimerState(t *testing.T, instance WorkflowInstance, timerID string, wantFired bool) {
+	t.Helper()
+	for _, timer := range instance.TimerState {
+		if strings.TrimSpace(timer.TimerID) != timerID {
+			continue
+		}
+		if timer.Fired != wantFired {
+			t.Fatalf("timer %s fired = %v, want %v in %#v", timerID, timer.Fired, wantFired, instance.TimerState)
+		}
+		return
+	}
+	t.Fatalf("timer %s missing from %#v", timerID, instance.TimerState)
+}
+
+func workflowTimerLifecycleLogContains(logs []RuntimeLogEntry, action string) bool {
+	for _, log := range logs {
+		if strings.TrimSpace(log.Action) == action {
+			return true
+		}
+	}
+	return false
+}
+
 func testActivePipelineSQLTxContext(t *testing.T, db *sql.DB, ctx context.Context) context.Context {
 	t.Helper()
 	tx, err := db.BeginTx(ctx, nil)
@@ -163,6 +224,124 @@ func TestWorkflowTimerFireAtSupportsPolicyRenderedDayDelay(t *testing.T) {
 	}
 	if want := now.Add(3 * 24 * time.Hour); !fireAt.Equal(want) {
 		t.Fatalf("fireAt = %s, want %s", fireAt, want)
+	}
+}
+
+func TestHandleWorkflowStageTimerFireMarksFiredAndAdvancesWithSQLiteStore(t *testing.T) {
+	runID := uuid.NewString()
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	if _, err := db.Exec(`INSERT INTO runs (run_id, status) VALUES (?, 'running')`, runID); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	source := semanticview.Wrap(stageTimerLifecycleBundle())
+	bus := &recordingPipelineBus{}
+	pc := &PipelineCoordinator{
+		bus:           bus,
+		module:        &pipelineFixtureWorkflowModule{source: source},
+		workflowStore: store,
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	now := time.Now().UTC().Round(time.Microsecond)
+
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      "ent-emit",
+		StorageRef:      "ent-emit",
+		WorkflowName:    "stage-timer-test",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "awaiting_review",
+		TimerState: []WorkflowTimerState{{
+			TimerID:   "awaiting_review.review.sla_escalated",
+			EventType: "review.sla_escalated",
+			CreatedAt: now.Add(-3 * time.Hour),
+			FiresAt:   now.Add(-2 * time.Hour),
+			StartedBy: "state:awaiting_review",
+		}},
+	}); err != nil {
+		t.Fatalf("seed emit workflow instance: %v", err)
+	}
+	emitEvt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType("review.sla_escalated"),
+		"runtime",
+		"awaiting_review.review.sla_escalated",
+		[]byte(`{"entity_id":"ent-emit"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-emit"),
+		now,
+	)
+	recognized, fired, err := pc.handleWorkflowStageTimerFire(ctx, emitEvt)
+	if err != nil {
+		t.Fatalf("handle emit stage timer: %v", err)
+	}
+	if !recognized || !fired {
+		t.Fatal("emit stage timer was not recognized")
+	}
+	emitInstance, ok, err := store.Load(ctx, "ent-emit")
+	if err != nil || !ok {
+		t.Fatalf("load emit instance ok=%v err=%v", ok, err)
+	}
+	if got := emitInstance.CurrentState; got != "awaiting_review" {
+		t.Fatalf("emit timer state = %q, want awaiting_review", got)
+	}
+	assertWorkflowTimerState(t, emitInstance, "awaiting_review.review.sla_escalated", true)
+
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      "ent-advance",
+		StorageRef:      "ent-advance",
+		WorkflowName:    "stage-timer-test",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "awaiting_review",
+		TimerState: []WorkflowTimerState{{
+			TimerID:   "awaiting_review.expired",
+			EventType: runtimecontracts.WorkflowStageTimerInternalEvent,
+			CreatedAt: now.Add(-3 * time.Hour),
+			FiresAt:   now.Add(-2 * time.Hour),
+			StartedBy: "state:awaiting_review",
+		}},
+	}); err != nil {
+		t.Fatalf("seed advance workflow instance: %v", err)
+	}
+	advanceEvt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType(runtimecontracts.WorkflowStageTimerInternalEvent),
+		"runtime",
+		"awaiting_review.expired",
+		[]byte(`{"entity_id":"ent-advance"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-advance"),
+		now,
+	)
+	recognized, fired, err = pc.handleWorkflowStageTimerFire(ctx, advanceEvt)
+	if err != nil {
+		t.Fatalf("handle advance stage timer: %v", err)
+	}
+	if !recognized || !fired {
+		t.Fatal("advance stage timer was not recognized")
+	}
+	advanceInstance, ok, err := store.Load(ctx, "ent-advance")
+	if err != nil || !ok {
+		t.Fatalf("load advance instance ok=%v err=%v", ok, err)
+	}
+	if got := advanceInstance.CurrentState; got != "expired" {
+		t.Fatalf("advance timer state = %q, want expired", got)
+	}
+	assertWorkflowTimerState(t, advanceInstance, "awaiting_review.expired", true)
+
+	if !workflowTimerLifecycleLogContains(bus.runtimeLogEntries(), "workflow_timer_fired_late") {
+		t.Fatalf("runtime logs = %#v, want late-fire diagnostic", bus.runtimeLogEntries())
+	}
+
+	recognized, fired, err = pc.handleWorkflowStageTimerFire(ctx, emitEvt)
+	if err != nil {
+		t.Fatalf("handle duplicate emit stage timer: %v", err)
+	}
+	if !recognized || fired {
+		t.Fatalf("duplicate emit stage timer recognized=%v fired=%v, want recognized stale no-op", recognized, fired)
 	}
 }
 
@@ -325,18 +504,19 @@ func TestPipelineIntercept_EventTimerStartOnRegistersSchedule(t *testing.T) {
 }
 
 func TestRegisterWorkflowTimerSchedule_PostCommitClaimDropsPipelineTransaction(t *testing.T) {
-	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) {
+	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) error {
 		pc.registerWorkflowTimerSchedule(ctx, sc)
+		return nil
 	})
 }
 
 func TestPersistWorkflowTimerSchedule_PostCommitClaimDropsPipelineTransaction(t *testing.T) {
-	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) {
-		pc.persistWorkflowTimerSchedule(ctx, sc)
+	assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t, func(pc *PipelineCoordinator, ctx context.Context, sc Schedule) error {
+		return pc.persistWorkflowTimerSchedule(ctx, sc)
 	})
 }
 
-func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testing.T, schedule func(*PipelineCoordinator, context.Context, Schedule)) {
+func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testing.T, schedule func(*PipelineCoordinator, context.Context, Schedule) error) {
 	t.Helper()
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -368,7 +548,9 @@ func assertWorkflowTimerSchedulePostCommitClaimDropsPipelineTransaction(t *testi
 		TaskID:    "timer-1",
 	}
 
-	schedule(pc, ctx, sc)
+	if err := schedule(pc, ctx, sc); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
 	if len(store.upsertTx) != 1 || !store.upsertTx[0] {
 		t.Fatalf("schedule upsert tx-active flags = %#v, want [true]", store.upsertTx)
 	}
@@ -408,7 +590,9 @@ func TestPersistWorkflowTimerCancellation_ReleasesClaimAfterCanonicalCancel(t *t
 		TaskID:       "timer-a",
 	}
 
-	pc.persistWorkflowTimerCancellation(testPipelineCoordinatorRunContext(t, pc), sc)
+	if err := pc.persistWorkflowTimerCancellation(testPipelineCoordinatorRunContext(t, pc), sc); err != nil {
+		t.Fatalf("persistWorkflowTimerCancellation: %v", err)
+	}
 
 	if got := store.cancelOwned; got != 1 {
 		t.Fatalf("cancel owned calls = %d, want 1", got)
@@ -445,7 +629,9 @@ func TestPersistWorkflowTimerCancellation_StillCancelsSchedulerWhenClaimReleaseF
 		t.Fatalf("Register(schedule): %v", err)
 	}
 
-	pc.persistWorkflowTimerCancellation(testPipelineCoordinatorRunContext(t, pc), sc)
+	if err := pc.persistWorkflowTimerCancellation(testPipelineCoordinatorRunContext(t, pc), sc); err != nil {
+		t.Fatalf("persistWorkflowTimerCancellation: %v", err)
+	}
 
 	if got := store.cancelOwned; got != 1 {
 		t.Fatalf("cancel owned calls = %d, want 1", got)

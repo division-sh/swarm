@@ -25,6 +25,23 @@ func TestValidateConditionCEL_RequiresExplicitScope(t *testing.T) {
 	}
 }
 
+func TestValidateConditionCEL_RejectsAmbientTimeAccess(t *testing.T) {
+	for _, expression := range []string{
+		`now() > payload.deadline`,
+		`timestamp("2026-07-09T00:00:00Z") > payload.deadline`,
+	} {
+		t.Run(expression, func(t *testing.T) {
+			err := ValidateConditionCEL(expression, WorkflowConditionContextRule)
+			if err == nil || !strings.Contains(err.Error(), "use stage timers") {
+				t.Fatalf("ValidateConditionCEL error = %v, want stage timer remediation", err)
+			}
+		})
+	}
+	if err := ValidateConditionCEL(`payload.label == "now()"`, WorkflowConditionContextRule); err != nil {
+		t.Fatalf("ValidateConditionCEL string literal = %v, want no ambient-time rejection", err)
+	}
+}
+
 func TestValidateConditionCEL_RejectsFanOutOutsideDataAccumulationExpressions(t *testing.T) {
 	if err := ValidateConditionCEL(`fan_out.count > 0`, WorkflowConditionContextGuard); err == nil {
 		t.Fatal("expected fan_out to be rejected in guard conditions")

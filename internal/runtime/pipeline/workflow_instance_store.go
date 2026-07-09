@@ -67,6 +67,7 @@ type WorkflowTimerState struct {
 	StartedBy string    `json:"started_by,omitempty"`
 	Recurring bool      `json:"recurring,omitempty"`
 	Cancelled bool      `json:"cancelled,omitempty"`
+	Fired     bool      `json:"fired,omitempty"`
 }
 
 type workflowInstancePersistedProjection struct {
@@ -923,7 +924,9 @@ func (s *WorkflowInstanceStore) upsertSpec(ctx context.Context, rowID, storageRe
 			return err
 		}
 		status := "active"
-		if timer.Cancelled {
+		if timer.Fired {
+			status = "fired"
+		} else if timer.Cancelled {
 			status = "cancelled"
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -1251,7 +1254,7 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runI
 			fire_at,
 			COALESCE(fire_payload->>'started_by', ''),
 			recurring,
-			status = 'cancelled'
+			status
 		FROM timers
 		WHERE run_id = $1::uuid
 		  AND entity_id = $2::uuid
@@ -1266,6 +1269,7 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runI
 	out := make([]WorkflowTimerState, 0, 4)
 	for rows.Next() {
 		var timer WorkflowTimerState
+		var status string
 		if err := rows.Scan(
 			&timer.TimerID,
 			&timer.EventType,
@@ -1273,10 +1277,13 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSpec(ctx context.Context, runI
 			&timer.FiresAt,
 			&timer.StartedBy,
 			&timer.Recurring,
-			&timer.Cancelled,
+			&status,
 		); err != nil {
 			return nil, err
 		}
+		status = strings.TrimSpace(status)
+		timer.Cancelled = status == "cancelled"
+		timer.Fired = status == "fired"
 		out = append(out, timer)
 	}
 	return out, rows.Err()

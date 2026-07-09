@@ -17,6 +17,8 @@ func (c *checkerContext) timerValidation() []Finding {
 	}
 	c.timerLoaded = true
 	for _, timer := range c.source.WorkflowTimers() {
+		c.validateStageTimerSemantics(timer)
+		c.validateLegacyStageTimerFence(timer)
 		owner := strings.TrimSpace(timer.Owner)
 		if owner == "" {
 			c.timerFindings = append(c.timerFindings, Finding{
@@ -39,16 +41,18 @@ func (c *checkerContext) timerValidation() []Finding {
 				}
 			}
 		}
-		fireEvent := semanticview.ResolveFlowEventProof(c.source, timer.FlowID, timer.Event)
-		if !fireEvent.HasSchema {
-			c.timerFindings = append(c.timerFindings, Finding{
-				CheckID:  "timer_validation",
-				Severity: "error",
-				Message:  fmt.Sprintf("timer %s event %s missing from event catalog", timer.ID, timer.Event),
-				Location: strings.TrimSpace(timer.ID),
-			})
-		} else {
-			c.validateTimerFireEventConsumer(timer, fireEvent)
+		if !timerUsesInternalStageTimerEvent(timer) {
+			fireEvent := semanticview.ResolveFlowEventProof(c.source, timer.FlowID, timer.Event)
+			if !fireEvent.HasSchema {
+				c.timerFindings = append(c.timerFindings, Finding{
+					CheckID:  "timer_validation",
+					Severity: "error",
+					Message:  fmt.Sprintf("timer %s event %s missing from event catalog", timer.ID, timer.Event),
+					Location: strings.TrimSpace(timer.ID),
+				})
+			} else {
+				c.validateTimerFireEventConsumer(timer, fireEvent)
+			}
 		}
 		startTrigger, err := timeridentity.ParseStartTrigger(timer.StartOn)
 		if err != nil {
@@ -87,6 +91,96 @@ func (c *checkerContext) timerValidation() []Finding {
 		c.validateTimerCancelStateReachability(timer, startTrigger, cancelTrigger)
 	}
 	return c.timerFindings
+}
+
+func (c *checkerContext) validateStageTimerSemantics(timer runtimecontracts.WorkflowTimerContract) {
+	if !timer.StageOwned {
+		return
+	}
+	stage := strings.TrimSpace(timer.Stage)
+	if stage == "" || !containsString(flowStatesForTimer(c.source, timer.FlowID), stage) {
+		c.timerFindings = append(c.timerFindings, Finding{
+			CheckID:  "timer_validation",
+			Severity: "error",
+			Message:  fmt.Sprintf("timer %s references unknown source stage %s", timer.ID, stage),
+			Location: strings.TrimSpace(timer.ID),
+		})
+	}
+	if strings.TrimSpace(timer.Delay) == "" {
+		c.timerFindings = append(c.timerFindings, Finding{
+			CheckID:  "timer_validation",
+			Severity: "error",
+			Message:  fmt.Sprintf("timer %s missing after delay", timer.ID),
+			Location: strings.TrimSpace(timer.ID),
+		})
+	}
+	if timer.Recurring {
+		c.timerFindings = append(c.timerFindings, Finding{
+			CheckID:  "timer_validation",
+			Severity: "error",
+			Message:  fmt.Sprintf("timer %s stage timers are one-shot; repeat/recurring is not supported", timer.ID),
+			Location: strings.TrimSpace(timer.ID),
+		})
+	}
+	if strings.TrimSpace(timer.AdvancesTo) != "" && !containsString(flowStatesForTimer(c.source, timer.FlowID), timer.AdvancesTo) {
+		c.timerFindings = append(c.timerFindings, Finding{
+			CheckID:  "timer_validation",
+			Severity: "error",
+			Message:  fmt.Sprintf("timer %s advances_to references unknown stage %s", timer.ID, timer.AdvancesTo),
+			Location: strings.TrimSpace(timer.ID),
+		})
+	}
+}
+
+func (c *checkerContext) validateLegacyStageTimerFence(timer runtimecontracts.WorkflowTimerContract) {
+	if timer.StageOwned || !timerFlowDeclaresStageMapping(c.source, timer.FlowID) {
+		return
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{name: "start_on", value: timer.StartOn},
+		{name: "cancel_on", value: timer.CancelOn},
+	} {
+		trigger, err := timeridentity.ParseCancelTrigger(field.value)
+		if field.name == "start_on" {
+			trigger, err = timeridentity.ParseStartTrigger(field.value)
+		}
+		if err != nil || trigger.Kind != timeridentity.TriggerKindState {
+			continue
+		}
+		c.timerFindings = append(c.timerFindings, Finding{
+			CheckID:  "timer_validation",
+			Severity: "error",
+			Message:  fmt.Sprintf("timer %s uses legacy node-level %s %s in a stages: flow; use stages.<stage>.timers instead", timer.ID, field.name, trigger.String()),
+			Location: strings.TrimSpace(timer.ID),
+		})
+	}
+}
+
+func timerUsesInternalStageTimerEvent(timer runtimecontracts.WorkflowTimerContract) bool {
+	return timer.StageOwned && strings.TrimSpace(timer.Event) == runtimecontracts.WorkflowStageTimerInternalEvent
+}
+
+type timerRootFlowSchemaProvider interface {
+	RootFlowSchema() (runtimecontracts.FlowSchemaDocument, bool)
+}
+
+func timerFlowDeclaresStageMapping(source semanticview.Source, flowID string) bool {
+	if source == nil {
+		return false
+	}
+	flowID = strings.TrimSpace(flowID)
+	if flowID == "" {
+		if provider, ok := source.(timerRootFlowSchemaProvider); ok {
+			schema, ok := provider.RootFlowSchema()
+			return ok && schema.StageDeclarations.Declared
+		}
+		return false
+	}
+	schema, ok := source.FlowSchemaByID(flowID)
+	return ok && schema.StageDeclarations.Declared
 }
 
 func (c *checkerContext) validateTimerTrigger(timer runtimecontracts.WorkflowTimerContract, field string, trigger timeridentity.Trigger) {

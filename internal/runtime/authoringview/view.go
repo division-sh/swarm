@@ -75,10 +75,11 @@ type FlowSourceFiles struct {
 }
 
 type StageGraphView struct {
-	FlowID   string               `json:"flow_id"`
-	FlowPath string               `json:"flow_path,omitempty"`
-	Nodes    []StageGraphNodeView `json:"nodes"`
-	Edges    []StageGraphEdgeView `json:"edges"`
+	FlowID   string                `json:"flow_id"`
+	FlowPath string                `json:"flow_path,omitempty"`
+	Nodes    []StageGraphNodeView  `json:"nodes"`
+	Edges    []StageGraphEdgeView  `json:"edges"`
+	Timers   []StageGraphTimerView `json:"timers,omitempty"`
 }
 
 type StageGraphNodeView struct {
@@ -94,6 +95,17 @@ type StageGraphEdgeView struct {
 	Source    string   `json:"source"`
 	NodeID    string   `json:"node_id,omitempty"`
 	EventType string   `json:"event_type,omitempty"`
+	TimerID   string   `json:"timer_id,omitempty"`
+	After     string   `json:"after,omitempty"`
+	Timed     bool     `json:"timed,omitempty"`
+}
+
+type StageGraphTimerView struct {
+	Stage      string `json:"stage"`
+	TimerID    string `json:"timer_id"`
+	After      string `json:"after"`
+	Emit       string `json:"emit,omitempty"`
+	AdvancesTo string `json:"advances_to,omitempty"`
 }
 
 type RequiredAgentsView struct {
@@ -390,7 +402,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 		return nil
 	}
 	graphs := make([]StageGraphView, 0, len(bundle.FlowViews())+1)
-	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 {
+	if graph := buildStageGraphForFlow(source, "", "root", ""); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 {
 		graphs = append(graphs, graph)
 	}
 	for _, flow := range bundle.FlowViews() {
@@ -399,7 +411,7 @@ func buildStageGraphs(source semanticview.Source, bundle *runtimecontracts.Workf
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(flow.Path), "/")
-		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 {
+		if graph := buildStageGraphForFlow(source, flowID, flowID, path); len(graph.Nodes) > 0 || len(graph.Edges) > 0 || len(graph.Timers) > 0 {
 			graphs = append(graphs, graph)
 		}
 	}
@@ -430,6 +442,7 @@ func buildStageGraphForFlow(source semanticview.Source, flowID, label, path stri
 		FlowPath: strings.TrimSpace(path),
 		Nodes:    nodes,
 		Edges:    buildStageGraphEdgesForFlow(source, flowID, initial, states, terminalSet),
+		Timers:   buildStageGraphTimersForFlow(source, flowID),
 	}
 }
 
@@ -519,6 +532,12 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 			}
 		}
 	}
+	for _, timer := range source.WorkflowTimers() {
+		if strings.TrimSpace(timer.FlowID) != strings.TrimSpace(flowID) || !timer.StageOwned || strings.TrimSpace(timer.AdvancesTo) == "" {
+			continue
+		}
+		edges = appendStageGraphTimedEdge(edges, []string{strings.TrimSpace(timer.Stage)}, timer.AdvancesTo, stateSet, timer)
+	}
 	sort.Slice(edges, func(i, j int) bool {
 		left := edges[i]
 		right := edges[j]
@@ -534,7 +553,13 @@ func buildStageGraphEdgesForFlow(source semanticview.Source, flowID, initial str
 		if left.NodeID != right.NodeID {
 			return left.NodeID < right.NodeID
 		}
-		return left.EventType < right.EventType
+		if left.EventType != right.EventType {
+			return left.EventType < right.EventType
+		}
+		if left.TimerID != right.TimerID {
+			return left.TimerID < right.TimerID
+		}
+		return left.After < right.After
 	})
 	return edges
 }
@@ -556,6 +581,52 @@ func appendStageGraphEdge(edges []StageGraphEdgeView, from []string, target stri
 		NodeID:    strings.TrimSpace(nodeID),
 		EventType: strings.TrimSpace(eventType),
 	})
+}
+
+func appendStageGraphTimedEdge(edges []StageGraphEdgeView, from []string, target string, stateSet map[string]struct{}, timer runtimecontracts.WorkflowTimerContract) []StageGraphEdgeView {
+	edgeCount := len(edges)
+	edges = appendStageGraphEdge(edges, from, target, stateSet, "timer", "runtime", "timer:"+strings.TrimSpace(timer.ID))
+	if len(edges) == edgeCount {
+		return edges
+	}
+	edge := &edges[len(edges)-1]
+	edge.TimerID = strings.TrimSpace(timer.ID)
+	edge.After = strings.TrimSpace(timer.Delay)
+	edge.Timed = true
+	return edges
+}
+
+func buildStageGraphTimersForFlow(source semanticview.Source, flowID string) []StageGraphTimerView {
+	if source == nil {
+		return nil
+	}
+	out := make([]StageGraphTimerView, 0)
+	for _, timer := range source.WorkflowTimers() {
+		if strings.TrimSpace(timer.FlowID) != strings.TrimSpace(flowID) || !timer.StageOwned {
+			continue
+		}
+		emit := strings.TrimSpace(timer.Event)
+		if emit == runtimecontracts.WorkflowStageTimerInternalEvent {
+			emit = ""
+		}
+		out = append(out, StageGraphTimerView{
+			Stage:      strings.TrimSpace(timer.Stage),
+			TimerID:    strings.TrimSpace(timer.ID),
+			After:      strings.TrimSpace(timer.Delay),
+			Emit:       emit,
+			AdvancesTo: strings.TrimSpace(timer.AdvancesTo),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Stage != out[j].Stage {
+			return out[i].Stage < out[j].Stage
+		}
+		if out[i].After != out[j].After {
+			return out[i].After < out[j].After
+		}
+		return out[i].TimerID < out[j].TimerID
+	})
+	return out
 }
 
 func authoringStringSet(values []string) map[string]struct{} {

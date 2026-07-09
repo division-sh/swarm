@@ -1487,7 +1487,7 @@ func ensureLifecycleWorkflowSchedules(ctx context.Context, store runtimepipeline
 			continue
 		}
 		for _, timerState := range instance.TimerState {
-			if timerState.Cancelled {
+			if timerState.Cancelled || timerState.Fired {
 				continue
 			}
 			timerID := strings.TrimSpace(timerState.TimerID)

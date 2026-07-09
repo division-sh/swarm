@@ -156,6 +156,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, entityID identit
 					StartedBy: strings.TrimSpace(timer.StartedBy),
 					Recurring: timer.Recurring,
 					Cancelled: timer.Cancelled,
+					Fired:     timer.Fired,
 				})
 			}
 			return out, true, nil

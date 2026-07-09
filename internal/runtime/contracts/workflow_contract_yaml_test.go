@@ -188,6 +188,77 @@ stages:
 	}
 }
 
+func TestFlowSchemaDocumentDecodeStageTimersUseCanonicalSyntax(t *testing.T) {
+	var doc FlowSchemaDocument
+	if err := yaml.Unmarshal([]byte(`
+name: validation
+stages:
+  awaiting_review:
+    timers:
+      - after: 48h
+        emit: review.sla_escalated
+      - after: "{{marginal_park_days}}d"
+        advances_to: expired
+  expired:
+    terminal: true
+`), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+	if len(doc.StageDeclarations.Entries) != 2 {
+		t.Fatalf("stages = %#v, want two stages", doc.StageDeclarations.Entries)
+	}
+	timers := doc.StageDeclarations.Entries[0].Timers
+	if len(timers) != 2 {
+		t.Fatalf("timers = %#v, want two timer rows", timers)
+	}
+	if got, want := timers[0].ID, "awaiting_review.review.sla_escalated"; got != want {
+		t.Fatalf("emit timer default ID = %q, want %q", got, want)
+	}
+	if got, want := timers[1].ID, "awaiting_review.expired"; got != want {
+		t.Fatalf("advance timer default ID = %q, want %q", got, want)
+	}
+	if got, want := timers[1].After, "{{marginal_park_days}}d"; got != want {
+		t.Fatalf("advance timer after = %q, want %q", got, want)
+	}
+}
+
+func TestFlowSchemaDocumentDecodeStageTimersRejectSupersededFields(t *testing.T) {
+	for _, field := range []string{"delay", "interrupting", "repeat"} {
+		t.Run(field, func(t *testing.T) {
+			var doc FlowSchemaDocument
+			err := yaml.Unmarshal([]byte(fmt.Sprintf(`
+name: validation
+stages:
+  awaiting_review:
+    timers:
+      - after: 48h
+        emit: review.sla_escalated
+        %s: true
+`, field)), &doc)
+			if err == nil || !strings.Contains(err.Error(), "not supported") {
+				t.Fatalf("yaml.Unmarshal error = %v, want unsupported field rejection", err)
+			}
+		})
+	}
+}
+
+func TestFlowSchemaDocumentDecodeStageTimersRequireExplicitIDOnDerivedCollision(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: validation
+stages:
+  awaiting_review:
+    timers:
+      - after: 48h
+        emit: review.sla_escalated
+      - after: 72h
+        emit: review.sla_escalated
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), "duplicate id") {
+		t.Fatalf("yaml.Unmarshal error = %v, want duplicate derived id rejection", err)
+	}
+}
+
 func TestFlowSchemaDocumentDecodeStagesExplicitEmpty(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`

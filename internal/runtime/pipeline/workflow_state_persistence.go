@@ -69,8 +69,7 @@ func (pc *PipelineCoordinator) updateEntityState(ctx context.Context, entityID, 
 		return err
 	}
 	pc.notifyTestEntityStateUpdated(entityID, nextState)
-	pc.reconcileWorkflowStageTimers(ctx, entityID, currentState, nextState, sourceEvent)
-	return nil
+	return pc.reconcileWorkflowStageTimers(ctx, entityID, currentState, nextState, sourceEvent)
 }
 
 func (pc *PipelineCoordinator) applyWorkflowGateMutation(ctx context.Context, entityID, _sourceEvent, setGate string, clear bool) error {

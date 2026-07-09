@@ -216,7 +216,32 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 					if strings.TrimSpace(edge.EventType) != "" {
 						detail += " on " + strings.TrimSpace(edge.EventType)
 					}
+					if strings.TrimSpace(edge.After) != "" {
+						detail += " after " + strings.TrimSpace(edge.After)
+					}
+					if strings.TrimSpace(edge.TimerID) != "" {
+						detail += " timer " + strings.TrimSpace(edge.TimerID)
+					}
 					fmt.Fprintf(out, "      - %s -> %s (%s)\n", from, edge.To, strings.TrimSpace(detail))
+				}
+			}
+			if len(graph.Timers) > 0 {
+				fmt.Fprintln(out, "    timers:")
+				for _, timer := range graph.Timers {
+					parts := []string{
+						strings.TrimSpace(timer.Stage),
+						"after " + strings.TrimSpace(timer.After),
+					}
+					if strings.TrimSpace(timer.Emit) != "" {
+						parts = append(parts, "emit "+strings.TrimSpace(timer.Emit))
+					}
+					if strings.TrimSpace(timer.AdvancesTo) != "" {
+						parts = append(parts, "advances_to "+strings.TrimSpace(timer.AdvancesTo))
+					}
+					if strings.TrimSpace(timer.TimerID) != "" {
+						parts = append(parts, "(timer "+strings.TrimSpace(timer.TimerID)+")")
+					}
+					fmt.Fprintf(out, "      - %s\n", strings.Join(parts, " "))
 				}
 			}
 		}

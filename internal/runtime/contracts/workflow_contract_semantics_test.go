@@ -93,6 +93,73 @@ func TestWorkflowSemanticsDerivesTopLevelAndAccumulateCompletionTransitions(t *t
 	}
 }
 
+func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T) {
+	bundle := &WorkflowContractBundle{
+		RootSchema: &FlowSchemaDocument{
+			Name: "validation",
+			StageDeclarations: FlowStageDeclarations{
+				Declared: true,
+				Entries: []FlowStageDeclaration{
+					{
+						ID: "awaiting_review",
+						Timers: []FlowStageTimerDeclaration{
+							{
+								ID:    "awaiting_review.review.sla_escalated",
+								After: "48h",
+								Emit:  "review.sla_escalated",
+							},
+							{
+								ID:         "awaiting_review.expired",
+								After:      "{{marginal_park_days}}d",
+								AdvancesTo: "expired",
+							},
+						},
+					},
+					{ID: "expired", Terminal: true},
+				},
+			},
+		},
+	}
+
+	populateWorkflowSemantics(bundle)
+
+	timers := map[string]WorkflowTimerContract{}
+	for _, timer := range bundle.WorkflowTimers() {
+		timers[timer.ID] = timer
+	}
+	emitTimer, ok := timers["awaiting_review.review.sla_escalated"]
+	if !ok {
+		t.Fatalf("missing emit stage timer: %#v", timers)
+	}
+	if !emitTimer.StageOwned || emitTimer.Stage != "awaiting_review" || emitTimer.Event != "review.sla_escalated" || emitTimer.Delay != "48h" || emitTimer.StartOn != "state:awaiting_review" {
+		t.Fatalf("emit timer = %#v, want stage-owned timer lowering", emitTimer)
+	}
+	advanceTimer, ok := timers["awaiting_review.expired"]
+	if !ok {
+		t.Fatalf("missing advance stage timer: %#v", timers)
+	}
+	if !advanceTimer.StageOwned || advanceTimer.Event != WorkflowStageTimerInternalEvent || advanceTimer.AdvancesTo != "expired" || advanceTimer.Delay != "{{marginal_park_days}}d" {
+		t.Fatalf("advance timer = %#v, want internal event + advances_to lowering", advanceTimer)
+	}
+
+	var foundTransition bool
+	for _, transition := range bundle.WorkflowTransitions() {
+		if transition.ID != "timer:awaiting_review.expired" {
+			continue
+		}
+		foundTransition = true
+		if got, want := transition.From, []string{"awaiting_review"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("timer transition From = %#v, want %#v", got, want)
+		}
+		if transition.To != "expired" || transition.Trigger != "timer:awaiting_review.expired" || transition.Node != "runtime" {
+			t.Fatalf("timer transition = %#v, want runtime timed edge to expired", transition)
+		}
+	}
+	if !foundTransition {
+		t.Fatalf("missing timed transition edge: %#v", bundle.WorkflowTransitions())
+	}
+}
+
 func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		Nodes: map[string]SystemNodeContract{

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -36,20 +37,18 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 		}
 		for i := range instance.TimerState {
 			timerState := &instance.TimerState[i]
-			if timerState.Cancelled {
+			if timerState.Cancelled || timerState.Fired {
 				continue
 			}
 			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
-			cancelTrigger, ok := workflowTimerCancelTrigger(timer)
-			if !ok || !workflowTimerLifecycleMatches(cancelTrigger, nextStage, sourceEvent) {
+			if !ok || !workflowTimerShouldCancelOnTransition(timer, currentStage, nextStage, sourceEvent) {
 				continue
 			}
 			timerState.Cancelled = true
 			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
-			startTrigger, ok := workflowTimerStartTrigger(timer)
-			if !ok || !workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent) {
+			if !workflowTimerShouldStartOnTransition(timer, nextStage, sourceEvent) {
 				continue
 			}
 			if workflowTimerStateActive(instance.TimerState, timer.ID) {
@@ -73,22 +72,107 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 		return err
 	}
 	for _, sc := range toCancel {
-		pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, sc))
+		if err := pc.persistWorkflowTimerCancellation(ctx, scheduleWithRunIDFromContext(ctx, sc)); err != nil {
+			return err
+		}
 	}
 	for _, sc := range toSchedule {
-		pc.persistWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc))
+		if err := pc.persistWorkflowTimerSchedule(ctx, scheduleWithRunIDFromContext(ctx, sc)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
-func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) {
+func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
 	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
 			"stage":         strings.TrimSpace(nextStage),
 			"current_stage": strings.TrimSpace(currentStage),
 			"source_event":  strings.TrimSpace(sourceEvent),
 		}, err)
+		return err
 	}
+	return nil
+}
+
+func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (bool, bool, error) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return false, false, nil
+	}
+	source := pc.SemanticSource()
+	if source == nil {
+		return false, false, nil
+	}
+	timerID := strings.TrimSpace(evt.TaskID())
+	if timerID == "" {
+		if handle, ok := timeridentity.ParseTimerHandle(parsePayloadMap(evt.Payload())); ok && handle.Kind == timeridentity.TimerHandleWorkflowTimer {
+			timerID = strings.TrimSpace(handle.TimerID)
+		}
+	}
+	if timerID == "" {
+		return false, false, nil
+	}
+	timer, ok := source.WorkflowTimerByID(timerID)
+	if !ok || !timer.StageOwned {
+		return false, false, nil
+	}
+	entityID := workflowEventEntityID(evt)
+	if entityID == "" {
+		return true, false, fmt.Errorf("stage timer %s fired without entity_id", timerID)
+	}
+	fired := false
+	var lateBy time.Duration
+	err := pc.workflowStore.RunPipelineMutation(ctx, func(txctx context.Context) error {
+		currentStage := ""
+		nextStage := strings.TrimSpace(timer.AdvancesTo)
+		if err := pc.workflowStore.Mutate(txctx, entityID, func(instance *WorkflowInstance) {
+			currentStage = strings.TrimSpace(instance.CurrentState)
+			if currentStage != strings.TrimSpace(timer.Stage) {
+				return
+			}
+			for i := range instance.TimerState {
+				state := &instance.TimerState[i]
+				if strings.TrimSpace(state.TimerID) != timerID || state.Cancelled || state.Fired {
+					continue
+				}
+				state.Fired = true
+				if !state.FiresAt.IsZero() {
+					firedAt := evt.CreatedAt()
+					if firedAt.IsZero() {
+						firedAt = time.Now().UTC()
+					}
+					if firedAt.After(state.FiresAt) {
+						lateBy = firedAt.Sub(state.FiresAt)
+					}
+				}
+				if nextStage != "" {
+					instance.CurrentState = nextStage
+					instance.EnteredStageAt = time.Now().UTC()
+					instance.TransitionHistory = append(instance.TransitionHistory, workflowTransitionRecord(pc.WorkflowDefinition(), currentStage, nextStage, "timer:"+timerID))
+				}
+				fired = true
+				return
+			}
+		}); err != nil {
+			return err
+		}
+		if fired && nextStage != "" {
+			return pc.applyWorkflowTimerIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID)
+		}
+		return nil
+	})
+	if err != nil {
+		return true, fired, err
+	}
+	if fired && lateBy > time.Minute {
+		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_fired_late", strings.TrimSpace(evt.ID()), strings.TrimSpace(string(evt.Type())), runtimeWorkflowID, entityID, map[string]any{
+			"timer_id": strings.TrimSpace(timerID),
+			"stage":    strings.TrimSpace(timer.Stage),
+			"late_by":  lateBy.String(),
+		}, nil)
+	}
+	return true, fired, nil
 }
 
 func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context, entityID, sourceEvent string) {
@@ -121,10 +205,13 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 		}
 		for i := range instance.TimerState {
 			timerState := &instance.TimerState[i]
-			if timerState.Cancelled {
+			if timerState.Cancelled || timerState.Fired {
 				continue
 			}
 			timer, ok := source.WorkflowTimerByID(timerState.TimerID)
+			if !ok || timer.StageOwned {
+				continue
+			}
 			cancelTrigger, ok := workflowTimerCancelTrigger(timer)
 			if !ok || !workflowTimerLifecycleMatches(cancelTrigger, "", sourceEvent) {
 				continue
@@ -133,6 +220,9 @@ func (pc *PipelineCoordinator) reconcileWorkflowEventTimers(ctx context.Context,
 			toCancel = append(toCancel, workflowTimerSchedule(timer, entityID, instance.StorageRef, timerState.FiresAt, workflowTimerPolicy(source)))
 		}
 		for _, timer := range source.WorkflowTimers() {
+			if timer.StageOwned {
+				continue
+			}
 			startTrigger, ok := workflowTimerStartTrigger(timer)
 			if !ok || !workflowTimerLifecycleMatches(startTrigger, "", sourceEvent) {
 				continue
@@ -198,20 +288,35 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 		sc.RunID = runID
 	}
 	if isAccumulationTimeoutEvent(evt.Type()) || !waiting {
-		pc.persistWorkflowTimerCancellation(ctx, sc)
-		return nil
+		return pc.persistWorkflowTimerCancellation(ctx, sc)
 	}
 	startedAt, ok := accumulationTimeoutStartedAt(stateBuckets, bucketRef)
 	if !ok {
 		return nil
 	}
 	sc.At = startedAt.Add(time.Duration(spec.TimeoutMS) * time.Millisecond)
-	pc.persistWorkflowTimerSchedule(ctx, sc)
-	return nil
+	return pc.persistWorkflowTimerSchedule(ctx, sc)
 }
 
 func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceEvent string) bool {
 	return trigger.MatchesStage(stage) || trigger.MatchesEvent(sourceEvent)
+}
+
+func workflowTimerShouldCancelOnTransition(timer runtimecontracts.WorkflowTimerContract, currentStage, nextStage, sourceEvent string) bool {
+	if timer.StageOwned {
+		stage := strings.TrimSpace(timer.Stage)
+		return stage != "" && strings.TrimSpace(currentStage) == stage && strings.TrimSpace(nextStage) != stage
+	}
+	cancelTrigger, ok := workflowTimerCancelTrigger(timer)
+	return ok && workflowTimerLifecycleMatches(cancelTrigger, nextStage, sourceEvent)
+}
+
+func workflowTimerShouldStartOnTransition(timer runtimecontracts.WorkflowTimerContract, nextStage, sourceEvent string) bool {
+	if timer.StageOwned {
+		return strings.TrimSpace(timer.Stage) != "" && strings.TrimSpace(timer.Stage) == strings.TrimSpace(nextStage)
+	}
+	startTrigger, ok := workflowTimerStartTrigger(timer)
+	return ok && workflowTimerLifecycleMatches(startTrigger, nextStage, sourceEvent)
 }
 
 func accumulationTimeoutBucketRef(evt Event, nodeID, handlerEventKey string) (timeridentity.AccumulatorBucketRef, bool) {
@@ -295,7 +400,7 @@ func workflowTimerStateActive(items []WorkflowTimerState, timerID string) bool {
 		return false
 	}
 	for _, item := range items {
-		if strings.TrimSpace(item.TimerID) == timerID && !item.Cancelled {
+		if strings.TrimSpace(item.TimerID) == timerID && !item.Cancelled && !item.Fired {
 			return true
 		}
 	}
@@ -444,9 +549,9 @@ func (pc *PipelineCoordinator) cancelWorkflowTimerSchedule(ctx context.Context, 
 	}
 }
 
-func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context, sc Schedule) {
+func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context, sc Schedule) error {
 	if pc == nil {
-		return
+		return nil
 	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.UpsertSchedule(ctx, sc); err != nil {
@@ -454,6 +559,7 @@ func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context,
 				"task_id": strings.TrimSpace(sc.TaskID),
 				"mode":    strings.TrimSpace(sc.Mode),
 			}, err)
+			return err
 		}
 	}
 	if pc.timerScheduler != nil {
@@ -469,11 +575,12 @@ func (pc *PipelineCoordinator) persistWorkflowTimerSchedule(ctx context.Context,
 			register(ctx)
 		}
 	}
+	return nil
 }
 
-func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Context, sc Schedule) {
+func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Context, sc Schedule) error {
 	if pc == nil {
-		return
+		return nil
 	}
 	if pc.timerScheduleStore != nil {
 		if err := pc.timerScheduleStore.CancelScheduleExactTerminal(ctx, sc); err != nil {
@@ -482,7 +589,7 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 				"mode":    strings.TrimSpace(sc.Mode),
 			}, err)
 			if !TerminalTransitionApplied(err) {
-				return
+				return err
 			}
 		}
 	}
@@ -499,4 +606,5 @@ func (pc *PipelineCoordinator) persistWorkflowTimerCancellation(ctx context.Cont
 			cancel()
 		}
 	}
+	return nil
 }

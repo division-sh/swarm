@@ -20,7 +20,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		EntitySchema:           entitySchema,
 		Stages:                 deriveWorkflowStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
 		TerminalStages:         deriveWorkflowTerminalStages(bundle.RootSchema, bundle.Paths.Flows, bundle.FlowSchemas),
-		Transitions:            nil,
+		Transitions:            deriveStageTimerTransitions(bundle),
 		Timers:                 deriveWorkflowSemanticTimers(bundle),
 		Guards:                 deriveWorkflowGuardEntries(bundle),
 		Actions:                deriveWorkflowActionEntries(bundle),
@@ -439,8 +439,83 @@ func deriveWorkflowSemanticTimers(bundle *WorkflowContractBundle) []WorkflowTime
 	for _, timer := range deriveNodeWorkflowTimers(bundle) {
 		addTimer(timer)
 	}
+	for _, timer := range deriveStageWorkflowTimers(bundle) {
+		addTimer(timer)
+	}
 	return out
 }
+
+const WorkflowStageTimerInternalEvent = "platform.stage_timer"
+
+func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
+	if bundle == nil {
+		return nil
+	}
+	type stageSchema struct {
+		FlowID string
+		Schema FlowSchemaDocument
+	}
+	schemas := make([]stageSchema, 0, len(bundle.FlowViews())+1)
+	if bundle.RootSchema != nil {
+		schemas = append(schemas, stageSchema{Schema: *bundle.RootSchema})
+	}
+	for _, flow := range bundle.FlowViews() {
+		flowID := strings.TrimSpace(flow.Paths.ID)
+		if flowID == "" {
+			continue
+		}
+		schemas = append(schemas, stageSchema{FlowID: flowID, Schema: flow.Schema})
+	}
+	out := make([]WorkflowTimerContract, 0)
+	for _, schema := range schemas {
+		if !schema.Schema.StageDeclarations.Declared {
+			continue
+		}
+		for _, stage := range schema.Schema.StageDeclarations.Entries {
+			stageID := strings.TrimSpace(stage.ID)
+			if stageID == "" {
+				continue
+			}
+			for _, row := range stage.Timers {
+				eventType := strings.TrimSpace(row.Emit)
+				if eventType == "" {
+					eventType = WorkflowStageTimerInternalEvent
+				}
+				out = append(out, WorkflowTimerContract{
+					ID:         strings.TrimSpace(row.ID),
+					Stage:      stageID,
+					Event:      eventType,
+					Owner:      "runtime",
+					FlowID:     strings.TrimSpace(schema.FlowID),
+					StageOwned: true,
+					AdvancesTo: strings.TrimSpace(row.AdvancesTo),
+					Delay:      strings.TrimSpace(row.After),
+					StartOn:    "state:" + stageID,
+				})
+			}
+		}
+	}
+	return out
+}
+
+func deriveStageTimerTransitions(bundle *WorkflowContractBundle) []WorkflowTransitionContract {
+	timers := deriveStageWorkflowTimers(bundle)
+	out := make([]WorkflowTransitionContract, 0, len(timers))
+	for _, timer := range timers {
+		if strings.TrimSpace(timer.AdvancesTo) == "" {
+			continue
+		}
+		out = append(out, WorkflowTransitionContract{
+			ID:      "timer:" + strings.TrimSpace(timer.ID),
+			From:    []string{strings.TrimSpace(timer.Stage)},
+			To:      strings.TrimSpace(timer.AdvancesTo),
+			Trigger: "timer:" + strings.TrimSpace(timer.ID),
+			Node:    "runtime",
+		})
+	}
+	return out
+}
+
 func deriveNodeWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerContract {
 	if bundle == nil {
 		return nil
@@ -522,6 +597,7 @@ func normalizeWorkflowSemanticTimer(bundle *WorkflowContractBundle, timer Workfl
 	timer.Owner = strings.TrimSpace(timer.Owner)
 	timer.FlowID = strings.TrimSpace(timer.FlowID)
 	timer.NodeID = strings.TrimSpace(timer.NodeID)
+	timer.AdvancesTo = strings.TrimSpace(timer.AdvancesTo)
 	timer.Action = strings.TrimSpace(timer.Action)
 	timer.Cancellation = strings.TrimSpace(timer.Cancellation)
 	timer.Delay = strings.TrimSpace(timer.Delay)
@@ -551,6 +627,10 @@ func mergeWorkflowSemanticTimer(existing, incoming WorkflowTimerContract) Workfl
 	}
 	if strings.TrimSpace(existing.NodeID) == "" {
 		existing.NodeID = incoming.NodeID
+	}
+	existing.StageOwned = existing.StageOwned || incoming.StageOwned
+	if strings.TrimSpace(existing.AdvancesTo) == "" {
+		existing.AdvancesTo = incoming.AdvancesTo
 	}
 	if strings.TrimSpace(existing.Action) == "" {
 		existing.Action = incoming.Action

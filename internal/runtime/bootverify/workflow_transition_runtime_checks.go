@@ -29,6 +29,9 @@ func (c *checkerContext) transitionReferences() []Finding {
 				Message:  fmt.Sprintf("transition %s missing trigger", id),
 				Location: id,
 			})
+		} else if transitionTriggerIsTimerReference(c.source, transition.Trigger) {
+			// Timer-triggered transitions are derived from stage timer rows and are
+			// not event catalog entries. The timer owner is validated separately.
 		} else if !eventExists(c.source, strings.TrimSpace(transition.Trigger)) {
 			c.transitionRefFindings = append(c.transitionRefFindings, Finding{
 				CheckID:  "transition_reference_validation",
@@ -101,6 +104,19 @@ func (c *checkerContext) transitionReferences() []Finding {
 		}
 	}
 	return c.transitionRefFindings
+}
+
+func transitionTriggerIsTimerReference(source semanticview.Source, trigger string) bool {
+	trigger = strings.TrimSpace(trigger)
+	if !strings.HasPrefix(trigger, "timer:") {
+		return false
+	}
+	timerID := strings.TrimSpace(strings.TrimPrefix(trigger, "timer:"))
+	if timerID == "" || source == nil {
+		return false
+	}
+	timer, ok := source.WorkflowTimerByID(timerID)
+	return ok && timer.StageOwned
 }
 
 func (c *checkerContext) transitionOwnership() []Finding {
