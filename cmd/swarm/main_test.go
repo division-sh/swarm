@@ -4398,7 +4398,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", "entity-writer", "delivered", 1)
 	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 
 	stopRunID, pendingEventID := seedServedRunControlPendingRunWithAgentDelivery(t, rt.DB, rt.Backend)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
@@ -4415,7 +4415,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	})
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
 	requireServedRunStatus(t, rt.Endpoint, stopRunID, "cancelled")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
 }
 
 func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -4466,7 +4466,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 
 	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
 	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 
 type servedMailboxDecisionFixture struct {
@@ -4520,9 +4520,7 @@ func runServedMailboxApproveDecisionLifecycleProof(t *testing.T, rt servedContro
 	if already.Data["code"] != apiv1.MailboxAlreadyDecidedCode {
 		t.Fatalf("%s mailbox.reject already-decided data = %#v, want %s", rt.Backend, already.Data, apiv1.MailboxAlreadyDecidedCode)
 	}
-	requireServedParitySettlementPostconditionsWithDebug(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxApproveDecisionLifecycle), func() string {
-		return servedEventPublishDebugSummary(t, rt.DB, rt.Backend, fixture.RunID)
-	})
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxApproveDecisionLifecycle))
 }
 
 func runServedMailboxRejectDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -4550,9 +4548,7 @@ func runServedMailboxRejectDecisionLifecycleProof(t *testing.T, rt servedControl
 	})
 	requireServedMailboxReplay(t, rejectReplay, rejected)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_decided", fixture.RejectID, 1)
-	requireServedParitySettlementPostconditionsWithDebug(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxRejectDecisionLifecycle), func() string {
-		return servedEventPublishDebugSummary(t, rt.DB, rt.Backend, fixture.RunID)
-	})
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxRejectDecisionLifecycle))
 }
 
 func runServedMailboxDeferDecisionLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -4580,9 +4576,13 @@ func runServedMailboxDeferDecisionLifecycleProof(t *testing.T, rt servedControlP
 	})
 	requireServedMailboxReplay(t, deferReplay, deferred)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_deferred", fixture.DeferID, 1)
-	requireServedParitySettlementPostconditionsWithDebug(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxDeferDecisionLifecycle), func() string {
-		return servedEventPublishDebugSummary(t, rt.DB, rt.Backend, fixture.RunID)
-	})
+	for _, scenarioID := range []string{
+		servedparity.ScenarioMailboxApproveDecisionLifecycle,
+		servedparity.ScenarioMailboxRejectDecisionLifecycle,
+		servedparity.ScenarioMailboxDeferDecisionLifecycle,
+	} {
+		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
+	}
 }
 
 func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -4647,7 +4647,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
 	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle))
 }
 
 func requireServedTestSetupPersistence(t *testing.T, db *sql.DB, backend, runID, entityID, bundleHash string) {
@@ -4772,24 +4772,73 @@ func seedServedMailboxDecisionFixture(t *testing.T, db *sql.DB, backend string) 
 	ctx := context.Background()
 	switch backend {
 	case "postgres":
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, fixture.RunID, now); err != nil {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("seed postgres mailbox proof tx: %v", err)
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, fixture.RunID, now); err != nil {
 			t.Fatalf("seed postgres mailbox proof run: %v", err)
 		}
-		pgStore := &store.PostgresStore{DB: db}
-		if err := seedServedMailboxDecisionSourceEvent(ctx, pgStore, fixture, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, entity_id, flow_instance, scope,
+				payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, 'review.requested', $3::uuid, $4, 'entity',
+				'{"request":true}'::jsonb, 'operator', 'external', $5
+		)
+	`, fixture.SourceEventID, fixture.RunID, fixture.EntityID, fixture.SourceFlow, now); err != nil {
 			t.Fatalf("seed postgres mailbox proof source event: %v", err)
 		}
+		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", ""); err != nil {
+			t.Fatalf("seed postgres mailbox proof source event pipeline receipt: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit postgres mailbox proof seed: %v", err)
+		}
+		committed = true
 		seedServedMailboxDecisionItem(t, db, backend, fixture.ApproveID, fixture, "review_request", "approve item", `{"title":"approve item"}`, nil)
 		seedServedMailboxDecisionItem(t, db, backend, fixture.RejectID, fixture, "approval", "reject item", `{"title":"reject item"}`, nil)
 		seedServedMailboxDecisionItem(t, db, backend, fixture.DeferID, fixture, "operational_decision", "defer item", `{"title":"defer item"}`, &fixture.DeferExpires)
 	case "sqlite":
-		if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, fixture.RunID, now); err != nil {
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("seed sqlite mailbox proof tx: %v", err)
+		}
+		committed := false
+		defer func() {
+			if !committed {
+				_ = tx.Rollback()
+			}
+		}()
+		if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, fixture.RunID, now); err != nil {
 			t.Fatalf("seed sqlite mailbox proof run: %v", err)
 		}
-		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := seedServedMailboxDecisionSourceEvent(ctx, sqliteStore, fixture, now); err != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO events (
+				event_id, run_id, event_name, entity_id, flow_instance, scope,
+				payload, produced_by, produced_by_type, created_at
+			) VALUES (
+				?, ?, 'review.requested', ?, ?, 'entity',
+				'{"request":true}', 'operator', 'external', ?
+		)
+	`, fixture.SourceEventID, fixture.RunID, fixture.EntityID, fixture.SourceFlow, now); err != nil {
 			t.Fatalf("seed sqlite mailbox proof source event: %v", err)
 		}
+		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
+		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", ""); err != nil {
+			t.Fatalf("seed sqlite mailbox proof source event pipeline receipt: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit sqlite mailbox proof seed: %v", err)
+		}
+		committed = true
 		seedServedMailboxDecisionItem(t, db, backend, fixture.ApproveID, fixture, "review_request", "approve item", `{"title":"approve item"}`, nil)
 		seedServedMailboxDecisionItem(t, db, backend, fixture.RejectID, fixture, "approval", "reject item", `{"title":"reject item"}`, nil)
 		seedServedMailboxDecisionItem(t, db, backend, fixture.DeferID, fixture, "operational_decision", "defer item", `{"title":"defer item"}`, &fixture.DeferExpires)
@@ -5385,15 +5434,15 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
-	requireServedParitySettlementPostconditions(t, endpoint, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
+	requireServedParitySettlementPostconditions(t, endpoint, db, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
 
-func requireServedParitySettlementPostconditions(t *testing.T, endpoint, runID string, scenario servedparity.Scenario) {
+func requireServedParitySettlementPostconditions(t *testing.T, endpoint string, db *sql.DB, backend, runID string, scenario servedparity.Scenario) {
 	t.Helper()
-	requireServedParitySettlementPostconditionsWithDebug(t, endpoint, runID, scenario, nil)
+	requireServedParitySettlementPostconditionsWithDebug(t, endpoint, db, backend, runID, scenario, nil)
 }
 
-func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint, runID string, scenario servedparity.Scenario, debug func() string) {
+func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint string, db *sql.DB, backend, runID string, scenario servedparity.Scenario, debug func() string) {
 	t.Helper()
 	var last diagnosticRunDiagnosisResult
 	deadline := time.Now().Add(servedProofPollDeadline)
@@ -5418,6 +5467,8 @@ func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint
 	extra := ""
 	if debug != nil {
 		extra = "\n" + debug()
+	} else {
+		extra = "\n" + servedEventPublishDebugSummary(t, db, backend, runID)
 	}
 	t.Fatalf("served parity scenario %s settlement did not quiesce for run %s: ready=%v active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d%s",
 		scenario.ID,
