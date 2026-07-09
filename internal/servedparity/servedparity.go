@@ -33,6 +33,7 @@ const (
 	ScenarioMailboxApproveDecisionLifecycle      = "mailbox_approve_decision_lifecycle"
 	ScenarioMailboxRejectDecisionLifecycle       = "mailbox_reject_decision_lifecycle"
 	ScenarioMailboxDeferDecisionLifecycle        = "mailbox_defer_decision_lifecycle"
+	ScenarioTestSetupEntitiesLifecycle           = "test_setup_entities_lifecycle"
 )
 
 type Scenario struct {
@@ -70,6 +71,7 @@ func Scenarios() []Scenario {
 		servedMailboxDecisionScenario(ScenarioMailboxApproveDecisionLifecycle, "mailbox.approve"),
 		servedMailboxDecisionScenario(ScenarioMailboxRejectDecisionLifecycle, "mailbox.reject"),
 		servedMailboxDecisionScenario(ScenarioMailboxDeferDecisionLifecycle, "mailbox.defer"),
+		servedControlScenario(ScenarioTestSetupEntitiesLifecycle, "test.setup_entities", "TestServedParityHarnessTestSetupEntitiesLifecycle"),
 	}
 }
 

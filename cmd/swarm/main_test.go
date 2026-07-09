@@ -4112,6 +4112,81 @@ func TestServedParityHarnessMailboxDecisionLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedMailboxDecisionBackendProof)
 }
 
+func TestServedParityHarnessTestSetupEntitiesLifecycle(t *testing.T) {
+	scenario := servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle)
+	servedparity.Run(t, scenario, runServedTestSetupEntitiesBackendProof)
+}
+
+func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
+	rt := startServedControlProofRuntime(t, servedparity.BackendDefaultSQLite)
+	cases := []struct {
+		method string
+		params map[string]any
+	}{
+		{
+			method: "bundle.register",
+			params: map[string]any{
+				"content_yaml":    "api_version: swarm.bundle.register.v1\nfiles: []\n",
+				"idempotency_key": "issue-1386-sqlite-bundle-register",
+			},
+		},
+		{
+			method: "bundle.delete",
+			params: map[string]any{
+				"bundle_hash":     rt.BundleHash,
+				"force":           true,
+				"idempotency_key": "issue-1386-sqlite-bundle-delete",
+			},
+		},
+		{
+			method: "run.fork",
+			params: map[string]any{
+				"source_run_id":   uuid.NewString(),
+				"fork_event_id":   uuid.NewString(),
+				"idempotency_key": "issue-1386-sqlite-run-fork",
+			},
+		},
+		{
+			method: "runtime.nuke",
+			params: map[string]any{
+				"dry_run":         true,
+				"idempotency_key": "issue-1386-sqlite-runtime-nuke",
+			},
+		},
+		{
+			method: "conversation.fork",
+			params: map[string]any{
+				"source_session_id": uuid.NewString(),
+				"fork_point":        map[string]any{"kind": "turn", "turn_index": 1},
+				"idempotency_key":   "issue-1386-sqlite-conversation-fork",
+			},
+		},
+		{
+			method: "conversation.fork_chat",
+			params: map[string]any{
+				"fork_id":         uuid.NewString(),
+				"message":         "inspect fork",
+				"idempotency_key": "issue-1386-sqlite-conversation-fork-chat",
+			},
+		},
+		{
+			method: "conversation.fork_delete",
+			params: map[string]any{
+				"fork_id":         uuid.NewString(),
+				"idempotency_key": "issue-1386-sqlite-conversation-fork-delete",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.method, ".", "_"), func(t *testing.T) {
+			errResp := requireServedJSONRPCError(t, rt.Endpoint, tc.method, tc.params)
+			if errResp.Data["code"] != apiv1.MethodUnavailableCode {
+				t.Fatalf("%s SQLite fail-closed data = %#v, want %s", tc.method, errResp.Data, apiv1.MethodUnavailableCode)
+			}
+		})
+	}
+}
+
 type servedControlProofRuntime struct {
 	Endpoint   string
 	DB         *sql.DB
@@ -4204,6 +4279,75 @@ func runServedMailboxDecisionBackendProof(t *testing.T, backend servedparity.Bac
 	t.Helper()
 	rt := startServedControlProofRuntime(t, backend)
 	runServedMailboxDecisionLifecycleProof(t, rt)
+}
+
+func runServedTestSetupEntitiesBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	rt := startServedTestSetupEntitiesProofRuntime(t, backend)
+	runServedTestSetupEntitiesLifecycleProof(t, rt)
+}
+
+func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+	t.Helper()
+	switch backend {
+	case servedparity.BackendDefaultSQLite:
+		unsetStoreSelectorEnv(t)
+		stubServeRuntimeWorkspaceLifecycle(t)
+		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
+		contractsPath := writeServedTestSetupFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		oldBuildStores := buildStoresForServe
+		t.Cleanup(func() {
+			buildStoresForServe = oldBuildStores
+		})
+		var servedDB *sql.DB
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			stores, err := oldBuildStores(ctx, selection, cfg)
+			if err == nil {
+				servedDB = stores.SQLDB
+			}
+			return stores, err
+		}
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
+			ContractsPath:           contractsPath,
+			PlatformSpecPath:        defaultPlatformSpecPath,
+			APIListenAddr:           "127.0.0.1:0",
+			MCPListenAddr:           "127.0.0.1:0",
+			SelfCheck:               true,
+			RequireBundleMatch:      false,
+			NoRequireBundleMatch:    true,
+			Verbose:                 true,
+			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		})
+		if servedDB == nil {
+			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
+		}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash}
+	case servedparity.BackendExplicitPostgres:
+		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
+			return serveRuntimeWorkspaceStub{}
+		})
+		contractsPath := writeServedTestSetupFixture(t)
+		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
+			ConfigPath:              writeServeRuntimeTestConfig(t),
+			ContractsPath:           contractsPath,
+			PlatformSpecPath:        defaultPlatformSpecPath,
+			StoreMode:               "postgres",
+			StoreModeSet:            true,
+			APIListenAddr:           "127.0.0.1:0",
+			MCPListenAddr:           "127.0.0.1:0",
+			SelfCheck:               true,
+			RequireBundleMatch:      false,
+			Verbose:                 true,
+			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		})
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash}
+	default:
+		t.Fatalf("unknown served test.setup_entities backend %q", backend)
+		return servedControlProofRuntime{}
+	}
 }
 
 func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
@@ -4429,6 +4573,176 @@ func runServedMailboxDeferDecisionLifecycleProof(t *testing.T, rt servedControlP
 	requireServedMailboxReplay(t, deferReplay, deferred)
 	requireServedMailboxEventCount(t, rt.DB, rt.Backend, "mailbox.item_deferred", fixture.DeferID, 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, fixture.RunID, servedparity.MustScenario(servedparity.ScenarioMailboxDeferDecisionLifecycle))
+}
+
+func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+	t.Helper()
+	keyPrefix := "issue-1386-" + rt.Backend + "-test-setup"
+	initial := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"event_name":      "widget.started",
+		"bundle_hash":     rt.BundleHash,
+		"payload":         map[string]any{"seed": true},
+		"idempotency_key": keyPrefix + "-run",
+	})
+	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
+		t.Fatalf("%s setup trigger event.publish result = %#v, want new run", rt.Backend, initial)
+	}
+	runID := initial.RunID
+	entityID := uuid.NewString()
+	key := keyPrefix + "-entities"
+	params := map[string]any{
+		"bundle_hash":     rt.BundleHash,
+		"run_id":          runID,
+		"idempotency_key": key,
+		"entities": []any{
+			map[string]any{
+				"alias":         "subject",
+				"entity_id":     entityID,
+				"entity_type":   "widget",
+				"current_state": "waiting",
+				"fields":        map[string]any{"score": 5},
+			},
+		},
+	}
+	var result struct {
+		RunID    string `json:"run_id"`
+		Entities []struct {
+			Alias        string `json:"alias"`
+			EntityID     string `json:"entity_id"`
+			FlowInstance string `json:"flow_instance"`
+			EntityType   string `json:"entity_type"`
+			CurrentState string `json:"current_state"`
+		} `json:"entities"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "test.setup_entities", params, &result)
+	if result.RunID != runID || len(result.Entities) != 1 {
+		t.Fatalf("%s test.setup_entities result = %#v, want run %s and one entity", rt.Backend, result, runID)
+	}
+	entity := result.Entities[0]
+	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != "" || entity.EntityType != "widget" || entity.CurrentState != "waiting" {
+		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
+	}
+	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
+
+	var replay struct {
+		RunID    string `json:"run_id"`
+		Entities []struct {
+			EntityID string `json:"entity_id"`
+		} `json:"entities"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "test.setup_entities", params, &replay)
+	if replay.RunID != runID || len(replay.Entities) != 1 || replay.Entities[0].EntityID != entityID {
+		t.Fatalf("%s test.setup_entities replay = %#v, want original run/entity", rt.Backend, replay)
+	}
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
+	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, runID, servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle))
+}
+
+func requireServedTestSetupPersistence(t *testing.T, db *sql.DB, backend, runID, entityID, bundleHash string) {
+	t.Helper()
+	var status, trigger, gotHash, source string
+	var runQuery string
+	var runArgs []any
+	switch backend {
+	case "postgres":
+		runQuery = `SELECT status, trigger_event_type, COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = $1::uuid`
+		runArgs = []any{runID}
+	case "sqlite":
+		runQuery = `SELECT status, trigger_event_type, COALESCE(bundle_hash, ''), bundle_source FROM runs WHERE run_id = ?`
+		runArgs = []any{runID}
+	default:
+		t.Fatalf("unknown test.setup_entities proof backend %q", backend)
+	}
+	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &trigger, &gotHash, &source); err != nil {
+		t.Fatalf("%s load test.setup_entities run %s: %v", backend, runID, err)
+	}
+	wantSource := storerunlifecycle.BundleSourceEphemeral
+	if backend == "postgres" {
+		wantSource = storerunlifecycle.BundleSourcePersisted
+	}
+	if status != "running" || trigger != "widget.started" || gotHash != bundleHash || source != wantSource {
+		t.Fatalf("%s setup run row = status:%q trigger:%q hash:%q source:%q", backend, status, trigger, gotHash, source)
+	}
+
+	var flow, typ, state string
+	var score any
+	var entityQuery string
+	var entityArgs []any
+	switch backend {
+	case "postgres":
+		entityQuery = `
+			SELECT flow_instance, entity_type, current_state, fields->>'score'
+			FROM entity_state
+			WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		`
+		entityArgs = []any{runID, entityID}
+	case "sqlite":
+		entityQuery = `
+			SELECT flow_instance, entity_type, current_state, json_extract(fields, '$.score')
+			FROM entity_state
+			WHERE run_id = ? AND entity_id = ?
+		`
+		entityArgs = []any{runID, entityID}
+	}
+	if err := db.QueryRowContext(context.Background(), entityQuery, entityArgs...).Scan(&flow, &typ, &state, &score); err != nil {
+		t.Fatalf("%s load setup entity %s: %v", backend, entityID, err)
+	}
+	if flow != "" || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
+		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
+	}
+
+	var mutations int
+	var mutationQuery string
+	var mutationArgs []any
+	switch backend {
+	case "postgres":
+		mutationQuery = `
+			SELECT COUNT(*)
+			FROM entity_mutations
+			WHERE run_id = $1::uuid
+			  AND entity_id = $2::uuid
+			  AND writer_type = 'platform'
+			  AND writer_id = 'test.setup_entities'
+		`
+		mutationArgs = []any{runID, entityID}
+	case "sqlite":
+		mutationQuery = `
+			SELECT COUNT(*)
+			FROM entity_mutations
+			WHERE run_id = ?
+			  AND entity_id = ?
+			  AND writer_type = 'platform'
+			  AND writer_id = 'test.setup_entities'
+		`
+		mutationArgs = []any{runID, entityID}
+	}
+	if err := db.QueryRowContext(context.Background(), mutationQuery, mutationArgs...).Scan(&mutations); err != nil {
+		t.Fatalf("%s count setup entity mutations: %v", backend, err)
+	}
+	if mutations != 2 {
+		t.Fatalf("%s setup mutation rows = %d, want 2", backend, mutations)
+	}
+}
+
+func jsonScalarInt(value any, want int64) bool {
+	switch v := value.(type) {
+	case string:
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		return err == nil && parsed == want
+	case []byte:
+		parsed, err := strconv.ParseInt(string(v), 10, 64)
+		return err == nil && parsed == want
+	case int:
+		return int64(v) == want
+	case int64:
+		return v == want
+	case float64:
+		return int64(v) == want && v == float64(want)
+	default:
+		return false
+	}
 }
 
 func seedServedMailboxDecisionFixture(t *testing.T, db *sql.DB, backend string) servedMailboxDecisionFixture {
@@ -5483,6 +5797,63 @@ entity-writer:
         writes:
           - source_field: note
             target_field: note
+      advances_to: done
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
+	return root
+}
+
+func writeServedTestSetupFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: served-test-setup
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
+name: served-test-setup
+initial_state: waiting
+terminal_states: [done]
+states: [waiting, done]
+pins:
+  inputs:
+    events:
+      - name: widget_started
+        event: widget.started
+        source: external
+      - name: widget_scored
+        event: widget.scored
+        source: external
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+widget:
+  score: integer
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
+widget.scored:
+  swarm:
+    source: external
+  delta: integer
+widget.started:
+  swarm:
+    source: external
+  seed: boolean
+`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+scorer:
+  id: scorer
+  execution_type: system_node
+  subscribes_to: [widget.scored]
+  event_handlers:
+    widget.scored:
+      data_accumulation:
+        source_event: widget.scored
+        writes:
+          - target_field: score
+            expression: entity.score + payload.delta
       advances_to: done
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)

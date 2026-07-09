@@ -37,24 +37,25 @@ active_trackers:
     issue: 1239
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: github_issue
-    issue: 1386
+    issue: 1910
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
 mutating_api_parity_ledger:
   - method: bundle.register
-    classification: split_with_issue_ref
-    split_issue: 1386
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_register
     proof_refs:
-      - kind: tracker
-        issue: 1386
-        watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
     notes: >
-      Catalog upload/register behavior remains a persisted-bundle public mutator.
-      No exact backend-support spec authority currently declares this method
-      intentionally Postgres-only, so it remains a #1386 split tail rather than
-      a closure-bearing postgres_only exclusion.
+      Catalog upload/register behavior consumes the bundle catalog register
+      writer capability. SQLite wires read-only bundle catalog support and is
+      served fail-closed for bundle.register until a separately gated SQLite
+      writer owner exists.
   - method: event.publish
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -67,20 +68,33 @@ mutating_api_parity_ledger:
       for the #1384 dynamic auto_emit served lifecycle regression.
   - method: event.replay
     classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    split_issue: 1910
+    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    notes: >
+      Positive served proof requires a live agent recipient channel through the
+      real runtime event bus; missing-agent or fake-handler probes do not count.
   - method: bundle.delete
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete
+    proof_refs:
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: run.fork
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork
+    proof_refs:
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: agent.replay
     classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    split_issue: 1910
+    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    notes: >
+      Shares the live-agent served replay proof requirement with event.replay.
   - method: run.start
     classification: covered_transitively
     backends: [default_sqlite, explicit_postgres]
@@ -166,16 +180,25 @@ mutating_api_parity_ledger:
       generic settlement.
   - method: agent.send_directive
     classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    split_issue: 1910
+    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    notes: >
+      Positive served proof requires a live BoardInteractiveAgent target on both
+      selected backends, not a missing-agent reachability error.
   - method: agent.restart
     classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    split_issue: 1910
+    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    notes: >
+      Kept with the live-agent control family so restart proof exercises the
+      real served runtime manager on both backends.
   - method: agent.replay_backlog
     classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    split_issue: 1910
+    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    notes: >
+      Kept with the live-agent control family because backlog replay depends on
+      live manager/store replay semantics, not method publication alone.
   - method: runtime.pause
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -201,25 +224,48 @@ mutating_api_parity_ledger:
       transition event, queued ingress release, idempotency replay, and generic
       settlement postconditions.
   - method: runtime.nuke
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke
+    proof_refs:
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: conversation.fork
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.conversation_fork
+    proof_refs:
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: conversation.fork_chat
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.conversation_fork_chat
+    proof_refs:
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: conversation.fork_delete
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: postgres_only_with_spec_ref
+    backends: [postgres_only]
+    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.conversation_fork_delete
+    proof_refs:
+      - {kind: artifact, path: platform-spec.yaml}
+      - {kind: go_test, name: TestOperatorConversationForkHandlersUseCanonicalOwnerAndIdempotency}
+      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: test.setup_entities
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: test_setup_entities_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle}
+    notes: >
+      Shared served harness proves real /v1/rpc test.setup_entities on default
+      SQLite and explicit Postgres, including selected bundle-scope validation,
+      idempotency replay, persisted entity state/mutation rows on an event-created
+      run, and generic settlement postconditions.
 operator_read_api_parity_ledger:
   - method: agent.delivery_diagnostics
     classification: dual_backend_api_proof
@@ -827,8 +873,8 @@ rows:
       and lifecycle assertions against default SQLite and explicit Postgres,
       including parent workflow-node delivery terminalization, dynamic child
       dispatch/readback, trace/status/diagnose surfaces, and durable
-      event.publish acceptance. This row does not claim full #1386 structural
-      lifecycle parity enforcement.
+      event.publish acceptance. This row is a served lifecycle proof, not a
+      complete public mutating API parity ledger by itself.
 
   - id: runtime_log_readback_api
     surface: runtime logs, log subscription, and run trace readback over selected stores

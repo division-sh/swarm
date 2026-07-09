@@ -197,18 +197,18 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 		},
 		"internal/runtime/runforkexecution/activation_gate.go": {
 			Classification: rawSQLOptionalProductBoundary,
-			Issue:          1386,
-			Reason:         "selected-contract run.fork activation is an optional Postgres-backed product seam; concrete store use remains split under #1386 until promoted behind selected owners",
+			Issue:          1239,
+			Reason:         "selected-contract run.fork activation is a spec-classified optional Postgres-backed product seam until promoted behind selected owners",
 		},
 		"internal/runtime/runforkexecution/execution.go": {
 			Classification: rawSQLOptionalProductBoundary,
-			Issue:          1386,
+			Issue:          1239,
 			Reason:         "selected-contract run.fork execution constructs a fork-local runtime pipeline from the Postgres store DB; this is an explicit optional product split, not backend-neutral selected capability authority",
 		},
 		"internal/runtime/runforkexecution/runtime_container.go": {
 			Classification: rawSQLOptionalProductBoundary,
-			Issue:          1386,
-			Reason:         "selected-contract fork-local runtime container uses the Postgres store DB for optional run.fork logging/pipeline support and remains classified under #1386",
+			Issue:          1239,
+			Reason:         "selected-contract fork-local runtime container uses the Postgres store DB for optional run.fork logging/pipeline support and remains a spec-classified optional product split",
 		},
 		"internal/runtime/pipeline/runtime_support.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
