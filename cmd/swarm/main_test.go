@@ -4158,7 +4158,6 @@ func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
 func TestServedParityHarnessLiveAgentControlLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
 		servedparity.MustScenario(servedparity.ScenarioAgentSendDirectiveLiveAgentLifecycle),
-		servedparity.MustScenario(servedparity.ScenarioAgentRestartLiveAgentLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle),
 	}
 	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentControlBackendProof)
@@ -5789,29 +5788,6 @@ func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProof
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", directiveKey, 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, directive.RunID, servedparity.MustScenario(servedparity.ScenarioAgentSendDirectiveLiveAgentLifecycle))
 
-	restartKey := "issue-1910-" + rt.Backend + "-" + uuid.NewString() + "-agent-restart"
-	requireServedOKJSONRPC(t, rt.Endpoint, "agent.restart", map[string]any{
-		"agent_id":        "load-agent",
-		"idempotency_key": restartKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", restartKey, 1)
-	restartEvidence := waitServedAgentLoopRestartEvidence(t, rt.DB, rt.Backend, "load-agent", 1)
-	if restartEvidence.PreviousGeneration < 1 || restartEvidence.Generation != restartEvidence.PreviousGeneration+1 {
-		t.Fatalf("%s agent.restart loop evidence = %#v, want one generation transition", rt.Backend, restartEvidence)
-	}
-	requireServedOKJSONRPC(t, rt.Endpoint, "agent.restart", map[string]any{
-		"agent_id":        "load-agent",
-		"idempotency_key": restartKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", restartKey, 1)
-	if replayEvidence := servedAgentLoopRestartEvidence(t, rt.DB, rt.Backend, "load-agent"); replayEvidence != restartEvidence {
-		t.Fatalf("%s idempotent agent.restart loop evidence = %#v, want unchanged %#v", rt.Backend, replayEvidence, restartEvidence)
-	}
-	restartRunID, restartInitialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1910-agent-restart-"+uuid.NewString())
-	restartHold := publishServedLiveAgentHoldEvent(t, rt, restartRunID, restartInitialEventID, "post-restart")
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, restartRunID, restartHold.EventID, "agent", "load-agent", "delivered", 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, restartRunID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLiveAgentLifecycle))
-
 	backlogRunID, backlogEventID := seedServedLiveAgentPendingBacklogDelivery(t, rt.DB, rt.Backend)
 	backlogKey := "issue-1910-" + rt.Backend + "-" + backlogRunID + "-agent-replay-backlog"
 	var backlog servedAgentReplayBacklogProofResult
@@ -5835,80 +5811,6 @@ func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProof
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay_backlog", backlogKey, 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, backlogRunID, servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle))
-}
-
-type servedAgentLoopRestartProof struct {
-	Count              int
-	PreviousGeneration int
-	Generation         int
-}
-
-func waitServedAgentLoopRestartEvidence(t *testing.T, db *sql.DB, backend, agentID string, wantCount int) servedAgentLoopRestartProof {
-	t.Helper()
-	deadline := time.Now().Add(servedProofPollDeadline)
-	var evidence servedAgentLoopRestartProof
-	for time.Now().Before(deadline) {
-		evidence = servedAgentLoopRestartEvidence(t, db, backend, agentID)
-		if evidence.Count == wantCount {
-			return evidence
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("%s agent loop restart evidence for %q = %#v, want count %d", backend, agentID, evidence, wantCount)
-	return servedAgentLoopRestartProof{}
-}
-
-func servedAgentLoopRestartEvidence(t *testing.T, db *sql.DB, backend, agentID string) servedAgentLoopRestartProof {
-	t.Helper()
-	var query string
-	switch backend {
-	case "postgres":
-		query = `SELECT payload::text FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at, event_id`
-	case "sqlite":
-		query = `SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at, event_id`
-	default:
-		t.Fatalf("unknown proof backend %q", backend)
-	}
-	rows, err := db.QueryContext(context.Background(), query)
-	if err != nil {
-		t.Fatalf("%s query agent loop restart evidence: %v", backend, err)
-	}
-	defer rows.Close()
-
-	var evidence servedAgentLoopRestartProof
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			t.Fatalf("%s scan agent loop restart evidence: %v", backend, err)
-		}
-		payload, err := runtimepkg.DecodeCanonicalRuntimeLogPayload([]byte(raw))
-		if err != nil {
-			t.Fatalf("%s decode runtime log payload: %v\n%s", backend, err, raw)
-		}
-		if payload.Action != "agent_loop_restarted" || payload.AgentID != agentID {
-			continue
-		}
-		evidence.Count++
-		evidence.PreviousGeneration = servedRuntimeLogGeneration(t, backend, payload.Detail, "previous_generation")
-		evidence.Generation = servedRuntimeLogGeneration(t, backend, payload.Detail, "generation")
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("%s iterate agent loop restart evidence: %v", backend, err)
-	}
-	return evidence
-}
-
-func servedRuntimeLogGeneration(t *testing.T, backend string, detail map[string]any, key string) int {
-	t.Helper()
-	raw, ok := detail[key]
-	if !ok {
-		t.Fatalf("%s runtime log detail missing %q: %#v", backend, key, detail)
-	}
-	value, ok := raw.(float64)
-	if !ok || value < 0 || value != float64(int(value)) {
-		t.Fatalf("%s runtime log detail %q = %#v, want non-negative integer", backend, key, raw)
-	}
-	return int(value)
 }
 
 func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime, runID, sourceEventID, label string) servedEventPublishRPCResult {

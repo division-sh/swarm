@@ -60,7 +60,7 @@ func (am *AgentManager) RestartAgent(agentID string) error {
 	return legacyAgentControlError(err)
 }
 
-func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
+func (am *AgentManager) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {
 	if am.shutdownAdmissionClosed() {
 		return runtimeagentcontrol.RestartResult{}, agentControlNotRunning(req.AgentID, runtimeagentcontrol.StatusTerminated)
 	}
@@ -76,43 +76,16 @@ func (am *AgentManager) Restart(ctx context.Context, req runtimeagentcontrol.Res
 	}
 
 	am.runMu.Lock()
-	previousGeneration := am.loopGeneration[agentID]
-	previousDone := am.loopDone[agentID]
 	if cancel, ok := am.loopCancel[agentID]; ok {
 		cancel()
 		delete(am.loopCancel, agentID)
 	}
-	delete(am.loopDone, agentID)
-	runCtx := am.runCtx
+	ctx := am.runCtx
 	running := am.running
 	am.runMu.Unlock()
 
-	if running && previousDone != nil {
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		select {
-		case <-previousDone:
-		case <-ctx.Done():
-			return runtimeagentcontrol.RestartResult{}, fmt.Errorf("wait for agent %s loop generation %d to stop: %w", agentID, previousGeneration, ctx.Err())
-		}
-	}
-
 	if running {
-		generation := am.startAgentLoop(runCtx, agent)
-		if am.bus != nil {
-			_ = am.bus.LogRuntime(am.runtimePlatformControlEventContext(ctx), runtimepipeline.RuntimeLogEntry{
-				Level:     "info",
-				Message:   "Agent loop restarted",
-				Component: "agent-manager",
-				Action:    "agent_loop_restarted",
-				AgentID:   agentID,
-				Detail: map[string]any{
-					"previous_generation": previousGeneration,
-					"generation":          generation,
-				},
-			})
-		}
+		am.startAgentLoop(ctx, agent)
 	}
 	return runtimeagentcontrol.RestartResult{AgentID: agentID}, nil
 }
@@ -1124,10 +1097,6 @@ func (am *AgentManager) resetRuntimeState(source string) error {
 	am.agentUpAt = make(map[string]time.Time)
 	am.inFlight = make(map[string]struct{})
 	am.mu.Unlock()
-	am.runMu.Lock()
-	am.loopDone = make(map[string]<-chan struct{})
-	am.loopGeneration = make(map[string]uint64)
-	am.runMu.Unlock()
 	am.poisonMu.Lock()
 	am.poisonPanicCounts = make(map[string]int)
 	am.poisonMu.Unlock()
@@ -1183,29 +1152,24 @@ func resetOrphanedSessionsDetail(summary sessions.ResetSummary, source string, r
 	return detail
 }
 
-func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) uint64 {
-	return am.startAgentLoopWithSubscriptions(parent, agent, agent.Subscriptions())
+func (am *AgentManager) startAgentLoop(parent context.Context, agent Agent) {
+	am.startAgentLoopWithSubscriptions(parent, agent, agent.Subscriptions())
 }
 
-func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, agent Agent, subscriptions []events.EventType) uint64 {
+func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, agent Agent, subscriptions []events.EventType) {
 	loopCtx, cancel := context.WithCancel(parent)
-	done := make(chan struct{})
 
 	am.runMu.Lock()
 	if old, ok := am.loopCancel[agent.ID()]; ok {
 		old()
 	}
-	generation := am.loopGeneration[agent.ID()] + 1
 	am.loopCancel[agent.ID()] = cancel
-	am.loopDone[agent.ID()] = done
-	am.loopGeneration[agent.ID()] = generation
 	am.runMu.Unlock()
 
 	ch := am.bus.Subscribe(agent.ID(), subscriptions...)
 	am.runWG.Add(1)
 	go func() {
 		defer am.runWG.Done()
-		defer close(done)
 		consecutivePanics := 0
 		for {
 			panicked := false
@@ -1301,7 +1265,6 @@ func (am *AgentManager) startAgentLoopWithSubscriptions(parent context.Context, 
 			}
 		}
 	}()
-	return generation
 }
 
 func panicBackoff(consecutivePanics int) time.Duration {
