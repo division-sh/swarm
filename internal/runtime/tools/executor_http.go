@@ -194,8 +194,12 @@ func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor m
 	if storeKey == "" {
 		return nil, fmt.Errorf("managed credential %q does not resolve to a deployment credential key", key)
 	}
+	if strings.TrimSpace(ref.InstallationIDInput) != "" {
+		return nil, fmt.Errorf("tool %s managed_credential.installation_id_input is supported only for activity input resolution", strings.TrimSpace(tool.Name))
+	}
 	token, record, err := e.managedTokenSource().AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
 		Key:          storeKey,
+		GrantType:    ref.GrantType,
 		Scopes:       ref.Scopes,
 		GrantModel:   ref.GrantModel,
 		TokenRequest: ref.TokenRequest,

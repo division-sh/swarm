@@ -87,6 +87,42 @@ func TestValidateSourceRejectsMixedStaticAndManagedProviderConnectorCredentials(
 	}
 }
 
+func TestValidateSourceRejectsGitHubAppInstallationWithoutInputCarrier(t *testing.T) {
+	tool := slackConnectorTool("https://api.github.test/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments")
+	tool.ManagedCredential = &runtimecontracts.ManagedCredentialRef{
+		Key:        "github_app",
+		GrantType:  runtimemanagedcredentials.GrantGitHubAppInstallation,
+		GrantModel: managedcredentialmodel.GrantModelInstallation,
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"github.create_issue_comment": tool,
+		},
+	})
+
+	errs := ValidateSource(source)
+	joined := joinErrors(errs)
+	if !strings.Contains(joined, "managed_credential.installation_id_input is required") {
+		t.Fatalf("ValidateSource errors = %q, want installation_id_input requirement", joined)
+	}
+}
+
+func TestValidateSourceRejectsInstallationInputOnNonGitHubAppCredential(t *testing.T) {
+	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
+	tool.ManagedCredential.InstallationIDInput = "installation_id"
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"slack.post_message": tool,
+		},
+	})
+
+	errs := ValidateSource(source)
+	joined := joinErrors(errs)
+	if !strings.Contains(joined, "managed_credential.installation_id_input requires grant_type github_app_installation") {
+		t.Fatalf("ValidateSource errors = %q, want grant_type guarded installation input", joined)
+	}
+}
+
 func TestValidateSourceRejectsSlackPostMessageWithoutRequiredResponseSuccess(t *testing.T) {
 	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
 	tool.ResponseSuccess = nil
@@ -413,6 +449,37 @@ func TestDefaultPackRegistryLoadsMicrosoftGraphManagedCredentialPack(t *testing.
 	}
 }
 
+func TestDefaultPackRegistryLoadsGitHubAppInstallationPack(t *testing.T) {
+	tool, ok := BuiltinTool("github", "github.create_issue_comment")
+	if !ok {
+		t.Fatal("BuiltinTool github.create_issue_comment not found")
+	}
+	if !isProviderConnector(tool) {
+		t.Fatalf("builtin GitHub tool category = %q, want %q", tool.Category, Category)
+	}
+	if tool.ManagedCredential == nil || tool.ManagedCredential.Key != "github_app" {
+		t.Fatalf("builtin GitHub managed credential = %#v, want github_app", tool.ManagedCredential)
+	}
+	if tool.ManagedCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+		t.Fatalf("builtin GitHub grant_type = %q, want github_app_installation", tool.ManagedCredential.GrantType)
+	}
+	if tool.ManagedCredential.GrantModel != managedcredentialmodel.GrantModelInstallation {
+		t.Fatalf("builtin GitHub grant_model = %q, want installation_grant", tool.ManagedCredential.GrantModel)
+	}
+	if tool.ManagedCredential.InstallationIDInput != "installation_id" {
+		t.Fatalf("builtin GitHub installation_id_input = %q, want installation_id", tool.ManagedCredential.InstallationIDInput)
+	}
+	if tool.HTTP == nil || tool.HTTP.Method != "POST" || !strings.Contains(tool.HTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments") {
+		t.Fatalf("builtin GitHub http = %#v, want create issue comment endpoint", tool.HTTP)
+	}
+	if len(tool.Credentials) != 0 {
+		t.Fatalf("builtin GitHub static credentials = %#v, want none", tool.Credentials)
+	}
+	if strings.Contains(tool.HTTP.URL, "secret") || strings.Contains(tool.HTTP.URL, "token") {
+		t.Fatal("builtin GitHub tool leaked a concrete credential value")
+	}
+}
+
 func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
@@ -458,6 +525,56 @@ func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *t
 	}
 	if len(mismatch) != 1 || len(mismatch[0].Requires) != 1 || mismatch[0].Requires[0].Bound || mismatch[0].Requires[0].Status != "SCOPE_INSUFFICIENT" {
 		t.Fatalf("mismatch requirement = %#v, want fail-closed token profile mismatch", mismatch)
+	}
+}
+
+func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
+	ctx := context.Background()
+	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
+		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		projectScopes: []semanticview.ProjectScope{
+			projectScopeWithConnectorPackImport(".", "github", "github.create_issue_comment"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
+	}
+
+	unbound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions unbound: %v", err)
+	}
+	if len(unbound) != 1 || len(unbound[0].Requires) != 1 {
+		t.Fatalf("unbound surfaces = %#v, want one GitHub managed credential requirement", unbound)
+	}
+	requirement := unbound[0].Requires[0]
+	if requirement.Kind != "managed_credential" || requirement.Name != "github_app" || requirement.Bound || requirement.Status != "UNBOUND" {
+		t.Fatalf("unbound requirement = %#v, want unbound github_app", requirement)
+	}
+	if requirement.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation ||
+		requirement.GrantModel != managedcredentialmodel.GrantModelInstallation ||
+		requirement.InstallationIDInput != "installation_id" {
+		t.Fatalf("unbound requirement shape = %#v, want github app installation grant", requirement)
+	}
+
+	matchingStore := runtimemanagedcredentials.NewMemoryStore(githubAppConnectedRecord())
+	bound, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: matchingStore})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions bound: %v", err)
+	}
+	if len(bound) != 1 || len(bound[0].Requires) != 1 || !bound[0].Requires[0].Bound || bound[0].Requires[0].Status != "CONNECTED" {
+		t.Fatalf("bound requirement = %#v, want connected GitHub App credential", bound)
+	}
+
+	wrongGrant := githubAppConnectedRecord()
+	wrongGrant.GrantType = runtimemanagedcredentials.GrantClientCredentials
+	wrongGrantStore := runtimemanagedcredentials.NewMemoryStore(wrongGrant)
+	mismatch, err := SurfacesWithOptions(ctx, source, SurfaceOptions{ManagedCredentials: wrongGrantStore})
+	if err != nil {
+		t.Fatalf("SurfacesWithOptions mismatch: %v", err)
+	}
+	if len(mismatch) != 1 || len(mismatch[0].Requires) != 1 || mismatch[0].Requires[0].Bound || mismatch[0].Requires[0].Status != "SCOPE_INSUFFICIENT" {
+		t.Fatalf("mismatch requirement = %#v, want fail-closed grant_type mismatch", mismatch)
 	}
 }
 
@@ -840,6 +957,22 @@ func microsoftGraphConnectedRecord() runtimemanagedcredentials.Record {
 		AccessToken:  "graph-access-secret",
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    time.Now().Add(time.Hour),
+	}
+}
+
+func githubAppConnectedRecord() runtimemanagedcredentials.Record {
+	return runtimemanagedcredentials.Record{
+		Key:            "github_app",
+		Provider:       "github",
+		GrantType:      runtimemanagedcredentials.GrantGitHubAppInstallation,
+		APIBaseURL:     "https://api.github.com",
+		ClientID:       "github-app-client-id",
+		InstallationID: "1001",
+		PrivateKey:     "redacted-test-private-key",
+		GrantModel:     managedcredentialmodel.GrantModelInstallation,
+		AccessToken:    "github-install-secret",
+		Status:         runtimemanagedcredentials.StatusConnected,
+		ExpiresAt:      time.Now().Add(time.Hour),
 	}
 }
 

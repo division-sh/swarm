@@ -14,8 +14,9 @@ const (
 	TokenBodyForm = "form"
 	TokenBodyJSON = "json"
 
-	GrantModelScope     = "scope_grant"
-	GrantModelWorkspace = "workspace_grant"
+	GrantModelScope        = "scope_grant"
+	GrantModelWorkspace    = "workspace_grant"
+	GrantModelInstallation = "installation_grant"
 )
 
 type TokenRequestProfile struct {
@@ -141,10 +142,10 @@ func NormalizeGrantModel(raw string) string {
 func ValidateGrantModel(raw string) error {
 	normalized := NormalizeGrantModel(raw)
 	switch normalized {
-	case GrantModelScope, GrantModelWorkspace:
+	case GrantModelScope, GrantModelWorkspace, GrantModelInstallation:
 		return nil
 	default:
-		return fmt.Errorf("grant_model %q is not supported; want %s or %s", normalized, GrantModelScope, GrantModelWorkspace)
+		return fmt.Errorf("grant_model %q is not supported; want %s, %s, or %s", normalized, GrantModelScope, GrantModelWorkspace, GrantModelInstallation)
 	}
 }
 

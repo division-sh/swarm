@@ -19,8 +19,11 @@ type connectionsConnectOptions struct {
 	provider          string
 	authURL           string
 	tokenURL          string
+	apiBaseURL        string
 	clientID          string
 	clientSecretStdin bool
+	privateKeyStdin   bool
+	installationID    string
 	redirectURL       string
 	account           string
 	scopes            []string
@@ -38,27 +41,31 @@ type connectionsStatusOptions struct {
 }
 
 type connectionRecord struct {
-	Key          string                                     `json:"key"`
-	Provider     string                                     `json:"provider,omitempty"`
-	Account      string                                     `json:"account,omitempty"`
-	GrantType    string                                     `json:"grant_type,omitempty"`
-	Scopes       []string                                   `json:"scopes,omitempty"`
-	GrantModel   string                                     `json:"grant_model,omitempty"`
-	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
-	Status       string                                     `json:"status"`
-	Failure      string                                     `json:"failure,omitempty"`
-	ExpiresAt    string                                     `json:"expires_at,omitempty"`
-	UpdatedAt    string                                     `json:"updated_at,omitempty"`
-	Present      bool                                       `json:"present"`
-	RequiredBy   []connectionRequirement                    `json:"required_by,omitempty"`
+	Key            string                                     `json:"key"`
+	Provider       string                                     `json:"provider,omitempty"`
+	Account        string                                     `json:"account,omitempty"`
+	GrantType      string                                     `json:"grant_type,omitempty"`
+	InstallationID string                                     `json:"installation_id,omitempty"`
+	APIBaseURL     string                                     `json:"api_base_url,omitempty"`
+	Scopes         []string                                   `json:"scopes,omitempty"`
+	GrantModel     string                                     `json:"grant_model,omitempty"`
+	TokenRequest   managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	Status         string                                     `json:"status"`
+	Failure        string                                     `json:"failure,omitempty"`
+	ExpiresAt      string                                     `json:"expires_at,omitempty"`
+	UpdatedAt      string                                     `json:"updated_at,omitempty"`
+	Present        bool                                       `json:"present"`
+	RequiredBy     []connectionRequirement                    `json:"required_by,omitempty"`
 }
 
 type connectionRequirement struct {
-	Kind         string                                     `json:"kind"`
-	Name         string                                     `json:"name"`
-	Scopes       []string                                   `json:"scopes,omitempty"`
-	GrantModel   string                                     `json:"grant_model,omitempty"`
-	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	Kind                string                                     `json:"kind"`
+	Name                string                                     `json:"name"`
+	GrantType           string                                     `json:"grant_type,omitempty"`
+	Scopes              []string                                   `json:"scopes,omitempty"`
+	GrantModel          string                                     `json:"grant_model,omitempty"`
+	TokenRequest        managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	InstallationIDInput string                                     `json:"installation_id_input,omitempty"`
 }
 
 type connectionsStatusResult struct {
@@ -100,7 +107,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 		Short: "Start or complete a managed credential grant.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			secret, err := readConnectionClientSecret(cmd.InOrStdin(), opts)
+			secret, privateKey, err := readConnectionSecrets(cmd.InOrStdin(), opts)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -211,17 +218,39 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "connection connected: key=%s status=%s\n", output.Connection.Key, output.Connection.Status)
 				return nil
+			case runtimemanagedcredentials.GrantGitHubAppInstallation:
+				record, err := source.ConnectGitHubAppInstallation(ctx, runtimemanagedcredentials.GitHubAppInstallationRequest{
+					Key:            key,
+					Provider:       firstNonEmpty(opts.provider, "github"),
+					APIBaseURL:     opts.apiBaseURL,
+					ClientID:       opts.clientID,
+					InstallationID: opts.installationID,
+					PrivateKey:     privateKey,
+					Account:        opts.account,
+				})
+				if err != nil {
+					return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
+				}
+				output := connectionsConnectResult{Connection: connectionRecordFromDescriptor(record.Descriptor(), true, nil)}
+				if opts.asJSON {
+					return encodeSecretsJSON(cmd.OutOrStdout(), output)
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "connection connected: key=%s status=%s\n", output.Connection.Key, output.Connection.Status)
+				return nil
 			default:
-				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--grant must be %s, %s, or %s", runtimemanagedcredentials.GrantAuthorizationCode, runtimemanagedcredentials.GrantAuthorizationCodePKCE, runtimemanagedcredentials.GrantClientCredentials))
+				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("--grant must be %s, %s, %s, or %s", runtimemanagedcredentials.GrantAuthorizationCode, runtimemanagedcredentials.GrantAuthorizationCodePKCE, runtimemanagedcredentials.GrantClientCredentials, runtimemanagedcredentials.GrantGitHubAppInstallation))
 			}
 		},
 	}
-	cmd.Flags().StringVar(&opts.grant, "grant", opts.grant, "Grant type: authorization_code, authorization_code_pkce, or client_credentials")
+	cmd.Flags().StringVar(&opts.grant, "grant", opts.grant, "Grant type: authorization_code, authorization_code_pkce, client_credentials, or github_app_installation")
 	cmd.Flags().StringVar(&opts.provider, "provider", "", "Provider label for operator status")
 	cmd.Flags().StringVar(&opts.authURL, "auth-url", "", "OAuth authorization URL")
 	cmd.Flags().StringVar(&opts.tokenURL, "token-url", "", "OAuth token URL")
+	cmd.Flags().StringVar(&opts.apiBaseURL, "api-base-url", "", "Provider API base URL for app-installation grants")
 	cmd.Flags().StringVar(&opts.clientID, "client-id", "", "OAuth client ID")
 	cmd.Flags().BoolVar(&opts.clientSecretStdin, "client-secret-stdin", false, "Read the OAuth client secret from stdin")
+	cmd.Flags().BoolVar(&opts.privateKeyStdin, "private-key-stdin", false, "Read the app private key from stdin")
+	cmd.Flags().StringVar(&opts.installationID, "installation-id", "", "Provider app installation id")
 	cmd.Flags().StringVar(&opts.redirectURL, "redirect-url", "", "OAuth redirect URL for authorization_code grants")
 	cmd.Flags().StringVar(&opts.account, "account", "", "Connected provider account label")
 	cmd.Flags().StringSliceVar(&opts.scopes, "scope", nil, "Required OAuth scope; repeat or comma-separate")
@@ -327,15 +356,34 @@ func newConnectionsDisconnectCommand(ctx context.Context, repo string) *cobra.Co
 	return cmd
 }
 
-func readConnectionClientSecret(in io.Reader, opts connectionsConnectOptions) (string, error) {
-	if !opts.clientSecretStdin {
-		return "", nil
+func readConnectionSecrets(in io.Reader, opts connectionsConnectOptions) (string, string, error) {
+	if opts.clientSecretStdin && opts.privateKeyStdin {
+		return "", "", fmt.Errorf("--client-secret-stdin and --private-key-stdin cannot both read from stdin")
 	}
+	if opts.privateKeyStdin {
+		privateKey, err := readConnectionPrivateKey(in)
+		return "", privateKey, err
+	}
+	if !opts.clientSecretStdin {
+		return "", "", nil
+	}
+	raw, err := io.ReadAll(in)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(string(raw)), "", nil
+}
+
+func readConnectionPrivateKey(in io.Reader) (string, error) {
 	raw, err := io.ReadAll(in)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(raw)), nil
+	privateKey := strings.TrimSpace(string(raw))
+	if privateKey == "" {
+		return "", fmt.Errorf("private key is required")
+	}
+	return privateKey, nil
 }
 
 func readConnectionAuthCode(in io.Reader, codeStdin bool) (string, error) {
@@ -410,16 +458,18 @@ func connectionRecords(ctx context.Context, store runtimemanagedcredentials.Stor
 
 func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, present bool, requiredBy []runtimemanagedcredentials.Requirement) connectionRecord {
 	record := connectionRecord{
-		Key:          strings.TrimSpace(desc.Key),
-		Provider:     strings.TrimSpace(desc.Provider),
-		Account:      strings.TrimSpace(desc.Account),
-		GrantType:    strings.TrimSpace(desc.GrantType),
-		Scopes:       append([]string{}, desc.Scopes...),
-		GrantModel:   strings.TrimSpace(desc.GrantModel),
-		TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(desc.TokenRequest),
-		Status:       strings.TrimSpace(desc.Status),
-		Failure:      strings.TrimSpace(desc.Failure),
-		Present:      present,
+		Key:            strings.TrimSpace(desc.Key),
+		Provider:       strings.TrimSpace(desc.Provider),
+		Account:        strings.TrimSpace(desc.Account),
+		GrantType:      strings.TrimSpace(desc.GrantType),
+		InstallationID: strings.TrimSpace(desc.InstallationID),
+		APIBaseURL:     strings.TrimSpace(desc.APIBaseURL),
+		Scopes:         append([]string{}, desc.Scopes...),
+		GrantModel:     strings.TrimSpace(desc.GrantModel),
+		TokenRequest:   managedcredentialmodel.NormalizeTokenRequestProfile(desc.TokenRequest),
+		Status:         strings.TrimSpace(desc.Status),
+		Failure:        strings.TrimSpace(desc.Failure),
+		Present:        present,
 	}
 	if !desc.ExpiresAt.IsZero() {
 		record.ExpiresAt = desc.ExpiresAt.Format(time.RFC3339)
@@ -429,11 +479,13 @@ func connectionRecordFromDescriptor(desc runtimemanagedcredentials.Descriptor, p
 	}
 	for _, item := range requiredBy {
 		record.RequiredBy = append(record.RequiredBy, connectionRequirement{
-			Kind:         strings.TrimSpace(item.Kind),
-			Name:         strings.TrimSpace(item.Name),
-			Scopes:       append([]string{}, item.Scopes...),
-			GrantModel:   strings.TrimSpace(item.GrantModel),
-			TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(item.TokenRequest),
+			Kind:                strings.TrimSpace(item.Kind),
+			Name:                strings.TrimSpace(item.Name),
+			GrantType:           strings.TrimSpace(item.GrantType),
+			Scopes:              append([]string{}, item.Scopes...),
+			GrantModel:          strings.TrimSpace(item.GrantModel),
+			TokenRequest:        managedcredentialmodel.NormalizeTokenRequestProfile(item.TokenRequest),
+			InstallationIDInput: strings.TrimSpace(item.InstallationIDInput),
 		})
 	}
 	return record
@@ -485,7 +537,10 @@ func formatConnectionRequirements(items []connectionRequirement) string {
 		if item.Kind == "" || item.Name == "" {
 			continue
 		}
-		details := make([]string, 0, 3)
+		details := make([]string, 0, 5)
+		if grantType := strings.TrimSpace(item.GrantType); grantType != "" {
+			details = append(details, "grant_type="+grantType)
+		}
 		if len(item.Scopes) > 0 {
 			details = append(details, "scopes="+strings.Join(item.Scopes, ","))
 		}
@@ -494,6 +549,9 @@ func formatConnectionRequirements(items []connectionRequirement) string {
 		}
 		if summary := managedcredentialmodel.TokenRequestProfileSummary(item.TokenRequest); summary != managedcredentialmodel.TokenRequestProfileSummary(managedcredentialmodel.DefaultTokenRequestProfile()) {
 			details = append(details, "token_request="+summary)
+		}
+		if input := strings.TrimSpace(item.InstallationIDInput); input != "" {
+			details = append(details, "installation_id_input="+input)
 		}
 		if len(details) > 0 {
 			parts = append(parts, item.Kind+":"+item.Name+"("+strings.Join(details, ";")+")")

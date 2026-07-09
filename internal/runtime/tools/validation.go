@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -56,6 +57,17 @@ func ValidateToolImplementations(source semanticview.Source) ([]error, error) {
 				return warnings, fmt.Errorf("tool %s managed_credential.header is required when prefix is set", name)
 			}
 			if entry.ManagedCredential != nil {
+				if err := runtimemanagedcredentials.ValidateRequiredGrantType(entry.ManagedCredential.GrantType); err != nil {
+					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
+				}
+				grantType := runtimemanagedcredentials.NormalizeGrantType(entry.ManagedCredential.GrantType)
+				installationIDInput := strings.TrimSpace(entry.ManagedCredential.InstallationIDInput)
+				if grantType == runtimemanagedcredentials.GrantGitHubAppInstallation && installationIDInput == "" {
+					return warnings, fmt.Errorf("tool %s managed_credential.installation_id_input is required for grant_type %s", name, grantType)
+				}
+				if installationIDInput != "" && grantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+					return warnings, fmt.Errorf("tool %s managed_credential.installation_id_input requires grant_type %s", name, runtimemanagedcredentials.GrantGitHubAppInstallation)
+				}
 				if err := managedcredentialmodel.ValidateGrantModel(entry.ManagedCredential.GrantModel); err != nil {
 					return warnings, fmt.Errorf("tool %s managed_credential.%s", name, err.Error())
 				}

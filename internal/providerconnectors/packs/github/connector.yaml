@@ -1,0 +1,41 @@
+provider: github
+tools:
+  github.create_issue_comment:
+    category: provider_connector
+    description: create GitHub issue comments
+    handler_type: http
+    effect_class: non_idempotent_write
+    managed_credential:
+      key: github_app
+      grant_type: github_app_installation
+      grant_model: installation_grant
+      installation_id_input: installation_id
+    input_schema:
+      type: object
+      properties:
+        installation_id:
+          type: string
+        owner:
+          type: string
+        repo:
+          type: string
+        issue_number:
+          type: integer
+        body:
+          type: string
+      required:
+        - installation_id
+        - owner
+        - repo
+        - issue_number
+        - body
+    output_schema:
+      type: object
+    http:
+      method: POST
+      url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments
+      headers:
+        Accept: application/vnd.github+json
+        X-GitHub-Api-Version: "2022-11-28"
+      body:
+        body: "{{input.body}}"
