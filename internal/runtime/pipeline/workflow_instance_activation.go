@@ -94,6 +94,9 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 	if err := pc.instanceActivator(ctx, req); err != nil {
 		return err
 	}
+	if err := pc.armWorkflowCurrentStageTimers(ctx, instance.EntityID, ""); err != nil {
+		return err
+	}
 	return nil
 }
 

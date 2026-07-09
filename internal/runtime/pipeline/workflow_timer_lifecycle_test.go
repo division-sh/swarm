@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -104,6 +106,10 @@ func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:           "stage-timer-test",
+			Version:        "1.0.0",
+			InitialStage:   "awaiting_review",
+			TerminalStages: []string{"expired"},
 			Timers: []runtimecontracts.WorkflowTimerContract{
 				{
 					ID:         "awaiting_review.review.sla_escalated",
@@ -119,6 +125,53 @@ func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 					Stage:      "awaiting_review",
 					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
 					Owner:      "runtime",
+					StageOwned: true,
+					AdvancesTo: "expired",
+					Delay:      "72h",
+					StartOn:    "state:awaiting_review",
+				},
+			},
+		},
+	}
+}
+
+func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
+	review := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review",
+	}
+	return &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &runtimecontracts.FlowContractView{
+				Children: []runtimecontracts.FlowContractView{review},
+			},
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				"review": &review,
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"review": {Mode: "template"},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name:         "stage-timer-test",
+			Version:      "1.0.0",
+			InitialStage: "awaiting_review",
+			FlowInitial: map[string]string{
+				"review": "awaiting_review",
+			},
+			FlowTerminal: map[string][]string{
+				"review": {"expired"},
+			},
+			FlowPrefix: map[string]string{
+				"review": "review",
+			},
+			Timers: []runtimecontracts.WorkflowTimerContract{
+				{
+					ID:         "review.awaiting_review.expired",
+					Stage:      "awaiting_review",
+					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
+					Owner:      "runtime",
+					FlowID:     "review",
 					StageOwned: true,
 					AdvancesTo: "expired",
 					Delay:      "72h",
@@ -342,6 +395,107 @@ func TestHandleWorkflowStageTimerFireMarksFiredAndAdvancesWithSQLiteStore(t *tes
 	}
 	if !recognized || fired {
 		t.Fatalf("duplicate emit stage timer recognized=%v fired=%v, want recognized stale no-op", recognized, fired)
+	}
+}
+
+func TestHandleWorkflowStageTimerFireDeactivatesTerminalTemplateFlow(t *testing.T) {
+	runID := uuid.NewString()
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
+	var deactivated FlowInstanceDeactivationRequest
+	pc := &PipelineCoordinator{
+		module:        &pipelineFixtureWorkflowModule{source: source},
+		workflowStore: store,
+		instanceDeactivator: func(_ context.Context, req FlowInstanceDeactivationRequest) error {
+			deactivated = req
+			return nil
+		},
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	now := time.Now().UTC().Round(time.Microsecond)
+	const flowPath = "review/inst-1"
+	entityID := FlowInstanceEntityID(flowPath)
+
+	if err := store.Upsert(ctx, WorkflowInstance{
+		InstanceID:      "inst-1",
+		StorageRef:      flowPath,
+		WorkflowName:    "review",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "awaiting_review",
+		Metadata: map[string]any{
+			"entity_id":   entityID,
+			"instance_id": "inst-1",
+			"flow_path":   flowPath,
+		},
+		TimerState: []WorkflowTimerState{{
+			TimerID:   "review.awaiting_review.expired",
+			EventType: runtimecontracts.WorkflowStageTimerInternalEvent,
+			CreatedAt: now.Add(-3 * time.Hour),
+			FiresAt:   now.Add(-2 * time.Hour),
+			StartedBy: "state:awaiting_review",
+		}},
+	}); err != nil {
+		t.Fatalf("seed template workflow instance: %v", err)
+	}
+	evt := eventtest.RootIngress(
+		uuid.NewString(),
+		events.EventType(runtimecontracts.WorkflowStageTimerInternalEvent),
+		"runtime",
+		"review.awaiting_review.expired",
+		[]byte(`{"entity_id":"`+entityID+`"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
+		now,
+	)
+
+	recognized, fired, err := pc.handleWorkflowStageTimerFire(ctx, evt)
+	if err != nil {
+		t.Fatalf("handle advance stage timer: %v", err)
+	}
+	if !recognized || !fired {
+		t.Fatalf("recognized=%v fired=%v, want terminal timer fire", recognized, fired)
+	}
+	if deactivated.FinalState != "expired" {
+		t.Fatalf("deactivated final state = %q, want expired; req=%#v", deactivated.FinalState, deactivated)
+	}
+	if deactivated.Instance.InstancePath != flowPath {
+		t.Fatalf("deactivated instance path = %q, want %q", deactivated.Instance.InstancePath, flowPath)
+	}
+}
+
+func TestPipelineEngineStateRepoSaveStateArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
+	runID := uuid.NewString()
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	schedules := &recordingSchedulePersistence{}
+	source := semanticview.Wrap(stageTimerLifecycleBundle())
+	pc := &PipelineCoordinator{
+		module:             &pipelineFixtureWorkflowModule{source: source},
+		workflowStore:      store,
+		timerScheduleStore: schedules,
+	}
+	repo := pipelineEngineStateRepo{coordinator: pc}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+	entityID := identity.NormalizeEntityID("33333333-3333-3333-3333-333333333333")
+
+	if err := repo.SaveState(ctx, entityID, testEngineStateMutation(nil, nil, nil)); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+	instance, ok, err := store.Load(ctx, entityID.String())
+	if err != nil || !ok {
+		t.Fatalf("load materialized instance ok=%v err=%v", ok, err)
+	}
+	if got := instance.CurrentState; got != "awaiting_review" {
+		t.Fatalf("materialized state = %q, want awaiting_review", got)
+	}
+	for _, id := range []string{"awaiting_review.review.sla_escalated", "awaiting_review.expired"} {
+		assertWorkflowTimerState(t, instance, id, false)
+	}
+	if got := len(schedules.schedules); got != 2 {
+		t.Fatalf("persisted schedules = %d, want 2: %#v", got, schedules.schedules)
 	}
 }
 

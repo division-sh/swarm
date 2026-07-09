@@ -260,6 +260,8 @@ contract_formats:
           `id:` is optional. When absent, the platform derives a stable ID from
           `<stage>.<emit-event-or-advance-target>`. Duplicate derived IDs are a
           boot error; authors must add explicit IDs to disambiguate collisions.
+          Runtime semantic timer IDs are scoped by the owning flow for non-root
+          flows so common local stage/timer IDs in sibling flows do not merge.
         invalid_forms: >
           Stage timer rows reject superseded spellings including `delay`,
           `interrupting`, `repeat`, and `recurring`. Stage timer rows are

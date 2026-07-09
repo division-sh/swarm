@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -73,6 +74,69 @@ func TestCreateFlowInstanceResolvesInstanceIDFromPayloadPath(t *testing.T) {
 	}
 	if captured.Instance.EntityID != FlowInstanceEntityID("review/inst-42") {
 		t.Fatalf("entity id = %q, want %q", captured.Instance.EntityID, FlowInstanceEntityID("review/inst-42"))
+	}
+}
+
+func TestCreateFlowInstanceArmsInitialStageTimersWithSQLiteStore(t *testing.T) {
+	runID := uuid.NewString()
+	db := newSQLiteWorkflowInstanceStoreTestDB(t)
+	store := newSQLiteWorkflowInstanceStoreForTest(t, db)
+	schedules := &recordingSchedulePersistence{}
+	source := semanticview.Wrap(stageTimerTemplateLifecycleBundle())
+	pc := &PipelineCoordinator{
+		module:             &pipelineFixtureWorkflowModule{source: source},
+		workflowStore:      store,
+		timerScheduleStore: schedules,
+		instanceActivator: func(ctx context.Context, req FlowInstanceActivationRequest) error {
+			return store.Upsert(ctx, WorkflowInstance{
+				InstanceID:      req.Instance.InstanceID,
+				StorageRef:      req.Instance.InstancePath,
+				WorkflowName:    req.Instance.TemplateID,
+				WorkflowVersion: "1.0.0",
+				CurrentState:    "awaiting_review",
+				Metadata: map[string]any{
+					"entity_id":        req.Instance.EntityID,
+					"instance_id":      req.Instance.InstanceID,
+					"flow_path":        req.Instance.InstancePath,
+					"parent_entity_id": req.Instance.ParentEntityID,
+				},
+			})
+		},
+	}
+	trigger := eventtest.RootIngress(
+		"",
+		events.EventType("spawn.requested"),
+		"",
+		"",
+		[]byte(`{"entity_id":"ent-1","instance_id":"inst-42","name":"alpha"}`),
+		0,
+		runID,
+		"",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
+		time.Time{},
+	)
+	triggerCtx := workflowTriggerContext{Event: trigger}
+	ctx := runtimecorrelation.WithRunID(context.Background(), runID)
+
+	err := pc.createFlowInstance(ctx, triggerCtx, handlerExecutionPlan{
+		Template:       "review",
+		InstanceIDFrom: "payload.instance_id",
+		InstanceIDPath: paths.Parse("payload.instance_id"),
+		ConfigFrom: &runtimecontracts.ConfigFromSpec{
+			Bindings: map[string]string{"name": "payload.name"},
+		},
+	}, testCreateFlowInstanceContext(triggerCtx))
+	if err != nil {
+		t.Fatalf("createFlowInstance: %v", err)
+	}
+	entityID := FlowInstanceEntityID("review/inst-42")
+	instance, ok, err := store.Load(ctx, entityID)
+	if err != nil || !ok {
+		t.Fatalf("load created instance ok=%v err=%v", ok, err)
+	}
+	assertWorkflowTimerState(t, instance, "review.awaiting_review.expired", false)
+	if got := len(schedules.schedules); got != 1 {
+		t.Fatalf("persisted schedules = %d, want 1: %#v", got, schedules.schedules)
 	}
 }
 

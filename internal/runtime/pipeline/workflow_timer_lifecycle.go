@@ -84,6 +84,28 @@ func (pc *PipelineCoordinator) applyWorkflowTimerIntents(ctx context.Context, en
 	return nil
 }
 
+func (pc *PipelineCoordinator) armWorkflowCurrentStageTimers(ctx context.Context, entityID, sourceEvent string) error {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.Enabled() {
+		return nil
+	}
+	entityID = strings.TrimSpace(entityID)
+	if entityID == "" {
+		return nil
+	}
+	instance, ok, err := pc.workflowStore.Load(ctx, entityID)
+	if err != nil || !ok {
+		return err
+	}
+	stage := strings.TrimSpace(instance.CurrentState)
+	if stage == "" {
+		return nil
+	}
+	if strings.TrimSpace(sourceEvent) == "" {
+		sourceEvent = "state:" + stage
+	}
+	return pc.applyWorkflowTimerIntents(ctx, entityID, "", stage, sourceEvent)
+}
+
 func (pc *PipelineCoordinator) reconcileWorkflowStageTimers(ctx context.Context, entityID, currentStage, nextStage, sourceEvent string) error {
 	if err := pc.applyWorkflowTimerIntents(ctx, entityID, currentStage, nextStage, sourceEvent); err != nil {
 		pc.logRuntimeWarn(ctx, runtimeWorkflowID, "workflow_timer_projection_failed", "", sourceEvent, runtimeWorkflowID, entityID, map[string]any{
@@ -158,7 +180,10 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 			return err
 		}
 		if fired && nextStage != "" {
-			return pc.applyWorkflowTimerIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID)
+			if err := pc.applyWorkflowTimerIntents(txctx, entityID, currentStage, nextStage, "timer:"+timerID); err != nil {
+				return err
+			}
+			return pc.maybeDeactivateTerminalFlowInstance(txctx, entityID, nextStage)
 		}
 		return nil
 	})
