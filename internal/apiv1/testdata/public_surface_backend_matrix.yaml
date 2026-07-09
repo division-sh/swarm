@@ -36,9 +36,6 @@ active_trackers:
   - kind: github_issue
     issue: 1239
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-  - kind: github_issue
-    issue: 1910
-    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -67,12 +64,16 @@ mutating_api_parity_ledger:
       Shared harness owns backend iteration and generic settlement postconditions
       for the #1384 dynamic auto_emit served lifecycle regression.
   - method: event.replay
-    classification: split_with_issue_ref
-    split_issue: 1910
-    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: event_replay_live_agent_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessLiveAgentEventReplayLifecycle}
     notes: >
-      Positive served proof requires a live agent recipient channel through the
-      real runtime event bus; missing-agent or fake-handler probes do not count.
+      Shared served harness proves real /v1/rpc event.replay against a live
+      load-agent recipient on default SQLite and explicit Postgres, including
+      canonical replay/audit events, source-delivery lineage, idempotency replay,
+      delivered replay delivery, and generic settlement postconditions.
   - method: bundle.delete
     classification: postgres_only_with_spec_ref
     backends: [postgres_only]
@@ -90,11 +91,16 @@ mutating_api_parity_ledger:
       - {kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity}
       - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: agent.replay
-    classification: split_with_issue_ref
-    split_issue: 1910
-    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: agent_replay_live_agent_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessLiveAgentEventReplayLifecycle}
     notes: >
-      Shares the live-agent served replay proof requirement with event.replay.
+      Shared served harness proves real /v1/rpc agent.replay as the canonical
+      event.replay projection for one live load-agent recipient on default
+      SQLite and explicit Postgres, including source-delivery lineage,
+      idempotency replay, delivered replay delivery, and generic settlement.
   - method: run.start
     classification: covered_transitively
     backends: [default_sqlite, explicit_postgres]
@@ -179,26 +185,38 @@ mutating_api_parity_ledger:
       payload/lineage/metadata, idempotency replay without duplicate events, and
       generic settlement.
   - method: agent.send_directive
-    classification: split_with_issue_ref
-    split_issue: 1910
-    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: agent_send_directive_live_agent_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessLiveAgentControlLifecycle}
     notes: >
-      Positive served proof requires a live BoardInteractiveAgent target on both
-      selected backends, not a missing-agent reachability error.
+      Shared served harness proves real /v1/rpc agent.send_directive against a
+      live BoardInteractiveAgent on default SQLite and explicit Postgres,
+      including canonical platform.agent_directive persistence, live-agent
+      mailbox_send tool execution, idempotency replay, and generic settlement.
   - method: agent.restart
-    classification: split_with_issue_ref
-    split_issue: 1910
-    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: agent_restart_live_agent_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessLiveAgentControlLifecycle}
     notes: >
-      Kept with the live-agent control family so restart proof exercises the
-      real served runtime manager on both backends.
+      Shared served harness proves real /v1/rpc agent.restart against the live
+      served runtime manager on default SQLite and explicit Postgres, including
+      idempotency replay and a post-restart live-agent delivery through the
+      restarted manager subscription path.
   - method: agent.replay_backlog
-    classification: split_with_issue_ref
-    split_issue: 1910
-    proof_refs: [{kind: tracker, issue: 1910, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: agent_replay_backlog_live_agent_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessLiveAgentControlLifecycle}
     notes: >
-      Kept with the live-agent control family because backlog replay depends on
-      live manager/store replay semantics, not method publication alone.
+      Shared served harness proves real /v1/rpc agent.replay_backlog on default
+      SQLite and explicit Postgres by seeding a real pending load-agent delivery
+      and proving manager replay terminalizes it through live agent processing,
+      with idempotency replay and generic settlement.
   - method: runtime.pause
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

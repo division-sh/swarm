@@ -25,9 +25,14 @@ const (
 
 const (
 	ScenarioEventPublishDynamicAutoEmitLifecycle = "event_publish_dynamic_auto_emit_lifecycle"
+	ScenarioEventReplayLiveAgentLifecycle        = "event_replay_live_agent_lifecycle"
+	ScenarioAgentReplayLiveAgentLifecycle        = "agent_replay_live_agent_lifecycle"
 	ScenarioRunStopControlLifecycle              = "run_stop_control_lifecycle"
 	ScenarioRunPauseControlLifecycle             = "run_pause_control_lifecycle"
 	ScenarioRunContinueControlLifecycle          = "run_continue_control_lifecycle"
+	ScenarioAgentSendDirectiveLiveAgentLifecycle = "agent_send_directive_live_agent_lifecycle"
+	ScenarioAgentRestartLiveAgentLifecycle       = "agent_restart_live_agent_lifecycle"
+	ScenarioAgentReplayBacklogLiveAgentLifecycle = "agent_replay_backlog_live_agent_lifecycle"
 	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
 	ScenarioRuntimeResumeIngressLifecycle        = "runtime_resume_ingress_lifecycle"
 	ScenarioMailboxApproveDecisionLifecycle      = "mailbox_approve_decision_lifecycle"
@@ -63,9 +68,14 @@ func Scenarios() []Scenario {
 				PostconditionNoUnfiredDueTimers,
 			},
 		},
+		servedControlScenario(ScenarioEventReplayLiveAgentLifecycle, "event.replay", "TestServedParityHarnessLiveAgentEventReplayLifecycle"),
+		servedControlScenario(ScenarioAgentReplayLiveAgentLifecycle, "agent.replay", "TestServedParityHarnessLiveAgentEventReplayLifecycle"),
 		servedControlScenario(ScenarioRunStopControlLifecycle, "run.stop", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRunPauseControlLifecycle, "run.pause", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRunContinueControlLifecycle, "run.continue", "TestServedParityHarnessRunControlLifecycle"),
+		servedControlScenario(ScenarioAgentSendDirectiveLiveAgentLifecycle, "agent.send_directive", "TestServedParityHarnessLiveAgentControlLifecycle"),
+		servedControlScenario(ScenarioAgentRestartLiveAgentLifecycle, "agent.restart", "TestServedParityHarnessLiveAgentControlLifecycle"),
+		servedControlScenario(ScenarioAgentReplayBacklogLiveAgentLifecycle, "agent.replay_backlog", "TestServedParityHarnessLiveAgentControlLifecycle"),
 		servedControlScenario(ScenarioRuntimePauseIngressLifecycle, "runtime.pause", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
 		servedControlScenario(ScenarioRuntimeResumeIngressLifecycle, "runtime.resume", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
 		servedMailboxDecisionScenario(ScenarioMailboxApproveDecisionLifecycle, "mailbox.approve"),
