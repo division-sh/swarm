@@ -7,7 +7,8 @@ provenance:
   source: platform
 capabilities:
   can:
-    call_provider_action: microsoft_graph.send_mail
+    call_provider_actions:
+      - microsoft_graph.send_mail
     lower_through_activity: true
     journal_activity_attempts: true
   cannot:

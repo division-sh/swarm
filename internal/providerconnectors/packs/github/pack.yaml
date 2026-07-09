@@ -2,12 +2,15 @@ id: provider.github.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:dca6952b20e5521326b7cb83ef85fbf3390d0c29f9b68bee65ba66ce2445b25d
+manifest_hash: sha256:5b6be20a1d75567d4c60d621ae4cbec555e406ec7ebf22d03b0c4204498804dd
 provenance:
   source: platform
 capabilities:
   can:
-    call_provider_action: github.create_issue_comment
+    call_provider_actions:
+      - github.add_labels_to_issue
+      - github.create_issue
+      - github.create_issue_comment
     lower_through_activity: true
     journal_activity_attempts: true
   cannot:
@@ -19,4 +22,4 @@ requires:
     - github_app
 tests:
   - providerconnectors/github_pack
-  - runtime/github_app_issue_comment_supported_surface
+  - runtime/github_app_issue_workflow_supported_surface

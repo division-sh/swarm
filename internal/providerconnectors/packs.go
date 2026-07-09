@@ -177,9 +177,6 @@ func (m ConnectorManifest) Validate() error {
 	if len(names) == 0 {
 		return fmt.Errorf("connector manifest tools are required")
 	}
-	if len(names) > 1 {
-		return fmt.Errorf("connector manifest provider %q declares %d tools; this first slice supports one connector action per pack", provider, len(names))
-	}
 	for _, toolID := range names {
 		tool := m.Tools[toolID]
 		if !isProviderConnector(tool) {
@@ -201,13 +198,9 @@ func (m ConnectorManifest) Validate() error {
 
 func DerivedCapabilities(manifest ConnectorManifest) packs.Capabilities {
 	names := manifestToolNames(manifest)
-	toolID := ""
-	if len(names) > 0 {
-		toolID = names[0]
-	}
 	return packs.Capabilities{
 		Can: packs.CanCapabilities{
-			CallProviderAction:      strings.TrimSpace(toolID),
+			CallProviderActions:     names,
 			LowerThroughActivity:    true,
 			JournalActivityAttempts: true,
 		},

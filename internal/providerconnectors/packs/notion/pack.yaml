@@ -7,7 +7,8 @@ provenance:
   source: platform
 capabilities:
   can:
-    call_provider_action: notion.append_block_children
+    call_provider_actions:
+      - notion.append_block_children
     lower_through_activity: true
     journal_activity_attempts: true
   cannot:
