@@ -244,6 +244,9 @@ golangci-lint run
 go test ./...
 ```
 
+For faster scoped validation while developing, use the changed-package local
+loop documented in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 To run a flow locally, see the [docs Quickstart](https://docs.division.sh/quickstart).
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR. High-risk
