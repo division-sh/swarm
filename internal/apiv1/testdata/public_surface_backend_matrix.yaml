@@ -204,8 +204,9 @@ mutating_api_parity_ledger:
     notes: >
       Shared served harness proves real /v1/rpc agent.restart against the live
       served runtime manager on default SQLite and explicit Postgres, including
-      idempotency replay and a post-restart live-agent delivery through the
-      restarted manager subscription path.
+      synchronous old-loop cancellation, a persisted manager loop-generation
+      transition, idempotency replay without a second transition, and a
+      post-restart live-agent delivery through the new generation.
   - method: agent.replay_backlog
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

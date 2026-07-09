@@ -52,6 +52,8 @@ type AgentManager struct {
 	runCtx             context.Context
 	cancelRun          context.CancelFunc
 	loopCancel         map[string]context.CancelFunc
+	loopDone           map[string]<-chan struct{}
+	loopGeneration     map[string]uint64
 	runWG              sync.WaitGroup
 
 	poisonMu            sync.Mutex
@@ -131,6 +133,8 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		requireModelResolution:          opts.RequireModelResolution,
 		inFlight:                        make(map[string]struct{}),
 		loopCancel:                      make(map[string]context.CancelFunc),
+		loopDone:                        make(map[string]<-chan struct{}),
+		loopGeneration:                  make(map[string]uint64),
 		poisonPanicCounts:               make(map[string]int),
 		poisonEventEntities:             make(map[string]map[string]struct{}),
 		poisonEventEmitted:              make(map[string]bool),
@@ -474,6 +478,7 @@ func (am *AgentManager) ReconfigureAgent(agentID string, cfg models.AgentConfig)
 		cancel()
 		delete(am.loopCancel, agentID)
 	}
+	delete(am.loopDone, agentID)
 	ctx := am.runCtx
 	running := am.running
 	am.runMu.Unlock()
@@ -492,6 +497,8 @@ func (am *AgentManager) TeardownAgent(agentID string) error {
 		cancel()
 		delete(am.loopCancel, agentID)
 	}
+	delete(am.loopDone, agentID)
+	delete(am.loopGeneration, agentID)
 	am.runMu.Unlock()
 
 	am.mu.Lock()
