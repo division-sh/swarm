@@ -39,6 +39,11 @@ for the full-truth push/manual/scheduled runs. Do not habitually force
 High-risk semantic/runtime migrations still require full local
 `go test ./... -count=1` when the issue gate or reviewer asks for it.
 
+Postgres-backed tests should use the supported host setup in
+[internal/testutil/POSTGRES.md](internal/testutil/POSTGRES.md). Keep the test
+DSN invocation-scoped; Docker remains a visible fallback, not the preferred
+local loop.
+
 If you change API/spec authority, update the authoritative root artifact in the
 same pull request as the implementation that makes it true.
 

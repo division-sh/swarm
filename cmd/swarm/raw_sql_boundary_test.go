@@ -275,6 +275,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "testutil owns local Postgres setup/teardown and is excluded from production selected-store authority",
 		},
+		"internal/testutil/postgres_dsn.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          1901,
+			Reason:         "testutil owns the typed Postgres DSN and connector boundary used by local test setup/teardown",
+		},
 	}
 }
 

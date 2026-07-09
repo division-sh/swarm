@@ -189,25 +189,16 @@ jobs:
     timeout-minutes: 18
     env:
       SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
+      SWARM_TEST_POSTGRES_ROLE_PROOF: "1"
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.ci-plan.outputs.shard_matrix) }}
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Start and verify disposable Postgres
+        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -308,22 +299,12 @@ jobs:
     timeout-minutes: 12
     env:
       SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Start and verify disposable Postgres
+        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -339,6 +320,16 @@ jobs:
           go test ./cmd/swarm \
             -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction \
             -count=1 -json 2>&1 | tee test-results/semantic-smoke.json
+
+      - name: Prove owned Docker fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u SWARM_TEST_POSTGRES_DSN \
+            SWARM_TEST_POSTGRES_ASSERT_OWNED_SETTINGS=1 \
+            go test ./internal/testutil \
+              -run '^TestOwnedPostgresSettings$' \
+              -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
 
       - name: Prove catalog required smoke
         shell: bash
@@ -382,22 +373,12 @@ jobs:
     timeout-minutes: 35
     env:
       SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Start and verify disposable Postgres
+        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -447,22 +428,12 @@ jobs:
     timeout-minutes: 25
     env:
       SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Start and verify disposable Postgres
+        run: ./internal/testutil/start-postgres-ci.sh
 
       - name: Setup Go
         uses: actions/setup-go@v5

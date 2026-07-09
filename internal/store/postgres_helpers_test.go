@@ -15,44 +15,6 @@ import (
 	"github.com/lib/pq"
 )
 
-func portFromDSN(t *testing.T, dsn string) int {
-	t.Helper()
-	for _, part := range strings.Fields(dsn) {
-		if strings.HasPrefix(part, "port=") {
-			var n int
-			fmtSscanf(strings.TrimPrefix(part, "port="), &n)
-			if n > 0 {
-				return n
-			}
-		}
-	}
-	t.Fatalf("port not found in dsn: %q", dsn)
-	return 0
-}
-
-func dbNameFromDSN(t *testing.T, dsn string) string {
-	t.Helper()
-	for _, part := range strings.Fields(dsn) {
-		if strings.HasPrefix(part, "dbname=") {
-			return strings.TrimPrefix(part, "dbname=")
-		}
-	}
-	t.Fatalf("dbname not found in dsn: %q", dsn)
-	return ""
-}
-
-// Small local helper to avoid importing fmt (keeps this file tiny in coverage terms).
-func fmtSscanf(s string, out *int) {
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			break
-		}
-		n = n*10 + int(r-'0')
-	}
-	*out = n
-}
-
 func TestDSNFromConfigQuotesKeywordValues(t *testing.T) {
 	cfg := config.DatabaseConfig{
 		Host:    "127.0.0.1",
@@ -112,19 +74,21 @@ func TestDSNFromConfigPinsDefaultNonSecretKeywordsAgainstPGEnv(t *testing.T) {
 func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
-	port := portFromDSN(t, dsn)
-	dbName := dbNameFromDSN(t, dsn)
+	parsed, err := pq.NewConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse canonical test Postgres DSN: %v", err)
+	}
 
 	cfg := config.DatabaseConfig{
-		Host:     "127.0.0.1",
-		Port:     port,
-		Name:     dbName,
-		User:     "postgres",
-		SSLMode:  "disable",
+		Host:     parsed.Host,
+		Port:     int(parsed.Port),
+		Name:     parsed.Database,
+		User:     parsed.User,
+		SSLMode:  string(parsed.SSLMode),
 		PoolSize: 5,
 	}
-	gotDSN := DSNFromConfig(cfg, "postgres")
-	if !strings.Contains(gotDSN, "host='127.0.0.1'") || !strings.Contains(gotDSN, "dbname='"+dbName+"'") {
+	gotDSN := DSNFromConfig(cfg, parsed.Password)
+	if !strings.Contains(gotDSN, "host='"+parsed.Host+"'") || !strings.Contains(gotDSN, "dbname='"+parsed.Database+"'") {
 		t.Fatalf("unexpected dsn: %q", gotDSN)
 	}
 	pg, err := NewPostgresStore(gotDSN)
