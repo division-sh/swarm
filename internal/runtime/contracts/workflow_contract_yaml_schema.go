@@ -273,6 +273,7 @@ func (t *ToolSchemaEntry) UnmarshalYAML(node *yaml.Node) error {
 	t.RequiredPermission = strings.TrimSpace(t.RequiredPermission)
 	t.Credentials = normalizeStrings(t.Credentials)
 	if t.ResponseSuccess != nil {
+		t.ResponseSuccess.Kind = strings.TrimSpace(t.ResponseSuccess.Kind)
 		t.ResponseSuccess.Path = strings.TrimSpace(t.ResponseSuccess.Path)
 	}
 	if t.ManagedCredential != nil {

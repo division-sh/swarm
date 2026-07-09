@@ -1,29 +1,29 @@
 package providerconnectors
 
 import (
-	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
 	"path"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"gopkg.in/yaml.v3"
 )
 
-//go:embed packs/*/pack.yaml packs/*/connector.yaml
+//go:embed packs/*/pack.yaml packs/*/connector.yaml catalog/generated-packs.yaml catalog/generator-profiles/*.yaml
 var builtinConnectorPackFS embed.FS
 
 const connectorPackRoot = "packs"
 
 type ConnectorManifest struct {
-	Provider string                                      `yaml:"provider"`
-	Tools    map[string]runtimecontracts.ToolSchemaEntry `yaml:"tools"`
+	Provider   string                                      `yaml:"provider"`
+	Generation *GenerationEvidence                         `yaml:"generation,omitempty"`
+	Tools      map[string]runtimecontracts.ToolSchemaEntry `yaml:"tools"`
 }
 
 type LoadedPack struct {
@@ -38,9 +38,15 @@ type PackRegistry struct {
 	byProvider map[string]map[string]LoadedPack
 }
 
-var defaultPackRegistry = mustDefaultPackRegistry()
+var (
+	defaultPackRegistryOnce sync.Once
+	defaultPackRegistry     *PackRegistry
+)
 
 func DefaultPackRegistry() *PackRegistry {
+	defaultPackRegistryOnce.Do(func() {
+		defaultPackRegistry = mustDefaultPackRegistry()
+	})
 	return defaultPackRegistry
 }
 
@@ -66,7 +72,16 @@ func mustDefaultPackRegistry() *PackRegistry {
 }
 
 func LoadBuiltinPackRegistry(runningPlatformVersion string) (*PackRegistry, error) {
-	entries, err := fs.ReadDir(builtinConnectorPackFS, connectorPackRoot)
+	return loadBuiltinPackRegistryFS(builtinConnectorPackFS, runningPlatformVersion)
+}
+
+func loadBuiltinPackRegistryFS(fsys fs.FS, runningPlatformVersion string) (*PackRegistry, error) {
+	index, err := loadGeneratedPackIndex(fsys)
+	if err != nil {
+		return nil, err
+	}
+	expectedGenerated := index.BuiltinByID()
+	entries, err := fs.ReadDir(fsys, connectorPackRoot)
 	if err != nil {
 		return nil, fmt.Errorf("read built-in provider connector packs: %w", err)
 	}
@@ -76,11 +91,30 @@ func LoadBuiltinPackRegistry(runningPlatformVersion string) (*PackRegistry, erro
 			continue
 		}
 		dir := path.Join(connectorPackRoot, entry.Name())
-		pack, err := LoadPackFS(builtinConnectorPackFS, dir, runningPlatformVersion)
+		pack, err := LoadPackFS(fsys, dir, runningPlatformVersion)
 		if err != nil {
 			return nil, err
 		}
 		loaded = append(loaded, pack)
+	}
+	seenGenerated := map[string]struct{}{}
+	for _, pack := range loaded {
+		expected, indexed := expectedGenerated[strings.TrimSpace(pack.Envelope.ID)]
+		if indexed {
+			if err := validateGeneratedPackIdentity(fsys, pack, expected); err != nil {
+				return nil, err
+			}
+			seenGenerated[strings.TrimSpace(pack.Envelope.ID)] = struct{}{}
+			continue
+		}
+		if pack.Manifest.Generation != nil {
+			return nil, fmt.Errorf("builtin connector pack %q carries generation evidence but is not in the generated pack index", pack.Envelope.ID)
+		}
+	}
+	for packID := range expectedGenerated {
+		if _, exists := seenGenerated[packID]; !exists {
+			return nil, fmt.Errorf("generated connector pack index references unknown builtin pack id %q", packID)
+		}
 	}
 	return NewPackRegistry(loaded...)
 }
@@ -141,6 +175,11 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 	if err := manifest.Validate(); err != nil {
 		return LoadedPack{}, fmt.Errorf("validate connector manifest for pack %q: %w", loaded.Envelope.ID, err)
 	}
+	if manifest.Generation != nil {
+		if err := manifest.Generation.Validate(manifest.Provider, manifest.Tools); err != nil {
+			return LoadedPack{}, fmt.Errorf("validate generation evidence for pack %q: %w", loaded.Envelope.ID, err)
+		}
+	}
 	expectedCapabilities := DerivedCapabilities(manifest)
 	if !packs.CapabilitiesEqual(loaded.Envelope.Capabilities, expectedCapabilities) {
 		return LoadedPack{}, fmt.Errorf("pack %q capabilities do not match connector manifest", loaded.Envelope.ID)
@@ -160,9 +199,7 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 
 func parseConnectorManifestStrict(body []byte) (ConnectorManifest, error) {
 	var manifest ConnectorManifest
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := decodeYAMLStrict(body, &manifest); err != nil {
 		return ConnectorManifest{}, err
 	}
 	return manifest, nil
@@ -268,6 +305,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 	}
 	existing := existingToolSources(source)
 	importedTools := map[string]runtimecontracts.ToolSchemaEntry{}
+	importedGeneration := map[string]GenerationSurface{}
 	importSources := map[string]string{}
 	importedByProjectScope := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, item := range imports {
@@ -296,6 +334,23 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		}
 		tool := pack.Manifest.Tools[item.toolID]
 		importedTools[item.toolID] = tool
+		if pack.Manifest.Generation != nil {
+			if operation, exists := pack.Manifest.Generation.OperationForTool(item.toolID); exists {
+				importedGeneration[item.toolID] = GenerationSurface{
+					GeneratorVersion: pack.Manifest.Generation.GeneratorVersion,
+					SourcePath:       pack.Manifest.Generation.Source.Path,
+					SourceSHA256:     pack.Manifest.Generation.Source.SHA256,
+					ProfilePath:      pack.Manifest.Generation.Profile.Path,
+					ProfileSHA256:    pack.Manifest.Generation.Profile.SHA256,
+					ManifestSHA256:   pack.Envelope.ManifestHash,
+					OperationID:      operation.OperationID,
+					Permissions:      append([]GenerationPermission(nil), operation.Permissions...),
+					FixtureID:        operation.FixtureID,
+					FixtureStatus:    operation.FixtureStatus,
+					ReviewStatus:     operation.ReviewStatus,
+				}
+			}
+		}
 		importSources[item.toolID] = item.source
 		if importedByProjectScope[item.projectScopeKey] == nil {
 			importedByProjectScope[item.projectScopeKey] = map[string]runtimecontracts.ToolSchemaEntry{}
@@ -305,6 +360,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 	return connectorPackSource{
 		Source:                 source,
 		importedTools:          importedTools,
+		importedGeneration:     importedGeneration,
 		importedByProjectScope: importedByProjectScope,
 	}, nil
 }
@@ -341,6 +397,7 @@ func connectorPackImportsFromSource(source semanticview.Source) []connectorPackI
 type connectorPackSource struct {
 	semanticview.Source
 	importedTools          map[string]runtimecontracts.ToolSchemaEntry
+	importedGeneration     map[string]GenerationSurface
 	importedByProjectScope map[string]map[string]runtimecontracts.ToolSchemaEntry
 }
 
@@ -350,6 +407,11 @@ func (s connectorPackSource) BaseSemanticSource() semanticview.Source {
 
 func (s connectorPackSource) ConnectorPackImportsApplied() bool {
 	return true
+}
+
+func (s connectorPackSource) ConnectorGenerationSurface(toolID string) (GenerationSurface, bool) {
+	evidence, ok := s.importedGeneration[strings.TrimSpace(toolID)]
+	return evidence, ok
 }
 
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {

@@ -2,7 +2,7 @@ id: provider.slack.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:7222305e4ec813fa7eb6ecc8c2b9154fae6d9ec9f5fea1a20f75e31f20c1bfa4
+manifest_hash: sha256:e68d81670b9322b063b5c953f0d210e5deee34930bc301a78d41b4ec7ff08819
 provenance:
   source: platform
 capabilities:

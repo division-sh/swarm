@@ -2,7 +2,7 @@ id: provider.telegram.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:f983e4df5b934a2322781aac992179b3d520c416e41e70e1963ee29a5bf08026
+manifest_hash: sha256:bfd99be3bb8d0b65b70faac200246b0abf61b381c1571e58dc3b2599d2d6422f
 provenance:
   source: platform
 capabilities:

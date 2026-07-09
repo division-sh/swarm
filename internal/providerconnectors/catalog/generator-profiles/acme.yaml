@@ -1,0 +1,43 @@
+schema_version: "1"
+provider: acme
+source:
+  path: catalog/sources/acme-openapi.json
+  compression: none
+  sha256: 182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d
+  openapi_version: 3.0.3
+  server: https://api.acme.test
+pack:
+  id: provider.acme.connector
+  version: 0.1.0
+  platform_version: ">=0.7.0 <0.8.0"
+  provenance: platform
+  tests:
+    - providerconnectors/acme_generated_conformance
+auth:
+  mode: static_credentials
+  credentials:
+    - acme_api_key
+static_headers:
+  Authorization: Bearer {{credentials.acme_api_key}}
+  X-Acme-Version: "2026-07-09"
+operations:
+  - operation_id: widgets/create
+    path: /accounts/{account_id}/widgets
+    method: post
+    tool_id: acme.create_widget
+    description: create Acme widgets
+    effect_class: non_idempotent_write
+    path_parameters:
+      - {source: account-id, input: account_id, type: string, required: true}
+    request_body:
+      required: true
+      variant: {kind: object, fields: [name]}
+      fields:
+        - {source: name, input: name, type: string, required: true}
+    injected_inputs: []
+    permissions:
+      - {id: widgets:write, note: Acme widget creation permission}
+    output: {type: object}
+    response_success: {kind: http_status_2xx}
+    fixture: {id: acme/widgets-create, status: passing}
+    review_status: approved

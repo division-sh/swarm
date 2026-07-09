@@ -1,122 +1,170 @@
 provider: github
+generation:
+    schema_version: "1"
+    generator_version: swarm-openapi-gen/v1
+    source:
+        path: catalog/sources/github-api-2026-03-10.json.gz
+        openapi_version: 3.0.3
+        sha256: sha256:a00d391d74dbc940025e6bad601f08014cbdca4ab890606178e42102e436ded9
+    profile:
+        path: catalog/generator-profiles/github.yaml
+        schema_version: "1"
+        sha256: sha256:04cf8aa22379d36dffb54b351ae352e38926d56c071ddebc595395b465376754
+    operations:
+        - operation_id: issues/add-labels
+          tool_id: github.add_labels_to_issue
+          permissions:
+            - id: issues:write
+              note: GitHub App Issues repository permission at write level
+          response_success:
+            kind: http_status_2xx
+          fixture_id: github/issues-add-labels
+          fixture_status: passing
+          review_status: approved
+        - operation_id: issues/create
+          tool_id: github.create_issue
+          permissions:
+            - id: issues:write
+              note: GitHub App Issues repository permission at write level
+          response_success:
+            kind: http_status_2xx
+          fixture_id: github/issues-create
+          fixture_status: passing
+          review_status: approved
+        - operation_id: issues/create-comment
+          tool_id: github.create_issue_comment
+          permissions:
+            - id: issues:write
+              note: GitHub App Issues repository permission at write level
+          response_success:
+            kind: http_status_2xx
+          fixture_id: github/issues-create-comment
+          fixture_status: passing
+          review_status: approved
 tools:
-  github.add_labels_to_issue:
-    category: provider_connector
-    description: add labels to GitHub issues
-    handler_type: http
-    effect_class: non_idempotent_write
-    managed_credential:
-      key: github_app
-      grant_type: github_app_installation
-      grant_model: installation_grant
-      installation_id_input: installation_id
-    input_schema:
-      type: object
-      properties:
-        installation_id:
-          type: string
-        owner:
-          type: string
-        repo:
-          type: string
-        issue_number:
-          type: integer
-        labels:
-          type: array
-          items:
-            type: string
-      required:
-        - installation_id
-        - owner
-        - repo
-        - issue_number
-        - labels
-    output_schema:
-      type: object
-    http:
-      method: POST
-      url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels
-      headers:
-        Accept: application/vnd.github+json
-        X-GitHub-Api-Version: "2022-11-28"
-      body:
-        labels: "{{input.labels}}"
-  github.create_issue:
-    category: provider_connector
-    description: create GitHub issues
-    handler_type: http
-    effect_class: non_idempotent_write
-    managed_credential:
-      key: github_app
-      grant_type: github_app_installation
-      grant_model: installation_grant
-      installation_id_input: installation_id
-    input_schema:
-      type: object
-      properties:
-        installation_id:
-          type: string
-        owner:
-          type: string
-        repo:
-          type: string
-        title:
-          type: string
-        body:
-          type: string
-      required:
-        - installation_id
-        - owner
-        - repo
-        - title
-        - body
-    output_schema:
-      type: object
-    http:
-      method: POST
-      url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues
-      headers:
-        Accept: application/vnd.github+json
-        X-GitHub-Api-Version: "2022-11-28"
-      body:
-        title: "{{input.title}}"
-        body: "{{input.body}}"
-  github.create_issue_comment:
-    category: provider_connector
-    description: create GitHub issue comments
-    handler_type: http
-    effect_class: non_idempotent_write
-    managed_credential:
-      key: github_app
-      grant_type: github_app_installation
-      grant_model: installation_grant
-      installation_id_input: installation_id
-    input_schema:
-      type: object
-      properties:
-        installation_id:
-          type: string
-        owner:
-          type: string
-        repo:
-          type: string
-        issue_number:
-          type: integer
-        body:
-          type: string
-      required:
-        - installation_id
-        - owner
-        - repo
-        - issue_number
-        - body
-    output_schema:
-      type: object
-    http:
-      method: POST
-      url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments
-      headers:
-        Accept: application/vnd.github+json
-        X-GitHub-Api-Version: "2022-11-28"
-      body:
-        body: "{{input.body}}"
+    github.add_labels_to_issue:
+        category: provider_connector
+        description: add labels to GitHub issues
+        handler_type: http
+        effect_class: non_idempotent_write
+        input_schema:
+            type: object
+            properties:
+                installation_id:
+                    type: string
+                issue_number:
+                    type: integer
+                labels:
+                    type: array
+                    items:
+                        type: string
+                owner:
+                    type: string
+                repo:
+                    type: string
+            required:
+                - installation_id
+                - owner
+                - repo
+                - issue_number
+                - labels
+        output_schema:
+            type: object
+        http:
+            method: POST
+            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels
+            headers:
+                Accept: application/vnd.github+json
+                X-GitHub-Api-Version: "2022-11-28"
+            body:
+                labels: '{{input.labels}}'
+        response_success:
+            kind: http_status_2xx
+        managed_credential:
+            key: github_app
+            grant_type: github_app_installation
+            grant_model: installation_grant
+            installation_id_input: installation_id
+    github.create_issue:
+        category: provider_connector
+        description: create GitHub issues
+        handler_type: http
+        effect_class: non_idempotent_write
+        input_schema:
+            type: object
+            properties:
+                body:
+                    type: string
+                installation_id:
+                    type: string
+                owner:
+                    type: string
+                repo:
+                    type: string
+                title:
+                    type: string
+            required:
+                - installation_id
+                - owner
+                - repo
+                - title
+                - body
+        output_schema:
+            type: object
+        http:
+            method: POST
+            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues
+            headers:
+                Accept: application/vnd.github+json
+                X-GitHub-Api-Version: "2022-11-28"
+            body:
+                body: '{{input.body}}'
+                title: '{{input.title}}'
+        response_success:
+            kind: http_status_2xx
+        managed_credential:
+            key: github_app
+            grant_type: github_app_installation
+            grant_model: installation_grant
+            installation_id_input: installation_id
+    github.create_issue_comment:
+        category: provider_connector
+        description: create GitHub issue comments
+        handler_type: http
+        effect_class: non_idempotent_write
+        input_schema:
+            type: object
+            properties:
+                body:
+                    type: string
+                installation_id:
+                    type: string
+                issue_number:
+                    type: integer
+                owner:
+                    type: string
+                repo:
+                    type: string
+            required:
+                - installation_id
+                - owner
+                - repo
+                - issue_number
+                - body
+        output_schema:
+            type: object
+        http:
+            method: POST
+            url: https://api.github.com/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments
+            headers:
+                Accept: application/vnd.github+json
+                X-GitHub-Api-Version: "2022-11-28"
+            body:
+                body: '{{input.body}}'
+        response_success:
+            kind: http_status_2xx
+        managed_credential:
+            key: github_app
+            grant_type: github_app_installation
+            grant_model: installation_grant
+            installation_id_input: installation_id

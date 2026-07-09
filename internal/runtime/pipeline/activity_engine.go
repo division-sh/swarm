@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -695,7 +696,7 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 				"body":    parsed,
 			},
 		}
-		if err := evaluateActivityHTTPResponseSuccess(prepared.toolName, prepared.success, responseEnv, prepared.secrets); err != nil {
+		if err := httpresponsesuccess.Evaluate("activity http tool "+strings.TrimSpace(prepared.toolName), prepared.success, responseEnv, prepared.secrets); err != nil {
 			return nil, err
 		}
 		return parsed, nil
@@ -708,70 +709,6 @@ func cloneActivityResponseSuccess(check *runtimecontracts.HTTPResponseSuccess) *
 	}
 	out := *check
 	return &out
-}
-
-func evaluateActivityHTTPResponseSuccess(toolName string, check *runtimecontracts.HTTPResponseSuccess, responseEnv map[string]any, secrets []string) error {
-	if check == nil {
-		return nil
-	}
-	path := strings.TrimSpace(check.Path)
-	if path == "" {
-		return fmt.Errorf("activity http tool %s response_success.path is required", strings.TrimSpace(toolName))
-	}
-	got, ok := workflowExpressionLookupPath(responseEnv, path)
-	if !ok {
-		return fmt.Errorf("activity http tool %s response_success path %q did not resolve", strings.TrimSpace(toolName), path)
-	}
-	if activityResponseSuccessValuesEqual(got, check.Equals) {
-		return nil
-	}
-	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(
-		fmt.Sprintf("activity http tool %s response_success failed: %s = %s, want %s", strings.TrimSpace(toolName), path, asString(got), asString(check.Equals)),
-		secrets...,
-	))
-}
-
-func activityResponseSuccessValuesEqual(got, want any) bool {
-	switch wantTyped := want.(type) {
-	case bool:
-		gotTyped, ok := got.(bool)
-		return ok && gotTyped == wantTyped
-	case string:
-		gotTyped, ok := got.(string)
-		return ok && gotTyped == wantTyped
-	case int:
-		gotFloat, ok := activityResponseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	case int64:
-		gotFloat, ok := activityResponseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	case float64:
-		gotFloat, ok := activityResponseSuccessFloat(got)
-		return ok && gotFloat == wantTyped
-	case float32:
-		gotFloat, ok := activityResponseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	default:
-		return fmt.Sprint(got) == fmt.Sprint(want)
-	}
-}
-
-func activityResponseSuccessFloat(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case json.Number:
-		parsed, err := typed.Float64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
 }
 
 func flattenActivityHTTPHeaders(headers http.Header) map[string]any {

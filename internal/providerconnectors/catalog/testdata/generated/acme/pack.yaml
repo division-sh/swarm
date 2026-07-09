@@ -1,16 +1,14 @@
-id: provider.github.connector
+id: provider.acme.connector
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: connector
-manifest_hash: sha256:6366b076584d385b92a6e7f7e717db333f9aa86cbee2c515e3ae9d74737c4a75
+manifest_hash: sha256:6a833ccfc84f86ef2c4328e8cd8d740c2128fe18ff29d8b15fce1cbdba6dc3d8
 provenance:
     source: platform
 capabilities:
     can:
         call_provider_actions:
-            - github.add_labels_to_issue
-            - github.create_issue
-            - github.create_issue_comment
+            - acme.create_widget
         lower_through_activity: true
         journal_activity_attempts: true
     cannot:
@@ -18,8 +16,7 @@ capabilities:
         - retry non_idempotent_write automatically
         - expose credential values
 requires:
-    managed_credentials:
-        - github_app
+    secrets:
+        - acme_api_key
 tests:
-    - providerconnectors/github_pack
-    - runtime/github_app_issue_workflow_supported_surface
+    - providerconnectors/acme_generated_conformance

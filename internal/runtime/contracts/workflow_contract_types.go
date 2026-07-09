@@ -986,41 +986,41 @@ type SchemaLiteral struct {
 	Node yaml.Node
 }
 type ToolAdditionalProperties struct {
-	Allowed *bool
-	Schema  *ToolInputSchema
+	Allowed *bool            `yaml:"allowed,omitempty"`
+	Schema  *ToolInputSchema `yaml:"schema,omitempty"`
 }
 type HTTPToolRetrySpec struct {
-	MaxRetries int    `yaml:"max_retries"`
-	Backoff    string `yaml:"backoff"`
+	MaxRetries int    `yaml:"max_retries,omitempty"`
+	Backoff    string `yaml:"backoff,omitempty"`
 }
 type HTTPToolSpec struct {
 	Method         string            `yaml:"method"`
 	URL            string            `yaml:"url"`
-	Headers        map[string]string `yaml:"headers"`
-	Body           any               `yaml:"body"`
-	TimeoutSeconds int               `yaml:"timeout_seconds"`
-	Retry          HTTPToolRetrySpec `yaml:"retry"`
+	Headers        map[string]string `yaml:"headers,omitempty"`
+	Body           any               `yaml:"body,omitempty"`
+	TimeoutSeconds int               `yaml:"timeout_seconds,omitempty"`
+	Retry          HTTPToolRetrySpec `yaml:"retry,omitempty"`
 }
 type ManagedCredentialRef struct {
 	Key                 string                                     `yaml:"key"`
-	Header              string                                     `yaml:"header"`
-	Prefix              string                                     `yaml:"prefix"`
-	GrantType           string                                     `yaml:"grant_type"`
-	Scopes              []string                                   `yaml:"scopes"`
-	GrantModel          string                                     `yaml:"grant_model"`
-	TokenRequest        managedcredentialmodel.TokenRequestProfile `yaml:"token_request"`
-	InstallationIDInput string                                     `yaml:"installation_id_input"`
+	Header              string                                     `yaml:"header,omitempty"`
+	Prefix              string                                     `yaml:"prefix,omitempty"`
+	GrantType           string                                     `yaml:"grant_type,omitempty"`
+	Scopes              []string                                   `yaml:"scopes,omitempty"`
+	GrantModel          string                                     `yaml:"grant_model,omitempty"`
+	TokenRequest        managedcredentialmodel.TokenRequestProfile `yaml:"token_request,omitempty"`
+	InstallationIDInput string                                     `yaml:"installation_id_input,omitempty"`
 }
 type ToolInputSchema struct {
 	Type                 string                     `yaml:"type"`
-	Description          string                     `yaml:"description"`
-	Properties           map[string]ToolInputSchema `yaml:"properties"`
-	Required             []string                   `yaml:"required"`
-	Items                *ToolInputSchema           `yaml:"items"`
-	Enum                 []SchemaLiteral            `yaml:"enum"`
-	AdditionalProperties ToolAdditionalProperties   `yaml:"additionalProperties"`
-	Minimum              *float64                   `yaml:"minimum"`
-	Maximum              *float64                   `yaml:"maximum"`
+	Description          string                     `yaml:"description,omitempty"`
+	Properties           map[string]ToolInputSchema `yaml:"properties,omitempty"`
+	Required             []string                   `yaml:"required,omitempty"`
+	Items                *ToolInputSchema           `yaml:"items,omitempty"`
+	Enum                 []SchemaLiteral            `yaml:"enum,omitempty"`
+	AdditionalProperties ToolAdditionalProperties   `yaml:"additionalProperties,omitempty"`
+	Minimum              *float64                   `yaml:"minimum,omitempty"`
+	Maximum              *float64                   `yaml:"maximum,omitempty"`
 }
 type ProjectPackagePaths struct {
 	Key               string
@@ -1892,26 +1892,27 @@ func (e AgentRegistryEntry) ConfiguredTools() []string {
 }
 
 type ToolSchemaEntry struct {
-	Category           string                `yaml:"category"`
-	Description        string                `yaml:"description"`
-	HandlerType        string                `yaml:"handler_type"`
-	EffectClass        string                `yaml:"effect_class"`
-	Permission         string                `yaml:"permission"`
-	RequiredPermission string                `yaml:"required_permission"`
-	RateLimit          string                `yaml:"rate_limit"`
-	RateLimitMaxWait   string                `yaml:"rate_limit_max_wait"`
-	InputSchema        ToolInputSchema       `yaml:"input_schema"`
-	OutputSchema       ToolInputSchema       `yaml:"output_schema"`
-	HTTP               *HTTPToolSpec         `yaml:"http"`
-	ResponseMapping    map[string]any        `yaml:"response_mapping"`
-	ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success"`
-	Credentials        []string              `yaml:"credentials"`
-	ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential"`
+	Category           string                `yaml:"category,omitempty"`
+	Description        string                `yaml:"description,omitempty"`
+	HandlerType        string                `yaml:"handler_type,omitempty"`
+	EffectClass        string                `yaml:"effect_class,omitempty"`
+	Permission         string                `yaml:"permission,omitempty"`
+	RequiredPermission string                `yaml:"required_permission,omitempty"`
+	RateLimit          string                `yaml:"rate_limit,omitempty"`
+	RateLimitMaxWait   string                `yaml:"rate_limit_max_wait,omitempty"`
+	InputSchema        ToolInputSchema       `yaml:"input_schema,omitempty"`
+	OutputSchema       ToolInputSchema       `yaml:"output_schema,omitempty"`
+	HTTP               *HTTPToolSpec         `yaml:"http,omitempty"`
+	ResponseMapping    map[string]any        `yaml:"response_mapping,omitempty"`
+	ResponseSuccess    *HTTPResponseSuccess  `yaml:"response_success,omitempty"`
+	Credentials        []string              `yaml:"credentials,omitempty"`
+	ManagedCredential  *ManagedCredentialRef `yaml:"managed_credential,omitempty"`
 }
 
 type HTTPResponseSuccess struct {
-	Path   string `yaml:"path"`
-	Equals any    `yaml:"equals"`
+	Kind   string `yaml:"kind"`
+	Path   string `yaml:"path,omitempty"`
+	Equals any    `yaml:"equals,omitempty"`
 }
 type PlatformSpecDocument struct {
 	Platform struct {

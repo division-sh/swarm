@@ -1,0 +1,53 @@
+provider: acme
+generation:
+    schema_version: "1"
+    generator_version: swarm-openapi-gen/v1
+    source:
+        path: catalog/sources/acme-openapi.json
+        openapi_version: 3.0.3
+        sha256: sha256:182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d
+    profile:
+        path: catalog/generator-profiles/acme.yaml
+        schema_version: "1"
+        sha256: sha256:5e7dfbe07dfe6d2e67af620bf4cc7af08fe612ca9fe06a130fac3027ad9f02d3
+    operations:
+        - operation_id: widgets/create
+          tool_id: acme.create_widget
+          permissions:
+            - id: widgets:write
+              note: Acme widget creation permission
+          response_success:
+            kind: http_status_2xx
+          fixture_id: acme/widgets-create
+          fixture_status: passing
+          review_status: approved
+tools:
+    acme.create_widget:
+        category: provider_connector
+        description: create Acme widgets
+        handler_type: http
+        effect_class: non_idempotent_write
+        input_schema:
+            type: object
+            properties:
+                account_id:
+                    type: string
+                name:
+                    type: string
+            required:
+                - account_id
+                - name
+        output_schema:
+            type: object
+        http:
+            method: POST
+            url: https://api.acme.test/accounts/{{input.account_id}}/widgets
+            headers:
+                Authorization: Bearer {{credentials.acme_api_key}}
+                X-Acme-Version: "2026-07-09"
+            body:
+                name: '{{input.name}}'
+        response_success:
+            kind: http_status_2xx
+        credentials:
+            - acme_api_key

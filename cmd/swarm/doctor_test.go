@@ -1127,6 +1127,8 @@ telegram.send_message:
         type: string
   output_schema:
     type: object
+  response_success:
+    kind: http_status_2xx
   http:
     method: POST
     url: https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage

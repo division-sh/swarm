@@ -84,6 +84,74 @@ func TestExecutor_HTTPToolExecutesTemplateAndResponseMapping(t *testing.T) {
 	}
 }
 
+func TestExecutor_HTTPResponseSuccessPolicyParityCases(t *testing.T) {
+	t.Setenv("POLICY_SECRET", "provider-secret")
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		policy      runtimecontracts.HTTPResponseSuccess
+		credential  bool
+		wantErr     string
+		forbidError string
+	}{
+		{name: "status 2xx", status: http.StatusNoContent, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}},
+		{name: "status non-2xx", status: http.StatusMultipleChoices, body: `{}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}, wantErr: "response_success failed"},
+		{name: "boolean equality", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}},
+		{name: "string equality", status: http.StatusOK, body: `{"state":"accepted"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}},
+		{name: "numeric equality", status: http.StatusOK, body: `{"count":2}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.count", Equals: int64(2)}},
+		{name: "provider failure", status: http.StatusOK, body: `{"ok":false}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}, wantErr: "response_success failed"},
+		{name: "unresolved path", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.missing", Equals: true}, wantErr: `path "response.body.missing" did not resolve`},
+		{name: "secret redaction", status: http.StatusOK, body: `{"state":"provider-secret"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}, credential: true, wantErr: "[REDACTED]", forbidError: "provider-secret"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.credential && r.Header.Get("X-Policy-Secret") != "provider-secret" {
+					t.Fatalf("X-Policy-Secret = %q", r.Header.Get("X-Policy-Secret"))
+				}
+				if tc.body != "" {
+					w.Header().Set("Content-Type", "application/json")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+
+			tool := runtimecontracts.ToolSchemaEntry{
+				Description:     "exercise response success semantics",
+				HandlerType:     "http",
+				ResponseSuccess: &tc.policy,
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: http.MethodPost,
+					URL:    server.URL,
+				},
+			}
+			if tc.credential {
+				tool.Credentials = []string{"policy_secret"}
+				tool.HTTP.Headers = map[string]string{"X-Policy-Secret": "{{credentials.policy_secret}}"}
+			}
+			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"policy_probe": tool}})
+			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
+			ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"policy_probe"}})
+			_, err := exec.Execute(ctx, "policy_probe", map[string]any{})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Execute: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Execute error = %v, want containing %q", err, tc.wantErr)
+			}
+			if tc.forbidError != "" && strings.Contains(err.Error(), tc.forbidError) {
+				t.Fatalf("Execute error leaked %q: %v", tc.forbidError, err)
+			}
+		})
+	}
+}
+
 func TestExecutor_HTTPToolEncodesURLTemplateComponentsAndPreservesRawHeaderBody(t *testing.T) {
 	query := `to:karpathy (agent OR "agentic")`
 	var sawEscapedPath string

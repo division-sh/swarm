@@ -1,0 +1,52 @@
+{
+  "openapi": "3.0.3",
+  "info": {"title": "Acme Widgets API", "version": "1.0.0"},
+  "servers": [{"url": "https://api.acme.test"}],
+  "paths": {
+    "/accounts/{account_id}/widgets": {
+      "post": {
+        "summary": "Create a widget",
+        "description": "Creates one widget in an account.",
+        "tags": ["widgets"],
+        "operationId": "widgets/create",
+        "parameters": [
+          {"$ref": "#/components/parameters/account-id"}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string", "description": "Widget name."}
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {"type": "object"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "account-id": {
+        "name": "account_id",
+        "in": "path",
+        "required": true,
+        "schema": {"type": "string"}
+      }
+    }
+  }
+}
