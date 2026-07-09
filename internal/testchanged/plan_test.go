@@ -66,9 +66,6 @@ func TestPlanChangedMapsTextFixturesInsidePackageDirectories(t *testing.T) {
 	if got, want := packagePatterns(plan.Packages), []string{"./internal/a"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("packages = %#v, want %#v", got, want)
 	}
-	if plan.DocsOnly {
-		t.Fatalf("DocsOnly = true, want false")
-	}
 }
 
 func TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite(t *testing.T) {
@@ -100,22 +97,42 @@ func TestPlanChangedGlobalFilesFallBackToFullSuite(t *testing.T) {
 	}
 }
 
-func TestPlanChangedDocsOnlySelectsNoPackages(t *testing.T) {
+func TestPlanChangedRootDocsFallBackToFullSuite(t *testing.T) {
 	pkgs := []Package{
 		{ImportPath: "github.com/division-sh/swarm", RelDir: "."},
+		{ImportPath: "github.com/division-sh/swarm/cmd/swarm", RelDir: "cmd/swarm"},
 	}
 	plan, err := PlanChanged(".", pkgs, []ChangedFile{
 		{Path: "README.md", Status: "M"},
-		{Path: "docs/local-testing.md", Status: "M"},
+		{Path: "CONTRIBUTING.md", Status: "M"},
+		{Path: "SECURITY.md", Status: "M"},
 	})
 	if err != nil {
 		t.Fatalf("plan changed: %v", err)
 	}
-	if !plan.DocsOnly {
-		t.Fatalf("DocsOnly = false, want true")
+	if !plan.FullSuite {
+		t.Fatalf("FullSuite = false, want true")
 	}
-	if len(plan.Packages) != 0 {
-		t.Fatalf("packages = %#v, want none", packagePatterns(plan.Packages))
+	wantReasons := []string{
+		"CONTRIBUTING.md has no owning Go package",
+		"README.md has no owning Go package",
+		"SECURITY.md has no owning Go package",
+	}
+	if !reflect.DeepEqual(plan.FullSuiteReasons, wantReasons) {
+		t.Fatalf("full suite reasons = %#v, want %#v", plan.FullSuiteReasons, wantReasons)
+	}
+	if got, want := TestCommand(plan, nil), []string{"go", "test", "./..."}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("command = %#v, want %#v", got, want)
+	}
+}
+
+func TestPlanChangedNoChangesSelectsNoPackages(t *testing.T) {
+	plan, err := PlanChanged(".", nil, nil)
+	if err != nil {
+		t.Fatalf("plan changed: %v", err)
+	}
+	if plan.FullSuite || len(plan.Packages) != 0 {
+		t.Fatalf("plan = %#v, want no full suite or packages", plan)
 	}
 	if got := TestCommand(plan, nil); got != nil {
 		t.Fatalf("command = %#v, want nil", got)
@@ -133,9 +150,6 @@ func TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite(t *testing.T) 
 	if err != nil {
 		t.Fatalf("plan changed: %v", err)
 	}
-	if plan.DocsOnly {
-		t.Fatalf("DocsOnly = true, want false")
-	}
 	if !plan.FullSuite {
 		t.Fatalf("FullSuite = false, want true")
 	}
@@ -147,7 +161,7 @@ func TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite(t *testing.T) 
 	}
 }
 
-func TestPlanChangedUnownedNonDocFallsBackToFullSuite(t *testing.T) {
+func TestPlanChangedUnownedFileFallsBackToFullSuite(t *testing.T) {
 	plan, err := PlanChanged(".", nil, []ChangedFile{{Path: ".github/workflows/ci.yml", Status: "M"}})
 	if err != nil {
 		t.Fatalf("plan changed: %v", err)
