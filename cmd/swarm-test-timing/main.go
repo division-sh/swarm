@@ -17,6 +17,7 @@ func main() {
 	var packagesPath string
 	var weightsPath string
 	var snapshotPath string
+	var sourceLabel string
 	var shardMatrixPath string
 	var topN int
 	var shardCount int
@@ -29,6 +30,7 @@ func main() {
 	flag.StringVar(&packagesPath, "packages", "", "path to newline-delimited Go package list for shard snapshot operations")
 	flag.StringVar(&weightsPath, "weights", "", "optional go test -json timing input for shard generation")
 	flag.StringVar(&snapshotPath, "snapshot", "", "path to shard snapshot for shard operations")
+	flag.StringVar(&sourceLabel, "source-label", "", "optional source label recorded in generated shard snapshots")
 	flag.StringVar(&shardMatrixPath, "shard-matrix", "", "path to write GitHub Actions shard matrix JSON, or - for stdout")
 	flag.IntVar(&topN, "top", 20, "number of slow packages and tests to include")
 	flag.IntVar(&shardCount, "shards", 4, "number of shards to generate")
@@ -44,6 +46,7 @@ func main() {
 		packagesPath:    packagesPath,
 		weightsPath:     weightsPath,
 		snapshotPath:    snapshotPath,
+		sourceLabel:     sourceLabel,
 		shardMatrixPath: shardMatrixPath,
 		topN:            topN,
 		shardCount:      shardCount,
@@ -63,6 +66,7 @@ type runConfig struct {
 	packagesPath    string
 	weightsPath     string
 	snapshotPath    string
+	sourceLabel     string
 	shardMatrixPath string
 	topN            int
 	shardCount      int
@@ -128,6 +132,9 @@ func generateShardSnapshot(cfg runConfig) error {
 			return err
 		}
 		source = cfg.weightsPath
+	}
+	if strings.TrimSpace(cfg.sourceLabel) != "" {
+		source = strings.TrimSpace(cfg.sourceLabel)
 	}
 	snapshot, err := testtiming.BuildShardSnapshot(packages, weights, cfg.shardCount, source, cfg.maxImbalance)
 	if err != nil {
