@@ -231,19 +231,44 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, matching, "mutation_safety"), "never act silently on a prefix")
 
 	families := mustMappingValue(t, resolution, "family_registry")
+	expectedFamilies := map[string]struct {
+		candidateSource   string
+		scopeMode         string
+		normalizationMode string
+	}{
+		"agent":         {candidateSource: "/v1/rpc agent.list", scopeMode: "global_bounded", normalizationMode: "trim_case_sensitive"},
+		"bundle":        {candidateSource: "/v1/rpc bundle.list", scopeMode: "bounded_catalog", normalizationMode: "bundle_digest_hex_case_fold"},
+		"run":           {candidateSource: "/v1/rpc run.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
+		"entity":        {candidateSource: "/v1/rpc entity.list", scopeMode: "full_run_required", normalizationMode: "trim_case_sensitive"},
+		"event":         {candidateSource: "/v1/rpc event.list", scopeMode: "unbounded_full_only", normalizationMode: "trim_case_sensitive"},
+		"session":       {candidateSource: "/v1/rpc conversation.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"fork":          {candidateSource: "/v1/rpc conversation.fork_list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"mailbox":       {candidateSource: "/v1/rpc mailbox.list", scopeMode: "unpromoted_full_only", normalizationMode: "trim_case_sensitive"},
+		"flow_instance": {candidateSource: "unpromoted", scopeMode: "unpromoted_full_only", normalizationMode: "existing_flow_path"},
+		"context":       {candidateSource: "local_context_registry", scopeMode: "local_bounded", normalizationMode: "trim_case_sensitive"},
+		"subscriber":    {candidateSource: "polymorphic_subscriber_identity", scopeMode: "polymorphic_full_only", normalizationMode: "trim_case_sensitive"},
+	}
 	familyCount := 0
 	forEachMappingEntry(t, families, func(name string, family *yaml.Node) {
 		familyCount++
+		expected, ok := expectedFamilies[name]
+		if !ok {
+			t.Errorf("identifier family registry has unsupported family %q", name)
+			return
+		}
 		assertScalarValue(t, mustMappingValue(t, family, "display_shortening_eligible"), "false")
 		for _, field := range []string{"candidate_source", "scope_mode", "scope_rule", "normalization_mode", "normalization", "display_projection"} {
 			if mappingValue(family, field) == nil {
 				t.Errorf("identifier family %s must declare %s", name, field)
 			}
 		}
+		assertScalarValue(t, mustMappingValue(t, family, "candidate_source"), expected.candidateSource)
+		assertScalarValue(t, mustMappingValue(t, family, "scope_mode"), expected.scopeMode)
+		assertScalarValue(t, mustMappingValue(t, family, "normalization_mode"), expected.normalizationMode)
 		assertScalarValue(t, mustMappingValue(t, family, "display_projection"), "full")
 	})
-	if familyCount != 11 {
-		t.Fatalf("identifier family count=%d, want 11", familyCount)
+	if familyCount != len(expectedFamilies) {
+		t.Fatalf("identifier family count=%d, want %d", familyCount, len(expectedFamilies))
 	}
 
 	allowedModes := map[string]bool{"resolver_bounded": true, "resolver_scoped": true, "full_only": true, "different_concept": true, "split": true}

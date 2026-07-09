@@ -88,6 +88,108 @@ func TestCLIIdentifierRegistryMatchesAuthoritativeSpec(t *testing.T) {
 	}
 }
 
+func TestCLIIdentifierRegistryRejectsUnsupportedFamilyPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*cliIdentifierFamilyPolicy)
+		want   string
+	}{
+		{
+			name: "unknown candidate source",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.CandidateSource = cliIdentifierCandidateSource("unknown")
+			},
+			want: "unsupported source/scope/normalization combination",
+		},
+		{
+			name: "unknown scope mode",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.ScopeMode = cliIdentifierScopeMode("unknown")
+			},
+			want: "unsupported source/scope/normalization combination",
+		},
+		{
+			name: "unknown normalization mode",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.NormalizationMode = cliIdentifierNormalizationMode("unknown")
+			},
+			want: "unsupported source/scope/normalization combination",
+		},
+		{
+			name: "unknown display projection",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.DisplayProjection = cliIdentifierDisplayProjection("unknown")
+			},
+			want: "unsupported display projection",
+		},
+		{
+			name: "known source from another family",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.CandidateSource = cliIdentifierSourceBundleList
+			},
+			want: "unsupported source/scope/normalization combination",
+		},
+		{
+			name: "known scope from another family",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.ScopeMode = cliIdentifierScopeBoundedCatalog
+			},
+			want: "unsupported source/scope/normalization combination",
+		},
+		{
+			name: "known normalization from another family",
+			mutate: func(policy *cliIdentifierFamilyPolicy) {
+				policy.NormalizationMode = cliIdentifierNormalizeBundleDigest
+			},
+			want: "unsupported source/scope/normalization combination",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			original := cliIdentifierFamilyRegistry[cliIdentifierFamilyAgent]
+			mutated := original
+			tt.mutate(&mutated)
+			cliIdentifierFamilyRegistry[cliIdentifierFamilyAgent] = mutated
+			t.Cleanup(func() { cliIdentifierFamilyRegistry[cliIdentifierFamilyAgent] = original })
+
+			err := validateCLIIdentifierRegistry()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateCLIIdentifierRegistry() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestCLIIdentifierRegistryRejectsUnknownFamily(t *testing.T) {
+	unknown := cliIdentifierFamily("unknown")
+	cliIdentifierFamilyRegistry[unknown] = cliIdentifierFamilyPolicy{
+		Family:            unknown,
+		CandidateSource:   cliIdentifierSourceAgentList,
+		ScopeMode:         cliIdentifierScopeGlobalBounded,
+		ScopeRule:         "test",
+		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
+		NormalizationRule: "test",
+		DisplayProjection: cliIdentifierDisplayFull,
+	}
+	t.Cleanup(func() { delete(cliIdentifierFamilyRegistry, unknown) })
+
+	err := validateCLIIdentifierRegistry()
+	if err == nil || !strings.Contains(err.Error(), "unsupported family") {
+		t.Fatalf("validateCLIIdentifierRegistry() error = %v, want unsupported family", err)
+	}
+}
+
+func TestCLIIdentifierMatchingRejectsUnsupportedNormalizationMode(t *testing.T) {
+	policy := cliIdentifierFamilyRegistry[cliIdentifierFamilyAgent]
+	policy.NormalizationMode = cliIdentifierNormalizationMode("unknown")
+
+	_, _, err := matchCLIIdentifierCandidates(policy, "agent", []cliIdentifierCandidate{{ID: "agent-one"}})
+	if err == nil || !strings.Contains(err.Error(), "unsupported normalization mode") {
+		t.Fatalf("matchCLIIdentifierCandidates() error = %v, want unsupported normalization mode", err)
+	}
+}
+
 func TestCLIIdentifierRegistryCoversVisiblePositionalsAndStringFlags(t *testing.T) {
 	paths := visibleCLICommandPaths(t)
 	for command, cmd := range paths {
