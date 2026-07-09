@@ -55,6 +55,22 @@ func TestPlanChangedMapsNonGoFilesInsidePackageDirectories(t *testing.T) {
 	}
 }
 
+func TestPlanChangedMapsTextFixturesInsidePackageDirectories(t *testing.T) {
+	pkgs := []Package{
+		{ImportPath: "github.com/division-sh/swarm/internal/a", RelDir: "internal/a"},
+	}
+	plan, err := PlanChanged(".", pkgs, []ChangedFile{{Path: "internal/a/testdata/golden.txt", Status: "M"}})
+	if err != nil {
+		t.Fatalf("plan changed: %v", err)
+	}
+	if got, want := packagePatterns(plan.Packages), []string{"./internal/a"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("packages = %#v, want %#v", got, want)
+	}
+	if plan.DocsOnly {
+		t.Fatalf("DocsOnly = true, want false")
+	}
+}
+
 func TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite(t *testing.T) {
 	pkgs := []Package{
 		{ImportPath: "github.com/division-sh/swarm/internal/a", RelDir: "internal/a"},

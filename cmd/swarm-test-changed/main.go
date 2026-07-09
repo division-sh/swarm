@@ -188,7 +188,14 @@ func parseNameStatus(out string) []testchanged.ChangedFile {
 		parts := strings.Split(line, "\t")
 		status := parts[0]
 		switch {
-		case strings.HasPrefix(status, "R"), strings.HasPrefix(status, "C"):
+		case strings.HasPrefix(status, "R"):
+			if len(parts) >= 3 {
+				files = append(files,
+					testchanged.ChangedFile{Path: parts[1], Status: "D"},
+					testchanged.ChangedFile{Path: parts[2], Status: status},
+				)
+			}
+		case strings.HasPrefix(status, "C"):
 			if len(parts) >= 3 {
 				files = append(files, testchanged.ChangedFile{Path: parts[2], Status: status})
 			}
