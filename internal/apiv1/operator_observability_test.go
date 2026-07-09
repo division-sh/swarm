@@ -80,8 +80,18 @@ func TestOperatorObservabilityHandlersExposePersistedReadMethods(t *testing.T) {
 	if observability.lastTrace.Since == nil || observability.lastTrace.Until == nil || observability.lastTrace.Limit != 1 {
 		t.Fatalf("run.trace options = %#v", observability.lastTrace)
 	}
+	if !observability.lastTrace.ExcludeRuntimeLogs {
+		t.Fatalf("run.trace ExcludeRuntimeLogs = false, want default true")
+	}
 	if got := observability.lastTrace.Filter; len(got.EventNames) != 1 || got.EventNames[0] != "scan.requested" || len(got.EntityIDs) != 1 || got.EntityIDs[0] != "entity-1" || len(got.DeliveryStatuses) != 1 || got.DeliveryStatuses[0] != "delivered" || len(got.SubscriberIDs) != 1 || got.SubscriberIDs[0] != "agent-1" || len(got.SubscriberTypes) != 1 || got.SubscriberTypes[0] != "agent" {
 		t.Fatalf("run.trace filter = %#v", got)
+	}
+	traceVerbose := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-verbose","method":"run.trace","params":{"run_id":"run-1","include_internal":true}}`)
+	if traceVerbose.Error != nil {
+		t.Fatalf("run.trace include_internal error = %#v", traceVerbose.Error)
+	}
+	if observability.lastTrace.ExcludeRuntimeLogs {
+		t.Fatalf("run.trace include_internal ExcludeRuntimeLogs = true, want false")
 	}
 
 	invalidTraceSince := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"trace-since","method":"run.trace","params":{"run_id":"run-1","since":"not-a-time"}}`)
@@ -288,6 +298,9 @@ func (s *fakeObservabilityReadStore) LoadRunDebugTracePage(_ context.Context, ru
 	}
 	rows := []store.RunDebugTraceRow{}
 	for _, row := range s.traceRows[runID] {
+		if opts.ExcludeRuntimeLogs && row.EventName == "platform.runtime_log" {
+			continue
+		}
 		if opts.Since != nil && !row.EventCreatedAt.After(opts.Since.UTC()) {
 			continue
 		}

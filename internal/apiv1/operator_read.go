@@ -1207,7 +1207,18 @@ func OperatorObservabilityHandlers(opts OperatorReadOptions) map[string]MethodHa
 			if err != nil {
 				return nil, err
 			}
-			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{Limit: limit, Cursor: cursor, Since: since, Until: until, Filter: filter})
+			includeInternal, err := optionalBoolParam(req.Params, "include_internal", false)
+			if err != nil {
+				return nil, err
+			}
+			rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
+				Limit:              limit,
+				Cursor:             cursor,
+				Since:              since,
+				Until:              until,
+				Filter:             filter,
+				ExcludeRuntimeLogs: !includeInternal,
+			})
 			if errors.Is(err, store.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}

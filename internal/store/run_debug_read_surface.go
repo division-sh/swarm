@@ -158,11 +158,12 @@ type RunDebugReport struct {
 }
 
 type RunDebugTraceQueryOptions struct {
-	Limit  int
-	Cursor string
-	Since  *time.Time
-	Until  *time.Time
-	Filter RunDebugTraceFilter
+	Limit              int
+	Cursor             string
+	Since              *time.Time
+	Until              *time.Time
+	Filter             RunDebugTraceFilter
+	ExcludeRuntimeLogs bool
 }
 
 type RunDebugTraceFilter struct {
@@ -925,6 +926,10 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 	addTextArrayFilter(opts.Filter.DeliveryStatuses, "d.status")
 	addTextArrayFilter(opts.Filter.SubscriberIDs, "d.subscriber_id")
 	addTextArrayFilter(opts.Filter.SubscriberTypes, "d.subscriber_type")
+	if opts.ExcludeRuntimeLogs {
+		filterWhere += `
+			  AND e.event_name <> 'platform.runtime_log'`
+	}
 	args = append(args, opts.Limit+1)
 	limitArg := len(args)
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`

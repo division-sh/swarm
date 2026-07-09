@@ -581,6 +581,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 	}
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	traceWriter := &runTraceRowLineWriter{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -602,7 +603,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				rows = nil
 				continue
 			}
-			writeRunCommandTraceRow(out, row)
+			traceWriter.Write(out, row)
 		case err := <-sub.errs:
 			if err != nil {
 				writeCLIAPIError(errOut, err)
@@ -832,28 +833,49 @@ func writeRunCommandReattached(out io.Writer, run diagnosticRunHeader) {
 }
 
 func writeRunCommandTraceRow(out io.Writer, row diagnosticRunTraceRow) {
+	writer := &runTraceRowLineWriter{}
+	writer.Write(out, row)
+}
+
+type runTraceRowLineWriter struct {
+	startedAt *time.Time
+}
+
+func (w *runTraceRowLineWriter) Write(out io.Writer, row diagnosticRunTraceRow) {
 	if out == nil {
 		return
 	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(row.EventCreatedAt))
+	if err == nil {
+		at = at.UTC()
+		if w.startedAt == nil {
+			startedAt := at
+			w.startedAt = &startedAt
+		}
+	}
+	relativeAt := strings.TrimSpace(row.EventCreatedAt)
+	if err == nil && w.startedAt != nil {
+		relativeAt = formatTraceOffset(at.Sub(*w.startedAt))
+	}
 	fields := []string{
-		"event_id=" + row.EventID,
-		"event_name=" + row.EventName,
-		"at=" + row.EventCreatedAt,
+		relativeAt,
+		row.EventName,
+		"id=" + row.EventID,
 	}
 	if row.EntityID != "" {
-		fields = append(fields, "entity_id="+row.EntityID)
+		fields = append(fields, "entity="+row.EntityID)
 	}
 	if row.DeliveryStatus != "" {
-		fields = append(fields, "delivery_status="+row.DeliveryStatus)
+		fields = append(fields, "delivery="+row.DeliveryStatus)
 	}
-	if row.SubscriberType != "" || row.SubscriberID != "" {
-		fields = append(fields, "subscriber="+strings.Trim(row.SubscriberType+"/"+row.SubscriberID, "/"))
+	if subscriber := formatTraceSubscriber(row); subscriber != "-" {
+		fields = append(fields, "subscriber="+subscriber)
 	}
 	if row.SessionID != "" {
-		fields = append(fields, "session_id="+row.SessionID)
+		fields = append(fields, "session="+row.SessionID)
 	}
-	if row.TurnID != "" {
-		fields = append(fields, "turn_id="+row.TurnID)
+	if turn := firstNonEmpty(row.TurnID, row.TurnTriggerEventType); turn != "" {
+		fields = append(fields, "turn="+turn)
 	}
 	fmt.Fprintf(out, "trace %s\n", strings.Join(fields, " "))
 }

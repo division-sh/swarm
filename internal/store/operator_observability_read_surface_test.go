@@ -693,6 +693,43 @@ func TestRunDebugTracePageCursorAndRunNotFound(t *testing.T) {
 	}
 }
 
+func TestRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
+	ctx := context.Background()
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+
+	runID := uuid.NewString()
+	businessEvent := uuid.NewString()
+	runtimeLogEvent := uuid.NewString()
+	base := time.Unix(1700000600, 0).UTC()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES
+			($1::uuid, $3::uuid, 'item.received', 'global', '{}'::jsonb, 'runtime', 'platform', $4),
+			($2::uuid, $3::uuid, 'platform.runtime_log', 'global', '{}'::jsonb, 'runtime', 'platform', $5)
+	`, businessEvent, runtimeLogEvent, runID, base, base.Add(time.Millisecond)); err != nil {
+		t.Fatalf("seed trace rows: %v", err)
+	}
+
+	allRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage all: %v", err)
+	}
+	if got := traceEventIDs(allRows); !sameStrings(got, []string{businessEvent, runtimeLogEvent}) {
+		t.Fatalf("all trace rows = %#v, want business and runtime_log", got)
+	}
+	filteredRows, _, err := pg.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, ExcludeRuntimeLogs: true})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage filtered: %v", err)
+	}
+	if got := traceEventIDs(filteredRows); !sameStrings(got, []string{businessEvent}) {
+		t.Fatalf("filtered trace rows = %#v, want business row only", got)
+	}
+}
+
 func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	ctx := context.Background()
 	_, db, _ := testutil.StartPostgres(t)

@@ -14370,9 +14370,12 @@ cli_specification:
           `-f` shorthand is promoted in the trace command row as a CLI-only alias for `--follow`. Typed
           RunTraceFilter fields for event-name, subscriber identity, entity-id, and delivery-status are promoted on
           `/v1/rpc run.trace` and `/v1/ws run.subscribe_trace` and consumed by `swarm run trace` snapshot and follow
-          modes. Snapshot `until` is promoted on `/v1/rpc run.trace` only as an inclusive upper bound. Review-artifact
-          `--include-payload`, shared `swarm run start` recovery, and multi-run `--all` remain explicitly unpromoted split
-          tails until later gated children promote their own canonical owners.
+          modes. Snapshot `until` is promoted on `/v1/rpc run.trace` only as an inclusive upper bound. `include_internal`
+          is promoted on both trace APIs by #1816 as the API-owned visibility control for `platform.runtime_log` trace
+          rows: omitted/false excludes those rows, true includes them. CLI `swarm run trace --verbose` is the user-facing
+          consumer of that API parameter. Review-artifact `--include-payload`, shared `swarm run start` recovery, and
+          multi-run `--all` remain explicitly unpromoted split tails until later gated children promote their own
+          canonical owners.
       mailbox_decision_sheet_and_result_ux:
         disposition: promoted_first_slice
         tracker: '#856'
@@ -17212,7 +17215,7 @@ cli_specification:
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
     trace:
-      command: swarm run trace [<run-id>] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
+      command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       group: run_operate
       tier: must_have
       implementation_status: implemented
@@ -17230,6 +17233,7 @@ cli_specification:
         - since
         - until
         - filter
+        - include_internal
         filter_schema: RunTraceFilter
         filter_fields:
           event_name: Repeatable event-name predicate. The CLI sends an array of non-empty names as `filter.event_name` and the server matches any value against RunTraceRow.event_name.
@@ -17254,6 +17258,9 @@ cli_specification:
           `/v1/rpc run.trace`. Follow `swarm run trace --follow` / `swarm run trace -f` consumes the same typed filter flags
           by sending `filter` to `/v1/ws run.subscribe_trace`; fixed-window snapshot controls `--since`, `--until`,
           `--limit`, and `--cursor` remain invalid with follow and must fail before any API or WebSocket request.
+          By default, both `run.trace` and `run.subscribe_trace` exclude `platform.runtime_log` trace rows. The CLI
+          `--verbose` flag sends `include_internal=true` to the selected trace API and reveals those rows. The CLI
+          MUST NOT hide or reveal runtime-log trace rows by client-side filtering.
           Snapshot `--delivery-detail` is a CLI-only rendering modifier over the same `/v1/rpc run.trace` response:
           it renders delivery identity, subscriber identity, delivery status/reason, delivery lifecycle timestamps, and
           queue/execution durations derived only from same-row RunTraceRow timestamps. `--delivery-detail` is invalid
@@ -17267,8 +17274,9 @@ cli_specification:
           is invalid with `--follow` and is mutually exclusive with `--delivery-detail`.
         proof_expectations:
         - exact /v1/rpc run.trace params for explicit run ids and omitted-run resolution through run.list
+        - default trace requests omit include_internal or send false and the API excludes platform.runtime_log; --verbose sends include_internal=true and reveals platform.runtime_log through the API owner
         - repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and compose with since/until/limit/cursor
-        - follow-mode repeatable filter flags serialize as RunTraceFilter arrays under the single `filter` param and are preserved across recovery requests
+        - follow-mode repeatable filter flags and include_internal serialize under the same run.subscribe_trace params and are preserved across recovery requests
         - invalid --since, invalid --until, since-after-until, out-of-range --limit, blank --cursor, blank/invalid typed filters, and fixed-window snapshot controls combined with --follow fail before API/WS calls
         - --delivery-detail renders only existing RunTraceRow delivery lifecycle facts and rejects --follow before API/WS calls
         - --delivery-summary exhausts /v1/rpc run.trace pagination across returned next_cursor values, captures and reuses a fixed until bound when the caller omits --until, treats --limit as page size rather than a total cap, rejects --follow and --delivery-detail before API/WS calls, fails closed on repeated/non-advancing cursors or malformed delivery rows, and renders only aggregate facts derived from existing RunTraceRow delivery fields
@@ -23566,6 +23574,12 @@ api_specification:
         description: Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
         schema:
           $ref: '#/components/schemas/RunTraceFilter'
+      - name: include_internal
+        required: false
+        description: Optional trace visibility control. Defaults to false. When omitted or false, run.trace excludes `platform.runtime_log` rows; when true, those internal runtime-log trace rows are included.
+        schema:
+          type: boolean
+          default: false
       result:
         name: result
         required: true
@@ -23627,6 +23641,12 @@ api_specification:
         description: Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.
         schema:
           $ref: '#/components/schemas/RunTraceFilter'
+      - name: include_internal
+        required: false
+        description: Optional trace visibility control. Defaults to false. When omitted or false, run.subscribe_trace excludes `platform.runtime_log` rows; when true, those internal runtime-log trace rows are included in notifications.
+        schema:
+          type: boolean
+          default: false
       - name: replay_since
         required: false
         description: Optional catch-up window. If present, delivers trace rows from this time forward, then continues live.

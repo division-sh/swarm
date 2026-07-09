@@ -182,8 +182,12 @@ func (r *SubscriptionRuntime) prepareRunTraceSubscription(session *webSocketSess
 	if err != nil {
 		return subscriptionPlan{}, err
 	}
+	includeInternal, err := optionalBoolParam(req.Params, "include_internal", false)
+	if err != nil {
+		return subscriptionPlan{}, err
+	}
 	baseSince := subscriptionBaseSince(replaySince, r.now())
-	if _, _, err := reads.LoadRunDebugTracePage(session.ctx, runID, store.RunDebugTraceQueryOptions{Limit: 1, Since: baseSince, Filter: filter}); errors.Is(err, store.ErrRunNotFound) {
+	if _, _, err := reads.LoadRunDebugTracePage(session.ctx, runID, store.RunDebugTraceQueryOptions{Limit: 1, Since: baseSince, Filter: filter, ExcludeRuntimeLogs: !includeInternal}); errors.Is(err, store.ErrRunNotFound) {
 		return subscriptionPlan{}, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 	} else if errors.Is(err, store.ErrInvalidObservabilityCursor) {
 		return subscriptionPlan{}, NewInvalidParamsError(map[string]any{"field": "replay_since", "reason": "invalid run trace replay watermark"})
@@ -194,7 +198,7 @@ func (r *SubscriptionRuntime) prepareRunTraceSubscription(session *webSocketSess
 	return subscriptionPlan{
 		Result: subscriptionIDResult{SubscriptionID: id},
 		Start: func() {
-			go r.runTraceSubscription(ctx, session, id, reads, runID, baseSince, filter)
+			go r.runTraceSubscription(ctx, session, id, reads, runID, baseSince, filter, includeInternal)
 		},
 		Cancel: cancel,
 	}, nil
@@ -353,9 +357,9 @@ func (r *SubscriptionRuntime) emitEventNotifications(ctx context.Context, sessio
 	return false
 }
 
-func (r *SubscriptionRuntime) runTraceSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter store.RunDebugTraceFilter) {
+func (r *SubscriptionRuntime) runTraceSubscription(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter store.RunDebugTraceFilter, includeInternal bool) {
 	seen := map[string]string{}
-	if !r.emitTraceNotifications(ctx, session, subscriptionID, reads, runID, since, filter, seen) {
+	if !r.emitTraceNotifications(ctx, session, subscriptionID, reads, runID, since, filter, includeInternal, seen) {
 		return
 	}
 	ticker := time.NewTicker(r.pollInterval)
@@ -365,21 +369,22 @@ func (r *SubscriptionRuntime) runTraceSubscription(ctx context.Context, session 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !r.emitTraceNotifications(ctx, session, subscriptionID, reads, runID, since, filter, seen) {
+			if !r.emitTraceNotifications(ctx, session, subscriptionID, reads, runID, since, filter, includeInternal, seen) {
 				return
 			}
 		}
 	}
 }
 
-func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter store.RunDebugTraceFilter, seen map[string]string) bool {
+func (r *SubscriptionRuntime) emitTraceNotifications(ctx context.Context, session *webSocketSession, subscriptionID string, reads ObservabilityReadStore, runID string, since *time.Time, filter store.RunDebugTraceFilter, includeInternal bool, seen map[string]string) bool {
 	cursor := ""
 	for page := 0; page < subscriptionMaxPages; page++ {
 		rows, nextCursor, err := reads.LoadRunDebugTracePage(ctx, runID, store.RunDebugTraceQueryOptions{
-			Limit:  subscriptionBatchLimit,
-			Cursor: cursor,
-			Since:  since,
-			Filter: filter,
+			Limit:              subscriptionBatchLimit,
+			Cursor:             cursor,
+			Since:              since,
+			Filter:             filter,
+			ExcludeRuntimeLogs: !includeInternal,
 		})
 		if err != nil {
 			session.close()
