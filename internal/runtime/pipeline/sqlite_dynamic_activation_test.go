@@ -195,10 +195,12 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 					"component_scaffold.batch_requested": {
 						FanOut: &runtimecontracts.FanOutSpec{
 							ItemsFrom: "payload.components",
+							As:        "component",
+							Identity:  "component.component_id",
 							Emit: runtimecontracts.EmitSpec{
 								Event: "component_scaffold.spawn_requested",
 								Fields: map[string]runtimecontracts.ExpressionValue{
-									"component_id": runtimecontracts.CELExpression("fan_out.item.component_id"),
+									"component_id": runtimecontracts.CELExpression("component.component_id"),
 								},
 							},
 						},

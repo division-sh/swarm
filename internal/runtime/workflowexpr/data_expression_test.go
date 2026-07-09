@@ -46,9 +46,9 @@ func TestEvalValueExpression_FailsClosedOnMissingEntityValueRead(t *testing.T) {
 }
 
 func TestEvalValueExpression_ExposesFanOutItemAlias(t *testing.T) {
-	value, err := EvalValueExpressionWithOptions(`[item]`, ValueContext{
+	value, err := EvalValueExpressionWithOptions(`[line_item]`, ValueContext{
 		FanOut: map[string]any{"item": "industry-a"},
-	}, ValueExpressionOptions{AllowBareItem: true})
+	}, ValueExpressionOptions{ItemAlias: "line_item"})
 	if err != nil {
 		t.Fatalf("EvalValueExpression error = %v", err)
 	}
@@ -291,17 +291,30 @@ func TestValidateValueExpression_AllowsSupportedEventContextRefs(t *testing.T) {
 	}
 }
 
-func TestValidateValueExpression_AllowsFanOutItemAndStringLiteralTargetText(t *testing.T) {
+func TestValidateValueExpression_AllowsFanOutAliasAndStringLiteralTargetText(t *testing.T) {
 	tests := []string{
-		`fan_out.item.target`,
-		`item.target`,
+		`line_item.target`,
 		`"fan_out.target"`,
 		`payload.note == "fan_out.target"`,
 	}
 	for _, expression := range tests {
 		t.Run(expression, func(t *testing.T) {
-			if err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{AllowBareItem: true}); err != nil {
+			if err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{ItemAlias: "line_item"}); err != nil {
 				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %v", expression, err)
+			}
+		})
+	}
+}
+
+func TestValidateValueExpression_RejectsRetiredFanOutItem(t *testing.T) {
+	for _, expression := range []string{`fan_out.item`, `fan_out.item.target`, `fan_out["item"]`} {
+		t.Run(expression, func(t *testing.T) {
+			err := ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{ItemAlias: "line_item"})
+			if err == nil {
+				t.Fatalf("expected %q to reject retired fan_out.item", expression)
+			}
+			if got := err.Error(); got == "" || !containsAll(got, "fan_out.item", "retired") {
+				t.Fatalf("ValidateValueExpressionWithOptions(%q) error = %q, want retired fan_out.item", expression, got)
 			}
 		})
 	}

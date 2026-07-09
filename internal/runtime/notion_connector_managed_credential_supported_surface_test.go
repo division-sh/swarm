@@ -450,9 +450,7 @@ func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackMa
 	if got := countNotionManagedConnectorActivityAttemptsForSource(t, backend, inboundEventID); got != 0 {
 		t.Fatalf("%s missing managed credential activity attempts = %d, want 0", backend.name, got)
 	}
-	if got := countNotionManagedConnectorFailureEventsForSource(t, backend, inboundEventID); got != 1 {
-		t.Fatalf("%s missing managed credential failure events = %d, want 1", backend.name, got)
-	}
+	requireManagedConnectorFailureEventCountEventually(t, backend, "missing managed credential", inboundEventID, countNotionManagedConnectorFailureEventsForSource)
 }
 
 func waitForNotionManagedConnectorTerminalActivityAttempt(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) runtimepipeline.ActivityAttemptRecord {

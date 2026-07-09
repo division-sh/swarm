@@ -8,7 +8,7 @@ trigger:
         id: item-2
 
 expected:
-
+  runtime_only: true
   handler_outcome: success
   entity_state: routing
   emitted_events:

@@ -2,3 +2,4 @@ batch.received:
   items: array
 task.dispatched:
   item: FanOutItem
+  item_id: text

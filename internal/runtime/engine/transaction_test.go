@@ -106,6 +106,9 @@ func TestClassifyFailure(t *testing.T) {
 	if got := ClassifyFailure(ErrMissingStateRepo); got != FailureLogic {
 		t.Fatalf("missing-state-repo failure class = %v", got)
 	}
+	if got := ClassifyFailure(ErrFanOutBoundExceeded); got != FailureLogic {
+		t.Fatalf("fan-out-bound failure class = %v", got)
+	}
 	if got := ClassifyFailure(errors.New("temporary")); got != FailureTransient {
 		t.Fatalf("generic failure class = %v", got)
 	}

@@ -80,7 +80,7 @@ func (c *checkerContext) dataAccumulationExpressions() []Finding {
 				if expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation {
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem}); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias}); err != nil {
 					c.dataAccumulationExprFindings = append(c.dataAccumulationExprFindings, Finding{
 						CheckID:  "data_accumulation_expression_validation",
 						Severity: "error",
@@ -109,7 +109,7 @@ func (c *checkerContext) emitFieldExpressions() []Finding {
 					expr.Phase != runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation {
 					continue
 				}
-				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem}); err != nil {
+				if err := workflowexpr.ValidateValueExpressionWithOptions(expr.Expression, workflowexpr.ValueExpressionOptions{AllowBareItem: expr.AllowBareItem, ItemAlias: expr.ItemAlias}); err != nil {
 					c.emitFieldExprFindings = append(c.emitFieldExprFindings, Finding{
 						CheckID:  "emit_field_expression_validation",
 						Severity: "error",
@@ -288,6 +288,7 @@ type expressionReference struct {
 	Phase           runtimepipeline.WorkflowEntityFieldLifecyclePhase
 	SelfTargetField string
 	AllowBareItem   bool
+	ItemAlias       string
 }
 
 type handlerCondition struct {
@@ -465,7 +466,7 @@ func handlerEntityExpressionsForSource(source semanticview.Source, flowID, nodeI
 
 func handlerEmitExpressionsForSource(source semanticview.Source, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
 	out := make([]expressionReference, 0, 8)
-	appendSpec := func(kindPrefix, siteKey string, spec runtimecontracts.EmitSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, allowBareItem bool) {
+	appendSpec := func(kindPrefix, siteKey string, spec runtimecontracts.EmitSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase, itemAlias string) {
 		if spec.Empty() {
 			return
 		}
@@ -490,21 +491,20 @@ func handlerEmitExpressionsForSource(source semanticview.Source, flowID, nodeID,
 				continue
 			}
 			out = append(out, expressionReference{
-				Kind:          kindPrefix + " emit field " + strings.TrimSpace(key),
-				Expression:    expr,
-				Phase:         phase,
-				AllowBareItem: allowBareItem,
+				Kind:       kindPrefix + " emit field " + strings.TrimSpace(key),
+				Expression: expr,
+				Phase:      phase,
+				ItemAlias:  strings.TrimSpace(itemAlias),
 			})
 		}
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
-		allowBareItem := strings.Contains(site.Source, "fan_out.emit")
-		appendSpec(site.Source, site.SiteKey, site.Spec, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields, allowBareItem)
+		appendSpec(site.Source, site.SiteKey, site.Spec, runtimepipeline.WorkflowEntityFieldLifecycleEmitFields, site.ItemAlias)
 	}
 	if handler.Guard != nil {
 		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
 			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-				appendSpec("guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation, false)
+				appendSpec("guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation, "")
 			}
 		}
 	}

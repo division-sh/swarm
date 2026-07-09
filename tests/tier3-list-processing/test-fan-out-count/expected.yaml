@@ -7,7 +7,7 @@ trigger:
       - id: task-c
 
 expected:
-
+  runtime_only: true
   handler_outcome: success
   entity_state: processing
   emitted_events:

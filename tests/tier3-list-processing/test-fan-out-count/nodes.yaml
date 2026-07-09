@@ -7,7 +7,12 @@ fan-out-node:
     batch.received:
       fan_out:
         items_from: payload.items
+        as: task
+        identity: task.id
         emit:
           event: task.dispatched
           broadcast: true
+          fields:
+            item: task
+            item_id: task.id
       advances_to: processing

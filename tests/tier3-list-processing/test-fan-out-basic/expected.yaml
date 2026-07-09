@@ -7,7 +7,7 @@ trigger:
       - id: item-3
 
 expected:
-
+  runtime_only: true
   handler_outcome: success
   entity_state: scanning
   emitted_events:

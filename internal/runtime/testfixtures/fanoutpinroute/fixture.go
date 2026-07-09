@@ -140,10 +140,12 @@ classifier-coordinator:
             target_field: coordinator_id
       fan_out:
         items_from: payload.results
+        as: classified_account
+        identity: classified_account.account_id
         emit:
           event: account.classified
 `+producerRouteYAML(opts)+`          fields:
-            account_id: fan_out.item.account_id
+            account_id: classified_account.account_id
 `+emitCarryFieldsYAML(opts))
 }
 
@@ -164,7 +166,7 @@ func producerRouteYAML(opts Options) string {
 		return `          target:
             flow: account
             match:
-              account_id: fan_out.item.account_id
+              account_id: classified_account.account_id
 `
 	}
 	if opts.ProducerBroadcast {
@@ -177,8 +179,8 @@ func emitCarryFieldsYAML(opts Options) string {
 	if opts.MissingEmitCarry {
 		return ""
 	}
-	return `            bucket: fan_out.item.bucket
-            score: fan_out.item.score
+	return `            bucket: classified_account.bucket
+            score: classified_account.score
 `
 }
 

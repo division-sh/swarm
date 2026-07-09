@@ -301,6 +301,9 @@ func policySheetLookupFanOutConsumes(spec runtimecontracts.FanOutSpec, target st
 	if policySheetLookupExpressionConsumes(spec.ItemsFrom, target) {
 		return true
 	}
+	if policySheetLookupExpressionConsumes(spec.Identity, target) {
+		return true
+	}
 	for _, expr := range spec.Emit.Fields {
 		if policySheetLookupExpressionValueConsumes(expr, target) {
 			return true

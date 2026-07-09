@@ -3179,10 +3179,12 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 			handler: runtimecontracts.SystemNodeEventHandler{
 				FanOut: &runtimecontracts.FanOutSpec{
 					ItemsFrom: "payload.items",
+					As:        "payload_item",
+					Identity:  "payload_item.label",
 					Emit: runtimecontracts.EmitSpec{
 						Event: "custom.emitted",
 						Fields: map[string]runtimecontracts.ExpressionValue{
-							"label": runtimecontracts.CELExpression(`"ok"`),
+							"label": runtimecontracts.CELExpression(`payload_item.label`),
 							"extra": runtimecontracts.CELExpression(`"bad"`),
 						},
 					},

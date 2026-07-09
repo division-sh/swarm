@@ -7,9 +7,12 @@ routing-node:
     batch.submitted:
       fan_out:
         items_from: payload.items
+        as: routed_item
+        identity: routed_item.id
         emit:
           event: routed.a
           broadcast: true
           fields:
-            item: item
+            item: routed_item
+            item_id: routed_item.id
       advances_to: routing

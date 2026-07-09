@@ -22,6 +22,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
+	"github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
@@ -421,6 +422,11 @@ type stubGuardRegistry struct {
 	entries map[identity.GuardKey]runtimeregistry.GuardInstruction
 }
 type stubPayloadShaper struct{}
+type recordingTransitionValidator struct {
+	calls   int
+	current string
+	next    string
+}
 type recordingPayloadShaper struct {
 	lastReq     ExecutionRequest
 	lastPayload map[string]any
@@ -519,6 +525,12 @@ func (stubPayloadShaper) ShapeEmitPayload(_ context.Context, _ ExecutionRequest,
 	out := cloneStringAnyMap(payload)
 	out["shaped_for"] = eventType
 	return out, nil
+}
+func (v *recordingTransitionValidator) ValidateTransition(currentState, nextState string) error {
+	v.calls++
+	v.current = currentState
+	v.next = nextState
+	return nil
 }
 func (s *recordingPayloadShaper) ShapeEmitPayload(ctx context.Context, req ExecutionRequest, eventType string, payload map[string]any) (map[string]any, error) {
 	s.lastReq = req
@@ -1503,12 +1515,14 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 		},
 		FanOut: &runtimecontracts.FanOutSpec{
 			ItemsFrom: "payload.targets",
+			As:        "target_item",
+			Identity:  "target_item",
 			Emit: runtimecontracts.EmitSpec{
 				Event: "vertical.scored",
 				Fields: map[string]runtimecontracts.ExpressionValue{
 					"handler_marker": runtimecontracts.RefExpression("metadata.handler_marker"),
 					"scores":         runtimecontracts.RefExpression("entity.scores"),
-					"target":         runtimecontracts.RefExpression("fan_out.item"),
+					"target":         runtimecontracts.CELExpression("target_item"),
 				},
 			},
 		},
@@ -3714,6 +3728,8 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 				Condition: "else",
 				FanOut: &runtimecontracts.FanOutSpec{
 					ItemsFrom: "payload.items",
+					As:        "fan_item",
+					Identity:  "fan_item",
 					Emit:      runtimecontracts.EmitSpec{Event: "item.done"},
 				},
 			}},
@@ -3996,6 +4012,8 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
+				As:        "fan_item",
+				Identity:  "fan_item",
 				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
 			},
 			AdvancesTo: "processing",
@@ -4030,6 +4048,283 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	}
 	if payload["shaped_for"] != "item.process" {
 		t.Fatalf("shaped payload missing marker: %#v", payload)
+	}
+}
+
+func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        stubSource(),
+		StateRepo:     stubStateRepo{},
+		TxRunner:      stubRunner{},
+		Locker:        stubLocker{},
+		Outbox:        stubOutbox{},
+		Dispatcher:    stubDispatcher{},
+		PayloadShaper: stubPayloadShaper{},
+		MaxChainDepth: 5,
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	_, err = exec.Execute(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		NodeID:   "node-1",
+		FlowID:   "flow-1",
+		Event:    eventtest.RootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			FanOut: &runtimecontracts.FanOutSpec{
+				ItemsFrom: "payload.items",
+				As:        "fan_item",
+				Identity:  "fan_item",
+				MaxItems:  1,
+				Emit: runtimecontracts.EmitSpec{
+					Event: "item.process",
+					Fields: map[string]runtimecontracts.ExpressionValue{
+						"item_id": runtimecontracts.CELExpression("fan_item"),
+					},
+				},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err == nil {
+		t.Fatal("expected fan_out bound exceeded error")
+	}
+	if !errors.Is(err, ErrFanOutBoundExceeded) {
+		t.Fatalf("Execute error = %v, want ErrFanOutBoundExceeded", err)
+	}
+	runtimeErr, ok := rterrors.AsRuntimeError(err)
+	if !ok {
+		t.Fatalf("Execute error = %T %v, want RuntimeError", err, err)
+	}
+	if runtimeErr.Code != runtimecontracts.FanOutBoundExceededCode || runtimeErr.Retryable {
+		t.Fatalf("runtime error = %#v, want non-retryable %s", runtimeErr, runtimecontracts.FanOutBoundExceededCode)
+	}
+	if got := ClassifyFailure(err); got != FailureLogic {
+		t.Fatalf("ClassifyFailure = %v, want FailureLogic", got)
+	}
+}
+
+func TestExecutor_FanOutRuleContextsExecuteCanonicalCollectionContract(t *testing.T) {
+	type fanOutContextCase struct {
+		name            string
+		eventType       events.EventType
+		payload         json.RawMessage
+		handlerEventKey string
+		handler         func(*runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler
+	}
+	cases := []fanOutContextCase{
+		{
+			name:      "rules",
+			eventType: "batch.ready",
+			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
+				return runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
+					ID: "dispatch", Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+				}}}
+			},
+		},
+		{
+			name:      "on_complete",
+			eventType: "batch.ready",
+			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
+				return runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
+					ID: "dispatch", Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+				}}}
+			},
+		},
+		{
+			name:      "accumulate_on_complete",
+			eventType: "batch.ready",
+			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
+				return runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
+					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+					OnComplete: []runtimecontracts.HandlerRuleEntry{{
+						ID: "dispatch", Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+					}},
+				}}
+			},
+		},
+		{
+			name:            "accumulate_on_timeout",
+			eventType:       "accumulate.timeout",
+			handlerEventKey: "batch.ready",
+			payload: json.RawMessage(`{
+				"timer_handle": {
+					"kind": "accumulation_timeout",
+					"bucket": {"node_id": "node-1", "event_type": "batch.ready"}
+				}
+			}`),
+			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
+				return runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{
+					Completion: runtimecontracts.ParseAccumulateCompletion("all"),
+					OnTimeout: &runtimecontracts.HandlerRuleEntry{
+						ID: "dispatch", FanOut: spec, AdvancesTo: "dispatched",
+					},
+				}}
+			},
+		},
+	}
+
+	newSpec := func(maxItems int) *runtimecontracts.FanOutSpec {
+		return &runtimecontracts.FanOutSpec{
+			ItemsFrom:   "entity.items",
+			As:          "line_item",
+			Identity:    "line_item.id",
+			MaxItems:    maxItems,
+			MaxItemsSet: maxItems > 0,
+			Emit: runtimecontracts.EmitSpec{
+				Event: "item.process",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"item_id":    runtimecontracts.CELExpression("line_item.id"),
+					"item_index": runtimecontracts.CELExpression("fan_out.index"),
+				},
+			},
+		}
+	}
+	state := func() StateSnapshot {
+		return testStateSnapshot("ready", map[string]any{
+			"items": []any{
+				map[string]any{"id": "item-a"},
+				map[string]any{"id": "item-b"},
+			},
+		}, nil, map[string]map[string]any{})
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			transition := &recordingTransitionValidator{}
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source:              stubSource(),
+				StateRepo:           stubStateRepo{},
+				TxRunner:            stubRunner{},
+				Locker:              stubLocker{},
+				Outbox:              stubOutbox{},
+				Dispatcher:          stubDispatcher{},
+				PayloadShaper:       stubPayloadShaper{},
+				TransitionValidator: transition,
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			payload := tc.payload
+			if len(payload) == 0 {
+				payload = json.RawMessage(`{}`)
+			}
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID:        "entity-1",
+				NodeID:          "node-1",
+				FlowID:          "flow-1",
+				Event:           eventtest.RootIngress("evt-1", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				HandlerEventKey: tc.handlerEventKey,
+				Handler:         tc.handler(newSpec(0)),
+				State:           state(),
+			})
+			if err != nil {
+				t.Fatalf("Execute error: %v", err)
+			}
+			if result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
+				t.Fatalf("fan_out result count=%d intents=%d, want 2/2", result.FanOutCount, len(result.EmitIntents))
+			}
+			for index, intent := range result.EmitIntents {
+				var emitted map[string]any
+				if err := json.Unmarshal(intent.Event.Payload(), &emitted); err != nil {
+					t.Fatalf("emit %d payload: %v", index, err)
+				}
+				if got, want := emitted["item_id"], []string{"item-a", "item-b"}[index]; got != want {
+					t.Fatalf("emit %d item_id = %#v, want %q", index, got, want)
+				}
+				if got := emitted["item_index"]; got != float64(index) {
+					t.Fatalf("emit %d item_index = %#v, want %d", index, got, index)
+				}
+			}
+			if got := result.NextState; got != "dispatched" {
+				t.Fatalf("NextState = %q, want dispatched", got)
+			}
+			if transition.calls != 1 || transition.current != "ready" || transition.next != "dispatched" {
+				t.Fatalf("transition = calls:%d %q->%q, want one ready->dispatched", transition.calls, transition.current, transition.next)
+			}
+
+			transition = &recordingTransitionValidator{}
+			exec.deps.TransitionValidator = transition
+			result, err = exec.Execute(context.Background(), ExecutionRequest{
+				EntityID:        "entity-1",
+				NodeID:          "node-1",
+				FlowID:          "flow-1",
+				Event:           eventtest.RootIngress("evt-bound", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				HandlerEventKey: tc.handlerEventKey,
+				Handler:         tc.handler(newSpec(1)),
+				State:           state(),
+			})
+			if err == nil || !errors.Is(err, ErrFanOutBoundExceeded) {
+				t.Fatalf("bounded Execute result=%#v error=%v, want ErrFanOutBoundExceeded", result, err)
+			}
+			if transition.calls != 0 {
+				t.Fatalf("bounded transition calls = %d, want 0", transition.calls)
+			}
+		})
+	}
+}
+
+func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
+	tests := []struct {
+		name string
+		spec runtimecontracts.FanOutSpec
+		want string
+	}{
+		{
+			name: "nested items source",
+			spec: runtimecontracts.FanOutSpec{ItemsFrom: "payload.items.missing", As: "line_item", Identity: "line_item.id", Emit: runtimecontracts.EmitSpec{Event: "item.process"}},
+			want: "must reference exactly one declared top-level collection field",
+		},
+		{
+			name: "explicit zero bound",
+			spec: runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", As: "line_item", Identity: "line_item.id", MaxItemsSet: true, Emit: runtimecontracts.EmitSpec{Event: "item.process"}},
+			want: "fan_out.max_items must be a positive integer when set",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			exec, err := NewExecutor(RuntimeDependencies{
+				Source: stubSource(), StateRepo: stubStateRepo{}, TxRunner: stubRunner{}, Locker: stubLocker{}, Outbox: stubOutbox{}, Dispatcher: stubDispatcher{},
+			}, nil)
+			if err != nil {
+				t.Fatalf("NewExecutor error: %v", err)
+			}
+			result, err := exec.Execute(context.Background(), ExecutionRequest{
+				EntityID: "entity-1", NodeID: "node-1", FlowID: "flow-1",
+				Event:   eventtest.RootIngress("evt-1", "batch.ready", "", "", json.RawMessage(`{"items":[{"id":"item-a"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &tc.spec},
+				State:   testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{}),
+			})
+			if err == nil || !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Execute result=%#v error=%v, want ErrInvalidConfig containing %q", result, err, tc.want)
+			}
+			if len(result.EmitIntents) != 0 || result.StateMutation.NextState != "" {
+				t.Fatalf("invalid fan_out produced effects: %#v", result)
+			}
+		})
+	}
+}
+
+func TestActiveFanOutSpecEmitSourceNamesOwningSite(t *testing.T) {
+	tests := []struct {
+		name   string
+		source handlerRuleSource
+		want   string
+	}{
+		{name: "handler", want: "handler.fan_out.emit"},
+		{name: "rules", source: handlerRuleSourceRules, want: "handler.rules.fan_out.emit"},
+		{name: "on_complete", source: handlerRuleSourceOnComplete, want: "handler.on_complete.fan_out.emit"},
+		{name: "accumulate_on_complete", source: handlerRuleSourceAccumulateOnComplete, want: "handler.accumulate.on_complete.fan_out.emit"},
+		{name: "accumulate_on_timeout", source: handlerRuleSourceAccumulateOnTimeout, want: "handler.accumulate.on_timeout.fan_out.emit"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (activeFanOutSpec{Source: tc.source}).EmitSource(); got != tc.want {
+				t.Fatalf("EmitSource = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -4390,6 +4685,8 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
+				As:        "component_item",
+				Identity:  "component_item.id",
 				Emit: runtimecontracts.EmitSpec{
 					Event: "component-scaffold/component.scaffolded",
 				},
@@ -5069,6 +5366,8 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
+				As:        "fan_item",
+				Identity:  "fan_item",
 				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
 			},
 			AdvancesTo: "scanning",
@@ -5078,7 +5377,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.Status != OutcomeCompleted {
+	if result.Status != OutcomeFannedOut {
 		t.Fatalf("Status = %q", result.Status)
 	}
 	if result.NextState != "scanning" {
@@ -5109,6 +5408,8 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
+				As:        "fan_item",
+				Identity:  "fan_item",
 				Emit:      runtimecontracts.EmitSpec{Event: "item.process"},
 			},
 			AdvancesTo: "scanning",
@@ -5146,6 +5447,8 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
+				As:        "routed_item",
+				Identity:  "routed_item.kind",
 				Emit:      runtimecontracts.EmitSpec{Event: "routed.item"},
 			},
 		},

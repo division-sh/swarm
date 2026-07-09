@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 )
@@ -18,6 +19,11 @@ func ClassifyFailure(err error) FailureClass {
 		return FailureNone
 	case ErrChainDepthExceeded:
 		return FailureDeadLetter
+	}
+	if errors.Is(err, ErrFanOutBoundExceeded) {
+		return FailureLogic
+	}
+	switch err {
 	case ErrMissingSemanticSource,
 		ErrMissingStateRepo,
 		ErrMissingTransaction,

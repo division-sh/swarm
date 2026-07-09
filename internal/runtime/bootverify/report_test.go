@@ -733,6 +733,9 @@ fanout-node:
   event_handlers:
     start:
       fan_out:
+        items_from: payload.items
+        as: ticket
+        identity: ticket.id
         emit: ticket.ready
 `,
 					},
@@ -787,6 +790,9 @@ accumulate-timeout-node:
         timeout_ms: 1000
         on_timeout:
           fan_out:
+            items_from: payload.items
+            as: ticket
+            identity: ticket.id
             emit: ticket.ready
 `,
 					},
@@ -3300,10 +3306,13 @@ func TestRun_RejectsRetiredFanOutTargetInFanOutEmitFieldExpressions(t *testing.T
 					"item.received": {
 						FanOut: &runtimecontracts.FanOutSpec{
 							ItemsFrom: "payload.items",
+							As:        "scored_item",
+							Identity:  "scored_item.id",
 							Emit: runtimecontracts.EmitSpec{
 								Event: "item.scored",
 								Fields: map[string]runtimecontracts.ExpressionValue{
 									"bad": runtimecontracts.CELExpression(`fan_out["target"]`),
+									"id":  runtimecontracts.CELExpression("scored_item.id"),
 								},
 							},
 						},
@@ -3375,16 +3384,18 @@ emit:
 	}
 }
 
-func TestRun_AcceptsYAMLScalarFanOutEmitItemExpressions(t *testing.T) {
+func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
   items_from: payload.industries
+  as: industry
+  identity: industry
   emit:
     event: market_research.industry_assigned
     fields:
-      industry: item
-      taxonomy_categories: "[item]"
+      industry: industry
+      taxonomy_categories: "[industry]"
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -3411,8 +3422,8 @@ fan_out:
 
 	report := Run(context.Background(), source, Options{})
 
-	if reportContains(report.Errors(), "emit_field_expression_validation", "item") {
-		t.Fatalf("unexpected item expression validation error, got %#v", report.Errors())
+	if reportContains(report.Errors(), "emit_field_expression_validation", "industry") {
+		t.Fatalf("unexpected fan_out alias expression validation error, got %#v", report.Errors())
 	}
 }
 
@@ -4149,10 +4160,13 @@ func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 	handler := node.EventHandlers["scan.corpus_dispatch"]
 	handler.Emit = runtimecontracts.EmitSpec{}
 	handler.FanOut = &runtimecontracts.FanOutSpec{
+		ItemsFrom: "payload.geography",
+		As:        "geography",
+		Identity:  "geography",
 		Emit: runtimecontracts.EmitSpec{
 			Event: "market_research.scan_assigned",
 			Fields: map[string]runtimecontracts.ExpressionValue{
-				"geography": runtimecontracts.RefExpression("payload.geography"),
+				"geography": runtimecontracts.CELExpression("geography"),
 			},
 		},
 	}
@@ -6333,8 +6347,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 73 {
-		t.Fatalf("bootCheckRegistry count = %d, want 73", got)
+	if got := len(bootCheckRegistry); got != 74 {
+		t.Fatalf("bootCheckRegistry count = %d, want 74", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
