@@ -125,6 +125,7 @@
       "id": 6,
       "weight": 132.0639999999999,
       "packages": [
+        "github.com/division-sh/swarm/cmd/swarm-openapi-gen",
         "github.com/division-sh/swarm/internal/builder",
         "github.com/division-sh/swarm/internal/config",
         "github.com/division-sh/swarm/internal/promptcontracts",
@@ -138,6 +139,7 @@
         "github.com/division-sh/swarm/internal/runtime/deliverylifecycle",
         "github.com/division-sh/swarm/internal/runtime/destructivereset",
         "github.com/division-sh/swarm/internal/runtime/eventschema",
+        "github.com/division-sh/swarm/internal/runtime/httpresponsesuccess",
         "github.com/division-sh/swarm/internal/runtime/lifecycleprobe",
         "github.com/division-sh/swarm/internal/runtime/managedcredentials/model",
         "github.com/division-sh/swarm/internal/runtime/pythonmodule",
