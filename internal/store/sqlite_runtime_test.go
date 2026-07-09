@@ -1930,12 +1930,15 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 	if !outcome.Result.OK || outcome.Result.Status != "decided" || outcome.Result.DownstreamEventName != "mailbox.item_decided" {
 		t.Fatalf("approval outcome = %+v, want decided downstream event", outcome.Result)
 	}
-	var eventName string
-	if err := store.DB.QueryRowContext(ctx, `SELECT event_name FROM events WHERE event_id = ?`, outcome.Result.DownstreamEventID).Scan(&eventName); err != nil {
+	if outcome.DecisionEvent == nil || outcome.DecisionEvent.AdmissionClass() != events.EventAdmissionRuntimeControl || outcome.DecisionEvent.SourceAgent() != "runtime" {
+		t.Fatalf("approval event source = %#v, want runtime_control/runtime", outcome.DecisionEvent)
+	}
+	var eventName, producedBy, producedByType string
+	if err := store.DB.QueryRowContext(ctx, `SELECT event_name, COALESCE(produced_by, ''), COALESCE(produced_by_type, '') FROM events WHERE event_id = ?`, outcome.Result.DownstreamEventID).Scan(&eventName, &producedBy, &producedByType); err != nil {
 		t.Fatalf("load downstream event: %v", err)
 	}
-	if eventName != "mailbox.item_decided" {
-		t.Fatalf("downstream event_name = %q, want mailbox.item_decided", eventName)
+	if eventName != "mailbox.item_decided" || producedBy != "runtime" || producedByType != "platform" {
+		t.Fatalf("downstream event producer = %s/%s/%s, want mailbox.item_decided runtime/platform", eventName, producedBy, producedByType)
 	}
 	decided, err := store.GetV1MailboxItem(ctx, itemID)
 	if err != nil {
@@ -1984,6 +1987,9 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 	if rejected.Result.Status != "decided" || rejected.Result.DownstreamEventName != "mailbox.item_decided" || rejected.DecisionEvent == nil {
 		t.Fatalf("rejected outcome = %+v, want decided downstream event", rejected)
 	}
+	if rejected.DecisionEvent.AdmissionClass() != events.EventAdmissionRuntimeControl || rejected.DecisionEvent.SourceAgent() != "runtime" {
+		t.Fatalf("reject event source = %s/%s, want runtime_control/runtime", rejected.DecisionEvent.AdmissionClass(), rejected.DecisionEvent.SourceAgent())
+	}
 	var rejectedPayload map[string]any
 	if err := json.Unmarshal(rejected.DecisionEvent.Payload(), &rejectedPayload); err != nil {
 		t.Fatalf("decode reject event payload: %v", err)
@@ -2018,6 +2024,9 @@ func TestSQLiteRuntimeStoreV1MailboxAPISelectedOwner(t *testing.T) {
 	}
 	if deferred.Result.Status != "deferred" || deferred.Result.DownstreamEventName != "mailbox.item_deferred" || deferred.DecisionEvent == nil {
 		t.Fatalf("deferred outcome = %+v, want deferred downstream event", deferred)
+	}
+	if deferred.DecisionEvent.AdmissionClass() != events.EventAdmissionRuntimeControl || deferred.DecisionEvent.SourceAgent() != "runtime" {
+		t.Fatalf("defer event source = %s/%s, want runtime_control/runtime", deferred.DecisionEvent.AdmissionClass(), deferred.DecisionEvent.SourceAgent())
 	}
 	deferredDetail, err := store.GetV1MailboxItem(ctx, deferID)
 	if err != nil {

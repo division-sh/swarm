@@ -30,6 +30,9 @@ const (
 	ScenarioRunContinueControlLifecycle          = "run_continue_control_lifecycle"
 	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
 	ScenarioRuntimeResumeIngressLifecycle        = "runtime_resume_ingress_lifecycle"
+	ScenarioMailboxApproveDecisionLifecycle      = "mailbox_approve_decision_lifecycle"
+	ScenarioMailboxRejectDecisionLifecycle       = "mailbox_reject_decision_lifecycle"
+	ScenarioMailboxDeferDecisionLifecycle        = "mailbox_defer_decision_lifecycle"
 )
 
 type Scenario struct {
@@ -64,6 +67,9 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioRunContinueControlLifecycle, "run.continue", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRuntimePauseIngressLifecycle, "runtime.pause", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
 		servedControlScenario(ScenarioRuntimeResumeIngressLifecycle, "runtime.resume", "TestServedParityHarnessRuntimeIngressControlLifecycle"),
+		servedMailboxDecisionScenario(ScenarioMailboxApproveDecisionLifecycle, "mailbox.approve"),
+		servedMailboxDecisionScenario(ScenarioMailboxRejectDecisionLifecycle, "mailbox.reject"),
+		servedMailboxDecisionScenario(ScenarioMailboxDeferDecisionLifecycle, "mailbox.defer"),
 	}
 }
 
@@ -72,6 +78,20 @@ func servedControlScenario(id, apiMethod, testName string) Scenario {
 		ID:        id,
 		APIMethod: apiMethod,
 		TestName:  testName,
+		Backends:  append([]Backend(nil), RequiredBackends...),
+		Postconditions: []Postcondition{
+			PostconditionNoNonTerminalDeliveries,
+			PostconditionNoPendingPipelineEvents,
+			PostconditionNoUnfiredDueTimers,
+		},
+	}
+}
+
+func servedMailboxDecisionScenario(id, apiMethod string) Scenario {
+	return Scenario{
+		ID:        id,
+		APIMethod: apiMethod,
+		TestName:  "TestServedParityHarnessMailboxDecisionLifecycle",
 		Backends:  append([]Backend(nil), RequiredBackends...),
 		Postconditions: []Postcondition{
 			PostconditionNoNonTerminalDeliveries,

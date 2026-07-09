@@ -752,14 +752,17 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1386, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
 		problems = append(problems, "active_trackers missing #1386 runtime_store_backend_default_and_sqlite_portability")
 	}
-	if _, ok := activeTrackers[trackerKey(1783, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
-		problems = append(problems, "active_trackers missing #1783 runtime_store_backend_default_and_sqlite_portability")
-	}
 	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability")
 	}
 	if _, ok := activeTrackers[trackerKey(1255, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1255 runtime_store_backend_default_and_sqlite_portability")
+	}
+	if _, ok := activeTrackers[trackerKey(1783, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
+		problems = append(problems, "active_trackers must not include closed #1783 runtime_store_backend_default_and_sqlite_portability")
+	}
+	if _, ok := activeTrackers[trackerKey(1864, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
+		problems = append(problems, "active_trackers must not include closed #1864 runtime_store_backend_default_and_sqlite_portability")
 	}
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")
