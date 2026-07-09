@@ -60,6 +60,7 @@
         "github.com/division-sh/swarm/internal/events",
         "github.com/division-sh/swarm/internal/packs",
         "github.com/division-sh/swarm/internal/runtime/accprojection",
+        "github.com/division-sh/swarm/internal/runtime/accumulator",
         "github.com/division-sh/swarm/internal/runtime/authoringview",
         "github.com/division-sh/swarm/internal/runtime/authority",
         "github.com/division-sh/swarm/internal/runtime/bootverify",
