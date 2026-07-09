@@ -833,17 +833,15 @@ func (r mailboxV1Row) decisionEvent(eventID, decisionID, eventType, action, acto
 		EntityID:     strings.TrimSpace(r.EntityID),
 		FlowInstance: strings.TrimSpace(r.FlowInstance),
 	}
-	evt := events.NewChildEventWithLineage(
+	evt := events.NewRuntimeControlEvent(
 		strings.TrimSpace(eventID),
 		events.EventType(strings.TrimSpace(eventType)),
-		"mailbox_human",
+		"runtime",
 		"",
 		raw,
 		0,
-		events.EventLineage{
-			RunID:         strings.TrimSpace(r.RunID),
-			ParentEventID: strings.TrimSpace(r.SourceEventID),
-		},
+		strings.TrimSpace(r.RunID),
+		strings.TrimSpace(r.SourceEventID),
 		envelope,
 		now.UTC(),
 	)

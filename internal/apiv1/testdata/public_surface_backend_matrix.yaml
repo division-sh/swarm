@@ -39,12 +39,6 @@ active_trackers:
   - kind: github_issue
     issue: 1386
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-  - kind: github_issue
-    issue: 1783
-    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
-  - kind: github_issue
-    issue: 1864
-    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -134,17 +128,42 @@ mutating_api_parity_ledger:
       and explicit Postgres, including release of run-scoped queued work exactly
       through the EventBus owner, idempotency replay, and generic settlement.
   - method: mailbox.approve
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: mailbox_approve_decision_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessMailboxDecisionLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc mailbox.approve on default
+      SQLite and explicit Postgres, including terminal row state/projection,
+      mailbox.item_decided payload/lineage/metadata, idempotency replay without
+      duplicate events, already-decided error behavior, and generic settlement.
   - method: mailbox.reject
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: mailbox_reject_decision_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessMailboxDecisionLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc mailbox.reject on default
+      SQLite and explicit Postgres, including terminal row state/projection,
+      schema-visible rejection reason in mailbox.item_decided, idempotency replay
+      without duplicate events, and generic settlement.
   - method: mailbox.defer
-    classification: split_with_issue_ref
-    split_issue: 1386
-    proof_refs: [{kind: tracker, issue: 1386, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: mailbox_defer_decision_lifecycle
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessMailboxDecisionLifecycle
+    notes: >
+      Shared served harness proves real /v1/rpc mailbox.defer on default SQLite
+      and explicit Postgres, including non-terminal pending/deferred storage,
+      explicit deferred_until independent from expires_at, mailbox.item_deferred
+      payload/lineage/metadata, idempotency replay without duplicate events, and
+      generic settlement.
   - method: agent.send_directive
     classification: split_with_issue_ref
     split_issue: 1386

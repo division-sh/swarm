@@ -130,6 +130,20 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	if !outcome.Result.OK || outcome.Result.Status != "decided" || outcome.Result.DownstreamEventID == "" || outcome.DecisionEvent == nil {
 		t.Fatalf("unexpected approve outcome=%#v", outcome)
 	}
+	if outcome.DecisionEvent.AdmissionClass() != events.EventAdmissionRuntimeControl || outcome.DecisionEvent.SourceAgent() != "runtime" {
+		t.Fatalf("approval event source = %s/%s, want runtime_control/runtime", outcome.DecisionEvent.AdmissionClass(), outcome.DecisionEvent.SourceAgent())
+	}
+	var eventName, producedBy, producedByType string
+	if err := db.QueryRowContext(ctx, `
+		SELECT event_name, COALESCE(produced_by, ''), COALESCE(produced_by_type, '')
+		FROM events
+		WHERE event_id = $1::uuid
+	`, outcome.Result.DownstreamEventID).Scan(&eventName, &producedBy, &producedByType); err != nil {
+		t.Fatalf("load approval event producer: %v", err)
+	}
+	if eventName != "mailbox.item_decided" || producedBy != "runtime" || producedByType != "platform" {
+		t.Fatalf("approval event producer = %s/%s/%s, want mailbox.item_decided runtime/platform", eventName, producedBy, producedByType)
+	}
 	var approvalPayload map[string]any
 	if err := json.Unmarshal(outcome.DecisionEvent.Payload(), &approvalPayload); err != nil {
 		t.Fatalf("decode approval event payload: %v", err)
@@ -173,6 +187,9 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 	}
 	if rejected.Result.Status != "decided" || rejected.Result.DownstreamEventName != "mailbox.item_decided" || rejected.DecisionEvent == nil {
 		t.Fatalf("unexpected reject outcome=%#v", rejected)
+	}
+	if rejected.DecisionEvent.AdmissionClass() != events.EventAdmissionRuntimeControl || rejected.DecisionEvent.SourceAgent() != "runtime" {
+		t.Fatalf("reject event source = %s/%s, want runtime_control/runtime", rejected.DecisionEvent.AdmissionClass(), rejected.DecisionEvent.SourceAgent())
 	}
 	var rejectedPayload map[string]any
 	if err := json.Unmarshal(rejected.DecisionEvent.Payload(), &rejectedPayload); err != nil {
@@ -237,15 +254,19 @@ func TestPostgresStore_V1MailboxReadDecisionAndIdempotencyOwners(t *testing.T) {
 		}
 	}
 
-	if _, err := s.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
+	deferredOutcome, err := s.DecideV1MailboxItem(ctx, MailboxV1DecisionRequest{
 		MailboxID:         pastID,
 		Action:            "deferred",
 		ActorTokenID:      "actor-1",
 		DeferUntil:        now.Add(time.Hour),
 		Now:               now,
 		DecisionEventType: "mailbox.item_deferred",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("defer future: %v", err)
+	}
+	if deferredOutcome.DecisionEvent == nil || deferredOutcome.DecisionEvent.AdmissionClass() != events.EventAdmissionRuntimeControl || deferredOutcome.DecisionEvent.SourceAgent() != "runtime" {
+		t.Fatalf("deferred event source = %#v, want runtime_control/runtime", deferredOutcome.DecisionEvent)
 	}
 	deferred, err := s.GetV1MailboxItem(ctx, pastID)
 	if err != nil {
