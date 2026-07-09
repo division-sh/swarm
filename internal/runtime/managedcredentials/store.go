@@ -3,10 +3,14 @@ package managedcredentials
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,6 +29,7 @@ const (
 	GrantAuthorizationCode     = "authorization_code"
 	GrantAuthorizationCodePKCE = "authorization_code_pkce"
 	GrantClientCredentials     = "client_credentials"
+	GrantGitHubAppInstallation = "github_app_installation"
 
 	StatusUnconnected       = "unconnected"
 	StatusPendingConsent    = "pending_consent"
@@ -53,8 +58,11 @@ type Record struct {
 	GrantType       string                                     `json:"grant_type"`
 	AuthURL         string                                     `json:"auth_url,omitempty"`
 	TokenURL        string                                     `json:"token_url"`
+	APIBaseURL      string                                     `json:"api_base_url,omitempty"`
 	ClientID        string                                     `json:"client_id"`
 	ClientSecret    string                                     `json:"client_secret,omitempty"`
+	InstallationID  string                                     `json:"installation_id,omitempty"`
+	PrivateKey      string                                     `json:"private_key,omitempty"`
 	RedirectURL     string                                     `json:"redirect_url,omitempty"`
 	Scopes          []string                                   `json:"scopes,omitempty"`
 	GrantModel      string                                     `json:"grant_model,omitempty"`
@@ -73,17 +81,19 @@ type Record struct {
 }
 
 type Descriptor struct {
-	Key          string                                     `json:"key"`
-	Provider     string                                     `json:"provider,omitempty"`
-	Account      string                                     `json:"account,omitempty"`
-	GrantType    string                                     `json:"grant_type,omitempty"`
-	Scopes       []string                                   `json:"scopes,omitempty"`
-	GrantModel   string                                     `json:"grant_model,omitempty"`
-	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
-	Status       string                                     `json:"status"`
-	Failure      string                                     `json:"failure,omitempty"`
-	ExpiresAt    time.Time                                  `json:"expires_at,omitempty"`
-	UpdatedAt    time.Time                                  `json:"updated_at,omitempty"`
+	Key            string                                     `json:"key"`
+	Provider       string                                     `json:"provider,omitempty"`
+	Account        string                                     `json:"account,omitempty"`
+	GrantType      string                                     `json:"grant_type,omitempty"`
+	Scopes         []string                                   `json:"scopes,omitempty"`
+	GrantModel     string                                     `json:"grant_model,omitempty"`
+	TokenRequest   managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	InstallationID string                                     `json:"installation_id,omitempty"`
+	APIBaseURL     string                                     `json:"api_base_url,omitempty"`
+	Status         string                                     `json:"status"`
+	Failure        string                                     `json:"failure,omitempty"`
+	ExpiresAt      time.Time                                  `json:"expires_at,omitempty"`
+	UpdatedAt      time.Time                                  `json:"updated_at,omitempty"`
 }
 
 type BeginAuthCodeRequest struct {
@@ -125,11 +135,23 @@ type ClientCredentialsRequest struct {
 	Account      string
 }
 
+type GitHubAppInstallationRequest struct {
+	Key            string
+	Provider       string
+	APIBaseURL     string
+	ClientID       string
+	InstallationID string
+	PrivateKey     string
+	Account        string
+}
+
 type AccessTokenRequest struct {
-	Key          string
-	Scopes       []string
-	GrantModel   string
-	TokenRequest managedcredentialmodel.TokenRequestProfile
+	Key            string
+	GrantType      string
+	Scopes         []string
+	GrantModel     string
+	TokenRequest   managedcredentialmodel.TokenRequestProfile
+	InstallationID string
 }
 
 type TokenSource struct {
@@ -348,6 +370,42 @@ func (s *TokenSource) ConnectClientCredentials(ctx context.Context, req ClientCr
 	return updated, nil
 }
 
+func (s *TokenSource) ConnectGitHubAppInstallation(ctx context.Context, req GitHubAppInstallationRequest) (Record, error) {
+	if s == nil || s.Store == nil {
+		return Record{}, fmt.Errorf("managed credential store is not configured")
+	}
+	record := Record{
+		Key:            strings.TrimSpace(req.Key),
+		Provider:       firstNonEmpty(strings.TrimSpace(req.Provider), "github"),
+		Account:        strings.TrimSpace(req.Account),
+		GrantType:      GrantGitHubAppInstallation,
+		APIBaseURL:     normalizeGitHubAPIBaseURL(req.APIBaseURL),
+		ClientID:       strings.TrimSpace(req.ClientID),
+		InstallationID: normalizeInstallationID(req.InstallationID),
+		PrivateKey:     strings.TrimSpace(req.PrivateKey),
+		GrantModel:     managedcredentialmodel.GrantModelInstallation,
+		Status:         StatusUnconnected,
+		UpdatedAt:      s.now(),
+	}
+	if record.Key == "" || record.ClientID == "" || record.InstallationID == "" || record.PrivateKey == "" {
+		return Record{}, fmt.Errorf("key, client_id, installation_id, and private_key are required for github_app_installation")
+	}
+	if _, err := parseRSAPrivateKey(record.PrivateKey); err != nil {
+		return Record{}, fmt.Errorf("managed credential %q private_key is invalid: %w", record.Key, err)
+	}
+	updated, err := s.exchangeGitHubAppInstallation(ctx, record, record.InstallationID)
+	if err != nil {
+		return s.markFailure(ctx, record, err)
+	}
+	updated.Status = StatusConnected
+	updated.Failure = ""
+	updated.UpdatedAt = s.now()
+	if err := s.Store.Put(ctx, updated); err != nil {
+		return Record{}, err
+	}
+	return updated, nil
+}
+
 func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (string, Record, error) {
 	record, ok, err := s.record(ctx, req.Key)
 	if err != nil {
@@ -355,6 +413,9 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 	}
 	if !ok {
 		return "", Record{}, fmt.Errorf("missing managed credential %q", strings.TrimSpace(req.Key))
+	}
+	if err := GrantTypeCovers(record.GrantType, req.GrantType); err != nil {
+		return "", Record{}, fmt.Errorf("managed credential %q grant-type-insufficient: %w", record.Key, err)
 	}
 	if err := managedcredentialmodel.GrantModelCovers(record.GrantModel, req.GrantModel); err != nil {
 		return "", Record{}, fmt.Errorf("managed credential %q grant-model-insufficient: %w", record.Key, err)
@@ -365,6 +426,9 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 	if err := ensureScopes(record.Scopes, req.Scopes); err != nil {
 		return "", Record{}, fmt.Errorf("managed credential %q scope-insufficient: %w", record.Key, err)
 	}
+	if err := ensureInstallationSelection(record, req.InstallationID); err != nil {
+		return "", Record{}, err
+	}
 	if strings.TrimSpace(record.Status) != StatusConnected {
 		return "", Record{}, fmt.Errorf("managed credential %q is %s", record.Key, statusOrUnconnected(record.Status))
 	}
@@ -372,6 +436,9 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 		record, err = s.refresh(ctx, record)
 		if err != nil {
 			return "", record, err
+		}
+		if err := GrantTypeCovers(record.GrantType, req.GrantType); err != nil {
+			return "", record, fmt.Errorf("managed credential %q grant-type-insufficient: %w", record.Key, err)
 		}
 		if err := ensureScopes(record.Scopes, req.Scopes); err != nil {
 			return "", record, fmt.Errorf("managed credential %q scope-insufficient: %w", record.Key, err)
@@ -381,6 +448,9 @@ func (s *TokenSource) AccessToken(ctx context.Context, req AccessTokenRequest) (
 		}
 		if err := managedcredentialmodel.TokenRequestProfileCovers(record.TokenRequest, req.TokenRequest); err != nil {
 			return "", record, fmt.Errorf("managed credential %q token-request-insufficient: %w", record.Key, err)
+		}
+		if err := ensureInstallationSelection(record, req.InstallationID); err != nil {
+			return "", record, err
 		}
 	}
 	return record.AccessToken, record, nil
@@ -416,6 +486,18 @@ func (s *TokenSource) refresh(ctx context.Context, record Record) (Record, error
 		if len(record.Scopes) > 0 {
 			values.Set("scope", strings.Join(record.Scopes, " "))
 		}
+	case GrantGitHubAppInstallation:
+		updated, err := s.exchangeGitHubAppInstallation(ctx, record, record.InstallationID)
+		if err != nil {
+			return s.markFailure(ctx, record, err)
+		}
+		updated.Status = StatusConnected
+		updated.Failure = ""
+		updated.UpdatedAt = s.now()
+		if err := s.Store.Put(ctx, updated); err != nil {
+			return Record{}, err
+		}
+		return updated, nil
 	default:
 		err := fmt.Errorf("managed credential %q has unsupported grant_type %q", record.Key, record.GrantType)
 		return s.markFailure(ctx, record, err)
@@ -515,6 +597,152 @@ func (s *TokenSource) exchange(ctx context.Context, record Record, values url.Va
 		updated.ExpiresAt = s.now().Add(time.Duration(body.ExpiresIn) * time.Second).UTC()
 	}
 	return updated, nil
+}
+
+func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record Record, installationID string) (Record, error) {
+	installationID = normalizeInstallationID(installationID)
+	if installationID == "" {
+		return Record{}, fmt.Errorf("managed credential %q installation_id is required", record.Key)
+	}
+	if record.InstallationID != "" && normalizeInstallationID(record.InstallationID) != installationID {
+		return Record{}, fmt.Errorf("managed credential %q installation_id mismatch", record.Key)
+	}
+	if strings.TrimSpace(record.ClientID) == "" {
+		return Record{}, fmt.Errorf("managed credential %q client_id is required", record.Key)
+	}
+	if strings.TrimSpace(record.PrivateKey) == "" {
+		return Record{}, fmt.Errorf("managed credential %q private_key is required", record.Key)
+	}
+	jwt, err := s.githubAppJWT(record)
+	if err != nil {
+		return Record{}, err
+	}
+	tokenURL, err := githubInstallationAccessTokenURL(record, installationID)
+	if err != nil {
+		return Record{}, err
+	}
+	client := s.HTTPClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return Record{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := client.Do(req)
+	if err != nil {
+		return Record{}, err
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Token     string `json:"token"`
+		ExpiresAt string `json:"expires_at"`
+		Error     string `json:"error"`
+		Message   string `json:"message"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return Record{}, fmt.Errorf("decode github installation token response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		msg := strings.TrimSpace(body.Error)
+		if msg == "" {
+			msg = strings.TrimSpace(body.Message)
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("github installation token endpoint returned status %d", resp.StatusCode)
+		}
+		return Record{}, fmt.Errorf("%s", msg)
+	}
+	token := strings.TrimSpace(body.Token)
+	if token == "" {
+		return Record{}, fmt.Errorf("github installation token endpoint did not return token")
+	}
+	updated := record
+	updated.AccessToken = token
+	updated.TokenType = "Bearer"
+	updated.GrantType = GrantGitHubAppInstallation
+	updated.GrantModel = managedcredentialmodel.GrantModelInstallation
+	updated.InstallationID = installationID
+	if expires := strings.TrimSpace(body.ExpiresAt); expires != "" {
+		parsed, err := time.Parse(time.RFC3339, expires)
+		if err != nil {
+			return Record{}, fmt.Errorf("parse github installation token expires_at: %w", err)
+		}
+		updated.ExpiresAt = parsed.UTC()
+	}
+	return updated, nil
+}
+
+func (s *TokenSource) githubAppJWT(record Record) (string, error) {
+	key, err := parseRSAPrivateKey(record.PrivateKey)
+	if err != nil {
+		return "", fmt.Errorf("managed credential %q private_key is invalid: %w", record.Key, err)
+	}
+	now := s.now()
+	header := struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+	}{Alg: "RS256", Typ: "JWT"}
+	claims := struct {
+		Iss string `json:"iss"`
+		Iat int64  `json:"iat"`
+		Exp int64  `json:"exp"`
+	}{
+		Iss: strings.TrimSpace(record.ClientID),
+		Iat: now.Add(-60 * time.Second).Unix(),
+		Exp: now.Add(9 * time.Minute).Unix(),
+	}
+	if claims.Iss == "" {
+		return "", fmt.Errorf("managed credential %q client_id is required", record.Key)
+	}
+	headerRaw, err := json.Marshal(header)
+	if err != nil {
+		return "", err
+	}
+	claimsRaw, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	encoder := base64.RawURLEncoding
+	signingInput := encoder.EncodeToString(headerRaw) + "." + encoder.EncodeToString(claimsRaw)
+	sum := sha256.Sum256([]byte(signingInput))
+	sig, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
+	if err != nil {
+		return "", fmt.Errorf("sign github app jwt: %w", err)
+	}
+	return signingInput + "." + encoder.EncodeToString(sig), nil
+}
+
+func parseRSAPrivateKey(raw string) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode([]byte(strings.TrimSpace(raw)))
+	if block == nil {
+		return nil, fmt.Errorf("PEM block is required")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("private key must be RSA")
+	}
+	return key, nil
+}
+
+func githubInstallationAccessTokenURL(record Record, installationID string) (string, error) {
+	base := normalizeGitHubAPIBaseURL(record.APIBaseURL)
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("managed credential %q api_base_url is invalid", record.Key)
+	}
+	return strings.TrimRight(base, "/") + "/app/installations/" + url.PathEscape(installationID) + "/access_tokens", nil
 }
 
 func applyTokenRequestClientAuth(values url.Values, record Record, profile managedcredentialmodel.TokenRequestProfile) error {
@@ -645,23 +873,25 @@ func (s *TokenSource) refreshWindow() time.Duration {
 func (r Record) Descriptor() Descriptor {
 	status := statusOrUnconnected(r.Status)
 	return Descriptor{
-		Key:          strings.TrimSpace(r.Key),
-		Provider:     strings.TrimSpace(r.Provider),
-		Account:      strings.TrimSpace(r.Account),
-		GrantType:    strings.TrimSpace(r.GrantType),
-		Scopes:       append([]string{}, r.Scopes...),
-		GrantModel:   managedcredentialmodel.NormalizeGrantModel(r.GrantModel),
-		TokenRequest: managedcredentialmodel.NormalizeTokenRequestProfile(r.TokenRequest),
-		Status:       status,
-		Failure:      RedactString(strings.TrimSpace(r.Failure), r.SecretValues()...),
-		ExpiresAt:    r.ExpiresAt,
-		UpdatedAt:    r.UpdatedAt,
+		Key:            strings.TrimSpace(r.Key),
+		Provider:       strings.TrimSpace(r.Provider),
+		Account:        strings.TrimSpace(r.Account),
+		GrantType:      strings.TrimSpace(r.GrantType),
+		Scopes:         append([]string{}, r.Scopes...),
+		GrantModel:     managedcredentialmodel.NormalizeGrantModel(r.GrantModel),
+		TokenRequest:   managedcredentialmodel.NormalizeTokenRequestProfile(r.TokenRequest),
+		InstallationID: normalizeInstallationID(r.InstallationID),
+		APIBaseURL:     strings.TrimSpace(r.APIBaseURL),
+		Status:         status,
+		Failure:        RedactString(strings.TrimSpace(r.Failure), r.SecretValues()...),
+		ExpiresAt:      r.ExpiresAt,
+		UpdatedAt:      r.UpdatedAt,
 	}
 }
 
 func (r Record) SecretValues() []string {
 	var out []string
-	for _, value := range []string{r.AccessToken, r.RefreshToken, r.ClientSecret, r.PKCEVerifier, r.OAuthState} {
+	for _, value := range []string{r.AccessToken, r.RefreshToken, r.ClientSecret, r.PrivateKey, r.PKCEVerifier, r.OAuthState} {
 		value = strings.TrimSpace(value)
 		if value != "" {
 			out = append(out, value)
@@ -906,11 +1136,14 @@ func normalizeRecord(record Record) Record {
 	record.Key = strings.TrimSpace(record.Key)
 	record.Provider = strings.TrimSpace(record.Provider)
 	record.Account = strings.TrimSpace(record.Account)
-	record.GrantType = strings.TrimSpace(record.GrantType)
+	record.GrantType = NormalizeGrantType(record.GrantType)
 	record.AuthURL = strings.TrimSpace(record.AuthURL)
 	record.TokenURL = strings.TrimSpace(record.TokenURL)
+	record.APIBaseURL = strings.TrimSpace(record.APIBaseURL)
 	record.ClientID = strings.TrimSpace(record.ClientID)
 	record.ClientSecret = strings.TrimSpace(record.ClientSecret)
+	record.InstallationID = normalizeInstallationID(record.InstallationID)
+	record.PrivateKey = strings.TrimSpace(record.PrivateKey)
 	record.RedirectURL = strings.TrimSpace(record.RedirectURL)
 	record.Scopes = normalizeStrings(record.Scopes)
 	record.GrantModel = managedcredentialmodel.NormalizeGrantModel(record.GrantModel)
@@ -930,6 +1163,79 @@ func normalizeRecord(record Record) Record {
 		record.UpdatedAt = record.UpdatedAt.UTC()
 	}
 	return record
+}
+
+func NormalizeGrantType(raw string) string {
+	return strings.TrimSpace(strings.ToLower(raw))
+}
+
+func ValidateRequiredGrantType(raw string) error {
+	normalized := NormalizeGrantType(raw)
+	if normalized == "" {
+		return nil
+	}
+	switch normalized {
+	case GrantAuthorizationCode, GrantAuthorizationCodePKCE, GrantClientCredentials, GrantGitHubAppInstallation:
+		return nil
+	default:
+		return fmt.Errorf("grant_type %q is not supported", normalized)
+	}
+}
+
+func GrantTypeCovers(actual, required string) error {
+	required = NormalizeGrantType(required)
+	if required == "" {
+		return nil
+	}
+	actual = NormalizeGrantType(actual)
+	if actual != required {
+		return fmt.Errorf("record grant_type %s does not satisfy required grant_type %s", actual, required)
+	}
+	return nil
+}
+
+func ensureInstallationSelection(record Record, requested string) error {
+	if NormalizeGrantType(record.GrantType) != GrantGitHubAppInstallation {
+		return nil
+	}
+	requested = normalizeInstallationID(requested)
+	if requested == "" {
+		return fmt.Errorf("managed credential %q installation_id is required", record.Key)
+	}
+	recordInstallationID := normalizeInstallationID(record.InstallationID)
+	if recordInstallationID == "" {
+		return fmt.Errorf("managed credential %q installation_id is not configured", record.Key)
+	}
+	if requested != recordInstallationID {
+		return fmt.Errorf("managed credential %q installation_id mismatch", record.Key)
+	}
+	return nil
+}
+
+func normalizeInstallationID(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if strings.HasSuffix(raw, ".0") {
+		raw = strings.TrimSuffix(raw, ".0")
+	}
+	return raw
+}
+
+func normalizeGitHubAPIBaseURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "https://api.github.com"
+	}
+	return strings.TrimRight(raw, "/")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func statusOrUnconnected(status string) string {

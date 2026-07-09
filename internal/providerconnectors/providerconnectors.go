@@ -18,13 +18,15 @@ import (
 const Category = "provider_connector"
 
 type RequirementStatus struct {
-	Kind         string
-	Name         string
-	Status       string
-	Bound        bool
-	Scopes       []string
-	GrantModel   string
-	TokenRequest managedcredentialmodel.TokenRequestProfile
+	Kind                string
+	Name                string
+	Status              string
+	Bound               bool
+	GrantType           string
+	Scopes              []string
+	GrantModel          string
+	TokenRequest        managedcredentialmodel.TokenRequestProfile
+	InstallationIDInput string
 }
 
 type Surface struct {
@@ -137,6 +139,17 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 		key := strings.TrimSpace(tool.ManagedCredential.Key)
 		if key == "" {
 			errs = append(errs, fmt.Errorf("%s managed_credential.key is required", context))
+		}
+		if err := runtimemanagedcredentials.ValidateRequiredGrantType(tool.ManagedCredential.GrantType); err != nil {
+			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
+		}
+		grantType := runtimemanagedcredentials.NormalizeGrantType(tool.ManagedCredential.GrantType)
+		installationIDInput := strings.TrimSpace(tool.ManagedCredential.InstallationIDInput)
+		if grantType == runtimemanagedcredentials.GrantGitHubAppInstallation && installationIDInput == "" {
+			errs = append(errs, fmt.Errorf("%s managed_credential.installation_id_input is required for grant_type %s", context, grantType))
+		}
+		if installationIDInput != "" && grantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
+			errs = append(errs, fmt.Errorf("%s managed_credential.installation_id_input requires grant_type %s", context, runtimemanagedcredentials.GrantGitHubAppInstallation))
 		}
 		if err := managedcredentialmodel.ValidateGrantModel(tool.ManagedCredential.GrantModel); err != nil {
 			errs = append(errs, fmt.Errorf("%s managed_credential.%s", context, err.Error()))
@@ -319,6 +332,7 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 	if tool.ManagedCredential != nil {
 		key := strings.TrimSpace(tool.ManagedCredential.Key)
 		if key != "" {
+			requiredGrantType := runtimemanagedcredentials.NormalizeGrantType(tool.ManagedCredential.GrantType)
 			requiredGrantModel := managedcredentialmodel.NormalizeGrantModel(tool.ManagedCredential.GrantModel)
 			requiredTokenRequest := managedcredentialmodel.NormalizeTokenRequestProfile(tool.ManagedCredential.TokenRequest)
 			storeKey := key
@@ -336,6 +350,12 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 					desc := record.Descriptor()
 					status = strings.ToUpper(strings.TrimSpace(desc.Status))
 					bound = desc.Status == runtimemanagedcredentials.StatusConnected
+					if bound {
+						if err := runtimemanagedcredentials.GrantTypeCovers(desc.GrantType, requiredGrantType); err != nil {
+							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
+							bound = false
+						}
+					}
 					if bound {
 						if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, requiredGrantModel); err != nil {
 							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
@@ -358,13 +378,15 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 				status = "UNBOUND"
 			}
 			requires = append(requires, RequirementStatus{
-				Kind:         "managed_credential",
-				Name:         key,
-				Status:       status,
-				Bound:        bound,
-				Scopes:       append([]string{}, tool.ManagedCredential.Scopes...),
-				GrantModel:   requiredGrantModel,
-				TokenRequest: requiredTokenRequest,
+				Kind:                "managed_credential",
+				Name:                key,
+				Status:              status,
+				Bound:               bound,
+				GrantType:           requiredGrantType,
+				Scopes:              append([]string{}, tool.ManagedCredential.Scopes...),
+				GrantModel:          requiredGrantModel,
+				TokenRequest:        requiredTokenRequest,
+				InstallationIDInput: strings.TrimSpace(tool.ManagedCredential.InstallationIDInput),
 			})
 		}
 	}

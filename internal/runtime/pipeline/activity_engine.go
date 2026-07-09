@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -843,10 +844,12 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		HTTPClient: client,
 	}
 	token, record, err := tokenSource.AccessToken(ctx, runtimemanagedcredentials.AccessTokenRequest{
-		Key:          storeKey,
-		Scopes:       ref.Scopes,
-		GrantModel:   ref.GrantModel,
-		TokenRequest: ref.TokenRequest,
+		Key:            storeKey,
+		GrantType:      ref.GrantType,
+		Scopes:         ref.Scopes,
+		GrantModel:     ref.GrantModel,
+		TokenRequest:   ref.TokenRequest,
+		InstallationID: activityManagedCredentialInputValue(intent.Input, ref.InstallationIDInput),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
@@ -867,6 +870,35 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 		Prefix:      prefix,
 		TokenSource: tokenSource,
 	}, nil
+}
+
+func activityManagedCredentialInputValue(input map[string]any, key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	value, ok := input[key]
+	if !ok || value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case float64:
+		return strings.TrimSpace(strconv.FormatFloat(typed, 'f', -1, 64))
+	case float32:
+		return strings.TrimSpace(strconv.FormatFloat(float64(typed), 'f', -1, 32))
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case uint64:
+		return strconv.FormatUint(typed, 10)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
 
 func applyActivityManagedCredentialHeader(headers http.Header, auth *activityManagedHTTPAuth, replace bool) error {

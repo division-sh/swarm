@@ -11,11 +11,13 @@ import (
 )
 
 type Requirement struct {
-	Kind         string
-	Name         string
-	Scopes       []string                                   `json:"scopes,omitempty"`
-	GrantModel   string                                     `json:"grant_model,omitempty"`
-	TokenRequest managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	Kind                string
+	Name                string
+	GrantType           string                                     `json:"grant_type,omitempty"`
+	Scopes              []string                                   `json:"scopes,omitempty"`
+	GrantModel          string                                     `json:"grant_model,omitempty"`
+	TokenRequest        managedcredentialmodel.TokenRequestProfile `json:"token_request,omitempty"`
+	InstallationIDInput string                                     `json:"installation_id_input,omitempty"`
 }
 
 type RequirementDescriptor struct {
@@ -61,11 +63,13 @@ func appendToolRequirements(index map[string][]Requirement, source semanticview.
 			continue
 		}
 		index[storeKey] = append(index[storeKey], Requirement{
-			Kind:         "tool",
-			Name:         name,
-			Scopes:       append([]string{}, entry.ManagedCredential.Scopes...),
-			GrantModel:   entry.ManagedCredential.GrantModel,
-			TokenRequest: entry.ManagedCredential.TokenRequest,
+			Kind:                "tool",
+			Name:                name,
+			GrantType:           entry.ManagedCredential.GrantType,
+			Scopes:              append([]string{}, entry.ManagedCredential.Scopes...),
+			GrantModel:          entry.ManagedCredential.GrantModel,
+			TokenRequest:        entry.ManagedCredential.TokenRequest,
+			InstallationIDInput: entry.ManagedCredential.InstallationIDInput,
 		})
 	}
 }
@@ -126,6 +130,13 @@ func MissingOrUnusableRequired(ctx context.Context, store Store, source semantic
 			continue
 		}
 		for _, req := range desc.RequiredBy {
+			if err := GrantTypeCovers(desc.GrantType, req.GrantType); err != nil {
+				scoped := desc
+				scoped.Status = StatusScopeInsufficient
+				scoped.Failure = "grant-type-insufficient: " + err.Error()
+				out = append(out, scoped)
+				break
+			}
 			if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, req.GrantModel); err != nil {
 				scoped := desc
 				scoped.Status = StatusScopeInsufficient
@@ -179,13 +190,15 @@ func normalizeRequirements(items []Requirement) []Requirement {
 	for _, item := range items {
 		item.Kind = strings.TrimSpace(item.Kind)
 		item.Name = strings.TrimSpace(item.Name)
+		item.GrantType = NormalizeGrantType(item.GrantType)
 		item.Scopes = normalizeStrings(item.Scopes)
 		item.GrantModel = managedcredentialmodel.NormalizeGrantModel(item.GrantModel)
 		item.TokenRequest = managedcredentialmodel.NormalizeTokenRequestProfile(item.TokenRequest)
+		item.InstallationIDInput = strings.TrimSpace(item.InstallationIDInput)
 		if item.Kind == "" || item.Name == "" {
 			continue
 		}
-		key := item.Kind + "\x00" + item.Name + "\x00" + strings.Join(item.Scopes, "\x00") + "\x00" + item.GrantModel + "\x00" + managedcredentialmodel.TokenRequestProfileSummary(item.TokenRequest)
+		key := item.Kind + "\x00" + item.Name + "\x00" + item.GrantType + "\x00" + strings.Join(item.Scopes, "\x00") + "\x00" + item.GrantModel + "\x00" + managedcredentialmodel.TokenRequestProfileSummary(item.TokenRequest) + "\x00" + item.InstallationIDInput
 		if _, ok := seen[key]; ok {
 			continue
 		}

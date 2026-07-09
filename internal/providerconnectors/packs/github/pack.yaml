@@ -1,0 +1,22 @@
+id: provider.github.connector
+version: 0.1.0
+platform_version: ">=0.7.0 <0.8.0"
+type: connector
+manifest_hash: sha256:dca6952b20e5521326b7cb83ef85fbf3390d0c29f9b68bee65ba66ce2445b25d
+provenance:
+  source: platform
+capabilities:
+  can:
+    call_provider_action: github.create_issue_comment
+    lower_through_activity: true
+    journal_activity_attempts: true
+  cannot:
+    - bypass activity_attempts
+    - retry non_idempotent_write automatically
+    - expose credential values
+requires:
+  managed_credentials:
+    - github_app
+tests:
+  - providerconnectors/github_pack
+  - runtime/github_app_issue_comment_supported_surface

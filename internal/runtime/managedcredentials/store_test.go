@@ -2,7 +2,14 @@ package managedcredentials
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -430,6 +437,112 @@ func TestTokenSourceClientCredentialsUsesMicrosoftDefaultScopeAndNeverRefreshTok
 	}
 }
 
+func TestTokenSourceGitHubAppInstallationExchangesJWTAndRequiresInstallationSelection(t *testing.T) {
+	ctx := context.Background()
+	privateKeyPEM, publicKey := testGitHubAppPrivateKey(t)
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	var tokenRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/app/installations/1001/access_tokens" {
+			t.Fatalf("path = %s, want installation token endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept"); got != "application/vnd.github+json" {
+			t.Fatalf("Accept = %q, want GitHub JSON media type", got)
+		}
+		jwt := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if strings.TrimSpace(jwt) == "" || jwt == r.Header.Get("Authorization") {
+			t.Fatalf("Authorization = %q, want Bearer JWT", r.Header.Get("Authorization"))
+		}
+		testVerifyGitHubAppJWT(t, jwt, publicKey, "github-app-client-id", now)
+		tokenRequests++
+		token := "github-install-token-1"
+		expires := now.Add(time.Second)
+		if tokenRequests > 1 {
+			token = "github-install-token-2"
+			expires = now.Add(time.Hour)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"token":      token,
+			"expires_at": expires.Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	store := NewMemoryStore()
+	source := TokenSource{
+		Store: store,
+		Now: func() time.Time {
+			return now
+		},
+	}
+	record, err := source.ConnectGitHubAppInstallation(ctx, GitHubAppInstallationRequest{
+		Key:            "github_app",
+		Provider:       "github",
+		APIBaseURL:     server.URL,
+		ClientID:       "github-app-client-id",
+		InstallationID: "1001",
+		PrivateKey:     privateKeyPEM,
+		Account:        "octo-org/octo-repo",
+	})
+	if err != nil {
+		t.Fatalf("ConnectGitHubAppInstallation: %v", err)
+	}
+	if record.Status != StatusConnected || record.AccessToken != "github-install-token-1" || record.GrantType != GrantGitHubAppInstallation {
+		t.Fatalf("connected record = %#v, want github app installation token", record)
+	}
+	if record.GrantModel != managedcredentialmodel.GrantModelInstallation || record.InstallationID != "1001" {
+		t.Fatalf("record grant/install = (%q, %q), want installation_grant/1001", record.GrantModel, record.InstallationID)
+	}
+
+	now = now.Add(2 * time.Second)
+	token, record, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:            "github_app",
+		GrantType:      GrantGitHubAppInstallation,
+		GrantModel:     managedcredentialmodel.GrantModelInstallation,
+		InstallationID: "1001",
+	})
+	if err != nil {
+		t.Fatalf("AccessToken refresh-before-use: %v", err)
+	}
+	if token != "github-install-token-2" || record.AccessToken != "github-install-token-2" {
+		t.Fatalf("refreshed token = (%q, %q), want github-install-token-2", token, record.AccessToken)
+	}
+	if tokenRequests != 2 {
+		t.Fatalf("installation token requests = %d, want 2", tokenRequests)
+	}
+
+	if _, _, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:            "github_app",
+		GrantType:      GrantGitHubAppInstallation,
+		GrantModel:     managedcredentialmodel.GrantModelInstallation,
+		InstallationID: "2002",
+	}); err == nil || !strings.Contains(err.Error(), "installation_id mismatch") {
+		t.Fatalf("AccessToken wrong installation err = %v, want mismatch", err)
+	}
+	if _, _, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:            "github_app",
+		GrantType:      GrantClientCredentials,
+		InstallationID: "1001",
+	}); err == nil || !strings.Contains(err.Error(), "grant-type-insufficient") {
+		t.Fatalf("AccessToken wrong grant err = %v, want grant-type-insufficient", err)
+	}
+
+	desc := record.Descriptor()
+	raw, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatalf("Marshal descriptor: %v", err)
+	}
+	if strings.Contains(string(raw), privateKeyPEM) || strings.Contains(string(raw), "github-install-token") {
+		t.Fatalf("descriptor leaked GitHub App secret material: %s", string(raw))
+	}
+	if desc.InstallationID != "1001" || desc.APIBaseURL != server.URL {
+		t.Fatalf("descriptor installation/api = (%q, %q), want 1001/%s", desc.InstallationID, desc.APIBaseURL, server.URL)
+	}
+}
+
 func TestTokenSourceRefreshUsesBasicJSONTokenRequestProfileAndRotatesRefreshToken(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -772,6 +885,66 @@ func TestTokenSourceRefreshFailurePropagatesFailureStatePersistenceError(t *test
 	}
 	if stored.Status != StatusConnected {
 		t.Fatalf("stale stored status = %q, want connected to prove write failure was not hidden", stored.Status)
+	}
+}
+
+func testGitHubAppPrivateKey(t *testing.T) (string, *rsa.PublicKey) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	raw := x509.MarshalPKCS1PrivateKey(key)
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: raw})
+	if len(pemBytes) == 0 {
+		t.Fatal("EncodeToMemory returned empty PEM")
+	}
+	return string(pemBytes), &key.PublicKey
+}
+
+func testVerifyGitHubAppJWT(t *testing.T, token string, publicKey *rsa.PublicKey, wantIss string, now time.Time) {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("JWT parts = %d, want 3", len(parts))
+	}
+	decode := func(name, raw string, target any) {
+		t.Helper()
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil {
+			t.Fatalf("decode JWT %s: %v", name, err)
+		}
+		if err := json.Unmarshal(decoded, target); err != nil {
+			t.Fatalf("unmarshal JWT %s: %v", name, err)
+		}
+	}
+	var header struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+	}
+	decode("header", parts[0], &header)
+	if header.Alg != "RS256" || header.Typ != "JWT" {
+		t.Fatalf("JWT header = %#v, want RS256 JWT", header)
+	}
+	var claims struct {
+		Iss string `json:"iss"`
+		Iat int64  `json:"iat"`
+		Exp int64  `json:"exp"`
+	}
+	decode("claims", parts[1], &claims)
+	if claims.Iss != wantIss {
+		t.Fatalf("JWT iss = %q, want %q", claims.Iss, wantIss)
+	}
+	if claims.Iat > now.Unix() || claims.Exp <= now.Unix() || claims.Exp-claims.Iat > 10*60+60 {
+		t.Fatalf("JWT time claims = %#v, want active short-lived app JWT around %s", claims, now)
+	}
+	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		t.Fatalf("decode JWT signature: %v", err)
+	}
+	sum := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
+	if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, sum[:], signature); err != nil {
+		t.Fatalf("VerifyPKCS1v15: %v", err)
 	}
 }
 

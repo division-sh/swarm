@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
+	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -110,6 +111,53 @@ func TestValidateToolImplementationsRejectsMalformedManagedCredentialReferences(
 	})
 	if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), "managed_credential is only supported") {
 		t.Fatalf("ValidateToolImplementations err = %v, want HTTP-only managed credential failure", err)
+	}
+}
+
+func TestExecutorHTTPToolRejectsInstallationIDInputOutsideActivityPath(t *testing.T) {
+	ctx := context.Background()
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("HTTP server should not be called when installation_id_input is used outside activity execution")
+	}))
+	defer server.Close()
+
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			"send_provider": {
+				HandlerType: "http",
+				InputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+				HTTP: &runtimecontracts.HTTPToolSpec{
+					Method: "POST",
+					URL:    server.URL,
+				},
+				ManagedCredential: &runtimecontracts.ManagedCredentialRef{
+					Key:                 "github_app",
+					GrantType:           runtimemanagedcredentials.GrantGitHubAppInstallation,
+					GrantModel:          managedcredentialmodel.GrantModelInstallation,
+					InstallationIDInput: "installation_id",
+				},
+			},
+		},
+	})
+	if _, err := ValidateToolImplementations(source); err != nil {
+		t.Fatalf("ValidateToolImplementations: %v", err)
+	}
+	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{
+		WorkflowSource: source,
+		ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
+			Key:            "github_app",
+			Provider:       "github",
+			GrantType:      runtimemanagedcredentials.GrantGitHubAppInstallation,
+			GrantModel:     managedcredentialmodel.GrantModelInstallation,
+			InstallationID: "1001",
+			AccessToken:    "github-install-token",
+			Status:         runtimemanagedcredentials.StatusConnected,
+			ExpiresAt:      time.Now().Add(time.Hour),
+		}),
+	})
+	_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{"installation_id": "1001"})
+	if err == nil || !strings.Contains(err.Error(), "installation_id_input is supported only for activity input resolution") {
+		t.Fatalf("Execute err = %v, want activity-only installation_id_input failure", err)
 	}
 }
 

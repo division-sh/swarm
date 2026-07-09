@@ -914,12 +914,14 @@ type HTTPToolSpec struct {
 	Retry          HTTPToolRetrySpec `yaml:"retry"`
 }
 type ManagedCredentialRef struct {
-	Key          string                                     `yaml:"key"`
-	Header       string                                     `yaml:"header"`
-	Prefix       string                                     `yaml:"prefix"`
-	Scopes       []string                                   `yaml:"scopes"`
-	GrantModel   string                                     `yaml:"grant_model"`
-	TokenRequest managedcredentialmodel.TokenRequestProfile `yaml:"token_request"`
+	Key                 string                                     `yaml:"key"`
+	Header              string                                     `yaml:"header"`
+	Prefix              string                                     `yaml:"prefix"`
+	GrantType           string                                     `yaml:"grant_type"`
+	Scopes              []string                                   `yaml:"scopes"`
+	GrantModel          string                                     `yaml:"grant_model"`
+	TokenRequest        managedcredentialmodel.TokenRequestProfile `yaml:"token_request"`
+	InstallationIDInput string                                     `yaml:"installation_id_input"`
 }
 type ToolInputSchema struct {
 	Type                 string                     `yaml:"type"`
