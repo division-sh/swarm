@@ -1,6 +1,7 @@
 package testtiming
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -94,5 +95,126 @@ func TestWriteMarkdownIncludesSummaryAndTables(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, text)
 		}
+	}
+}
+
+func TestBuildShardSnapshotBalancesMeasuredWeightsDeterministically(t *testing.T) {
+	packages := []string{
+		"github.com/division-sh/swarm/a",
+		"github.com/division-sh/swarm/b",
+		"github.com/division-sh/swarm/c",
+		"github.com/division-sh/swarm/d",
+	}
+	weights := map[string]float64{
+		"github.com/division-sh/swarm/a": 8,
+		"github.com/division-sh/swarm/b": 4,
+		"github.com/division-sh/swarm/c": 2,
+		"github.com/division-sh/swarm/d": 2,
+	}
+
+	snapshot, err := BuildShardSnapshot(packages, weights, 2, "fixture", 0.25)
+	if err != nil {
+		t.Fatalf("BuildShardSnapshot: %v", err)
+	}
+	if snapshot.Version != ShardSnapshotVersion || snapshot.ShardCount != 2 {
+		t.Fatalf("snapshot metadata = %+v, want version %d / 2 shards", snapshot, ShardSnapshotVersion)
+	}
+	if got := strings.Join(snapshot.Shards[0].Packages, " "); got != "github.com/division-sh/swarm/a" {
+		t.Fatalf("shard 1 packages = %q, want a", got)
+	}
+	if got := strings.Join(snapshot.Shards[1].Packages, " "); got != "github.com/division-sh/swarm/b github.com/division-sh/swarm/c github.com/division-sh/swarm/d" {
+		t.Fatalf("shard 2 packages = %q, want b c d", got)
+	}
+	validation, err := ValidateShardSnapshot(snapshot, packages)
+	if err != nil {
+		t.Fatalf("ValidateShardSnapshot: %v", err)
+	}
+	if validation.ImbalanceRatio != 0 {
+		t.Fatalf("imbalance ratio = %v, want 0", validation.ImbalanceRatio)
+	}
+}
+
+func TestValidateShardSnapshotRejectsMissingExtraAndDuplicatePackages(t *testing.T) {
+	snapshot := ShardSnapshot{
+		Version:    ShardSnapshotVersion,
+		ShardCount: 2,
+		Shards: []PackageShard{
+			{ID: 1, Weight: 1, Packages: []string{"github.com/division-sh/swarm/a", "github.com/division-sh/swarm/a"}},
+			{ID: 2, Weight: 1, Packages: []string{"github.com/division-sh/swarm/extra"}},
+		},
+	}
+
+	validation, err := ValidateShardSnapshot(snapshot, []string{
+		"github.com/division-sh/swarm/a",
+		"github.com/division-sh/swarm/b",
+	})
+	if err == nil {
+		t.Fatal("ValidateShardSnapshot succeeded, want error")
+	}
+	if got := strings.Join(validation.Missing, ","); got != "github.com/division-sh/swarm/b" {
+		t.Fatalf("missing = %q, want b", got)
+	}
+	if got := strings.Join(validation.Extra, ","); got != "github.com/division-sh/swarm/extra" {
+		t.Fatalf("extra = %q, want extra", got)
+	}
+	if got := strings.Join(validation.Duplicates, ","); got != "github.com/division-sh/swarm/a" {
+		t.Fatalf("duplicates = %q, want a", got)
+	}
+}
+
+func TestShardMatrixJSONAndPackagesForShard(t *testing.T) {
+	snapshot := ShardSnapshot{
+		Version:    ShardSnapshotVersion,
+		ShardCount: 2,
+		Shards: []PackageShard{
+			{ID: 1, Weight: 1, Packages: []string{"github.com/division-sh/swarm/a"}},
+			{ID: 2, Weight: 1, Packages: []string{"github.com/division-sh/swarm/b"}},
+		},
+	}
+	raw, err := ShardMatrixJSON(snapshot)
+	if err != nil {
+		t.Fatalf("ShardMatrixJSON: %v", err)
+	}
+	var decoded struct {
+		Include []struct {
+			Shard int `json:"shard"`
+		} `json:"include"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v raw=%s", err, raw)
+	}
+	if len(decoded.Include) != 2 || decoded.Include[0].Shard != 1 || decoded.Include[1].Shard != 2 {
+		t.Fatalf("matrix = %+v, want shards 1 and 2", decoded.Include)
+	}
+	packages, err := PackagesForShard(snapshot, 2)
+	if err != nil {
+		t.Fatalf("PackagesForShard: %v", err)
+	}
+	if got := strings.Join(packages, " "); got != "github.com/division-sh/swarm/b" {
+		t.Fatalf("packages = %q, want shard 2 package", got)
+	}
+}
+
+func TestParsePackageWeightsUsesTerminalPackageEventsOnly(t *testing.T) {
+	input := strings.NewReader(strings.Join([]string{
+		`{"Action":"pass","Package":"github.com/division-sh/swarm/a","Test":"TestA","Elapsed":99}`,
+		`{"Action":"pass","Package":"github.com/division-sh/swarm/a","Elapsed":3}`,
+		`{"Action":"skip","Package":"github.com/division-sh/swarm/b","Elapsed":0}`,
+		`{"Action":"output","Package":"github.com/division-sh/swarm/c","Elapsed":8}`,
+		`not-json`,
+	}, "\n"))
+
+	weights, err := ParsePackageWeights(input)
+	if err != nil {
+		t.Fatalf("ParsePackageWeights: %v", err)
+	}
+	if got := weights["github.com/division-sh/swarm/a"]; got != 3 {
+		t.Fatalf("weight a = %v, want package elapsed 3", got)
+	}
+	if got := weights["github.com/division-sh/swarm/b"]; got != minPackageWeight {
+		t.Fatalf("weight b = %v, want min package weight", got)
+	}
+	if _, ok := weights["github.com/division-sh/swarm/c"]; ok {
+		t.Fatalf("output-only package got weight: %+v", weights)
 	}
 }
