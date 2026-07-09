@@ -655,7 +655,7 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 		if msg == "" {
 			msg = fmt.Sprintf("github installation token endpoint returned status %d", resp.StatusCode)
 		}
-		return Record{}, fmt.Errorf("%s", msg)
+		return Record{}, fmt.Errorf("%s", RedactString(msg, jwt))
 	}
 	token := strings.TrimSpace(body.Token)
 	if token == "" {
