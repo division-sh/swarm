@@ -56,12 +56,39 @@ func appendProviderConnectorToolSurfaceFindings(ctx context.Context, report *loc
 }
 
 func providerConnectorSurfaceMessage(surface providerconnectors.Surface) string {
-	return fmt.Sprintf("provider connector tool %s %s %s requires %s",
+	message := fmt.Sprintf("provider connector tool %s %s %s requires %s",
 		strings.TrimSpace(surface.ToolID),
 		formatProviderConnectorSurfaceVerbs("CAN", surface.Can),
 		formatProviderConnectorSurfaceVerbs("CANNOT", surface.Cannot),
 		formatProviderConnectorRequirements(surface.Requires),
 	)
+	if surface.Generation != nil {
+		message += fmt.Sprintf(" generated operation=%s permissions=%s source=%s source_hash=%s profile=%s profile_hash=%s manifest_hash=%s fixture=%s:%s review=%s generator=%s",
+			strings.TrimSpace(surface.Generation.OperationID),
+			formatProviderConnectorGenerationPermissions(surface.Generation.Permissions),
+			strings.TrimSpace(surface.Generation.SourcePath),
+			strings.TrimSpace(surface.Generation.SourceSHA256),
+			strings.TrimSpace(surface.Generation.ProfilePath),
+			strings.TrimSpace(surface.Generation.ProfileSHA256),
+			strings.TrimSpace(surface.Generation.ManifestSHA256),
+			strings.TrimSpace(surface.Generation.FixtureID),
+			strings.TrimSpace(surface.Generation.FixtureStatus),
+			strings.TrimSpace(surface.Generation.ReviewStatus),
+			strings.TrimSpace(surface.Generation.GeneratorVersion),
+		)
+	}
+	return message
+}
+
+func formatProviderConnectorGenerationPermissions(permissions []providerconnectors.GenerationPermission) string {
+	if len(permissions) == 0 {
+		return "none"
+	}
+	items := make([]string, 0, len(permissions))
+	for _, permission := range permissions {
+		items = append(items, strings.TrimSpace(permission.ID)+":"+strings.TrimSpace(permission.Note))
+	}
+	return "[" + strings.Join(items, "; ") + "]"
 }
 
 func formatProviderConnectorSurfaceVerbs(verb string, items []string) string {

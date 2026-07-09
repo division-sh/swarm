@@ -10,6 +10,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -35,9 +36,24 @@ type Surface struct {
 	Action       string
 	EndpointHost string
 	EffectClass  string
+	Generation   *GenerationSurface
 	Can          []string
 	Cannot       []string
 	Requires     []RequirementStatus
+}
+
+type GenerationSurface struct {
+	GeneratorVersion string
+	SourcePath       string
+	SourceSHA256     string
+	ProfilePath      string
+	ProfileSHA256    string
+	ManifestSHA256   string
+	OperationID      string
+	Permissions      []GenerationPermission
+	FixtureID        string
+	FixtureStatus    string
+	ReviewStatus     string
 }
 
 type SurfaceOptions struct {
@@ -161,107 +177,15 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 	if len(tool.ResponseMapping) > 0 {
 		errs = append(errs, fmt.Errorf("%s uses response_mapping; connector activity response mapping is split", context))
 	}
-	if tool.ResponseSuccess != nil {
-		errs = append(errs, validateResponseSuccess(context, *tool.ResponseSuccess)...)
-	}
-	if required, ok := requiredResponseSuccessForProviderAction(provider, action); ok {
-		if tool.ResponseSuccess == nil {
-			errs = append(errs, fmt.Errorf("%s must declare response_success %s == %s; this provider action can return HTTP 2xx for provider-level failure", context, required.Path, asConnectorScalar(required.Equals)))
-		} else if !responseSuccessMatches(*tool.ResponseSuccess, required) {
-			errs = append(errs, fmt.Errorf("%s response_success must be %s == %s for this provider action", context, required.Path, asConnectorScalar(required.Equals)))
-		}
+	if tool.ResponseSuccess == nil {
+		errs = append(errs, fmt.Errorf("%s must declare exactly one response_success policy", context))
+	} else if err := httpresponsesuccess.Validate(*tool.ResponseSuccess); err != nil {
+		errs = append(errs, fmt.Errorf("%s %s", context, err))
 	}
 	if strings.TrimSpace(tool.RateLimit) != "" || strings.TrimSpace(tool.RateLimitMaxWait) != "" {
 		errs = append(errs, fmt.Errorf("%s uses rate_limit; connector activity rate-limit admission is split", context))
 	}
 	return errs
-}
-
-func validateResponseSuccess(context string, check runtimecontracts.HTTPResponseSuccess) []error {
-	path := strings.TrimSpace(check.Path)
-	var errs []error
-	if path == "" {
-		errs = append(errs, fmt.Errorf("%s response_success.path is required", context))
-	} else if !strings.HasPrefix(path, "response.") {
-		errs = append(errs, fmt.Errorf("%s response_success.path must start with response.", context))
-	}
-	if check.Equals == nil {
-		errs = append(errs, fmt.Errorf("%s response_success.equals is required", context))
-	} else if !responseSuccessScalar(check.Equals) {
-		errs = append(errs, fmt.Errorf("%s response_success.equals must be a scalar value", context))
-	}
-	return errs
-}
-
-func responseSuccessScalar(value any) bool {
-	switch value.(type) {
-	case string, bool, int, int64, float64, float32, uint, uint64:
-		return true
-	default:
-		return false
-	}
-}
-
-func requiredResponseSuccessForProviderAction(provider, action string) (runtimecontracts.HTTPResponseSuccess, bool) {
-	switch normalizeToken(provider) + "." + normalizeToken(action) {
-	case "slack.post_message":
-		return runtimecontracts.HTTPResponseSuccess{Path: "response.body.ok", Equals: true}, true
-	default:
-		return runtimecontracts.HTTPResponseSuccess{}, false
-	}
-}
-
-func responseSuccessMatches(got, want runtimecontracts.HTTPResponseSuccess) bool {
-	return strings.TrimSpace(got.Path) == strings.TrimSpace(want.Path) && responseSuccessValuesEqual(got.Equals, want.Equals)
-}
-
-func responseSuccessValuesEqual(got, want any) bool {
-	switch wantTyped := want.(type) {
-	case bool:
-		gotTyped, ok := got.(bool)
-		return ok && gotTyped == wantTyped
-	case string:
-		gotTyped, ok := got.(string)
-		return ok && gotTyped == wantTyped
-	case int:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	case int64:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	case float64:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == wantTyped
-	case float32:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	default:
-		return fmt.Sprint(got) == fmt.Sprint(want)
-	}
-}
-
-func responseSuccessFloat(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	default:
-		return 0, false
-	}
-}
-
-func asConnectorScalar(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	default:
-		return fmt.Sprint(typed)
-	}
 }
 
 func validateProviderConnectorAgentExposure(source semanticview.Source) []error {
@@ -402,12 +326,23 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 		"lower through platform.activity_requested",
 		"journal non-idempotent attempts in activity_attempts",
 	}
+	var generation *GenerationSurface
+	type generationSource interface {
+		ConnectorGenerationSurface(string) (GenerationSurface, bool)
+	}
+	if generated, ok := source.(generationSource); ok {
+		if evidence, exists := generated.ConnectorGenerationSurface(toolID); exists {
+			copy := evidence
+			generation = &copy
+		}
+	}
 	return Surface{
 		ToolID:       strings.TrimSpace(toolID),
 		Provider:     provider,
 		Action:       action,
 		EndpointHost: host,
 		EffectClass:  string(runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)),
+		Generation:   generation,
 		Can:          can,
 		Cannot: []string{
 			"bypass activity_attempts",

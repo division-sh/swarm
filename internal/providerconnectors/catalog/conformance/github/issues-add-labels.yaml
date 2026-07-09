@@ -1,0 +1,25 @@
+schema_version: "1"
+provider: github
+operation_id: issues/add-labels
+tool_id: github.add_labels_to_issue
+source_sha256: sha256:a00d391d74dbc940025e6bad601f08014cbdca4ab890606178e42102e436ded9
+profile_sha256: sha256:04cf8aa22379d36dffb54b351ae352e38926d56c071ddebc595395b465376754
+manifest_sha256: sha256:6366b076584d385b92a6e7f7e717db333f9aa86cbee2c515e3ae9d74737c4a75
+fixture_status: passing
+review_status: approved
+input:
+  installation_id: "1001"
+  owner: octocat
+  repo: hello-world
+  issue_number: 42
+  labels: [bug, generated]
+expected:
+  method: POST
+  url: https://api.github.com/repos/octocat/hello-world/issues/42/labels
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+  body:
+    labels: [bug, generated]
+response_success:
+  kind: http_status_2xx

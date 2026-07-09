@@ -20,8 +20,8 @@ const (
 )
 
 type TokenRequestProfile struct {
-	ClientAuth    string            `yaml:"client_auth" json:"client_auth"`
-	Body          string            `yaml:"body" json:"body"`
+	ClientAuth    string            `yaml:"client_auth,omitempty" json:"client_auth"`
+	Body          string            `yaml:"body,omitempty" json:"body"`
 	StaticHeaders map[string]string `yaml:"static_headers,omitempty" json:"static_headers,omitempty"`
 }
 

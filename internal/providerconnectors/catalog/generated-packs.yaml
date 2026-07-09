@@ -1,0 +1,12 @@
+schema_version: "1"
+packs:
+  - id: provider.github.connector
+    provider: github
+    profile: catalog/generator-profiles/github.yaml
+    kind: builtin
+    output: packs/github
+  - id: provider.acme.connector
+    provider: acme
+    profile: catalog/generator-profiles/acme.yaml
+    kind: fixture
+    output: catalog/testdata/generated/acme

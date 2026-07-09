@@ -1,0 +1,22 @@
+schema_version: "1"
+provider: acme
+operation_id: widgets/create
+tool_id: acme.create_widget
+source_sha256: sha256:182ed500197c682bca81a5a72cb1399e53e18dd87e9cc890fd89df1987b6a38d
+profile_sha256: sha256:5e7dfbe07dfe6d2e67af620bf4cc7af08fe612ca9fe06a130fac3027ad9f02d3
+manifest_sha256: sha256:6a833ccfc84f86ef2c4328e8cd8d740c2128fe18ff29d8b15fce1cbdba6dc3d8
+fixture_status: passing
+review_status: approved
+input:
+  account_id: acct-42
+  name: Catalog widget
+expected:
+  method: POST
+  url: https://api.acme.test/accounts/acct-42/widgets
+  headers:
+    Authorization: Bearer {{credentials.acme_api_key}}
+    X-Acme-Version: "2026-07-09"
+  body:
+    name: Catalog widget
+response_success:
+  kind: http_status_2xx

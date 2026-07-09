@@ -252,6 +252,9 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 				},
 			},
 			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+			ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+				Kind: "http_status_2xx",
+			},
 			HTTP: &runtimecontracts.HTTPToolSpec{
 				Method: "POST",
 				URL:    "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage",
@@ -310,6 +313,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 			},
 			OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
 			ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+				Kind:   "json_field_equals",
 				Path:   "response.body.ok",
 				Equals: true,
 			},
@@ -401,8 +405,8 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 		FatalToolImplementationWarning: false,
 		FatalBootWarnings:              false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "provider connector validation failed") || !strings.Contains(err.Error(), "must declare response_success response.body.ok == true") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want Slack response_success fail-closed", err)
+	if err == nil || !strings.Contains(err.Error(), "provider connector validation failed") || !strings.Contains(err.Error(), "must declare exactly one response_success policy") {
+		t.Fatalf("ValidateWorkflowContractSurface error = %v, want connector response_success fail-closed", err)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -60,6 +62,63 @@ func TestPipelineActivityIntentWriterPersistsDurableActivityRequestEvent(t *test
 	}
 	if got := payload.Input["url"]; got != "https://example.com/source" {
 		t.Fatalf("request input url = %#v", got)
+	}
+}
+
+func TestActivityHTTPResponseSuccessPolicyParityCases(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		body        string
+		policy      runtimecontracts.HTTPResponseSuccess
+		secrets     []string
+		wantErr     string
+		forbidError string
+	}{
+		{name: "status 2xx", status: http.StatusNoContent, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}},
+		{name: "status non-2xx", status: http.StatusMultipleChoices, body: `{}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}, wantErr: "returned status 300"},
+		{name: "boolean equality", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}},
+		{name: "string equality", status: http.StatusOK, body: `{"state":"accepted"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}},
+		{name: "numeric equality", status: http.StatusOK, body: `{"count":2}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.count", Equals: int64(2)}},
+		{name: "provider failure", status: http.StatusOK, body: `{"ok":false}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}, wantErr: "response_success failed"},
+		{name: "unresolved path", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.missing", Equals: true}, wantErr: `path "response.body.missing" did not resolve`},
+		{name: "secret redaction", status: http.StatusOK, body: `{"state":"provider-secret"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}, secrets: []string{"provider-secret"}, wantErr: "[REDACTED]", forbidError: "provider-secret"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.body != "" {
+					w.Header().Set("Content-Type", "application/json")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+
+			policy := tc.policy
+			_, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
+				toolName: "policy_probe",
+				method:   http.MethodPost,
+				url:      server.URL,
+				timeout:  time.Second,
+				client:   server.Client(),
+				secrets:  tc.secrets,
+				success:  &policy,
+			})
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("executePreparedActivityHTTPTool: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("executePreparedActivityHTTPTool error = %v, want containing %q", err, tc.wantErr)
+			}
+			if tc.forbidError != "" && strings.Contains(err.Error(), tc.forbidError) {
+				t.Fatalf("executePreparedActivityHTTPTool error leaked %q: %v", tc.forbidError, err)
+			}
+		})
 	}
 }
 
@@ -368,6 +427,88 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	}
 	if got, want := bus.publishes[1].ID(), bus.publishes[0].ID(); got != want {
 		t.Fatalf("duplicate result id = %q, want canonical journaled id %q", got, want)
+	}
+}
+
+func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
+	ctx := context.Background()
+	artifacts, err := providerconnectors.GenerateCatalog(os.DirFS("../../providerconnectors"))
+	if err != nil {
+		t.Fatalf("GenerateCatalog: %v", err)
+	}
+	var tool runtimecontracts.ToolSchemaEntry
+	for _, artifact := range artifacts {
+		if artifact.Manifest.Provider == "acme" {
+			tool = artifact.Manifest.Tools["acme.create_widget"]
+			break
+		}
+	}
+	if tool.HTTP == nil {
+		t.Fatal("generated synthetic connector acme.create_widget is missing")
+	}
+
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if got := r.URL.Path; got != "/accounts/account-7/widgets" {
+			t.Fatalf("request path = %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer acme-secret" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if got := body["name"]; got != "proof widget" {
+			t.Fatalf("request name = %#v", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "widget-1"})
+	}))
+	defer server.Close()
+
+	httpSpec := *tool.HTTP
+	httpSpec.URL = strings.Replace(httpSpec.URL, "https://api.acme.test", server.URL, 1)
+	tool.HTTP = &httpSpec
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+		"acme.create_widget": tool,
+	}})
+	runID := uuid.NewString()
+	sourceEventID := uuid.NewString()
+	entityID := uuid.NewString()
+	db, store := newSQLiteActivityJournalStore(t, ctx)
+	seedActivityRun(t, db, true, runID)
+	bus := &recordingPipelineBus{}
+	pc := NewPipelineCoordinatorWithOptions(bus, db, PipelineCoordinatorOptions{
+		Module:        staticSemanticWorkflowModule{source: source},
+		WorkflowStore: store,
+		Credentials:   testActivityCredentialStore(t, "acme_api_key", "acme-secret"),
+	})
+	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
+	intent.Tool = "acme.create_widget"
+	intent.ActivityID = "acme_create_widget"
+	intent.Input = map[string]any{"account_id": "account-7", "name": "proof widget"}
+	request, err := activityRequestEmitIntent(intent)
+	if err != nil {
+		t.Fatalf("activityRequestEmitIntent: %v", err)
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		handled, err := pc.handleEventResult(ctx, request.Event)
+		if err != nil {
+			t.Fatalf("handleEventResult attempt %d: %v", attempt, err)
+		}
+		if !handled {
+			t.Fatalf("handleEventResult attempt %d handled = false", attempt)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("provider calls after replay = %d, want exactly one", calls)
+	}
+	if len(bus.publishes) != 2 || bus.publishes[0].ID() != bus.publishes[1].ID() {
+		t.Fatalf("journal replay publications = %#v, want same canonical result twice", bus.publishes)
 	}
 }
 
@@ -943,6 +1084,9 @@ func testTelegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry 
 		Credentials: []string{"telegram_bot_token"},
 		OutputSchema: runtimecontracts.ToolInputSchema{
 			Type: "object",
+		},
+		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+			Kind: "http_status_2xx",
 		},
 		HTTP: &runtimecontracts.HTTPToolSpec{
 			Method: "POST",

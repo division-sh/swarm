@@ -27,6 +27,8 @@ tools:
         - children
     output_schema:
       type: object
+    response_success:
+      kind: http_status_2xx
     http:
       method: PATCH
       url: https://api.notion.com/v1/blocks/{{input.block_id}}/children

@@ -123,7 +123,7 @@ func TestValidateSourceRejectsInstallationInputOnNonGitHubAppCredential(t *testi
 	}
 }
 
-func TestValidateSourceRejectsSlackPostMessageWithoutRequiredResponseSuccess(t *testing.T) {
+func TestValidateSourceRejectsConnectorWithoutResponseSuccess(t *testing.T) {
 	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
 	tool.ResponseSuccess = nil
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
@@ -134,14 +134,14 @@ func TestValidateSourceRejectsSlackPostMessageWithoutRequiredResponseSuccess(t *
 
 	errs := ValidateSource(source)
 	joined := joinErrors(errs)
-	if !strings.Contains(joined, "must declare response_success response.body.ok == true") {
-		t.Fatalf("ValidateSource errors = %q, want required Slack response_success rejection", joined)
+	if !strings.Contains(joined, "must declare exactly one response_success policy") {
+		t.Fatalf("ValidateSource errors = %q, want required response_success rejection", joined)
 	}
 }
 
 func TestValidateSourceRejectsMalformedProviderConnectorResponseSuccess(t *testing.T) {
 	tool := slackConnectorTool("https://slack.com/api/chat.postMessage")
-	tool.ResponseSuccess = &runtimecontracts.HTTPResponseSuccess{Path: "body.ok", Equals: true}
+	tool.ResponseSuccess = &runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "body.ok", Equals: true}
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"slack.post_message": tool,
@@ -652,6 +652,15 @@ func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
 		if len(surface.Requires) != 1 || surface.Requires[0].Kind != "managed_credential" || surface.Requires[0].Name != "github_app" || surface.Requires[0].Bound {
 			t.Fatalf("surface %s requirements = %#v, want unbound github_app managed credential", surface.ToolID, surface.Requires)
 		}
+		if surface.Generation == nil || surface.Generation.OperationID == "" || surface.Generation.SourcePath == "" || surface.Generation.ProfilePath != "catalog/generator-profiles/github.yaml" {
+			t.Fatalf("surface %s generation = %#v, want generated GitHub freshness evidence", surface.ToolID, surface.Generation)
+		}
+		if len(surface.Generation.Permissions) != 1 || surface.Generation.Permissions[0].ID != "issues:write" || surface.Generation.Permissions[0].Note == "" {
+			t.Fatalf("surface %s generation permissions = %#v", surface.ToolID, surface.Generation.Permissions)
+		}
+		if surface.Generation.FixtureStatus != GenerationFixturePassing || surface.Generation.ReviewStatus != GenerationReviewApproved {
+			t.Fatalf("surface %s generation status = %#v", surface.ToolID, surface.Generation)
+		}
 	}
 	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
 		if !seen[toolID] {
@@ -964,6 +973,9 @@ func telegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
 			Required: []string{"chat_id", "text"},
 		},
 		OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
+		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+			Kind: "http_status_2xx",
+		},
 		HTTP: &runtimecontracts.HTTPToolSpec{
 			Method: "POST",
 			URL:    strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage",
@@ -995,6 +1007,7 @@ func slackConnectorTool(url string) runtimecontracts.ToolSchemaEntry {
 		},
 		OutputSchema: runtimecontracts.ToolInputSchema{Type: "object"},
 		ResponseSuccess: &runtimecontracts.HTTPResponseSuccess{
+			Kind:   "json_field_equals",
 			Path:   "response.body.ok",
 			Equals: true,
 		},

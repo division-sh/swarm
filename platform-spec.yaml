@@ -6466,11 +6466,13 @@ tool_model:
         response_mapping: object — maps response body fields to tool output fields. If omitted, the entire response body is
           returned as the tool result.
         response_success: >
-          object — optional provider success predicate evaluated after a 2xx HTTP response is parsed and before the tool
-          result is accepted. Fields: path is a response-rooted dotted path such as `response.body.ok`; equals is the
-          expected scalar value. Missing paths or unequal values fail closed. This is not response mapping and does not shape
-          output; it only prevents providers that encode failure inside HTTP 2xx bodies from being journaled as successful
-          calls.
+          object — optional closed provider success predicate evaluated after the HTTP response is parsed and before the
+          tool result is accepted. `kind` is required and is exactly `http_status_2xx` or `json_field_equals`.
+          `http_status_2xx` forbids `path` and `equals`. `json_field_equals` requires a syntactically valid
+          response-rooted path such as `response.body.ok` plus a scalar string, boolean, or numeric `equals` value.
+          Missing paths, malformed paths, unsupported kinds, non-scalar expected values, or unequal values fail closed.
+          This is not response mapping and does not shape output; it only prevents unsuccessful provider responses from
+          being accepted or journaled as successful calls.
         credentials: list of strings — credential store key names this tool needs. The platform resolves them from the credential
           store at call time and makes them available as {{credentials.key}} in templates.
         managed_credential: >
@@ -6495,6 +6497,15 @@ tool_model:
         rate_limit: string — optional external dispatch rate limit, format N/period.
         rate_limit_max_wait: string — required when rate_limit is present; maximum per-call admission wait before
           returning typed rate_limited.
+    response_success_owner:
+      canonical_owner: internal/runtime/httpresponsesuccess
+      semantics: >
+        The owner exclusively performs closed-kind validation, response-envelope path lookup, scalar/numeric equality,
+        provider-failure construction, and credential-value redaction. Direct HTTP execution in internal/runtime/tools
+        and activity HTTP execution in internal/runtime/pipeline construct the same response envelope and consume this
+        owner. They MUST NOT retain independent kind switches, path interpreters, equality/coercion helpers, or failure
+        formatters. Transport status handling, managed-token refresh, dispatch admission, and activity journaling remain
+        execution-surface concerns rather than response-success semantics.
     template_resolution:
       description: Template variables in url, headers, body, and response_mapping are resolved at tool call time. URL
         template resolution is context-aware and performs URL-component percent-encoding for embedded substitutions;
@@ -6564,9 +6575,7 @@ tool_model:
       - "`handler_type` MUST resolve to `http` and include an `http` block with explicit `method` and `url`."
       - "`effect_class` MUST be `non_idempotent_write`."
       - "exactly one credential mode MUST be declared: either static credential keys under `credentials` or one managed credential handle under `managed_credential`."
-      - "If the provider can return HTTP 2xx for provider-level failure, the connector MUST declare `response_success` so the activity journal does not record that provider failure as success."
-      known_response_success_requirements:
-      - "Slack Web API `slack.post_message` MUST declare `response_success.path: response.body.ok` and `response_success.equals: true` whether authored locally or imported from the Slack connector pack."
+      - "Every provider connector MUST declare exactly one closed `response_success` policy. Ordinary HTTP-status APIs declare `kind: http_status_2xx`; APIs that encode provider failure inside HTTP 2xx declare `kind: json_field_equals` with explicit path and expected scalar data. No provider/action-specific Go completeness switch is authoritative."
       forbidden:
       - "declaring both static `credentials` and `managed_credential`; dual auth ownership is forbidden."
       - "`response_mapping`; connector response mapping is split until specified."
@@ -6611,6 +6620,54 @@ tool_model:
         credential is unavailable, unconnected, pending, refresh_failed, scope-insufficient, unsupported, or unbound.
         Duplicate/redelivered activity requests with an existing activity_attempts row must reuse the journaled result
         before resolving managed credentials and MUST NOT refresh or dispatch again.
+    generated_catalog_first_slice:
+      description: >
+        The first OpenAPI-to-connector-pack transform proof generates exactly the three GitHub issue/comment/label write
+        tools proven by the prior supported surface plus one test-only synthetic Acme write tool. GitHub generated output
+        replaces the live handwritten connector body at the same pack path and preserves the stable tool ids
+        `github.create_issue_comment`, `github.create_issue`, and `github.add_labels_to_issue`. The synthetic pack uses the
+        identical source/profile/generator/evidence/conformance path but is not part of the ambient builtin runtime registry.
+      generator_owner: >
+        `internal/providerconnectors.GenerateCatalog` plus `cmd/swarm-openapi-gen` is the deterministic transform owner.
+        `--check` regenerates in memory and requires exact checked-in connector.yaml and pack.yaml bytes plus passing
+        conformance bindings. The transform uses a strict selected-subtree JSON decoder and MUST NOT add a tolerant OpenAPI
+        parser dependency or fetch provider documents from the network in CI.
+      source_owner: >
+        Each profile names checked-in OpenAPI bytes, compression (`none` or `gzip`), exact decompressed SHA-256,
+        OpenAPI version, and server. Hash/version/server mismatch fails before operation lowering. Moving provider aliases or
+        live provider responses are not merge-bearing generation input.
+      profile_owner: >
+        Strict known-field files under `internal/providerconnectors/catalog/generator-profiles` are the reviewed semantic
+        source for the selected operation id/path/method, stable published tool id, canonical body variant, required fields,
+        injected inputs, credential mode, permissions, non-idempotent effect class, response-success policy, output shape,
+        fixture identity/status, and review status. These trust-bearing and product-narrowing fields have no inferred
+        defaults. Unsupported OpenAPI forms, ambiguous variants, missing selected local parameter refs, unbound path
+        parameters, missing 2xx declarations, unknown selected-operation fields, or profile/source disagreement fail closed.
+      generated_identity_owner: >
+        Strict versioned `internal/providerconnectors/catalog/generated-packs.yaml` independently classifies each generated
+        pack by pack id, provider, exact profile path, kind, and output. It is consumed before builtin connector admission.
+        Duplicate ids, duplicate profile bindings, duplicate outputs, unknown builtin ids, provider/profile mismatch,
+        unindexed generator profiles, or builtin bodies carrying generated evidence without index identity fail closed.
+        Indexed generated packs MUST carry matching generation evidence; removing that evidence and recomputing the exact
+        pack manifest hash does not downgrade the pack to handwritten status.
+      evidence_chain: >
+        Generated connector bodies carry schema/generator versions, exact source path/version/hash, exact profile path/
+        schema/hash, and one operation record per generated tool. Each operation binds operation id, tool id, reviewed
+        permissions, response-success policy, fixture id/status, and review status. The operation/tool sets must be equal,
+        and the pack envelope binds the exact generated connector bytes by manifest_hash. Generated readback exposes these
+        non-secret provenance/freshness facts, including reviewed permission ids/notes, but never credential values.
+      conformance_owner: >
+        Strict fixtures under `internal/providerconnectors/catalog/conformance` are keyed by provider + operation id + tool
+        id and bind source/profile/manifest hashes, fixture/review status, exact resolved request method/URL/headers/body,
+        and response-success policy. Missing, duplicate, stale, malformed, or unreferenced fixtures fail the generator
+        check. The synthetic write additionally executes through the normal HTTP activity path and proves replay reuses the
+        canonical activity_attempt result without a second provider dispatch.
+      non_goals:
+      - read-only provider connector admission
+      - external connector-pack directories or marketplace publication
+      - full GitHub API generation or broad OpenAPI normalization
+      - provider rate-limit or generic error-taxonomy expansion
+      - provider-specific generator or runtime branches
   credential_store:
     description: Secure storage for API keys, tokens, and other credentials referenced by MCP servers and HTTP tools. The
       platform provides a typed interface with a layered resolution model.
@@ -7178,7 +7235,10 @@ tool_model:
     http_fields:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
-      response_success: object — optional response-rooted success predicate, evaluated before accepting a 2xx HTTP result
+      response_success: >
+        object — optional closed response-success policy for ordinary HTTP tools and mandatory for provider connectors.
+        `kind` is exactly `http_status_2xx` or `json_field_equals`; the latter also requires a valid response-rooted `path`
+        and scalar `equals` value. See tool_model.http_tool_definition.response_success_owner.
       credentials: list of strings — credential store keys
       managed_credential: object — managed OAuth/token credential reference; supported only for handler_type http
       rate_limit: string — optional external dispatch admission rate, supported only when handler_type resolves to http.

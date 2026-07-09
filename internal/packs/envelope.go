@@ -63,8 +63,8 @@ type CanCapabilities struct {
 }
 
 type Requires struct {
-	Secrets            []string `yaml:"secrets" json:"secrets"`
-	ManagedCredentials []string `yaml:"managed_credentials" json:"managed_credentials"`
+	Secrets            []string `yaml:"secrets,omitempty" json:"secrets"`
+	ManagedCredentials []string `yaml:"managed_credentials,omitempty" json:"managed_credentials"`
 }
 
 type Loaded struct {

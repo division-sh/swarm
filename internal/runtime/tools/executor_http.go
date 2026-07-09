@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -77,7 +77,12 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 	if err != nil {
 		return nil, err
 	}
-	authSecrets := []string{}
+	authSecrets := make([]string, 0, len(credentials))
+	for _, value := range credentials {
+		if secret := strings.TrimSpace(asString(value)); secret != "" {
+			authSecrets = append(authSecrets, secret)
+		}
+	}
 	if managedAuth != nil {
 		if err := applyManagedCredentialHeader(headers, managedAuth, false); err != nil {
 			return nil, err
@@ -295,77 +300,13 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 			"body":    parsedBody,
 		},
 	}
-	if err := evaluateHTTPResponseSuccess(tool.Name, tool.ResponseSuccess, responseEnv, secrets); err != nil {
+	if err := httpresponsesuccess.Evaluate("http tool "+strings.TrimSpace(tool.Name), tool.ResponseSuccess, responseEnv, secrets); err != nil {
 		return nil, err
 	}
 	if len(tool.ResponseMapping) == 0 {
 		return parsedBody, nil
 	}
 	return resolveTemplateTree(tool.ResponseMapping, responseEnv)
-}
-
-func evaluateHTTPResponseSuccess(toolName string, check *runtimecontracts.HTTPResponseSuccess, responseEnv map[string]any, secrets []string) error {
-	if check == nil {
-		return nil
-	}
-	path := strings.TrimSpace(check.Path)
-	if path == "" {
-		return fmt.Errorf("http tool %s response_success.path is required", strings.TrimSpace(toolName))
-	}
-	got, err := lookupTemplatePath(responseEnv, path)
-	if err != nil {
-		return fmt.Errorf("http tool %s response_success path %q did not resolve", strings.TrimSpace(toolName), path)
-	}
-	if responseSuccessValuesEqual(got, check.Equals) {
-		return nil
-	}
-	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(
-		fmt.Sprintf("http tool %s response_success failed: %s = %s, want %s", strings.TrimSpace(toolName), path, asString(got), asString(check.Equals)),
-		secrets...,
-	))
-}
-
-func responseSuccessValuesEqual(got, want any) bool {
-	switch wantTyped := want.(type) {
-	case bool:
-		gotTyped, ok := got.(bool)
-		return ok && gotTyped == wantTyped
-	case string:
-		gotTyped, ok := got.(string)
-		return ok && gotTyped == wantTyped
-	case int:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	case int64:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	case float64:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == wantTyped
-	case float32:
-		gotFloat, ok := responseSuccessFloat(got)
-		return ok && gotFloat == float64(wantTyped)
-	default:
-		return fmt.Sprint(got) == fmt.Sprint(want)
-	}
-}
-
-func responseSuccessFloat(value any) (float64, bool) {
-	switch typed := value.(type) {
-	case int:
-		return float64(typed), true
-	case int64:
-		return float64(typed), true
-	case float64:
-		return typed, true
-	case float32:
-		return float64(typed), true
-	case json.Number:
-		parsed, err := typed.Float64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
 }
 
 func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
