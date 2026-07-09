@@ -85,6 +85,70 @@ func TestFanInStreamConformance_RoutesToSingletonAndKernelEnforcesWindowedDedup(
 	}
 }
 
+func TestFanInStreamConformance_EventIDDedupUsesEventIdentity(t *testing.T) {
+	ctx := context.Background()
+	source := templatefanin.LoadSource(t, templatefanin.Options{EventIDDedup: true})
+	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
+	if got := report.HardInvalidities(); len(got) != 0 {
+		t.Fatalf("fan-in stream event.id hard invalidities = %#v, want none", got)
+	}
+
+	store := &fanInStreamMemoryStore{}
+	eb, err := bus.NewEventBusWithOptions(store, bus.EventBusOptions{
+		ContractBundle: source,
+		TemplateInstanceActivator: func(context.Context, runtimepipeline.FlowInstanceActivationRequest) error {
+			t.Fatal("fan-in stream routes to an explicit singleton; template activation is not authoritative")
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	exec, err := runtimeengine.NewExecutor(runtimeengine.RuntimeDependencies{
+		Source:     source,
+		StateRepo:  fanOutPinRouteStateRepo{},
+		TxRunner:   fanOutPinRouteTxRunner{},
+		Locker:     fanOutPinRouteLocker{},
+		Outbox:     fanOutPinRouteOutbox{},
+		Dispatcher: fanOutPinRouteDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	handler, ok := source.NodeEventHandler(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	if !ok {
+		t.Fatalf("receiver handler %s/%s missing", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	}
+
+	state := runtimeengine.StateSnapshot{
+		EntityID:     "portfolio-entity",
+		CurrentState: "active",
+		StateCarrier: runtimeengine.NewStateCarrier(map[string]any{}, nil, nil),
+	}
+	target := events.RouteIdentity{
+		FlowID:       templatefanin.ReceiverFlowID,
+		FlowInstance: templatefanin.ReceiverFlowInstance,
+	}.Normalized()
+
+	first := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/a", "report-1", "2026-Q1", 100)
+	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, first, target)
+	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
+		t.Fatalf("Q1 accumulator items after first = %d, want 1", got)
+	}
+
+	sameEventDifferentPayloadKey := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id", "operating/b", "report-2", "2026-Q1", 200)
+	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, sameEventDifferentPayloadKey, target)
+	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 1 {
+		t.Fatalf("Q1 accumulator items after same event id = %d, want 1", got)
+	}
+
+	nextEvent := fanInStreamEvent(source.ResolveFlowEventReference(templatefanin.ProducerFlowID, templatefanin.ProducerEvent), "evt-fanin-event-id-2", "operating/c", "report-2", "2026-Q1", 300)
+	state = fanInStreamPublishAndExecute(t, ctx, eb, store, exec, handler, state, nextEvent, target)
+	if got := fanInStreamAccumulatorItemCount(t, state.StateCarrier.StateBuckets, "2026-Q1"); got != 2 {
+		t.Fatalf("Q1 accumulator items after distinct event id = %d, want 2", got)
+	}
+}
+
 type fanInStreamMemoryStore struct {
 	bus.InMemoryEventStore
 	events         map[string]events.Event

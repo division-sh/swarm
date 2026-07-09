@@ -241,12 +241,24 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 }
 
 func TestRun_AllowsFanInStreamInputResolution(t *testing.T) {
-	source := templatefanin.LoadSource(t, templatefanin.Options{})
+	tests := []struct {
+		name string
+		opts templatefanin.Options
+	}{
+		{name: "payload field dedup", opts: templatefanin.Options{}},
+		{name: "event id dedup", opts: templatefanin.Options{EventIDDedup: true}},
+	}
 
-	report := Run(context.Background(), source, Options{})
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := templatefanin.LoadSource(t, tc.opts)
 
-	if got := reportContains(report.Errors(), "composition_connect_validation", "fan-in"); got {
-		t.Fatalf("fan-in stream fixture composition_connect_validation errors = %#v, want none", report.Errors())
+			report := Run(context.Background(), source, Options{})
+
+			if got := reportContains(report.Errors(), "composition_connect_validation", "fan-in"); got {
+				t.Fatalf("fan-in stream fixture composition_connect_validation errors = %#v, want none", report.Errors())
+			}
+		})
 	}
 }
 
@@ -262,6 +274,7 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 		{name: "barrier remains unrunnable", opts: templatefanin.Options{BarrierAggregation: true}, want: "supports only aggregation: stream"},
 		{name: "missing singleton", opts: templatefanin.Options{MissingSingleton: true}, want: "requires explicit singleton"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, want: "must be the receiver singleton route or a child"},
+		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, want: "is not mode: singleton"},
 		{name: "accumulator dedup mismatch", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by"},
 		{name: "accumulator window mismatch", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window"},
 		{name: "wrong delivery", opts: templatefanin.Options{DeliveryMany: true}, want: "requires delivery one"},

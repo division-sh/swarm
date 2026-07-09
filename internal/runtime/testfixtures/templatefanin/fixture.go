@@ -32,6 +32,8 @@ type Options struct {
 	AccumulateWindowMismatch bool
 	DeliveryMany             bool
 	LegacyConnectMap         bool
+	EventIDDedup             bool
+	NonSingletonReceiver     bool
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -75,7 +77,7 @@ flows:
     mode: template
   - id: portfolio
     flow: portfolio/default
-    mode: singleton
+    mode: `+receiverPackageModeYAML(opts)+`
 connect:
   - from: operating.operating_reported
     to: portfolio.operating_reported
@@ -150,7 +152,7 @@ func writePortfolio(t testing.TB, root string, opts Options) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "flows", "portfolio", "default", "schema.yaml"), `
 name: portfolio
-mode: singleton
+mode: `+receiverSchemaModeYAML(opts)+`
 initial_state: active
 states: [active]
 pins:
@@ -231,7 +233,24 @@ func dedupYAML(opts Options) string {
 	if opts.DedupTuple {
 		return "          dedup_by: [payload.report_id, payload.operating_id]\n"
 	}
+	if opts.EventIDDedup {
+		return "          dedup_by: event.id\n"
+	}
 	return "          dedup_by: payload.report_id\n"
+}
+
+func receiverPackageModeYAML(opts Options) string {
+	if opts.NonSingletonReceiver {
+		return "static"
+	}
+	return "singleton"
+}
+
+func receiverSchemaModeYAML(opts Options) string {
+	if opts.NonSingletonReceiver {
+		return "static"
+	}
+	return "singleton"
 }
 
 func singletonYAML(opts Options) string {
@@ -254,6 +273,9 @@ func accumulateWindowYAML(opts Options) string {
 func accumulateDedupYAML(opts Options) string {
 	if opts.AccumulateDedupMismatch {
 		return "payload.operating_id"
+	}
+	if opts.EventIDDedup {
+		return "event.id"
 	}
 	return "payload.report_id"
 }

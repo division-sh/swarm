@@ -682,6 +682,13 @@ func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPacka
 	if resolution.Aggregation != "stream" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode fan-in supports only aggregation: stream in this slice, got %q", resolution.Aggregation)}
 	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "receiver singleton coordinator owner is unavailable for input pin resolution"}
+	}
+	if _, err := bundle.ResolveFlowSingletonCoordinator(receiverFlowID); err != nil {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: err.Error()}
+	}
 	window := strings.TrimSpace(resolution.Window)
 	if window == "" {
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode fan-in stream requires window"}
