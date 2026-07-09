@@ -68,12 +68,12 @@ func PlanChanged(repoRoot string, packages []Package, changedFiles []ChangedFile
 			plan.FullSuiteReasons = append(plan.FullSuiteReasons, fullSuiteReason(path))
 			continue
 		}
-		if isDocsOnlyPath(path) {
-			plan.UnownedFiles = append(plan.UnownedFiles, file)
-			continue
-		}
 		if pkg, ok := packageForChangedPath(normalized, path); ok {
 			seedImports[pkg.ImportPath] = true
+			continue
+		}
+		if isDocsOnlyPath(path) {
+			plan.UnownedFiles = append(plan.UnownedFiles, file)
 			continue
 		}
 		plan.UnownedFiles = append(plan.UnownedFiles, file)
@@ -204,7 +204,7 @@ func packageForChangedPath(packages []Package, path string) (Package, bool) {
 	}
 	for _, pkg := range packages {
 		if pkg.RelDir == "." {
-			if !strings.Contains(path, "/") {
+			if !isDocsOnlyPath(path) && !strings.Contains(path, "/") {
 				return pkg, true
 			}
 			continue
