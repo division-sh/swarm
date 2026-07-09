@@ -275,6 +275,8 @@ func TestRun_FailsClosedForInvalidFanInStreamInputResolution(t *testing.T) {
 		{name: "missing singleton", opts: templatefanin.Options{MissingSingleton: true}, want: "requires explicit singleton"},
 		{name: "wrong singleton", opts: templatefanin.Options{WrongSingleton: true}, want: "must be the receiver singleton route or a child"},
 		{name: "non-singleton receiver", opts: templatefanin.Options{NonSingletonReceiver: true}, want: "is not mode: singleton"},
+		{name: "missing receiver handler", opts: templatefanin.Options{MissingReceiverHandler: true}, want: "has no handler for fan-in input event operating.reported"},
+		{name: "missing accumulate", opts: templatefanin.Options{MissingAccumulate: true}, want: "for fan-in input must declare accumulate"},
 		{name: "accumulator dedup redeclaration", opts: templatefanin.Options{AccumulateDedupMismatch: true}, want: "accumulate.dedup_by \"payload.operating_id\" must not redeclare fan-in dedup_by"},
 		{name: "accumulator window redeclaration", opts: templatefanin.Options{AccumulateWindowMismatch: true}, want: "accumulate.window \"payload.operating_id\" must not redeclare fan-in window"},
 		{name: "wrong delivery", opts: templatefanin.Options{DeliveryMany: true}, want: "requires delivery one"},
