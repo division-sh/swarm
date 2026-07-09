@@ -6556,7 +6556,10 @@ tool_model:
         provider_connector profile, derives connector capabilities/requires mechanically from every tool declaration in
         deterministic tool-id order, and rejects any declared capability or requirement drift. Connector envelopes declare
         action capability truth as `capabilities.can.call_provider_actions`, a non-empty list of the exact packed tool ids;
-        the former scalar action form is non-authoritative.
+        the former scalar `capabilities.can.call_provider_action` form is retired and MUST fail closed under strict
+        envelope parsing rather than being accepted as a compatibility alias. External connector-pack directories remain a
+        later gated surface, so first-party connector packs are migrated aggressively before any external connector-pack
+        compatibility promise exists.
       capability_surface: >
         Connector pack CAN/CANNOT/readback is kind-specific. Connector CAN rows include calling the declared provider
         action or actions, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in

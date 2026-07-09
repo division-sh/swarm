@@ -754,6 +754,13 @@ func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
 			want: "field unexpected not found",
 		},
 		{
+			name: "retired scalar action capability",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.send_message", "call_provider_action: telegram.send_message")
+			},
+			want: "field call_provider_action not found",
+		},
+		{
 			name: "missing tests metadata",
 			mutate: func(t *testing.T, files fstest.MapFS) {
 				replaceConnectorPackFile(t, files, "pack.yaml", "tests:\n  - providerconnectors/telegram_pack\n  - runtime/telegram_connector_supported_surface\n", "tests: []\n")
