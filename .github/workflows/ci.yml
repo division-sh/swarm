@@ -7,60 +7,116 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
+
 jobs:
-  sqlite-local-dev:
+  ci-plan:
+    name: CI plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      shard_matrix: ${{ steps.plan.outputs.shard_matrix }}
+      run_full_conformance: ${{ steps.plan.outputs.run_full_conformance }}
+      test_count_flag: ${{ steps.plan.outputs.test_count_flag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
 
-      - name: Build swarm binary
-        run: go build ./cmd/swarm
-
-      - name: Build workspace image
-        run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
-
-      - name: Prove no-selector SQLite local run
+      - name: Plan test topology
+        id: plan
+        shell: bash
         run: |
-          payload=$(mktemp)
-          printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > "$payload"
-          ./swarm run start \
-            --contracts tests/tier1-primitives/test-emits-single \
-            --data "${{ github.workspace }}/data" \
-            --event item.received \
-            --payload "$payload" \
-            --api-port 18091
+          set -euo pipefail
+          mkdir -p test-results
+          go list ./... > test-results/go-packages.txt
+          awk '$0 != "github.com/division-sh/swarm/internal/runtime/cataloge2e" { print }' \
+            test-results/go-packages.txt > test-results/go-packages-required.txt
+          if [ ! -s test-results/go-packages-required.txt ]; then
+            echo "no non-catalog Go packages discovered"
+            exit 1
+          fi
 
-  test:
+          go run ./cmd/swarm-test-timing \
+            -check-shards \
+            -snapshot .github/test-shards/go-test-shards.json \
+            -packages test-results/go-packages-required.txt \
+            -shard-matrix test-results/shard-matrix.json
+
+          run_full=false
+          escalation_reason="none"
+          : > test-results/changed-files.txt
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            run_full=true
+            escalation_reason="full-truth event: ${{ github.event_name }}"
+          else
+            git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" \
+              "${{ github.event.pull_request.head.sha }}" | tee test-results/changed-files.txt
+            if grep -Eq '^(internal/runtime/cataloge2e/|internal/runtime/conformance/|internal/runtime/contracts/|tests/|platform-spec\.yaml$|\.github/workflows/|internal/testutil/)' test-results/changed-files.txt; then
+              run_full=true
+              escalation_reason="changed-path escalation"
+            fi
+          fi
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            test_count_flag=""
+          else
+            test_count_flag="-count=1"
+          fi
+
+          shard_matrix=$(cat test-results/shard-matrix.json)
+          echo "shard_matrix=${shard_matrix}" >> "$GITHUB_OUTPUT"
+          echo "run_full_conformance=${run_full}" >> "$GITHUB_OUTPUT"
+          echo "test_count_flag=${test_count_flag}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### CI plan"
+            echo
+            echo "- Event: \`${{ github.event_name }}\`"
+            echo "- PR common-path target: \`<=5m\`"
+            echo "- Broad shard count flag: \`${test_count_flag:-<cache-enabled default>}\`"
+            echo "- Full catalog/conformance: \`${run_full}\` (${escalation_reason})"
+            echo "- Changed-path escalation covers cataloge2e, conformance/contracts, tests, \`platform-spec.yaml\`, workflows, and \`internal/testutil\`."
+            echo "- Push-to-master full-truth failures use the #1899 revert-on-red playbook."
+            if [ -s test-results/changed-files.txt ]; then
+              echo
+              echo "Changed files considered for escalation:"
+              sed 's/^/- `/' test-results/changed-files.txt | sed 's/$/`/'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CI plan artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-plan
+          path: |
+            test-results/go-packages.txt
+            test-results/go-packages-required.txt
+            test-results/shard-matrix.json
+            test-results/changed-files.txt
+          if-no-files-found: warn
+
+  static-checks:
+    name: Static checks
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,41 +153,386 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Prove explicit Postgres opt-in selector
-        run: go test ./cmd/swarm -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction -count=1
+  sqlite-local-dev:
+    name: SQLite local smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Run tests
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build swarm binary
+        run: go build ./cmd/swarm
+
+      - name: Build workspace image
+        run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
+
+      - name: Prove no-selector SQLite local run
+        run: |
+          payload=$(mktemp)
+          printf '{"entity_id":"11111111-1111-4111-8111-111111111111"}\n' > "$payload"
+          ./swarm run start \
+            --contracts tests/tier1-primitives/test-emits-single \
+            --data "${{ github.workspace }}/data" \
+            --event item.received \
+            --payload "$payload" \
+            --api-port 18091
+
+  test-shard:
+    name: Go test shard ${{ matrix.shard }}
+    needs:
+      - ci-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.ci-plan.outputs.shard_matrix) }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Restore measured Go cache
+        id: go-cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-test-${{ runner.os }}-shard-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            go-test-${{ runner.os }}-shard-${{ matrix.shard }}-master-
+            go-test-${{ runner.os }}-shard-${{ matrix.shard }}-
+            go-test-${{ runner.os }}-
+
+      - name: Report cache restore economics
         shell: bash
         run: |
+          set -euo pipefail
+          {
+            echo "### Go cache restore shard ${{ matrix.shard }}"
+            echo
+            echo "- cache-hit: \`${{ steps.go-cache-restore.outputs.cache-hit }}\`"
+            echo "- matched-key: \`${{ steps.go-cache-restore.outputs.cache-matched-key }}\`"
+            echo "- primary-key: \`${{ steps.go-cache-restore.outputs.cache-primary-key }}\`"
+            echo "- GOCACHE: \`$(go env GOCACHE)\`"
+            echo "- GOPATH: \`$(go env GOPATH)\`"
+            du -sh "$(go env GOCACHE)" "$(go env GOPATH)/pkg/mod" 2>/dev/null | sed 's/^/- /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run shard tests
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p test-results
-          go list ./... > test-results/go-packages.txt
-          awk '$0 != "github.com/division-sh/swarm/internal/runtime/cataloge2e" { print }' test-results/go-packages.txt > test-results/go-packages-required.txt
-          if [ ! -s test-results/go-packages-required.txt ]; then
-            echo "no non-catalog Go packages discovered"
+          go run ./cmd/swarm-test-timing \
+            -snapshot .github/test-shards/go-test-shards.json \
+            -shard-packages "${{ matrix.shard }}" > test-results/shard-packages.txt
+          if [ ! -s test-results/shard-packages.txt ]; then
+            echo "no packages assigned to shard ${{ matrix.shard }}"
             exit 1
           fi
-          test_packages=$(cat test-results/go-packages-required.txt)
-          set +e
-          go test $test_packages -count=1 -json 2>&1 | tee test-results/go-test.json
-          package_status=${PIPESTATUS[0]}
-          go test ./internal/runtime/cataloge2e -run '^TestCatalogRequiredSmoke$' -count=1 -json 2>&1 | tee -a test-results/go-test.json
-          catalog_smoke_status=${PIPESTATUS[0]}
-          set -e
-          go run ./cmd/swarm-test-timing \
-            -input test-results/go-test.json \
-            -markdown test-results/go-test-timing.md
-          cat test-results/go-test-timing.md >> "$GITHUB_STEP_SUMMARY"
-          if [ "$package_status" -ne 0 ]; then
-            exit "$package_status"
-          fi
-          exit "$catalog_smoke_status"
 
-      - name: Upload test timing artifact
+          test_packages=$(cat test-results/shard-packages.txt)
+          count_flag="${{ needs.ci-plan.outputs.test_count_flag }}"
+          start_epoch=$(date +%s)
+          set +e
+          if [ -n "$count_flag" ]; then
+            go test $test_packages "$count_flag" -json 2>&1 | tee "test-results/go-test-shard-${{ matrix.shard }}.json"
+          else
+            go test $test_packages -json 2>&1 | tee "test-results/go-test-shard-${{ matrix.shard }}.json"
+          fi
+          status=${PIPESTATUS[0]}
+          set -e
+          elapsed=$(( $(date +%s) - start_epoch ))
+          echo "Shard ${{ matrix.shard }} elapsed ${elapsed}s" | tee "test-results/shard-${{ matrix.shard }}-elapsed.txt"
+          go run ./cmd/swarm-test-timing \
+            -input "test-results/go-test-shard-${{ matrix.shard }}.json" \
+            -markdown "test-results/go-test-shard-${{ matrix.shard }}-timing.md"
+          {
+            echo "### Shard ${{ matrix.shard }} timing"
+            echo
+            echo "- elapsed wall time: \`${elapsed}s\`"
+            echo "- count flag: \`${count_flag:-<cache-enabled default>}\`"
+            cat "test-results/go-test-shard-${{ matrix.shard }}-timing.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Save measured Go cache
+        if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-test-${{ runner.os }}-shard-${{ matrix.shard }}-${{ github.ref_name }}-${{ github.sha }}
+
+      - name: Upload shard timing artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: go-test-timing
+          name: go-test-shard-${{ matrix.shard }}-timing
           path: |
-            test-results/go-test.json
-            test-results/go-test-timing.md
+            test-results/shard-packages.txt
+            test-results/go-test-shard-${{ matrix.shard }}.json
+            test-results/go-test-shard-${{ matrix.shard }}-timing.md
+            test-results/shard-${{ matrix.shard }}-elapsed.txt
           if-no-files-found: warn
+
+  semantic-smoke:
+    name: Semantic smoke proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Prove explicit Postgres opt-in selector
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          go test ./cmd/swarm \
+            -run TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction \
+            -count=1 -json 2>&1 | tee test-results/semantic-smoke.json
+
+      - name: Prove catalog required smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          go test ./internal/runtime/cataloge2e \
+            -run '^TestCatalogRequiredSmoke$' \
+            -count=1 -json 2>&1 | tee -a test-results/semantic-smoke.json
+
+      - name: Report semantic smoke timing
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s test-results/semantic-smoke.json ]; then
+            echo "No semantic smoke timing was produced." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          go run ./cmd/swarm-test-timing \
+            -input test-results/semantic-smoke.json \
+            -markdown test-results/semantic-smoke-timing.md
+          cat test-results/semantic-smoke-timing.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload semantic smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semantic-smoke-timing
+          path: |
+            test-results/semantic-smoke.json
+            test-results/semantic-smoke-timing.md
+          if-no-files-found: warn
+
+  full-conformance:
+    name: Full catalog and conformance
+    if: needs.ci-plan.outputs.run_full_conformance == 'true'
+    needs:
+      - ci-plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run full catalog/conformance truth
+        shell: bash
+        run: |
+          set +e
+          mkdir -p test-results
+          SWARM_TOOL_GATEWAY_URL= \
+          SWARM_TOOL_GATEWAY_CONTAINER_URL= \
+          SWARM_TOOL_GATEWAY_TOKEN= \
+          go test \
+            ./internal/runtime/bus \
+            ./internal/runtime/pipeline \
+            ./internal/apiv1 \
+            ./cmd/swarm \
+            ./internal/dashboard/server \
+            ./internal/runtime/conformance \
+            ./internal/runtime/cataloge2e \
+            -count=1 -json 2>&1 | tee test-results/full-conformance.json
+          status=${PIPESTATUS[0]}
+          set -e
+          go run ./cmd/swarm-test-timing \
+            -input test-results/full-conformance.json \
+            -markdown test-results/full-conformance-timing.md
+          cat test-results/full-conformance-timing.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload full conformance artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-conformance-timing
+          path: |
+            test-results/full-conformance.json
+            test-results/full-conformance-timing.md
+          if-no-files-found: warn
+
+  nightly-extras:
+    name: Nightly Python and fork extras
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run nightly extras
+        shell: bash
+        run: |
+          set +e
+          mkdir -p test-results
+          go test \
+            ./internal/runtime/pythonmodule \
+            ./internal/runtime/runforkexecution \
+            -count=1 -json 2>&1 | tee test-results/nightly-extras.json
+          status=${PIPESTATUS[0]}
+          set -e
+          go run ./cmd/swarm-test-timing \
+            -input test-results/nightly-extras.json \
+            -markdown test-results/nightly-extras-timing.md
+          cat test-results/nightly-extras-timing.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Upload nightly extras artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-extras-timing
+          path: |
+            test-results/nightly-extras.json
+            test-results/nightly-extras-timing.md
+          if-no-files-found: warn
+
+  required-tests:
+    name: Required test summary
+    if: always()
+    needs:
+      - ci-plan
+      - static-checks
+      - sqlite-local-dev
+      - test-shard
+      - semantic-smoke
+      - full-conformance
+      - nightly-extras
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarize required checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          {
+            echo "### Required test summary"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          for item in \
+            "ci-plan:${{ needs.ci-plan.result }}" \
+            "static-checks:${{ needs.static-checks.result }}" \
+            "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
+            "test-shard:${{ needs.test-shard.result }}" \
+            "semantic-smoke:${{ needs.semantic-smoke.result }}" \
+            "full-conformance:${{ needs.full-conformance.result }}" \
+            "nightly-extras:${{ needs.nightly-extras.result }}"
+          do
+            name="${item%%:*}"
+            result="${item#*:}"
+            echo "- ${name}: \`${result}\`" >> "$GITHUB_STEP_SUMMARY"
+            case "$result" in
+              success|skipped)
+                ;;
+              *)
+                failed=1
+                ;;
+            esac
+          done
+          exit "$failed"
