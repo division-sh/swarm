@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
@@ -91,6 +92,8 @@ type executionFrame struct {
 	rule                      *runtimecontracts.HandlerRuleEntry
 	ruleSource                handlerRuleSource
 	payload                   map[string]any
+	accumulatorBucketRef      timeridentity.AccumulatorBucketRef
+	hasAccumulatorBucketRef   bool
 	topLevelDataAccumulation  runtimecontracts.WorkflowDataAccumulation
 	topLevelDataWritesApplied bool
 	ruleDataWritesApplied     bool
@@ -848,19 +851,12 @@ func (e *Executor) stepAccumulate(frame *executionFrame) (bool, error) {
 	frame.result.AccumulatorCompletionDiagnostics.OnCompleteDeclared = len(frame.req.Handler.OnComplete) > 0 || len(spec.OnComplete) > 0
 	frame.result.AccumulatorCompletionDiagnostics.EvaluationOutcome = AccumulatorCompletionEvaluationNotAttempted
 	current := e.currentContext(frame)
-	bucketRef := handlerAccumulatorBucketRef(frame.req)
-	if isAccumulationTimeoutEvent(frame.req.Event.Type()) {
-		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
-		if !ok || parsed.NodeID != frame.req.NodeID.String() {
-			return false, nil
-		}
-		bucketRef = parsed
-	} else {
-		var err error
-		bucketRef, err = handlerAccumulatorBucketRefForSpec(frame.req, current, frame.state, spec)
-		if err != nil {
-			return false, err
-		}
+	bucketRef, matched, err := e.resolveAccumulatorBucketRef(frame, spec)
+	if err != nil {
+		return false, err
+	}
+	if !matched {
+		return false, nil
 	}
 	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if !ok {
@@ -1041,9 +1037,12 @@ func (e *Executor) executeComputeSpec(frame *executionFrame, spec *runtimecontra
 	if spec == nil {
 		return nil
 	}
-	bucketRef, bucketErr := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, frame.req.Handler.Accumulate)
+	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, frame.req.Handler.Accumulate)
 	if bucketErr != nil {
 		return bucketErr
+	}
+	if !matched {
+		return nil
 	}
 	acc, _ := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	var (
@@ -1791,9 +1790,12 @@ func (e *Executor) stepProjection(frame *executionFrame) error {
 		}
 		return nil
 	}
-	bucketRef, bucketErr := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, frame.req.Handler.Accumulate)
+	bucketRef, matched, bucketErr := e.resolveAccumulatorBucketRef(frame, frame.req.Handler.Accumulate)
 	if bucketErr != nil {
 		return bucketErr
+	}
+	if !matched {
+		return nil
 	}
 	acc, ok := loadAccumulatorForBucket(frame.state.State, bucketRef)
 	if !ok {
@@ -1836,6 +1838,31 @@ func accumulatorProjectionEligible(frame *executionFrame) bool {
 	}
 	return frame.rule != nil &&
 		(frame.ruleSource == handlerRuleSourceOnComplete || frame.ruleSource == handlerRuleSourceAccumulateOnComplete)
+}
+
+func (e *Executor) resolveAccumulatorBucketRef(frame *executionFrame, spec *runtimecontracts.AccumulateSpec) (timeridentity.AccumulatorBucketRef, bool, error) {
+	if frame == nil {
+		return timeridentity.AccumulatorBucketRef{}, false, nil
+	}
+	if frame.hasAccumulatorBucketRef {
+		return frame.accumulatorBucketRef, true, nil
+	}
+	if isAccumulationTimeoutEvent(frame.req.Event.Type()) {
+		parsed, ok := accumulationTimeoutBucketRefFromPayload(frame.payload)
+		if !ok || parsed.NodeID != frame.req.NodeID.String() {
+			return timeridentity.AccumulatorBucketRef{}, false, nil
+		}
+		frame.accumulatorBucketRef = parsed
+		frame.hasAccumulatorBucketRef = true
+		return parsed, true, nil
+	}
+	bucketRef, err := handlerAccumulatorBucketRefForSpec(frame.req, e.currentContext(frame), frame.state, spec)
+	if err != nil {
+		return timeridentity.AccumulatorBucketRef{}, false, err
+	}
+	frame.accumulatorBucketRef = bucketRef
+	frame.hasAccumulatorBucketRef = true
+	return bucketRef, true, nil
 }
 
 func (e *Executor) projectAccumulatorItems(frame *executionFrame, binding accprojection.Binding, items []map[string]any) ([]any, error) {
