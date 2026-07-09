@@ -53,9 +53,10 @@
     },
     {
       "id": 4,
-      "weight": 132.00799999999992,
+      "weight": 133.00799999999992,
       "packages": [
         "github.com/division-sh/swarm/cmd/swarm-openrpc-gen",
+        "github.com/division-sh/swarm/cmd/swarm-test-changed",
         "github.com/division-sh/swarm/internal/dashboard/server",
         "github.com/division-sh/swarm/internal/events",
         "github.com/division-sh/swarm/internal/packs",
@@ -86,7 +87,7 @@
     },
     {
       "id": 5,
-      "weight": 132.0619999999999,
+      "weight": 133.0619999999999,
       "packages": [
         "github.com/division-sh/swarm/cmd/swarm-test-timing",
         "github.com/division-sh/swarm/internal/apispec",
@@ -116,7 +117,8 @@
         "github.com/division-sh/swarm/internal/runtime/workflowexpr",
         "github.com/division-sh/swarm/internal/runtime/workspace",
         "github.com/division-sh/swarm/internal/store",
-        "github.com/division-sh/swarm/internal/store/runlifecycle"
+        "github.com/division-sh/swarm/internal/store/runlifecycle",
+        "github.com/division-sh/swarm/internal/testchanged"
       ]
     },
     {
