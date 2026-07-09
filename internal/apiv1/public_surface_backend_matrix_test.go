@@ -438,6 +438,9 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			name: "mutating api ledger rejects stale issue ref",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.replay")
+				entry.Classification = "split_with_issue_ref"
+				entry.Backends = nil
+				entry.Scenario = ""
 				entry.SplitIssue = 999999
 				entry.ProofRefs = []publicSurfaceProofRef{
 					{Kind: "tracker", Issue: 999999, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
@@ -577,13 +580,22 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 		{
 			name: "mutating api ledger rejects transitive coverage over split method",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				covered := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "event.replay")
+				covered.Classification = "split_with_issue_ref"
+				covered.Backends = nil
+				covered.Scenario = ""
+				covered.SplitIssue = 1910
+				covered.ProofRefs = []publicSurfaceProofRef{
+					{Kind: "tracker", Issue: 1910, Watchlist: "runtime_operations.runtime_store_backend_default_and_sqlite_portability"},
+				}
+
 				entry := publicSurfaceMutatingLedgerEntryByMethod(t, matrix, "run.start")
 				entry.Classification = "covered_transitively"
 				entry.Backends = []string{"default_sqlite", "explicit_postgres"}
 				entry.CoveredByMethod = "event.replay"
-				entry.CoveredByScenario = "event_publish_dynamic_auto_emit_lifecycle"
+				entry.CoveredByScenario = "event_replay_live_agent_lifecycle"
 				entry.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "go_test", Name: "TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle"},
+					{Kind: "go_test", Name: "TestServedParityHarnessLiveAgentEventReplayLifecycle"},
 				}
 			},
 			want: "ledger method run.start covered_by_method event.replay classification = \"split_with_issue_ref\", want dual_backend_served_proof",
@@ -749,9 +761,6 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1239, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
 		problems = append(problems, "active_trackers missing #1239 runtime_store_backend_default_and_sqlite_portability")
 	}
-	if _, ok := activeTrackers[trackerKey(1910, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; !ok {
-		problems = append(problems, "active_trackers missing #1910 runtime_store_backend_default_and_sqlite_portability")
-	}
 	if _, ok := activeTrackers[trackerKey(1254, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1254 runtime_store_backend_default_and_sqlite_portability")
 	}
@@ -766,6 +775,9 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	}
 	if _, ok := activeTrackers[trackerKey(1386, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
 		problems = append(problems, "active_trackers must not include closed #1386 runtime_store_backend_default_and_sqlite_portability")
+	}
+	if _, ok := activeTrackers[trackerKey(1910, "runtime_operations.runtime_store_backend_default_and_sqlite_portability")]; ok {
+		problems = append(problems, "active_trackers must not include closed #1910 runtime_store_backend_default_and_sqlite_portability")
 	}
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")

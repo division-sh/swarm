@@ -461,25 +461,52 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 	if eventStore == nil {
 		return errors.New("event store is required for agent directive persistence")
 	}
+	if mutationRunner, ok := eventStore.(runtimebus.EventMutationRunner); ok && mutationRunner != nil {
+		return mutationRunner.RunEventMutation(eventCtx, func(mutation runtimebus.EventMutation) error {
+			mutationCtx := mutation.Context()
+			if err := mutation.AppendEvent(mutationCtx, evt); err != nil {
+				return err
+			}
+			if err := mutation.UpsertCommittedReplayScope(mutationCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+				return err
+			}
+			return mutation.UpsertPipelineReceipt(mutationCtx, evt.ID(), "processed", "")
+		})
+	}
 	if atomicStore, ok := eventStore.(runtimebus.AtomicEventReplayScopePersistence); ok && atomicStore != nil {
-		return atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect)
+		if err := atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+			return err
+		}
+		return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
 	}
 	if atomicStore, ok := eventStore.(runtimebus.AtomicEventPersistence); ok && atomicStore != nil {
 		if err := atomicStore.PersistEventWithDeliveries(eventCtx, evt, nil); err != nil {
 			return err
 		}
 		if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
-			return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect)
+			if err := scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+				return err
+			}
 		}
-		return nil
+		return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
 	}
 	if err := eventStore.AppendEvent(eventCtx, evt); err != nil {
 		return err
 	}
 	if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
-		return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect)
+		if err := scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
+			return err
+		}
 	}
-	return nil
+	return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
+}
+
+func markAgentDirectivePipelineReceipt(ctx context.Context, eventStore runtimebus.EventStore, eventID string) error {
+	receiptWriter, ok := eventStore.(runtimebus.PipelineReceiptPersistence)
+	if !ok || receiptWriter == nil {
+		return nil
+	}
+	return receiptWriter.UpsertPipelineReceipt(ctx, eventID, "processed", "")
 }
 
 func (am *AgentManager) Run(ctx context.Context) {
