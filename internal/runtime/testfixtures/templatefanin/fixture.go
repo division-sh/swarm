@@ -34,6 +34,8 @@ type Options struct {
 	LegacyConnectMap         bool
 	EventIDDedup             bool
 	NonSingletonReceiver     bool
+	MissingReceiverHandler   bool
+	MissingAccumulate        bool
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -199,13 +201,26 @@ portfolio-collector:
   id: portfolio-collector
   execution_type: system_node
   subscribes_to: [operating.reported]
-  event_handlers:
+`+receiverHandlersYAML(opts))
+}
+
+func receiverHandlersYAML(opts Options) string {
+	if opts.MissingReceiverHandler {
+		return "  event_handlers: {}\n"
+	}
+	if opts.MissingAccumulate {
+		return `  event_handlers:
+    operating.reported:
+      advances_to: active
+`
+	}
+	return `  event_handlers:
     operating.reported:
       accumulate:
         into: operating_reports
         from: payload
-`+accumulateWindowYAML(opts)+accumulateDedupYAML(opts)+`
-`)
+` + accumulateWindowYAML(opts) + accumulateDedupYAML(opts) + `
+`
 }
 
 func aggregationYAML(opts Options) string {
