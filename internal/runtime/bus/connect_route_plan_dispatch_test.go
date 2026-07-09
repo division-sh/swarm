@@ -153,10 +153,10 @@ func (s *connectRoutePlanConcurrentLifecycleStore) ListActiveFlowInstanceDescrip
 
 func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, descriptor := range s.flowInstances {
 		descriptor = descriptor.Normalized()
 		if descriptor.InstanceID == req.Instance.InstanceID || descriptor.FlowInstance == req.Instance.InstancePath {
-			s.mu.Unlock()
 			return errors.New("flow instance already exists")
 		}
 	}
@@ -169,7 +169,6 @@ func (s *connectRoutePlanConcurrentLifecycleStore) Activate(ctx context.Context,
 		AddressFields: connectRoutePlanActivationAddressFields(req.Metadata),
 	})
 	bus := s.bus
-	s.mu.Unlock()
 	if bus == nil {
 		return nil
 	}
