@@ -228,9 +228,10 @@ func TestMailboxListSendsV1RPCRequestAndRendersResult(t *testing.T) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
 	for _, want := range []string{
-		"MAILBOX_ID\tSTATUS\tPRIORITY\tTYPE",
-		"mailbox-1\tpending\thigh\treview_request\t-\tentity-1",
-		"mailbox-2\tdecided\tnormal\treview_request",
+		"MAILBOX_ID",
+		"mailbox-1   pending  high      review_request  -",
+		"entity-1",
+		"mailbox-2   decided  normal    review_request",
 		"next_cursor=cursor-2",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -264,7 +265,7 @@ func TestMailboxListDefaultsToPendingAndRendersEmptyResult(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, map[string]any{"status": "pending"}) {
 		t.Fatalf("params = %#v, want pending default", captured.Params)
 	}
-	if !strings.Contains(stdout.String(), "No mailbox items match the filter.") {
+	if !strings.Contains(stdout.String(), "No mailbox items match the current filters.") {
 		t.Fatalf("stdout = %q, want empty message", stdout.String())
 	}
 }

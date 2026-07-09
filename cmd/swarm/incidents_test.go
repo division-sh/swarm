@@ -91,7 +91,7 @@ func TestIncidentsOmitOptionalParamsWhenUnset(t *testing.T) {
 	if len(captured.Params) != 0 {
 		t.Fatalf("params = %#v, want empty map", captured.Params)
 	}
-	if !strings.Contains(stdout.String(), "No runtime incidents match the filter.") {
+	if !strings.Contains(stdout.String(), "No runtime incidents match the current filters.") {
 		t.Fatalf("stdout = %q, want empty-state text", stdout.String())
 	}
 }

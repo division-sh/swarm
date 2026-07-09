@@ -52,8 +52,10 @@ func TestAgentDeliveriesUsesAgentDeliveryLifecycleAndRendersRows(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Agent agent-1 deliveries",
-		"delivery: delivery_id=delivery-1 event_name=platform.agent_directive event_id=event-1 run_id=run-1 entity_id=entity-1 status=delivered delivery_created_at=2026-05-18T03:01:00Z delivery_started_at=2026-05-18T03:02:00Z delivery_delivered_at=2026-05-18T03:03:00Z retry_count=1 reason_code=- last_error=-",
-		"delivery: delivery_id=delivery-2 event_name=platform.agent_followup event_id=event-2 run_id=- entity_id=- status=pending delivery_created_at=2026-05-18T03:04:00Z delivery_started_at=- delivery_delivered_at=- retry_count=0 reason_code=queued last_error=waiting",
+		"DELIVERY_ID",
+		"delivery-1   platform.agent_directive",
+		"delivery-2   platform.agent_followup",
+		"queued       waiting",
 		"next_cursor=cursor-2",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -90,7 +92,7 @@ func TestAgentDeliveriesEmptyResult(t *testing.T) {
 		t.Fatalf("method = %q, want agent.delivery_lifecycle", captured.Method)
 	}
 	assertAgentDeliveriesParams(t, captured.Params, map[string]any{"agent_id": "agent-1"})
-	if !strings.Contains(stdout.String(), "No deliveries match the filter.") {
+	if !strings.Contains(stdout.String(), "No deliveries match the current filters.") {
 		t.Fatalf("stdout = %q, want empty result message", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "next_cursor=") {

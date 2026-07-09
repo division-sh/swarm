@@ -9,7 +9,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -499,10 +498,9 @@ func writeSecretsTable(out io.Writer, records []secretRecord) {
 	if out == nil {
 		return
 	}
-	writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "KEY\tSOURCE\tWRITABLE\tSHADOWED\tPRESENT\tUPDATED_AT\tREQUIRED_BY")
+	rows := make([][]string, 0, len(records))
 	for _, record := range records {
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			record.Key,
 			dash(record.Source),
 			yesNo(record.Writable),
@@ -510,9 +508,21 @@ func writeSecretsTable(out io.Writer, records []secretRecord) {
 			yesNo(record.Present),
 			dash(record.UpdatedAt),
 			dash(formatSecretRequirements(record.RequiredBy)),
-		)
+		})
 	}
-	_ = writer.Flush()
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "KEY", KeyColumn: true},
+			{Header: "SOURCE"},
+			{Header: "WRITABLE"},
+			{Header: "SHADOWED"},
+			{Header: "PRESENT"},
+			{Header: "UPDATED_AT"},
+			{Header: "REQUIRED_BY"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No secrets match the current filters. Add one: swarm secrets set <key>",
+	})
 }
 
 func formatSecretRequirements(items []secretRequirement) string {

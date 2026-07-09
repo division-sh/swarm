@@ -845,61 +845,71 @@ func writeEventListResult(out io.Writer, result eventListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Events) == 0 {
-		fmt.Fprintln(out, "No events match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "EVENT AT\tEVENT\tEVENT ID\tRUN\tENTITY\tDELIVERIES\tDEAD_LETTERS")
+	rows := make([][]string, 0, len(result.Events))
 	for _, event := range result.Events {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%d\t%d\n",
+		rows = append(rows, []string{
 			event.CreatedAt,
 			event.EventName,
 			event.EventID,
 			eventObservationDash(event.RunID),
 			eventObservationDash(event.EntityID),
-			len(event.Deliveries),
-			len(event.DeadLetters),
-		)
+			fmt.Sprintf("%d", len(event.Deliveries)),
+			fmt.Sprintf("%d", len(event.DeadLetters)),
+		})
 	}
+	footers := []string{}
 	if strings.TrimSpace(result.NextCursor) != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "EVENT AT"},
+			{Header: "EVENT"},
+			{Header: "EVENT ID", KeyColumn: true},
+			{Header: "RUN"},
+			{Header: "ENTITY"},
+			{Header: "DELIVERIES"},
+			{Header: "DEAD_LETTERS"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No events match the current filters. Publish one: swarm event publish <event>",
+		FooterLines:  footers,
+	})
 }
 
 func writeEventDetailResult(out io.Writer, event eventFull) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "Event %s\n", event.EventID)
-	fmt.Fprintf(out, "event_name=%s created_at=%s source=%s run_id=%s entity_id=%s source_event_id=%s\n",
-		event.EventName,
-		event.CreatedAt,
-		event.Source,
-		eventObservationDash(event.RunID),
-		eventObservationDash(event.EntityID),
-		eventObservationDash(event.SourceEventID),
+	writeCLITitle(out, fmt.Sprintf("Event %s", event.EventID))
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "event_name", Value: event.EventName},
+		cliDetailField{Key: "created_at", Value: event.CreatedAt},
+		cliDetailField{Key: "source", Value: event.Source},
+		cliDetailField{Key: "run_id", Value: eventObservationDash(event.RunID)},
+		cliDetailField{Key: "entity_id", Value: eventObservationDash(event.EntityID)},
+		cliDetailField{Key: "source_event_id", Value: eventObservationDash(event.SourceEventID)},
 	)
-	fmt.Fprintf(out, "payload=%s\n", eventObservationCompactJSON(event.Payload))
+	writeCLIFieldLine(out, cliDetailField{Key: "payload", Value: eventObservationCompactJSON(event.Payload)})
 	if len(event.Deliveries) == 0 {
 		fmt.Fprintln(out, "deliveries: none")
 	} else {
 		fmt.Fprintln(out, "deliveries:")
 		for _, delivery := range event.Deliveries {
-			fmt.Fprintf(out, "  delivery_id=%s subscriber=%s/%s status=%s session_id=%s created_at=%s started_at=%s finished_at=%s reason_code=%s last_error=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
-				delivery.DeliveryID,
-				delivery.SubscriberType,
-				delivery.SubscriberID,
-				delivery.Status,
-				eventObservationDash(delivery.SessionID),
-				eventObservationDash(delivery.CreatedAt),
-				eventObservationDash(delivery.StartedAt),
-				eventObservationDash(delivery.FinishedAt),
-				eventObservationDash(delivery.ReasonCode),
-				eventObservationDash(delivery.LastError),
-				*delivery.RetryCount,
-				*delivery.RetryEligible,
-				*delivery.Terminal,
-				len(delivery.DeadLetters),
+			writeCLIFieldLine(out,
+				cliDetailField{Key: "delivery_id", Value: delivery.DeliveryID},
+				cliDetailField{Key: "subscriber", Value: delivery.SubscriberType + "/" + delivery.SubscriberID},
+				cliDetailField{Key: "status", Value: delivery.Status},
+				cliDetailField{Key: "session_id", Value: eventObservationDash(delivery.SessionID)},
+				cliDetailField{Key: "created_at", Value: eventObservationDash(delivery.CreatedAt)},
+				cliDetailField{Key: "started_at", Value: eventObservationDash(delivery.StartedAt)},
+				cliDetailField{Key: "finished_at", Value: eventObservationDash(delivery.FinishedAt)},
+				cliDetailField{Key: "reason_code", Value: eventObservationDash(delivery.ReasonCode)},
+				cliDetailField{Key: "last_error", Value: eventObservationDash(delivery.LastError)},
+				cliDetailField{Key: "retry_count", Value: fmt.Sprintf("%d", *delivery.RetryCount)},
+				cliDetailField{Key: "retry_eligible", Value: fmt.Sprintf("%t", *delivery.RetryEligible)},
+				cliDetailField{Key: "terminal", Value: fmt.Sprintf("%t", *delivery.Terminal)},
+				cliDetailField{Key: "dead_letters", Value: fmt.Sprintf("%d", len(delivery.DeadLetters))},
 			)
 			for _, deadLetter := range delivery.DeadLetters {
 				writeEventDeadLetterLine(out, "    delivery_dead_letter", deadLetter)
@@ -917,15 +927,18 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 }
 
 func writeEventDeadLetterLine(out io.Writer, prefix string, deadLetter eventDeadLetter) {
-	fmt.Fprintf(out, "%s dead_letter_id=%s failure_type=%s retry_count=%d chain_depth=%d created_at=%s handler_node=%s error=%s\n",
-		prefix,
-		deadLetter.DeadLetterID,
-		deadLetter.FailureType,
-		*deadLetter.RetryCount,
-		*deadLetter.ChainDepth,
-		deadLetter.CreatedAt,
-		eventObservationDash(deadLetter.HandlerNode),
-		eventObservationDash(deadLetter.ErrorMessage),
+	label := strings.TrimSpace(prefix)
+	if label == "" {
+		label = "dead_letter"
+	}
+	writeCLIFieldLine(out,
+		cliDetailField{Key: label + ".dead_letter_id", Value: deadLetter.DeadLetterID},
+		cliDetailField{Key: label + ".failure_type", Value: deadLetter.FailureType},
+		cliDetailField{Key: label + ".retry_count", Value: fmt.Sprintf("%d", *deadLetter.RetryCount)},
+		cliDetailField{Key: label + ".chain_depth", Value: fmt.Sprintf("%d", *deadLetter.ChainDepth)},
+		cliDetailField{Key: label + ".created_at", Value: deadLetter.CreatedAt},
+		cliDetailField{Key: label + ".handler_node", Value: eventObservationDash(deadLetter.HandlerNode)},
+		cliDetailField{Key: label + ".error", Value: eventObservationDash(deadLetter.ErrorMessage)},
 	)
 }
 

@@ -6,7 +6,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-	"text/tabwriter"
 	"time"
 
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -444,10 +443,9 @@ func writeConnectionsTable(out io.Writer, records []connectionRecord) {
 	if out == nil {
 		return
 	}
-	writer := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "KEY\tPROVIDER\tACCOUNT\tGRANT\tGRANT_MODEL\tTOKEN_REQUEST\tSTATUS\tEXPIRES_AT\tREQUIRED_BY")
+	rows := make([][]string, 0, len(records))
 	for _, record := range records {
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			record.Key,
 			dash(record.Provider),
 			dash(record.Account),
@@ -457,9 +455,23 @@ func writeConnectionsTable(out io.Writer, records []connectionRecord) {
 			dash(record.Status),
 			dash(record.ExpiresAt),
 			dash(formatConnectionRequirements(record.RequiredBy)),
-		)
+		})
 	}
-	_ = writer.Flush()
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "KEY", KeyColumn: true},
+			{Header: "PROVIDER"},
+			{Header: "ACCOUNT"},
+			{Header: "GRANT"},
+			{Header: "GRANT_MODEL"},
+			{Header: "TOKEN_REQUEST"},
+			{Header: "STATUS"},
+			{Header: "EXPIRES_AT"},
+			{Header: "REQUIRED_BY"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No managed connections match the current filters. Add one: swarm connections connect <key>",
+	})
 }
 
 func formatConnectionRequirements(items []connectionRequirement) string {

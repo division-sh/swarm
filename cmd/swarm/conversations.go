@@ -604,26 +604,38 @@ func writeConversationListResult(out io.Writer, result conversationListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Conversations) == 0 {
-		fmt.Fprintln(out, "No conversations match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "SESSION_ID\tAGENT\tRUN\tSTATUS\tTURNS\tMESSAGES\tSTARTED\tENDED")
+	rows := make([][]string, 0, len(result.Conversations))
 	for _, item := range result.Conversations {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n",
+		rows = append(rows, []string{
 			item.SessionID,
 			item.AgentID,
 			conversationDash(item.RunID),
 			item.Status,
-			item.TurnCount,
-			item.MessageCount,
+			fmt.Sprintf("%d", item.TurnCount),
+			fmt.Sprintf("%d", item.MessageCount),
 			item.StartedAt,
 			conversationDash(item.EndedAt),
-		)
+		})
 	}
+	footers := []string{}
 	if strings.TrimSpace(result.NextCursor) != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "SESSION_ID", KeyColumn: true},
+			{Header: "AGENT"},
+			{Header: "RUN"},
+			{Header: "STATUS"},
+			{Header: "TURNS"},
+			{Header: "MESSAGES"},
+			{Header: "STARTED"},
+			{Header: "ENDED"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No conversations match the current filters.",
+		FooterLines:  footers,
+	})
 }
 
 func writeConversationDetailResult(out io.Writer, result conversationDetail) {
@@ -631,32 +643,41 @@ func writeConversationDetailResult(out io.Writer, result conversationDetail) {
 		return
 	}
 	item := result.Conversation
-	fmt.Fprintf(out, "Conversation %s\n", item.SessionID)
-	fmt.Fprintf(out, "agent_id=%s run_id=%s status=%s turns=%d messages=%d started_at=%s ended_at=%s\n",
-		item.AgentID,
-		conversationDash(item.RunID),
-		item.Status,
-		item.TurnCount,
-		item.MessageCount,
-		item.StartedAt,
-		conversationDash(item.EndedAt),
+	writeCLITitle(out, fmt.Sprintf("Conversation %s", item.SessionID))
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "agent_id", Value: item.AgentID},
+		cliDetailField{Key: "run_id", Value: conversationDash(item.RunID)},
+		cliDetailField{Key: "status", Value: item.Status},
+		cliDetailField{Key: "turns", Value: fmt.Sprintf("%d", item.TurnCount)},
+		cliDetailField{Key: "messages", Value: fmt.Sprintf("%d", item.MessageCount)},
+		cliDetailField{Key: "started_at", Value: item.StartedAt},
+		cliDetailField{Key: "ended_at", Value: conversationDash(item.EndedAt)},
 	)
-	if len(result.Turns) == 0 {
-		fmt.Fprintln(out, "No turns recorded.")
-		return
-	}
-	fmt.Fprintln(out, "TURN\tTURN_ID\tEVENT_ID\tEVENT_TYPE\tPARSE_OK\tLATENCY_MS\tERROR")
+	rows := make([][]string, 0, len(result.Turns))
 	for _, turn := range result.Turns {
-		fmt.Fprintf(out, "%d\t%s\t%s\t%s\t%t\t%d\t%s\n",
-			turn.TurnIndex,
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", turn.TurnIndex),
 			turn.TurnID,
 			turn.TriggerEventID,
 			turn.TriggerEventType,
-			*turn.ParseOK,
-			*turn.LatencyMS,
+			fmt.Sprintf("%t", *turn.ParseOK),
+			fmt.Sprintf("%d", *turn.LatencyMS),
 			conversationDash(turn.Error),
-		)
+		})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "TURN"},
+			{Header: "TURN_ID", KeyColumn: true},
+			{Header: "EVENT_ID", KeyColumn: true},
+			{Header: "EVENT_TYPE"},
+			{Header: "PARSE_OK"},
+			{Header: "LATENCY_MS"},
+			{Header: "ERROR", Truncatable: true},
+		},
+		Rows:         rows,
+		EmptyMessage: "No turns recorded.",
+	})
 }
 
 func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDetail) {
@@ -665,34 +686,34 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 	}
 	session := result.Session
 	turn := result.Turn
-	fmt.Fprintf(out, "Conversation %s turn %d\n", session.SessionID, turn.TurnIndex)
-	fmt.Fprintf(out, "turn_id=%s agent_id=%s run_id=%s status=%s started_at=%s completed_at=%s duration_ms=%d parse_ok=%t outcome=%s error=%s\n",
-		turn.TurnID,
-		session.AgentID,
-		conversationDash(session.RunID),
-		session.Status,
-		turn.StartedAt,
-		turn.CompletedAt,
-		*turn.DurationMS,
-		*turn.ParseOK,
-		conversationDash(turn.Outcome),
-		conversationDash(turn.Error),
+	writeCLITitle(out, fmt.Sprintf("Conversation %s turn %d", session.SessionID, turn.TurnIndex))
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "turn_id", Value: turn.TurnID},
+		cliDetailField{Key: "agent_id", Value: session.AgentID},
+		cliDetailField{Key: "run_id", Value: conversationDash(session.RunID)},
+		cliDetailField{Key: "status", Value: session.Status},
+		cliDetailField{Key: "started_at", Value: turn.StartedAt},
+		cliDetailField{Key: "completed_at", Value: turn.CompletedAt},
+		cliDetailField{Key: "duration_ms", Value: fmt.Sprintf("%d", *turn.DurationMS)},
+		cliDetailField{Key: "parse_ok", Value: fmt.Sprintf("%t", *turn.ParseOK)},
+		cliDetailField{Key: "outcome", Value: conversationDash(turn.Outcome)},
+		cliDetailField{Key: "error", Value: conversationDash(turn.Error)},
 	)
 	dispatch := turn.DispatchMetadata
-	fmt.Fprintf(out, "dispatch trigger_event_id=%s trigger_event_type=%s entity_id=%s task_id=%s run_id=%s\n",
-		conversationDash(dispatch.TriggerEventID),
-		conversationDash(dispatch.TriggerEventType),
-		conversationDash(dispatch.EntityID),
-		conversationDash(dispatch.TaskID),
-		conversationDash(dispatch.RunID),
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "dispatch.trigger_event_id", Value: conversationDash(dispatch.TriggerEventID)},
+		cliDetailField{Key: "dispatch.trigger_event_type", Value: conversationDash(dispatch.TriggerEventType)},
+		cliDetailField{Key: "dispatch.entity_id", Value: conversationDash(dispatch.EntityID)},
+		cliDetailField{Key: "dispatch.task_id", Value: conversationDash(dispatch.TaskID)},
+		cliDetailField{Key: "dispatch.run_id", Value: conversationDash(dispatch.RunID)},
 	)
-	fmt.Fprintf(out, "advertised_tools=%s runtime_log_entries=%d turn_blocks_raw=%s\n",
-		conversationListDash(turn.AdvertisedTools),
-		len(turn.RuntimeLogEntries),
-		conversationCompactJSON(result.TurnBlocksRaw),
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "advertised_tools", Value: conversationListDash(turn.AdvertisedTools)},
+		cliDetailField{Key: "runtime_log_entries", Value: fmt.Sprintf("%d", len(turn.RuntimeLogEntries))},
+		cliDetailField{Key: "turn_blocks_raw", Value: conversationCompactJSON(result.TurnBlocksRaw)},
 	)
 	if strings.TrimSpace(turn.AssistantVisibleOutput) != "" {
-		fmt.Fprintf(out, "assistant_visible_output=%s\n", strings.TrimSpace(turn.AssistantVisibleOutput))
+		writeCLIFieldLine(out, cliDetailField{Key: "assistant_visible_output", Value: strings.TrimSpace(turn.AssistantVisibleOutput)})
 	}
 	if len(turn.RuntimeLogEntries) > 0 {
 		fmt.Fprintln(out, "Runtime logs:")

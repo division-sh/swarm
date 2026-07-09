@@ -824,13 +824,9 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Agents) == 0 {
-		fmt.Fprintln(out, "No agents match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "AGENT_ID\tROLE\tTYPE\tSTATUS\tMODEL\tMODE\tSCOPE")
+	rows := make([][]string, 0, len(result.Agents))
 	for _, agent := range result.Agents {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			agent.AgentID,
 			agent.Role,
 			agent.Type,
@@ -838,38 +834,68 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			agent.Model,
 			agent.Mode,
 			agent.SessionScope,
-		)
+		})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "AGENT_ID", KeyColumn: true},
+			{Header: "ROLE"},
+			{Header: "TYPE"},
+			{Header: "STATUS"},
+			{Header: "MODEL"},
+			{Header: "MODE"},
+			{Header: "SCOPE"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No agents match the current filters.",
+	})
 }
 
 func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLifecycleListResult) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "Agent %s deliveries\n", result.AgentID)
-	if len(result.Deliveries) == 0 {
-		fmt.Fprintln(out, "No deliveries match the filter.")
-	} else {
-		for _, delivery := range result.Deliveries {
-			fmt.Fprintf(out, "delivery: delivery_id=%s event_name=%s event_id=%s run_id=%s entity_id=%s status=%s delivery_created_at=%s delivery_started_at=%s delivery_delivered_at=%s retry_count=%d reason_code=%s last_error=%s\n",
-				delivery.DeliveryID,
-				delivery.EventName,
-				delivery.EventID,
-				agentOptionalStringDash(delivery.RunID),
-				agentOptionalStringDash(delivery.EntityID),
-				delivery.Status,
-				delivery.DeliveryCreatedAt,
-				agentOptionalStringDash(delivery.DeliveryStartedAt),
-				agentOptionalStringDash(delivery.DeliveryDeliveredAt),
-				*delivery.RetryCount,
-				agentDash(delivery.ReasonCode),
-				agentDash(delivery.LastError),
-			)
-		}
+	writeCLITitle(out, fmt.Sprintf("Agent %s deliveries", result.AgentID))
+	rows := make([][]string, 0, len(result.Deliveries))
+	for _, delivery := range result.Deliveries {
+		rows = append(rows, []string{
+			delivery.DeliveryID,
+			delivery.EventName,
+			delivery.EventID,
+			agentOptionalStringDash(delivery.RunID),
+			agentOptionalStringDash(delivery.EntityID),
+			delivery.Status,
+			delivery.DeliveryCreatedAt,
+			agentOptionalStringDash(delivery.DeliveryStartedAt),
+			agentOptionalStringDash(delivery.DeliveryDeliveredAt),
+			fmt.Sprintf("%d", *delivery.RetryCount),
+			agentDash(delivery.ReasonCode),
+			agentDash(delivery.LastError),
+		})
 	}
+	footers := []string{}
 	if result.NextCursor != nil {
-		fmt.Fprintf(out, "next_cursor=%s\n", strings.TrimSpace(*result.NextCursor))
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", strings.TrimSpace(*result.NextCursor)))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "DELIVERY_ID", KeyColumn: true},
+			{Header: "EVENT"},
+			{Header: "EVENT_ID", KeyColumn: true},
+			{Header: "RUN"},
+			{Header: "ENTITY"},
+			{Header: "STATUS"},
+			{Header: "DELIVERY_CREATED_AT"},
+			{Header: "DELIVERY_STARTED_AT"},
+			{Header: "DELIVERY_DELIVERED_AT"},
+			{Header: "RETRY_COUNT"},
+			{Header: "REASON_CODE"},
+			{Header: "LAST_ERROR", Truncatable: true},
+		},
+		Rows:         rows,
+		EmptyMessage: "No deliveries match the current filters.",
+		FooterLines:  footers,
+	})
 }
 
 func writeAgentDiagnosisResult(out io.Writer, result agentDiagnosisResult) {

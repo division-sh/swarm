@@ -34,7 +34,7 @@ func TestContextListCommandSwarmDirFlagBypassesBrokenConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "no contexts found") {
+	if !strings.Contains(out.String(), "No contexts found.") {
 		t.Fatalf("output = %q, want empty registry", out.String())
 	}
 }
@@ -49,7 +49,7 @@ func TestContextListCommandSurfacesZeroEntryRegistryFailure(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
 	}
-	if !strings.Contains(out.String(), "no contexts found") {
+	if !strings.Contains(out.String(), "No contexts found.") {
 		t.Fatalf("output = %q, want empty-list marker", out.String())
 	}
 	if !strings.Contains(out.String(), "registry_status: invalid_descriptor") || !strings.Contains(out.String(), "detail:") {

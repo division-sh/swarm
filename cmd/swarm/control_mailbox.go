@@ -639,13 +639,9 @@ func writeMailboxListResult(out io.Writer, result mailboxListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Items) == 0 {
-		fmt.Fprintln(out, "No mailbox items match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "MAILBOX_ID\tSTATUS\tPRIORITY\tTYPE\tSOURCE_EVENT\tENTITY\tCREATED\tDECISION")
+	rows := make([][]string, 0, len(result.Items))
 	for _, item := range result.Items {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			item.MailboxID,
 			item.Status,
 			item.Priority,
@@ -654,11 +650,27 @@ func writeMailboxListResult(out io.Writer, result mailboxListResult) {
 			mailboxDash(item.SourceEntityID),
 			item.CreatedAt,
 			mailboxDash(item.Decision),
-		)
+		})
 	}
+	footers := []string{}
 	if result.NextCursor != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "MAILBOX_ID", KeyColumn: true},
+			{Header: "STATUS"},
+			{Header: "PRIORITY"},
+			{Header: "TYPE"},
+			{Header: "SOURCE_EVENT", KeyColumn: true},
+			{Header: "ENTITY", KeyColumn: true},
+			{Header: "CREATED"},
+			{Header: "DECISION"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No mailbox items match the current filters.",
+		FooterLines:  footers,
+	})
 }
 
 func writeMailboxDetailResult(out io.Writer, result mailboxDetailResult) {
@@ -666,16 +678,23 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailResult) {
 		return
 	}
 	item := result.Item
-	fmt.Fprintf(out, "Mailbox %s\n", item.MailboxID)
-	fmt.Fprintf(out, "status=%s priority=%s type=%s\n", item.Status, item.Priority, item.Type)
-	fmt.Fprintf(out, "source_event_id=%s source_flow=%s source_entity_id=%s created_at=%s\n",
-		mailboxDash(item.SourceEventID),
-		item.SourceFlow,
-		mailboxDash(item.SourceEntityID),
-		item.CreatedAt,
+	writeCLITitle(out, fmt.Sprintf("Mailbox %s", item.MailboxID))
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "status", Value: item.Status},
+		cliDetailField{Key: "priority", Value: item.Priority},
+		cliDetailField{Key: "type", Value: item.Type},
+	)
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "source_event_id", Value: mailboxDash(item.SourceEventID)},
+		cliDetailField{Key: "source_flow", Value: item.SourceFlow},
+		cliDetailField{Key: "source_entity_id", Value: mailboxDash(item.SourceEntityID)},
+		cliDetailField{Key: "created_at", Value: item.CreatedAt},
 	)
 	if item.Decision != "" || item.DecidedAt != "" {
-		fmt.Fprintf(out, "decision=%s decided_at=%s\n", mailboxDash(item.Decision), mailboxDash(item.DecidedAt))
+		writeCLIFieldLine(out,
+			cliDetailField{Key: "decision", Value: mailboxDash(item.Decision)},
+			cliDetailField{Key: "decided_at", Value: mailboxDash(item.DecidedAt)},
+		)
 	}
 	writeMailboxDecisionSheet(out, *result.DecisionSheet)
 	writeMailboxObject(out, "payload", result.Payload)

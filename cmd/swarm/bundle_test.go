@@ -58,9 +58,9 @@ func TestBundleCommandsUseCanonicalRPCAndRender(t *testing.T) {
 		args       []string
 		wantStdout []string
 	}{
-		{args: []string{"bundle", "list", "--limit", "2", "--cursor", "bundle-cursor-1"}, wantStdout: []string{"bundle " + bundleHash, "agents=2", "next_cursor=bundle-cursor-2"}},
+		{args: []string{"bundle", "list", "--limit", "2", "--cursor", "bundle-cursor-1"}, wantStdout: []string{bundleHash, "AGENTS", "2", "next_cursor=bundle-cursor-2"}},
 		{args: []string{"bundle", "show", bundleHash}, wantStdout: []string{"Bundle " + bundleHash, "content_yaml:", "agents:"}},
-		{args: []string{"bundle", "agents", bundleHash}, wantStdout: []string{"agent agent-alpha", "role=researcher", "model=regular", "subscriptions=scan.requested"}},
+		{args: []string{"bundle", "agents", bundleHash}, wantStdout: []string{"AGENT", "agent-alpha", "researcher", "regular", "scan.requested"}},
 	}
 	for _, command := range commands {
 		var stdout, stderr bytes.Buffer
