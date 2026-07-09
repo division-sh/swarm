@@ -260,10 +260,14 @@ func fullSuiteReason(path string) string {
 }
 
 func isDocsOnlyPath(path string) bool {
-	if strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".txt") {
+	path = cleanRel(path)
+	if strings.HasPrefix(path, "docs/") {
 		return true
 	}
-	return strings.HasPrefix(path, "docs/")
+	if strings.Contains(path, "/") {
+		return false
+	}
+	return strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".txt")
 }
 
 func sortPackages(packages []Package) {
