@@ -45,6 +45,7 @@
         "github.com/division-sh/swarm/internal/runtime/runstalled",
         "github.com/division-sh/swarm/internal/runtime/startupownership",
         "github.com/division-sh/swarm/internal/runtime/testfixtures/sealedpackage",
+        "github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin",
         "github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate",
         "github.com/division-sh/swarm/internal/store/backendselection",
         "github.com/division-sh/swarm/internal/testtiming"
