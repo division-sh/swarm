@@ -548,7 +548,7 @@ func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *
 			if !sqliteConfigured {
 				t.Fatalf("sqlite selected operator-read capability %s nil while postgres wires it; wire SQLite or classify explicitly: %s", entry.Name, entry.Reason)
 			}
-		case "split_with_issue_ref", "different_semantic_concept_with_proof":
+		case "split_with_issue_ref", "different_semantic_concept_with_proof", "postgres_only_with_spec_ref":
 			if entry.Issue == 0 {
 				t.Fatalf("selected operator-read construction capability %s classification %s missing issue", entry.Name, entry.Classification)
 			}
@@ -587,11 +587,11 @@ func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadCo
 		{Name: "RunBundleContext", Classification: "wired_both", Reason: "served event.publish follow-up read context is required on both selected stores"},
 		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},
 		{Name: "BundleCatalog", Classification: "wired_both", Reason: "bundle.list/get/agents read owner was promoted by #1782/#1805"},
-		{Name: "BundleDelete", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "bundle.delete is a mutating/destructive bundle lifecycle capability, not operator-read parity"},
+		{Name: "BundleDelete", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "bundle.delete is a spec-classified Postgres-only mutating/destructive bundle lifecycle capability, not operator-read parity"},
 		{Name: "ConversationForks", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "conversation.fork_list/view now consume a read-only fork capability; SQLite read parity remains a local-dev parity split until a real SQLite read owner is promoted"},
-		{Name: "ConversationForkLifecycle", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "conversation.fork/fork_chat/fork_delete are mutating fork lifecycle capabilities split from operator-read parity"},
-		{Name: "RunForkAvailability", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "run.fork availability is a product/mutating lifecycle seam split from operator reads"},
-		{Name: "RunFork", Classification: "split_with_issue_ref", Issue: 1386, RequiresPostgresBaseline: true, Reason: "run.fork execution is a product/mutating lifecycle seam split from operator reads"},
+		{Name: "ConversationForkLifecycle", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "conversation.fork/fork_chat/fork_delete are spec-classified Postgres-only mutating fork lifecycle capabilities split from operator-read parity"},
+		{Name: "RunForkAvailability", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "run.fork availability is a spec-classified Postgres-only product/mutating lifecycle seam split from operator reads"},
+		{Name: "RunFork", Classification: "postgres_only_with_spec_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "run.fork execution is a spec-classified Postgres-only product/mutating lifecycle seam split from operator reads"},
 		{Name: "RuntimeContexts", Classification: "split_with_issue_ref", Issue: 1239, Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},
 		{Name: "ResetCoordinator", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset coordinator remains split from operator-read parity"},
 		{Name: "ResetQuiescer", Classification: "split_with_issue_ref", Issue: 1239, RequiresPostgresBaseline: true, Reason: "destructive reset quiescer remains split from operator-read parity"},

@@ -4486,6 +4486,49 @@ engine:
       scope: >
         SQLite exposes persisted local-runtime event, delivery, session, turn, and log rows through the same API read owner.
         Cursor-rich production read semantics remain Postgres-owned unless separately promoted for SQLite.
+    optional_public_mutating_backend_support:
+      owner: selectedRuntimeStoreFacade optional_product_capabilities plus apiv1.OperatorReadOptions method assembly
+      rule: >
+        Public mutating methods whose required selected optional product capability is absent for SQLite MUST remain
+        fail-closed on SQLite through normal /v1/rpc method registration. Publishing a method in the public catalog does
+        not imply that every selected backend wires the method; backend support is declared by the selected capability
+        owner below. Producers and handlers must not infer support from backend identity, raw SQL handles, or method
+        catalog presence.
+      bundle_register:
+        method: bundle.register
+        selected_capability: BundleCatalog register writer capability
+        postgres_support: supported through the Postgres persisted bundle source catalog writer
+        sqlite_support: unsupported; SQLite wires the bundle catalog read capability only and must not expose bundle.register until a separately gated SQLite write owner exists
+      bundle_delete:
+        method: bundle.delete
+        selected_capability: BundleDelete
+        postgres_support: supported through the Postgres bundle delete coordinator and selected bundle catalog cleanup owners
+        sqlite_support: unsupported; SQLite omits the destructive bundle delete capability and must fail closed
+      run_fork:
+        method: run.fork
+        selected_capability: RunForkAvailability plus RunFork
+        postgres_support: supported through the selected-contract Postgres run-fork runtime owner
+        sqlite_support: unsupported; SQLite omits selected-contract run.fork runtime lifecycle mutation until separately promoted
+      runtime_nuke:
+        method: runtime.nuke
+        selected_capability: ResetCoordinator plus ResetQuiescer plus ResetCleaner plus ResetContainers
+        postgres_support: supported through the Postgres destructive reset owner chain
+        sqlite_support: unsupported; SQLite omits destructive reset cleanup/quiescence capabilities and must fail closed
+      conversation_fork:
+        method: conversation.fork
+        selected_capability: ConversationForkLifecycle
+        postgres_support: supported through the Postgres conversation fork lifecycle owner
+        sqlite_support: unsupported; SQLite may expose read-only conversation fork capability separately, but lifecycle mutation remains absent until separately promoted
+      conversation_fork_chat:
+        method: conversation.fork_chat
+        selected_capability: ConversationForkLifecycle plus ForkChatExecutor
+        postgres_support: supported through the Postgres conversation fork lifecycle owner with separately admitted fork-chat execution
+        sqlite_support: unsupported; SQLite omits conversation fork lifecycle mutation and must not enable fork chat through read capability wiring
+      conversation_fork_delete:
+        method: conversation.fork_delete
+        selected_capability: ConversationForkLifecycle
+        postgres_support: supported through the Postgres conversation fork lifecycle owner
+        sqlite_support: unsupported; SQLite omits conversation fork lifecycle deletion and must fail closed
     raw_sql_runtime_consumer_boundary_for_sqlite:
       runtime_sql_handle_for_sqlite: omitted
       rule: >
