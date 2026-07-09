@@ -174,6 +174,22 @@ func runGitHubAppIssueCommentSurface(t *testing.T, backend slackManagedConnector
 		t.Fatalf("%s comment requests after duplicate activity = %d, want still 1", backend.name, got)
 	}
 
+	publishGitHubIssueCommentFromSender(t, backend, bus, gateway, webhookPath, "gh-delivery-bot-1", "1001", "issue comment reply", "github-app[bot]", "Bot", http.StatusAccepted)
+	botInboundEventID := loadGitHubAppIssueCommentInboundEventID(t, backend, "gh-delivery-bot-1")
+	if got := countGitHubAppIssueCommentActivityAttemptsForSource(t, backend, botInboundEventID); got != 0 {
+		t.Fatalf("%s bot-authored inbound activity attempts = %d, want 0", backend.name, got)
+	}
+	fake.requireNoSideEffectCall(t, backend.name, "bot-authored issue_comment")
+	if got := countGitHubAppIssueCommentActivityAttempts(t, backend); got != 1 {
+		t.Fatalf("%s activity attempts after bot-authored issue_comment = %d, want still 1", backend.name, got)
+	}
+	if got := fake.tokenRequestCount(); got != 1 {
+		t.Fatalf("%s token requests after bot-authored issue_comment = %d, want still 1", backend.name, got)
+	}
+	if got := fake.commentRequestCount(); got != 1 {
+		t.Fatalf("%s comment requests after bot-authored issue_comment = %d, want still 1", backend.name, got)
+	}
+
 	assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t, backend, fake, "missing credential", "gh-delivery-2", "1001", runtimemanagedcredentials.NewMemoryStore())
 	mismatched := managedStoreRecordWithInstallation(privateKeyPEM, fake.server.URL, "1001")
 	assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t, backend, fake, "installation mismatch", "gh-delivery-3", "2002", runtimemanagedcredentials.NewMemoryStore(mismatched))
@@ -307,7 +323,12 @@ func publishGitHubIssueComment(t *testing.T, backend slackManagedConnectorBacken
 
 func publishGitHubIssueCommentExpectStatus(t *testing.T, backend slackManagedConnectorBackend, bus *runtimebus.EventBus, gateway *runtimepkg.InboundGateway, webhookPath, deliveryID, installationID, body string, wantStatus int) {
 	t.Helper()
-	payload := []byte(fmt.Sprintf(`{"action":"created","installation":{"id":%s},"repository":{"name":"octo-repo","owner":{"login":"octo-org"}},"issue":{"number":42},"comment":{"id":9001,"body":%q}}`, installationID, body))
+	publishGitHubIssueCommentFromSender(t, backend, bus, gateway, webhookPath, deliveryID, installationID, body, "octocat", "User", wantStatus)
+}
+
+func publishGitHubIssueCommentFromSender(t *testing.T, backend slackManagedConnectorBackend, bus *runtimebus.EventBus, gateway *runtimepkg.InboundGateway, webhookPath, deliveryID, installationID, body, senderLogin, senderType string, wantStatus int) {
+	t.Helper()
+	payload := []byte(fmt.Sprintf(`{"action":"created","installation":{"id":%s},"repository":{"name":"octo-repo","owner":{"login":"octo-org"}},"issue":{"number":42},"comment":{"id":9001,"body":%q,"user":{"login":%q,"type":%q}},"sender":{"login":%q,"type":%q}}`, installationID, body, senderLogin, senderType, senderLogin, senderType))
 	req := httptest.NewRequest(http.MethodPost, webhookPath, strings.NewReader(string(payload))).WithContext(backend.ctx)
 	req.Header.Set("X-Hub-Signature-256", githubWebhookSignature("github-webhook-secret", payload))
 	req.Header.Set("X-GitHub-Delivery", deliveryID)
@@ -323,6 +344,10 @@ func publishGitHubIssueCommentExpectStatus(t *testing.T, backend slackManagedCon
 func githubAppIssueCommentSource(t *testing.T, baseURL string) semanticview.Source {
 	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
+		Guard: &runtimecontracts.GuardSpec{
+			Check:  `payload.payload.comment.user.type != "Bot" && payload.payload.sender.type != "Bot"`,
+			OnFail: "discard",
+		},
 		Activity: runtimecontracts.ActivitySpec{
 			ID:   "github_create_issue_comment",
 			Tool: "github.create_issue_comment",

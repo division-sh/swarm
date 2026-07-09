@@ -6641,6 +6641,10 @@ tool_model:
       activity input populated from verified inbound GitHub event context. The deployment record stores the app/client id,
       installation id, API base URL, and RSA private key, and caches the returned installation access token until expiry.
       Runtime must fail closed when the inbound-selected installation id is absent or differs from the connected record.
+      Issue-comment bot-loop flows that consume `inbound.github.issue_comment` and call a GitHub App issue-comment
+      connector MUST guard app/bot-authored comments before activity lowering, using an `on_fail: discard` handler guard
+      or equivalent no-side-effect filter. Delivery-id dedupe alone is not sufficient because an app-authored response is a
+      separate GitHub webhook delivery with a new delivery id.
       Private keys, generated JWTs, installation tokens, webhook signing secrets, and provider errors containing those values
       are secret material and MUST NOT appear in events, logs, activity attempts, status, or readback. This grant family is
       not OAuth client_credentials, not a PAT/static bearer shortcut, and not a provider-specific connector dispatcher.
@@ -6666,9 +6670,9 @@ tool_model:
       declared requirement. Execution still fails closed even when boot warnings are non-fatal.
     redaction_guarantee: >
       Access tokens, refresh tokens, client secrets, authorization codes, PKCE verifier/state, GitHub App private keys,
-      generated JWTs, installation tokens, and provider errors containing those values MUST NOT be returned through logs,
-      events, dead letters, tool results, metadata, or CLI/API/status surfaces. Supported readback surfaces return only
-      redacted metadata and failure evidence.
+      generated JWTs, installation tokens, provider errors containing those values, and transport/proxy errors that echo
+      generated Authorization headers MUST NOT be returned through logs, events, dead letters, tool results, metadata, or
+      CLI/API/status surfaces. Supported readback surfaces return only redacted metadata and failure evidence.
   provider_trigger_adapters:
     description: >
       Source authority for first-class provider webhook triggers on top of the existing `inbound.webhook` gateway. The
