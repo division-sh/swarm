@@ -543,6 +543,60 @@ func TestTokenSourceGitHubAppInstallationExchangesJWTAndRequiresInstallationSele
 	}
 }
 
+func TestTokenSourceGitHubAppInstallationExchangeErrorRedactsGeneratedJWT(t *testing.T) {
+	ctx := context.Background()
+	privateKeyPEM, _ := testGitHubAppPrivateKey(t)
+	var rawAuth string
+	store := NewMemoryStore(Record{
+		Key:            "github_app",
+		Provider:       "github",
+		GrantType:      GrantGitHubAppInstallation,
+		APIBaseURL:     "https://api.github.test",
+		ClientID:       "github-app-client-id",
+		InstallationID: "1001",
+		PrivateKey:     privateKeyPEM,
+		GrantModel:     managedcredentialmodel.GrantModelInstallation,
+		AccessToken:    "expired-install-token",
+		Status:         StatusConnected,
+		ExpiresAt:      time.Now().Add(-time.Hour),
+	})
+	source := TokenSource{
+		Store: store,
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			rawAuth = r.Header.Get("Authorization")
+			return nil, errors.New("proxy captured Authorization=" + rawAuth)
+		})},
+	}
+	_, _, err := source.AccessToken(ctx, AccessTokenRequest{
+		Key:            "github_app",
+		GrantType:      GrantGitHubAppInstallation,
+		InstallationID: "1001",
+	})
+	if err == nil {
+		t.Fatal("AccessToken error = nil, want transport failure")
+	}
+	jwt := strings.TrimPrefix(rawAuth, "Bearer ")
+	if jwt == "" || jwt == rawAuth {
+		t.Fatalf("captured auth header = %q, want bearer GitHub App JWT", rawAuth)
+	}
+	if strings.Contains(err.Error(), jwt) || strings.Contains(err.Error(), rawAuth) {
+		t.Fatalf("AccessToken error leaked generated JWT: %v", err)
+	}
+	stored, ok, getErr := store.Get(ctx, "github_app")
+	if getErr != nil || !ok {
+		t.Fatalf("store.Get = (%#v, %v, %v)", stored, ok, getErr)
+	}
+	if strings.Contains(stored.Failure, jwt) || strings.Contains(stored.Failure, rawAuth) {
+		t.Fatalf("stored failure leaked generated JWT: %q", stored.Failure)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
 func TestTokenSourceRefreshUsesBasicJSONTokenRequestProfileAndRotatesRefreshToken(t *testing.T) {
 	ctx := context.Background()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

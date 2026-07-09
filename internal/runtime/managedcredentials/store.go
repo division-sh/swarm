@@ -635,7 +635,7 @@ func (s *TokenSource) exchangeGitHubAppInstallation(ctx context.Context, record 
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	resp, err := client.Do(req)
 	if err != nil {
-		return Record{}, err
+		return Record{}, fmt.Errorf("%s", RedactString(err.Error(), jwt))
 	}
 	defer resp.Body.Close()
 	var body struct {
