@@ -121,8 +121,8 @@ func ValidateShardSnapshot(snapshot ShardSnapshot, packages []string) (ShardVali
 	if snapshot.Version != ShardSnapshotVersion {
 		return ShardValidation{}, fmt.Errorf("unsupported shard snapshot version %d", snapshot.Version)
 	}
-	if snapshot.ShardCount != len(snapshot.Shards) {
-		return ShardValidation{}, fmt.Errorf("shard_count = %d, want %d shard entries", snapshot.ShardCount, len(snapshot.Shards))
+	if err := validateShardIDs(snapshot); err != nil {
+		return ShardValidation{}, err
 	}
 	expected, err := normalizePackageList(packages)
 	if err != nil {
@@ -135,9 +135,6 @@ func ValidateShardSnapshot(snapshot ShardSnapshot, packages []string) (ShardVali
 	seen := map[string]int{}
 	validation := ShardValidation{}
 	for _, shard := range snapshot.Shards {
-		if shard.ID <= 0 {
-			return ShardValidation{}, fmt.Errorf("shard id must be positive")
-		}
 		if validation.MaxWeight == 0 || shard.Weight > validation.MaxWeight {
 			validation.MaxWeight = shard.Weight
 		}
@@ -178,6 +175,9 @@ func ValidateShardSnapshot(snapshot ShardSnapshot, packages []string) (ShardVali
 }
 
 func ShardMatrixJSON(snapshot ShardSnapshot) ([]byte, error) {
+	if err := validateShardIDs(snapshot); err != nil {
+		return nil, err
+	}
 	type shardEntry struct {
 		Shard int `json:"shard"`
 	}
@@ -191,12 +191,40 @@ func ShardMatrixJSON(snapshot ShardSnapshot) ([]byte, error) {
 }
 
 func PackagesForShard(snapshot ShardSnapshot, shardID int) ([]string, error) {
+	if err := validateShardIDs(snapshot); err != nil {
+		return nil, err
+	}
 	for _, shard := range snapshot.Shards {
 		if shard.ID == shardID {
 			return append([]string(nil), shard.Packages...), nil
 		}
 	}
 	return nil, fmt.Errorf("shard %d not found", shardID)
+}
+
+func validateShardIDs(snapshot ShardSnapshot) error {
+	if snapshot.ShardCount != len(snapshot.Shards) {
+		return fmt.Errorf("shard_count = %d, want %d shard entries", snapshot.ShardCount, len(snapshot.Shards))
+	}
+	if snapshot.ShardCount <= 0 {
+		return fmt.Errorf("shard_count must be positive")
+	}
+	seen := make([]bool, snapshot.ShardCount+1)
+	for i, shard := range snapshot.Shards {
+		if shard.ID < 1 || shard.ID > snapshot.ShardCount {
+			return fmt.Errorf("shard entry %d has id %d, want 1..%d", i, shard.ID, snapshot.ShardCount)
+		}
+		if seen[shard.ID] {
+			return fmt.Errorf("duplicate shard id %d", shard.ID)
+		}
+		seen[shard.ID] = true
+	}
+	for id := 1; id <= snapshot.ShardCount; id++ {
+		if !seen[id] {
+			return fmt.Errorf("missing shard id %d", id)
+		}
+	}
+	return nil
 }
 
 func ReadPackageList(r io.Reader) ([]string, error) {

@@ -162,6 +162,59 @@ func TestValidateShardSnapshotRejectsMissingExtraAndDuplicatePackages(t *testing
 	}
 }
 
+func TestShardSnapshotConsumersRejectMalformedShardIDs(t *testing.T) {
+	packages := []string{
+		"github.com/division-sh/swarm/a",
+		"github.com/division-sh/swarm/b",
+	}
+	base := func() ShardSnapshot {
+		return ShardSnapshot{
+			Version:    ShardSnapshotVersion,
+			ShardCount: 2,
+			Shards: []PackageShard{
+				{ID: 1, Weight: 1, Packages: []string{"github.com/division-sh/swarm/a"}},
+				{ID: 2, Weight: 1, Packages: []string{"github.com/division-sh/swarm/b"}},
+			},
+		}
+	}
+	tests := []struct {
+		name string
+		edit func(*ShardSnapshot)
+		want string
+	}{
+		{
+			name: "duplicate id",
+			edit: func(snapshot *ShardSnapshot) {
+				snapshot.Shards[1].ID = 1
+			},
+			want: "duplicate shard id 1",
+		},
+		{
+			name: "non-contiguous id",
+			edit: func(snapshot *ShardSnapshot) {
+				snapshot.Shards[1].ID = 3
+			},
+			want: "want 1..2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snapshot := base()
+			tt.edit(&snapshot)
+			if _, err := ValidateShardSnapshot(snapshot, packages); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ValidateShardSnapshot error = %v, want containing %q", err, tt.want)
+			}
+			if _, err := ShardMatrixJSON(snapshot); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("ShardMatrixJSON error = %v, want containing %q", err, tt.want)
+			}
+			if _, err := PackagesForShard(snapshot, 1); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("PackagesForShard error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestShardMatrixJSONAndPackagesForShard(t *testing.T) {
 	snapshot := ShardSnapshot{
 		Version:    ShardSnapshotVersion,
