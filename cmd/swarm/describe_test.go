@@ -218,6 +218,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	var foundOpenedAdvance bool
 	var foundAccumulateComplete bool
 	var foundAccumulateTimeout bool
+	var foundTimedAdvance bool
 	for _, edge := range graph.Edges {
 		if edge.Source == "handler.advances_to" && edge.NodeID == "support-node" && edge.EventType == "ticket.opened" && edge.To == "active" {
 			foundOpenedAdvance = true
@@ -228,6 +229,9 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		if edge.Source == "handler.accumulate.on_timeout" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "timed_out" {
 			foundAccumulateTimeout = true
 		}
+		if edge.Source == "timer" && edge.TimerID == "active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
+			foundTimedAdvance = true
+		}
 	}
 	if !foundOpenedAdvance {
 		t.Fatalf("graph edges = %#v, want ticket.opened handler.advances_to edge to active", graph.Edges)
@@ -237,6 +241,12 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 	}
 	if !foundAccumulateTimeout {
 		t.Fatalf("graph edges = %#v, want ticket.closed handler.accumulate.on_timeout edge to timed_out", graph.Edges)
+	}
+	if !foundTimedAdvance {
+		t.Fatalf("graph edges = %#v, want stage timer edge to timed_out with delay", graph.Edges)
+	}
+	if len(graph.Timers) != 2 {
+		t.Fatalf("graph timers = %#v, want emit and advance stage timers", graph.Timers)
 	}
 
 	stdout.Reset()
@@ -258,6 +268,9 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"handler.advances_to support-node on ticket.opened",
 		"handler.accumulate.on_complete support-node on ticket.closed",
 		"handler.accumulate.on_timeout support-node on ticket.closed",
+		"timer runtime on timer:active.timed_out after 72h timer active.timed_out",
+		"active after 48h emit ticket.sla_escalated (timer active.ticket.sla_escalated)",
+		"active after 72h advances_to timed_out (timer active.timed_out)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)
@@ -353,7 +366,12 @@ name: support
 stages:
   waiting:
     initial: true
-  active: {}
+  active:
+    timers:
+      - after: 48h
+        emit: ticket.sla_escalated
+      - after: 72h
+        advances_to: timed_out
   review: {}
   timed_out: {}
   done:
@@ -370,6 +388,10 @@ ticket.opened:
 ticket.closed:
   swarm:
     source: external
+  entity_id: string
+ticket.sla_escalated:
+  swarm:
+    consumer: [operator]
   entity_id: string
 accumulate.timeout:
   swarm:

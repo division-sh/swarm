@@ -29,6 +29,9 @@ func ValidateConditionCEL(expression string, context WorkflowConditionContext) e
 	if normalized == "" {
 		return fmt.Errorf("workflow expression is empty")
 	}
+	if call := workflowConditionAmbientTimeCall(normalized); call != "" {
+		return fmt.Errorf("workflow expression uses ambient time call %s(); use stage timers for time-driven behavior", call)
+	}
 	env, err := celValidationEnv(context)
 	if err != nil {
 		return err
@@ -38,6 +41,32 @@ func ValidateConditionCEL(expression string, context WorkflowConditionContext) e
 		return issues.Err()
 	}
 	return nil
+}
+
+func workflowConditionAmbientTimeCall(expression string) string {
+	stripped := stripWorkflowExpressionStringLiterals(expression)
+	for _, name := range []string{"now", "timestamp"} {
+		for pos := 0; pos < len(stripped); {
+			idx := strings.Index(stripped[pos:], name)
+			if idx < 0 {
+				break
+			}
+			start := pos + idx
+			end := start + len(name)
+			pos = end
+			if start > 0 && isWorkflowConditionIdentifierPart(stripped[start-1]) {
+				continue
+			}
+			if end < len(stripped) && isWorkflowConditionIdentifierPart(stripped[end]) {
+				continue
+			}
+			next := skipWorkflowConditionWhitespace(stripped, end)
+			if next < len(stripped) && stripped[next] == '(' {
+				return name
+			}
+		}
+	}
+	return ""
 }
 
 func celValidationEnv(context WorkflowConditionContext) (*cel.Env, error) {

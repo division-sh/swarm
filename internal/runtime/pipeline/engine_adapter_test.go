@@ -3097,7 +3097,9 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 		TaskID:    "timer-1",
 	}
 
-	pc.persistWorkflowTimerSchedule(ctx, sc)
+	if err := pc.persistWorkflowTimerSchedule(ctx, sc); err != nil {
+		t.Fatalf("persistWorkflowTimerSchedule: %v", err)
+	}
 	if got := len(store.upserts); got != 1 {
 		t.Fatalf("persisted schedules = %d, want 1", got)
 	}
@@ -3114,7 +3116,9 @@ func TestPipelineEngineTimerApplierPersistsTimersAndDefersSchedulerToPostCommit(
 
 	cancelActions := make([]func(), 0, 1)
 	cancelCtx := withPipelinePostCommitActions(context.Background(), &cancelActions)
-	pc.persistWorkflowTimerCancellation(cancelCtx, sc)
+	if err := pc.persistWorkflowTimerCancellation(cancelCtx, sc); err != nil {
+		t.Fatalf("persistWorkflowTimerCancellation: %v", err)
+	}
 	if got := len(store.cancels); got != 1 {
 		t.Fatalf("persisted cancels = %d, want 1", got)
 	}

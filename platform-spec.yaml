@@ -237,6 +237,33 @@ contract_formats:
         `initial_state`, `states`, and `terminal_states` in the same schema.
         Legacy fields remain accepted as explicit legacy/kernel input until a
         later migration removes them from public authoring.
+      temporal_rows:
+        implementation_tracker: '#1846'
+        rule: >
+          A stage may declare one-shot temporal rows under
+          `stages.<stage>.timers`. Each row uses `after:` plus `emit:`,
+          `advances_to:`, or both. The timer arms when the entity enters the
+          owning stage and cancels when the entity leaves that stage. A row with
+          `advances_to` terminates the stage by lowering to the existing
+          transition-edge model; an emit-only row does not leave the stage. The
+          author does not write `interrupting`; the presence of `advances_to`
+          defines the stage-ending behavior.
+        syntax: |
+          stages:
+            awaiting_review:
+              timers:
+                - after: 48h
+                  emit: review.sla_escalated
+                - after: "{{marginal_park_days}}d"
+                  advances_to: expired
+        row_identity: >
+          `id:` is optional. When absent, the platform derives a stable ID from
+          `<stage>.<emit-event-or-advance-target>`. Duplicate derived IDs are a
+          boot error; authors must add explicit IDs to disambiguate collisions.
+        invalid_forms: >
+          Stage timer rows reject superseded spellings including `delay`,
+          `interrupting`, `repeat`, and `recurring`. Stage timer rows are
+          one-shot in this slice.
   entity_schema:
     description: |
       `package.yaml.entity_schema` is retired. Authoritative entity
@@ -3144,7 +3171,9 @@ handler_specification:
         description: string — human-readable description
         state_schema: map — fields the node persists per entity (accumulator state)
         state_table: string — table name for node state persistence
-        timers: list of timer declarations (see timer_model)
+        timers: legacy/kernel timer declarations (see timer_model). Staged lifecycle
+          timer authoring for flows using `stages:` is owned by
+          `stages.<stage>.timers`, not node-level state timers.
         gate_state: map — gate field definitions for this node (boolean flags on entity)
       effective_semantics:
         id: YAML map key, with same-value explicit id accepted during migration
@@ -5311,9 +5340,12 @@ engine:
           must satisfy the external tool-provider dispatch grammar. They do not make CLI native_tools.web_search valid.
   timer_model:
     description: Timers are durable delayed events. The platform schedules them and fires them as regular events entering
-      the event loop. Timers are declared in nodes.yaml.
+      the event loop. Canonical staged lifecycle timer authoring lives under `stages.<stage>.timers`; lower-level
+      node timers remain kernel/legacy declarations for non-staged or platform-owned schedules.
     declaration:
-      description: Timers are declared per system node in nodes.yaml.
+      description: >
+        Public staged lifecycle timers are declared as stage-resident rows in schema.yaml. Legacy/kernel timers are
+        declared per system node in nodes.yaml.
       fields:
         id: Unique timer name
         event: Event name to fire when timer expires (e.g., timer.scan_timeout)
@@ -5331,22 +5363,49 @@ engine:
       invalid_forms:
       - "Unprefixed trigger values are boot errors. The platform does not infer state-vs-event intent from bare strings."
       - "Prefixes other than state: and event: are boot errors."
+      stage_timer_authoring:
+        fields:
+          after: Canonical duration string or policy-rendered duration. The platform evaluates it once on stage entry
+            and persists the resulting fire_at.
+          emit: Optional event to emit when the timer fires.
+          advances_to: Optional target stage. Presence of this field lowers to a timed transition edge and ends the
+            source stage when the timer fires.
+          id: Optional stable row ID. If omitted, defaults to `<stage>.<emit-event-or-advance-target>`.
+        invalid_fields: [delay, interrupting, repeat, recurring]
     lifecycle:
-    - 1. Timer starts when the entity enters the start_on state, the start_on event fires, or start_on is boot and platform startup schedules it.
+    - 1. Timer starts when the entity enters the owning stage for stage timer rows, when the entity enters the
+      start_on state, when the start_on event fires, or when start_on is boot and platform startup schedules it.
     - 2. Platform renders the timer delay at start time and persists the timer. State/event timers persist run/entity or
       flow scope plus fire_at. Boot-start timers persist as global schedules with entity_id, flow_instance, and run_id NULL.
       Non-recurring boot timers persist a one-shot fire_at. Recurring boot timers persist the recurring schedule interval.
       Active timers keep the persisted fire_at or recurrence value; later policy/config changes do not rewrite already scheduled
       timers unless a separate explicit reschedule primitive is defined.
-    - 3. When fire_at is reached, platform emits the timer event into the event loop.
-    - 4. Timer event is a regular event — routed to subscribers, processed by handlers.
-    - 5. If cancel_on state is reached or cancel_on event fires before fire_at, timer is cancelled. cancel_on is invalid
-      for start_on boot timers until an explicit global cancellation primitive is specified.
-    - 6. Recurring timers restart after firing unless cancelled.
-    crash_recovery: Timers are persisted. On restart, platform checks for expired timers and fires them.
+    - 3. Stage timers cancel durably when the entity leaves the owning stage before fire_at. The schedule/cancel intent
+      is part of the same lifecycle mutation unit as the stage transition; persistence failure is fatal to the mutation.
+    - 4. When fire_at is reached, platform emits the timer event into the event loop. Advance-only stage timers use the
+      internal event `platform.stage_timer`; user-authored emit timers use their declared event and remain visible to
+      downstream consumers.
+    - 5. Timer event is a regular event for user-authored emit timers — routed to subscribers, processed by handlers.
+      For advance-only stage timers, the runtime consumes the internal event and applies the derived timed transition.
+    - 6. If cancel_on state is reached or cancel_on event fires before fire_at, a legacy/kernel timer is cancelled.
+      cancel_on is invalid for start_on boot timers until an explicit global cancellation primitive is specified.
+    - 7. Recurring timers restart after firing unless cancelled. Stage timer rows do not support repeat/recurring behavior
+      in this slice.
+    crash_recovery: >
+      Timers are persisted. On restart, platform checks for expired timers and fires them. Overdue stage timers fire late
+      by contract and record a typed runtime diagnostic including the timer ID, stage, and lateness instead of pretending
+      punctual delivery.
+    replay_and_fork: >
+      Replay and fork reconstruct stage timer facts from recorded timer state under the run/fork admission rules. Fired
+      and cancelled stage timers are not rescheduled as active work.
     boot_validation:
       start_on: start_on must match state:<name>, event:<name>, or boot. Any other form is a boot error.
       cancel_on: cancel_on must match state:<name> or event:<name>. boot is not valid.
+      stage_timers: >
+        Stage timer source and advances_to target must reference declared stages in the owning flow. The internal
+        `platform.stage_timer` event used for advance-only rows does not require authored event-catalog membership.
+        In a flow that declares `stages:`, node-level timers using `start_on: state:*` or `cancel_on: state:*` are
+        rejected as legacy staged authoring; use `stages.<stage>.timers`.
       boot_start: start_on boot creates a global startup schedule. Recurring and non-recurring boot timers are valid only
         when cancel_on is absent. A boot-start timer with cancel_on is a boot error because no entity/run-scoped cancellation
         context exists for that global schedule.
@@ -5366,9 +5425,10 @@ engine:
         cancel state from that activation state. Missing activation proof or any derived activation state with no
         post-activation path is a boot error. start_on boot state-cancel reachability is left to explicit boot-start
         scheduling semantics and is not closed by this rule.
-    example: "timers:\n  - id: sla_timeout\n    event: timer.sla_breach\n    delay: \"{{sla_timeout_hours}}h\"\
-      \n    start_on: state:assigned\n    cancel_on: state:resolved\n    recurring: false\n  - id: daily_report\n\
-      \    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\n    start_on: boot\n    recurring: true"
+    example: "stages:\n  awaiting_review:\n    timers:\n      - after: 48h\n        emit: review.sla_escalated\n\
+      \      - after: \"{{marginal_park_days}}d\"\n        advances_to: expired\n  expired:\n    terminal: true\n\
+      \n# Legacy/kernel timer example:\ntimers:\n  - id: daily_report\n    event: timer.daily_report\n    delay: \"{{report_interval_hours}}h\"\
+      \n    start_on: boot\n    recurring: true"
   expression_language:
     description: All guard checks, rule conditions, filter conditions, and on_complete branch conditions are evaluated using
       CEL (Common Expression Language). CEL is a non-Turing-complete, safe expression language designed for policy evaluation.
@@ -5381,6 +5441,9 @@ engine:
       policy: Policy values from flow policy.yaml merged with root policy.yaml
       fan_out: Available after fan_out step (e.g., fan_out.count)
       accumulated: Available inside on_complete after accumulation (list of received items)
+    ambient_time: >
+      CEL guard/rule/filter/on_complete conditions must not call ambient time functions such as `now()` or
+      `timestamp()`. Time-driven behavior is authored with stage timers so fire_at is evaluated once and persisted.
     supported_operators:
     - 'Comparison: ==, !=, <, <=, >, >='
     - 'Logical: &&, ||, !'

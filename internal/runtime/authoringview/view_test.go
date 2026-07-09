@@ -186,6 +186,71 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 	}
 }
 
+func TestBuildStageGraphShowsStageTimersAndTimedEdges(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			StageDeclarations: runtimecontracts.FlowStageDeclarations{
+				Declared: true,
+				Entries: []runtimecontracts.FlowStageDeclaration{
+					{ID: "awaiting_review", Initial: true},
+					{ID: "expired", Terminal: true},
+				},
+			},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{
+				{
+					ID:         "awaiting_review.review.sla_escalated",
+					Stage:      "awaiting_review",
+					Event:      "review.sla_escalated",
+					Owner:      "runtime",
+					StageOwned: true,
+					Delay:      "48h",
+					StartOn:    "state:awaiting_review",
+				},
+				{
+					ID:         "awaiting_review.expired",
+					Stage:      "awaiting_review",
+					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
+					Owner:      "runtime",
+					StageOwned: true,
+					AdvancesTo: "expired",
+					Delay:      "{{marginal_park_days}}d",
+					StartOn:    "state:awaiting_review",
+				},
+			},
+		},
+	}
+
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(view.StageGraphs) != 1 {
+		t.Fatalf("StageGraphs = %#v, want one root graph", view.StageGraphs)
+	}
+	graph := view.StageGraphs[0]
+	if len(graph.Timers) != 2 {
+		t.Fatalf("graph timers = %#v, want both stage timers including emit-only", graph.Timers)
+	}
+	if graph.Timers[0].TimerID != "awaiting_review.expired" && graph.Timers[1].TimerID != "awaiting_review.expired" {
+		t.Fatalf("graph timers = %#v, want advances_to timer visible", graph.Timers)
+	}
+	var timedEdge StageGraphEdgeView
+	for _, edge := range graph.Edges {
+		if edge.TimerID == "awaiting_review.expired" {
+			timedEdge = edge
+			break
+		}
+	}
+	if timedEdge.TimerID == "" {
+		t.Fatalf("graph edges = %#v, want timed transition edge", graph.Edges)
+	}
+	if !timedEdge.Timed || timedEdge.After != "{{marginal_park_days}}d" || timedEdge.To != "expired" {
+		t.Fatalf("timed edge = %#v, want after-labeled transition to expired", timedEdge)
+	}
+}
+
 func TestBuildShowsEffectiveAgentPlatformDefaultProvenance(t *testing.T) {
 	flow := runtimecontracts.FlowContractView{
 		Path: "analysis",

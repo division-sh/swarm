@@ -13,16 +13,32 @@ type FlowStageDeclarations struct {
 }
 
 type FlowStageDeclaration struct {
-	ID          string `yaml:"-"`
-	Initial     bool   `yaml:"initial"`
-	Terminal    bool   `yaml:"terminal"`
-	Description string `yaml:"description"`
+	ID          string                      `yaml:"-"`
+	Initial     bool                        `yaml:"initial"`
+	Terminal    bool                        `yaml:"terminal"`
+	Description string                      `yaml:"description"`
+	Timers      []FlowStageTimerDeclaration `yaml:"timers"`
+}
+
+type FlowStageTimerDeclaration struct {
+	ID         string `yaml:"id"`
+	After      string `yaml:"after"`
+	Emit       string `yaml:"emit"`
+	AdvancesTo string `yaml:"advances_to"`
 }
 
 var stageDeclarationFieldOptions = map[string]struct{}{
 	"initial":     {},
 	"terminal":    {},
 	"description": {},
+	"timers":      {},
+}
+
+var stageTimerFieldOptions = map[string]struct{}{
+	"id":          {},
+	"after":       {},
+	"emit":        {},
+	"advances_to": {},
 }
 
 func (d *FlowStageDeclarations) UnmarshalYAML(node *yaml.Node) error {
@@ -61,6 +77,9 @@ func (d *FlowStageDeclarations) UnmarshalYAML(node *yaml.Node) error {
 			return fmt.Errorf("stage %q: %w", key, err)
 		}
 		stage.ID = key
+		if err := stage.normalizeTimerIDs(); err != nil {
+			return fmt.Errorf("stage %q: %w", key, err)
+		}
 		out = append(out, stage)
 	}
 	d.Entries = out
@@ -95,6 +114,84 @@ func (s *FlowStageDeclaration) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*s = FlowStageDeclaration(aux)
 	return nil
+}
+
+func (t *FlowStageTimerDeclaration) UnmarshalYAML(node *yaml.Node) error {
+	if t == nil {
+		return nil
+	}
+	if node == nil || node.Kind == 0 {
+		*t = FlowStageTimerDeclaration{}
+		return nil
+	}
+	if node.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") {
+		*t = FlowStageTimerDeclaration{}
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return fmt.Errorf("stage timer declaration must be a mapping")
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := stageTimerFieldOptions[key]; !ok {
+			return NewUndefinedFieldDiagnostic("stage timer", key, stageTimerFieldOptions)
+		}
+	}
+	type alias FlowStageTimerDeclaration
+	var aux alias
+	if err := node.Decode(&aux); err != nil {
+		return err
+	}
+	*t = FlowStageTimerDeclaration(aux)
+	t.ID = strings.TrimSpace(t.ID)
+	t.After = strings.TrimSpace(t.After)
+	t.Emit = strings.TrimSpace(t.Emit)
+	t.AdvancesTo = strings.TrimSpace(t.AdvancesTo)
+	return nil
+}
+
+func (s *FlowStageDeclaration) normalizeTimerIDs() error {
+	if s == nil || len(s.Timers) == 0 {
+		return nil
+	}
+	stageID := strings.TrimSpace(s.ID)
+	seen := map[string]struct{}{}
+	for i := range s.Timers {
+		timer := &s.Timers[i]
+		if strings.TrimSpace(timer.After) == "" {
+			return fmt.Errorf("timer row %d missing after", i)
+		}
+		if strings.TrimSpace(timer.Emit) == "" && strings.TrimSpace(timer.AdvancesTo) == "" {
+			return fmt.Errorf("timer row %d must declare emit and/or advances_to", i)
+		}
+		if strings.TrimSpace(timer.ID) == "" {
+			timer.ID = timer.defaultID(stageID)
+		}
+		timer.ID = strings.TrimSpace(timer.ID)
+		if timer.ID == "" {
+			return fmt.Errorf("timer row %d could not derive stable id", i)
+		}
+		if _, ok := seen[timer.ID]; ok {
+			return fmt.Errorf("timers contains duplicate id %q; add explicit id values to disambiguate", timer.ID)
+		}
+		seen[timer.ID] = struct{}{}
+	}
+	return nil
+}
+
+func (t FlowStageTimerDeclaration) defaultID(stageID string) string {
+	stageID = strings.TrimSpace(stageID)
+	target := strings.TrimSpace(t.AdvancesTo)
+	if target == "" {
+		target = strings.TrimSpace(t.Emit)
+	}
+	if stageID == "" {
+		return target
+	}
+	if target == "" {
+		return stageID
+	}
+	return stageID + "." + target
 }
 
 func (d FlowStageDeclarations) StageIDs() []string {

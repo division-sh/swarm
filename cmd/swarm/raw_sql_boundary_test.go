@@ -240,6 +240,11 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "workflow node construction carries pipeline SQL dependency to explicit node/unit-of-work owners",
 		},
+		"internal/runtime/pipeline/workflow_timer_lifecycle.go": {
+			Classification: rawSQLRuntimeUnitOfWorkBoundary,
+			Issue:          1846,
+			Reason:         "stage timer fire handling uses the selected workflow instance RunPipelineMutation owner to keep fired state and timed transition application in one unit of work",
+		},
 		"internal/runtime/pipeline/workflow_transitions.go": {
 			Classification: rawSQLRuntimeUnitOfWorkBoundary,
 			Issue:          1783,

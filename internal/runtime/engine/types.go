@@ -206,6 +206,7 @@ type TimerState struct {
 	StartedBy string
 	Recurring bool
 	Cancelled bool
+	Fired     bool
 }
 
 type ExecutionRequest struct {

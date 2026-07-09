@@ -645,7 +645,9 @@ func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context,
 			return err
 		}
 		status := "active"
-		if timer.Cancelled {
+		if timer.Fired {
+			status = "fired"
+		} else if timer.Cancelled {
 			status = "cancelled"
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -665,7 +667,7 @@ func (s *WorkflowInstanceStore) replaceWorkflowTimersSQLite(ctx context.Context,
 
 func (s *WorkflowInstanceStore) loadWorkflowTimersSQLite(ctx context.Context, runID, entityID string) ([]WorkflowTimerState, error) {
 	rows, err := dbQueryContext(ctx, s.db, `
-		SELECT timer_name, fire_event, created_at, fire_at, COALESCE(json_extract(fire_payload, '$.started_by'), ''), recurring, status = 'cancelled'
+		SELECT timer_name, fire_event, created_at, fire_at, COALESCE(json_extract(fire_payload, '$.started_by'), ''), recurring, status
 		FROM timers
 		WHERE run_id = ? AND entity_id = ? AND owner_node = ? AND owner_agent IS NULL
 		ORDER BY created_at ASC, timer_name ASC
@@ -678,9 +680,13 @@ func (s *WorkflowInstanceStore) loadWorkflowTimersSQLite(ctx context.Context, ru
 	for rows.Next() {
 		var timer WorkflowTimerState
 		var createdRaw, firesRaw any
-		if err := rows.Scan(&timer.TimerID, &timer.EventType, &createdRaw, &firesRaw, &timer.StartedBy, &timer.Recurring, &timer.Cancelled); err != nil {
+		var status string
+		if err := rows.Scan(&timer.TimerID, &timer.EventType, &createdRaw, &firesRaw, &timer.StartedBy, &timer.Recurring, &status); err != nil {
 			return nil, err
 		}
+		status = strings.TrimSpace(status)
+		timer.Cancelled = status == "cancelled"
+		timer.Fired = status == "fired"
 		if at, ok, err := sqliteWorkflowTimeValue(createdRaw); err != nil {
 			return nil, err
 		} else if ok {
