@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeaccumulator "github.com/division-sh/swarm/internal/runtime/accumulator"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -299,6 +300,11 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	if spec == nil || spec.TimeoutMS <= 0 {
 		return nil
 	}
+	effectiveSpec, err := pc.effectiveAccumulationTimeoutSpec(ctx, nodeID, handlerEventKey, spec)
+	if err != nil {
+		return err
+	}
+	spec = effectiveSpec
 	entityID = strings.TrimSpace(entityID)
 	nodeID = strings.TrimSpace(nodeID)
 	if entityID == "" || nodeID == "" {
@@ -321,6 +327,16 @@ func (pc *PipelineCoordinator) reconcileAccumulationTimeoutSchedule(
 	}
 	sc.At = startedAt.Add(time.Duration(spec.TimeoutMS) * time.Millisecond)
 	return pc.persistWorkflowTimerSchedule(ctx, sc)
+}
+
+func (pc *PipelineCoordinator) effectiveAccumulationTimeoutSpec(ctx context.Context, nodeID, handlerEventKey string, spec *runtimecontracts.AccumulateSpec) (*runtimecontracts.AccumulateSpec, error) {
+	if spec == nil {
+		return nil, nil
+	}
+	if pc == nil || pc.SemanticSource() == nil || pipelineFlowScope(ctx) == "" {
+		return spec, nil
+	}
+	return runtimeaccumulator.EffectiveSpecForHandler(pc.SemanticSource(), pipelineFlowScope(ctx), nodeID, handlerEventKey, spec)
 }
 
 func workflowTimerLifecycleMatches(trigger timeridentity.Trigger, stage, sourceEvent string) bool {
