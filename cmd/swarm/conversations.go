@@ -625,9 +625,9 @@ func writeConversationListResult(out io.Writer, result conversationListResult) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "SESSION_ID", KeyColumn: true},
-			{Header: "AGENT"},
-			{Header: "RUN"},
+			{Header: "SESSION_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilySession},
+			{Header: "AGENT", IdentifierFamily: cliIdentifierFamilyAgent},
+			{Header: "RUN", IdentifierFamily: cliIdentifierFamilyRun},
 			{Header: "STATUS"},
 			{Header: "TURNS"},
 			{Header: "MESSAGES"},
@@ -671,7 +671,7 @@ func writeConversationDetailResult(out io.Writer, result conversationDetail) {
 		Columns: []cliTableColumn{
 			{Header: "TURN"},
 			{Header: "TURN_ID", KeyColumn: true},
-			{Header: "EVENT_ID", KeyColumn: true},
+			{Header: "EVENT_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
 			{Header: "EVENT_TYPE"},
 			{Header: "PARSE_OK"},
 			{Header: "LATENCY_MS"},

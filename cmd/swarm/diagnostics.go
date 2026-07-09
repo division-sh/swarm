@@ -1392,7 +1392,7 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "RUN ID", KeyColumn: true},
+			{Header: "RUN ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyRun},
 			{Header: "STATUS"},
 			{Header: "STARTED"},
 			{Header: "EVENTS"},
@@ -1513,13 +1513,13 @@ func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTr
 		columns := []cliTableColumn{
 			{Header: "TIME"},
 			{Header: "EVENT"},
-			{Header: "ID", KeyColumn: true},
+			{Header: "ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
 			{Header: "DELIVERY"},
-			{Header: "SUBSCRIBER"},
+			{Header: "SUBSCRIBER", IdentifierFamily: cliIdentifierFamilySubscriber},
 		}
 		if includeSessionTurn {
 			columns = append(columns,
-				cliTableColumn{Header: "SESSION"},
+				cliTableColumn{Header: "SESSION", IdentifierFamily: cliIdentifierFamilySession},
 				cliTableColumn{Header: "TURN"},
 			)
 		}
@@ -1617,7 +1617,7 @@ func writeDiagnosticRunTraceDeliverySummary(out io.Writer, runID string, result 
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "SUBSCRIBER"},
+			{Header: "SUBSCRIBER", IdentifierFamily: cliIdentifierFamilySubscriber},
 			{Header: "PENDING"},
 			{Header: "IN_PROGRESS"},
 			{Header: "DELIVERED"},
@@ -1658,9 +1658,9 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 		Columns: []cliTableColumn{
 			{Header: "EVENT AT"},
 			{Header: "EVENT"},
-			{Header: "EVENT ID", KeyColumn: true},
+			{Header: "EVENT ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
 			{Header: "DELIVERY ID", KeyColumn: true},
-			{Header: "SUBSCRIBER"},
+			{Header: "SUBSCRIBER", IdentifierFamily: cliIdentifierFamilySubscriber},
 			{Header: "STATUS"},
 			{Header: "REASON"},
 			{Header: "DELIVERY CREATED"},
@@ -1668,7 +1668,7 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 			{Header: "DELIVERY DELIVERED"},
 			{Header: "QUEUE WAIT"},
 			{Header: "EXECUTION TIME"},
-			{Header: "SESSION"},
+			{Header: "SESSION", IdentifierFamily: cliIdentifierFamilySession},
 			{Header: "TURN"},
 		},
 		Rows:         tableRows,

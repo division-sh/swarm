@@ -662,12 +662,12 @@ func writeMailboxListResult(out io.Writer, result mailboxListResult) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "MAILBOX_ID", KeyColumn: true},
+			{Header: "MAILBOX_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyMailbox},
 			{Header: "STATUS"},
 			{Header: "PRIORITY"},
 			{Header: "TYPE"},
-			{Header: "SOURCE_EVENT", KeyColumn: true},
-			{Header: "ENTITY", KeyColumn: true},
+			{Header: "SOURCE_EVENT", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
+			{Header: "ENTITY", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEntity},
 			{Header: "CREATED"},
 			{Header: "DECISION"},
 		},

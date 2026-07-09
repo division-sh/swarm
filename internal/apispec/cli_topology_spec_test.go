@@ -218,7 +218,10 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, resolution, "canonical_owner"), "platform-spec.yaml#cli_specification.foundations.output_contract.identifier_resolution")
 	assertScalarContains(t, mustMappingValue(t, resolution, "implementation_owner"), "cmd/swarm/cli_identifier_registry.go")
 	assertScalarContains(t, mustMappingValue(t, resolution, "implementation_owner"), "cmd/swarm/cli_identifier_resolver.go")
+	assertScalarContains(t, mustMappingValue(t, resolution, "implementation_owner"), "cmd/swarm/cli_output.go")
 	assertScalarContains(t, mustMappingValue(t, resolution, "round_trip_law"), "any full-only, unresolved, or split input row")
+	assertScalarContains(t, mustMappingValue(t, resolution, "display_enforcement"), "MUST declare that family")
+	assertScalarContains(t, mustMappingValue(t, resolution, "display_enforcement"), "Command-local identifier slicing")
 
 	matching := mustMappingValue(t, resolution, "matching")
 	assertScalarContains(t, mustMappingValue(t, matching, "exact_precedence"), "exact canonical identifier wins")
@@ -232,9 +235,12 @@ func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
 	forEachMappingEntry(t, families, func(name string, family *yaml.Node) {
 		familyCount++
 		assertScalarValue(t, mustMappingValue(t, family, "display_shortening_eligible"), "false")
-		if mappingValue(family, "candidate_source") == nil || mappingValue(family, "scope_rule") == nil || mappingValue(family, "normalization") == nil {
-			t.Errorf("identifier family %s must declare candidate_source, scope_rule, and normalization", name)
+		for _, field := range []string{"candidate_source", "scope_mode", "scope_rule", "normalization_mode", "normalization", "display_projection"} {
+			if mappingValue(family, field) == nil {
+				t.Errorf("identifier family %s must declare %s", name, field)
+			}
 		}
+		assertScalarValue(t, mustMappingValue(t, family, "display_projection"), "full")
 	})
 	if familyCount != 11 {
 		t.Fatalf("identifier family count=%d, want 11", familyCount)

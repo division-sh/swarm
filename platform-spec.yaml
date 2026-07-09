@@ -15190,7 +15190,8 @@ cli_specification:
       identifier_resolution:
         promoted_by: '#1815'
         canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.identifier_resolution
-        implementation_owner: cmd/swarm/cli_identifier_registry.go and cmd/swarm/cli_identifier_resolver.go
+        implementation_owner: cmd/swarm/cli_identifier_registry.go, cmd/swarm/cli_identifier_resolver.go, and the
+          family-aware identifier cells in cmd/swarm/cli_output.go
         status: implemented_registry_first_slice
         scope: >
           Shared source authority for classifying every public CLI input that selects or filters an existing resource
@@ -15202,6 +15203,11 @@ cli_specification:
           Every identifier form rendered by the human CLI must be accepted safely everywhere that family is an input.
           A family with any full-only, unresolved, or split input row is not eligible for short display. JSON and quiet
           output continue to carry canonical full identifiers.
+        display_enforcement: >
+          Every shared-table column that renders an identifier family MUST declare that family and route through the
+          family-aware display owner. That owner derives shortening eligibility from every input row in the family and
+          fails closed to the full identifier when the registry is invalid, any input is full-only/split, or no lossy
+          display projection is promoted. Command-local identifier slicing or abbreviation is forbidden.
         matching:
           exact_precedence: An exact canonical identifier wins before prefix ambiguity is considered.
           ambiguity: A prefix matching multiple candidates fails closed and lists at most five stable candidates with
@@ -15225,58 +15231,91 @@ cli_specification:
         family_registry:
           agent:
             candidate_source: /v1/rpc agent.list
+            scope_mode: global_bounded
             scope_rule: global authored-slug set; duplicate live slugs remain unsupported
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           bundle:
             candidate_source: /v1/rpc bundle.list
+            scope_mode: bounded_catalog
             scope_rule: bounded registered bundle catalog
+            normalization_mode: bundle_digest_hex_case_fold
             normalization: canonical full-string or bare digest-hex prefix; lowercase hex folding
+            display_projection: full
             display_shortening_eligible: false
           run:
             candidate_source: /v1/rpc run.list
+            scope_mode: unbounded_full_only
             scope_rule: unbounded; full ID unless a narrower promoted scope exists
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           entity:
             candidate_source: /v1/rpc entity.list
+            scope_mode: full_run_required
             scope_rule: full run ID required for prefix resolution
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           event:
             candidate_source: /v1/rpc event.list
+            scope_mode: unbounded_full_only
             scope_rule: unbounded; full ID unless a narrower promoted scope exists
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           session:
             candidate_source: /v1/rpc conversation.list
+            scope_mode: unpromoted_full_only
             scope_rule: global boundedness not promoted; full ID
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           fork:
             candidate_source: /v1/rpc conversation.fork_list
+            scope_mode: unpromoted_full_only
             scope_rule: boundedness and required scope not promoted
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           mailbox:
             candidate_source: /v1/rpc mailbox.list
+            scope_mode: unpromoted_full_only
             scope_rule: boundedness and required scope not promoted
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           flow_instance:
-            candidate_source: split; no promoted flow-instance list owner
+            candidate_source: unpromoted
+            scope_mode: unpromoted_full_only
             scope_rule: full exact value
-            normalization: command-owned slash trimming only
+            normalization_mode: existing_flow_path
+            normalization: trim surrounding slashes only where the command contract already does so
+            display_projection: full
             display_shortening_eligible: false
           context:
-            candidate_source: local context registry
+            candidate_source: local_context_registry
+            scope_mode: local_bounded
             scope_rule: bounded local descriptor set
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
           subscriber:
-            candidate_source: polymorphic agent/node identity
+            candidate_source: polymorphic_subscriber_identity
+            scope_mode: polymorphic_full_only
             scope_rule: full exact value unless subscriber type supplies a promoted family owner
+            normalization_mode: trim_case_sensitive
             normalization: trim only; case-sensitive
+            display_projection: full
             display_shortening_eligible: false
         input_rows:
           agent_view_agent: {command: swarm agent view, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
@@ -15358,8 +15397,9 @@ cli_specification:
         conformance_guard: >
           `cmd/swarm/cli_identifier_registry_test.go` compares this registry with the production registry, inventories
           visible Cobra positional signatures and direct/indirect string flags, requires explicit different-concept
-          accounting instead of an identifier-name regex, and prevents display shortening while any family row is
-          full-only, unresolved, or split.
+          accounting instead of an identifier-name regex, binds resolver callsites to non-safety resolver rows, requires
+          identifier-bearing shared-table columns to declare their family, rejects direct identifier short-slice
+          bypasses, and prevents display shortening while any family row is full-only, unresolved, or split.
       modes:
         default_text:
           invocation: no output-mode flag

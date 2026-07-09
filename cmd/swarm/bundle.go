@@ -334,6 +334,9 @@ func runBundleShowCommand(ctx context.Context, out, errOut io.Writer, opts bundl
 	if strings.TrimSpace(rawBundleHash) == "" {
 		return returnCLIValidationError(errOut, fmt.Errorf("bundle hash is required"))
 	}
+	if err := validateBundleIdentifierInput(rawBundleHash); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
@@ -361,6 +364,9 @@ func runBundleShowCommand(ctx context.Context, out, errOut io.Writer, opts bundl
 func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bundleHashCommandOptions, rawBundleHash string) error {
 	if strings.TrimSpace(rawBundleHash) == "" {
 		return returnCLIValidationError(errOut, fmt.Errorf("bundle hash is required"))
+	}
+	if err := validateBundleIdentifierInput(rawBundleHash); err != nil {
+		return returnCLIValidationError(errOut, err)
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
@@ -888,7 +894,7 @@ func writeBundleListHuman(w io.Writer, result bundleListResult) {
 	}
 	writeCLITable(w, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "BUNDLE", KeyColumn: true},
+			{Header: "BUNDLE", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyBundle},
 			{Header: "AGENTS"},
 			{Header: "HAS_DATA"},
 			{Header: "DATA_SIZE_BYTES"},
@@ -942,8 +948,8 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 	}
 	writeCLITable(w, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "AGENT", KeyColumn: true},
-			{Header: "FLOW_INSTANCE"},
+			{Header: "AGENT", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyAgent},
+			{Header: "FLOW_INSTANCE", IdentifierFamily: cliIdentifierFamilyFlowInstance},
 			{Header: "ROLE"},
 			{Header: "TYPE"},
 			{Header: "MODEL"},

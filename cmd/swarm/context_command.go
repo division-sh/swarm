@@ -160,7 +160,7 @@ func writeContextListText(out io.Writer, report localContextRegistryReport) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "NAME", KeyColumn: true},
+			{Header: "NAME", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyContext},
 			{Header: "STATUS"},
 			{Header: "TRANSPORT"},
 			{Header: "TARGET"},

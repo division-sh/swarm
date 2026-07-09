@@ -124,7 +124,7 @@ func TestCLITableRendererDoesNotImplicitlyTruncateIdentifierColumns(t *testing.T
 	id := "run_0123456789abcdef0123456789abcdef"
 	writeCLITable(&out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "RUN ID", KeyColumn: true},
+			{Header: "RUN ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyRun},
 			{Header: "STATUS"},
 		},
 		Rows: [][]string{{id, "completed"}},

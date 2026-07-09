@@ -769,6 +769,25 @@ func TestBundleCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	}
 }
 
+func TestBundleReadSelectorValidationPrecedesAPIConfiguration(t *testing.T) {
+	for _, args := range [][]string{
+		{"bundle", "show", "sha256:xyz"},
+		{"bundle", "agents", "bad-"},
+	} {
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, rootCommandOptions{apiServer: "://bad"})
+		if code != cliExitValidation {
+			t.Fatalf("%v code=%d stderr=%s", args, code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "bundle hash must be a canonical bundle hash or a hexadecimal digest prefix") {
+			t.Fatalf("%v stderr=%q", args, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "valid http") || strings.Contains(stderr.String(), "API server") {
+			t.Fatalf("%v API configuration masked selector validation: %s", args, stderr.String())
+		}
+	}
+}
+
 func TestBundleRegisterContractsDirectoryRejectsSymlinkBeforeRequest(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	contractsDir := writeBundleRegisterContractsFixture(t)

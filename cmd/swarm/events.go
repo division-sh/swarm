@@ -869,9 +869,9 @@ func writeEventListResult(out io.Writer, result eventListResult) {
 		Columns: []cliTableColumn{
 			{Header: "EVENT AT"},
 			{Header: "EVENT"},
-			{Header: "EVENT ID", KeyColumn: true},
-			{Header: "RUN"},
-			{Header: "ENTITY"},
+			{Header: "EVENT ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
+			{Header: "RUN", IdentifierFamily: cliIdentifierFamilyRun},
+			{Header: "ENTITY", IdentifierFamily: cliIdentifierFamilyEntity},
 			{Header: "DELIVERIES"},
 			{Header: "DEAD_LETTERS"},
 		},

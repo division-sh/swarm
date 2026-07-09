@@ -867,7 +867,7 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "AGENT_ID", KeyColumn: true},
+			{Header: "AGENT_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyAgent},
 			{Header: "ROLE"},
 			{Header: "TYPE"},
 			{Header: "STATUS"},
@@ -910,9 +910,9 @@ func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLi
 		Columns: []cliTableColumn{
 			{Header: "DELIVERY_ID", KeyColumn: true},
 			{Header: "EVENT"},
-			{Header: "EVENT_ID", KeyColumn: true},
-			{Header: "RUN"},
-			{Header: "ENTITY"},
+			{Header: "EVENT_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
+			{Header: "RUN", IdentifierFamily: cliIdentifierFamilyRun},
+			{Header: "ENTITY", IdentifierFamily: cliIdentifierFamilyEntity},
 			{Header: "STATUS"},
 			{Header: "DELIVERY_CREATED_AT"},
 			{Header: "DELIVERY_STARTED_AT"},
