@@ -12,6 +12,7 @@ import (
 const (
 	agentDirectiveMethod         = "agent.send_directive"
 	agentDirectiveEventType      = "platform.agent_directive"
+	agentDirectiveUse            = "directive <agent-id> <message>"
 	agentDirectiveExitValidation = 2
 	agentDirectiveExitRuntime    = 3
 	agentDirectiveExitAuth       = 4
@@ -43,13 +44,14 @@ var agentDirectiveValidRunIDResolutions = map[string]struct{}{
 func newAgentDirectiveCommand(opts rootCommandOptions) *cobra.Command {
 	directiveOpts := agentDirectiveCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "directive <agent-id> <message>",
+		Use:   agentDirectiveUse,
 		Short: "Send a directive message to a running agent.",
-		Args:  cobra.ExactArgs(2),
+		Args:  cliExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentDirectiveCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, directiveOpts)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&directiveOpts.runID, "run-id", "", "Optional explicit nonterminal run target")
 	cmd.Flags().StringVar(&directiveOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -85,7 +87,7 @@ func runAgentDirectiveCommand(ctx context.Context, out, errOut io.Writer, args [
 
 func validateAgentDirectiveArgs(args []string) (string, string, error) {
 	if len(args) != 2 {
-		return "", "", fmt.Errorf("agent directive requires <agent-id> and <message>")
+		return "", "", newCLIArgCountDiagnosticFromUse("swarm agent directive", "directive", agentDirectiveUse, args, cliArgCountRule{exact: 2}, "List agent ids with `swarm agent list`.")
 	}
 	agentID := strings.TrimSpace(args[0])
 	if agentID == "" {

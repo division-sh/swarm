@@ -450,6 +450,70 @@ func TestCLIOutputConformanceMigratedDisplayWritersConsumeSharedRenderer(t *test
 	}
 }
 
+func TestCLIOutputConformanceNoRawCobraArgCountValidators(t *testing.T) {
+	rawValidators := map[string]bool{
+		"ExactArgs":    true,
+		"MaximumNArgs": true,
+		"MinimumNArgs": true,
+		"RangeArgs":    true,
+	}
+	fset := token.NewFileSet()
+	root := driftTestRepoRoot(t)
+	err := filepath.WalkDir(filepath.Join(root, "cmd", "swarm"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			sel, ok := node.(*ast.SelectorExpr)
+			if !ok || !rawValidators[sel.Sel.Name] {
+				return true
+			}
+			ident, ok := sel.X.(*ast.Ident)
+			if !ok || ident.Name != "cobra" {
+				return true
+			}
+			pos := fset.Position(sel.Pos())
+			t.Errorf("%s: raw cobra.%s is not allowed for promoted CLI arg-count diagnostics; use cliExactArgs/cliMaximumNArgs", pos, sel.Sel.Name)
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk cmd/swarm: %v", err)
+	}
+}
+
+func TestCLIOutputConformanceNoRawCobraArgCountExpectations(t *testing.T) {
+	rawExpectation := regexp.MustCompile(`accepts (?:at most )?\d+ arg\(s\)`)
+	root := driftTestRepoRoot(t)
+	err := filepath.WalkDir(filepath.Join(root, "cmd", "swarm"), func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if match := rawExpectation.Find(content); match != nil {
+			t.Errorf("%s: raw Cobra arg-count expectation %q is no longer authoritative", path, string(match))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk cmd/swarm tests: %v", err)
+	}
+}
+
 func TestCLIOutputConformanceNoStaleActiveSplitOwners(t *testing.T) {
 	staleOwners := map[string]string{
 		"#1814": "display renderer migration is complete",

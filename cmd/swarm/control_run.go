@@ -79,13 +79,22 @@ func newControlRunCommand(opts controlRunCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   opts.action + " [<run-id>] [--all]",
 		Short: fmt.Sprintf("%s a run, or all runs with --all.", controlCommandTitle(opts.action)),
-		Args:  cobra.MaximumNArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 1 {
+				return cliMaximumNArgs(1)(cmd, args)
+			}
+			if len(args) == 0 && !cmdOpts.all {
+				return newCLIArgCountDiagnostic(cmd, args, cliArgCountRule{exact: 1})
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runOpts := cmdOpts
 			runOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			return runControlRunCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, runOpts)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().BoolVar(&cmdOpts.all, "all", false, "Apply the supported all-runs scope for this action")
 	if opts.action == "stop" {
 		cmd.Flags().BoolVar(&cmdOpts.yes, "yes", false, "Skip the stop-all confirmation prompt")
@@ -104,7 +113,7 @@ func controlCommandTitle(action string) string {
 }
 
 func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []string, opts controlRunCommandOptions) error {
-	runID, err := validateControlRunTarget(args, opts.all)
+	runID, err := validateControlRunTarget(args, opts)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: controlCommandExitCodeValidation}
@@ -157,15 +166,16 @@ func runControlRunCommand(ctx context.Context, out, errOut io.Writer, args []str
 	return nil
 }
 
-func validateControlRunTarget(args []string, all bool) (string, error) {
-	if all {
+func validateControlRunTarget(args []string, opts controlRunCommandOptions) (string, error) {
+	if opts.all {
 		if len(args) > 0 {
 			return "", fmt.Errorf("--all cannot be combined with a run id")
 		}
 		return "", nil
 	}
 	if len(args) != 1 {
-		return "", fmt.Errorf("pass a run id or --all")
+		use := opts.action + " [<run-id>] [--all]"
+		return "", newCLIArgCountDiagnosticFromUse("swarm control "+opts.action, opts.action, use, args, cliArgCountRule{exact: 1}, "List run ids with `swarm run list`.")
 	}
 	runID := strings.TrimSpace(args[0])
 	if runID == "" {

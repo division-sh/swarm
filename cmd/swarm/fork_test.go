@@ -105,7 +105,7 @@ func TestForkCommandRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing source", args: []string{"run", "fork"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing source", args: []string{"run", "fork"}, wantStderr: "requires <source-run-id>"},
 		{name: "blank source", args: []string{"run", "fork", " "}, wantStderr: "source run id is required"},
 		{name: "invalid source", args: []string{"run", "fork", "bad id!"}, wantStderr: "source run id must be a UUID"},
 		{name: "opaque non uuid source", args: []string{"run", "fork", "run_opaque-1"}, wantStderr: "source run id must be a UUID"},

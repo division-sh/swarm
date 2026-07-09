@@ -11,6 +11,7 @@ import (
 
 const (
 	agentRestartMethod         = "agent.restart"
+	agentRestartUse            = "restart <agent-id>"
 	agentRestartExitValidation = 2
 	agentRestartExitRuntime    = 3
 	agentRestartExitAuth       = 4
@@ -30,13 +31,14 @@ type agentRestartResult struct {
 func newAgentRestartCommand(opts rootCommandOptions) *cobra.Command {
 	restartOpts := agentRestartCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "restart <agent-id>",
+		Use:   agentRestartUse,
 		Short: "Restart a stuck or failed agent.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentRestartCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, restartOpts)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&restartOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
 	bindCLIAPIConnectionFlagsWithClass(cmd, &restartOpts.apiOptions, cliAPICommandClassMutating, "swarm agent restart")
@@ -71,7 +73,7 @@ func runAgentRestartCommand(ctx context.Context, out, errOut io.Writer, args []s
 
 func validateAgentRestartArgs(args []string) (string, error) {
 	if len(args) != 1 {
-		return "", fmt.Errorf("agent restart requires <agent-id>")
+		return "", newCLIArgCountDiagnosticFromUse("swarm agent restart", "restart", agentRestartUse, args, cliArgCountRule{exact: 1}, "List agent ids with `swarm agent list`.")
 	}
 	agentID := strings.TrimSpace(args[0])
 	if agentID == "" {

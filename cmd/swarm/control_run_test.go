@@ -240,9 +240,9 @@ func TestControlRunRejectsInvalidTargetsBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing target", args: []string{"control", "pause"}, wantStderr: "pass a run id or --all"},
+		{name: "missing target", args: []string{"control", "pause"}, wantStderr: "requires <run-id>"},
 		{name: "all with run id", args: []string{"control", "pause", "run-1", "--all"}, wantStderr: "--all cannot be combined with a run id"},
-		{name: "extra target", args: []string{"control", "continue", "run-1", "run-2"}, wantStderr: "accepts at most 1 arg"},
+		{name: "extra target", args: []string{"control", "continue", "run-1", "run-2"}, wantStderr: "accepts at most one argument"},
 		{name: "blank run id", args: []string{"control", "stop", "  "}, wantStderr: "run id is required"},
 		{name: "blank idempotency key pause run", args: []string{"control", "pause", "run-1", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},
 		{name: "blank idempotency key pause all", args: []string{"control", "pause", "--all", "--idempotency-key", "  "}, wantStderr: "--idempotency-key must be non-empty"},

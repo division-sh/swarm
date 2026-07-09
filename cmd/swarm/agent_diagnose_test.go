@@ -126,9 +126,9 @@ func TestAgentDiagnoseRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing id", args: []string{"agent", "diagnose"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing id", args: []string{"agent", "diagnose"}, wantStderr: "requires <agent-id>"},
 		{name: "blank id", args: []string{"agent", "diagnose", "  "}, wantStderr: "agent id is required"},
-		{name: "extra arg", args: []string{"agent", "diagnose", "agent-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "extra arg", args: []string{"agent", "diagnose", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "diagnose", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
 		{name: "queue limit too small", args: []string{"agent", "diagnose", "agent-1", "--queue-limit", "0"}, wantStderr: "--queue-limit must be between 1 and 200"},
 		{name: "queue limit too large", args: []string{"agent", "diagnose", "agent-1", "--queue-limit", "201"}, wantStderr: "--queue-limit must be between 1 and 200"},

@@ -105,7 +105,7 @@ func newConnectionsConnectCommand(ctx context.Context, repo string) *cobra.Comma
 	cmd := &cobra.Command{
 		Use:   "connect <key>",
 		Short: "Start or complete a managed credential grant.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			secret, privateKey, err := readConnectionSecrets(cmd.InOrStdin(), opts)
 			if err != nil {
@@ -269,7 +269,7 @@ func newConnectionsCallbackCommand(ctx context.Context, repo string) *cobra.Comm
 	cmd := &cobra.Command{
 		Use:   "callback <key>",
 		Short: "Record an OAuth authorization-code callback.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			code, err := readConnectionAuthCode(cmd.InOrStdin(), codeStdin)
 			if err != nil {
@@ -307,7 +307,7 @@ func newConnectionsStatusCommand(ctx context.Context, repo string) *cobra.Comman
 	cmd := &cobra.Command{
 		Use:   "status [key]",
 		Short: "Show managed credential connection status.",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cliMaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := buildManagedCredentialStore()
 			if err != nil {
@@ -332,6 +332,7 @@ func newConnectionsStatusCommand(ctx context.Context, repo string) *cobra.Comman
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root for required_by metadata")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render successful output as one JSON document")
+	setCLIArgDiscoveryHint(cmd, "List connection keys with `swarm connections status`.")
 	return cmd
 }
 
@@ -339,7 +340,7 @@ func newConnectionsDisconnectCommand(ctx context.Context, repo string) *cobra.Co
 	cmd := &cobra.Command{
 		Use:   "disconnect <key>",
 		Short: "Delete a managed credential token record.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store, err := buildManagedCredentialStore()
 			if err != nil {
@@ -353,6 +354,7 @@ func newConnectionsDisconnectCommand(ctx context.Context, repo string) *cobra.Co
 			return nil
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List connection keys with `swarm connections status`.")
 	return cmd
 }
 

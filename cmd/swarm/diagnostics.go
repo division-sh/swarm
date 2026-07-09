@@ -266,7 +266,7 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status [run-id]",
 		Short: "Diagnose one run (state, gates, stuck points).",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cliMaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runID := ""
 			if len(args) == 1 {
@@ -281,6 +281,7 @@ func newStatusCommand(opts rootCommandOptions) *cobra.Command {
 			return runDiagnosticRunCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts, runID)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().BoolVar(&runOpts.noDiagnose, "no-diagnose", false, "Use run.get and print only the canonical run header")
 	bindCLIOutputFlags(cmd, &runOpts.output)
 	bindCLILoggingFlags(cmd, &runOpts.logging)
@@ -295,7 +296,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Print or follow a run's execution trace.",
 		Example: `  swarm run trace <run-id>
   swarm run trace -f <run-id>    # follow live`,
-		Args: cobra.MaximumNArgs(1),
+		Args: cliMaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			traceOpts.sinceSet = cmd.Flags().Changed("since")
 			traceOpts.untilSet = cmd.Flags().Changed("until")
@@ -308,6 +309,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 			return runDiagnosticTraceCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), traceOpts, runID)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows as they stream")
 	cmd.Flags().BoolVar(&traceOpts.verbose, "verbose", false, "Include internal trace rows such as platform.runtime_log")
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")

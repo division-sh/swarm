@@ -212,7 +212,7 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "deliveries <agent-id>",
 		Short: "List one agent's event delivery history.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			deliveryOpts.runIDSet = cmd.Flags().Changed("run-id")
 			deliveryOpts.limitSet = cmd.Flags().Changed("limit")
@@ -220,6 +220,7 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 			return runAgentDeliveriesCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), deliveryOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().StringVar(&deliveryOpts.runID, "run-id", "", "Filter by run id")
 	cmd.Flags().StringArrayVar(&deliveryOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
 	cmd.Flags().IntVar(&deliveryOpts.limit, "limit", 0, "Max lifecycle rows to return (1-200)")
@@ -234,13 +235,14 @@ func newAgentDiagnoseCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diagnose <agent-id>",
 		Short: "Diagnose why an agent is stuck or failing.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diagnoseOpts.queueLimitSet = cmd.Flags().Changed("queue-limit")
 			diagnoseOpts.queueCursorSet = cmd.Flags().Changed("queue-cursor")
 			return runAgentDiagnoseCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), diagnoseOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().IntVar(&diagnoseOpts.queueLimit, "queue-limit", 0, "Max pending-delivery detail rows to return (1-200)")
 	cmd.Flags().StringVar(&diagnoseOpts.queueCursor, "queue-cursor", "", "Opaque queue cursor returned by the previous diagnosis result")
 	cmd.Flags().BoolVar(&diagnoseOpts.asJSON, "json", false, cliOutputJSONFlagHelp)
@@ -269,11 +271,12 @@ func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view <agent-id>",
 		Short: "View one agent's configuration and state.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	bindCLIAPIConnectionFlags(cmd, &apiOpts)
 	return cmd
 }

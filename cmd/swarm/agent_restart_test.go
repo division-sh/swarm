@@ -88,9 +88,9 @@ func TestAgentRestartRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing id", args: []string{"agent", "restart"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing id", args: []string{"agent", "restart"}, wantStderr: "requires <agent-id>"},
 		{name: "blank id", args: []string{"agent", "restart", "  "}, wantStderr: "agent id is required"},
-		{name: "extra arg", args: []string{"agent", "restart", "agent-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "extra arg", args: []string{"agent", "restart", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "restart", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

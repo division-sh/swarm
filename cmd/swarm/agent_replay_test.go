@@ -103,11 +103,11 @@ func TestAgentReplayRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing id", args: []string{"agent", "replay", "--event-id", "event-1"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "missing id", args: []string{"agent", "replay", "--event-id", "event-1"}, wantStderr: "requires <agent-id>"},
 		{name: "blank id", args: []string{"agent", "replay", "  ", "--event-id", "event-1"}, wantStderr: "agent id is required"},
 		{name: "missing event id", args: []string{"agent", "replay", "agent-1"}, wantStderr: "--event-id is required"},
 		{name: "blank event id", args: []string{"agent", "replay", "agent-1", "--event-id", "  "}, wantStderr: "--event-id is required"},
-		{name: "extra arg", args: []string{"agent", "replay", "agent-1", "extra", "--event-id", "event-1"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "extra arg", args: []string{"agent", "replay", "agent-1", "extra", "--event-id", "event-1"}, wantStderr: "accepts one argument"},
 		{name: "unsupported flag", args: []string{"agent", "replay", "agent-1", "--event-id", "event-1", "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

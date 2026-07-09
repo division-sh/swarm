@@ -306,10 +306,10 @@ func TestEventsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "list invalid since", args: []string{"event", "list", "--since", "not-time"}, wantStderr: "--since must be an RFC3339 timestamp"},
 		{name: "list invalid delivery status", args: []string{"event", "list", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 		{name: "view blank event id", args: []string{"event", "view", "  "}, wantStderr: "event id is required"},
-		{name: "replay missing event id", args: []string{"event", "replay"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "replay missing event id", args: []string{"event", "replay"}, wantStderr: "requires <event-id>"},
 		{name: "replay blank event id", args: []string{"event", "replay", "  "}, wantStderr: "event id is required"},
 		{name: "replay blank subscriber", args: []string{"event", "replay", "event-1", "--subscriber", "  "}, wantStderr: "--subscriber must be a non-empty agent id"},
-		{name: "replay extra arg", args: []string{"event", "replay", "event-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "replay extra arg", args: []string{"event", "replay", "event-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "follow rejects list limit", args: []string{"event", "follow", "--limit", "1"}, wantStderr: "unknown flag"},
 		{name: "follow invalid replay since", args: []string{"event", "follow", "--replay-since", "not-time"}, wantStderr: "--replay-since must be an RFC3339 timestamp"},
 	} {

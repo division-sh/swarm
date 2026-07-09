@@ -252,25 +252,29 @@ func newEventViewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view <event-id>",
 		Short: "View one event.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEventViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List event ids with `swarm event list`.")
 	bindCLIAPIConnectionFlags(cmd, &apiOpts)
 	return cmd
 }
 
+const eventReplayUse = "replay <event-id>"
+
 func newEventReplayCommand(opts rootCommandOptions) *cobra.Command {
 	replayOpts := eventReplayCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
-		Use:   "replay <event-id>",
+		Use:   eventReplayUse,
 		Short: "Replay one event.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEventReplayCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, replayOpts)
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List event ids with `swarm event list`.")
 	cmd.Flags().StringArrayVar(&replayOpts.subscribers, "subscriber", nil, "Original agent subscriber to replay to; repeat to select a subset")
 	cmd.Flags().StringVar(&replayOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -463,7 +467,7 @@ func (opts eventFollowCommandOptions) params() (map[string]any, error) {
 
 func validateEventReplayArgs(args []string, subscriberFlags []string) (string, []string, error) {
 	if len(args) != 1 {
-		return "", nil, fmt.Errorf("event replay requires <event-id>")
+		return "", nil, newCLIArgCountDiagnosticFromUse("swarm event replay", "replay", eventReplayUse, args, cliArgCountRule{exact: 1}, "List event ids with `swarm event list`.")
 	}
 	eventID := strings.TrimSpace(args[0])
 	if eventID == "" {

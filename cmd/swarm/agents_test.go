@@ -152,9 +152,9 @@ func TestAgentReadCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	}{
 		{name: "agents list extra arg", args: []string{"agent", "list", "extra"}, wantStderr: "unknown command"},
 		{name: "agents list unsupported flag", args: []string{"agent", "list", "--unknown"}, wantStderr: "unknown flag"},
-		{name: "agent view missing id", args: []string{"agent", "view"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "agent view missing id", args: []string{"agent", "view"}, wantStderr: "requires <agent-id>"},
 		{name: "agent view blank id", args: []string{"agent", "view", "  "}, wantStderr: "agent id is required"},
-		{name: "agent view extra arg", args: []string{"agent", "view", "agent-1", "extra"}, wantStderr: "accepts 1 arg(s)"},
+		{name: "agent view extra arg", args: []string{"agent", "view", "agent-1", "extra"}, wantStderr: "accepts one argument"},
 		{name: "agent view unsupported flag", args: []string{"agent", "view", "agent-1", "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

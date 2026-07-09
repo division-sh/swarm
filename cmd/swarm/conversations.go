@@ -197,7 +197,7 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "view <session-id>",
 		Short: "View one conversation.",
-		Args:  cobra.ExactArgs(1),
+		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := viewOpts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -208,6 +208,7 @@ func newConversationViewCommand(opts rootCommandOptions) *cobra.Command {
 			return runConversationViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), viewOpts, args[0])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List conversation session ids with `swarm conversation list`.")
 	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &viewOpts.output)
 	bindCLILoggingFlags(cmd, &viewOpts.logging)
@@ -219,7 +220,7 @@ func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "turn <session-id> <turn-index>",
 		Short: "View one conversation turn.",
-		Args:  cobra.ExactArgs(2),
+		Args:  cliExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := turnOpts.logging.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -230,6 +231,7 @@ func newConversationTurnCommand(opts rootCommandOptions) *cobra.Command {
 			return runConversationTurnCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), turnOpts, args[0], args[1])
 		},
 	}
+	setCLIArgDiscoveryHint(cmd, "List conversation session ids with `swarm conversation list`.")
 	bindCLIAPIConnectionFlags(cmd, &turnOpts.apiOptions)
 	bindCLIOutputFlags(cmd, &turnOpts.output)
 	bindCLILoggingFlags(cmd, &turnOpts.logging)

@@ -129,10 +129,10 @@ func TestAgentDirectiveRejectsInvalidInputBeforeRequest(t *testing.T) {
 		args       []string
 		wantStderr string
 	}{
-		{name: "missing args", args: []string{"agent", "directive"}, wantStderr: "accepts 2 arg(s)"},
+		{name: "missing args", args: []string{"agent", "directive"}, wantStderr: "requires <agent-id>"},
 		{name: "blank agent", args: []string{"agent", "directive", "  ", "run it"}, wantStderr: "agent id is required"},
 		{name: "blank directive", args: []string{"agent", "directive", "agent-1", "  "}, wantStderr: "directive is required"},
-		{name: "extra arg", args: []string{"agent", "directive", "agent-1", "run it", "extra"}, wantStderr: "accepts 2 arg(s)"},
+		{name: "extra arg", args: []string{"agent", "directive", "agent-1", "run it", "extra"}, wantStderr: "accepts two arguments"},
 		{name: "unsupported flag", args: []string{"agent", "directive", "agent-1", "run it", "--unknown"}, wantStderr: "unknown flag"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

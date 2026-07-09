@@ -1241,7 +1241,7 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 	}{
 		{name: "runs invalid limit", args: []string{"run", "list", "--limit", "0"}, wantStderr: "--limit must be between 1 and 500"},
 		{name: "runs invalid since", args: []string{"run", "list", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
-		{name: "trace extra arg", args: []string{"run", "trace", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
+		{name: "trace extra arg", args: []string{"run", "trace", "run-1", "extra"}, wantStderr: "accepts at most one argument"},
 		{name: "trace invalid limit low", args: []string{"run", "trace", "run-1", "--limit", "0"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid limit high", args: []string{"run", "trace", "run-1", "--limit", "2001"}, wantStderr: "--limit must be between 1 and 2000"},
 		{name: "trace invalid since", args: []string{"run", "trace", "run-1", "--since", "yesterday"}, wantStderr: "--since must be an RFC3339 timestamp"},
@@ -1271,7 +1271,7 @@ func TestDiagnosticsRejectInvalidInputBeforeRequest(t *testing.T) {
 		{name: "trace follow invalid delivery status", args: []string{"run", "trace", "run-1", "--follow", "--delivery-status", "done"}, wantStderr: "--delivery-status must be one of"},
 		{name: "trace follow blank subscriber id", args: []string{"run", "trace", "run-1", "--follow", "--subscriber-id", " "}, wantStderr: "--subscriber-id must not be empty"},
 		{name: "trace follow invalid subscriber type", args: []string{"run", "trace", "run-1", "--follow", "--subscriber-type", "platform"}, wantStderr: "--subscriber-type must be one of"},
-		{name: "status extra arg", args: []string{"run", "status", "run-1", "extra"}, wantStderr: "accepts at most 1 arg(s)"},
+		{name: "status extra arg", args: []string{"run", "status", "run-1", "extra"}, wantStderr: "accepts at most one argument"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := calls.Load()
