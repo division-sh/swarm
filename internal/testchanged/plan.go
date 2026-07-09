@@ -32,11 +32,10 @@ type Plan struct {
 	FullSuite         bool
 	FullSuiteReasons  []string
 	UnownedFiles      []ChangedFile
-	DocsOnly          bool
 }
 
 // PlanChanged maps changed files to Go packages and expands in-repository
-// reverse dependencies. Global files fall back to the full suite.
+// reverse dependencies. Files without a package owner fall back to the full suite.
 func PlanChanged(repoRoot string, packages []Package, changedFiles []ChangedFile) (Plan, error) {
 	normalized, err := normalizePackages(repoRoot, packages)
 	if err != nil {
@@ -47,7 +46,6 @@ func PlanChanged(repoRoot string, packages []Package, changedFiles []ChangedFile
 		ChangedFiles: normalizeChangedFiles(changedFiles),
 	}
 	if len(plan.ChangedFiles) == 0 {
-		plan.DocsOnly = true
 		return plan, nil
 	}
 
@@ -57,7 +55,6 @@ func PlanChanged(repoRoot string, packages []Package, changedFiles []ChangedFile
 	}
 
 	seedImports := map[string]bool{}
-	unownedNonDocs := 0
 	for _, file := range plan.ChangedFiles {
 		path := cleanRel(file.Path)
 		if path == "" {
@@ -72,20 +69,11 @@ func PlanChanged(repoRoot string, packages []Package, changedFiles []ChangedFile
 			seedImports[pkg.ImportPath] = true
 			continue
 		}
-		if isDocsOnlyPath(path) {
-			plan.UnownedFiles = append(plan.UnownedFiles, file)
-			continue
-		}
 		plan.UnownedFiles = append(plan.UnownedFiles, file)
-		unownedNonDocs++
 		plan.FullSuite = true
 		plan.FullSuiteReasons = append(plan.FullSuiteReasons, fmt.Sprintf("%s has no owning Go package", path))
 	}
 
-	if len(seedImports) == 0 && !plan.FullSuite && unownedNonDocs == 0 {
-		plan.DocsOnly = true
-		return plan, nil
-	}
 	if plan.FullSuite {
 		plan.Packages = []Package{{
 			ImportPath: "./...",
@@ -204,9 +192,6 @@ func packageForChangedPath(packages []Package, path string) (Package, bool) {
 	}
 	for _, pkg := range packages {
 		if pkg.RelDir == "." {
-			if !isDocsOnlyPath(path) && !strings.Contains(path, "/") {
-				return pkg, true
-			}
 			continue
 		}
 		if dir == pkg.RelDir || strings.HasPrefix(dir, pkg.RelDir+"/") {
@@ -257,17 +242,6 @@ func fullSuiteReason(path string) string {
 	default:
 		return ""
 	}
-}
-
-func isDocsOnlyPath(path string) bool {
-	path = cleanRel(path)
-	if strings.HasPrefix(path, "docs/") {
-		return true
-	}
-	if strings.Contains(path, "/") {
-		return false
-	}
-	return strings.HasSuffix(path, ".md") || strings.HasSuffix(path, ".txt")
 }
 
 func sortPackages(packages []Package) {
