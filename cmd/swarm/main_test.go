@@ -52,6 +52,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
 
@@ -10767,35 +10768,22 @@ func runForkReadinessFactHasDisposition(values []store.RunForkSelectedContractRe
 
 func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 	t.Helper()
-	values := map[string]string{}
-	for _, part := range strings.Fields(dsn) {
-		key, value, ok := strings.Cut(part, "=")
-		if !ok {
-			continue
-		}
-		values[key] = value
+	parsed, err := pq.NewConfig(dsn)
+	if err != nil {
+		t.Fatalf("parse canonical test Postgres DSN: %v", err)
 	}
-	for _, item := range []struct {
-		env string
-		key string
-	}{
-		{"PGPASSWORD", "password"},
-	} {
-		if value := strings.TrimSpace(values[item.key]); value != "" {
-			t.Setenv(item.env, value)
-		}
-	}
+	t.Setenv("PGPASSWORD", parsed.Password)
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	t.Setenv("SWARM_CONFIG", configPath)
 	writeRuntimeConfigText(t, configPath, fmt.Sprintf(`store:
   backend: postgres
 database:
-  host: %s
-  port: %s
-  name: %s
-  user: %s
+  host: %q
+  port: %d
+  name: %q
+  user: %q
   password_env: PGPASSWORD
-  sslmode: %s
+  sslmode: %q
   pool_size: 5
 llm:
   backend: claude_cli
@@ -10807,7 +10795,7 @@ llm:
     command: true
     timeout: 2s
     output_format: json
-`, values["host"], values["port"], values["dbname"], values["user"], values["sslmode"]))
+`, parsed.Host, parsed.Port, parsed.Database, parsed.User, parsed.SSLMode))
 }
 
 func TestDefaultRuntimeConfig_RejectsUnsupportedRuntimeControlEnv(t *testing.T) {

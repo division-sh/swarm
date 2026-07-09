@@ -4,10 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/store/platformschema"
-	_ "github.com/lib/pq"
-	"gopkg.in/yaml.v3"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,19 +16,31 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/store/platformschema"
+	"gopkg.in/yaml.v3"
+)
+
+const (
+	postgresTestSetupDoc      = "internal/testutil/POSTGRES.md"
+	dockerPostgresFallbackLog = "using Docker Postgres (set SWARM_TEST_POSTGRES_DSN for host Postgres - faster)"
 )
 
 type sharedPostgresState struct {
-	mu             sync.Mutex
-	lifecycle      sync.Mutex
-	started        bool
-	dockerBin      string
-	name           string
-	adminDSN       string
-	template       string
-	templated      bool
-	cleanupStarted bool
-	nextDBID       uint64
+	mu                sync.Mutex
+	lifecycle         sync.Mutex
+	started           bool
+	dockerBin         string
+	name              string
+	admin             testPostgresDSN
+	authenticatedRole string
+	template          string
+	templated         bool
+	cleanupStarted    bool
+	nextDBID          uint64
+	reportWriter      io.Writer
+	reportFallback    sync.Once
 }
 
 var sharedPostgres sharedPostgresState
@@ -70,11 +79,11 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (dsn string, db *sql.
 			t.Fatalf("start shared postgres: %v", err)
 		}
 	}
-	adminDSN := sharedPostgres.adminDSN
+	admin := sharedPostgres.admin
 	dbName := sharedPostgres.nextDatabaseName()
 	sharedPostgres.mu.Unlock()
 
-	adminDB, err := sql.Open("postgres", adminDSN)
+	adminDB, err := admin.open()
 	if err != nil {
 		t.Fatalf("open postgres admin: %v", err)
 	}
@@ -95,8 +104,19 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (dsn string, db *sql.
 		t.Fatalf("create empty postgres database %q: %v", dbName, err)
 	}
 
-	dsn = withDBName(adminDSN, dbName)
-	db, err = sql.Open("postgres", dsn)
+	projected, err := admin.withDatabase(dbName)
+	if err != nil {
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
+		t.Fatalf("project postgres database %q: %v", dbName, err)
+	}
+	dsn, err = projected.string()
+	if err != nil {
+		_ = dropIsolatedDatabase(adminDB, dbName)
+		sharedPostgres.lifecycle.Unlock()
+		t.Fatalf("serialize postgres database %q: %v", dbName, err)
+	}
+	db, err = projected.open()
 	if err != nil {
 		_ = dropIsolatedDatabase(adminDB, dbName)
 		sharedPostgres.lifecycle.Unlock()
@@ -117,7 +137,7 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (dsn string, db *sql.
 		}
 		released = true
 		_ = db.Close()
-		adminCleanupDB, err := sql.Open("postgres", adminDSN)
+		adminCleanupDB, err := admin.open()
 		if err != nil {
 			t.Fatalf("reopen postgres admin for cleanup: %v", err)
 		}
@@ -158,19 +178,51 @@ func waitForTestDatabase(ctx context.Context, db *sql.DB, timeout time.Duration)
 }
 
 func (s *sharedPostgresState) startLocked() error {
-	if adminDSN := strings.TrimSpace(os.Getenv("SWARM_TEST_POSTGRES_DSN")); adminDSN != "" {
-		db, err := sql.Open("postgres", adminDSN)
-		if err != nil {
-			return fmt.Errorf("open external postgres: %w", err)
+	return s.startLockedWithDSN(strings.TrimSpace(os.Getenv("SWARM_TEST_POSTGRES_DSN")))
+}
+
+func (s *sharedPostgresState) startLockedWithDSN(raw string) error {
+	if raw != "" {
+		if err := s.startExternalLocked(raw); err != nil {
+			return fmt.Errorf("SWARM_TEST_POSTGRES_DSN is set but unusable; Docker fallback is disabled; see %s: %w", postgresTestSetupDoc, err)
 		}
-		defer db.Close()
-		if err := waitForTestDatabase(context.Background(), db, 180*time.Second); err != nil {
-			return fmt.Errorf("external postgres not ready: %w", err)
-		}
-		s.started = true
-		s.adminDSN = adminDSN
 		return nil
 	}
+	s.reportDockerFallback()
+	if err := s.startDockerLocked(); err != nil {
+		return dockerPostgresSetupError(err)
+	}
+	return nil
+}
+
+func dockerPostgresSetupError(cause error) error {
+	return fmt.Errorf("SWARM_TEST_POSTGRES_DSN is not set and Docker fallback failed; configure host Postgres using %s: %w", postgresTestSetupDoc, cause)
+}
+
+func (s *sharedPostgresState) startExternalLocked(raw string) error {
+	admin, err := parseTestPostgresDSN(raw)
+	if err != nil {
+		return err
+	}
+	db, err := admin.open()
+	if err != nil {
+		return fmt.Errorf("open external postgres: %w", err)
+	}
+	defer db.Close()
+	if err := waitForTestDatabase(context.Background(), db, 180*time.Second); err != nil {
+		return fmt.Errorf("external postgres not ready: %w", err)
+	}
+	role, err := inspectTestPostgresSession(db)
+	if err != nil {
+		return err
+	}
+	s.started = true
+	s.admin = admin
+	s.authenticatedRole = role
+	return nil
+}
+
+func (s *sharedPostgresState) startDockerLocked() error {
 
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
@@ -181,15 +233,7 @@ func (s *sharedPostgresState) startLocked() error {
 	}
 
 	name := fmt.Sprintf("swarm-test-pg-%d-%d", os.Getpid(), time.Now().UnixNano())
-	runArgs := []string{
-		"run", "-d", "--rm",
-		"--name", name,
-		"-e", "POSTGRES_PASSWORD=postgres",
-		"-e", "POSTGRES_DB=swarm",
-		"-p", "127.0.0.1::5432",
-		"postgres:16",
-		"-c", "max_connections=300",
-	}
+	runArgs := dockerPostgresRunArgs(name)
 	if out, err := exec.Command(dockerBin, runArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("docker run postgres failed: %v output=%s", err, strings.TrimSpace(string(out)))
 	}
@@ -215,8 +259,12 @@ func (s *sharedPostgresState) startLocked() error {
 		return fmt.Errorf("empty host port from docker port: %q", portLine)
 	}
 
-	adminDSN := fmt.Sprintf("host=127.0.0.1 port=%s user=postgres password=postgres dbname=postgres sslmode=disable", port)
-	db, err := sql.Open("postgres", adminDSN)
+	admin, err := parseTestPostgresDSN(fmt.Sprintf("host=127.0.0.1 port=%s user=postgres password=postgres dbname=postgres sslmode=disable", port))
+	if err != nil {
+		_ = exec.Command(dockerBin, "stop", name).Run()
+		return fmt.Errorf("build owned postgres DSN: %w", err)
+	}
+	db, err := admin.open()
 	if err != nil {
 		_ = exec.Command(dockerBin, "stop", name).Run()
 		return fmt.Errorf("open postgres: %w", err)
@@ -237,6 +285,11 @@ func (s *sharedPostgresState) startLocked() error {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	role, err := inspectTestPostgresSession(db)
+	if err != nil {
+		_ = exec.Command(dockerBin, "stop", name).Run()
+		return err
+	}
 
 	if err := startContainerWatcher(dockerBin, name); err != nil {
 		_ = exec.Command(dockerBin, "stop", name).Run()
@@ -246,8 +299,61 @@ func (s *sharedPostgresState) startLocked() error {
 	s.started = true
 	s.dockerBin = dockerBin
 	s.name = name
-	s.adminDSN = adminDSN
+	s.admin = admin
+	s.authenticatedRole = role
 	return nil
+}
+
+func dockerPostgresRunArgs(name string) []string {
+	return []string{
+		"run", "-d", "--rm",
+		"--name", name,
+		"--tmpfs", "/var/lib/postgresql/data:rw",
+		"-e", "POSTGRES_PASSWORD=postgres",
+		"-e", "POSTGRES_DB=postgres",
+		"-p", "127.0.0.1::5432",
+		"postgres:16",
+		"-c", "max_connections=300",
+		"-c", "fsync=off",
+		"-c", "synchronous_commit=off",
+		"-c", "full_page_writes=off",
+	}
+}
+
+func (s *sharedPostgresState) reportDockerFallback() {
+	s.reportFallback.Do(func() {
+		writer := s.reportWriter
+		if writer == nil {
+			writer = os.Stderr
+		}
+		_, _ = fmt.Fprintln(writer, dockerPostgresFallbackLog)
+	})
+}
+
+func inspectTestPostgresSession(db *sql.DB) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var (
+		role             string
+		gssAuthenticated bool
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT current_user,
+		       COALESCE((
+		           SELECT gss_authenticated
+		           FROM pg_catalog.pg_stat_gssapi
+		           WHERE pid = pg_backend_pid()
+		       ), false)
+	`).Scan(&role, &gssAuthenticated); err != nil {
+		return "", fmt.Errorf("verify postgres test authentication: %w", err)
+	}
+	if strings.TrimSpace(role) == "" {
+		return "", fmt.Errorf("verify postgres test authentication: current_user is empty")
+	}
+	if gssAuthenticated {
+		return "", fmt.Errorf("postgres test DSN used GSS authentication, which cannot be reproduced by the cleanup process; use password authentication")
+	}
+	return role, nil
 }
 
 func cleanupStaleTestContainers(dockerBin string) error {
@@ -300,13 +406,17 @@ func (s *sharedPostgresState) ensureTemplateDatabase(adminDB *sql.DB) error {
 	if err := createIsolatedDatabase(adminDB, templateName); err != nil {
 		return fmt.Errorf("create template database %q: %w", templateName, err)
 	}
-	templateDSN := withDBName(s.adminDSN, templateName)
-	templateDB, err := sql.Open("postgres", templateDSN)
+	templateDSN, err := s.admin.withDatabase(templateName)
+	if err != nil {
+		_ = dropIsolatedDatabase(adminDB, templateName)
+		return fmt.Errorf("project template database %q: %w", templateName, err)
+	}
+	templateDB, err := templateDSN.open()
 	if err != nil {
 		_ = dropIsolatedDatabase(adminDB, templateName)
 		return fmt.Errorf("open template database %q: %w", templateName, err)
 	}
-	if err := initializeDatabase(templateDB); err != nil {
+	if err := initializeDatabase(templateDB, s.authenticatedRole); err != nil {
 		_ = templateDB.Close()
 		_ = dropIsolatedDatabase(adminDB, templateName)
 		return fmt.Errorf("initialize template database %q: %w", templateName, err)
@@ -331,11 +441,15 @@ func (s *sharedPostgresState) startTemplateCleanupWatcher(templateName string) e
 	if err != nil {
 		return fmt.Errorf("resolve postgres template cleanup binary: %w", err)
 	}
+	adminDSN, err := s.admin.string()
+	if err != nil {
+		return fmt.Errorf("serialize postgres cleanup admin DSN: %w", err)
+	}
 	cmd := exec.Command(exe)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(withoutPostgresConnectionEnv(os.Environ()),
 		"SWARM_TEST_POSTGRES_TEMPLATE_CLEANUP=1",
 		"SWARM_TEST_POSTGRES_TEMPLATE_PARENT_PID="+strconv.Itoa(os.Getpid()),
-		"SWARM_TEST_POSTGRES_TEMPLATE_ADMIN_DSN="+s.adminDSN,
+		"SWARM_TEST_POSTGRES_TEMPLATE_ADMIN_DSN="+adminDSN,
 		"SWARM_TEST_POSTGRES_TEMPLATE_NAME="+templateName,
 	)
 	if err := cmd.Start(); err != nil {
@@ -346,6 +460,18 @@ func (s *sharedPostgresState) startTemplateCleanupWatcher(templateName string) e
 	}
 	s.cleanupStarted = true
 	return nil
+}
+
+func withoutPostgresConnectionEnv(env []string) []string {
+	result := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "PG") || strings.HasPrefix(key, "SWARM_TEST_POSTGRES_TEMPLATE_") {
+			continue
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 func runPostgresTemplateCleanupWatcherFromEnv() {
@@ -359,7 +485,11 @@ func runPostgresTemplateCleanupWatcherFromEnv() {
 		return
 	}
 	waitForProcessExit(parentPID)
-	db, err := sql.Open("postgres", adminDSN)
+	admin, err := parseTestPostgresDSN(adminDSN)
+	if err != nil {
+		return
+	}
+	db, err := admin.open()
 	if err != nil {
 		return
 	}
@@ -380,7 +510,7 @@ func waitForProcessExit(pid int) {
 	}
 }
 
-func initializeDatabase(db *sql.DB) error {
+func initializeDatabase(db *sql.DB, authenticatedRole string) error {
 	spec, err := loadPlatformSpec()
 	if err != nil {
 		return err
@@ -393,7 +523,7 @@ func initializeDatabase(db *sql.DB) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	if err := ensurePublicSchema(ctx, db); err != nil {
+	if err := ensurePublicSchema(ctx, db, authenticatedRole); err != nil {
 		return err
 	}
 	if err := platformschema.EnsurePostgresTables(ctx, db, plans, nil); err != nil {
@@ -427,10 +557,13 @@ func loadPlatformSpec() (runtimecontracts.PlatformSpecDocument, error) {
 	return spec, nil
 }
 
-func ensurePublicSchema(ctx context.Context, db *sql.DB) error {
+func ensurePublicSchema(ctx context.Context, db *sql.DB, authenticatedRole string) error {
+	if strings.TrimSpace(authenticatedRole) == "" {
+		return fmt.Errorf("authenticated postgres role is required")
+	}
 	for _, stmt := range []string{
 		`CREATE SCHEMA IF NOT EXISTS public`,
-		`GRANT ALL ON SCHEMA public TO postgres`,
+		`GRANT ALL ON SCHEMA public TO ` + quoteIdent(authenticatedRole),
 		`GRANT ALL ON SCHEMA public TO public`,
 	} {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
@@ -473,17 +606,6 @@ func dropIsolatedDatabase(adminDB *sql.DB, dbName string) error {
 		return fmt.Errorf("drop database %s: %w", dbName, err)
 	}
 	return nil
-}
-
-func withDBName(dsn, dbName string) string {
-	parts := strings.Fields(dsn)
-	for i, part := range parts {
-		if strings.HasPrefix(part, "dbname=") {
-			parts[i] = "dbname=" + dbName
-			return strings.Join(parts, " ")
-		}
-	}
-	return dsn + " dbname=" + dbName
 }
 
 func quoteIdent(v string) string {
