@@ -14,9 +14,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
-
 jobs:
   ci-plan:
     name: CI plan
@@ -190,6 +187,8 @@ jobs:
       - ci-plan
     runs-on: ubuntu-latest
     timeout-minutes: 18
+    env:
+      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.ci-plan.outputs.shard_matrix) }}
@@ -307,6 +306,8 @@ jobs:
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    env:
+      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     services:
       postgres:
         image: postgres:16
@@ -379,6 +380,8 @@ jobs:
       - ci-plan
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    env:
+      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     services:
       postgres:
         image: postgres:16
@@ -442,6 +445,8 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      SWARM_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=postgres dbname=postgres sslmode=disable
     services:
       postgres:
         image: postgres:16
