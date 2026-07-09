@@ -49,6 +49,25 @@ func assertObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T, fixture obs
 	if rows, _ := asMap(t, trace.Result)["trace"].([]any); len(rows) != 1 || asMap(t, rows[0])["event_id"] != fixture.eventID {
 		t.Fatalf("run.trace rows = %#v, want event %s", asMap(t, trace.Result)["trace"], fixture.eventID)
 	}
+	defaultTrace := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"trace-default","method":"run.trace","params":{"run_id":%q,"limit":10}}`, fixture.runID))
+	if defaultTrace.Error != nil {
+		t.Fatalf("run.trace default error = %#v", defaultTrace.Error)
+	}
+	defaultRows, _ := asMap(t, defaultTrace.Result)["trace"].([]any)
+	if !traceRowsContainEvent(t, defaultRows, "trace.visible") {
+		t.Fatalf("run.trace default rows = %#v, want business event", defaultRows)
+	}
+	if traceRowsContainEvent(t, defaultRows, "platform.runtime_log") {
+		t.Fatalf("run.trace default rows = %#v, want runtime logs hidden", defaultRows)
+	}
+	verboseTrace := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"trace-verbose","method":"run.trace","params":{"run_id":%q,"include_internal":true,"limit":10}}`, fixture.runID))
+	if verboseTrace.Error != nil {
+		t.Fatalf("run.trace include_internal error = %#v", verboseTrace.Error)
+	}
+	verboseRows, _ := asMap(t, verboseTrace.Result)["trace"].([]any)
+	if !traceRowsContainEvent(t, verboseRows, "trace.visible") || !traceRowsContainEvent(t, verboseRows, "platform.runtime_log") {
+		t.Fatalf("run.trace include_internal rows = %#v, want business and runtime_log", verboseRows)
+	}
 
 	logs := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"logs","method":"runtime.logs","params":{"run_id":%q,"component":"scheduler","level":"warn","limit":10}}`, fixture.runID))
 	if logs.Error != nil {
@@ -96,6 +115,20 @@ func assertObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T, fixture obs
 		"filter":       map[string]any{"event_name": []any{"trace.visible"}},
 		"replay_since": fixture.now.Add(-time.Minute).Format(time.RFC3339Nano),
 	}, "event_id", fixture.eventID)
+	assertObservabilitySubscriptionNoNotification(t, server.URL, "run.subscribe_trace", map[string]any{
+		"run_id":       fixture.runID,
+		"filter":       map[string]any{"event_name": []any{"platform.runtime_log"}},
+		"replay_since": fixture.now.Add(-time.Minute).Format(time.RFC3339Nano),
+	})
+	verboseTraceNotification := assertObservabilitySubscriptionNotification(t, server.URL, "run.subscribe_trace", map[string]any{
+		"run_id":           fixture.runID,
+		"filter":           map[string]any{"event_name": []any{"platform.runtime_log"}},
+		"include_internal": true,
+		"replay_since":     fixture.now.Add(-time.Minute).Format(time.RFC3339Nano),
+	}, "event_name", "platform.runtime_log")
+	if got := verboseTraceNotification["event_name"]; got != "platform.runtime_log" {
+		t.Fatalf("run.subscribe_trace include_internal notification = %#v", verboseTraceNotification)
+	}
 	logNotification := assertObservabilitySubscriptionNotification(t, server.URL, "runtime.subscribe_logs", map[string]any{
 		"run_id":       fixture.runID,
 		"component":    "scheduler",
@@ -113,6 +146,16 @@ func assertObservabilityOwnerBacksSupportedAPISurfaces(t *testing.T, fixture obs
 		"source":       "agent-1",
 		"replay_since": fixture.now.Add(-time.Minute).Format(time.RFC3339Nano),
 	})
+}
+
+func traceRowsContainEvent(t *testing.T, rows []any, eventName string) bool {
+	t.Helper()
+	for _, row := range rows {
+		if asMap(t, row)["event_name"] == eventName {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testing.T) {

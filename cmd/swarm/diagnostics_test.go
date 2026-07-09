@@ -213,7 +213,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 			lists:      [][]any{{}, {}, {validDiagnosticRunHeaderWithStatus("terminal-run", "completed")}},
 			owner:      "run.trace",
 			selected:   "terminal-run",
-			wantOutput: "run trace: run_id=terminal-run",
+			wantOutput: "run trace terminal-run",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -347,11 +347,12 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 			t.Fatalf("method = %q, want run.trace", req.Method)
 		}
 		wantParams := map[string]any{
-			"run_id": "run-1",
-			"limit":  float64(2),
-			"cursor": "trace-cur",
-			"since":  "2026-05-13T10:00:00Z",
-			"until":  "2026-05-13T10:05:00Z",
+			"run_id":           "run-1",
+			"limit":            float64(2),
+			"cursor":           "trace-cur",
+			"since":            "2026-05-13T10:00:00Z",
+			"until":            "2026-05-13T10:05:00Z",
+			"include_internal": true,
 			"filter": map[string]any{
 				"event_name":      []any{"scan.requested", "scan.completed"},
 				"entity_id":       []any{"entity-1", "entity-2"},
@@ -382,6 +383,7 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"run", "trace", "run-1",
+		"--verbose",
 		"--limit", "2",
 		"--cursor", "trace-cur",
 		"--since", "2026-05-13T10:00:00Z",
@@ -403,7 +405,12 @@ func TestTraceUsesRunTraceSnapshot(t *testing.T) {
 	if len(*requests) != 1 {
 		t.Fatalf("requests = %d, want 1", len(*requests))
 	}
-	for _, want := range []string{"run trace: run_id=run-1", "event-1", "scan.requested", "agent/agent-1", "next_cursor=trace-next"} {
+	for _, want := range []string{"run trace run-1", "event-1", "scan.requested", "agent/agent-1", "next_cursor=trace-next"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+		}
+	}
+	for _, want := range []string{"SESSION", "TURN", "+0ms"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -479,10 +486,11 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 			t.Fatalf("method[%d] = %q, want run.trace", callIndex, req.Method)
 		}
 		baseParams := map[string]any{
-			"run_id": "run-1",
-			"limit":  float64(1),
-			"since":  "2026-05-13T10:00:00Z",
-			"until":  "2026-05-13T10:05:00Z",
+			"run_id":           "run-1",
+			"limit":            float64(1),
+			"since":            "2026-05-13T10:00:00Z",
+			"until":            "2026-05-13T10:05:00Z",
+			"include_internal": true,
 			"filter": map[string]any{
 				"delivery_status": []any{"in_progress", "delivered", "failed"},
 				"subscriber_type": []any{"agent", "node"},
@@ -557,6 +565,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
 		"run", "trace", "run-1",
 		"--delivery-summary",
+		"--verbose",
 		"--limit", "1",
 		"--cursor", "start-cur",
 		"--since", "2026-05-13T10:00:00Z",
@@ -721,8 +730,13 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 	if len(*requests) != 2 {
 		t.Fatalf("requests = %d, want run.list then run.trace", len(*requests))
 	}
-	if !strings.Contains(stdout.String(), "run trace: run_id=active-run") {
+	if !strings.Contains(stdout.String(), "run trace active-run") {
 		t.Fatalf("stdout = %q, want resolved run trace header", stdout.String())
+	}
+	for _, unwanted := range []string{"SESSION", "TURN"} {
+		if strings.Contains(stdout.String(), unwanted) {
+			t.Fatalf("stdout contains %q for non-agent trace:\n%s", unwanted, stdout.String())
+		}
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
@@ -731,14 +745,16 @@ func TestTraceSnapshotFiltersUseOmittedRunResolver(t *testing.T) {
 
 func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 	for _, tc := range []struct {
-		name       string
-		args       []string
-		wantFilter map[string]any
+		name                string
+		args                []string
+		wantFilter          map[string]any
+		wantIncludeInternal bool
 	}{
 		{
-			name:       "long follow",
-			args:       []string{"run", "trace", "run-follow", "--follow", "--no-retry", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"},
-			wantFilter: wantFullTraceFilterParams(),
+			name:                "long follow verbose",
+			args:                []string{"run", "trace", "run-follow", "--follow", "--verbose", "--no-retry", "--event-name", "scan.requested", "--event-name", "scan.completed", "--entity-id", "entity-1", "--entity-id", "entity-2", "--delivery-status", "delivered", "--delivery-status", "failed", "--subscriber-id", "agent-1", "--subscriber-id", "node-2", "--subscriber-type", "agent", "--subscriber-type", "node"},
+			wantFilter:          wantFullTraceFilterParams(),
+			wantIncludeInternal: true,
 		},
 		{
 			name:       "shorthand follow",
@@ -761,7 +777,12 @@ func TestTraceFollowUsesRunSubscribeTrace(t *testing.T) {
 			}
 			assertRunCommandMethods(t, calls, nil)
 			assertRunCommandTraceSubscriptionWithFilter(t, wsRequests, "run-follow", false, tc.wantFilter)
-			if !strings.Contains(stdout.String(), "trace event_id=evt-follow") {
+			if got := (*wsRequests)[0].Params["include_internal"]; got != tc.wantIncludeInternal {
+				if tc.wantIncludeInternal || got != nil {
+					t.Fatalf("ws include_internal = %#v, want %t", got, tc.wantIncludeInternal)
+				}
+			}
+			if !strings.Contains(stdout.String(), "id=evt-follow") {
 				t.Fatalf("stdout = %q, want trace row", stdout.String())
 			}
 			if strings.TrimSpace(stderr.String()) != "" {
@@ -798,7 +819,7 @@ func TestTraceFollowOmittedRunReusesActivePreferenceResolver(t *testing.T) {
 		"event_name":    []any{"scan.requested"},
 		"subscriber_id": []any{"agent-1"},
 	})
-	if !strings.Contains(stdout.String(), "trace event_id=evt-active") {
+	if !strings.Contains(stdout.String(), "id=evt-active") {
 		t.Fatalf("stdout = %q, want trace row", stdout.String())
 	}
 }
@@ -824,6 +845,9 @@ func TestTraceHelpPromotesNoRetryWithoutReplaySince(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "--delivery-summary") {
 		t.Fatalf("help missing --delivery-summary:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--verbose") {
+		t.Fatalf("help missing --verbose:\n%s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "--replay-since") {
 		t.Fatalf("help exposed unpromoted --replay-since:\n%s", stdout.String())
@@ -945,7 +969,7 @@ func TestTraceFollowRecoversWithReplaySinceAfterClose(t *testing.T) {
 	if got := wsRequests[1].Params["replay_since"]; got != "2026-05-13T10:00:01Z" {
 		t.Fatalf("recovery replay_since = %#v, want first row timestamp", got)
 	}
-	for _, want := range []string{"trace event_id=evt-1", "trace event_id=evt-2"} {
+	for _, want := range []string{"id=evt-1", "id=evt-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -1043,7 +1067,7 @@ func TestTraceFollowRetriesRetryableReadFailure(t *testing.T) {
 			t.Fatalf("ws filter[%d] = %#v, want %#v", i, got, wantFilter)
 		}
 	}
-	if !strings.Contains(stdout.String(), "trace event_id=evt-recovered") {
+	if !strings.Contains(stdout.String(), "id=evt-recovered") {
 		t.Fatalf("stdout = %q, want recovered row", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "detached from run trace") {
@@ -1273,6 +1297,7 @@ func TestDiagnosticsRequireAPITokenBeforeRequest(t *testing.T) {
 	for _, args := range [][]string{
 		{"run", "list"},
 		{"run", "trace", "run-1"},
+		{"run", "trace", "run-1", "--verbose"},
 		{"run", "trace", "run-1", "--limit", "2", "--cursor", "cur", "--since", "2026-05-13T10:00:00Z", "--until", "2026-05-13T10:05:00Z"},
 		{"run", "trace", "run-1", "--delivery-detail"},
 		{"run", "trace", "run-1", "--delivery-summary"},

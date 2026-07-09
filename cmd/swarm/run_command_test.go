@@ -82,7 +82,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 		return 0
 	}
 
-	stdout := &notifyingBuffer{needle: "trace event_id=evt-local", notify: tracePrinted}
+	stdout := &notifyingBuffer{needle: "id=evt-local", notify: tracePrinted}
 	var stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data", "--platform-spec", "platform.yaml"}, stdout, &stderr, opts)
 	if code != 0 {
@@ -98,7 +98,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
 	assertRunCommandTraceSubscription(t, wsRequests, "run-local", true)
-	for _, want := range []string{"run started: run_id=run-local", "trace event_id=evt-local", "run terminal: run_id=run-local status=completed"} {
+	for _, want := range []string{"run started: run_id=run-local", "id=evt-local", "run terminal: run_id=run-local status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -472,7 +472,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 	})
 	defer server.Close()
 
-	stdout := &notifyingBuffer{needle: "trace event_id=evt-foreground", notify: tracePrinted}
+	stdout := &notifyingBuffer{needle: "id=evt-foreground", notify: tracePrinted}
 	var stderr bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -490,7 +490,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 		}
 	}
 	assertRunCommandTraceSubscription(t, wsRequests, "run-foreground", true)
-	for _, want := range []string{"trace event_id=evt-foreground", "run terminal: run_id=run-foreground status=completed"} {
+	for _, want := range []string{"id=evt-foreground", "run terminal: run_id=run-foreground status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}

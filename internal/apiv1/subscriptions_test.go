@@ -393,8 +393,32 @@ func TestHandlerWebSocketRunSubscribeTraceUsesOwnerReplayAndRunNotFound(t *testi
 	if observability.lastTrace.Since == nil || !observability.lastTrace.Since.Equal(base) {
 		t.Fatalf("run.subscribe_trace since = %#v, want %s", observability.lastTrace.Since, base)
 	}
+	if !observability.lastTrace.ExcludeRuntimeLogs {
+		t.Fatalf("run.subscribe_trace ExcludeRuntimeLogs = false, want default true")
+	}
 	if got := observability.lastTrace.Filter; len(got.EventNames) != 1 || got.EventNames[0] != "scan.requested" || len(got.EntityIDs) != 1 || got.EntityIDs[0] != "entity-1" || len(got.DeliveryStatuses) != 1 || got.DeliveryStatuses[0] != "delivered" || len(got.SubscriberIDs) != 1 || got.SubscriberIDs[0] != "agent-1" || len(got.SubscriberTypes) != 1 || got.SubscriberTypes[0] != "agent" {
 		t.Fatalf("run.subscribe_trace filter = %#v", got)
+	}
+
+	verboseConn := dialTestWS(t, server.URL)
+	defer verboseConn.Close()
+	writeWSRequest(t, verboseConn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      "sub-trace-verbose",
+		"method":  "run.subscribe_trace",
+		"params": map[string]any{
+			"run_id":           "run-1",
+			"include_internal": true,
+			"replay_since":     base.Format(time.RFC3339Nano),
+		},
+	})
+	verboseSubscribe := readWSResponse(t, verboseConn)
+	if verboseSubscribe.Error != nil {
+		t.Fatalf("run.subscribe_trace include_internal error = %#v", verboseSubscribe.Error)
+	}
+	_ = readWSNotification(t, verboseConn)
+	if observability.lastTrace.ExcludeRuntimeLogs {
+		t.Fatalf("run.subscribe_trace include_internal ExcludeRuntimeLogs = true, want false")
 	}
 }
 
@@ -415,6 +439,7 @@ func TestRunSubscribeTraceFilterValidation(t *testing.T) {
 	}{
 		{name: "unknown top-level limit", params: map[string]any{"run_id": "run-1", "limit": 1}, wantField: "limit"},
 		{name: "unknown top-level until", params: map[string]any{"run_id": "run-1", "until": "2026-05-13T10:05:00Z"}, wantField: "until"},
+		{name: "invalid include internal", params: map[string]any{"run_id": "run-1", "include_internal": "yes"}, wantField: "include_internal"},
 		{name: "unknown filter field", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"event_nmae": []any{"scan.requested"}}}, wantField: "filter.event_nmae"},
 		{name: "invalid delivery status", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"delivery_status": []any{"done"}}}, wantField: "filter.delivery_status"},
 		{name: "invalid subscriber type", params: map[string]any{"run_id": "run-1", "filter": map[string]any{"subscriber_type": []any{"system"}}}, wantField: "filter.subscriber_type"},

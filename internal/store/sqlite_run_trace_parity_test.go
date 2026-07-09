@@ -128,6 +128,42 @@ func TestSQLiteRunDebugTracePageDeterministicDeliveryAndTurnTiePaging(t *testing
 	}
 }
 
+func TestSQLiteRunDebugTracePageExcludeRuntimeLogs(t *testing.T) {
+	ctx := context.Background()
+	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+
+	runID := "00000000-0000-0000-0000-000000001816"
+	businessEvent := "00000000-0000-0000-0000-000000001817"
+	runtimeLogEvent := "00000000-0000-0000-0000-000000001818"
+	base := time.Unix(1700000600, 0).UTC()
+	if _, err := sqliteStore.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, base); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := sqliteStore.DB.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, entity_id, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES
+			(?, ?, 'item.received', NULL, 'global', '{}', 'runtime', 'platform', ?),
+			(?, ?, 'platform.runtime_log', NULL, 'global', '{}', 'runtime', 'platform', ?)
+	`, runID, businessEvent, base, runID, runtimeLogEvent, base.Add(time.Millisecond)); err != nil {
+		t.Fatalf("seed trace rows: %v", err)
+	}
+
+	allRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage all: %v", err)
+	}
+	if got := traceEventIDs(allRows); !sameStrings(got, []string{businessEvent, runtimeLogEvent}) {
+		t.Fatalf("all trace rows = %#v, want business and runtime_log", got)
+	}
+	filteredRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, RunDebugTraceQueryOptions{Limit: 10, ExcludeRuntimeLogs: true})
+	if err != nil {
+		t.Fatalf("LoadRunDebugTracePage filtered: %v", err)
+	}
+	if got := traceEventIDs(filteredRows); !sameStrings(got, []string{businessEvent}) {
+		t.Fatalf("filtered trace rows = %#v, want business row only", got)
+	}
+}
+
 func TestSQLiteRunDebugTracePageIncludesTaskAuditSessionsInWatermark(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)

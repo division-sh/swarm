@@ -6893,6 +6893,15 @@
           }
         },
         {
+          "name": "include_internal",
+          "required": false,
+          "description": "Optional trace visibility control. Defaults to false. When omitted or false, run.subscribe_trace excludes `platform.runtime_log` rows; when true, those internal runtime-log trace rows are included in notifications.",
+          "schema": {
+            "default": false,
+            "type": "boolean"
+          }
+        },
+        {
           "name": "replay_since",
           "required": false,
           "description": "Optional catch-up window. If present, delivers trace rows from this time forward, then continues live. Subject to runtime trace retention.",
@@ -7002,6 +7011,15 @@
           "description": "Typed predicates over canonical RunTraceRow facts. Present fields are OR-lists within the field and AND-composed across fields.",
           "schema": {
             "$ref": "#/components/schemas/RunTraceFilter"
+          }
+        },
+        {
+          "name": "include_internal",
+          "required": false,
+          "description": "Optional trace visibility control. Defaults to false. When omitted or false, run.trace excludes `platform.runtime_log` rows; when true, those internal runtime-log trace rows are included.",
+          "schema": {
+            "default": false,
+            "type": "boolean"
           }
         }
       ],

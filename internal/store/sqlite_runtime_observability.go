@@ -85,6 +85,9 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	appendIn("COALESCE(d.status, '')", opts.Filter.DeliveryStatuses)
 	appendIn("COALESCE(d.subscriber_id, '')", opts.Filter.SubscriberIDs)
 	appendIn("COALESCE(d.subscriber_type, '')", opts.Filter.SubscriberTypes)
+	if opts.ExcludeRuntimeLogs {
+		where = append(where, "e.event_name <> 'platform.runtime_log'")
+	}
 	args = append(args, opts.Limit+1)
 	rows, err := s.DB.QueryContext(ctx, `
 		WITH trace_sessions AS (

@@ -34,6 +34,7 @@ type diagnosticRunListOptions struct {
 type diagnosticTraceOptions struct {
 	apiOptions       rootCommandOptions
 	follow           bool
+	verbose          bool
 	noRetry          bool
 	deliveryDetail   bool
 	deliverySummary  bool
@@ -308,6 +309,7 @@ func newTraceCommand(opts rootCommandOptions) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&traceOpts.follow, "follow", "f", false, "Follow live trace rows as they stream")
+	cmd.Flags().BoolVar(&traceOpts.verbose, "verbose", false, "Include internal trace rows such as platform.runtime_log")
 	cmd.Flags().BoolVar(&traceOpts.noRetry, "no-retry", false, "Disable trace follow reconnect/recovery retries")
 	cmd.Flags().BoolVar(&traceOpts.deliveryDetail, "delivery-detail", false, "Show snapshot delivery lifecycle fields from RunTraceRow")
 	cmd.Flags().BoolVar(&traceOpts.deliverySummary, "delivery-summary", false, "Summarize snapshot delivery lifecycle fields from all RunTraceRow pages")
@@ -547,7 +549,7 @@ func runDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, opts 
 	if err := validateDiagnosticRunTraceResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, diagnosticRunAPIErrorClassifier())
 	}
-	writeDiagnosticRunTrace(out, runID, result, opts.deliveryDetail)
+	writeDiagnosticRunTrace(out, runID, result, opts.deliveryDetail, opts.verbose)
 	return nil
 }
 
@@ -609,6 +611,9 @@ func (o diagnosticTraceOptions) snapshotParams() (map[string]any, error) {
 	if len(filter) > 0 {
 		params["filter"] = filter
 	}
+	if o.verbose {
+		params["include_internal"] = true
+	}
 	return params, nil
 }
 
@@ -635,6 +640,9 @@ func (o diagnosticTraceOptions) followParams() (map[string]any, error) {
 	params := map[string]any{}
 	if len(filter) > 0 {
 		params["filter"] = filter
+	}
+	if o.verbose {
+		params["include_internal"] = true
 	}
 	return params, nil
 }
@@ -878,6 +886,7 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 	}
 	retryAttempt := 0
 	var replaySince *time.Time
+	traceWriter := &runTraceRowLineWriter{}
 	for {
 		sub, err := subscribeRunTrace(ctx, wsEndpoint, client.token, runID, replaySince, params)
 		if err != nil {
@@ -897,7 +906,7 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 			}
 			continue
 		}
-		streamErr, interrupted := consumeDiagnosticTraceSubscription(ctx, out, sub, &replaySince)
+		streamErr, interrupted := consumeDiagnosticTraceSubscription(ctx, out, sub, &replaySince, traceWriter)
 		sub.close()
 		if interrupted {
 			return traceFollowDetached(errOut)
@@ -925,7 +934,10 @@ func followDiagnosticTraceCommand(ctx context.Context, out, errOut io.Writer, cl
 	}
 }
 
-func consumeDiagnosticTraceSubscription(ctx context.Context, out io.Writer, sub *runTraceSubscription, replaySince **time.Time) (error, bool) {
+func consumeDiagnosticTraceSubscription(ctx context.Context, out io.Writer, sub *runTraceSubscription, replaySince **time.Time, traceWriter *runTraceRowLineWriter) (error, bool) {
+	if traceWriter == nil {
+		traceWriter = &runTraceRowLineWriter{}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -945,7 +957,7 @@ func consumeDiagnosticTraceSubscription(ctx context.Context, out io.Writer, sub 
 			if err != nil {
 				return fmt.Errorf("malformed run.subscribe_trace notification: event_created_at is not RFC3339: %w", err), false
 			}
-			writeRunCommandTraceRow(out, row)
+			traceWriter.Write(out, row)
 			nextReplaySince = nextReplaySince.UTC()
 			*replaySince = &nextReplaySince
 		case err := <-sub.errs:
@@ -1465,36 +1477,52 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 	}
 }
 
-func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTraceResult, deliveryDetail bool) {
+func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTraceResult, deliveryDetail, verbose bool) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "run trace: run_id=%s\n", runID)
+	startedAt, hasStart := traceRowsStart(result.Trace)
+	fmt.Fprintf(out, "run trace %s", runID)
+	if hasStart {
+		fmt.Fprintf(out, " started %s", formatTraceWallClock(startedAt))
+	}
+	fmt.Fprintf(out, " rows=%d\n", len(result.Trace))
 	if deliveryDetail {
 		writeDiagnosticRunTraceDeliveryDetail(out, result.Trace)
 	} else {
 		rows := make([][]string, 0, len(result.Trace))
+		includeSessionTurn := verbose || traceRowsHaveSessionOrTurn(result.Trace)
 		for _, row := range result.Trace {
-			rows = append(rows, []string{
-				row.EventCreatedAt,
+			tableRow := []string{
+				formatTraceRelativeFrom(startedAt, hasStart, row.EventCreatedAt),
 				row.EventName,
 				row.EventID,
 				emptyDash(row.DeliveryStatus),
-				emptyDash(row.SubscriberType) + "/" + emptyDash(row.SubscriberID),
-				emptyDash(row.SessionID),
-				emptyDash(firstNonEmpty(row.TurnID, row.TurnTriggerEventType)),
-			})
+				formatTraceSubscriber(row),
+			}
+			if includeSessionTurn {
+				tableRow = append(tableRow,
+					emptyDash(row.SessionID),
+					emptyDash(firstNonEmpty(row.TurnID, row.TurnTriggerEventType)),
+				)
+			}
+			rows = append(rows, tableRow)
+		}
+		columns := []cliTableColumn{
+			{Header: "TIME"},
+			{Header: "EVENT"},
+			{Header: "ID", KeyColumn: true},
+			{Header: "DELIVERY"},
+			{Header: "SUBSCRIBER"},
+		}
+		if includeSessionTurn {
+			columns = append(columns,
+				cliTableColumn{Header: "SESSION"},
+				cliTableColumn{Header: "TURN"},
+			)
 		}
 		writeCLITable(out, cliTable{
-			Columns: []cliTableColumn{
-				{Header: "EVENT AT"},
-				{Header: "EVENT"},
-				{Header: "EVENT ID", KeyColumn: true},
-				{Header: "DELIVERY"},
-				{Header: "SUBSCRIBER"},
-				{Header: "SESSION"},
-				{Header: "TURN"},
-			},
+			Columns:      columns,
 			Rows:         rows,
 			EmptyMessage: "No trace rows found for this run.",
 		})
@@ -1502,6 +1530,56 @@ func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTr
 	if result.NextCursor != "" {
 		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
 	}
+}
+
+func traceRowsStart(rows []diagnosticRunTraceRow) (time.Time, bool) {
+	if len(rows) == 0 {
+		return time.Time{}, false
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(rows[0].EventCreatedAt))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return startedAt.UTC(), true
+}
+
+func traceRowsHaveSessionOrTurn(rows []diagnosticRunTraceRow) bool {
+	for _, row := range rows {
+		if strings.TrimSpace(row.SessionID) != "" || strings.TrimSpace(row.TurnID) != "" || strings.TrimSpace(row.TurnTriggerEventType) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func formatTraceRelativeFrom(startedAt time.Time, hasStart bool, raw string) string {
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
+	if err != nil || !hasStart {
+		return raw
+	}
+	return formatTraceOffset(at.UTC().Sub(startedAt))
+}
+
+func formatTraceOffset(duration time.Duration) string {
+	duration = duration.Round(time.Millisecond)
+	if duration == 0 {
+		return "+0ms"
+	}
+	sign := "+"
+	if duration < 0 {
+		sign = "-"
+		duration = -duration
+	}
+	return sign + duration.String()
+}
+
+func formatTraceWallClock(at time.Time) string {
+	return at.UTC().Format("15:04:05.000")
+}
+
+func formatTraceSubscriber(row diagnosticRunTraceRow) string {
+	subscriber := strings.Trim(strings.TrimSpace(row.SubscriberType)+"/"+strings.TrimSpace(row.SubscriberID), "/")
+	return emptyDash(subscriber)
 }
 
 func writeDiagnosticRunTraceDeliverySummary(out io.Writer, runID string, result diagnosticRunTraceSummaryResult) {
