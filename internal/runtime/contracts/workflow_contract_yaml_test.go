@@ -259,6 +259,29 @@ stages:
 	}
 }
 
+func TestFlowSchemaDocumentDecodeStageTimersRejectExplicitIDCollisionAcrossStages(t *testing.T) {
+	var doc FlowSchemaDocument
+	err := yaml.Unmarshal([]byte(`
+name: validation
+stages:
+  awaiting_review:
+    timers:
+      - id: sla
+        after: 48h
+        emit: review.sla_escalated
+  parked:
+    timers:
+      - id: sla
+        after: 72h
+        advances_to: expired
+  expired:
+    terminal: true
+`), &doc)
+	if err == nil || !strings.Contains(err.Error(), `stage timer id "sla" is declared in both stage "awaiting_review" and stage "parked"`) {
+		t.Fatalf("yaml.Unmarshal error = %v, want cross-stage timer id rejection", err)
+	}
+}
+
 func TestFlowSchemaDocumentDecodeStagesExplicitEmpty(t *testing.T) {
 	var doc FlowSchemaDocument
 	if err := yaml.Unmarshal([]byte(`
