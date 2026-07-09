@@ -144,7 +144,7 @@ func writeContextListText(out io.Writer, report localContextRegistryReport) {
 		return
 	}
 	if len(report.Entries) == 0 {
-		fmt.Fprintf(out, "no contexts found\n")
+		writeCLIEmptyState(out, "No contexts found. Create one by running a command with --api or --config.")
 		if report.Status != "" && report.Status != "empty" {
 			fmt.Fprintf(out, "registry_status: %s\n", report.Status)
 			if report.Detail != "" {
@@ -153,11 +153,20 @@ func writeContextListText(out io.Writer, report localContextRegistryReport) {
 		}
 		return
 	}
-	fmt.Fprintf(out, "%-24s %-22s %-9s %s\n", "NAME", "STATUS", "TRANSPORT", "TARGET")
+	rows := make([][]string, 0, len(report.Entries))
 	for _, entry := range report.Entries {
 		target := contextEntryTarget(entry.Descriptor)
-		fmt.Fprintf(out, "%-24s %-22s %-9s %s\n", entry.Descriptor.Name, entry.Status, entry.Descriptor.Transport, target)
+		rows = append(rows, []string{entry.Descriptor.Name, entry.Status, entry.Descriptor.Transport, target})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "NAME", KeyColumn: true},
+			{Header: "STATUS"},
+			{Header: "TRANSPORT"},
+			{Header: "TARGET"},
+		},
+		Rows: rows,
+	})
 }
 
 func writeContextEntryText(out io.Writer, label string, entry localContextEntry) {

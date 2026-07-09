@@ -95,7 +95,7 @@ func TestEntitiesListEmptyResultOmitsUnsetParams(t *testing.T) {
 	if len(captured.Params) != 0 {
 		t.Fatalf("params = %#v, want empty", captured.Params)
 	}
-	if !strings.Contains(stdout.String(), "No entities match the filter.") {
+	if !strings.Contains(stdout.String(), "No entities match the current filters.") {
 		t.Fatalf("stdout = %q, want empty-state text", stdout.String())
 	}
 }
@@ -175,7 +175,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("entity aggregate code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"GROUP\tCOUNT", "vertical\t2"} {
+	for _, want := range []string{"GROUP", "COUNT", "vertical  2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("entity aggregate stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -251,7 +251,7 @@ func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 	if len(captured[0].Params) != 0 {
 		t.Fatalf("default params = %#v, want empty for server-owned default group", captured[0].Params)
 	}
-	if !strings.Contains(stdout.String(), "GROUP\tCOUNT") || !strings.Contains(stdout.String(), "collecting\t2") {
+	if !strings.Contains(stdout.String(), "GROUP") || !strings.Contains(stdout.String(), "COUNT") || !strings.Contains(stdout.String(), "collecting  2") {
 		t.Fatalf("stdout = %q, want aggregate table", stdout.String())
 	}
 

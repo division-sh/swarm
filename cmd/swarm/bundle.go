@@ -844,33 +844,55 @@ func writeBundleListHuman(w io.Writer, result bundleListResult) {
 	if w == nil {
 		return
 	}
-	if len(result.Bundles) == 0 {
-		fmt.Fprintln(w, "No bundles found")
-	} else {
-		for _, bundle := range result.Bundles {
-			fmt.Fprintf(w, "bundle %s agents=%d has_data=%t data_size_bytes=%d ingested_at=%s",
-				bundle.BundleHash, bundle.AgentCount, bundle.HasData, bundle.DataSizeBytes, bundle.IngestedAt)
-			if rendered := compactJSONValue(bundle.Metadata); rendered != "{}" {
-				fmt.Fprintf(w, " metadata=%s", rendered)
-			}
-			fmt.Fprintln(w)
+	rows := make([][]string, 0, len(result.Bundles))
+	for _, bundle := range result.Bundles {
+		metadata := compactJSONValue(bundle.Metadata)
+		if metadata == "{}" {
+			metadata = ""
 		}
+		rows = append(rows, []string{
+			bundle.BundleHash,
+			fmt.Sprintf("%d", bundle.AgentCount),
+			fmt.Sprintf("%t", bundle.HasData),
+			fmt.Sprintf("%d", bundle.DataSizeBytes),
+			bundle.IngestedAt,
+			metadata,
+		})
 	}
+	footers := []string{}
 	if cursor := strings.TrimSpace(result.NextCursor); cursor != "" {
-		fmt.Fprintf(w, "next_cursor=%s\n", cursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", cursor))
 	}
+	writeCLITable(w, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "BUNDLE", KeyColumn: true},
+			{Header: "AGENTS"},
+			{Header: "HAS_DATA"},
+			{Header: "DATA_SIZE_BYTES"},
+			{Header: "INGESTED_AT"},
+			{Header: "METADATA", Truncatable: true},
+		},
+		Rows:         rows,
+		EmptyMessage: "No bundles found. Register one: swarm bundle register <path>",
+		FooterLines:  footers,
+	})
 }
 
 func writeBundleDetailHuman(w io.Writer, result bundleDetail) {
 	if w == nil {
 		return
 	}
-	fmt.Fprintf(w, "Bundle %s\n", result.BundleHash)
-	fmt.Fprintf(w, "agents=%d has_data=%t data_size_bytes=%d ingested_at=%s\n", result.AgentCount, result.HasData, result.DataSizeBytes, result.IngestedAt)
+	writeCLITitle(w, fmt.Sprintf("Bundle %s", result.BundleHash))
+	writeCLIFieldLine(w,
+		cliDetailField{Key: "agents", Value: fmt.Sprintf("%d", result.AgentCount)},
+		cliDetailField{Key: "has_data", Value: fmt.Sprintf("%t", result.HasData)},
+		cliDetailField{Key: "data_size_bytes", Value: fmt.Sprintf("%d", result.DataSizeBytes)},
+		cliDetailField{Key: "ingested_at", Value: result.IngestedAt},
+	)
 	if rendered := compactJSONValue(result.Metadata); rendered != "{}" {
-		fmt.Fprintf(w, "metadata=%s\n", rendered)
+		writeCLIFieldLine(w, cliDetailField{Key: "metadata", Value: rendered})
 	}
-	fmt.Fprintf(w, "parsed_json=%s\n", compactJSONValue(result.ParsedJSON))
+	writeCLIFieldLine(w, cliDetailField{Key: "parsed_json", Value: compactJSONValue(result.ParsedJSON)})
 	fmt.Fprintln(w, "content_yaml:")
 	fmt.Fprintln(w, strings.TrimRight(result.ContentYAML, "\n"))
 }
@@ -879,33 +901,39 @@ func writeBundleAgentsHuman(w io.Writer, result bundleAgentsResult) {
 	if w == nil {
 		return
 	}
-	if len(result.Agents) == 0 {
-		fmt.Fprintln(w, "No bundle agents found")
-		return
-	}
+	rows := make([][]string, 0, len(result.Agents))
 	for _, agent := range result.Agents {
-		fields := []string{fmt.Sprintf("agent %s", agent.AgentID)}
-		appendKV := func(key, value string) {
-			if strings.TrimSpace(value) != "" {
-				fields = append(fields, fmt.Sprintf("%s=%s", key, value))
-			}
-		}
-		appendKV("flow_instance", agent.FlowInstance)
-		appendKV("role", agent.Role)
-		appendKV("type", agent.Type)
-		appendKV("model", agent.Model)
-		appendKV("llm_backend", agent.LLMBackend)
-		appendKV("mode", agent.Mode)
-		appendKV("session_scope", agent.SessionScope)
-		appendKV("prompt_path", agent.PromptPath)
-		if len(agent.Subscriptions) > 0 {
-			fields = append(fields, "subscriptions="+strings.Join(agent.Subscriptions, ","))
-		}
-		if len(agent.Tools) > 0 {
-			fields = append(fields, "tools="+strings.Join(agent.Tools, ","))
-		}
-		fmt.Fprintln(w, strings.Join(fields, " "))
+		rows = append(rows, []string{
+			agent.AgentID,
+			agent.FlowInstance,
+			agent.Role,
+			agent.Type,
+			agent.Model,
+			agent.LLMBackend,
+			agent.Mode,
+			agent.SessionScope,
+			agent.PromptPath,
+			strings.Join(agent.Subscriptions, ","),
+			strings.Join(agent.Tools, ","),
+		})
 	}
+	writeCLITable(w, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "AGENT", KeyColumn: true},
+			{Header: "FLOW_INSTANCE"},
+			{Header: "ROLE"},
+			{Header: "TYPE"},
+			{Header: "MODEL"},
+			{Header: "LLM_BACKEND"},
+			{Header: "MODE"},
+			{Header: "SESSION_SCOPE"},
+			{Header: "PROMPT_PATH"},
+			{Header: "SUBSCRIPTIONS", Truncatable: true},
+			{Header: "TOOLS", Truncatable: true},
+		},
+		Rows:         rows,
+		EmptyMessage: "No bundle agents found.",
+	})
 }
 
 func writeBundleBuildHuman(w io.Writer, report runtimecontracts.BundleBuildReport) {

@@ -467,27 +467,40 @@ func writeEntityListResult(out io.Writer, result entityListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Entities) == 0 {
-		fmt.Fprintln(out, "No entities match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "ENTITY_ID\tRUN_ID\tFLOW\tTYPE\tSTATE\tREVISION\tUPDATED\tSLUG\tNAME")
+	rows := make([][]string, 0, len(result.Entities))
 	for _, entity := range result.Entities {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+		rows = append(rows, []string{
 			entity.EntityID,
 			entity.RunID,
 			entity.FlowInstance,
 			entity.EntityType,
 			entity.CurrentState,
-			entity.Revision,
+			fmt.Sprintf("%d", entity.Revision),
 			entity.UpdatedAt,
 			entityDash(entity.Slug),
 			entityDash(entity.Name),
-		)
+		})
 	}
+	footers := []string{}
 	if strings.TrimSpace(result.NextCursor) != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "ENTITY_ID", KeyColumn: true},
+			{Header: "RUN_ID", KeyColumn: true},
+			{Header: "FLOW"},
+			{Header: "TYPE"},
+			{Header: "STATE"},
+			{Header: "REVISION"},
+			{Header: "UPDATED"},
+			{Header: "SLUG"},
+			{Header: "NAME"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No entities match the current filters.",
+		FooterLines:  footers,
+	})
 }
 
 func writeEntityFullResult(out io.Writer, result entityFull) {
@@ -495,28 +508,27 @@ func writeEntityFullResult(out io.Writer, result entityFull) {
 		return
 	}
 	entity := result.Entity
-	fmt.Fprintf(out, "Entity %s\n", entity.EntityID)
-	fmt.Fprintf(out, "run_id=%s flow=%s type=%s state=%s revision=%d created_at=%s updated_at=%s\n",
-		entity.RunID,
-		entity.FlowInstance,
-		entity.EntityType,
-		entity.CurrentState,
-		entity.Revision,
-		entity.CreatedAt,
-		entity.UpdatedAt,
+	writeCLITitle(out, fmt.Sprintf("Entity %s", entity.EntityID))
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "run_id", Value: entity.RunID},
+		cliDetailField{Key: "flow", Value: entity.FlowInstance},
+		cliDetailField{Key: "type", Value: entity.EntityType},
+		cliDetailField{Key: "state", Value: entity.CurrentState},
+		cliDetailField{Key: "revision", Value: fmt.Sprintf("%d", entity.Revision)},
+		cliDetailField{Key: "created_at", Value: entity.CreatedAt},
+		cliDetailField{Key: "updated_at", Value: entity.UpdatedAt},
 	)
-	fmt.Fprintf(out, "slug=%s name=%s\n", entityDash(entity.Slug), entityDash(entity.Name))
-	fmt.Fprintf(out, "fields=%s\n", entityCompactJSON(result.Fields))
-	fmt.Fprintf(out, "gates=%s\n", entityCompactJSON(result.Gates))
-	fmt.Fprintf(out, "accumulated=%s\n", entityCompactJSON(result.Accumulated))
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "slug", Value: entityDash(entity.Slug)},
+		cliDetailField{Key: "name", Value: entityDash(entity.Name)},
+	)
+	writeCLIFieldLine(out, cliDetailField{Key: "fields", Value: entityCompactJSON(result.Fields)})
+	writeCLIFieldLine(out, cliDetailField{Key: "gates", Value: entityCompactJSON(result.Gates)})
+	writeCLIFieldLine(out, cliDetailField{Key: "accumulated", Value: entityCompactJSON(result.Accumulated)})
 }
 
 func writeEntityAggregateResult(out io.Writer, result entityAggregateResult) {
 	if out == nil {
-		return
-	}
-	if len(result.Counts) == 0 {
-		fmt.Fprintln(out, "No entity aggregate rows match the filter.")
 		return
 	}
 	keys := make([]string, 0, len(result.Counts))
@@ -524,10 +536,18 @@ func writeEntityAggregateResult(out io.Writer, result entityAggregateResult) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	fmt.Fprintln(out, "GROUP\tCOUNT")
+	rows := make([][]string, 0, len(keys))
 	for _, key := range keys {
-		fmt.Fprintf(out, "%s\t%d\n", entityDash(key), result.Counts[key])
+		rows = append(rows, []string{entityDash(key), fmt.Sprintf("%d", result.Counts[key])})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "GROUP"},
+			{Header: "COUNT"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No entity aggregate rows match the current filters.",
+	})
 }
 
 func entityListAPIErrorClassifier() cliAPIErrorClassifier {

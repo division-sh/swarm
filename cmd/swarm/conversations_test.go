@@ -87,7 +87,7 @@ func TestConversationsListEmptyResultOmitsUnsetParams(t *testing.T) {
 	if len(captured.Params) != 0 {
 		t.Fatalf("params = %#v, want empty", captured.Params)
 	}
-	if !strings.Contains(stdout.String(), "No conversations match the filter.") {
+	if !strings.Contains(stdout.String(), "No conversations match the current filters.") {
 		t.Fatalf("stdout = %q, want empty-state text", stdout.String())
 	}
 }
@@ -117,8 +117,9 @@ func TestConversationViewUsesConversationGetAndRendersTurns(t *testing.T) {
 	for _, want := range []string{
 		"Conversation sess-1",
 		"agent_id=agent-1 run_id=run-1 status=active turns=1 messages=2",
-		"TURN\tTURN_ID",
-		"1\tturn-1\tevent-1\ttask.started\ttrue\t150\t-",
+		"TURN  TURN_ID",
+		"1     turn-1",
+		"task.started  true      150",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -155,7 +156,7 @@ func TestConversationTurnUsesConversationGetTurnAndRendersDeepTurn(t *testing.T)
 	for _, want := range []string{
 		"Conversation sess-1 turn 2",
 		"turn_id=turn-2",
-		"dispatch trigger_event_id=event-2 trigger_event_type=task.completed",
+		"dispatch.trigger_event_id=event-2 dispatch.trigger_event_type=task.completed",
 		"advertised_tools=emit_done,read_state runtime_log_entries=1",
 		"assistant_visible_output=done",
 		"log_id=log-1",

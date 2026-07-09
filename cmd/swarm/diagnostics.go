@@ -1361,24 +1361,34 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Runs) == 0 {
-		fmt.Fprintln(out, "no runs")
-	} else {
-		fmt.Fprintln(out, "RUN ID\tSTATUS\tSTARTED\tEVENTS\tENTITIES\tTRIGGER")
-		for _, run := range result.Runs {
-			fmt.Fprintf(out, "%s\t%s\t%s\t%d\t%d\t%s\n",
-				run.RunID,
-				run.Status,
-				run.StartedAt,
-				intPointerValue(run.EventCount),
-				intPointerValue(run.EntityCount),
-				run.TriggerEventType,
-			)
-		}
+	rows := make([][]string, 0, len(result.Runs))
+	for _, run := range result.Runs {
+		rows = append(rows, []string{
+			run.RunID,
+			run.Status,
+			run.StartedAt,
+			fmt.Sprintf("%d", intPointerValue(run.EventCount)),
+			fmt.Sprintf("%d", intPointerValue(run.EntityCount)),
+			run.TriggerEventType,
+		})
 	}
+	footers := []string{}
 	if result.NextCursor != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "RUN ID", KeyColumn: true},
+			{Header: "STATUS"},
+			{Header: "STARTED"},
+			{Header: "EVENTS"},
+			{Header: "ENTITIES"},
+			{Header: "TRIGGER"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No runs found. Start one: swarm run start --event <event>",
+		FooterLines:  footers,
+	})
 }
 
 func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader) {
@@ -1460,24 +1470,34 @@ func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTr
 		return
 	}
 	fmt.Fprintf(out, "run trace: run_id=%s\n", runID)
-	if len(result.Trace) == 0 {
-		fmt.Fprintln(out, "no trace rows")
-	} else if deliveryDetail {
+	if deliveryDetail {
 		writeDiagnosticRunTraceDeliveryDetail(out, result.Trace)
 	} else {
-		fmt.Fprintln(out, "EVENT AT\tEVENT\tEVENT ID\tDELIVERY\tSUBSCRIBER\tSESSION\tTURN")
+		rows := make([][]string, 0, len(result.Trace))
 		for _, row := range result.Trace {
-			fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\n",
+			rows = append(rows, []string{
 				row.EventCreatedAt,
 				row.EventName,
 				row.EventID,
 				emptyDash(row.DeliveryStatus),
-				emptyDash(row.SubscriberType),
-				emptyDash(row.SubscriberID),
+				emptyDash(row.SubscriberType) + "/" + emptyDash(row.SubscriberID),
 				emptyDash(row.SessionID),
 				emptyDash(firstNonEmpty(row.TurnID, row.TurnTriggerEventType)),
-			)
+			})
 		}
+		writeCLITable(out, cliTable{
+			Columns: []cliTableColumn{
+				{Header: "EVENT AT"},
+				{Header: "EVENT"},
+				{Header: "EVENT ID", KeyColumn: true},
+				{Header: "DELIVERY"},
+				{Header: "SUBSCRIBER"},
+				{Header: "SESSION"},
+				{Header: "TURN"},
+			},
+			Rows:         rows,
+			EmptyMessage: "No trace rows found for this run.",
+		})
 	}
 	if result.NextCursor != "" {
 		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
@@ -1495,39 +1515,54 @@ func writeDiagnosticRunTraceDeliverySummary(out io.Writer, runID string, result 
 		result.NonDeliveryRows,
 	)
 	if len(result.Groups) == 0 {
-		fmt.Fprintln(out, "no delivery rows")
+		writeCLIEmptyState(out, "No delivery rows found for this trace.")
 		return
 	}
-	fmt.Fprintln(out, "SUBSCRIBER\tPENDING\tIN_PROGRESS\tDELIVERED\tFAILED\tDEAD_LETTER\tAVG_QUEUE_WAIT\tMAX_QUEUE_WAIT\tAVG_EXECUTION_TIME\tMAX_EXECUTION_TIME\tQUEUE_UNAVAILABLE\tEXECUTION_UNAVAILABLE")
+	rows := make([][]string, 0, len(result.Groups))
 	for _, group := range result.Groups {
-		fmt.Fprintf(out, "%s/%s\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\t%d\t%d\n",
-			group.SubscriberType,
-			group.SubscriberID,
-			group.StatusCounts["pending"],
-			group.StatusCounts["in_progress"],
-			group.StatusCounts["delivered"],
-			group.StatusCounts["failed"],
-			group.StatusCounts["dead_letter"],
+		rows = append(rows, []string{
+			group.SubscriberType + "/" + group.SubscriberID,
+			fmt.Sprintf("%d", group.StatusCounts["pending"]),
+			fmt.Sprintf("%d", group.StatusCounts["in_progress"]),
+			fmt.Sprintf("%d", group.StatusCounts["delivered"]),
+			fmt.Sprintf("%d", group.StatusCounts["failed"]),
+			fmt.Sprintf("%d", group.StatusCounts["dead_letter"]),
 			traceDurationAverage(group.QueueWait),
 			traceDurationMax(group.QueueWait),
 			traceDurationAverage(group.ExecutionTime),
 			traceDurationMax(group.ExecutionTime),
-			group.UnavailableQueue,
-			group.UnavailableExec,
-		)
+			fmt.Sprintf("%d", group.UnavailableQueue),
+			fmt.Sprintf("%d", group.UnavailableExec),
+		})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "SUBSCRIBER"},
+			{Header: "PENDING"},
+			{Header: "IN_PROGRESS"},
+			{Header: "DELIVERED"},
+			{Header: "FAILED"},
+			{Header: "DEAD_LETTER"},
+			{Header: "AVG_QUEUE_WAIT"},
+			{Header: "MAX_QUEUE_WAIT"},
+			{Header: "AVG_EXECUTION_TIME"},
+			{Header: "MAX_EXECUTION_TIME"},
+			{Header: "QUEUE_UNAVAILABLE"},
+			{Header: "EXECUTION_UNAVAILABLE"},
+		},
+		Rows: rows,
+	})
 }
 
 func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTraceRow) {
-	fmt.Fprintln(out, "EVENT AT\tEVENT\tEVENT ID\tDELIVERY ID\tSUBSCRIBER\tSTATUS\tREASON\tDELIVERY CREATED\tDELIVERY STARTED\tDELIVERY DELIVERED\tQUEUE WAIT\tEXECUTION TIME\tSESSION\tTURN")
+	tableRows := make([][]string, 0, len(rows))
 	for _, row := range rows {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		tableRows = append(tableRows, []string{
 			row.EventCreatedAt,
 			row.EventName,
 			row.EventID,
 			emptyDash(row.DeliveryID),
-			emptyDash(row.SubscriberType),
-			emptyDash(row.SubscriberID),
+			emptyDash(row.SubscriberType) + "/" + emptyDash(row.SubscriberID),
 			emptyDash(row.DeliveryStatus),
 			emptyDash(row.DeliveryReasonCode),
 			emptyDash(row.DeliveryCreatedAt),
@@ -1537,8 +1572,28 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 			traceDuration(row.DeliveryStartedAt, row.DeliveryDeliveredAt),
 			emptyDash(row.SessionID),
 			emptyDash(firstNonEmpty(row.TurnID, row.TurnTriggerEventType)),
-		)
+		})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "EVENT AT"},
+			{Header: "EVENT"},
+			{Header: "EVENT ID", KeyColumn: true},
+			{Header: "DELIVERY ID", KeyColumn: true},
+			{Header: "SUBSCRIBER"},
+			{Header: "STATUS"},
+			{Header: "REASON"},
+			{Header: "DELIVERY CREATED"},
+			{Header: "DELIVERY STARTED"},
+			{Header: "DELIVERY DELIVERED"},
+			{Header: "QUEUE WAIT"},
+			{Header: "EXECUTION TIME"},
+			{Header: "SESSION"},
+			{Header: "TURN"},
+		},
+		Rows:         tableRows,
+		EmptyMessage: "No delivery rows found for this trace.",
+	})
 }
 
 func traceDurationAverage(stats diagnosticTraceDurationStats) string {

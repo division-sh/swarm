@@ -868,48 +868,67 @@ func writeForkChatListResult(out io.Writer, result forkChatListResult) {
 	if out == nil {
 		return
 	}
-	if len(result.Forks) == 0 {
-		fmt.Fprintln(out, "No forkchat sessions match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "FORK_ID\tSOURCE_SESSION\tSOURCE_AGENT\tSTATE\tTURNS\tEXPIRES_AT")
+	rows := make([][]string, 0, len(result.Forks))
 	for _, fork := range result.Forks {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%d\t%s\n",
+		rows = append(rows, []string{
 			fork.ForkID,
 			fork.SourceSessionID,
 			fork.SourceAgentID,
 			fork.State,
-			len(fork.Turns),
+			fmt.Sprintf("%d", len(fork.Turns)),
 			fork.ExpiresAt,
-		)
+		})
 	}
+	footers := []string{}
 	if strings.TrimSpace(result.NextCursor) != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "FORK_ID", KeyColumn: true},
+			{Header: "SOURCE_SESSION"},
+			{Header: "SOURCE_AGENT"},
+			{Header: "STATE"},
+			{Header: "TURNS"},
+			{Header: "EXPIRES_AT"},
+		},
+		Rows:         rows,
+		EmptyMessage: "No forkchat sessions match the current filters. Start one: swarm forkchat new <session-id>",
+		FooterLines:  footers,
+	})
 }
 
 func writeForkChatSessionDetail(out io.Writer, fork forkChatSession) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "Fork %s\n", fork.ForkID)
+	writeCLITitle(out, fmt.Sprintf("Fork %s", fork.ForkID))
 	writeForkChatSessionHeader(out, fork)
-	if len(fork.Turns) == 0 {
-		fmt.Fprintln(out, "No forkchat turns recorded.")
-		return
-	}
-	fmt.Fprintln(out, "TURN\tTURN_ID\tPARSE_OK\tLATENCY_MS\tTOOL_CALLS\tASSISTANT\tERROR")
+	rows := make([][]string, 0, len(fork.Turns))
 	for _, turn := range fork.Turns {
-		fmt.Fprintf(out, "%d\t%s\t%t\t%d\t%d\t%s\t%s\n",
-			turn.TurnIndex,
+		rows = append(rows, []string{
+			fmt.Sprintf("%d", turn.TurnIndex),
 			turn.TurnID,
-			*turn.ParseOK,
-			*turn.LatencyMS,
-			len(turn.ToolCalls),
+			fmt.Sprintf("%t", *turn.ParseOK),
+			fmt.Sprintf("%d", *turn.LatencyMS),
+			fmt.Sprintf("%d", len(turn.ToolCalls)),
 			conversationDash(forkChatAssistantMessage(turn)),
 			conversationDash(turn.Error),
-		)
+		})
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "TURN"},
+			{Header: "TURN_ID", KeyColumn: true},
+			{Header: "PARSE_OK"},
+			{Header: "LATENCY_MS"},
+			{Header: "TOOL_CALLS"},
+			{Header: "ASSISTANT", Truncatable: true},
+			{Header: "ERROR", Truncatable: true},
+		},
+		Rows:         rows,
+		EmptyMessage: "No forkchat turns recorded.",
+	})
 }
 
 func writeForkChatChatResult(out io.Writer, result forkChatChatResult) {
@@ -932,22 +951,22 @@ func writeForkChatDeleteResult(out io.Writer, result forkChatDeleteResult) {
 }
 
 func writeForkChatSessionHeader(out io.Writer, fork forkChatSession) {
-	fmt.Fprintf(out, "source_session_id=%s source_agent_id=%s source_run_id=%s state=%s created_by=%s expires_at=%s\n",
-		fork.SourceSessionID,
-		fork.SourceAgentID,
-		conversationDash(fork.SourceRunID),
-		fork.State,
-		fork.CreatedBy,
-		fork.ExpiresAt,
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "source_session_id", Value: fork.SourceSessionID},
+		cliDetailField{Key: "source_agent_id", Value: fork.SourceAgentID},
+		cliDetailField{Key: "source_run_id", Value: conversationDash(fork.SourceRunID)},
+		cliDetailField{Key: "state", Value: fork.State},
+		cliDetailField{Key: "created_by", Value: fork.CreatedBy},
+		cliDetailField{Key: "expires_at", Value: fork.ExpiresAt},
 	)
 	point := fork.ForkPoint
-	fmt.Fprintf(out, "fork_point kind=%s turn_index=%d turn_id=%s event_id=%s at=%s selected_at=%s\n",
-		point.Kind,
-		point.TurnIndex,
-		point.TurnID,
-		conversationDash(point.EventID),
-		conversationDash(point.At),
-		point.SelectedAt,
+	writeCLIFieldLine(out,
+		cliDetailField{Key: "fork_point.kind", Value: point.Kind},
+		cliDetailField{Key: "fork_point.turn_index", Value: fmt.Sprintf("%d", point.TurnIndex)},
+		cliDetailField{Key: "fork_point.turn_id", Value: point.TurnID},
+		cliDetailField{Key: "fork_point.event_id", Value: conversationDash(point.EventID)},
+		cliDetailField{Key: "fork_point.at", Value: conversationDash(point.At)},
+		cliDetailField{Key: "fork_point.selected_at", Value: point.SelectedAt},
 	)
 }
 

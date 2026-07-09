@@ -122,8 +122,8 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		"retry_count=2",
 		"retry_eligible=false",
 		"terminal=true",
-		"delivery_dead_letter dead_letter_id=delivery-dead-1",
-		"dead_letter_id=dead-1",
+		"delivery_dead_letter.dead_letter_id=delivery-dead-1",
+		"dead_letter.dead_letter_id=dead-1",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())

@@ -78,7 +78,7 @@ func TestAgentsListEmptyResult(t *testing.T) {
 	if len(captured.Params) != 0 {
 		t.Fatalf("params = %#v, want empty", captured.Params)
 	}
-	if !strings.Contains(stdout.String(), "No agents match the filter.") {
+	if !strings.Contains(stdout.String(), "No agents match the current filters.") {
 		t.Fatalf("stdout = %q, want empty message", stdout.String())
 	}
 	if strings.TrimSpace(stderr.String()) != "" {

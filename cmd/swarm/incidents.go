@@ -201,25 +201,36 @@ func writeRuntimeIncidentListResult(out io.Writer, result runtimeIncidentListRes
 	if out == nil {
 		return
 	}
-	if len(result.Incidents) == 0 {
-		fmt.Fprintln(out, "No runtime incidents match the filter.")
-		return
-	}
-	fmt.Fprintln(out, "LAST SEEN\tLEVEL\tCOMPONENT\tERROR\tCOUNT\tINCIDENT ID\tSAMPLE")
+	rows := make([][]string, 0, len(result.Incidents))
 	for _, incident := range result.Incidents {
-		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+		rows = append(rows, []string{
 			incident.LastSeen,
 			incident.Level,
 			incident.Component,
 			runtimeIncidentDash(incident.ErrorCode),
-			incident.Count,
+			fmt.Sprintf("%d", incident.Count),
 			incident.IncidentID,
 			runtimeIncidentSampleMessage(incident),
-		)
+		})
 	}
+	footers := []string{}
 	if strings.TrimSpace(result.NextCursor) != "" {
-		fmt.Fprintf(out, "next_cursor=%s\n", result.NextCursor)
+		footers = append(footers, fmt.Sprintf("next_cursor=%s", result.NextCursor))
 	}
+	writeCLITable(out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "LAST SEEN"},
+			{Header: "LEVEL"},
+			{Header: "COMPONENT"},
+			{Header: "ERROR"},
+			{Header: "COUNT"},
+			{Header: "INCIDENT ID", KeyColumn: true},
+			{Header: "SAMPLE", Truncatable: true},
+		},
+		Rows:         rows,
+		EmptyMessage: "No runtime incidents match the current filters.",
+		FooterLines:  footers,
+	})
 }
 
 func runtimeIncidentErrorClassifier() cliAPIErrorClassifier {

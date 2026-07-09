@@ -14957,6 +14957,48 @@ cli_specification:
           mode parsing, stdout/stderr policy, JSON/NDJSON encoding, quiet rendering, and exception enforcement.
           Command-local writers may provide command-specific facts and text renderers, but they MUST NOT each
           reinterpret output-mode semantics independently.
+        display_renderer_rule: >
+          Successful human table/list/repeated-row/detail-display output MUST consume one shared `cmd/swarm`
+          display renderer for column alignment, empty values, empty list states, color/no-color policy,
+          emoji-vocabulary policy, and truncation declarations. Command owners keep owning facts, row order,
+          filtering, and business vocabulary. The display renderer MUST NOT reorder rows, shorten identifiers by
+          default, hide fields, or infer semantics not supplied by the command's canonical fact owner.
+        row_model_rule: >
+          For migrated read/list/detail surfaces, default text and JSON MUST derive from the same validated command
+          result or row/detail model. A command MUST NOT assemble separate fact interpretations for human table rows
+          and JSON output. Human default text may omit fields for readability, but it cannot invent alternate field
+          values or abbreviate identifiers unless a command row explicitly owns that lossy projection.
+        table_policy:
+          alignment: Space-aligned columns with at least two spaces between columns; literal-tab TSV is not a
+            supported table rendering policy for public CLI read/list output.
+          empty_value: Empty string values render as `-` in human tables/details. JSON preserves the canonical
+            empty/null value from the fact owner.
+          empty_state: Empty successful lists render a single author-facing sentence with the applicable filter
+            context and, when the command has an obvious creation path, a concrete next command. Blank tables are
+            invalid.
+          identifier_columns: ID/key/hash columns MUST NOT be implicitly truncated. Short-ID adoption waits for the
+            ID-prefix resolver owner and must remain drillable.
+          truncation: Truncatable columns must be declared by the table owner. Terminal width alone is not authority
+            to truncate an identifier or semantic key.
+          ordering: Row order is fact semantics owned by the command/API owner; the shared display renderer MUST
+            render rows in the order supplied by that owner.
+        color_and_emoji_policy:
+          color: >
+            Human default text may use ANSI color only when stdout is an interactive TTY and neither `--no-color`
+            nor `NO_COLOR` suppresses it. JSON, NDJSON, quiet output, and non-TTY output MUST NOT depend on ANSI
+            color for meaning.
+          emoji: >
+            Emoji status marks share the same gating and suppression rules as color. They may augment, but never
+            replace, complete plain text. The allowed semantic vocabulary is limited to success/settled, failed,
+            warning/blocked, and inactive classes; implementation of emoji marks is optional for the first #1814
+            slice.
+        sibling_exclusions:
+        - Logs formatting and log table policy remain owned by #1819.
+        - Broad short-ID adoption and ID-prefix drillability remain owned by #1815.
+        - Run-trace business-event fidelity and runtime-log hiding remain owned by #1816.
+        - Vocabulary/status/detail-depth rewrites remain owned by #1817/#1820.
+        - Arg/Cobra error rendering remains owned by #1818.
+        - Mutation summaries and streaming/follow rendering are not table/display closure proof for #1814.
         canonical_fact_rule: >
           Runtime-state commands render facts returned by their canonical API owner at /v1/rpc or /v1/ws. They
           MUST NOT read DB/store/runtime/EventBus state locally, recompute status, or enrich JSON/quiet output
@@ -14987,8 +15029,9 @@ cli_specification:
             pass must stay `split` with an owner issue until that owner lands.
           classification_values:
             shared_output: >
-              The command consumes the shared `cmd/swarm` output-mode/color owner for successful output. It accepts
-              `--json`, `--quiet`, and `--no-color` through the shared helper path.
+              The command consumes the shared `cmd/swarm` output-mode/color owner for successful output and, when it
+              renders table/list/detail human text, consumes the shared display renderer. It accepts `--json`,
+              `--quiet`, and `--no-color` through the shared helper path.
             exception: >
               The command is an explicit help/process/retired-style surface that does not consume output modes and
               is governed by an exception rule.
@@ -15061,8 +15104,8 @@ cli_specification:
             secrets_list:
               command: swarm secrets list
               classification: split
-              owner_issue: '#1814'
-              reason: secret list table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: secret list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             secrets_check:
               command: swarm secrets check
               classification: split
@@ -15090,8 +15133,8 @@ cli_specification:
             connections_status:
               command: swarm connections status
               classification: split
-              owner_issue: '#1814'
-              reason: status table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: connection status table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             connections_disconnect:
               command: swarm connections disconnect
               classification: split
@@ -15144,8 +15187,8 @@ cli_specification:
             trace:
               command: swarm run trace
               classification: split
-              owner_issue: '#1814'
-              reason: trace table/follow rendering remains on the shared table/display migration path.
+              owner_issue: '#1816'
+              reason: trace tables consume the shared display renderer; trace fidelity/follow behavior remains on the dedicated trace owner before full shared-output classification.
             run_fork:
               command: swarm run fork
               classification: shared_output
@@ -15161,12 +15204,12 @@ cli_specification:
               command: swarm mailbox list
               classification: split
               owner_issue: '#1712'
-              reason: mailbox discovery output is implemented but not routed through the shared output-mode owner.
+              reason: mailbox list display consumes the shared display renderer; full shared output-mode route-through remains part of the CLI output umbrella.
             mailbox_view:
               command: swarm mailbox view
               classification: split
               owner_issue: '#1712'
-              reason: mailbox detail output is implemented but not routed through the shared output-mode owner.
+              reason: mailbox detail shell consumes the shared display renderer; decision-sheet depth and full shared output-mode route-through remain part of the CLI output umbrella.
             mailbox_approve:
               command: swarm mailbox approve
               classification: split
@@ -15220,8 +15263,8 @@ cli_specification:
             agents_list:
               command: swarm agent list
               classification: split
-              owner_issue: '#1814'
-              reason: agent list table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: agent list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             agent_view:
               command: swarm agent view
               classification: split
@@ -15236,7 +15279,7 @@ cli_specification:
               command: swarm agent deliveries
               classification: split
               owner_issue: '#1817'
-              reason: agent delivery detail vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+              reason: agent delivery table/default text consumes the shared display renderer; vocabulary/sectioning remains on the vocabulary/status-detail migration path.
             agent_restart:
               command: swarm agent restart
               classification: split
@@ -15264,8 +15307,8 @@ cli_specification:
             events_list:
               command: swarm event list
               classification: split
-              owner_issue: '#1814'
-              reason: event list table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: event list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             events_follow:
               command: swarm event follow
               classification: split
@@ -15274,8 +15317,8 @@ cli_specification:
             event_view:
               command: swarm event view
               classification: split
-              owner_issue: '#1814'
-              reason: event detail text remains on the display-policy migration path.
+              owner_issue: '#1821'
+              reason: event detail shell consumes the shared display renderer; full shared output-mode route-through remains pending.
             event_replay:
               command: swarm event replay
               classification: split
@@ -15401,18 +15444,18 @@ cli_specification:
             entities_list:
               command: swarm entity list
               classification: split
-              owner_issue: '#1814'
-              reason: entity list table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: entity list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             entity_view:
               command: swarm entity view
               classification: split
-              owner_issue: '#1814'
-              reason: entity detail text remains on the display-policy migration path.
+              owner_issue: '#1821'
+              reason: entity detail shell consumes the shared display renderer; full shared output-mode route-through remains pending.
             entity_aggregate:
               command: swarm entity aggregate
               classification: split
-              owner_issue: '#1814'
-              reason: entity aggregate table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: entity aggregate table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             logs:
               command: swarm logs
               classification: split
@@ -15421,8 +15464,8 @@ cli_specification:
             incidents:
               command: swarm incidents
               classification: split
-              owner_issue: '#1814'
-              reason: incident table/default text remains on the table-renderer migration path.
+              owner_issue: '#1821'
+              reason: incident table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             context:
               command: swarm context
               classification: exception
@@ -15435,8 +15478,8 @@ cli_specification:
             context_list:
               command: swarm context list
               classification: split
-              owner_issue: '#1814'
-              reason: context list output remains on the table/display migration path.
+              owner_issue: '#1821'
+              reason: context list table/default text consumes the shared display renderer; full shared output-mode route-through remains pending.
             context_prune:
               command: swarm context prune
               classification: split

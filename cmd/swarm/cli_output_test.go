@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -97,6 +98,69 @@ func TestCLIOutputModesForLocalConsumers(t *testing.T) {
 	}
 	if got := stdout.String(); got != "ok\n" {
 		t.Fatalf("verify --quiet stdout = %q, want ok", got)
+	}
+}
+
+func TestCLITableRendererAlignsAndRendersEmptyValues(t *testing.T) {
+	var out bytes.Buffer
+	writeCLITable(&out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "KEY", KeyColumn: true},
+			{Header: "VALUE"},
+		},
+		Rows: [][]string{
+			{"abc", ""},
+			{"longer", "ok"},
+		},
+	})
+	want := "KEY     VALUE\nabc     -\nlonger  ok\n"
+	if out.String() != want {
+		t.Fatalf("table output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestCLITableRendererDoesNotImplicitlyTruncateIdentifierColumns(t *testing.T) {
+	var out bytes.Buffer
+	id := "run_0123456789abcdef0123456789abcdef"
+	writeCLITable(&out, cliTable{
+		Columns: []cliTableColumn{
+			{Header: "RUN ID", KeyColumn: true},
+			{Header: "STATUS"},
+		},
+		Rows: [][]string{{id, "completed"}},
+	})
+	if !strings.Contains(out.String(), id) {
+		t.Fatalf("table output = %q, want full id %q", out.String(), id)
+	}
+}
+
+func TestCLITableRendererUsesActionableEmptyState(t *testing.T) {
+	var out bytes.Buffer
+	writeCLITable(&out, cliTable{
+		Columns:      []cliTableColumn{{Header: "ID"}},
+		EmptyMessage: "No runs found. Start one: swarm run start --event <event>",
+	})
+	want := "No runs found. Start one: swarm run start --event <event>\n"
+	if out.String() != want {
+		t.Fatalf("empty table output = %q, want %q", out.String(), want)
+	}
+}
+
+func TestCLITextWriterCarriesTTYGatedDisplayPolicy(t *testing.T) {
+	var out bytes.Buffer
+	writer := cliOutputOptions{}.textWriter(&out)
+	policy := cliWriterDisplayPolicy(writer)
+	if policy.Color || policy.Emoji {
+		t.Fatalf("non-tty display policy = %#v, want color and emoji disabled", policy)
+	}
+
+	out.Reset()
+	noColorWriter := cliOutputOptions{noColor: true}.textWriter(&out)
+	if _, err := fmt.Fprint(noColorWriter, "\x1b[31mred\x1b[0m"); err != nil {
+		t.Fatalf("write no-color text: %v", err)
+	}
+	if out.String() != "red" {
+		t.Fatalf("no-color writer output = %q, want ANSI stripped", out.String())
 	}
 }
 

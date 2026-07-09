@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -125,6 +126,36 @@ var cliOutputExpectedFactOwners = map[string]string{
 	"swarm bundle agents":   "/v1/rpc bundle.agents",
 	"swarm bundle register": "/v1/rpc bundle.register",
 	"swarm bundle delete":   "/v1/rpc bundle.delete",
+}
+
+var cliOutputSharedDisplayProofs = map[string][]string{
+	"writeAgentDeliveryLifecycleListResult":  {"writeCLITable"},
+	"writeAgentListResult":                   {"writeCLITable"},
+	"writeBundleAgentsHuman":                 {"writeCLITable"},
+	"writeBundleDetailHuman":                 {"writeCLIFieldLine"},
+	"writeBundleListHuman":                   {"writeCLITable"},
+	"writeConnectionsTable":                  {"writeCLITable"},
+	"writeContextListText":                   {"writeCLITable"},
+	"writeConversationDetailResult":          {"writeCLITable", "writeCLIFieldLine"},
+	"writeConversationListResult":            {"writeCLITable"},
+	"writeConversationTurnDetailResult":      {"writeCLIFieldLine"},
+	"writeDiagnosticRunList":                 {"writeCLITable"},
+	"writeDiagnosticRunTrace":                {"writeCLITable"},
+	"writeDiagnosticRunTraceDeliveryDetail":  {"writeCLITable"},
+	"writeDiagnosticRunTraceDeliverySummary": {"writeCLITable"},
+	"writeEntityAggregateResult":             {"writeCLITable"},
+	"writeEntityFullResult":                  {"writeCLIFieldLine"},
+	"writeEntityListResult":                  {"writeCLITable"},
+	"writeEventDeadLetterLine":               {"writeCLIFieldLine"},
+	"writeEventDetailResult":                 {"writeCLIFieldLine"},
+	"writeEventListResult":                   {"writeCLITable"},
+	"writeForkChatListResult":                {"writeCLITable"},
+	"writeForkChatSessionDetail":             {"writeCLITable"},
+	"writeForkChatSessionHeader":             {"writeCLIFieldLine"},
+	"writeMailboxDetailResult":               {"writeCLIFieldLine"},
+	"writeMailboxListResult":                 {"writeCLITable"},
+	"writeRuntimeIncidentListResult":         {"writeCLITable"},
+	"writeSecretsTable":                      {"writeCLITable"},
 }
 
 func cliOutputConformanceRegistryRows(t *testing.T) map[string]cliOutputConformanceRegistryRow {
@@ -403,6 +434,92 @@ func TestCLIOutputConformanceSharedRowsConsumeSharedOwner(t *testing.T) {
 	}
 }
 
+func TestCLIOutputConformanceMigratedDisplayWritersConsumeSharedRenderer(t *testing.T) {
+	calls := cliOutputFunctionCalls(t)
+	for fn, requiredCalls := range cliOutputSharedDisplayProofs {
+		fnCalls, ok := calls[fn]
+		if !ok {
+			t.Errorf("display proof function %s not found", fn)
+			continue
+		}
+		for _, required := range requiredCalls {
+			if !fnCalls[required] {
+				t.Errorf("%s does not call %s", fn, required)
+			}
+		}
+	}
+}
+
+func TestCLIOutputConformanceNoStaleTableRendererSplitRows(t *testing.T) {
+	rows := cliOutputConformanceRegistryRows(t)
+	for command, row := range rows {
+		if row.OwnerIssue == "#1814" {
+			t.Errorf("%s: command %q still points at #1814 after display renderer migration; split rows need a remaining non-stale owner", row.Key, command)
+		}
+	}
+}
+
+func TestCLIOutputConformanceNoUnclassifiedLiteralTabTables(t *testing.T) {
+	root := driftTestRepoRoot(t)
+	dir := filepath.Join(root, "cmd", "swarm")
+	allowedFiles := map[string]string{
+		"logs.go": "split to #1819 logs formatting",
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, imp := range file.Imports {
+			if imp.Path != nil && imp.Path.Value == strconv.Quote("text/tabwriter") && allowedFiles[name] == "" {
+				t.Errorf("%s imports text/tabwriter; table/list display must consume writeCLITable", name)
+			}
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || !cliOutputIsFmtPrintCall(call) {
+				return true
+			}
+			for _, arg := range call.Args {
+				lit, ok := arg.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				value, err := strconv.Unquote(lit.Value)
+				if err != nil || !strings.Contains(value, "\t") {
+					continue
+				}
+				if allowedFiles[name] != "" {
+					continue
+				}
+				t.Errorf("%s contains fmt print literal tab %q; table/list display must consume writeCLITable", name, value)
+			}
+			return true
+		})
+	}
+}
+
+func cliOutputIsFmtPrintCall(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || pkg.Name != "fmt" {
+		return false
+	}
+	return strings.HasPrefix(sel.Sel.Name, "Fprint")
+}
+
 func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 	t.Helper()
 	root := driftTestRepoRoot(t)
@@ -440,7 +557,7 @@ func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 					return true
 				}
 				switch ident.Name {
-				case "bindCLIOutputFlags", "renderCLIOutput":
+				case "bindCLIOutputFlags", "renderCLIOutput", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState":
 					calls[fn.Name.Name][ident.Name] = true
 				}
 				return true
