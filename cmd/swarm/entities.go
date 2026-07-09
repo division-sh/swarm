@@ -218,9 +218,11 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 	if err := validateEntityOpaqueIDArg("entity id", entityID); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	params := map[string]any{"entity_id": entityID}
+	params := map[string]any{}
+	runID := ""
 	if opts.runIDSet {
-		runID, err := entityNonEmptyFlag("--run-id", opts.runID)
+		var err error
+		runID, err = entityNonEmptyFlag("--run-id", opts.runID)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -233,9 +235,23 @@ func runEntityViewCommand(ctx context.Context, out, errOut io.Writer, entityID s
 	if err != nil {
 		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
 	}
+	params["entity_id"] = entityID
 	var result entityFull
 	if err := client.call(ctx, entityGetMethod, params, &result); err != nil {
-		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
+		if runID == "" {
+			return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
+		}
+		entityID, err = resolveCLIIdentifierAfterNotFound(ctx, client, cliIdentifierResolveRequest{
+			Command: "swarm entity view", Selector: "arg:entity-id", Value: entityID,
+			Scope: map[string]string{"run_id": runID},
+		}, err, "ENTITY_NOT_FOUND")
+		if err != nil {
+			return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
+		}
+		params["entity_id"] = entityID
+		if err := client.call(ctx, entityGetMethod, params, &result); err != nil {
+			return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())
+		}
 	}
 	if err := validateEntityFullResult("entity.get result", result); err != nil {
 		return returnCLIAPIError(errOut, err, entityViewAPIErrorClassifier())

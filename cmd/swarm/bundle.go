@@ -331,11 +331,16 @@ func runBundleListCommand(ctx context.Context, out, errOut io.Writer, opts bundl
 }
 
 func runBundleShowCommand(ctx context.Context, out, errOut io.Writer, opts bundleHashCommandOptions, rawBundleHash string) error {
-	bundleHash, err := validateBundleHashArg("bundle hash", rawBundleHash)
-	if err != nil {
-		return returnCLIValidationError(errOut, err)
+	if strings.TrimSpace(rawBundleHash) == "" {
+		return returnCLIValidationError(errOut, fmt.Errorf("bundle hash is required"))
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+	}
+	bundleHash, err := resolveCLIIdentifier(ctx, client, cliIdentifierResolveRequest{
+		Command: "swarm bundle show", Selector: "arg:bundle-hash", Value: rawBundleHash,
+	})
 	if err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}
@@ -354,11 +359,16 @@ func runBundleShowCommand(ctx context.Context, out, errOut io.Writer, opts bundl
 }
 
 func runBundleAgentsCommand(ctx context.Context, out, errOut io.Writer, opts bundleHashCommandOptions, rawBundleHash string) error {
-	bundleHash, err := validateBundleHashArg("bundle hash", rawBundleHash)
-	if err != nil {
-		return returnCLIValidationError(errOut, err)
+	if strings.TrimSpace(rawBundleHash) == "" {
+		return returnCLIValidationError(errOut, fmt.Errorf("bundle hash is required"))
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
+	}
+	bundleHash, err := resolveCLIIdentifier(ctx, client, cliIdentifierResolveRequest{
+		Command: "swarm bundle agents", Selector: "arg:bundle-hash", Value: rawBundleHash,
+	})
 	if err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}

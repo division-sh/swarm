@@ -14479,9 +14479,12 @@ cli_specification:
     owner: platform-spec.yaml#agent_identity_model
     status: current_global_slug_constraint
     rule: >
-      Agent-facing CLI commands accept and display agent-id values as the current public authored slug. The CLI must not
-      resolve agent ids locally, infer bundle-scoped aliases from bundle_hash, display UUIDs as authoritative internal
-      identity, or claim duplicate-slug support until a #977 API/OpenRPC/CLI identity child promotes that behavior.
+      Agent-facing CLI commands accept and display agent-id values as the current public authored slug. Read-only CLI
+      inputs registered by `cli_specification.foundations.output_contract.identifier_resolution` may resolve a unique,
+      case-sensitive authored-slug prefix through the complete `agent.list` result. That lookup does not change agent
+      identity: the CLI MUST NOT infer UUIDs, bundle-scoped aliases from bundle_hash, duplicate-slug support, or case
+      folding, and mutating agent selectors remain full-slug-only unless an explicit confirmation contract is promoted.
+      The staged UUID/display-alias migration remains parked under #977.
   catalog_accounting_model:
     owner: platform-spec.yaml#cli_specification.command_catalog
     accounting_unit: explicit_command_catalog_row
@@ -15184,6 +15187,179 @@ cli_specification:
             `cmd/swarm/cli_output_conformance_registry_test.go` structurally rejects raw
             `cobra.ExactArgs`/`cobra.MaximumNArgs`/`cobra.MinimumNArgs`/`cobra.RangeArgs` uses and stale raw Cobra
             `accepts N arg(s)` expectations for promoted CLI arg-count diagnostics.
+      identifier_resolution:
+        promoted_by: '#1815'
+        canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.identifier_resolution
+        implementation_owner: cmd/swarm/cli_identifier_registry.go and cmd/swarm/cli_identifier_resolver.go
+        status: implemented_registry_first_slice
+        scope: >
+          Shared source authority for classifying every public CLI input that selects or filters an existing resource
+          by identifier. The registry owns the family, candidate source, scope rule, normalization, accepting command
+          or flag, safety mode, and display-shortening eligibility. It does not make unbounded global scans, infer
+          identity aliases, or turn caller-minted identifiers, idempotency keys, authored keys, provider identifiers,
+          cursors, or result-only identifiers into resource selectors.
+        round_trip_law: >
+          Every identifier form rendered by the human CLI must be accepted safely everywhere that family is an input.
+          A family with any full-only, unresolved, or split input row is not eligible for short display. JSON and quiet
+          output continue to carry canonical full identifiers.
+        matching:
+          exact_precedence: An exact canonical identifier wins before prefix ambiguity is considered.
+          ambiguity: A prefix matching multiple candidates fails closed and lists at most five stable candidates with
+            status and created-time facts when the candidate owner supplies them.
+          no_match: A prefix matching no candidate fails before retrying the addressed read with a resolved identifier
+            and teaches the family list path. Commands that preserve an existing exact-first RPC may perform that exact
+            probe before candidate enumeration.
+          bounded_enumeration: Bounded candidate sources must page to completion, reject repeated cursors, and fail
+            closed on API/list/protocol errors.
+          unbounded_enumeration: Runs, events, and entities without a full run scope MUST NOT be globally paged for
+            prefix lookup. They require a promoted scope or the full identifier.
+          mutation_safety: Mutating, destructive, creation, and boot inputs never act silently on a prefix. They remain
+            full-only unless an explicit echo-resolution plus confirmation contract is promoted and proven before side effects.
+        modes:
+          resolver_bounded: Complete bounded candidate enumeration followed by exact-or-unique-prefix matching.
+          resolver_scoped: Complete candidate enumeration inside the registry-declared full scope.
+          full_only: Existing exact/full input behavior; the row blocks short display for its family.
+          different_concept: Explicitly inventoried non-resource identity input that is never prefix-resolved.
+          split: A live resource selector whose candidate source or scope is not promoted; full input behavior remains
+            and the row blocks short display.
+        family_registry:
+          agent:
+            candidate_source: /v1/rpc agent.list
+            scope_rule: global authored-slug set; duplicate live slugs remain unsupported
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          bundle:
+            candidate_source: /v1/rpc bundle.list
+            scope_rule: bounded registered bundle catalog
+            normalization: canonical full-string or bare digest-hex prefix; lowercase hex folding
+            display_shortening_eligible: false
+          run:
+            candidate_source: /v1/rpc run.list
+            scope_rule: unbounded; full ID unless a narrower promoted scope exists
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          entity:
+            candidate_source: /v1/rpc entity.list
+            scope_rule: full run ID required for prefix resolution
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          event:
+            candidate_source: /v1/rpc event.list
+            scope_rule: unbounded; full ID unless a narrower promoted scope exists
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          session:
+            candidate_source: /v1/rpc conversation.list
+            scope_rule: global boundedness not promoted; full ID
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          fork:
+            candidate_source: /v1/rpc conversation.fork_list
+            scope_rule: boundedness and required scope not promoted
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          mailbox:
+            candidate_source: /v1/rpc mailbox.list
+            scope_rule: boundedness and required scope not promoted
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          flow_instance:
+            candidate_source: split; no promoted flow-instance list owner
+            scope_rule: full exact value
+            normalization: command-owned slash trimming only
+            display_shortening_eligible: false
+          context:
+            candidate_source: local context registry
+            scope_rule: bounded local descriptor set
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+          subscriber:
+            candidate_source: polymorphic agent/node identity
+            scope_rule: full exact value unless subscriber type supplies a promoted family owner
+            normalization: trim only; case-sensitive
+            display_shortening_eligible: false
+        input_rows:
+          agent_view_agent: {command: swarm agent view, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
+          agent_diagnose_agent: {command: swarm agent diagnose, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
+          agent_deliveries_agent: {command: swarm agent deliveries, selector: 'arg:agent-id', family: agent, mode: resolver_bounded}
+          agent_restart_agent: {command: swarm agent restart, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
+          agent_replay_agent: {command: swarm agent replay, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
+          agent_replay_backlog_agent: {command: swarm agent replay-backlog, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
+          agent_directive_agent: {command: swarm agent directive, selector: 'arg:agent-id', family: agent, mode: full_only, safety: mutating}
+          conversation_list_agent: {command: swarm conversation list, selector: 'flag:agent-id', family: agent, mode: full_only}
+          event_replay_subscriber: {command: swarm event replay, selector: 'flag:subscriber', family: agent, mode: full_only, safety: mutating}
+          bundle_show_hash: {command: swarm bundle show, selector: 'arg:bundle-hash', family: bundle, mode: resolver_bounded}
+          bundle_agents_hash: {command: swarm bundle agents, selector: 'arg:bundle-hash', family: bundle, mode: resolver_bounded}
+          bundle_delete_hash: {command: swarm bundle delete, selector: 'arg:bundle-hash', family: bundle, mode: full_only, safety: mutating}
+          serve_bundle_hash: {command: swarm serve, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: boot}
+          run_start_bundle_hash: {command: swarm run start, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: creation}
+          run_start_bundle_fingerprint: {command: swarm run start, selector: 'flag:bundle-fingerprint', family: bundle, mode: full_only, safety: creation}
+          run_fork_bundle_hash: {command: swarm run fork, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
+          event_publish_bundle_hash: {command: swarm event publish, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
+          event_publish_bundle_fingerprint: {command: swarm event publish, selector: 'flag:bundle-fingerprint', family: bundle, mode: full_only, safety: mutating}
+          run_status_run: {command: swarm run status, selector: 'arg:run-id', family: run, mode: full_only}
+          run_trace_run: {command: swarm run trace, selector: 'arg:run-id', family: run, mode: full_only}
+          run_start_reattach: {command: swarm run start, selector: 'flag:reattach', family: run, mode: full_only}
+          run_fork_source_run: {command: swarm run fork, selector: 'arg:source-run-id', family: run, mode: full_only, safety: mutating}
+          control_pause_run: {command: swarm control pause, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
+          control_continue_run: {command: swarm control continue, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
+          control_stop_run: {command: swarm control stop, selector: 'arg:run-id', family: run, mode: full_only, safety: mutating}
+          agent_deliveries_run: {command: swarm agent deliveries, selector: 'flag:run-id', family: run, mode: full_only}
+          agent_directive_run: {command: swarm agent directive, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
+          conversation_list_run: {command: swarm conversation list, selector: 'flag:run-id', family: run, mode: full_only}
+          entity_list_run: {command: swarm entity list, selector: 'flag:run-id', family: run, mode: full_only}
+          entity_view_run: {command: swarm entity view, selector: 'flag:run-id', family: run, mode: full_only}
+          entity_aggregate_run: {command: swarm entity aggregate, selector: 'flag:run-id', family: run, mode: full_only}
+          event_list_run: {command: swarm event list, selector: 'flag:run-id', family: run, mode: full_only}
+          event_follow_run: {command: swarm event follow, selector: 'flag:run-id', family: run, mode: full_only}
+          event_publish_run: {command: swarm event publish, selector: 'flag:run-id', family: run, mode: full_only, safety: mutating}
+          mailbox_list_run: {command: swarm mailbox list, selector: 'flag:run-id', family: run, mode: full_only}
+          logs_run: {command: swarm logs, selector: 'flag:run-id', family: run, mode: full_only}
+          run_start_caller_run: {command: swarm run start, selector: 'flag:run-id', family: none, mode: different_concept, scope_rule: caller-minted new-run ID}
+          entity_view_entity: {command: swarm entity view, selector: 'arg:entity-id', family: entity, mode: resolver_scoped, scope_rule: full --run-id required}
+          event_list_entity: {command: swarm event list, selector: 'flag:entity-id', family: entity, mode: full_only}
+          event_follow_entity: {command: swarm event follow, selector: 'flag:entity-id', family: entity, mode: full_only}
+          mailbox_list_entity: {command: swarm mailbox list, selector: 'flag:entity-id', family: entity, mode: full_only}
+          logs_entity: {command: swarm logs, selector: 'flag:entity-id', family: entity, mode: full_only}
+          run_trace_entity: {command: swarm run trace, selector: 'flag:entity-id', family: entity, mode: full_only}
+          event_publish_target_entity: {command: swarm event publish, selector: 'flag:target-entity-id', family: entity, mode: full_only, safety: mutating}
+          event_view_event: {command: swarm event view, selector: 'arg:event-id', family: event, mode: full_only}
+          event_replay_event: {command: swarm event replay, selector: 'arg:event-id', family: event, mode: full_only, safety: mutating}
+          agent_replay_event: {command: swarm agent replay, selector: 'flag:event-id', family: event, mode: full_only, safety: mutating}
+          run_fork_event: {command: swarm run fork, selector: 'flag:at-event', family: event, mode: full_only, safety: mutating}
+          forkchat_new_event: {command: swarm forkchat new, selector: 'flag:event-id', family: event, mode: full_only, safety: mutating}
+          event_publish_source_event: {command: swarm event publish, selector: 'flag:source-event-id', family: event, mode: full_only, safety: mutating}
+          conversation_view_session: {command: swarm conversation view, selector: 'arg:session-id', family: session, mode: full_only}
+          conversation_turn_session: {command: swarm conversation turn, selector: 'arg:session-id', family: session, mode: full_only}
+          forkchat_new_session: {command: swarm forkchat new, selector: 'arg:source-session-id', family: session, mode: full_only, safety: mutating}
+          forkchat_list_session: {command: swarm forkchat list, selector: 'flag:source-session-id', family: session, mode: full_only}
+          logs_session: {command: swarm logs, selector: 'flag:session-id', family: session, mode: full_only}
+          forkchat_view_fork: {command: swarm forkchat view, selector: 'arg:fork-id', family: fork, mode: split}
+          forkchat_resume_fork: {command: swarm forkchat resume, selector: 'arg:fork-id', family: fork, mode: full_only, safety: mutating}
+          forkchat_delete_fork: {command: swarm forkchat delete, selector: 'arg:fork-id', family: fork, mode: full_only, safety: mutating}
+          mailbox_view_mailbox: {command: swarm mailbox view, selector: 'arg:mailbox-item-id', family: mailbox, mode: split}
+          mailbox_approve_mailbox: {command: swarm mailbox approve, selector: 'arg:mailbox-item-id', family: mailbox, mode: full_only, safety: mutating}
+          mailbox_reject_mailbox: {command: swarm mailbox reject, selector: 'arg:mailbox-item-id', family: mailbox, mode: full_only, safety: mutating}
+          mailbox_defer_mailbox: {command: swarm mailbox defer, selector: 'arg:mailbox-item-id', family: mailbox, mode: full_only, safety: mutating}
+          entity_list_flow: {command: swarm entity list, selector: 'flag:flow', family: flow_instance, mode: split}
+          event_publish_flow: {command: swarm event publish, selector: 'flag:target-flow-instance', family: flow_instance, mode: full_only, safety: mutating}
+          agent_list_flow: {command: swarm agent list, selector: 'flag:flow', family: none, mode: different_concept, scope_rule: authored canonical flow path}
+          api_context: {command: 'swarm <api-backed>', selector: 'flag:context', family: context, mode: full_only}
+          serve_context: {command: swarm serve, selector: 'flag:context', family: none, mode: different_concept, scope_rule: caller-authored context registration name}
+          event_list_subscriber: {command: swarm event list, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
+          event_follow_subscriber: {command: swarm event follow, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
+          run_trace_subscriber: {command: swarm run trace, selector: 'flag:subscriber-id', family: subscriber, mode: full_only}
+          mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
+          connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
+          secrets_key: {command: 'swarm secrets <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable secret key}
+          connections_client: {command: swarm connections connect, selector: 'flag:client-id', family: none, mode: different_concept, scope_rule: external OAuth client identifier}
+          connections_installation: {command: swarm connections connect, selector: 'flag:installation-id', family: none, mode: different_concept, scope_rule: external provider installation identifier}
+          event_publish_emitter: {command: swarm event publish, selector: 'flag:emitter', family: none, mode: different_concept, scope_rule: producer label}
+        conformance_guard: >
+          `cmd/swarm/cli_identifier_registry_test.go` compares this registry with the production registry, inventories
+          visible Cobra positional signatures and direct/indirect string flags, requires explicit different-concept
+          accounting instead of an identifier-name regex, and prevents display shortening while any family row is
+          full-only, unresolved, or split.
       modes:
         default_text:
           invocation: no output-mode flag

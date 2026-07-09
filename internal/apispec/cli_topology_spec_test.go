@@ -210,6 +210,63 @@ func TestCLIDiagnosticConventionPromotedToOutputContract(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, argCount, "conformance_guard"), "cobra.ExactArgs")
 }
 
+func TestCLIIdentifierResolutionPromotedToOutputContract(t *testing.T) {
+	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
+	resolution := mustMappingValue(t, outputContract, "identifier_resolution")
+
+	assertScalarValue(t, mustMappingValue(t, resolution, "promoted_by"), "#1815")
+	assertScalarValue(t, mustMappingValue(t, resolution, "canonical_owner"), "platform-spec.yaml#cli_specification.foundations.output_contract.identifier_resolution")
+	assertScalarContains(t, mustMappingValue(t, resolution, "implementation_owner"), "cmd/swarm/cli_identifier_registry.go")
+	assertScalarContains(t, mustMappingValue(t, resolution, "implementation_owner"), "cmd/swarm/cli_identifier_resolver.go")
+	assertScalarContains(t, mustMappingValue(t, resolution, "round_trip_law"), "any full-only, unresolved, or split input row")
+
+	matching := mustMappingValue(t, resolution, "matching")
+	assertScalarContains(t, mustMappingValue(t, matching, "exact_precedence"), "exact canonical identifier wins")
+	assertScalarContains(t, mustMappingValue(t, matching, "bounded_enumeration"), "page to completion")
+	assertScalarContains(t, mustMappingValue(t, matching, "bounded_enumeration"), "reject repeated cursors")
+	assertScalarContains(t, mustMappingValue(t, matching, "unbounded_enumeration"), "MUST NOT be globally paged")
+	assertScalarContains(t, mustMappingValue(t, matching, "mutation_safety"), "never act silently on a prefix")
+
+	families := mustMappingValue(t, resolution, "family_registry")
+	familyCount := 0
+	forEachMappingEntry(t, families, func(name string, family *yaml.Node) {
+		familyCount++
+		assertScalarValue(t, mustMappingValue(t, family, "display_shortening_eligible"), "false")
+		if mappingValue(family, "candidate_source") == nil || mappingValue(family, "scope_rule") == nil || mappingValue(family, "normalization") == nil {
+			t.Errorf("identifier family %s must declare candidate_source, scope_rule, and normalization", name)
+		}
+	})
+	if familyCount != 11 {
+		t.Fatalf("identifier family count=%d, want 11", familyCount)
+	}
+
+	allowedModes := map[string]bool{"resolver_bounded": true, "resolver_scoped": true, "full_only": true, "different_concept": true, "split": true}
+	rows := mustMappingValue(t, resolution, "input_rows")
+	rowCount := 0
+	forEachMappingEntry(t, rows, func(name string, row *yaml.Node) {
+		rowCount++
+		for _, field := range []string{"command", "selector", "family", "mode"} {
+			if mappingValue(row, field) == nil {
+				t.Errorf("identifier input row %s missing %s", name, field)
+			}
+		}
+		if mode := mappingValue(row, "mode"); mode != nil && !allowedModes[mode.Value] {
+			t.Errorf("identifier input row %s has unsupported mode %q", name, mode.Value)
+		}
+	})
+	if rowCount < 70 {
+		t.Fatalf("identifier input row count=%d, want at least 70; registry coverage likely regressed", rowCount)
+	}
+
+	agentBoundary := mustMappingValue(t, cliSpecification(t), "agent_identity_boundary")
+	agentRule := mustMappingValue(t, agentBoundary, "rule")
+	assertScalarContains(t, agentRule, "unique")
+	assertScalarContains(t, agentRule, "case-sensitive")
+	assertScalarContains(t, agentRule, "mutating agent selectors remain full-slug-only")
+	assertScalarContains(t, agentRule, "UUIDs")
+	assertScalarContains(t, agentRule, "aliases")
+}
+
 func TestCLITopologyRevisionV22IsImplementedHistoricalRecord(t *testing.T) {
 	revision := mustMappingValue(t, cliSpecification(t), "topology_revision_v2_2")
 	assertScalarValue(t, mustMappingValue(t, revision, "status"), "implemented_historical_record")
