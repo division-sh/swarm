@@ -229,7 +229,7 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		if edge.Source == "handler.accumulate.on_timeout" && edge.NodeID == "support-node" && edge.EventType == "ticket.closed" && edge.To == "timed_out" {
 			foundAccumulateTimeout = true
 		}
-		if edge.Source == "timer" && edge.TimerID == "active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
+		if edge.Source == "timer" && edge.TimerID == "support.active.timed_out" && edge.After == "72h" && edge.To == "timed_out" {
 			foundTimedAdvance = true
 		}
 	}
@@ -268,9 +268,9 @@ func TestDescribeCommandGraphRendersStageGraph(t *testing.T) {
 		"handler.advances_to support-node on ticket.opened",
 		"handler.accumulate.on_complete support-node on ticket.closed",
 		"handler.accumulate.on_timeout support-node on ticket.closed",
-		"timer runtime on timer:active.timed_out after 72h timer active.timed_out",
-		"active after 48h emit ticket.sla_escalated (timer active.ticket.sla_escalated)",
-		"active after 72h advances_to timed_out (timer active.timed_out)",
+		"timer runtime on timer:support.active.timed_out after 72h timer support.active.timed_out",
+		"active after 48h emit ticket.sla_escalated (timer support.active.ticket.sla_escalated)",
+		"active after 72h advances_to timed_out (timer support.active.timed_out)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("describe --graph output missing %q:\n%s", want, text)

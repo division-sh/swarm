@@ -3,6 +3,8 @@ package contracts
 import (
 	"reflect"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) {
@@ -157,6 +159,83 @@ func TestWorkflowSemanticsDerivesStageTimersAndTimedTransitionEdges(t *testing.T
 	}
 	if !foundTransition {
 		t.Fatalf("missing timed transition edge: %#v", bundle.WorkflowTransitions())
+	}
+}
+
+func TestWorkflowSemanticsScopesStageTimerIDsByFlow(t *testing.T) {
+	review := FlowContractView{
+		Paths: FlowContractPaths{ID: "review", Flow: "review"},
+		Path:  "review",
+		Schema: FlowSchemaDocument{
+			StageDeclarations: FlowStageDeclarations{
+				Declared: true,
+				Entries: []FlowStageDeclaration{
+					{
+						ID: "pending",
+						Timers: []FlowStageTimerDeclaration{{
+							ID:         "pending.expired",
+							After:      "48h",
+							AdvancesTo: "expired",
+						}},
+					},
+					{ID: "expired", Terminal: true},
+				},
+			},
+		},
+	}
+	approval := FlowContractView{
+		Paths: FlowContractPaths{ID: "approval", Flow: "approval"},
+		Path:  "approval",
+		Schema: FlowSchemaDocument{
+			StageDeclarations: FlowStageDeclarations{
+				Declared: true,
+				Entries: []FlowStageDeclaration{
+					{
+						ID: "pending",
+						Timers: []FlowStageTimerDeclaration{{
+							ID:         "pending.expired",
+							After:      "72h",
+							AdvancesTo: "expired",
+						}},
+					},
+					{ID: "expired", Terminal: true},
+				},
+			},
+		},
+	}
+	bundle := &WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[FlowContractView]{
+			Root: &FlowContractView{
+				Children: []FlowContractView{review, approval},
+			},
+			ByID: map[string]*FlowContractView{
+				"review":   &review,
+				"approval": &approval,
+			},
+		},
+		FlowSchemas: map[string]FlowSchemaDocument{
+			"review":   review.Schema,
+			"approval": approval.Schema,
+		},
+	}
+
+	populateWorkflowSemantics(bundle)
+
+	timers := map[string]WorkflowTimerContract{}
+	for _, timer := range bundle.WorkflowTimers() {
+		timers[timer.ID] = timer
+	}
+	for _, id := range []string{"review.pending.expired", "approval.pending.expired"} {
+		timer, ok := timers[id]
+		if !ok {
+			t.Fatalf("missing flow-scoped stage timer %q in %#v", id, timers)
+		}
+		if timer.FlowID == "" {
+			t.Fatalf("timer %q missing FlowID: %#v", id, timer)
+		}
+	}
+	if _, ok := timers["pending.expired"]; ok {
+		t.Fatalf("unscoped stage timer survived in semantic timers: %#v", timers)
 	}
 }
 

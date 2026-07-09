@@ -481,8 +481,9 @@ func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCo
 				if eventType == "" {
 					eventType = WorkflowStageTimerInternalEvent
 				}
+				timerID := stageWorkflowTimerSemanticID(schema.FlowID, row.ID)
 				out = append(out, WorkflowTimerContract{
-					ID:         strings.TrimSpace(row.ID),
+					ID:         timerID,
 					Stage:      stageID,
 					Event:      eventType,
 					Owner:      "runtime",
@@ -496,6 +497,15 @@ func deriveStageWorkflowTimers(bundle *WorkflowContractBundle) []WorkflowTimerCo
 		}
 	}
 	return out
+}
+
+func stageWorkflowTimerSemanticID(flowID, rowID string) string {
+	rowID = strings.TrimSpace(rowID)
+	flowID = strings.TrimSpace(flowID)
+	if rowID == "" || flowID == "" {
+		return rowID
+	}
+	return flowID + "." + rowID
 }
 
 func deriveStageTimerTransitions(bundle *WorkflowContractBundle) []WorkflowTransitionContract {

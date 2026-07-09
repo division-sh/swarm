@@ -186,8 +186,13 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 	if entityID.IsZero() {
 		return nil
 	}
+	materializedState := false
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.Enabled() {
 		if err := r.ensureFlowOwnsEntity(ctx, entityID.String()); err != nil {
+			return err
+		}
+		_, hadState, err := r.coordinator.workflowStore.Load(ctx, entityID.String())
+		if err != nil {
 			return err
 		}
 		allowedFields := workflowEntitySchemaFields(r.coordinator.SemanticSource(), pipelineFlowScope(ctx))
@@ -196,12 +201,20 @@ func (r pipelineEngineStateRepo) SaveState(ctx context.Context, entityID identit
 		}); err != nil {
 			return err
 		}
+		if !hadState {
+			materializedState = true
+		}
 	}
 	if next := strings.TrimSpace(mutation.NextState); next != "" {
 		if err := r.coordinator.updateEntityState(ctx, entityID.String(), next, ""); err != nil {
 			return err
 		}
 		if err := r.coordinator.maybeDeactivateTerminalFlowInstance(ctx, entityID.String(), next); err != nil {
+			return err
+		}
+	}
+	if materializedState {
+		if err := r.coordinator.armWorkflowCurrentStageTimers(ctx, entityID.String(), ""); err != nil {
 			return err
 		}
 	}
