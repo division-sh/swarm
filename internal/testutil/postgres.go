@@ -259,7 +259,12 @@ func (s *sharedPostgresState) startDockerLocked() error {
 		return fmt.Errorf("empty host port from docker port: %q", portLine)
 	}
 
-	admin, err := parseTestPostgresDSN(fmt.Sprintf("host=127.0.0.1 port=%s user=postgres password=postgres dbname=postgres sslmode=disable", port))
+	portNumber, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || portNumber == 0 {
+		_ = exec.Command(dockerBin, "stop", name).Run()
+		return fmt.Errorf("invalid host port from docker port %q", portLine)
+	}
+	admin, err := newOwnedDockerPostgresDSN(uint16(portNumber))
 	if err != nil {
 		_ = exec.Command(dockerBin, "stop", name).Run()
 		return fmt.Errorf("build owned postgres DSN: %w", err)

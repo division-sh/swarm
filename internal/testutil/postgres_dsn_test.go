@@ -80,6 +80,88 @@ func TestTestPostgresDSNRoundTripsSupportedRepresentations(t *testing.T) {
 	}
 }
 
+func TestTestPostgresDSNPreservesExplicitEmptyApplicationName(t *testing.T) {
+	owner, err := parseTestPostgresDSN("host=127.0.0.1 port=5432 user=tester password=secret dbname=postgres sslmode=disable application_name='' fallback_application_name='fallback'")
+	if err != nil {
+		t.Fatalf("parse explicit-empty application name: %v", err)
+	}
+	if owner.config.ApplicationName != "" || owner.config.FallbackApplicationName != "fallback" {
+		t.Fatalf("source application names = (%q, %q), want empty and fallback", owner.config.ApplicationName, owner.config.FallbackApplicationName)
+	}
+	canonical, err := owner.string()
+	if err != nil {
+		t.Fatalf("serialize explicit-empty application name: %v", err)
+	}
+	if !strings.Contains(canonical, "application_name=''") {
+		t.Fatalf("canonical DSN omitted explicit empty application_name: %q", canonical)
+	}
+	reparsed, err := parseTestPostgresDSN(canonical)
+	if err != nil {
+		t.Fatalf("reparse explicit-empty application name: %v", err)
+	}
+	assertPostgresConfigEqual(t, reparsed.config, owner.config)
+}
+
+func TestOwnedDockerPostgresDSNIgnoresAmbientPGEnv(t *testing.T) {
+	for key, value := range map[string]string{
+		"PGHOST":               "hostile.example",
+		"PGHOSTADDR":           "192.0.2.1",
+		"PGPORT":               "6543",
+		"PGDATABASE":           "hostile",
+		"PGUSER":               "hostile",
+		"PGPASSWORD":           "hostile",
+		"PGPASSFILE":           "/tmp/hostile-passfile",
+		"PGOPTIONS":            "-c search_path=hostile",
+		"PGAPPNAME":            "hostile",
+		"PGSSLMODE":            "verify-full",
+		"PGSSLNEGOTIATION":     "direct",
+		"PGSSLCERT":            "/tmp/hostile-cert",
+		"PGSSLKEY":             "/tmp/hostile-key",
+		"PGSSLROOTCERT":        "/tmp/hostile-root",
+		"PGSSLSNI":             "0",
+		"PGCONNECT_TIMEOUT":    "19",
+		"PGCLIENTENCODING":     "LATIN1",
+		"PGDATESTYLE":          "SQL, DMY",
+		"PGTZ":                 "Pacific/Honolulu",
+		"PGGEQO":               "on",
+		"PGTARGETSESSIONATTRS": "read-only",
+		"PGLOADBALANCEHOSTS":   "random",
+	} {
+		t.Setenv(key, value)
+	}
+
+	owner, err := newOwnedDockerPostgresDSN(55432)
+	if err != nil {
+		t.Fatalf("newOwnedDockerPostgresDSN: %v", err)
+	}
+	want, err := newTestPostgresDSN(pq.Config{
+		Host:           "127.0.0.1",
+		Hostaddr:       netip.MustParseAddr("127.0.0.1"),
+		Port:           55432,
+		Database:       "postgres",
+		User:           "postgres",
+		Password:       "postgres",
+		SSLMode:        pq.SSLModeDisable,
+		SSLSNI:         true,
+		ClientEncoding: "UTF8",
+		Datestyle:      "ISO, MDY",
+	})
+	if err != nil {
+		t.Fatalf("build expected Docker config: %v", err)
+	}
+	assertPostgresConfigEqual(t, owner.config, want.config)
+
+	canonical, err := owner.string()
+	if err != nil {
+		t.Fatalf("serialize owned Docker config: %v", err)
+	}
+	reparsed, err := parseTestPostgresDSN(canonical)
+	if err != nil {
+		t.Fatalf("reparse owned Docker config under hostile PG env: %v", err)
+	}
+	assertPostgresConfigEqual(t, reparsed.config, owner.config)
+}
+
 func TestTestPostgresDSNSerializerCoversPQConfigSchema(t *testing.T) {
 	typ := reflect.TypeOf(pq.Config{})
 	value := reflect.ValueOf(pq.Config{})
