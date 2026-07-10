@@ -33,7 +33,7 @@ func TestUpsertEventReceipt_DeadLettersAfterOneRetry_V2(t *testing.T) {
 	}
 
 	for i := 1; i <= 2; i++ {
-		if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, "error", "boom"); err != nil {
+		if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, "error", testRetryableFailure()); err != nil {
 			t.Fatalf("upsert receipt error #%d: %v", i, err)
 		}
 
@@ -70,7 +70,7 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable error: %v", err)
 	}
 
@@ -97,11 +97,11 @@ func TestUpsertEventReceipt_PreservesRetryableVsTerminalDeliveryStatus_V2(t *tes
 	`, evt.ID(), agentID).Scan(&deliveryStatus, &reasonCode, &deliveryRetry, &managerStatus); err != nil {
 		t.Fatalf("query retryable delivery status: %v", err)
 	}
-	if deliveryStatus != "failed" || managerStatus != "error" || deliveryRetry != 1 || reasonCode != "handler_error" {
+	if deliveryStatus != "failed" || managerStatus != "error" || deliveryRetry != 1 || reasonCode != "handler_failure" {
 		t.Fatalf("retryable status mismatch: delivery=%q manager=%q retry=%d reason=%q", deliveryStatus, managerStatus, deliveryRetry, reasonCode)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert terminal error: %v", err)
 	}
 	if err := pg.DB.QueryRowContext(ctx, `
@@ -137,7 +137,7 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 		t.Fatalf("insert deliveries: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable error: %v", err)
 	}
 
@@ -166,11 +166,11 @@ func TestUpsertEventReceipt_AlignsRetryOwnershipOnCanonicalDelivery_V2(t *testin
 	`, evt.ID(), agentID).Scan(&deliveryStatus, &deliveryRetry, &reasonCode, &managerStatus, &receiptRetry); err != nil {
 		t.Fatalf("query retryable aligned state: %v", err)
 	}
-	if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_error" || managerStatus != "error" || receiptRetry != 1 {
+	if deliveryStatus != "failed" || deliveryRetry != 1 || reasonCode != "handler_failure" || managerStatus != "error" || receiptRetry != 1 {
 		t.Fatalf("retryable aligned state mismatch: delivery=%q retry=%d reason=%q manager=%q receiptRetry=%d", deliveryStatus, deliveryRetry, reasonCode, managerStatus, receiptRetry)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert exhausted error: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestUpsertEventReceipt_FailsClosedOnLegacyReceiptOnlyRetryHistory_V2(t *tes
 	evt := seedEvent(t, ctx, pg, entityID, "test.retry_legacy_receipt_only")
 	insertLegacyAgentReceiptState(t, ctx, pg, evt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", time.Now().Add(-2*time.Minute))
 
-	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom")
+	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure())
 	if err == nil {
 		t.Fatal("expected legacy receipt-only retry history write to fail closed")
 	}
@@ -275,7 +275,7 @@ func TestUpsertEventReceipt_ConcurrentErrorRetriesAdvanceAtomically_V2(t *testin
 	errCh := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom")
+			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure())
 		}()
 	}
 	time.Sleep(150 * time.Millisecond)
@@ -390,7 +390,7 @@ func TestUpsertEventReceipt_ConcurrentTerminalReceiptsConvergeStandaloneRuntimeR
 	for _, agentID := range []string{agentA, agentB} {
 		agentID := agentID
 		go func() {
-			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, "")
+			errCh <- pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, nil)
 		}()
 	}
 	for i := 0; i < 2; i++ {
@@ -477,7 +477,7 @@ func TestUpsertEventReceipt_RollsBackReceiptWhenDeliverySyncFails_V2(t *testing.
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, "")
+	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, nil)
 	if err == nil {
 		t.Fatal("expected delivery sync failure")
 	}
@@ -540,7 +540,7 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
@@ -561,7 +561,7 @@ func TestListPendingEventsForAgent_RetryBackoff_V2(t *testing.T) {
 	}
 
 	// After retries are exhausted, the event should not be pending.
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert dead_letter receipt: %v", err)
 	}
 	evts, err = pg.ListPendingEventsForAgent(ctx, agentID, since, 100)
@@ -595,7 +595,7 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list subscribed pending (no receipt): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
 	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID(), agentID, time.Now().Add(-2*time.Minute))
@@ -607,7 +607,7 @@ func TestListPendingSubscribedEvents_RetryBackoff_V2(t *testing.T) {
 		t.Fatalf("list subscribed pending (retry=1 ready): got %v events, want 1 (%s)", len(evts), evt.ID())
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert dead_letter receipt: %v", err)
 	}
 	evts, err = pg.ListPendingSubscribedEvents(ctx, agentID, subs, since, 100)
@@ -729,17 +729,17 @@ func TestListPendingAgentDeliveryFacts_AlignsWithCanonicalPendingStates_V2(t *te
 	`, pendingEvt.ID(), agentID); err != nil {
 		t.Fatalf("age pending delivery: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
 	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID(), agentID, time.Now().Add(-2*time.Minute))
 	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID(), agentID, ""); err != nil {
 		t.Fatalf("mark in progress: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert dead-letter first error: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert dead-letter second error: %v", err)
 	}
 
@@ -795,20 +795,20 @@ func TestListPendingAgentDeliveryDetails_PagesCanonicalQueueTruth_V2(t *testing.
 		}
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, retryableEvt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
 	rewindCanonicalDeliveryAttempt(t, ctx, pg, retryableEvt.ID(), agentID, now.Add(-2*time.Minute))
 	if err := pg.MarkEventDeliveryInProgress(ctx, inProgressEvt.ID(), agentID, ""); err != nil {
 		t.Fatalf("mark in progress: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert dead-letter first error: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deadEvt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert dead-letter second error: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, deliveredEvt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, "done"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, deliveredEvt.ID(), agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("upsert delivered receipt: %v", err)
 	}
 	insertLegacyAgentReceiptState(t, ctx, pg, legacyEvt.ID(), agentID, runtimemanager.ReceiptStatusError, 1, "handler_error", "boom", now.Add(-2*time.Minute))
@@ -949,7 +949,7 @@ func TestMarkEventDeliveryInProgress_AllowsRetryableFailedDeliveryClaim_V2(t *te
 	if err := pg.InsertEventDeliveries(ctx, evt.ID(), []string{agentID}); err != nil {
 		t.Fatalf("insert deliveries: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "retryable"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 		t.Fatalf("upsert retryable receipt: %v", err)
 	}
 	rewindCanonicalDeliveryAttempt(t, ctx, pg, evt.ID(), agentID, time.Now().Add(-2*time.Minute))

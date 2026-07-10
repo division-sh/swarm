@@ -16,6 +16,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/google/uuid"
@@ -197,7 +198,7 @@ func (pc *PipelineCoordinator) Run(ctx context.Context) {
 					EventID:   strings.TrimSpace(evt.ID()),
 					EventType: strings.TrimSpace(string(evt.Type())),
 					EntityID:  workflowEventEntityID(evt),
-					Error:     strings.TrimSpace(err.Error()),
+					Failure:   pipelineRuntimeFailure(err, runtimeWorkflowID, "handle_event"),
 				})
 			}
 		}
@@ -339,20 +340,20 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResult(ctx context.Context,
 	}, false)
 	if err != nil {
 		pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "failed")
+		failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
 		if errors.Is(err, runtimeengine.ErrChainDepthExceeded) {
 			_ = runtimedeadletters.Insert(ctx, pc.db, runtimedeadletters.Record{
 				OriginalEventID: strings.TrimSpace(evt.ID()),
-				FailureType:     "chain_depth_exceeded",
-				ErrorMessage:    strings.TrimSpace(err.Error()),
+				Failure:         failure.Failure,
 				ChainDepth:      evt.ChainDepth(),
 				HandlerNode:     nodeID,
 			})
-			setPipelineReceiptOverride(ctx, "dead_letter", err.Error())
-			pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "chain_depth_exceeded", err, 0)
+			setPipelineReceiptOverride(ctx, "dead_letter", &failure.Failure)
+			pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "chain_depth_exceeded", &failure.Failure, 0)
 			return true, nil
 		}
 		pc.recordWorkflowHandlerFailure(ctx, evt, nodeID, err)
-		pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "handler_error", err, 0)
+		pc.markWorkflowNodeDeliveryDeadLetter(ctx, nodeID, evt, "handler_terminal_failure", &failure.Failure, 0)
 		return true, err
 	}
 	pc.notifyTestLifecycleHandlerCompleted(ctx, nodeID, evt, "completed")
@@ -367,11 +368,8 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 	if pc == nil || err == nil {
 		return
 	}
-	errText := strings.TrimSpace(err.Error())
-	if errText == "" {
-		errText = "unknown handler error"
-	}
-	setPipelineReceiptOverride(ctx, "dead_letter", errText)
+	failure := runtimefailures.FromError(err, runtimeWorkflowID, "execute_handler")
+	setPipelineReceiptOverride(ctx, "dead_letter", &failure.Failure)
 	if pc.bus != nil {
 		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 			Level:     "error",
@@ -381,10 +379,10 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 			EventID:   strings.TrimSpace(evt.ID()),
 			EventType: strings.TrimSpace(string(evt.Type())),
 			EntityID:  workflowEventEntityID(evt),
-			Error:     errText,
 			Detail: map[string]any{
 				"node_id": nodeID,
 			},
+			Failure: &failure.Failure,
 		})
 	}
 	if pc.db != nil {
@@ -394,8 +392,7 @@ func (pc *PipelineCoordinator) recordWorkflowHandlerFailure(ctx context.Context,
 			OriginalPayload: evt.Payload(),
 			EntityID:        workflowEventEntityID(evt),
 			FlowInstance:    "runtime",
-			FailureType:     "handler_error",
-			ErrorMessage:    errText,
+			Failure:         failure.Failure,
 			RetryCount:      0,
 			ChainDepth:      evt.ChainDepth(),
 			HandlerNode:     strings.TrimSpace(nodeID),
@@ -414,15 +411,16 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			continue
 		}
 		eventType := strings.TrimSpace(string(intercepted.Event.Type()))
-		errMsg := fmt.Sprintf("emit %s exceeded chain depth limit", eventType)
+		failure := runtimefailures.FromError(runtimefailures.New(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", runtimeWorkflowID, "emit", map[string]any{
+			"event_type": eventType, "chain_depth": intercepted.ChainDepth,
+		}), runtimeWorkflowID, "emit")
 		rec := runtimedeadletters.Record{
 			OriginalEventID: strings.TrimSpace(trigger.ID()),
 			OriginalEvent:   eventType,
 			OriginalPayload: intercepted.Event.Payload(),
 			EntityID:        entityID,
 			FlowInstance:    "runtime",
-			FailureType:     "chain_depth_exceeded",
-			ErrorMessage:    errMsg,
+			Failure:         failure.Failure,
 			ChainDepth:      intercepted.ChainDepth,
 			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
 		}
@@ -445,8 +443,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			"original_payload": json.RawMessage(intercepted.Event.Payload()),
 			"entity_id":        entityID,
 			"flow_instance":    "runtime",
-			"failure_type":     "chain_depth_exceeded",
-			"error_message":    errMsg,
+			"failure":          failure.Failure,
 			"retry_count":      0,
 			"chain_depth":      intercepted.ChainDepth,
 			"handler_node":     nodeID,
@@ -487,10 +484,6 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 
 func (pc *PipelineCoordinator) logRuntimeWarn(ctx context.Context, component, action, eventID, eventType, agentID, entityID string, detail any, err error) {
 	if pc != nil && pc.bus != nil {
-		errText := ""
-		if err != nil {
-			errText = strings.TrimSpace(err.Error())
-		}
 		pc.bus.LogRuntime(ctx, RuntimeLogEntry{
 			Level:     "warn",
 			Message:   "Workflow runtime warning was recorded",
@@ -501,7 +494,7 @@ func (pc *PipelineCoordinator) logRuntimeWarn(ctx context.Context, component, ac
 			AgentID:   strings.TrimSpace(agentID),
 			EntityID:  strings.TrimSpace(entityID),
 			Detail:    detail,
-			Error:     errText,
+			Failure:   pipelineRuntimeFailure(err, strings.TrimSpace(component), strings.TrimSpace(action)),
 		})
 		return
 	}

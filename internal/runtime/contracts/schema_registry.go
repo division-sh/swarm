@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
@@ -493,6 +494,9 @@ func eventSchemaForResolvedType(typeRef string, types TypeCatalogDocument, seen 
 	typeRef = strings.TrimSpace(typeRef)
 	if typeRef == "" {
 		return map[string]any{}
+	}
+	if typeRef == runtimefailures.EnvelopeSchemaVersion+" envelope" {
+		return runtimefailures.EnvelopeJSONSchema()
 	}
 	if isEventListType(typeRef) {
 		return map[string]any{

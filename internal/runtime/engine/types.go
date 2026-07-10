@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
 )
 
@@ -415,7 +416,8 @@ type RuleMatch struct {
 
 type ExecutionResult struct {
 	Status                           OutcomeStatus
-	FailureClass                     FailureClass
+	Failure                          *failures.Envelope
+	FailureDisposition               FailureDisposition
 	ExecutedSteps                    []Step
 	CurrentState                     string
 	NextState                        string

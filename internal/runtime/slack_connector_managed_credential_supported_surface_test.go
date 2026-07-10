@@ -817,7 +817,7 @@ func assertSlackManagedConnectorNoStoredSecret(t *testing.T, backend slackManage
 				WHERE run_id = ?
 				  AND (
 					COALESCE(result_payload, '') LIKE '%' || ? || '%'
-					OR COALESCE(error, '') LIKE '%' || ? || '%'
+					OR COALESCE(failure, '') LIKE '%' || ? || '%'
 				  )
 			`, backend.runID, secret, secret).Scan(&attemptLeaks)
 		}
@@ -835,7 +835,7 @@ func assertSlackManagedConnectorNoStoredSecret(t *testing.T, backend slackManage
 				WHERE run_id = $1::uuid
 				  AND (
 					COALESCE(result_payload::text, '') LIKE '%' || $2 || '%'
-					OR COALESCE(error, '') LIKE '%' || $2 || '%'
+					OR COALESCE(failure::text, '') LIKE '%' || $2 || '%'
 				  )
 			`, backend.runID, secret).Scan(&attemptLeaks)
 		}

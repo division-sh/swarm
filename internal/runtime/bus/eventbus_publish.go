@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
@@ -33,14 +33,15 @@ func shouldPersistPipelineReceipt(persisted bool, publishErr error) bool {
 	return !errors.Is(publishErr, errAuthoritativeDeliveryIncomplete)
 }
 
-func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, string) {
+func pipelineReceiptStatus(ctx context.Context, publishErr error) (string, *runtimefailures.Envelope) {
 	if publishErr != nil {
-		return "error", publishErr.Error()
+		failure := runtimefailures.Normalize(publishErr, "eventbus", "publish")
+		return "error", &failure
 	}
-	if overrideStatus, overrideErr, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
-		return overrideStatus, overrideErr
+	if overrideStatus, overrideFailure, ok := runtimepipeline.PipelineReceiptOverrideFromContext(ctx); ok {
+		return overrideStatus, overrideFailure
 	}
-	return "processed", ""
+	return "processed", nil
 }
 
 func applyTargetDeliveryFailureReceipt(override *runtimepipeline.PipelineReceiptOverride, failure runtimepinrouting.TargetFailure) {
@@ -48,15 +49,32 @@ func applyTargetDeliveryFailureReceipt(override *runtimepipeline.PipelineReceipt
 		return
 	}
 	override.Status = "dead_letter"
-	override.ErrText = targetDeliveryFailureMessage(failure)
+	override.Failure = targetDeliveryFailureEnvelope(failure)
 }
 
-func targetDeliveryFailureMessage(failure runtimepinrouting.TargetFailure) string {
+func targetDeliveryFailureEnvelope(failure runtimepinrouting.TargetFailure) *runtimefailures.Envelope {
 	failure = runtimepinrouting.TargetFailure(strings.TrimSpace(string(failure)))
 	if failure == "" {
-		return ""
+		return nil
 	}
-	return fmt.Sprintf("pin routing target delivery failed: %s", failure)
+	canonical := runtimefailures.Normalize(runtimefailures.NewTarget(string(failure), "eventbus", "resolve_delivery_target", nil), "eventbus", "resolve_delivery_target")
+	return &canonical
+}
+
+func eventBusFailure(err error, operation string) *runtimefailures.Envelope {
+	if err == nil {
+		return nil
+	}
+	failure := runtimefailures.Normalize(err, "eventbus", operation)
+	return &failure
+}
+
+func eventBusDependencyFailure(err error, detailCode, operation string) *runtimefailures.Envelope {
+	if err == nil {
+		return nil
+	}
+	failure := runtimefailures.Normalize(runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, detailCode, "eventbus", operation, nil, err), "eventbus", operation)
+	return &failure
 }
 
 var ErrRuntimeIngressPaused = errors.New("runtime ingress is paused")
@@ -144,7 +162,7 @@ func (eb *EventBus) logDispatchQueued(ctx context.Context, reason string, evt ev
 		message = "Run dispatch is blocked; event persisted without dispatch"
 		detail["run_id"] = strings.TrimSpace(evt.RunID())
 	}
-	eb.logRuntime(ctx, "debug", message, "eventbus", reason, evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, "", 0)
+	eb.logRuntime(ctx, "debug", message, "eventbus", reason, evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, nil, 0)
 }
 
 func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
@@ -160,7 +178,7 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		return errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
@@ -208,8 +226,8 @@ func (eb *EventBus) Publish(ctx context.Context, evt events.Event) (err error) {
 		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status, errText := pipelineReceiptStatus(ictx, err)
-		eb.markPipelineReceipt(ictx, evt.ID(), status, errText)
+		status, failure := pipelineReceiptStatus(ictx, err)
+		eb.markPipelineReceipt(ictx, evt.ID(), status, failure)
 	}()
 
 	plan, err := eb.planSubscribedPublish(ictx, evt)
@@ -291,7 +309,7 @@ func (eb *EventBus) PublishAcknowledged(ctx context.Context, evt events.Event) e
 		return errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
@@ -351,7 +369,7 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 		return errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
@@ -391,8 +409,8 @@ func (eb *EventBus) PublishInMutation(ctx context.Context, evt events.Event) err
 	}
 	if inboundPlan.TargetFailure != "" {
 		applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
-		status, errText := pipelineReceiptStatus(txctx, nil)
-		if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
+		status, failure := pipelineReceiptStatus(txctx, nil)
+		if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, failure); err != nil {
 			return fmt.Errorf("persist pipeline receipt: %w", err)
 		}
 		if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
@@ -677,8 +695,8 @@ func (eb *EventBus) publishTransactional(
 		}
 		if inboundPlan.TargetFailure != "" {
 			applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
-			status, errText := pipelineReceiptStatus(txctx, nil)
-			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
+			status, failure := pipelineReceiptStatus(txctx, nil)
+			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, failure); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
@@ -790,8 +808,8 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 		}
 		if inboundPlan.TargetFailure != "" {
 			applyTargetDeliveryFailureReceipt(receiptOverride, inboundPlan.TargetFailure)
-			status, errText := pipelineReceiptStatus(txctx, nil)
-			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, errText); err != nil {
+			status, failure := pipelineReceiptStatus(txctx, nil)
+			if err := mutation.UpsertPipelineReceipt(txctx, evt.ID(), status, failure); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			if err := eb.recordTargetDeliveryFailureMutation(txctx, mutation, evt, inboundPlan); err != nil {
@@ -828,16 +846,20 @@ func (eb *EventBus) publishAcknowledgedTransactional(
 }
 
 func (eb *EventBus) recordCommittedPublishReceipt(ctx context.Context, evt events.Event, publishErr error) {
-	status, errText := pipelineReceiptStatus(ctx, publishErr)
-	_ = eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
+	status, failure := pipelineReceiptStatus(ctx, publishErr)
+	_ = eb.markPipelineReceipt(ctx, evt.ID(), status, failure)
 }
 
 func (eb *EventBus) recordCommittedPublishConvergence(ctx context.Context, evt events.Event) {
 	if err := eb.convergeStandaloneRuntimePlatformRun(ctx, evt); err != nil {
-		eb.recordCommittedPublishReceipt(ctx, evt, err)
+		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "normal_run_completion_failed", "eventbus", "post_commit_convergence", map[string]any{
+			"event_id": evt.ID(), "event_type": string(evt.Type()),
+		}, err)
+		eb.recordCommittedPublishReceipt(ctx, evt, failureErr)
+		failure := runtimefailures.Normalize(failureErr, "eventbus", "post_commit_convergence")
 		eb.logRuntime(ctx, "error", "Post-commit publish convergence failed", "eventbus", "publish_post_commit_convergence_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, map[string]any{
-			"error": err.Error(),
-		}, err.Error(), 0)
+			"failure": failure,
+		}, &failure, 0)
 	}
 }
 
@@ -869,7 +891,9 @@ func (eb *EventBus) runInterceptorSet(ctx context.Context, evt events.Event, int
 	for _, it := range interceptors {
 		pass, out, err := it.Intercept(ctx, evt)
 		if err != nil {
-			return true, nil, err
+			return true, nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "event_interceptor_failed", "eventbus", "run_interceptor", map[string]any{
+				"event_id": evt.ID(), "event_type": string(evt.Type()),
+			}, err)
 		}
 		if !pass {
 			passthrough = false
@@ -992,8 +1016,8 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status, errText := pipelineReceiptStatus(ctx, err)
-		eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
+		status, failure := pipelineReceiptStatus(ctx, err)
+		eb.markPipelineReceipt(ctx, evt.ID(), status, failure)
 	}()
 	plan, err := eb.planSubscribedPublish(ctx, evt)
 	if err != nil {
@@ -1042,7 +1066,7 @@ func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, duration
 		"type":            string(evt.Type()),
 		"source":          evt.SourceAgent(),
 		"parent_event_id": strings.TrimSpace(evt.ParentEventID()),
-	}, "", durationUS)
+	}, nil, durationUS)
 }
 
 func (eb *EventBus) publishSubscribedNonTransactional(ctx context.Context, evt events.Event) (bool, error) {
@@ -1332,7 +1356,7 @@ func (eb *EventBus) logDelivery(ctx context.Context, evt events.Event, recipient
 	for k, v := range extra {
 		detail[k] = v
 	}
-	eb.logRuntime(ctx, "debug", "Event was delivered to recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, "", 0)
+	eb.logRuntime(ctx, "debug", "Event was delivered to recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, nil, 0)
 }
 
 func (eb *EventBus) logQueuedDeliveries(ctx context.Context, evt events.Event, recipients []string, reason string, extra map[string]any) {
@@ -1353,7 +1377,7 @@ func (eb *EventBus) logQueuedDeliveries(ctx context.Context, evt events.Event, r
 		for k, v := range extra {
 			detail[k] = v
 		}
-		eb.logRuntime(ctx, "debug", "Delivery entered queued state", "eventbus", "delivery_lifecycle_transition", evt.ID(), string(evt.Type()), strings.TrimSpace(recipient), evt.EntityID(), "", nil, detail, "", 0)
+		eb.logRuntime(ctx, "debug", "Delivery entered queued state", "eventbus", "delivery_lifecycle_transition", evt.ID(), string(evt.Type()), strings.TrimSpace(recipient), evt.EntityID(), "", nil, detail, nil, 0)
 	}
 }
 
@@ -1508,14 +1532,14 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 		if !shouldPersistPipelineReceipt(persisted, err) {
 			return
 		}
-		status, errText := pipelineReceiptStatus(ctx, err)
-		eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
+		status, failure := pipelineReceiptStatus(ctx, err)
+		eb.markPipelineReceipt(ctx, evt.ID(), status, failure)
 	}()
 	if evt.Type() == "" {
 		return errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
@@ -1561,7 +1585,7 @@ func (eb *EventBus) PublishDirect(ctx context.Context, evt events.Event, recipie
 	for k, v := range plan.ExtraDetail {
 		detail[k] = v
 	}
-	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, "", int(time.Since(start)/time.Microsecond))
+	eb.logRuntime(ctx, "debug", "Event was delivered directly to recipients", "eventbus", "delivered", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, nil, int(time.Since(start)/time.Microsecond))
 	return nil
 }
 
@@ -1580,7 +1604,7 @@ func (eb *EventBus) CheckDirectRecipients(ctx context.Context, evt events.Event,
 		return status, errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return status, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return status, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
@@ -1620,7 +1644,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 		return PublishRecipientPlan{}, errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return PublishRecipientPlan{}, fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return PublishRecipientPlan{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	if eb.payloadValidator != nil {
 		if err := eb.payloadValidator(string(evt.Type()), evt.Payload()); err != nil {
@@ -1661,7 +1685,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		return errors.New("event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
-		return fmt.Errorf("invalid event type: %s", strings.TrimSpace(string(evt.Type())))
+		return fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
 	var err error
 	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "")
@@ -1728,7 +1752,7 @@ func (eb *EventBus) publishPersistedRecipients(ctx context.Context, evt events.E
 		"persisted_recipients":       append([]string(nil), recipients...),
 		"internal_recipients":        append([]string(nil), internalRecipients...),
 		"replay_scope":               string(scope),
-	}, "", 0)
+	}, nil, 0)
 	return nil
 }
 
@@ -1768,15 +1792,15 @@ func (eb *EventBus) recordTargetDeliveryFailure(ctx context.Context, evt events.
 	if failure == "" {
 		return
 	}
-	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
-	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, message, 0)
+	_, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, &record.Failure, 0)
 
 	recorder, ok := eb.store.(targetFailureDeadLetterRecorder)
 	if !ok || recorder == nil {
 		return
 	}
 	if err := recorder.RecordDeadLetter(ctx, record); err != nil {
-		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, err.Error(), 0)
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, eventBusDependencyFailure(err, "target_failure_dead_letter_persist_failed", "record_target_failure"), 0)
 	}
 }
 
@@ -1785,11 +1809,11 @@ func (eb *EventBus) recordTargetDeliveryFailureMutation(ctx context.Context, mut
 	if failure == "" || mutation == nil {
 		return nil
 	}
-	message, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
-	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, message, 0)
+	_, detail, record := targetDeliveryFailureRecord(evt, plan, failure)
+	eb.logRuntime(ctx, "warn", "Pin routing target delivery failed", "eventbus", "target_resolution_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, &record.Failure, 0)
 
 	if err := mutation.RecordDeadLetter(ctx, record); err != nil {
-		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, err.Error(), 0)
+		eb.logRuntime(ctx, "warn", "Pin routing target failure dead-letter record failed", "eventbus", "target_resolution_failed_dead_letter_failed", evt.ID(), string(evt.Type()), evt.SourceAgent(), evt.EntityID(), "", nil, detail, eventBusDependencyFailure(err, "target_failure_dead_letter_persist_failed", "record_target_failure"), 0)
 		return fmt.Errorf("persist target failure dead letter: %w", err)
 	}
 	return nil
@@ -1797,20 +1821,20 @@ func (eb *EventBus) recordTargetDeliveryFailureMutation(ctx context.Context, mut
 
 func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runtimepinrouting.TargetFailure) (string, map[string]any, runtimedeadletters.Record) {
 	plan = plan.Normalized()
-	message := targetDeliveryFailureMessage(failure)
 	target := evt.TargetRoute()
 	targetSet := evt.TargetRoutes()
 	detail := map[string]any{
-		"target_failure_reason": string(failure),
-		"source":                evt.SourceRoute(),
-		"target":                target,
-		"target_set":            targetSet,
-		"recipients":            plan.RecipientIDs(),
-		"persisted_recipients":  plan.PersistedRecipientIDs(),
-		"delivery_targets":      cloneRouteTargetMap(plan.DeliveryTargets()),
-		"delivery_routes":       plan.DeliveryRoutes(),
+		"target_detail_code":   string(failure),
+		"source":               evt.SourceRoute(),
+		"target":               target,
+		"target_set":           targetSet,
+		"recipients":           plan.RecipientIDs(),
+		"persisted_recipients": plan.PersistedRecipientIDs(),
+		"delivery_targets":     cloneRouteTargetMap(plan.DeliveryTargets()),
+		"delivery_routes":      plan.DeliveryRoutes(),
 	}
-	targetContext, _ := json.Marshal(detail)
+	canonical := runtimefailures.FromError(runtimefailures.NewTarget(string(failure), "eventbus", "resolve_delivery_target", detail), "eventbus", "resolve_delivery_target")
+	detail["failure"] = canonical.Failure
 	deadLetterRoute := target
 	if deadLetterRoute.Empty() && len(targetSet) > 0 {
 		deadLetterRoute = targetSet[0]
@@ -1818,19 +1842,16 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 	if deadLetterRoute.Empty() {
 		deadLetterRoute = evt.SourceRoute()
 	}
-	return message, detail, runtimedeadletters.Record{
-		OriginalEventID:     strings.TrimSpace(evt.ID()),
-		OriginalEvent:       strings.TrimSpace(string(evt.Type())),
-		OriginalPayload:     evt.Payload(),
-		EntityID:            firstNonEmptyString(deadLetterRoute.EntityID, evt.EntityID()),
-		FlowInstance:        firstNonEmptyString(deadLetterRoute.FlowInstance, evt.FlowInstance(), "runtime"),
-		FailureType:         "target_resolution_failed",
-		TargetFailureReason: string(failure),
-		TargetContext:       json.RawMessage(targetContext),
-		ErrorMessage:        message,
-		RetryCount:          0,
-		ChainDepth:          evt.ChainDepth(),
-		HandlerNode:         "pin_routing",
+	return canonical.Failure.Message, detail, runtimedeadletters.Record{
+		OriginalEventID: strings.TrimSpace(evt.ID()),
+		OriginalEvent:   strings.TrimSpace(string(evt.Type())),
+		OriginalPayload: evt.Payload(),
+		EntityID:        firstNonEmptyString(deadLetterRoute.EntityID, evt.EntityID()),
+		FlowInstance:    firstNonEmptyString(deadLetterRoute.FlowInstance, evt.FlowInstance(), "runtime"),
+		Failure:         canonical.Failure,
+		RetryCount:      0,
+		ChainDepth:      evt.ChainDepth(),
+		HandlerNode:     "pin_routing",
 	}
 }
 

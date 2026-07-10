@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
@@ -257,7 +258,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 		unlockScope := r.budget.LockExecutionScope(scopeKey)
 		defer unlockScope()
 		if r.budget.IsEntityEmergency(entityID) {
-			return nil, fmt.Errorf("budget emergency: refusing llm execution (entity=%s)", entityID)
+			return nil, budgetEmergencyFailure(entityID)
 		}
 	}
 
@@ -269,7 +270,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	if !resolved.Stateless {
 		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
-			return nil, err
+			return nil, sessionAcquireFailure(err, s.AgentID)
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
@@ -301,7 +302,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 
 	prompt := message.Content
 	if strings.TrimSpace(prompt) == "" {
-		err := errors.New("empty prompt input for claude cli")
+		err := runtimefailures.New(runtimefailures.ClassSchemaInvalid, "empty_agent_prompt", "llm-runtime", "claude_cli_turn", nil)
 		s.ParseFailures++
 		r.persistTurn(ctx, enrichTurnRecord(ctx, s, AgentTurnRecord{
 			AgentID:        s.AgentID,
@@ -310,7 +311,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			RequestPayload: jsonBytes(map[string]any{"message": message}),
 			ParseOK:        false,
 			Latency:        0,
-			Error:          err.Error(),
+			Failure:        agentTurnFailure(err, "claude_cli_turn"),
 		}, nil))
 		return nil, err
 	}
@@ -383,101 +384,6 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 	resp, fallback, err := r.runWithPromptTransportFallback(ctx, args, target, prompt, monitorMeta)
 	transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
 	transportFallback.Used = transportFallback.Used || fallback.Used
-	if err != nil && s.TurnCount == 0 && isUnsupportedCLIFlagError(err) {
-		args = []string{
-			"-p",
-			"--session-id", sessionToken(s),
-			"--output-format", configuredCLIOutputFormat(r.cfg),
-		}
-		args = appendClaudePrintModeArgs(args, r.cfg)
-		args = append(args, permissionModeArgs()...)
-		if strings.TrimSpace(disallowedBuiltinTools) != "" {
-			args = append(args, "--disallowedTools", disallowedBuiltinTools)
-		}
-		if strings.TrimSpace(allowedToolsArg) != "" {
-			args = append(args, "--allowedTools", allowedToolsArg)
-		}
-		if mcpEnabled {
-			args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-		}
-		resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, prompt), monitorMeta)
-		transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
-		transportFallback.Used = transportFallback.Used || fallback.Used
-	}
-	if err != nil && shouldRotateSessionOnCLIError(err) {
-		rotateReason := rotateSessionRetryReason(err)
-		oldSessionID := s.ID
-		oldTurnCount := s.TurnCount
-		oldParseFailures := s.ParseFailures
-		checkpoint := BuildRotationCheckpoint(rotateReason, s)
-		if !resolved.Stateless {
-			rotated, rotateErr := r.sessions.Rotate(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, sessions.RotationMetadata{
-				CheckpointSummary: checkpoint,
-				RetryReason:       rotateReason,
-			}, resolved.ScopeKey)
-			if rotateErr == nil && rotated != nil {
-				s.ID = rotated.SessionID
-				s.ProviderSessionID = rotated.ProviderSessionID
-				s.RetryReason = rotated.RetryReason
-				s.RetriesFromSessionID = rotated.RetriesFromSessionID
-				s.TurnCount = 0
-				if len(s.Messages) > 0 {
-					s.Messages = []Message{{Role: "system", Content: "Session rotated due to CLI runtime recovery."}}
-				}
-				LogSessionRotatedForRun(ctx, r.events, s.AgentID, resolved.RuntimeMode.String(), oldSessionID, rotated.SessionID, resolved.ScopeKey, rotateReason, oldTurnCount, oldParseFailures)
-				if err := requireInboundDeliveryActiveForSession(ctx, r.events, s, "error", "Marking the rotated agent delivery in progress failed", map[string]any{
-					"runtime_mode": resolved.RuntimeMode.String(),
-					"scope_key":    resolved.ScopeKey,
-				}, entityID); err != nil {
-					return nil, fmt.Errorf("mark inbound delivery active for rotated cli session: %w", err)
-				}
-				args = []string{
-					"-p",
-					"--session-id", sessionToken(s),
-					"--output-format", configuredCLIOutputFormat(r.cfg),
-				}
-				args = appendClaudePrintModeArgs(args, r.cfg)
-				args = append(args, permissionModeArgs()...)
-				if sys := strings.TrimSpace(s.SystemPrompt); sys != "" {
-					args = append(args, "--system-prompt", sys)
-				}
-				if strings.TrimSpace(disallowedBuiltinTools) != "" {
-					args = append(args, "--disallowedTools", disallowedBuiltinTools)
-				}
-				if strings.TrimSpace(allowedToolsArg) != "" {
-					args = append(args, "--allowedTools", allowedToolsArg)
-				}
-				if mcpEnabled {
-					args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-				}
-				monitorMeta.SessionID = s.ID
-				resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, message.Content, monitorMeta)
-				transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
-				transportFallback.Used = transportFallback.Used || fallback.Used
-				if err != nil && isUnsupportedCLIFlagError(err) {
-					args = []string{
-						"-p",
-						"--session-id", sessionToken(s),
-						"--output-format", configuredCLIOutputFormat(r.cfg),
-					}
-					args = appendClaudePrintModeArgs(args, r.cfg)
-					args = append(args, permissionModeArgs()...)
-					if strings.TrimSpace(disallowedBuiltinTools) != "" {
-						args = append(args, "--disallowedTools", disallowedBuiltinTools)
-					}
-					if strings.TrimSpace(allowedToolsArg) != "" {
-						args = append(args, "--allowedTools", allowedToolsArg)
-					}
-					if mcpEnabled {
-						args = append(args, "--mcp-config", mcpConfig, "--strict-mcp-config")
-					}
-					resp, fallback, err = r.runWithPromptTransportFallback(ctx, args, target, buildInitialPrompt(s, message.Content), monitorMeta)
-					transportFallback.Attempted = transportFallback.Attempted || fallback.Attempted
-					transportFallback.Used = transportFallback.Used || fallback.Used
-				}
-			}
-		}
-	}
 	latency := time.Since(start)
 	if err != nil {
 		s.ParseFailures++
@@ -494,7 +400,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			}),
 			ParseOK: false,
 			Latency: latency,
-			Error:   err.Error(),
+			Failure: agentTurnFailure(err, "claude_cli_turn"),
 		}, nil))
 		if !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
@@ -518,7 +424,7 @@ func (r *ClaudeCLIRuntime) ContinueSession(ctx context.Context, s *Session, mess
 			ResponseRaw: resp.Raw,
 			ParseOK:     true,
 			Latency:     latency,
-			Error:       err.Error(),
+			Failure:     agentTurnFailure(err, "claude_cli_tool_validation"),
 		}, resp))
 		return nil, err
 	}

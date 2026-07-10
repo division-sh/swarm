@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -360,9 +361,7 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *tes
 	})
 
 	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
-		t.Fatalf("Execute(send_provider) err = %v, want missing binding fail-closed", err)
-	}
+	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "tool_credential_required")
 }
 
 func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *testing.T) {
@@ -389,9 +388,7 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *te
 	})
 
 	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
-		t.Fatalf("Execute(send_provider) err = %v, want undeclared credential fail-closed", err)
-	}
+	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "tool_credential_required")
 }
 
 func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testing.T) {

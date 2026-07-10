@@ -146,7 +146,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 		t.Fatalf("Publish paused run event: %v", err)
 	}
 	requireNoBusEvent(t, ch, "paused run with pipeline receipt before continue")
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt queued event: %v", err)
 	}
 	if got := countPipelineReceiptsForEvent(t, ctx, db, eventID); got != 1 {

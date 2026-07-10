@@ -6,6 +6,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -18,9 +19,10 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level diaglog.Lev
 		return
 	}
 	inbound, _ := runtimebus.InboundEventFromContext(ctx)
-	errText := ""
+	var failure *runtimefailures.Envelope
 	if err != nil {
-		errText = strings.TrimSpace(err.Error())
+		canonical := runtimefailures.Normalize(err, "llm-runtime", strings.TrimSpace(action))
+		failure = &canonical
 	}
 	if err := diaglog.RunLog(ctx, logger, runtimepipeline.RuntimeLogEntry{
 		Level:     diaglog.NormalizeLevel(level.String()),
@@ -33,7 +35,7 @@ func logRunRuntime(ctx context.Context, logger RuntimeLogSink, level diaglog.Lev
 		EntityID:  strings.TrimSpace(entityID),
 		SessionID: strings.TrimSpace(sessionID),
 		Detail:    detail,
-		Error:     errText,
+		Failure:   failure,
 	}); err != nil {
 		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
 			"component", "llm-runtime",

@@ -18,8 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 )
 
 const testGatewayToken = "gateway-token"
@@ -840,7 +840,7 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		if isError, _ := result["isError"].(bool); !isError {
 			t.Fatalf("%s isError = %#v, want true", def.Name, result["isError"])
 		}
-		if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+		if !strings.Contains(rec.Body.String(), "Authorization was denied") {
 			t.Fatalf("%s response = %s, want tool-not-allowed", def.Name, rec.Body.String())
 		}
 	}
@@ -860,7 +860,7 @@ func TestGatewayMCPToolsForRoleScopedActor_RetiresLegacyEntitySurface(t *testing
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("direct %s status = %d, want 400", def.Name, rec.Code)
 		}
-		if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+		if !strings.Contains(rec.Body.String(), "Authorization was denied") {
 			t.Fatalf("direct %s response = %s, want tool-not-allowed", def.Name, rec.Body.String())
 		}
 	}
@@ -961,7 +961,7 @@ func TestGatewayMCPToolsForRequest_FiltersRoleScopedToolsByTurnEntityEligibility
 	if exec.callCount != 0 {
 		t.Fatalf("ineligible role-scoped MCP call reached executor %d times", exec.callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+	if !strings.Contains(rec.Body.String(), "Authorization was denied") {
 		t.Fatalf("response = %s, want tool-not-allowed", rec.Body.String())
 	}
 }
@@ -1059,7 +1059,7 @@ func TestGatewayHandleMCP_ToolsListRejectsMissingOrInvalidContextToken(t *testin
 			if resp.Error == nil {
 				t.Fatalf("response error = nil, want context error in %s", rec.Body.String())
 			}
-			if !strings.Contains(resp.Error.Message, "missing or invalid mcp context token") {
+			if !strings.Contains(resp.Error.Message, "MCP context token is required") {
 				t.Fatalf("error message = %q", resp.Error.Message)
 			}
 		})
@@ -1248,7 +1248,7 @@ func TestGatewayHandleMCP_AllowsPrefixedToolNameFromRuntimeOwnedTurnContext(t *t
 	if exec.callCount != 1 {
 		t.Fatalf("executor call count = %d, want 1", exec.callCount)
 	}
-	if strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+	if strings.Contains(rec.Body.String(), "Authorization was denied") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -1261,7 +1261,7 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 	g := NewGateway(exec, testGatewayToken, GatewayHooks{
 		ResolveTurnContext: registry.ResolveTurnContext,
 		MarkEmitKeyUsed:    registry.MarkEmitKeyUsed,
-		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, failure *failures.Envelope) {
 			loggedAction = action
 			denialLayer = strings.TrimSpace(asString(detail["denial_layer"]))
 		},
@@ -1296,7 +1296,7 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 	if exec.callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", exec.callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+	if !strings.Contains(rec.Body.String(), "Authorization was denied") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 	if loggedAction != "mcp.tools.call.denied" {
@@ -1310,7 +1310,7 @@ func TestGatewayHandleMCP_DoesNotLetCallerAllowlistGrantToolAccess(t *testing.T)
 func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(testToolExecutor(func(_ context.Context, _ string, _ any) (any, error) {
-		return nil, runtimerterr.WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required")
+		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_query_entities.filter", map[string]any{"field": "query"})
 	}), testGatewayToken, GatewayHooks{
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
@@ -1355,11 +1355,8 @@ func TestGatewayHandleMCP_ToolsCallIncludesStructuredRuntimeErrorPayload(t *test
 	if err != nil {
 		t.Fatalf("DecodeRuntimeErrorPayload: %v", err)
 	}
-	if runtimeErr.Code != ErrCodeToolExecFailed {
-		t.Fatalf("runtimeError.code = %q, want %q", runtimeErr.Code, ErrCodeToolExecFailed)
-	}
-	if runtimeErr.Cause == nil || runtimeErr.Cause.Code != "invalid_tool_input" {
-		t.Fatalf("runtimeError.cause = %#v, want invalid_tool_input", runtimeErr.Cause)
+	if runtimeErr.Failure == nil || runtimeErr.Failure.Class != failures.ClassSchemaInvalid || runtimeErr.Failure.Detail.Code != "invalid_tool_input" {
+		t.Fatalf("runtimeError.failure = %#v, want schema_invalid/invalid_tool_input", runtimeErr.Failure)
 	}
 }
 
@@ -1589,8 +1586,8 @@ func TestProjectToolCallSuccessText_RoleScopedTypedReadFailsClosedWhenTooLarge(t
 	if err == nil {
 		t.Fatalf("projectToolCallSuccessText returned nil error and text %s", text)
 	}
-	runtimeErr, ok := runtimerterr.AsRuntimeError(err)
-	if !ok || runtimeErr.Code != toolresultpolicy.TypedReadResultTooLargeCode {
+	runtimeErr, ok := failures.As(err)
+	if !ok || runtimeErr.Failure.Class != failures.ClassDataLimitExceeded || runtimeErr.Failure.Detail.Code != toolresultpolicy.TypedReadResultTooLargeCode {
 		t.Fatalf("error = %#v, want runtime code %s", err, toolresultpolicy.TypedReadResultTooLargeCode)
 	}
 }
@@ -1733,7 +1730,7 @@ func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeSuccessOutcome(t 
 func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeValidationOnlyOutcome(t *testing.T) {
 	registry := newTestTurnContextRegistry()
 	g := NewGateway(testToolExecutor(func(_ context.Context, _ string, _ any) (any, error) {
-		return nil, runtimerterr.WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_query_entities.filter", false, nil, "query is required")
+		return nil, failures.NewDetail("invalid_tool_input", "tool-executor", "exec_query_entities.filter", map[string]any{"field": "query"})
 	}), testGatewayToken, GatewayHooks{
 		ResolveTurnContext: registry.ResolveTurnContext,
 	})
@@ -1778,8 +1775,8 @@ func TestGatewayHandleMCP_ToolsCallIncludesExplicitStartupProbeValidationOnlyOut
 	if probeResult.Outcome != StartupProbeOutcomeValidationOnly {
 		t.Fatalf("startup probe outcome = %q, want validation_only", probeResult.Outcome)
 	}
-	if probeResult.CauseCode != "invalid_tool_input" {
-		t.Fatalf("startup probe cause_code = %q, want invalid_tool_input", probeResult.CauseCode)
+	if probeResult.FailureClass != string(failures.ClassSchemaInvalid) || probeResult.FailureDetail != "invalid_tool_input" {
+		t.Fatalf("startup probe failure = %s/%s, want schema_invalid/invalid_tool_input", probeResult.FailureClass, probeResult.FailureDetail)
 	}
 }
 
@@ -1812,7 +1809,7 @@ func TestGatewayHandleMCP_RejectsToolWhenContextTokenMisses(t *testing.T) {
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(rec.Body.String(), "MCP context token is required") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -1946,7 +1943,7 @@ func TestGatewayAuthorize_DeniesMissingBearer(t *testing.T) {
 	g := NewGateway(nil, testGatewayToken, GatewayHooks{})
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	err := g.AuthorizeForTest(req)
-	if err == nil || !strings.Contains(err.Error(), "missing authorization bearer token") {
+	if err == nil || !strings.Contains(err.Error(), "Authorization bearer token is required") {
 		t.Fatalf("AuthorizeForTest err = %v, want missing bearer error", err)
 	}
 }
@@ -1956,8 +1953,8 @@ func TestGatewayAuthorize_DeniesInvalidBearer(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	req.Header.Set("Authorization", "Bearer wrong-token")
 	err := g.AuthorizeForTest(req)
-	if err == nil || !strings.Contains(err.Error(), "invalid token") {
-		t.Fatalf("AuthorizeForTest err = %v, want invalid token error", err)
+	if err == nil || !strings.Contains(err.Error(), "Authorization bearer token is invalid") {
+		t.Fatalf("AuthorizeForTest err = %v, want Authorization bearer token is invalid error", err)
 	}
 }
 
@@ -2093,7 +2090,7 @@ func TestGatewayHandleMCP_RejectsReadOnlyToolWhenContextTokenMisses(t *testing.T
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(rec.Body.String(), "MCP context token is required") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -2122,7 +2119,7 @@ func TestGatewayHandleTool_RejectsMutatingToolWithoutContextToken(t *testing.T) 
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(rec.Body.String(), "MCP context token is required") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -2151,7 +2148,7 @@ func TestGatewayHandleTool_RejectsReadOnlyToolWithoutContextToken(t *testing.T) 
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(rec.Body.String(), "MCP context token is required") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -2186,7 +2183,7 @@ func TestGatewayHandleTool_IgnoresCallerSuppliedPrivilegeFields(t *testing.T) {
 	if exec.callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", exec.callCount)
 	}
-	if !strings.Contains(rec.Body.String(), "tool is not allowed for this agent") {
+	if !strings.Contains(rec.Body.String(), "Authorization was denied") {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }
@@ -2260,10 +2257,10 @@ func TestGatewayTransports_AlignReadOnlyToolContextTokenFailures(t *testing.T) {
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if !strings.Contains(mcpRec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(mcpRec.Body.String(), "MCP context token is required") {
 		t.Fatalf("mcp body = %s", mcpRec.Body.String())
 	}
-	if !strings.Contains(toolRec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(toolRec.Body.String(), "MCP context token is required") {
 		t.Fatalf("tool body = %s", toolRec.Body.String())
 	}
 }
@@ -2314,10 +2311,10 @@ func TestGatewayTransports_RejectLegacyQueryContextTokenCarrier(t *testing.T) {
 	if callCount != 0 {
 		t.Fatalf("executor call count = %d, want 0", callCount)
 	}
-	if !strings.Contains(mcpRec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(mcpRec.Body.String(), "MCP context token is required") {
 		t.Fatalf("mcp body = %s", mcpRec.Body.String())
 	}
-	if !strings.Contains(toolRec.Body.String(), "missing or invalid mcp context token") {
+	if !strings.Contains(toolRec.Body.String(), "MCP context token is required") {
 		t.Fatalf("tool body = %s", toolRec.Body.String())
 	}
 }
@@ -2374,10 +2371,10 @@ func TestGatewayTransports_AlignReadOnlyToolSuccessWithResolvedTurnContext(t *te
 	if callCount != 2 {
 		t.Fatalf("executor call count = %d, want 2", callCount)
 	}
-	if strings.Contains(mcpRec.Body.String(), "missing or invalid mcp context token") {
+	if strings.Contains(mcpRec.Body.String(), "MCP context token is required") {
 		t.Fatalf("mcp body = %s", mcpRec.Body.String())
 	}
-	if strings.Contains(toolRec.Body.String(), "missing or invalid mcp context token") {
+	if strings.Contains(toolRec.Body.String(), "MCP context token is required") {
 		t.Fatalf("tool body = %s", toolRec.Body.String())
 	}
 }
@@ -2437,7 +2434,7 @@ func TestGatewayHandleMCP_DoesNotLogFallbackUsedReason(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
 	}), testGatewayToken, GatewayHooks{
-		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, failure *failures.Envelope) {
 			actions = append(actions, action)
 		},
 	})
@@ -2471,7 +2468,7 @@ func TestGatewayHandleTool_DoesNotLogFallbackBlockedReason(t *testing.T) {
 	g := NewGateway(testToolExecutor(func(_ context.Context, name string, input any) (any, error) {
 		return map[string]any{"ok": true, "name": name, "input": input}, nil
 	}), testGatewayToken, GatewayHooks{
-		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+		Log: func(_ context.Context, level, action, agentID, entityID string, detail map[string]any, failure *failures.Envelope) {
 			actions = append(actions, action)
 		},
 	})

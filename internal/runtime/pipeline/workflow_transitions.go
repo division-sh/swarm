@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -32,7 +34,7 @@ type PipelineTransitionInput struct {
 	StateAfter    any
 	EventsEmitted []string
 	DropReason    string
-	Error         string
+	Failure       *runtimefailures.Envelope
 	Duration      time.Duration
 }
 
@@ -85,7 +87,7 @@ func RecordPipelineTransition(ctx context.Context, db *sql.DB, capability func(c
 	if !eventExists {
 		return nil
 	}
-	return recordPipelineTransitionReceipt(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Error)
+	return recordPipelineTransitionReceipt(ctx, db, eventID, handler, pipelineType, pipelineID, action, before, after, eventsEmitted, durationUS, in.DropReason, in.Failure)
 }
 
 func WithPipelineTransitionCollector(ctx context.Context, collector *[]DeferredPipelineTransition, capability func(context.Context) (bool, error)) context.Context {
@@ -159,13 +161,13 @@ func sanitizeStringSlice(in []string) []string {
 	return out
 }
 
-func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason, errText string) error {
+func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, handler, pipelineType, pipelineID, action string, before, after []byte, eventsEmitted []string, durationMS int, dropReason string, failure *runtimefailures.Envelope) error {
 	handlerID := strings.TrimSpace(runtimecorrelation.HandlerIDFromContext(ctx))
 	if handlerID == "" {
 		handlerID = strings.TrimSpace(handler)
 	}
 	reasonCode := "pipeline_transition_applied"
-	if strings.TrimSpace(errText) != "" {
+	if failure != nil {
 		reasonCode = "pipeline_transition_error"
 	} else if strings.TrimSpace(dropReason) != "" {
 		reasonCode = "pipeline_transition_discarded"
@@ -178,25 +180,32 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 		"reason_code":    reasonCode,
 		"events_emitted": eventsEmitted,
 		"drop_reason":    strings.TrimSpace(dropReason),
-		"error":          strings.TrimSpace(errText),
 	})
 	if err != nil {
 		return err
 	}
 	outcome := "success"
-	if strings.TrimSpace(errText) != "" {
+	if failure != nil {
 		outcome = "dead_letter"
 	} else if strings.TrimSpace(dropReason) != "" {
 		outcome = "discard"
 	}
+	var failureJSON any
+	if failure != nil {
+		raw, marshalErr := runtimefailures.MarshalEnvelope(*failure)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal pipeline transition failure: %w", marshalErr)
+		}
+		failureJSON = string(raw)
+	}
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, state_before, state_after, side_effects, duration_ms, processed_at
+			outcome, reason_code, state_before, state_after, side_effects, failure, duration_ms, processed_at
 		)
 		SELECT
 			e.event_id, 'platform', $2, e.entity_id, e.flow_instance,
-			$3, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), $7::jsonb, NULLIF($8,0), now()
+			$3, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), $7::jsonb, $8::jsonb, NULLIF($9,0), now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
 		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
@@ -205,8 +214,9 @@ func recordPipelineTransitionReceipt(ctx context.Context, db *sql.DB, eventID, h
 			state_before = EXCLUDED.state_before,
 			state_after = EXCLUDED.state_after,
 			side_effects = EXCLUDED.side_effects,
+			failure = EXCLUDED.failure,
 			duration_ms = EXCLUDED.duration_ms,
 			processed_at = now()
-	`, eventID, "pipeline:"+pipelineID, outcome, reasonCode, string(before), string(after), string(sideEffects), durationMS)
+	`, eventID, "pipeline:"+pipelineID, outcome, reasonCode, string(before), string(after), string(sideEffects), failureJSON, durationMS)
 	return err
 }

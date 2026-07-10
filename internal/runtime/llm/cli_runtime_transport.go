@@ -132,14 +132,5 @@ func shouldUseMCPBridge() bool {
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
 	resp, err := r.runWithInput(ctx, args, target, prompt, meta)
-	if err == nil || !isPromptArgRequiredError(err) {
-		return resp, promptTransportFallback{}, err
-	}
-	used := promptTransportFallback{Attempted: true}
-	resp, err = r.runWithPromptArg(ctx, args, target, prompt, meta)
-	if err == nil {
-		used.Used = true
-		logPublisherRuntime(ctx, r.events, "warn", "prompt_transport_fallback_used", "CLI prompt transport fallback was used", "", "", "", nil, nil)
-	}
-	return resp, used, err
+	return resp, promptTransportFallback{}, err
 }

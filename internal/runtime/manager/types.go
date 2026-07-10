@@ -11,6 +11,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -80,7 +81,7 @@ type EventReceipt struct {
 	AgentID    string
 	Status     ReceiptStatus
 	RetryCount int
-	Error      string
+	Failure    *runtimefailures.Envelope
 }
 
 type ReceiptStatus string
@@ -102,7 +103,7 @@ type EntitySchemaPersistence interface {
 }
 
 type ReceiptPersistence interface {
-	UpsertEventReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, errText string) error
+	UpsertEventReceipt(ctx context.Context, eventID, agentID string, status ReceiptStatus, failure *runtimefailures.Envelope) error
 }
 
 type PendingEventPersistence interface {
@@ -139,7 +140,7 @@ type AgentManagerOptions struct {
 	Budget                         BudgetGuard
 	ResetRuntimeOwnedState         func()
 	RuntimeShutdownAdmissionClosed func() bool
-	RuntimeIngressSafetyPause      func(context.Context, string) error
+	RuntimeIngressSafetyPause      func(context.Context, string, *runtimefailures.Envelope) error
 	NativeToolAdmissionValidator   func(context.Context, models.AgentConfig) error
 	ThrottleSuppressPrefixes       []string
 	DisableSpinupControl           bool

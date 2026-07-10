@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
@@ -155,7 +156,7 @@ func normalizeDescriptorAddressFields(in map[string]string) map[string]string {
 // PipelineReceiptPersistence is an optional capability for marking whether
 // persisted events were fully routed/delivered by the runtime publish path.
 type PipelineReceiptPersistence interface {
-	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
+	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
 }
 
 // RunLifecyclePersistence is an optional capability for persisting canonical
@@ -235,7 +236,7 @@ type EventMutation interface {
 	InsertEventDeliveriesWithTargets(ctx context.Context, eventID string, agentIDs []string, deliveryTargets map[string]events.RouteIdentity) error
 	InsertEventDeliveryRoutes(ctx context.Context, eventID string, deliveryRoutes []events.DeliveryRoute) error
 	UpsertCommittedReplayScope(ctx context.Context, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
-	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
+	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
 	RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error
 }
 
@@ -276,7 +277,7 @@ type TransactionalEventStore interface {
 	BeginEventTx(ctx context.Context) (*sql.Tx, error)
 	AppendEventTx(ctx context.Context, tx *sql.Tx, evt events.Event) error
 	InsertEventDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string, agentIDs []string) error
-	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error
+	UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error
 }
 
 type EventTransactionRunner interface {

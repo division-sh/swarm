@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -37,8 +39,7 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	}
 	rec := runtimedeadletters.Record{
 		OriginalEventID: evt.ID(),
-		FailureType:     "retry_exhausted",
-		ErrorMessage:    "boom",
+		Failure:         testFailureEnvelope(runtimefailures.ClassRetryExhausted, "delivery_retry_exhausted", nil),
 		RetryCount:      4,
 		HandlerNode:     "agent-1",
 	}
@@ -84,8 +85,7 @@ func TestRecordDeadLetter_AllowsNonUUIDEntityIDViaSourceEventPayload(t *testing.
 	rec := runtimedeadletters.Record{
 		OriginalEventID: evt.ID(),
 		EntityID:        "ent-001",
-		FailureType:     "chain_depth_exceeded",
-		ErrorMessage:    "too deep",
+		Failure:         testFailureEnvelope(runtimefailures.ClassChainDepthExceeded, "chain_depth_exceeded", nil),
 		HandlerNode:     "node-1",
 	}
 	if err := pg.RecordDeadLetter(ctx, rec); err != nil {
@@ -133,36 +133,30 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 	rec := runtimedeadletters.Record{
-		OriginalEventID:     evt.ID(),
-		FailureType:         "target_resolution_failed",
-		TargetFailureReason: "target_not_subscribed",
-		TargetContext:       []byte(`{"target":{"flow_instance":"flow/target"}}`),
-		ErrorMessage:        "pin routing target delivery failed: target_not_subscribed",
-		HandlerNode:         "pin_routing",
+		OriginalEventID: evt.ID(),
+		Failure: testFailureEnvelope(runtimefailures.ClassTargetUnreachable, "target_not_subscribed", map[string]any{
+			"target": map[string]any{"flow_instance": "flow/target"},
+		}),
+		HandlerNode: "pin_routing",
 	}
 	if err := pg.RecordDeadLetter(ctx, rec); err != nil {
 		t.Fatalf("RecordDeadLetter: %v", err)
 	}
 
 	var (
-		failureType string
-		reason      sql.NullString
-		contextJSON string
+		failureJSON string
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT failure_type, target_failure_reason, target_context::text
+		SELECT failure::text
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID()).Scan(&failureType, &reason, &contextJSON); err != nil {
+	`, evt.ID()).Scan(&failureJSON); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
-	if failureType != "target_resolution_failed" {
-		t.Fatalf("failure_type = %q, want target_resolution_failed", failureType)
+	if !strings.Contains(failureJSON, `"class": "platform.target_unreachable"`) || !strings.Contains(failureJSON, `"code": "target_not_subscribed"`) {
+		t.Fatalf("failure = %s, want target_unreachable/target_not_subscribed", failureJSON)
 	}
-	if !reason.Valid || reason.String != "target_not_subscribed" {
-		t.Fatalf("target_failure_reason = %#v, want target_not_subscribed", reason)
-	}
-	if contextJSON == "" || contextJSON == "{}" {
-		t.Fatalf("target_context = %q, want populated JSON", contextJSON)
+	if !strings.Contains(failureJSON, `"flow_instance": "flow/target"`) {
+		t.Fatalf("failure = %q, want target context attribute", failureJSON)
 	}
 }

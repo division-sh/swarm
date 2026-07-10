@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type recordingRunner struct {
@@ -96,20 +98,30 @@ func TestPersistAndDispatch_DoesNotDispatchWhenOutboxFails(t *testing.T) {
 	}
 }
 
-func TestClassifyFailure(t *testing.T) {
-	if got := ClassifyFailure(nil); got != FailureNone {
-		t.Fatalf("nil failure class = %v", got)
+func TestNormalizeFailureAndDisposition(t *testing.T) {
+	if got := NormalizeFailure(nil, "test", "nil"); got != nil {
+		t.Fatalf("nil failure = %#v", got)
 	}
-	if got := ClassifyFailure(ErrChainDepthExceeded); got != FailureDeadLetter {
-		t.Fatalf("chain-depth failure class = %v", got)
+	tests := []struct {
+		name        string
+		err         error
+		class       failures.Class
+		disposition FailureDisposition
+	}{
+		{name: "chain depth", err: ErrChainDepthExceeded, class: failures.ClassChainDepthExceeded, disposition: FailureDispositionDeadLetter},
+		{name: "missing state repo", err: ErrMissingStateRepo, class: failures.ClassDependencyUnavailable, disposition: FailureDispositionRetry},
+		{name: "fan out bound", err: ErrFanOutBoundExceeded, class: failures.ClassFanOutBoundExceeded, disposition: FailureDispositionTerminal},
+		{name: "raw error", err: errors.New("temporary"), class: failures.ClassInternalFailure, disposition: FailureDispositionTerminal},
 	}
-	if got := ClassifyFailure(ErrMissingStateRepo); got != FailureLogic {
-		t.Fatalf("missing-state-repo failure class = %v", got)
-	}
-	if got := ClassifyFailure(ErrFanOutBoundExceeded); got != FailureLogic {
-		t.Fatalf("fan-out-bound failure class = %v", got)
-	}
-	if got := ClassifyFailure(errors.New("temporary")); got != FailureTransient {
-		t.Fatalf("generic failure class = %v", got)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			failure := NormalizeFailure(test.err, "test", test.name)
+			if failure.Failure.Class != test.class {
+				t.Fatalf("class = %s, want %s", failure.Failure.Class, test.class)
+			}
+			if got := FailureDispositionFor(test.err); got != test.disposition {
+				t.Fatalf("disposition = %s, want %s", got, test.disposition)
+			}
+		})
 	}
 }

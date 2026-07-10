@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
 
@@ -36,7 +37,6 @@ const (
 	maxReadFileResultBytes          = 256 * 1024
 	maxReadFileEnvelopeReserveBytes = 8 * 1024
 	maxReadFileMessageBytes         = maxReadFileResultBytes + maxToolResultBytes + maxReadFileEnvelopeReserveBytes
-	maxToolErrorTextRunes           = 600
 	maxToolResultPreviewRunes       = 1200
 )
 
@@ -181,7 +181,11 @@ func (c *Conversation) ensureSession(ctx context.Context) error {
 
 func (c *Conversation) continueOnce(ctx context.Context, msg Message) (*Response, error) {
 	if c.TurnCount >= c.MaxTurns {
-		return nil, fmt.Errorf("max turns reached (%d)", c.MaxTurns)
+		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
+			"budget_kind": "agent_turns",
+			"actual":      c.TurnCount,
+			"limit":       c.MaxTurns,
+		})
 	}
 	resp, err := c.runtime.ContinueSession(ctx, c.Session, msg)
 	if err != nil {
@@ -203,7 +207,10 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			return resp, nil
 		}
 		ctx = withCLIUsableToolsForTurn(ctx, c.turnToolDefinitions(), resp)
-		toolPayload, executed := c.executeToolCalls(ctx, resp.ToolCalls)
+		toolPayload, executed, err := c.executeToolCalls(ctx, resp.ToolCalls)
+		if err != nil {
+			return nil, err
+		}
 		if shouldTerminateAfterToolCalls(executed) {
 			terminal := *resp
 			terminal.ToolCalls = nil
@@ -216,10 +223,14 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		}
 		resp = next
 	}
-	return nil, fmt.Errorf("tool resolution exceeded max rounds (%d)", rounds)
+	return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "tool_round_budget_exhausted", "llm-conversation", "resolve_tool_calls", map[string]any{
+		"budget_kind": "tool_rounds",
+		"actual":      rounds,
+		"limit":       rounds,
+	})
 }
 
-func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (string, []executedToolCall) {
+func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (string, []executedToolCall, error) {
 	ctx = c.withToolCapabilities(ctx)
 	results := make([]map[string]any, 0, len(calls))
 	executed := make([]executedToolCall, 0, len(calls))
@@ -243,7 +254,12 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		}
 		if err != nil {
 			entry["ok"] = false
-			entry["error"] = clampRunes(err.Error(), maxToolErrorTextRunes)
+			failure := runtimefailures.Normalize(err, "llm-conversation", "execute_tool")
+			failureValue, valueErr := runtimefailures.EnvelopeValue(failure)
+			if valueErr != nil {
+				return "", executed, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "tool_failure_envelope_encode_failed", "llm-conversation", "deliver_tool_result", map[string]any{"tool": strings.TrimSpace(tc.Name)}, valueErr)
+			}
+			entry["failure"] = failureValue
 		}
 		results = append(results, entry)
 		executed = append(executed, executedToolCall{
@@ -257,33 +273,20 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 	}
 	b, err := json.Marshal(results)
 	if err != nil {
-		return fmt.Sprintf(`[%q]`, err.Error()), executed
+		return "", executed, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "tool_result_batch_marshal_failed", "llm-conversation", "marshal_tool_results", nil, err)
 	}
 	if len(b) > toolRelayMessageLimit(calls) {
+		limitKind := "aggregate_tool_result_bytes"
 		if toolCallBatchHasRoleScopedTypedRead(ctx, calls) {
-			overflow := []map[string]any{{
-				"name":  "__runtime_guardrail__",
-				"ok":    false,
-				"error": fmt.Sprintf("%s: role-scoped typed read results exceeded the complete delivery limit of %d bytes", toolresultpolicy.TypedReadResultTooLargeCode, toolresultpolicy.MaxCompleteTypedReadResultBytes),
-			}}
-			guarded, gerr := json.Marshal(overflow)
-			if gerr != nil {
-				return fmt.Sprintf(`[{"name":"__runtime_guardrail__","ok":false,"error":%q}]`, toolresultpolicy.TypedReadResultTooLargeCode), executed
-			}
-			return strings.TrimSpace(string(guarded)), executed
+			limitKind = "aggregate_typed_read_result_bytes"
 		}
-		overflow := []map[string]any{{
-			"name":  "__runtime_guardrail__",
-			"ok":    false,
-			"error": fmt.Sprintf("tool output exceeded %d bytes and was truncated", toolRelayMessageLimit(calls)),
-		}}
-		guarded, gerr := json.Marshal(overflow)
-		if gerr != nil {
-			return `[{"name":"__runtime_guardrail__","ok":false,"error":"tool output too large"}]`, executed
-		}
-		return strings.TrimSpace(string(guarded)), executed
+		return "", executed, runtimefailures.New(runtimefailures.ClassDataLimitExceeded, "aggregate_tool_result_limit_exceeded", "llm-conversation", "deliver_tool_results", map[string]any{
+			"limit_kind": limitKind,
+			"actual":     len(b),
+			"limit":      toolRelayMessageLimit(calls),
+		})
 	}
-	return strings.TrimSpace(string(b)), executed
+	return strings.TrimSpace(string(b)), executed, nil
 }
 
 func (c *Conversation) projectToolResult(ctx context.Context, name string, input any, result any) (any, error) {
@@ -295,10 +298,7 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 		if toolIsRoleScopedTypedReadInContext(ctx, name) {
 			return nil, toolresultpolicy.NewTypedReadResultMarshalError("llm-conversation", "tool_result.project", name, err)
 		}
-		return map[string]any{
-			"truncated": false,
-			"error":     "marshal tool result",
-		}, nil
+		return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "tool_result_marshal_failed", "llm-conversation", "tool_result.project", map[string]any{"tool": strings.TrimSpace(name)}, err)
 	}
 	if toolIsRoleScopedTypedReadInContext(ctx, name) {
 		if len(b) > toolresultpolicy.MaxCompleteTypedReadResultBytes {
@@ -319,7 +319,10 @@ func (c *Conversation) projectToolResult(ctx context.Context, name string, input
 	}
 	if relay, ok, err := relayOversizedToolResult(ctx, c.runtime, c.Session, name, b); ok {
 		if err != nil {
-			return nil, fmt.Errorf("persist oversized tool result relay for %s: %w", strings.TrimSpace(name), err)
+			if _, typed := runtimefailures.As(err); typed {
+				return nil, err
+			}
+			return nil, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "tool_result_relay_write_failed", "llm-conversation", "persist_tool_result_relay", map[string]any{"tool": strings.TrimSpace(name)}, err)
 		}
 		followUp := map[string]any{
 			"kind":        "runtime_read_file",
@@ -374,7 +377,7 @@ func shouldTerminateAfterToolCalls(calls []executedToolCall) bool {
 func (c *Conversation) safeExecuteTool(ctx context.Context, name string, input any) (out any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("tool panic: %v", r)
+			err = runtimefailures.New(runtimefailures.ClassInternalFailure, "tool_executor_panic", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(name)})
 			out = nil
 		}
 	}()
@@ -453,28 +456,6 @@ func runtimeReadFileFollowUpAllowedForTurn(ctx context.Context, tools []ToolDefi
 		}
 	}
 	return false
-}
-
-func clampToolResult(name string, result any) any {
-	if result == nil {
-		return nil
-	}
-	b, err := json.Marshal(result)
-	if err != nil {
-		return map[string]any{
-			"truncated": false,
-			"error":     "marshal tool result",
-		}
-	}
-	limit := toolRelayResultLimit(name)
-	if len(b) <= limit {
-		return result
-	}
-	return map[string]any{
-		"truncated": true,
-		"bytes":     len(b),
-		"preview":   clampRunes(string(b), maxToolResultPreviewRunes),
-	}
 }
 
 func relayOversizedToolResult(ctx context.Context, runtime Runtime, session *Session, name string, rawJSON []byte) (toolResultRelayRef, bool, error) {

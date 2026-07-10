@@ -812,7 +812,7 @@ type ArtifactRepoOutputSpec struct {
 	CurrentRef        string `yaml:"current_ref"`
 	FileManifest      string `yaml:"file_manifest"`
 	Status            string `yaml:"status"`
-	FailureReason     string `yaml:"failure_reason"`
+	Failure           string `yaml:"failure"`
 	LastRequestID     string `yaml:"last_request_id"`
 	LastSourceEventID string `yaml:"last_source_event_id"`
 }

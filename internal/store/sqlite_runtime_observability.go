@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID string, opts RunDebugTraceQueryOptions) ([]RunDebugTraceRow, string, error) {
@@ -113,7 +116,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			e.event_id, e.event_name, COALESCE(e.source_event_id, ''), COALESCE(e.entity_id, ''),
 			COALESCE(e.produced_by, ''), COALESCE(e.produced_by_type, ''), e.created_at,
 				COALESCE(d.delivery_id, ''), COALESCE(d.subscriber_type, ''), COALESCE(d.subscriber_id, ''),
-				COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.last_error, ''), COALESCE(d.retry_count, 0),
+				COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.failure, 'null'), COALESCE(d.retry_count, 0),
 				COALESCE(d.active_session_id, ''),
 				d.created_at, d.started_at, d.delivered_at,
 			COALESCE(ses.session_id, ''), COALESCE(ses.session_kind, ''), COALESCE(ses.runtime_mode, ''),
@@ -121,7 +124,7 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 			COALESCE(t.turn_id, ''), COALESCE(t.trigger_event_id, ''), COALESCE(t.trigger_event_type, ''),
 			COALESCE(t.runtime_mode, ''), COALESCE(t.scope_key, ''), COALESCE(t.entity_id, ''),
 			COALESCE(t.task_id, ''), COALESCE(t.parse_ok, 0), COALESCE(t.retry_count, 0),
-			COALESCE(t.error, ''), t.created_at
+			COALESCE(t.failure, 'null'), t.created_at
 		FROM events e
 		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
 		LEFT JOIN agent_turns t
@@ -152,21 +155,30 @@ func (s *SQLiteRuntimeStore) LoadRunDebugTracePage(ctx context.Context, runID st
 	out := make([]RunDebugTraceRow, 0, opts.Limit+1)
 	for rows.Next() {
 		var row RunDebugTraceRow
+		var rawDeliveryFailure, rawTurnFailure any
 		var eventCreatedRaw, deliveryCreatedRaw, deliveryStartedRaw, deliveryDeliveredRaw, sessionUpdatedRaw, turnCreatedRaw any
 		if err := rows.Scan(
 			&row.EventID, &row.EventName, &row.SourceEventID, &row.EntityID,
 			&row.EventSource, &row.EventSourceType, &eventCreatedRaw,
 			&row.DeliveryID, &row.SubscriberType, &row.SubscriberID,
-			&row.DeliveryStatus, &row.DeliveryReasonCode, &row.DeliveryLastError, &row.DeliveryRetryCount, &row.ActiveSessionID,
+			&row.DeliveryStatus, &row.DeliveryReasonCode, &rawDeliveryFailure, &row.DeliveryRetryCount, &row.ActiveSessionID,
 			&deliveryCreatedRaw, &deliveryStartedRaw, &deliveryDeliveredRaw,
 			&row.SessionID, &row.SessionKind, &row.SessionRuntimeMode,
 			&row.SessionStatus, &sessionUpdatedRaw,
 			&row.TurnID, &row.TurnTriggerEventID, &row.TurnTriggerEventType,
 			&row.TurnRuntimeMode, &row.TurnScopeKey, &row.TurnEntityID,
 			&row.TurnTaskID, &row.TurnParseOK, &row.TurnRetryCount,
-			&row.TurnError, &turnCreatedRaw,
+			&rawTurnFailure, &turnCreatedRaw,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan sqlite run trace: %w", err)
+		}
+		row.DeliveryFailure, err = decodeStoredFailure(rawDeliveryFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode sqlite run trace delivery failure: %w", err)
+		}
+		row.TurnFailure, err = decodeStoredFailure(rawTurnFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode sqlite run trace turn failure: %w", err)
 		}
 		if at, ok, err := sqliteTimeValue(eventCreatedRaw); err != nil {
 			return nil, "", err
@@ -465,7 +477,7 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeIncidents(ctx context.Context, o
 func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, eventID string) ([]OperatorEventDelivery, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT delivery_id, subscriber_type, subscriber_id, COALESCE(active_session_id, ''),
-		       status, COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(retry_count, 0),
+		       status, COALESCE(reason_code, ''), COALESCE(failure, 'null'), COALESCE(retry_count, 0),
 		       created_at, started_at, delivered_at
 		FROM event_deliveries
 		WHERE event_id = ?
@@ -478,9 +490,14 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, 
 	out := []OperatorEventDelivery{}
 	for rows.Next() {
 		var delivery OperatorEventDelivery
+		var rawFailure any
 		var createdRaw, startedRaw, finishedRaw any
-		if err := rows.Scan(&delivery.DeliveryID, &delivery.SubscriberType, &delivery.SubscriberID, &delivery.SessionID, &delivery.Status, &delivery.ReasonCode, &delivery.LastError, &delivery.RetryCount, &createdRaw, &startedRaw, &finishedRaw); err != nil {
+		if err := rows.Scan(&delivery.DeliveryID, &delivery.SubscriberType, &delivery.SubscriberID, &delivery.SessionID, &delivery.Status, &delivery.ReasonCode, &rawFailure, &delivery.RetryCount, &createdRaw, &startedRaw, &finishedRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite operator event delivery: %w", err)
+		}
+		delivery.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, fmt.Errorf("decode sqlite operator event delivery failure: %w", err)
 		}
 		delivery.CreatedAt = sqliteTraceTimePtr(createdRaw)
 		delivery.StartedAt = sqliteTraceTimePtr(startedRaw)
@@ -495,8 +512,7 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeliveries(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context, eventID string) ([]OperatorDeadLetterRecord, error) {
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT dead_letter_id, COALESCE(failure_type, ''), COALESCE(error_message, ''),
-		       COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
+		SELECT dead_letter_id, failure, COALESCE(retry_count, 0), COALESCE(chain_depth, 0), COALESCE(handler_node, ''), created_at
 		FROM dead_letters
 		WHERE original_event_id = ?
 		ORDER BY created_at ASC, dead_letter_id ASC
@@ -508,10 +524,16 @@ func (s *SQLiteRuntimeStore) sqliteOperatorEventDeadLetters(ctx context.Context,
 	out := []OperatorDeadLetterRecord{}
 	for rows.Next() {
 		var item OperatorDeadLetterRecord
+		var rawFailure any
 		var createdRaw any
-		if err := rows.Scan(&item.DeadLetterID, &item.FailureType, &item.ErrorMessage, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
+		if err := rows.Scan(&item.DeadLetterID, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &createdRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite operator event dead letter: %w", err)
 		}
+		failure, err := decodeStoredFailure(rawFailure)
+		if err != nil || failure == nil {
+			return nil, fmt.Errorf("decode sqlite operator dead-letter failure")
+		}
+		item.Failure = *failure
 		if at, ok, err := sqliteTimeValue(createdRaw); err != nil {
 			return nil, err
 		} else if ok {
@@ -533,31 +555,23 @@ func sqliteTraceTimePtr(raw any) *time.Time {
 	return &at
 }
 
-func applySQLiteRuntimeLogPayload(log *OperatorRuntimeLogEntry, raw json.RawMessage) {
+func applySQLiteRuntimeLogPayload(log *OperatorRuntimeLogEntry, raw json.RawMessage) error {
 	if log == nil {
-		return
+		return fmt.Errorf("runtime log target is required")
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		payload = map[string]any{}
+	payload, err := runtimepkg.DecodeCanonicalRuntimeLogPayload(raw)
+	if err != nil {
+		return err
 	}
-	log.Level = strings.TrimSpace(sqliteObservabilityString(payload["log_level"]))
-	if log.Level == "" {
-		log.Level = "info"
-	}
-	log.Message = strings.TrimSpace(sqliteObservabilityString(payload["message"]))
-	details, _ := payload["details"].(map[string]any)
-	if details == nil {
-		details = map[string]any{}
-	}
-	log.Details = details
-	log.Component = strings.TrimSpace(sqliteObservabilityString(details["component"]))
-	log.Source = strings.TrimSpace(sqliteObservabilityString(details["source"]))
-	log.SessionID = strings.TrimSpace(sqliteObservabilityString(details["session_id"]))
-	log.ErrorCode = strings.TrimSpace(sqliteObservabilityString(details["error_code"]))
-	if log.Message == "" {
-		log.Message = strings.TrimSpace(sqliteObservabilityString(details["message"]))
-	}
+	log.Level = strings.TrimSpace(payload.LogLevel)
+	log.Message = strings.TrimSpace(payload.Message)
+	log.Details = payload.Detail
+	log.Component = strings.TrimSpace(payload.Component)
+	log.Source = strings.TrimSpace(payload.AgentID)
+	log.SessionID = strings.TrimSpace(payload.SessionID)
+	log.ErrorCode = strings.TrimSpace(payload.ErrorCode)
+	log.Failure = runtimefailures.CloneEnvelope(payload.Failure)
+	return nil
 }
 
 func coalesceRuntimeIncidentLevel(level string) string {

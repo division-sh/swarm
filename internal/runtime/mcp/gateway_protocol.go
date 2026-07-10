@@ -45,6 +45,7 @@ type RPCResponse struct {
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 type ToolDef struct {
@@ -130,12 +131,31 @@ func WriteRPCResult(w http.ResponseWriter, id any, result any) {
 }
 
 func WriteRPCError(w http.ResponseWriter, id any, code int, message string) {
+	writeRPCError(w, id, code, message, nil)
+}
+
+func WriteRPCErrorForRuntimeError(w http.ResponseWriter, id any, code int, err error) {
+	message := "mcp error"
+	var data any
+	if runtimeErr := RuntimeErrorPayloadFromError(err); runtimeErr != nil {
+		data = map[string]any{"runtimeError": runtimeErr}
+		if runtimeErr.Failure != nil {
+			message = runtimeErr.Failure.Message
+		} else if runtimeErr.Protocol != nil {
+			message = runtimeErr.Protocol.Message
+		}
+	}
+	writeRPCError(w, id, code, message, data)
+}
+
+func writeRPCError(w http.ResponseWriter, id any, code int, message string, data any) {
 	resp := RPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error: &RPCError{
 			Code:    code,
 			Message: strings.TrimSpace(message),
+			Data:    data,
 		},
 	}
 	if strings.TrimSpace(resp.Error.Message) == "" {

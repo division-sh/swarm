@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const (
@@ -56,16 +58,16 @@ type OperatorAgentDeliveryDiagnosticsSummary struct {
 }
 
 type OperatorAgentDeliveryFailure struct {
-	DeliveryID string    `json:"delivery_id"`
-	EventID    string    `json:"event_id"`
-	EventName  string    `json:"event_name"`
-	RunID      string    `json:"run_id,omitempty"`
-	EntityID   string    `json:"entity_id,omitempty"`
-	Status     string    `json:"status"`
-	ReasonCode string    `json:"reason_code,omitempty"`
-	LastError  string    `json:"last_error,omitempty"`
-	RetryCount int       `json:"retry_count"`
-	OccurredAt time.Time `json:"occurred_at"`
+	DeliveryID string                    `json:"delivery_id"`
+	EventID    string                    `json:"event_id"`
+	EventName  string                    `json:"event_name"`
+	RunID      string                    `json:"run_id,omitempty"`
+	EntityID   string                    `json:"entity_id,omitempty"`
+	Status     string                    `json:"status"`
+	ReasonCode string                    `json:"reason_code,omitempty"`
+	Failure    *runtimefailures.Envelope `json:"failure,omitempty"`
+	RetryCount int                       `json:"retry_count"`
+	OccurredAt time.Time                 `json:"occurred_at"`
 }
 
 type OperatorAgentDeadLetterDelivery struct {
@@ -76,7 +78,7 @@ type OperatorAgentDeadLetterDelivery struct {
 	EntityID          string                     `json:"entity_id,omitempty"`
 	Status            string                     `json:"status"`
 	ReasonCode        string                     `json:"reason_code,omitempty"`
-	LastError         string                     `json:"last_error,omitempty"`
+	Failure           *runtimefailures.Envelope  `json:"failure,omitempty"`
 	RetryCount        int                        `json:"retry_count"`
 	OccurredAt        time.Time                  `json:"occurred_at"`
 	DeadLetterRecords []OperatorDeadLetterRecord `json:"dead_letter_records"`
@@ -186,10 +188,10 @@ func (r *OperatorAgentConversationReadSurface) requireAgentDeliveryDiagnosticsCa
 		},
 		"event_deliveries": {
 			"delivery_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "last_error", "delivered_at", "created_at",
+			"status", "retry_count", "reason_code", "failure", "delivered_at", "created_at",
 		},
 		"dead_letters": {
-			"dead_letter_id", "original_event_id", "failure_type", "error_message",
+			"dead_letter_id", "original_event_id", "failure",
 			"retry_count", "chain_depth", "handler_node", "created_at",
 		},
 	}
@@ -249,7 +251,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryFailures(ctx con
 			COALESCE(e.run_id::text, ''),
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'::jsonb),
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.delivered_at, d.created_at) AS occurred_at
 		FROM event_deliveries d
@@ -269,6 +271,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryFailures(ctx con
 	out := []OperatorAgentDeliveryFailure{}
 	for rows.Next() {
 		var item OperatorAgentDeliveryFailure
+		var rawFailure []byte
 		if err := rows.Scan(
 			&item.DeliveryID,
 			&item.EventID,
@@ -276,11 +279,15 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryFailures(ctx con
 			&item.RunID,
 			&item.EntityID,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.RetryCount,
 			&item.OccurredAt,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan agent delivery failure: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode agent delivery failure: %w", err)
 		}
 		item.Status = "failed"
 		out = append(out, item)
@@ -335,13 +342,12 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeadLetterDeliveries(ctx
 			COALESCE(e.run_id::text, ''),
 			COALESCE(e.entity_id::text, ''),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'::jsonb),
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.delivered_at, d.created_at) AS occurred_at,
 			COALESCE(jsonb_agg(jsonb_build_object(
 				'dead_letter_id', dl.dead_letter_id::text,
-				'failure_type', COALESCE(dl.failure_type, ''),
-				'error_message', COALESCE(dl.error_message, ''),
+				'failure', dl.failure,
 				'retry_count', COALESCE(dl.retry_count, 0),
 				'chain_depth', COALESCE(dl.chain_depth, 0),
 				'handler_node', COALESCE(dl.handler_node, ''),
@@ -354,7 +360,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeadLetterDeliveries(ctx
 		  AND d.subscriber_id = $1
 		  AND d.status = 'dead_letter'
 		  %s
-		GROUP BY d.delivery_id, d.event_id, e.event_name, e.run_id, e.entity_id, d.reason_code, d.last_error, d.retry_count, d.delivered_at, d.created_at
+		GROUP BY d.delivery_id, d.event_id, e.event_name, e.run_id, e.entity_id, d.reason_code, d.failure, d.retry_count, d.delivered_at, d.created_at
 		ORDER BY occurred_at DESC, d.delivery_id::text DESC
 		LIMIT $%d
 	`, cursorClause, len(args)), args...)
@@ -367,6 +373,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeadLetterDeliveries(ctx
 	for rows.Next() {
 		var (
 			item       OperatorAgentDeadLetterDelivery
+			rawFailure []byte
 			recordsRaw []byte
 		)
 		if err := rows.Scan(
@@ -376,12 +383,16 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeadLetterDeliveries(ctx
 			&item.RunID,
 			&item.EntityID,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.RetryCount,
 			&item.OccurredAt,
 			&recordsRaw,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan agent dead-letter delivery: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode agent dead-letter delivery failure: %w", err)
 		}
 		item.Status = "dead_letter"
 		if err := json.Unmarshal(recordsRaw, &item.DeadLetterRecords); err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -40,7 +41,7 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO dead_letters (
 			dead_letter_id, original_event_id, original_event, original_payload, entity_id, flow_instance,
-			failure_type, target_failure_reason, target_context, error_message, retry_count, chain_depth, handler_node, created_at
+			failure, retry_count, chain_depth, handler_node, created_at
 		)
 		SELECT
 			?,
@@ -50,9 +51,6 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 			?,
 			COALESCE(NULLIF(?, ''), COALESCE((SELECT NULLIF(e.flow_instance, '') FROM events e WHERE e.event_id = ?), 'runtime')),
 			?,
-			NULLIF(?, ''),
-			COALESCE(NULLIF(?, 'null'), '{}'),
-			NULLIF(?, ''),
 			?,
 			?,
 			NULLIF(?, ''),
@@ -61,7 +59,7 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 			SELECT 1
 			FROM dead_letters dl
 			WHERE dl.original_event_id = ?
-			  AND dl.failure_type = ?
+			  AND dl.failure = ?
 			  AND COALESCE(dl.handler_node, '') = COALESCE(NULLIF(?, ''), '')
 		)
 	`,
@@ -74,16 +72,13 @@ func (s *SQLiteRuntimeStore) RecordDeadLetterTx(ctx context.Context, tx *sql.Tx,
 		sqliteNullUUID(rec.EntityID),
 		rec.FlowInstance,
 		rec.OriginalEventID,
-		rec.FailureType,
-		rec.TargetFailureReason,
-		string(rec.TargetContext),
-		rec.ErrorMessage,
+		mustFailureJSON(rec.Failure),
 		rec.RetryCount,
 		rec.ChainDepth,
 		rec.HandlerNode,
 		createdAt,
 		rec.OriginalEventID,
-		rec.FailureType,
+		mustFailureJSON(rec.Failure),
 		rec.HandlerNode,
 	); err != nil {
 		return fmt.Errorf("insert sqlite dead letter: %w", err)
@@ -96,9 +91,6 @@ func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadlette
 	rec.OriginalEvent = strings.TrimSpace(rec.OriginalEvent)
 	rec.EntityID = strings.TrimSpace(rec.EntityID)
 	rec.FlowInstance = strings.TrimSpace(rec.FlowInstance)
-	rec.FailureType = strings.TrimSpace(rec.FailureType)
-	rec.TargetFailureReason = strings.TrimSpace(rec.TargetFailureReason)
-	rec.ErrorMessage = strings.TrimSpace(rec.ErrorMessage)
 	rec.HandlerNode = strings.TrimSpace(rec.HandlerNode)
 	rec.Timestamp = strings.TrimSpace(rec.Timestamp)
 	if rec.OriginalEventID == "" {
@@ -112,20 +104,14 @@ func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadlette
 			rec.EntityID = ""
 		}
 	}
-	if rec.FailureType == "" {
-		return rec, time.Time{}, fmt.Errorf("dead letter failure type is required")
+	if err := runtimefailures.ValidateEnvelope(rec.Failure); err != nil {
+		return rec, time.Time{}, fmt.Errorf("dead letter failure is invalid: %w", err)
 	}
 	if len(rec.OriginalPayload) == 0 {
 		rec.OriginalPayload = json.RawMessage(`{}`)
 	}
 	if !json.Valid(rec.OriginalPayload) {
 		return rec, time.Time{}, fmt.Errorf("dead letter original payload must be valid json")
-	}
-	if len(rec.TargetContext) == 0 {
-		rec.TargetContext = json.RawMessage(`{}`)
-	}
-	if !json.Valid(rec.TargetContext) {
-		return rec, time.Time{}, fmt.Errorf("dead letter target context must be valid json")
 	}
 	if rec.RetryCount < 0 {
 		rec.RetryCount = 0
@@ -145,4 +131,12 @@ func normalizeSQLiteDeadLetterRecord(s *SQLiteRuntimeStore, rec runtimedeadlette
 		createdAt = parsed.UTC()
 	}
 	return rec, createdAt, nil
+}
+
+func mustFailureJSON(envelope runtimefailures.Envelope) string {
+	raw, err := runtimefailures.MarshalEnvelope(envelope)
+	if err != nil {
+		return "null"
+	}
+	return string(raw)
 }

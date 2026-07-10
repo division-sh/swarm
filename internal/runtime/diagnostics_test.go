@@ -12,6 +12,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -129,17 +130,18 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 
 	mock.ExpectExec(`INSERT INTO events`).
 		WithArgs(runtimeLogPayloadArg{
-			level:      "warn",
-			message:    "Tool execution was denied for save_entity_field",
-			component:  "tool-executor",
-			action:     "tool_execution_denied",
-			eventID:    "evt-1",
-			eventType:  "validation/requested",
-			agentID:    "agent-1",
-			entityID:   "entity-1",
-			sessionID:  "session-1",
-			errorText:  "runtime_error code=cross_flow_write_forbidden",
-			durationUS: 1200,
+			level:        "warn",
+			message:      "Tool execution was denied for save_entity_field",
+			component:    "tool-executor",
+			action:       "tool_execution_denied",
+			eventID:      "evt-1",
+			eventType:    "validation/requested",
+			agentID:      "agent-1",
+			entityID:     "entity-1",
+			sessionID:    "session-1",
+			failureCode:  "cross_flow_write_forbidden",
+			failureClass: runtimefailures.ClassAuthorizationDenied,
+			durationUS:   1200,
 			detail: map[string]any{
 				"tool_name":     "save_entity_field",
 				"denial_layer":  "executor",
@@ -151,6 +153,13 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	logger := newTestRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx := runtimebus.WithEmittedEventsRecorder(context.Background(), recorder)
+	failure := runtimefailures.Normalize(runtimefailures.New(
+		runtimefailures.ClassAuthorizationDenied,
+		"cross_flow_write_forbidden",
+		"tool-executor",
+		"tool_execution_denied",
+		map[string]any{"action": "write_entity_field"},
+	), "tool-executor", "tool_execution_denied")
 
 	if err := logger.Log(ctx, RuntimeLogEntry{
 		Level:      "warn",
@@ -162,7 +171,7 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 		AgentID:    "agent-1",
 		EntityID:   "entity-1",
 		SessionID:  "session-1",
-		Error:      "runtime_error code=cross_flow_write_forbidden",
+		Failure:    &failure,
 		DurationUS: 1200,
 		Detail: map[string]any{
 			"tool_name":     "save_entity_field",
@@ -203,8 +212,16 @@ func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	if details["denial_layer"] != "executor" {
 		t.Fatalf("details.denial_layer = %#v", details["denial_layer"])
 	}
-	if details["error"] != "runtime_error code=cross_flow_write_forbidden" {
-		t.Fatalf("details.error = %#v", details["error"])
+	if _, ok := details["error"]; ok {
+		t.Fatalf("details.error survives canonicalization: %#v", details["error"])
+	}
+	failureMap, ok := details["failure"].(map[string]any)
+	if !ok || failureMap["class"] != string(runtimefailures.ClassAuthorizationDenied) {
+		t.Fatalf("details.failure = %#v", details["failure"])
+	}
+	detail, ok := failureMap["detail"].(map[string]any)
+	if !ok || detail["code"] != "cross_flow_write_forbidden" {
+		t.Fatalf("details.failure.detail = %#v", failureMap["detail"])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)
@@ -289,17 +306,18 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 
 	mock.ExpectExec(`INSERT INTO events`).
 		WithArgs(runtimeLogPayloadArg{
-			level:      "warn",
-			message:    "Tool execution was denied for save_entity_field",
-			component:  "tool-executor",
-			action:     "tool_execution_denied",
-			eventID:    "evt-1",
-			eventType:  "validation/requested",
-			agentID:    "agent-1",
-			entityID:   "entity-1",
-			sessionID:  "session-1",
-			errorText:  "runtime_error code=cross_flow_write_forbidden",
-			durationUS: 1200,
+			level:        "warn",
+			message:      "Tool execution was denied for save_entity_field",
+			component:    "tool-executor",
+			action:       "tool_execution_denied",
+			eventID:      "evt-1",
+			eventType:    "validation/requested",
+			agentID:      "agent-1",
+			entityID:     "entity-1",
+			sessionID:    "session-1",
+			failureCode:  "cross_flow_write_forbidden",
+			failureClass: runtimefailures.ClassAuthorizationDenied,
+			durationUS:   1200,
 			detail: map[string]any{
 				"tool_name":     "save_entity_field",
 				"denial_layer":  "executor",
@@ -309,6 +327,13 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	logger := newTestRuntimeLogger(db, runtimeLogCapabilityStub{enabled: true})
+	failure := runtimefailures.Normalize(runtimefailures.New(
+		runtimefailures.ClassAuthorizationDenied,
+		"cross_flow_write_forbidden",
+		"tool-executor",
+		"tool_execution_denied",
+		map[string]any{"action": "write_entity_field"},
+	), "tool-executor", "tool_execution_denied")
 	if err := logger.Log(context.Background(), RuntimeLogEntry{
 		Level:      "warn",
 		Message:    "Tool execution was denied for save_entity_field",
@@ -319,7 +344,7 @@ func TestRuntimeLogger_Log_PersistsRuntimeLogPayloadViaCapabilityOwner(t *testin
 		AgentID:    "agent-1",
 		EntityID:   "entity-1",
 		SessionID:  "session-1",
-		Error:      "runtime_error code=cross_flow_write_forbidden",
+		Failure:    &failure,
 		DurationUS: 1200,
 		Detail: map[string]any{
 			"tool_name":     "save_entity_field",
@@ -539,6 +564,17 @@ func TestDecodeCanonicalRuntimeLogPayload_FailsClosedOnMissingMessageField(t *te
 	}`))
 	if err == nil || !strings.Contains(err.Error(), "runtime log message is required") {
 		t.Fatalf("DecodeCanonicalRuntimeLogPayload() error = %v, want missing message failure", err)
+	}
+}
+
+func TestDecodeCanonicalRuntimeLogPayloadRejectsRetiredErrorCarrier(t *testing.T) {
+	_, err := DecodeCanonicalRuntimeLogPayload([]byte(`{
+		"log_level":"error",
+		"message":"legacy",
+		"details":{"component":"runtime","action":"legacy_failure","error":"raw prose"}
+	}`))
+	if err == nil || !strings.Contains(err.Error(), "details.error is retired") {
+		t.Fatalf("DecodeCanonicalRuntimeLogPayload() error = %v, want retired error carrier failure", err)
 	}
 }
 
@@ -1050,18 +1086,19 @@ func ensureRuntimeLogRunRowForTest(ctx context.Context, db storerunlifecycle.DBT
 }
 
 type runtimeLogPayloadArg struct {
-	level      string
-	message    string
-	component  string
-	action     string
-	eventID    string
-	eventType  string
-	agentID    string
-	entityID   string
-	sessionID  string
-	errorText  string
-	durationUS int
-	detail     map[string]any
+	level        string
+	message      string
+	component    string
+	action       string
+	eventID      string
+	eventType    string
+	agentID      string
+	entityID     string
+	sessionID    string
+	failureCode  string
+	failureClass runtimefailures.Class
+	durationUS   int
+	detail       map[string]any
 }
 
 func (m runtimeLogPayloadArg) Match(v driver.Value) bool {
@@ -1107,7 +1144,20 @@ func (m runtimeLogPayloadArg) Match(v driver.Value) bool {
 	if strings.TrimSpace(asString(details["session_id"])) != m.sessionID {
 		return false
 	}
-	if strings.TrimSpace(asString(details["error"])) != m.errorText {
+	if m.failureCode != "" {
+		failure, ok := details["failure"].(map[string]any)
+		class := m.failureClass
+		if class == "" {
+			class = runtimefailures.ClassInternalFailure
+		}
+		if !ok || strings.TrimSpace(asString(failure["class"])) != string(class) {
+			return false
+		}
+		detail, ok := failure["detail"].(map[string]any)
+		if !ok || strings.TrimSpace(asString(detail["code"])) != m.failureCode {
+			return false
+		}
+	} else if _, ok := details["failure"]; ok {
 		return false
 	}
 	if int(asFloat(details["duration_us"])) != m.durationUS {

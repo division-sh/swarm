@@ -1,12 +1,11 @@
 package toolresultpolicy
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
-	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const (
@@ -44,29 +43,25 @@ func IsRoleScopedTypedReadInContext(set toolcapabilities.Set, name string) bool 
 }
 
 func NewTypedReadResultTooLargeError(component, operation, toolName string, bytes int) error {
-	return runtimerterr.NewRuntimeError(
+	return failures.NewDetail(
 		TypedReadResultTooLargeCode,
 		component,
 		operation,
-		false,
-		"role-scoped typed read %s produced %d bytes, exceeding the complete delivery limit of %d bytes",
-		strings.TrimSpace(toolName),
-		bytes,
-		MaxCompleteTypedReadResultBytes,
+		map[string]any{
+			"limit_kind": "typed_read_result_bytes",
+			"tool":       strings.TrimSpace(toolName),
+			"actual":     bytes,
+			"limit":      MaxCompleteTypedReadResultBytes,
+		},
 	)
 }
 
 func NewTypedReadResultMarshalError(component, operation, toolName string, cause error) error {
-	if cause == nil {
-		cause = fmt.Errorf("marshal typed read result")
-	}
-	return runtimerterr.WrapRuntimeError(
+	return failures.WrapDetail(
 		TypedReadResultMarshalErrorCode,
 		component,
 		operation,
-		false,
+		map[string]any{"tool": strings.TrimSpace(toolName)},
 		cause,
-		"role-scoped typed read %s result cannot be serialized completely",
-		strings.TrimSpace(toolName),
 	)
 }

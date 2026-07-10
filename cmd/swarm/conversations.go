@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
 
@@ -68,17 +69,17 @@ type conversationDetail struct {
 }
 
 type conversationTurn struct {
-	TurnIndex        int              `json:"turn_index"`
-	TurnID           string           `json:"turn_id"`
-	TriggerEventID   string           `json:"trigger_event_id"`
-	TriggerEventType string           `json:"trigger_event_type"`
-	RequestPayload   map[string]any   `json:"request_payload,omitempty"`
-	ResponsePayload  map[string]any   `json:"response_payload,omitempty"`
-	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`
-	TurnBlocks       []map[string]any `json:"turn_blocks,omitempty"`
-	ParseOK          *bool            `json:"parse_ok"`
-	LatencyMS        *int             `json:"latency_ms"`
-	Error            string           `json:"error,omitempty"`
+	TurnIndex        int                       `json:"turn_index"`
+	TurnID           string                    `json:"turn_id"`
+	TriggerEventID   string                    `json:"trigger_event_id"`
+	TriggerEventType string                    `json:"trigger_event_type"`
+	RequestPayload   map[string]any            `json:"request_payload,omitempty"`
+	ResponsePayload  map[string]any            `json:"response_payload,omitempty"`
+	ToolCalls        []map[string]any          `json:"tool_calls,omitempty"`
+	TurnBlocks       []map[string]any          `json:"turn_blocks,omitempty"`
+	ParseOK          *bool                     `json:"parse_ok"`
+	LatencyMS        *int                      `json:"latency_ms"`
+	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 type conversationTurnDetail struct {
@@ -96,7 +97,7 @@ type conversationDeepTurn struct {
 	DurationMS                  *int                          `json:"duration_ms"`
 	Outcome                     string                        `json:"outcome,omitempty"`
 	ParseOK                     *bool                         `json:"parse_ok"`
-	Error                       string                        `json:"error,omitempty"`
+	Failure                     *runtimefailures.Envelope     `json:"failure,omitempty"`
 	RetryCount                  int                           `json:"retry_count,omitempty"`
 	DispatchMetadata            *conversationDispatchMetadata `json:"dispatch_metadata"`
 	AdvertisedTools             []string                      `json:"advertised_tools"`
@@ -664,7 +665,7 @@ func writeConversationDetailResult(out io.Writer, result conversationDetail) {
 			turn.TriggerEventType,
 			fmt.Sprintf("%t", *turn.ParseOK),
 			fmt.Sprintf("%d", *turn.LatencyMS),
-			conversationDash(turn.Error),
+			conversationFailureSummary(turn.Failure),
 		})
 	}
 	writeCLITable(out, cliTable{
@@ -675,7 +676,7 @@ func writeConversationDetailResult(out io.Writer, result conversationDetail) {
 			{Header: "EVENT_TYPE"},
 			{Header: "PARSE_OK"},
 			{Header: "LATENCY_MS"},
-			{Header: "ERROR", Truncatable: true},
+			{Header: "FAILURE", Truncatable: true},
 		},
 		Rows:         rows,
 		EmptyMessage: "No turns recorded.",
@@ -699,7 +700,7 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 		cliDetailField{Key: "duration_ms", Value: fmt.Sprintf("%d", *turn.DurationMS)},
 		cliDetailField{Key: "parse_ok", Value: fmt.Sprintf("%t", *turn.ParseOK)},
 		cliDetailField{Key: "outcome", Value: conversationDash(turn.Outcome)},
-		cliDetailField{Key: "error", Value: conversationDash(turn.Error)},
+		cliDetailField{Key: "failure", Value: conversationFailureSummary(turn.Failure)},
 	)
 	dispatch := turn.DispatchMetadata
 	writeCLIFieldLine(out,
@@ -730,6 +731,13 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 			)
 		}
 	}
+}
+
+func conversationFailureSummary(failure *runtimefailures.Envelope) string {
+	if failure == nil {
+		return "-"
+	}
+	return string(failure.Class) + "/" + strings.TrimSpace(failure.Detail.Code)
 }
 
 func conversationListAPIErrorClassifier() cliAPIErrorClassifier {

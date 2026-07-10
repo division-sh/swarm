@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -62,21 +63,24 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 			INSERT INTO event_deliveries (
 				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-				retry_count, reason_code, last_error, created_at, started_at, delivered_at
+				retry_count, reason_code, failure, created_at, started_at, delivered_at
 			)
 			VALUES
-				(?, ?, ?, 'agent', 'agent-failed', 'failed', 1, 'handler_error', 'agent boom', ?, ?, NULL),
-				(?, ?, ?, 'node', 'node-dead', 'dead_letter', 2, 'retry_exhausted', 'node boom', ?, ?, ?)
-	`, agentFailedDeliveryID, newer, newerMiddleEvent, now.Add(4*time.Second), now.Add(5*time.Second), nodeDeadDeliveryID, newer, newerLatestEvent, now.Add(6*time.Second), now.Add(7*time.Second), now.Add(8*time.Second)); err != nil {
+				(?, ?, ?, 'agent', 'agent-failed', 'failed', 1, 'handler_error', ?, ?, ?, NULL),
+				(?, ?, ?, 'node', 'node-dead', 'dead_letter', 2, 'retry_exhausted', ?, ?, ?, ?)
+	`, agentFailedDeliveryID, newer, newerMiddleEvent,
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "agent_failure", nil)), now.Add(4*time.Second), now.Add(5*time.Second),
+		nodeDeadDeliveryID, newer, newerLatestEvent,
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "node_failure", nil)), now.Add(6*time.Second), now.Add(7*time.Second), now.Add(8*time.Second)); err != nil {
 		t.Fatalf("seed sqlite failed deliveries: %v", err)
 	}
 	successDeliveryID := uuid.NewString()
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 			INSERT INTO event_deliveries (
 				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-				retry_count, reason_code, last_error, created_at, started_at, delivered_at
+				retry_count, reason_code, created_at, started_at, delivered_at
 			)
-			VALUES (?, ?, ?, 'node', 'node-success', 'delivered', 0, 'node_processed', '', ?, ?, ?)
+			VALUES (?, ?, ?, 'node', 'node-success', 'delivered', 0, 'node_processed', ?, ?, ?)
 		`, successDeliveryID, newer, newerMiddleEvent, now.Add(5*time.Second), now.Add(6*time.Second), now.Add(7*time.Second)); err != nil {
 		t.Fatalf("seed sqlite successful delivery: %v", err)
 	}
@@ -84,10 +88,10 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if _, err := sqliteStore.DB.ExecContext(ctx, `
 			INSERT INTO dead_letters (
 				dead_letter_id, original_event_id, original_event, original_payload, flow_instance,
-				failure_type, error_message, retry_count, chain_depth, handler_node, created_at
+				failure, retry_count, chain_depth, handler_node, created_at
 			)
-			VALUES (?, ?, 'scan.finished', '{}', 'flow-1', 'retry_exhausted', 'node boom', 2, 0, 'node-dead', ?)
-		`, deadLetterID, newerLatestEvent, now.Add(9*time.Second)); err != nil {
+			VALUES (?, ?, 'scan.finished', '{}', 'flow-1', ?, 2, 0, 'node-dead', ?)
+		`, deadLetterID, newerLatestEvent, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "node_failure", nil)), now.Add(9*time.Second)); err != nil {
 		t.Fatalf("seed sqlite dead letter: %v", err)
 	}
 
@@ -157,7 +161,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if got := report.FailedDeliveries[0]; got.DeliveryID != nodeDeadDeliveryID || got.SubscriberType != "node" || got.RetryCount != 2 || got.RetryEligible || !got.Terminal || len(got.DeadLetters) != 1 {
 		t.Fatalf("node failed delivery evidence = %#v", got)
 	}
-	if got := report.FailedDeliveries[1]; got.DeliveryID != agentFailedDeliveryID || got.SubscriberType != "agent" || got.RetryCount != 1 || !got.RetryEligible || got.Terminal || got.LastError != "agent boom" {
+	if got := report.FailedDeliveries[1]; got.DeliveryID != agentFailedDeliveryID || got.SubscriberType != "agent" || got.RetryCount != 1 || !got.RetryEligible || got.Terminal || got.Failure == nil || got.Failure.Detail.Code != "agent_failure" {
 		t.Fatalf("agent failed delivery evidence = %#v", got)
 	}
 	traceRows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, newer, RunDebugTraceQueryOptions{
@@ -172,7 +176,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	if len(traceRows) != 1 {
 		t.Fatalf("sqlite failed trace rows = %#v, want one failed delivery row", traceRows)
 	}
-	if got := traceRows[0]; got.DeliveryID != agentFailedDeliveryID || got.DeliveryLastError != "agent boom" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
+	if got := traceRows[0]; got.DeliveryID != agentFailedDeliveryID || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "agent_failure" || got.DeliveryRetryCount != 1 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
 		t.Fatalf("sqlite trace delivery failure evidence = %#v", got)
 	}
 	if len(report.Events) != 2 || report.Events[0].EventID != newerLatestEvent || report.Events[1].EventID != newerMiddleEvent {
@@ -229,10 +233,10 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		readyRunID, readyEventID, now.Add(-20*time.Second)); err != nil {
 		t.Fatalf("seed sqlite events: %v", err)
 	}
-	if err := sqliteStore.UpsertPipelineReceipt(ctx, activeEventID, "processed", ""); err != nil {
+	if err := sqliteStore.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
 	}
-	if err := sqliteStore.UpsertPipelineReceipt(ctx, readyEventID, "processed", ""); err != nil {
+	if err := sqliteStore.UpsertPipelineReceipt(ctx, readyEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
 	if _, err := sqliteStore.DB.ExecContext(ctx, `

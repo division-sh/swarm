@@ -25,6 +25,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -761,6 +762,12 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 			_ = json.Unmarshal(evt.Payload(), &payload)
 			details, _ := payload["details"].(map[string]any)
 			detailJSON, _ := json.Marshal(details)
+			var failure *runtimefailures.Envelope
+			if raw, err := json.Marshal(details["failure"]); err == nil && string(raw) != "null" {
+				if decoded, err := runtimefailures.UnmarshalEnvelope(raw); err == nil {
+					failure = &decoded
+				}
+			}
 			report.RuntimeLogs = append(report.RuntimeLogs, store.RunDebugRuntimeLog{
 				EventID:   strings.TrimSpace(evt.ID()),
 				Level:     strings.TrimSpace(asString(payload["log_level"])),
@@ -770,7 +777,7 @@ func (s *stubBuilderRunStore) LoadRunDebugReport(_ context.Context, runID string
 				EventType: strings.TrimSpace(asString(details["event_type"])),
 				AgentID:   strings.TrimSpace(asString(details["agent_id"])),
 				EntityID:  strings.TrimSpace(asString(details["entity_id"])),
-				Error:     strings.TrimSpace(asString(details["error"])),
+				Failure:   failure,
 				Detail:    append(json.RawMessage(nil), detailJSON...),
 				CreatedAt: evt.CreatedAt().UTC(),
 			})
@@ -2393,22 +2400,23 @@ func TestSQLAgentReader_ListGenericAgents_AlignsBacklogWithCanonicalPendingSelec
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, delivered_at, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, delivered_at, created_at
 		) VALUES
-			($1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, '', NULL, now() - interval '7 minutes'),
-			($1::uuid, $3::uuid, 'agent', 'agent-1', 'failed', 1, 'retryable-failure', now() - interval '2 minutes', now() - interval '5 minutes'),
-			($1::uuid, $4::uuid, 'agent', 'agent-1', 'in_progress', 0, '', NULL, now() - interval '6 minutes'),
-			($1::uuid, $5::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'terminal-dead-letter', now() - interval '1 minute', now() - interval '8 minutes')
-	`, runID, pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID); err != nil {
+			($1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, NULL, NULL, now() - interval '7 minutes'),
+			($1::uuid, $3::uuid, 'agent', 'agent-1', 'failed', 1, $6::jsonb, now() - interval '2 minutes', now() - interval '5 minutes'),
+			($1::uuid, $4::uuid, 'agent', 'agent-1', 'in_progress', 0, NULL, NULL, now() - interval '6 minutes'),
+			($1::uuid, $5::uuid, 'agent', 'agent-1', 'dead_letter', 2, $7::jsonb, now() - interval '1 minute', now() - interval '8 minutes')
+	`, runID, pendingEventID, failedEventID, inProgressNoReceiptEventID, deadEventID,
+		mustMarshalFailure(t, testFailure("retryable_failure")), mustMarshalFailure(t, testFailure("terminal_dead_letter"))); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, side_effects, processed_at
+			event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at
 		) VALUES
-			($1::uuid, 'agent', 'agent-1', 'dead_letter', '{"manager_status":"error","retry_count":1,"error":"retryable-failure"}'::jsonb, now() - interval '2 minutes'),
-			($2::uuid, 'agent', 'agent-1', 'success', '{"manager_status":"dead_letter","retry_count":2,"error":"terminal-dead-letter"}'::jsonb, now())
-	`, failedEventID, deadEventID); err != nil {
+			($1::uuid, 'agent', 'agent-1', 'dead_letter', '{"manager_status":"error","retry_count":1}'::jsonb, $3::jsonb, now() - interval '2 minutes'),
+			($2::uuid, 'agent', 'agent-1', 'success', '{"manager_status":"dead_letter","retry_count":2}'::jsonb, NULL, now())
+	`, failedEventID, deadEventID, mustMarshalFailure(t, testFailure("retryable_failure"))); err != nil {
 		t.Fatalf("seed conflicting receipts: %v", err)
 	}
 
@@ -2496,9 +2504,9 @@ func TestSQLAgentReader_ListGenericAgents_UsesFullPendingDeliveryFactHorizon(t *
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, delivered_at, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, delivered_at, created_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, '', NULL, now() - interval '45 days'
+			$1::uuid, $2::uuid, 'agent', 'agent-1', 'pending', 0, NULL, now() - interval '45 days'
 		)
 	`, runID, eventID); err != nil {
 		t.Fatalf("seed delivery: %v", err)

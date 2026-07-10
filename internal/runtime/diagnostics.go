@@ -9,6 +9,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 // RuntimeLogEntry is a structured runtime operation record (spec v2.0.14).
@@ -26,7 +27,7 @@ type RuntimeLogEntry struct {
 	Correlation map[string]string
 
 	Detail     any
-	Error      string
+	Failure    *runtimefailures.Envelope
 	StackTrace string
 	DurationUS int
 }
@@ -91,6 +92,11 @@ func (l *RuntimeLogger) Log(ctx context.Context, e RuntimeLogEntry) error {
 		action = "unknown"
 	}
 	e.NormalizeEntityID()
+	if e.Failure != nil {
+		if err := runtimefailures.ValidateEnvelope(*e.Failure); err != nil {
+			return err
+		}
+	}
 	if l.persistence == nil {
 		return nil
 	}
@@ -114,9 +120,10 @@ func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, deta
 	if l == nil {
 		return nil
 	}
-	errText := ""
+	var failure *runtimefailures.Envelope
 	if err != nil {
-		errText = strings.TrimSpace(err.Error())
+		normalized := runtimefailures.Normalize(err, strings.TrimSpace(component), strings.TrimSpace(action))
+		failure = &normalized
 	}
 	return l.Log(ctx, RuntimeLogEntry{
 		Level:     diaglog.LevelWarn,
@@ -124,7 +131,7 @@ func (l *RuntimeLogger) Warn(ctx context.Context, component, action string, deta
 		Component: strings.TrimSpace(component),
 		Action:    strings.TrimSpace(action),
 		Detail:    detail,
-		Error:     errText,
+		Failure:   failure,
 	})
 }
 
@@ -132,9 +139,10 @@ func (l *RuntimeLogger) Error(ctx context.Context, component, action string, det
 	if l == nil {
 		return nil
 	}
-	errText := ""
+	var failure *runtimefailures.Envelope
 	if err != nil {
-		errText = strings.TrimSpace(err.Error())
+		normalized := runtimefailures.Normalize(err, strings.TrimSpace(component), strings.TrimSpace(action))
+		failure = &normalized
 	}
 	return l.Log(ctx, RuntimeLogEntry{
 		Level:     diaglog.LevelError,
@@ -142,7 +150,7 @@ func (l *RuntimeLogger) Error(ctx context.Context, component, action string, det
 		Component: strings.TrimSpace(component),
 		Action:    strings.TrimSpace(action),
 		Detail:    detail,
-		Error:     errText,
+		Failure:   failure,
 	})
 }
 
@@ -274,7 +282,7 @@ func runtimeLogRecorderEntry(payload CanonicalRuntimeLogPayload) diaglog.RunEntr
 		SessionID:   payload.SessionID,
 		Correlation: payload.Correlation,
 		Detail:      payload.Detail,
-		Error:       payload.Error,
+		Failure:     runtimefailures.CloneEnvelope(payload.Failure),
 		StackTrace:  payload.StackTrace,
 		DurationUS:  payload.DurationUS,
 	}
@@ -384,8 +392,8 @@ func runtimeLogPayload(level, component, action string, e RuntimeLogEntry, detai
 	if corr := sanitizeStringMap(e.Correlation); len(corr) > 0 {
 		details["correlation"] = corr
 	}
-	if v := strings.TrimSpace(e.Error); v != "" {
-		details["error"] = v
+	if e.Failure != nil {
+		details["failure"] = *e.Failure
 	}
 	if e.DurationUS > 0 {
 		details["duration_us"] = e.DurationUS

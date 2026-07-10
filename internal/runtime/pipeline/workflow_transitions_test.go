@@ -25,7 +25,7 @@ func TestRecordPipelineTransition_PersistsViaCanonicalCapabilityOwner(t *testing
 		WithArgs(eventID).
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectExec("INSERT INTO event_receipts").
-		WithArgs(eventID, "pipeline:"+pipelineID, "success", "pipeline_transition_applied", "", "", sqlmock.AnyArg(), 0).
+		WithArgs(eventID, "pipeline:"+pipelineID, "success", "pipeline_transition_applied", "", "", sqlmock.AnyArg(), nil, 0).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	pg := &store.PostgresStore{DB: db}
@@ -91,6 +91,7 @@ func canonicalTransitionSchemaRows() *sqlmock.Rows {
 		AddRow("event_receipts", "state_before").
 		AddRow("event_receipts", "state_after").
 		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "failure").
 		AddRow("event_receipts", "duration_ms").
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")
@@ -116,6 +117,7 @@ func mixedTransitionSchemaRows() *sqlmock.Rows {
 		AddRow("event_receipts", "state_before").
 		AddRow("event_receipts", "state_after").
 		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "failure").
 		AddRow("event_receipts", "duration_ms").
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")

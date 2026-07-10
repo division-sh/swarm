@@ -74,18 +74,6 @@ func (e *Executor) logEmitToolOutcome(
 	if v := strings.TrimSpace(actor.EffectiveEntityID()); v != "" {
 		detail["actor_entity_id"] = v
 	}
-	if runtimeErr, ok := AsRuntimeError(execErr); ok {
-		if v := strings.TrimSpace(runtimeErr.Code); v != "" {
-			detail["runtime_error_code"] = v
-		}
-		if v := strings.TrimSpace(runtimeErr.Operation); v != "" {
-			detail["runtime_error_operation"] = v
-		}
-		if v := strings.TrimSpace(runtimeErr.Component); v != "" {
-			detail["runtime_error_component"] = v
-		}
-		detail["retryable"] = runtimeErr.Retryable
-	}
 	logger.LogRuntime(toolExecutorRuntimeLogContext(ctx), runtimepipeline.RuntimeLogEntry{
 		Level:     diaglog.NormalizeLevel(level),
 		Message:   emitToolOutcomeMessage(toolName, outcome, execErr),
@@ -94,7 +82,7 @@ func (e *Executor) logEmitToolOutcome(
 		AgentID:   strings.TrimSpace(actor.ID),
 		EntityID:  strings.TrimSpace(actor.EffectiveEntityID()),
 		Detail:    detail,
-		Error:     toolExecErrorText(execErr),
+		Failure:   toolExecFailure(execErr),
 	})
 }
 

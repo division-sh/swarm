@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -2149,6 +2150,11 @@ func seedSelectedExecutionSourceRun(t *testing.T, db *sql.DB, sourceRunID, entit
 func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "source_dead_letter", "run-fork-test", "seed", nil), "run-fork-test", "seed")
+	failureRaw, err := json.Marshal(failure)
+	if err != nil {
+		t.Fatalf("marshal source dead-letter failure: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance, outcome, reason_code, side_effects, processed_at
@@ -2159,10 +2165,10 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
-			original_event_id, original_event, entity_id, flow_instance, failure_type, error_message, handler_node, created_at
+			original_event_id, original_event, entity_id, flow_instance, failure, handler_node, created_at
 		)
-		VALUES ($1::uuid, 'item.received', $2::uuid, 'flow-a/1', 'handler_error', 'source dead letter must not suppress fork', 'old-source-node', $3)
-	`, sourceEventID, entityID, at); err != nil {
+		VALUES ($1::uuid, 'item.received', $2::uuid, 'flow-a/1', $3::jsonb, 'old-source-node', $4)
+	`, sourceEventID, entityID, string(failureRaw), at); err != nil {
 		t.Fatalf("seed source dead letter: %v", err)
 	}
 }

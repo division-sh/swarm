@@ -11,6 +11,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -189,8 +190,9 @@ func TestExecutorPersistOversizedToolResultRelay_HostWithoutBackingMountFailsClo
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "market-research-agent"})
 
 	_, err := exec.PersistOversizedToolResultRelay(ctx, "sql_execute", []byte(`{"blob":"hello"}`))
-	if err == nil || !strings.Contains(err.Error(), "host backing path for /workspace is unavailable") {
-		t.Fatalf("PersistOversizedToolResultRelay error = %v, want host backing path fail-closed diagnostic", err)
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Failure.Detail.Code != "tool_result_relay_path_unavailable" {
+		t.Fatalf("PersistOversizedToolResultRelay failure = %#v, want typed host backing path failure", failure)
 	}
 }
 
