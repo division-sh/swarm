@@ -22,13 +22,17 @@ func loadConfiguredProviderTriggerPacks(repo string, cfgResult runtimeConfigLoad
 	if cfgResult.Config == nil {
 		return providerTriggerPackLoad{}, fmt.Errorf("runtime config is required")
 	}
+	configuredPlatformDirs := cfgResult.Config.ProviderTriggers.Packs.PlatformDirs
+	if len(configuredPlatformDirs) == 0 {
+		return providerTriggerPackLoad{}, fmt.Errorf("provider_triggers.packs.platform_dirs is required and must declare the complete first-party platform pack inventory (%s); add this key to elevated operator configuration", requiredProviderTriggerPlatformPackIDs())
+	}
 	runningVersion, err := platform.PlatformVersion()
 	if err != nil {
 		return providerTriggerPackLoad{}, err
 	}
-	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.platform_dirs"), cfgResult.Config.ProviderTriggers.Packs.PlatformDirs)
+	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.platform_dirs"), configuredPlatformDirs)
 	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.external_dirs"), cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
-	registry, loaded, err := providertriggers.NewRegistryFromPackDirs(runningVersion, platformDirs, externalDirs)
+	registry, loaded, err := providertriggers.NewRegistryFromRequiredPlatformPackDirs(runningVersion, platformDirs, externalDirs)
 	if err != nil {
 		return providerTriggerPackLoad{}, err
 	}
@@ -38,6 +42,15 @@ func loadConfiguredProviderTriggerPacks(repo string, cfgResult runtimeConfigLoad
 		PlatformDirs: platformDirs,
 		ExternalDirs: externalDirs,
 	}, nil
+}
+
+func requiredProviderTriggerPlatformPackIDs() string {
+	identities := providertriggers.RequiredPlatformPackIdentities()
+	ids := make([]string, 0, len(identities))
+	for _, identity := range identities {
+		ids = append(ids, strings.TrimSpace(identity.ID))
+	}
+	return strings.Join(ids, ", ")
 }
 
 func providerTriggerPackConfigOrigin(cfgResult runtimeConfigLoadResult, key string) string {

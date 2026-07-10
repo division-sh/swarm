@@ -1,9 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -47,4 +49,16 @@ func emptyProviderTriggerRegistry(t *testing.T) *providertriggers.Registry {
 		t.Fatalf("create empty provider trigger registry: %v", err)
 	}
 	return registry
+}
+
+func withTestProviderTriggerPlatformInventory(t *testing.T, configText string) string {
+	t.Helper()
+	if strings.Contains(configText, "\nprovider_triggers:") || strings.HasPrefix(configText, "provider_triggers:") {
+		t.Fatalf("test runtime config already declares provider_triggers; compose the intended inventory explicitly")
+	}
+	lines := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
+	for _, dir := range testProviderTriggerPackDirs(t) {
+		lines = append(lines, fmt.Sprintf("      - %q", dir))
+	}
+	return strings.TrimRight(configText, "\n") + "\n" + strings.Join(lines, "\n") + "\n"
 }

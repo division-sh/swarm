@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
@@ -93,6 +94,41 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 	}
 }
 
+func TestPlatformSpecRequiredProviderTriggerInventoryMatchesRuntimeOwner(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(repoRoot(), "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec struct {
+		ToolModel struct {
+			ProviderTriggerAdapters struct {
+				PackEnvelopeSourceAuthority struct {
+					RequiredPlatformInventory struct {
+						Owner      string                                  `yaml:"owner"`
+						Identities []providertriggers.PlatformPackIdentity `yaml:"identities"`
+					} `yaml:"required_platform_inventory"`
+				} `yaml:"pack_envelope_source_authority"`
+			} `yaml:"provider_trigger_adapters"`
+		} `yaml:"tool_model"`
+	}
+	if err := yaml.Unmarshal(body, &spec); err != nil {
+		t.Fatalf("parse platform spec provider trigger inventory: %v", err)
+	}
+	declared := spec.ToolModel.ProviderTriggerAdapters.PackEnvelopeSourceAuthority.RequiredPlatformInventory
+	if declared.Owner != "internal/providertriggers.RequiredPlatformPackIdentities" {
+		t.Fatalf("required platform inventory owner = %q", declared.Owner)
+	}
+	want := providertriggers.RequiredPlatformPackIdentities()
+	if len(declared.Identities) != len(want) {
+		t.Fatalf("spec required platform identities = %+v, want %+v", declared.Identities, want)
+	}
+	for i := range want {
+		if declared.Identities[i] != want[i] {
+			t.Fatalf("spec required platform identity[%d] = %+v, want %+v", i, declared.Identities[i], want[i])
+		}
+	}
+}
+
 func TestProviderTriggerPlatformDirsAreElevated(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	repo := t.TempDir()
@@ -119,12 +155,20 @@ func TestProviderTriggerPackDirsResolveFromEffectiveDeclaringLayers(t *testing.T
 	repo := t.TempDir()
 	projectExternal := filepath.Join(repo, "project-external")
 	copyProviderTriggerPackFixture(t, "stripe", projectExternal, true)
+	rewriteProviderTriggerPackFixtureAsExternalAcme(t, projectExternal)
 	localDir := filepath.Join(repo, ".swarm")
 	if err := os.MkdirAll(localDir, 0o755); err != nil {
 		t.Fatalf("mkdir local config dir: %v", err)
 	}
-	localPlatform := filepath.Join(localDir, "platform-github")
-	copyProviderTriggerPackFixture(t, "github", localPlatform, false)
+	platformConfig := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
+	wantPlatformDirs := make([]string, 0, len(providertriggers.RequiredPlatformPackIdentities()))
+	for _, identity := range providertriggers.RequiredPlatformPackIdentities() {
+		relative := "platform-" + identity.Provider
+		target := filepath.Join(localDir, relative)
+		copyProviderTriggerPackFixture(t, identity.Provider, target, false)
+		platformConfig = append(platformConfig, "      - ./"+relative)
+		wantPlatformDirs = append(wantPlatformDirs, target)
+	}
 
 	writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), strings.Join([]string{
 		"provider_triggers:",
@@ -132,12 +176,7 @@ func TestProviderTriggerPackDirsResolveFromEffectiveDeclaringLayers(t *testing.T
 		"    external_dirs:",
 		"      - ./project-external",
 	}, "\n")+"\n")
-	writeRuntimeConfigText(t, filepath.Join(localDir, "swarm.yaml"), strings.Join([]string{
-		"provider_triggers:",
-		"  packs:",
-		"    platform_dirs:",
-		"      - ./platform-github",
-	}, "\n")+"\n")
+	writeRuntimeConfigText(t, filepath.Join(localDir, "swarm.yaml"), strings.Join(platformConfig, "\n")+"\n")
 	explicitDir := t.TempDir()
 	explicitPath := filepath.Join(explicitDir, "explicit.yaml")
 	writeRuntimeConfigText(t, explicitPath, "runtime:\n  recovery_on_startup: false\n")
@@ -150,8 +189,8 @@ func TestProviderTriggerPackDirsResolveFromEffectiveDeclaringLayers(t *testing.T
 	if err != nil {
 		t.Fatalf("load configured provider trigger packs: %v", err)
 	}
-	if len(loaded.PlatformDirs) != 1 || loaded.PlatformDirs[0] != localPlatform {
-		t.Fatalf("platform dirs = %v, want declaring local layer path %s", loaded.PlatformDirs, localPlatform)
+	if strings.Join(loaded.PlatformDirs, "\n") != strings.Join(wantPlatformDirs, "\n") {
+		t.Fatalf("platform dirs = %v, want declaring local layer paths %v", loaded.PlatformDirs, wantPlatformDirs)
 	}
 	if len(loaded.ExternalDirs) != 1 || loaded.ExternalDirs[0] != projectExternal {
 		t.Fatalf("external dirs = %v, want declaring project layer path %s", loaded.ExternalDirs, projectExternal)
@@ -161,6 +200,33 @@ func TestProviderTriggerPackDirsResolveFromEffectiveDeclaringLayers(t *testing.T
 	}
 	if got := cfgResult.KeyOrigins["provider_triggers.packs.external_dirs"]; got.Path != filepath.Join(repo, "swarm.yaml") || got.Layer != unifiedLayerProject {
 		t.Fatalf("external key origin = %+v", got)
+	}
+}
+
+func rewriteProviderTriggerPackFixtureAsExternalAcme(t *testing.T, dir string) {
+	t.Helper()
+	manifestPath := filepath.Join(dir, "trigger.yaml")
+	manifestBody, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("read external trigger fixture: %v", err)
+	}
+	manifestBody = []byte(strings.ReplaceAll(string(manifestBody), "stripe", "acme"))
+	if err := os.WriteFile(manifestPath, manifestBody, 0o644); err != nil {
+		t.Fatalf("write external trigger fixture: %v", err)
+	}
+
+	envelopePath := filepath.Join(dir, "pack.yaml")
+	envelopeBody, err := os.ReadFile(envelopePath)
+	if err != nil {
+		t.Fatalf("read external pack fixture: %v", err)
+	}
+	envelopeBody = []byte(strings.ReplaceAll(string(envelopeBody), "stripe", "acme"))
+	_, stamped, err := providertriggers.StampPackEnvelope(envelopeBody, manifestBody)
+	if err != nil {
+		t.Fatalf("stamp external Acme fixture: %v", err)
+	}
+	if err := os.WriteFile(envelopePath, stamped, 0o644); err != nil {
+		t.Fatalf("write external pack fixture: %v", err)
 	}
 }
 

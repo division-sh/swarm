@@ -14853,6 +14853,7 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 		"    rotate_on_parse_failures: 3",
 	}, "\n") + "\n"
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
+	configText = withTestProviderTriggerPlatformInventory(t, configText)
 	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write serve runtime config: %v", err)
 	}
@@ -14885,7 +14886,8 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
 	return path

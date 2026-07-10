@@ -837,6 +837,92 @@ func TestRunServeRuntimeRejectsDeclaredProviderTriggerPackBeforeStoreSelection(t
 	}
 }
 
+func TestRunServeRuntimeRejectsMissingProviderTriggerPlatformInventoryBeforeStoreSelection(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, providerTriggerBootAdmissionConfig(t, nil, false))
+
+	code, output := runProviderTriggerBootAdmissionProbe(t, configPath)
+	if code != 1 {
+		t.Fatalf("runServeRuntime code = %d, want config load failure\noutput:\n%s", code, output)
+	}
+	for _, want := range []string{"config_load", "provider_triggers.packs.platform_dirs is required", "provider.github", "provider.typeform", "elevated operator configuration"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("missing-inventory failure lacks %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "not-a-store") || strings.Contains(output, "db_connection") {
+		t.Fatalf("serve reached store selection instead of rejecting missing platform inventory:\n%s", output)
+	}
+}
+
+func TestRunServeRuntimeRejectsOmittedProviderTriggerIdentityBeforeStoreSelection(t *testing.T) {
+	dirs := testProviderTriggerPackDirs(t)
+	partial := make([]string, 0, len(dirs)-1)
+	for _, dir := range dirs {
+		if filepath.Base(dir) != "stripe" {
+			partial = append(partial, dir)
+		}
+	}
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, providerTriggerBootAdmissionConfig(t, partial, true))
+
+	code, output := runProviderTriggerBootAdmissionProbe(t, configPath)
+	if code != 1 {
+		t.Fatalf("runServeRuntime code = %d, want config load failure\noutput:\n%s", code, output)
+	}
+	for _, want := range []string{"config_load", "required provider trigger platform inventory mismatch", "missing identities", `"provider.stripe" provider="stripe"`, "provider_triggers.packs.platform_dirs"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("partial-inventory failure lacks %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "not-a-store") || strings.Contains(output, "db_connection") {
+		t.Fatalf("serve reached store selection instead of rejecting omitted platform identity:\n%s", output)
+	}
+}
+
+func providerTriggerBootAdmissionConfig(t *testing.T, platformDirs []string, declarePlatformDirs bool) string {
+	t.Helper()
+	lines := []string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  data_source: " + t.TempDir(),
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}
+	if declarePlatformDirs {
+		lines = append(lines, "provider_triggers:", "  packs:", "    platform_dirs:")
+		for _, dir := range platformDirs {
+			lines = append(lines, fmt.Sprintf("      - %q", dir))
+		}
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func runProviderTriggerBootAdmissionProbe(t *testing.T, configPath string) (int, string) {
+	t.Helper()
+	var out bytes.Buffer
+	code := runServeRuntime(context.Background(), repoRoot(), serveOptions{
+		ConfigPath:         configPath,
+		ContractsPath:      doctorAgentContractsPath,
+		DataSource:         t.TempDir(),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "not-a-store",
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: false,
+		Verbose:            true,
+		Output:             &out,
+		Dev:                true,
+	})
+	return code, out.String()
+}
+
 func TestPlatformSpecLocalClaudeCLIPreflightAdmissionPromoted(t *testing.T) {
 	var spec struct {
 		CLISpecification struct {
