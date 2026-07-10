@@ -182,6 +182,56 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	}
 }
 
+func TestStatusHumanOutputPreservesCanonicalTerminalEvidence(t *testing.T) {
+	failure := testRuntimeFailure("workflow_failed")
+	for _, tc := range []struct {
+		name       string
+		status     string
+		wantOutput []string
+	}{
+		{
+			name:   "failure envelope",
+			status: "failed",
+			wantOutput: []string{
+				"Run run-1  failed",
+				"platform.connector_failure/workflow_failed",
+				failure.Message,
+				failure.Remediation,
+			},
+		},
+		{
+			name:   "control reason",
+			status: "cancelled",
+			wantOutput: []string{
+				"Run run-1  cancelled",
+				"control reason  operator_stopped",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setCLIAPITestToken(t, "test-token")
+			server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+				if req.Method != "run.get" {
+					t.Fatalf("method = %q, want run.get", req.Method)
+				}
+				return map[string]any{"run": validDiagnosticRunHeaderWithStatus("run-1", tc.status)}
+			})
+			defer server.Close()
+
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "status", "run-1", "--no-diagnose"}, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			for _, want := range tc.wantOutput {
+				if !strings.Contains(stdout.String(), want) {
+					t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
+				}
+			}
+		})
+	}
+}
+
 func TestStatusProjectsCanonicalScoringBlockerTuple(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
