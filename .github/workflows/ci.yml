@@ -250,28 +250,88 @@ jobs:
 
           test_packages=$(cat test-results/shard-packages.txt)
           count_flag="${{ needs.ci-plan.outputs.test_count_flag }}"
+          count_mode="count-1"
+          if [ -z "$count_flag" ]; then
+            count_mode="cache-default"
+          fi
+          surface="shard-${{ matrix.shard }}"
+          environment_id="ci-postgres-role-proof-v1"
+          primary_json="test-results/go-test-shard-${{ matrix.shard }}.json"
+          primary_stderr="test-results/go-test-shard-${{ matrix.shard }}-stderr.txt"
+          primary_evidence="test-results/shard-${{ matrix.shard }}-primary-evidence.json"
+
           start_epoch=$(date +%s)
           set +e
           if [ -n "$count_flag" ]; then
-            go test $test_packages "$count_flag" -json 2>&1 | tee "test-results/go-test-shard-${{ matrix.shard }}.json"
+            go test $test_packages "$count_flag" -json \
+              2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
           else
-            go test $test_packages -json 2>&1 | tee "test-results/go-test-shard-${{ matrix.shard }}.json"
+            go test $test_packages -json \
+              2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
           fi
           status=${PIPESTATUS[0]}
           set -e
           elapsed=$(( $(date +%s) - start_epoch ))
-          echo "Shard ${{ matrix.shard }} elapsed ${elapsed}s" | tee "test-results/shard-${{ matrix.shard }}-elapsed.txt"
           go run ./cmd/swarm-test-timing \
-            -input "test-results/go-test-shard-${{ matrix.shard }}.json" \
+            -record-evidence \
+            -input "$primary_json" \
+            -packages test-results/shard-packages.txt \
+            -evidence "$primary_evidence" \
+            -surface "$surface" \
+            -attempt primary \
+            -elapsed-seconds "$elapsed" \
+            -exit-code "$status" \
+            -environment-id "$environment_id" \
+            -count-mode "$count_mode"
+
+          confirmation_status=0
+          if [ "$status" -eq 0 ]; then
+            needs_confirmation=$(go run ./cmd/swarm-test-timing \
+              -check-confirmation \
+              -policy .github/test-timing-budgets.yaml \
+              -evidence "$primary_evidence")
+            if [ "$needs_confirmation" = "true" ]; then
+              confirmation_json="test-results/go-test-shard-${{ matrix.shard }}-confirmation.json"
+              confirmation_stderr="test-results/go-test-shard-${{ matrix.shard }}-confirmation-stderr.txt"
+              confirmation_evidence="test-results/shard-${{ matrix.shard }}-confirmation-evidence.json"
+              confirmation_start_epoch=$(date +%s)
+              set +e
+              go test $test_packages -count=1 -json \
+                2> >(tee "$confirmation_stderr" >&2) | tee "$confirmation_json"
+              confirmation_status=${PIPESTATUS[0]}
+              set -e
+              confirmation_elapsed=$(( $(date +%s) - confirmation_start_epoch ))
+              go run ./cmd/swarm-test-timing \
+                -record-evidence \
+                -input "$confirmation_json" \
+                -packages test-results/shard-packages.txt \
+                -evidence "$confirmation_evidence" \
+                -surface "$surface" \
+                -attempt confirmation \
+                -elapsed-seconds "$confirmation_elapsed" \
+                -exit-code "$confirmation_status" \
+                -environment-id "$environment_id" \
+                -count-mode count-1
+            elif [ "$needs_confirmation" != "false" ]; then
+              echo "invalid confirmation decision: $needs_confirmation" >&2
+              exit 1
+            fi
+          fi
+
+          go run ./cmd/swarm-test-timing \
+            -input "$primary_json" \
             -markdown "test-results/go-test-shard-${{ matrix.shard }}-timing.md"
           {
             echo "### Shard ${{ matrix.shard }} timing"
             echo
-            echo "- elapsed wall time: \`${elapsed}s\`"
+            echo "- command elapsed: \`${elapsed}s\`"
             echo "- count flag: \`${count_flag:-<cache-enabled default>}\`"
             cat "test-results/go-test-shard-${{ matrix.shard }}-timing.md"
           } >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          exit "$confirmation_status"
 
       - name: Save measured Go cache
         if: github.event_name != 'pull_request' && steps.go-cache-restore.outputs.cache-hit != 'true' && success()
@@ -290,8 +350,11 @@ jobs:
           path: |
             test-results/shard-packages.txt
             test-results/go-test-shard-${{ matrix.shard }}.json
+            test-results/go-test-shard-${{ matrix.shard }}-stderr.txt
+            test-results/go-test-shard-${{ matrix.shard }}-confirmation.json
+            test-results/go-test-shard-${{ matrix.shard }}-confirmation-stderr.txt
             test-results/go-test-shard-${{ matrix.shard }}-timing.md
-            test-results/shard-${{ matrix.shard }}-elapsed.txt
+            test-results/shard-${{ matrix.shard }}-*-evidence.json
           if-no-files-found: warn
 
   semantic-smoke:
@@ -390,27 +453,80 @@ jobs:
       - name: Run full catalog/conformance truth
         shell: bash
         run: |
-          set +e
+          set -euo pipefail
           mkdir -p test-results
+          full_packages=$(cat .github/test-shards/full-conformance-packages.txt)
+          environment_id="ci-postgres-gateway-empty-v1"
+          primary_json="test-results/full-conformance.json"
+          primary_stderr="test-results/full-conformance-stderr.txt"
+          primary_evidence="test-results/full-conformance-primary-evidence.json"
+          start_epoch=$(date +%s)
+          set +e
           SWARM_TOOL_GATEWAY_URL= \
           SWARM_TOOL_GATEWAY_CONTAINER_URL= \
           SWARM_TOOL_GATEWAY_TOKEN= \
-          go test \
-            ./internal/runtime/bus \
-            ./internal/runtime/pipeline \
-            ./internal/apiv1 \
-            ./cmd/swarm \
-            ./internal/dashboard/server \
-            ./internal/runtime/conformance \
-            ./internal/runtime/cataloge2e \
-            -count=1 -json 2>&1 | tee test-results/full-conformance.json
+          go test $full_packages -count=1 -json \
+            2> >(tee "$primary_stderr" >&2) | tee "$primary_json"
           status=${PIPESTATUS[0]}
           set -e
+          elapsed=$(( $(date +%s) - start_epoch ))
           go run ./cmd/swarm-test-timing \
-            -input test-results/full-conformance.json \
+            -record-evidence \
+            -input "$primary_json" \
+            -packages .github/test-shards/full-conformance-packages.txt \
+            -evidence "$primary_evidence" \
+            -surface full-conformance \
+            -attempt primary \
+            -elapsed-seconds "$elapsed" \
+            -exit-code "$status" \
+            -environment-id "$environment_id" \
+            -count-mode count-1
+
+          confirmation_status=0
+          if [ "$status" -eq 0 ]; then
+            needs_confirmation=$(go run ./cmd/swarm-test-timing \
+              -check-confirmation \
+              -policy .github/test-timing-budgets.yaml \
+              -evidence "$primary_evidence")
+            if [ "$needs_confirmation" = "true" ]; then
+              confirmation_json="test-results/full-conformance-confirmation.json"
+              confirmation_stderr="test-results/full-conformance-confirmation-stderr.txt"
+              confirmation_evidence="test-results/full-conformance-confirmation-evidence.json"
+              confirmation_start_epoch=$(date +%s)
+              set +e
+              SWARM_TOOL_GATEWAY_URL= \
+              SWARM_TOOL_GATEWAY_CONTAINER_URL= \
+              SWARM_TOOL_GATEWAY_TOKEN= \
+              go test $full_packages -count=1 -json \
+                2> >(tee "$confirmation_stderr" >&2) | tee "$confirmation_json"
+              confirmation_status=${PIPESTATUS[0]}
+              set -e
+              confirmation_elapsed=$(( $(date +%s) - confirmation_start_epoch ))
+              go run ./cmd/swarm-test-timing \
+                -record-evidence \
+                -input "$confirmation_json" \
+                -packages .github/test-shards/full-conformance-packages.txt \
+                -evidence "$confirmation_evidence" \
+                -surface full-conformance \
+                -attempt confirmation \
+                -elapsed-seconds "$confirmation_elapsed" \
+                -exit-code "$confirmation_status" \
+                -environment-id "$environment_id" \
+                -count-mode count-1
+            elif [ "$needs_confirmation" != "false" ]; then
+              echo "invalid confirmation decision: $needs_confirmation" >&2
+              exit 1
+            fi
+          fi
+
+          go run ./cmd/swarm-test-timing \
+            -input "$primary_json" \
             -markdown test-results/full-conformance-timing.md
           cat test-results/full-conformance-timing.md >> "$GITHUB_STEP_SUMMARY"
-          exit "$status"
+          if [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+          exit "$confirmation_status"
 
       - name: Upload full conformance artifact
         if: always()
@@ -419,6 +535,10 @@ jobs:
           name: full-conformance-timing
           path: |
             test-results/full-conformance.json
+            test-results/full-conformance-stderr.txt
+            test-results/full-conformance-confirmation.json
+            test-results/full-conformance-confirmation-stderr.txt
+            test-results/full-conformance-*-evidence.json
             test-results/full-conformance-timing.md
           if-no-files-found: warn
 
@@ -469,6 +589,78 @@ jobs:
             test-results/nightly-extras-timing.md
           if-no-files-found: warn
 
+  timing-budget:
+    name: CI timing budget
+    if: always()
+    needs:
+      - ci-plan
+      - test-shard
+      - full-conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download shard evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: go-test-shard-*-timing
+          path: test-results/evidence
+
+      - name: Download full-conformance evidence
+        if: always() && needs.ci-plan.outputs.run_full_conformance == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: full-conformance-timing
+          path: test-results/evidence/full-conformance-timing
+
+      - name: Evaluate complete timing evidence
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p test-results/evidence
+          expect_full="${{ needs.ci-plan.outputs.run_full_conformance }}"
+          if [ "$expect_full" != "true" ] && [ "$expect_full" != "false" ]; then
+            expect_full=false
+          fi
+          set +e
+          go run ./cmd/swarm-test-timing \
+            -evaluate-budget \
+            -policy .github/test-timing-budgets.yaml \
+            -snapshot .github/test-shards/go-test-shards.json \
+            -full-packages .github/test-shards/full-conformance-packages.txt \
+            -evidence-root test-results/evidence \
+            -expect-full="$expect_full" \
+            -result-json test-results/timing-budget-result.json \
+            -markdown test-results/timing-budget-result.md
+          status=$?
+          set -e
+          if [ -s test-results/timing-budget-result.md ]; then
+            cat test-results/timing-budget-result.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Upload timing budget result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timing-budget-result
+          path: |
+            test-results/timing-budget-result.json
+            test-results/timing-budget-result.md
+          if-no-files-found: warn
+
   required-tests:
     name: Required test summary
     if: always()
@@ -480,6 +672,7 @@ jobs:
       - semantic-smoke
       - full-conformance
       - nightly-extras
+      - timing-budget
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -499,7 +692,8 @@ jobs:
             "test-shard:${{ needs.test-shard.result }}" \
             "semantic-smoke:${{ needs.semantic-smoke.result }}" \
             "full-conformance:${{ needs.full-conformance.result }}" \
-            "nightly-extras:${{ needs.nightly-extras.result }}"
+            "nightly-extras:${{ needs.nightly-extras.result }}" \
+            "timing-budget:${{ needs.timing-budget.result }}"
           do
             name="${item%%:*}"
             result="${item#*:}"
