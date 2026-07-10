@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func TestAgentDirectiveUsesV1RPCWithRunIDAndIdempotencyKey(t *testing.T) {
@@ -347,6 +349,62 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 				t.Fatalf("stderr = %q, want substring %q", stderr.String(), tc.wantStderr)
 			}
 		})
+	}
+}
+
+func TestAgentDirectiveRendersCanonicalFailureEnvelope(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	failure := testRuntimeFailureClass(runtimefailures.ClassOutcomeUncertain, "directive_execution_lease_expired")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("content-type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"error": map[string]any{
+				"code":    -32010,
+				"message": "Application error: AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+				"data": map[string]any{
+					"code": "AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+					"details": map[string]any{
+						"operation_id":       "operation-directive-1",
+						"directive_event_id": "event-directive-1",
+						"run_id":             "run-1",
+						"state":              "indeterminate",
+						"failure":            failure,
+					},
+					"retryable":      false,
+					"correlation_id": "corr-agent-directive",
+				},
+			},
+		}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"agent", "directive", "agent-1", "run it"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 6 {
+		t.Fatalf("code = %d, want 6 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	got := stderr.String()
+	for _, want := range []string{
+		"AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+		"platform.outcome_uncertain",
+		"directive_execution_lease_expired",
+		failure.Message,
+		failure.Remediation,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr = %q, want %q", got, want)
+		}
+	}
+	for _, retired := range []string{"failure_code", "failure_message"} {
+		if strings.Contains(got, retired) {
+			t.Fatalf("stderr contains retired key %q: %s", retired, got)
+		}
 	}
 }
 

@@ -599,7 +599,8 @@ func validateDetail(class Class, detail Detail) error {
 	}
 	switch class {
 	case ClassOutcomeUncertain:
-		if detail.Code == "run_terminal_persistence_unconfirmed" {
+		switch detail.Code {
+		case "run_terminal_persistence_unconfirmed":
 			if len(detail.Attributes) != 1 {
 				return fmt.Errorf("run_terminal_persistence_unconfirmed detail requires only attempted_status")
 			}
@@ -608,6 +609,10 @@ func validateDetail(class Class, detail Detail) error {
 			case "failed", "completed":
 			default:
 				return fmt.Errorf("run_terminal_persistence_unconfirmed attempted_status must be failed or completed")
+			}
+		case "directive_heartbeat_shutdown_unconfirmed", "directive_failure_persistence_unconfirmed", "directive_result_persistence_unconfirmed", "directive_execution_lease_expired":
+			if len(detail.Attributes) != 0 {
+				return fmt.Errorf("%s detail forbids attributes", detail.Code)
 			}
 		}
 	case ClassBudgetExhausted:
@@ -635,6 +640,13 @@ func validateDetail(class Class, detail Detail) error {
 		if value, _ := detail.Attributes["action"].(string); strings.TrimSpace(value) == "" {
 			return fmt.Errorf("authorization_denied detail action is required")
 		}
+	case ClassInternalFailure:
+		switch detail.Code {
+		case "directive_board_step_failed", "directive_execution_not_admitted":
+			if len(detail.Attributes) != 0 {
+				return fmt.Errorf("%s detail forbids attributes", detail.Code)
+			}
+		}
 	}
 	return nil
 }
@@ -654,7 +666,7 @@ func decisions(def Definition, detail Detail) (bool, bool) {
 	case ClassComputeFailure:
 		deterministic = true
 	case ClassInternalFailure:
-		if detail.Code == "typed_read_result_marshal_failed" {
+		if detail.Code == "typed_read_result_marshal_failed" || detail.Code == "directive_execution_not_admitted" {
 			deterministic = true
 		}
 	}

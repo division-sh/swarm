@@ -27,12 +27,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -160,7 +162,65 @@ func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Contex
 }
 
 type servedLiveAgentProofLLMRuntime struct {
-	calls *atomic.Int32
+	calls             *atomic.Int32
+	directiveFailures bool
+}
+
+type servedDirectivePersistenceFaults struct {
+	mu          sync.Mutex
+	afterCommit bool
+	remaining   int
+}
+
+func (f *servedDirectivePersistenceFaults) setRecordResultFault(afterCommit bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.afterCommit = afterCommit
+	f.remaining = 1
+}
+
+func (f *servedDirectivePersistenceFaults) takeRecordResultFault() (bool, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.remaining == 0 {
+		return false, false
+	}
+	f.remaining--
+	return f.afterCommit, true
+}
+
+type servedPostgresDirectiveFaultStore struct {
+	*store.PostgresStore
+	faults *servedDirectivePersistenceFaults
+}
+
+func (s *servedPostgresDirectiveFaultStore) RecordDirectiveExecuted(ctx context.Context, operationID, ownerID string, response json.RawMessage, now time.Time) (runtimeagentcontrol.DirectiveOperation, error) {
+	afterCommit, inject := s.faults.takeRecordResultFault()
+	if inject && !afterCommit {
+		return runtimeagentcontrol.DirectiveOperation{}, errors.New("injected served directive result persistence rollback")
+	}
+	op, err := s.PostgresStore.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
+	if err == nil && inject && afterCommit {
+		return runtimeagentcontrol.DirectiveOperation{}, errors.New("injected served directive result acknowledgment loss")
+	}
+	return op, err
+}
+
+type servedSQLiteDirectiveFaultStore struct {
+	*store.SQLiteRuntimeStore
+	faults *servedDirectivePersistenceFaults
+}
+
+func (s *servedSQLiteDirectiveFaultStore) RecordDirectiveExecuted(ctx context.Context, operationID, ownerID string, response json.RawMessage, now time.Time) (runtimeagentcontrol.DirectiveOperation, error) {
+	afterCommit, inject := s.faults.takeRecordResultFault()
+	if inject && !afterCommit {
+		return runtimeagentcontrol.DirectiveOperation{}, errors.New("injected served directive result persistence rollback")
+	}
+	op, err := s.SQLiteRuntimeStore.RecordDirectiveExecuted(ctx, operationID, ownerID, response, now)
+	if err == nil && inject && afterCommit {
+		return runtimeagentcontrol.DirectiveOperation{}, errors.New("injected served directive result acknowledgment loss")
+	}
+	return op, err
 }
 
 func (servedLiveAgentProofLLMRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
@@ -172,9 +232,20 @@ func (servedLiveAgentProofLLMRuntime) StartSession(_ context.Context, agentID st
 	}, nil
 }
 
-func (r servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
+func (r servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
 	if r.calls != nil {
 		r.calls.Add(1)
+	}
+	if r.directiveFailures {
+		switch {
+		case strings.Contains(message.Content, "untyped directive failure"):
+			return nil, errors.New("raw provider failure must not survive")
+		case strings.Contains(message.Content, "typed directive failure"):
+			return nil, runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_unauthorized", "served-llm", "continue_session", map[string]any{
+				"auth_kind": "provider_credential",
+				"provider":  "served-proof",
+			})
+		}
 	}
 	sessionID := ""
 	if session != nil {
@@ -4249,6 +4320,10 @@ func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend
 }
 
 func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime) servedControlProofRuntime {
+	return startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, llm, nil)
+}
+
+func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, faults *servedDirectivePersistenceFaults) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
@@ -4267,6 +4342,7 @@ func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
 				servedDB = stores.SQLDB
+				stores = wrapServedDirectiveFaultStore(t, stores, faults)
 			}
 			return stores, err
 		}
@@ -4292,6 +4368,17 @@ func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
+		if faults != nil {
+			oldBuildStores := buildStoresForServe
+			t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+				stores, err := oldBuildStores(ctx, selection, cfg)
+				if err == nil {
+					stores = wrapServedDirectiveFaultStore(t, stores, faults)
+				}
+				return stores, err
+			}
+		}
 		contractsPath := writeServedLiveAgentFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
@@ -4315,6 +4402,22 @@ func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.
 		t.Fatalf("unknown live-agent served parity backend %q", backend)
 		return servedControlProofRuntime{}
 	}
+}
+
+func wrapServedDirectiveFaultStore(t *testing.T, stores storeBundle, faults *servedDirectivePersistenceFaults) storeBundle {
+	t.Helper()
+	if faults == nil {
+		return stores
+	}
+	switch eventStore := stores.EventStore.(type) {
+	case *store.PostgresStore:
+		stores.EventStore = &servedPostgresDirectiveFaultStore{PostgresStore: eventStore, faults: faults}
+	case *store.SQLiteRuntimeStore:
+		stores.EventStore = &servedSQLiteDirectiveFaultStore{SQLiteRuntimeStore: eventStore, faults: faults}
+	default:
+		t.Fatalf("unsupported served directive event store %T", stores.EventStore)
+	}
+	return stores
 }
 
 func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
@@ -4405,8 +4508,9 @@ func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedpar
 func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	var effects atomic.Int32
-	rt := startServedLiveAgentProofRuntimeWithLLM(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects})
-	runServedAgentDirectiveOutcomeLifecycleProof(t, rt, &effects)
+	faults := &servedDirectivePersistenceFaults{}
+	rt := startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects, directiveFailures: true}, faults)
+	runServedAgentDirectiveOutcomeLifecycleProof(t, rt, &effects, faults)
 }
 
 func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -5775,7 +5879,7 @@ type servedAgentDirectiveProofResult struct {
 	DirectiveEventType string `json:"directive_event_type"`
 }
 
-func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32) {
+func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
 	t.Helper()
 	key := "issue-1932-" + rt.Backend + "-directive"
 	params := map[string]any{
@@ -5828,6 +5932,277 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	for _, runID := range []string{first.RunID, keylessA.RunID, keylessB.RunID} {
 		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle))
 	}
+
+	for _, failureCase := range []struct {
+		name      string
+		directive string
+		class     runtimefailures.Class
+		detail    string
+	}{
+		{name: "untyped", directive: "return untyped directive failure", class: runtimefailures.ClassInternalFailure, detail: runtimeagentcontrol.DirectiveBoardStepFailedDetail},
+		{name: "typed", directive: "return typed directive failure", class: runtimefailures.ClassAuthenticationNeeded, detail: "provider_unauthorized"},
+	} {
+		t.Run(failureCase.name+"_failure", func(t *testing.T) {
+			failureKey := "issue-1869-" + rt.Backend + "-" + failureCase.name
+			failureParams := map[string]any{
+				"agent_id":        "load-agent",
+				"directive":       failureCase.directive,
+				"idempotency_key": failureKey,
+			}
+			before := effects.Load()
+			firstFailure := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", failureParams)
+			failure := requireServedDirectiveFailureEnvelope(t, rt, firstFailure, failureKey, failureCase.class, failureCase.detail)
+			if got := effects.Load(); got != before+1 {
+				t.Fatalf("%s %s failure effects = %d, want %d", rt.Backend, failureCase.name, got, before+1)
+			}
+			replayFailure := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", failureParams)
+			replayed := requireServedDirectiveFailureEnvelope(t, rt, replayFailure, failureKey, failureCase.class, failureCase.detail)
+			if got, want := mustFailureEnvelopeJSON(t, replayed), mustFailureEnvelopeJSON(t, failure); got != want {
+				t.Fatalf("%s %s replay failure = %s, want %s", rt.Backend, failureCase.name, got, want)
+			}
+			if got := effects.Load(); got != before+1 {
+				t.Fatalf("%s %s replay effects = %d, want %d", rt.Backend, failureCase.name, got, before+1)
+			}
+		})
+	}
+	runServedDirectiveResultPersistenceUncertaintyProof(t, rt, effects, faults)
+	requireServedAgentDirectiveOperationCount(t, rt.DB, rt.Backend, 7)
+}
+
+func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
+	t.Helper()
+	for _, test := range []struct {
+		name        string
+		afterCommit bool
+	}{
+		{name: "rollback"},
+		{name: "acknowledgment_loss", afterCommit: true},
+	} {
+		t.Run("result_persistence_"+test.name, func(t *testing.T) {
+			key := "issue-1869-" + rt.Backend + "-result-" + test.name
+			params := map[string]any{
+				"agent_id":        "load-agent",
+				"directive":       "complete a directive with " + test.name,
+				"idempotency_key": key,
+			}
+			before := effects.Load()
+			faults.setRecordResultFault(test.afterCommit)
+			immediate := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", params)
+			failure := servedDirectiveErrorFailure(t, rt.Backend, immediate, apiv1.AgentDirectiveOutcomeIndeterminateCode)
+			if failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Detail.Code != runtimeagentcontrol.DirectiveResultPersistenceUnconfirmedDetail {
+				t.Fatalf("%s immediate uncertainty = %#v", rt.Backend, failure)
+			}
+			if got := effects.Load(); got != before+1 {
+				t.Fatalf("%s result persistence effects = %d, want %d", rt.Backend, got, before+1)
+			}
+
+			op := loadServedDirectiveOperationByKey(t, rt, key)
+			if op.Failure != nil && op.Failure.Detail.Code == runtimeagentcontrol.DirectiveResultPersistenceUnconfirmedDetail {
+				t.Fatalf("%s response-local uncertainty was persisted", rt.Backend)
+			}
+			if test.afterCommit {
+				if op.State != runtimeagentcontrol.DirectiveOperationExecuted || len(op.Response) == 0 || op.Failure != nil {
+					t.Fatalf("%s acknowledgment-loss durable operation = %#v", rt.Backend, op)
+				}
+				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 0)
+				var result servedAgentDirectiveProofResult
+				requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &result)
+				requireServedAgentDirectiveResult(t, rt.Backend, result)
+				op = loadServedDirectiveOperationByKey(t, rt, key)
+				if op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
+					t.Fatalf("%s acknowledgment-loss convergence state = %s", rt.Backend, op.State)
+				}
+				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 1)
+			} else {
+				if op.State != runtimeagentcontrol.DirectiveOperationExecuting || len(op.Response) != 0 || op.Failure != nil {
+					t.Fatalf("%s rollback durable operation = %#v", rt.Backend, op)
+				}
+				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 0)
+				expireServedDirectiveLease(t, rt, op.OperationID)
+				replay := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", params)
+				replayedFailure := servedDirectiveErrorFailure(t, rt.Backend, replay, apiv1.AgentDirectiveOutcomeIndeterminateCode)
+				if replayedFailure.Detail.Code != runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail {
+					t.Fatalf("%s rollback convergence failure = %#v", rt.Backend, replayedFailure)
+				}
+				op = loadServedDirectiveOperationByKey(t, rt, key)
+				if op.State != runtimeagentcontrol.DirectiveOperationIndeterminate || op.Failure == nil || op.Failure.Detail.Code != runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail {
+					t.Fatalf("%s rollback convergence operation = %#v", rt.Backend, op)
+				}
+				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 1)
+			}
+			if got := effects.Load(); got != before+1 {
+				t.Fatalf("%s result persistence replay effects = %d, want %d", rt.Backend, got, before+1)
+			}
+		})
+	}
+}
+
+func requireServedDirectiveFailureEnvelope(t *testing.T, rt servedControlProofRuntime, rpcErr *servedJSONRPCError, key string, class runtimefailures.Class, detail string) runtimefailures.Envelope {
+	t.Helper()
+	if rpcErr == nil || rpcErr.Data["code"] != apiv1.AgentDirectiveExecutionFailedCode {
+		t.Fatalf("%s directive failure RPC = %#v", rt.Backend, rpcErr)
+	}
+	details, ok := rpcErr.Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s directive failure details = %#v", rt.Backend, rpcErr.Data["details"])
+	}
+	for _, retired := range []string{"failure_code", "failure_message"} {
+		if _, ok := details[retired]; ok {
+			t.Fatalf("%s retired %s survived: %#v", rt.Backend, retired, details)
+		}
+	}
+	apiFailure := decodeServedFailureEnvelope(t, details["failure"])
+	if apiFailure.Class != class || apiFailure.Detail.Code != detail {
+		t.Fatalf("%s API failure = %#v, want %s/%s", rt.Backend, apiFailure, class, detail)
+	}
+
+	var state string
+	var operationFailure, receiptFailure []byte
+	switch rt.Backend {
+	case "postgres":
+		if err := rt.DB.QueryRow(`SELECT state, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&state, &operationFailure); err != nil {
+			t.Fatalf("load Postgres directive failure: %v", err)
+		}
+		if err := rt.DB.QueryRow(`SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = $1 AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&receiptFailure); err != nil {
+			t.Fatalf("load Postgres directive receipt failure: %v", err)
+		}
+	case "sqlite":
+		if err := rt.DB.QueryRow(`SELECT state, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&state, &operationFailure); err != nil {
+			t.Fatalf("load SQLite directive failure: %v", err)
+		}
+		if err := rt.DB.QueryRow(`SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = ? AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&receiptFailure); err != nil {
+			t.Fatalf("load SQLite directive receipt failure: %v", err)
+		}
+	default:
+		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+	if state != "failed" {
+		t.Fatalf("%s directive failure state = %s, want failed", rt.Backend, state)
+	}
+	persisted, err := runtimefailures.UnmarshalEnvelope(operationFailure)
+	if err != nil {
+		t.Fatalf("decode operation failure: %v", err)
+	}
+	receipt, err := runtimefailures.UnmarshalEnvelope(receiptFailure)
+	if err != nil {
+		t.Fatalf("decode receipt failure: %v", err)
+	}
+	want := mustFailureEnvelopeJSON(t, apiFailure)
+	for carrier, failure := range map[string]runtimefailures.Envelope{"operation": persisted, "receipt": receipt} {
+		if got := mustFailureEnvelopeJSON(t, failure); got != want {
+			t.Fatalf("%s %s failure = %s, want %s", rt.Backend, carrier, got, want)
+		}
+	}
+	if strings.Contains(want, "raw provider failure must not survive") {
+		t.Fatalf("%s raw BoardStep prose survived: %s", rt.Backend, want)
+	}
+	return apiFailure
+}
+
+func servedDirectiveErrorFailure(t *testing.T, backend string, rpcErr *servedJSONRPCError, code string) runtimefailures.Envelope {
+	t.Helper()
+	if rpcErr == nil || rpcErr.Data["code"] != code {
+		t.Fatalf("%s directive error = %#v, want %s", backend, rpcErr, code)
+	}
+	details, ok := rpcErr.Data["details"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s directive error details = %#v", backend, rpcErr.Data["details"])
+	}
+	for _, retired := range []string{"failure_code", "failure_message"} {
+		if _, ok := details[retired]; ok {
+			t.Fatalf("%s retired %s survived: %#v", backend, retired, details)
+		}
+	}
+	return decodeServedFailureEnvelope(t, details["failure"])
+}
+
+func loadServedDirectiveOperationByKey(t *testing.T, rt servedControlProofRuntime, key string) runtimeagentcontrol.DirectiveOperation {
+	t.Helper()
+	var op runtimeagentcontrol.DirectiveOperation
+	var state string
+	var response, failure sql.NullString
+	switch rt.Backend {
+	case "postgres":
+		if err := rt.DB.QueryRow(`SELECT operation_id::text, directive_event_id::text, state, response, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&op.OperationID, &op.DirectiveEventID, &state, &response, &failure); err != nil {
+			t.Fatalf("load Postgres directive operation: %v", err)
+		}
+	case "sqlite":
+		if err := rt.DB.QueryRow(`SELECT operation_id, directive_event_id, state, response, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&op.OperationID, &op.DirectiveEventID, &state, &response, &failure); err != nil {
+			t.Fatalf("load SQLite directive operation: %v", err)
+		}
+	default:
+		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+	op.State = runtimeagentcontrol.DirectiveOperationState(state)
+	if response.Valid {
+		op.Response = json.RawMessage(response.String)
+	}
+	if failure.Valid {
+		decoded, err := runtimefailures.UnmarshalEnvelope([]byte(failure.String))
+		if err != nil {
+			t.Fatalf("decode directive operation failure: %v", err)
+		}
+		op.Failure = &decoded
+	}
+	return op
+}
+
+func expireServedDirectiveLease(t *testing.T, rt servedControlProofRuntime, operationID string) {
+	t.Helper()
+	switch rt.Backend {
+	case "postgres":
+		if _, err := rt.DB.Exec(`UPDATE agent_directive_operations SET execution_lease_expires_at = $1 WHERE operation_id = $2::uuid`, time.Now().UTC().Add(-time.Minute), operationID); err != nil {
+			t.Fatalf("expire Postgres directive lease: %v", err)
+		}
+	case "sqlite":
+		if _, err := rt.DB.Exec(`UPDATE agent_directive_operations SET execution_lease_expires_at = ? WHERE operation_id = ?`, time.Now().UTC().Add(-time.Minute), operationID); err != nil {
+			t.Fatalf("expire SQLite directive lease: %v", err)
+		}
+	default:
+		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+}
+
+func requireServedDirectivePipelineReceiptCount(t *testing.T, rt servedControlProofRuntime, eventID string, want int) {
+	t.Helper()
+	var count int
+	switch rt.Backend {
+	case "postgres":
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+			t.Fatalf("count Postgres directive receipts: %v", err)
+		}
+	case "sqlite":
+		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+			t.Fatalf("count SQLite directive receipts: %v", err)
+		}
+	default:
+		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+	if count != want {
+		t.Fatalf("%s directive receipt count = %d, want %d", rt.Backend, count, want)
+	}
+}
+
+func decodeServedFailureEnvelope(t *testing.T, value any) runtimefailures.Envelope {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode served failure envelope: %v", err)
+	}
+	return failure
+}
+
+func mustFailureEnvelopeJSON(t *testing.T, failure runtimefailures.Envelope) string {
+	t.Helper()
+	raw, err := runtimefailures.MarshalEnvelope(failure)
+	if err != nil {
+		t.Fatalf("marshal failure envelope: %v", err)
+	}
+	return string(raw)
 }
 
 func requireServedAgentDirectiveEffectCount(t *testing.T, backend string, effects *atomic.Int32, want int32) {

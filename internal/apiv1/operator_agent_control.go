@@ -9,6 +9,7 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -211,7 +212,10 @@ func agentControlError(method, agentID string, err error) error {
 	}
 	var operationErr *runtimeagentcontrol.DirectiveOperationError
 	if errors.As(err, &operationErr) && operationErr != nil {
-		details := directiveOperationErrorDetails(operationErr.Operation)
+		details, detailsErr := directiveOperationApplicationDetails(operationErr.Operation)
+		if detailsErr != nil {
+			return detailsErr
+		}
 		switch {
 		case errors.Is(operationErr.Err, runtimeagentcontrol.ErrDirectiveInProgress):
 			return NewApplicationError(AgentDirectiveInProgressCode, true, details)
@@ -284,8 +288,11 @@ func agentControlError(method, agentID string, err error) error {
 	}
 }
 
-func directiveOperationErrorDetails(op runtimeagentcontrol.DirectiveOperation) map[string]any {
+func directiveOperationApplicationDetails(op runtimeagentcontrol.DirectiveOperation) (map[string]any, error) {
 	op = op.Normalized()
+	if err := runtimeagentcontrol.ValidateDirectiveOperationEvidence(op); err != nil {
+		return nil, err
+	}
 	details := map[string]any{
 		"operation_id":       op.OperationID,
 		"directive_event_id": op.DirectiveEventID,
@@ -295,13 +302,10 @@ func directiveOperationErrorDetails(op runtimeagentcontrol.DirectiveOperation) m
 	if !op.ExecutionLeaseExpiresAt.IsZero() {
 		details["lease_expires_at"] = op.ExecutionLeaseExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	if op.ErrorCode != "" {
-		details["failure_code"] = op.ErrorCode
+	if op.Failure != nil {
+		details["failure"] = runtimefailures.CloneEnvelope(op.Failure)
 	}
-	if op.ErrorMessage != "" {
-		details["failure_message"] = op.ErrorMessage
-	}
-	return details
+	return details, nil
 }
 
 func activeSessionDetails(sessions []runtimeagentcontrol.ActiveSessionTarget) []map[string]any {

@@ -1542,11 +1542,8 @@
                   "directive_event_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
-                  "failure_code": {
-                    "type": "string"
-                  },
-                  "failure_message": {
-                    "type": "string"
+                  "failure": {
+                    "$ref": "#/components/schemas/FailureEnvelope"
                   },
                   "operation_id": {
                     "$ref": "#/components/schemas/OpaqueId"
@@ -1564,8 +1561,7 @@
                   "directive_event_id",
                   "run_id",
                   "state",
-                  "failure_code",
-                  "failure_message"
+                  "failure"
                 ],
                 "type": "object"
               },
@@ -1602,11 +1598,8 @@
                   "directive_event_id": {
                     "$ref": "#/components/schemas/OpaqueId"
                   },
-                  "failure_code": {
-                    "type": "string"
-                  },
-                  "failure_message": {
-                    "type": "string"
+                  "failure": {
+                    "$ref": "#/components/schemas/FailureEnvelope"
                   },
                   "operation_id": {
                     "$ref": "#/components/schemas/OpaqueId"
@@ -1624,8 +1617,7 @@
                   "directive_event_id",
                   "run_id",
                   "state",
-                  "failure_code",
-                  "failure_message"
+                  "failure"
                 ],
                 "type": "object"
               },
@@ -11379,6 +11371,10 @@
       "RunHeader": {
         "additionalProperties": false,
         "properties": {
+          "control_reason": {
+            "description": "Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.",
+            "type": "string"
+          },
           "ended_at": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "Omitted while run is active; present once status is terminal (completed/failed/cancelled/forked)."
@@ -11387,17 +11383,13 @@
             "minimum": 0,
             "type": "integer"
           },
-          "failure": {
-            "$ref": "#/components/schemas/FailureEnvelope",
-            "description": "Required exactly when status is failed; forbidden for every other status."
-          },
-          "control_reason": {
-            "description": "Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.",
-            "type": "string"
-          },
           "event_count": {
             "minimum": 0,
             "type": "integer"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope",
+            "description": "Required exactly when status is failed; forbidden for every other status."
           },
           "forked_from_run_id": {
             "$ref": "#/components/schemas/OpaqueId",
@@ -12140,11 +12132,8 @@
                 "directive_event_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 },
-                "failure_code": {
-                  "type": "string"
-                },
-                "failure_message": {
-                  "type": "string"
+                "failure": {
+                  "$ref": "#/components/schemas/FailureEnvelope"
                 },
                 "operation_id": {
                   "$ref": "#/components/schemas/OpaqueId"
@@ -12162,8 +12151,7 @@
                 "directive_event_id",
                 "run_id",
                 "state",
-                "failure_code",
-                "failure_message"
+                "failure"
               ],
               "type": "object"
             },
@@ -12256,11 +12244,8 @@
                 "directive_event_id": {
                   "$ref": "#/components/schemas/OpaqueId"
                 },
-                "failure_code": {
-                  "type": "string"
-                },
-                "failure_message": {
-                  "type": "string"
+                "failure": {
+                  "$ref": "#/components/schemas/FailureEnvelope"
                 },
                 "operation_id": {
                   "$ref": "#/components/schemas/OpaqueId"
@@ -12278,8 +12263,7 @@
                 "directive_event_id",
                 "run_id",
                 "state",
-                "failure_code",
-                "failure_message"
+                "failure"
               ],
               "type": "object"
             },

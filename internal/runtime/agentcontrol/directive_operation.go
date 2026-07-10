@@ -1,6 +1,7 @@
 package agentcontrol
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const DirectiveOperationMethod = "agent.send_directive"
@@ -51,9 +53,7 @@ type DirectiveOperation struct {
 	ExecutionOwnerID        string
 	ExecutionLeaseExpiresAt time.Time
 	Response                json.RawMessage
-	ErrorCode               string
-	ErrorMessage            string
-	ErrorDetails            json.RawMessage
+	Failure                 *runtimefailures.Envelope
 	ExecutionAdmittedAt     time.Time
 	ExecutedAt              time.Time
 	CompletedAt             time.Time
@@ -77,9 +77,28 @@ func (o DirectiveOperation) Normalized() DirectiveOperation {
 	o.OperatorID = strings.TrimSpace(o.OperatorID)
 	o.DirectiveEventID = strings.TrimSpace(o.DirectiveEventID)
 	o.ExecutionOwnerID = strings.TrimSpace(o.ExecutionOwnerID)
-	o.ErrorCode = strings.TrimSpace(o.ErrorCode)
-	o.ErrorMessage = strings.TrimSpace(o.ErrorMessage)
+	o.Failure = runtimefailures.CloneEnvelope(o.Failure)
 	return o
+}
+
+func ValidateDirectiveOperationEvidence(op DirectiveOperation) error {
+	op = op.Normalized()
+	hasResponse := len(bytes.TrimSpace(op.Response)) > 0
+	hasFailure := op.Failure != nil
+	wantsResponse := op.State == DirectiveOperationExecuted || op.State == DirectiveOperationSucceeded
+	wantsFailure := op.State == DirectiveOperationFailed || op.State == DirectiveOperationIndeterminate
+	if hasResponse != wantsResponse {
+		return fmt.Errorf("directive operation state %s response presence = %t, want %t", op.State, hasResponse, wantsResponse)
+	}
+	if hasFailure != wantsFailure {
+		return fmt.Errorf("directive operation state %s failure presence = %t, want %t", op.State, hasFailure, wantsFailure)
+	}
+	if hasFailure {
+		if err := runtimefailures.ValidateEnvelope(*op.Failure); err != nil {
+			return fmt.Errorf("directive operation state %s failure is invalid: %w", op.State, err)
+		}
+	}
+	return nil
 }
 
 type ReserveDirectiveOperationRequest struct {
@@ -107,7 +126,7 @@ type DirectiveOperationStore interface {
 	RenewDirectiveExecutionLease(context.Context, string, string, time.Time, time.Duration) error
 	RecordDirectiveExecuted(context.Context, string, string, json.RawMessage, time.Time) (DirectiveOperation, error)
 	FinalizeDirectiveSuccess(context.Context, string, time.Time, time.Duration) (DirectiveOperation, error)
-	FinalizeDirectiveFailure(context.Context, string, string, string, string, json.RawMessage, time.Time, time.Duration) (DirectiveOperation, error)
+	FinalizeDirectiveFailure(context.Context, string, string, runtimefailures.Envelope, time.Time, time.Duration) (DirectiveOperation, error)
 	LoadDirectiveOperation(context.Context, string) (DirectiveOperation, bool, error)
 	LoadDirectiveOperationByKey(context.Context, string, string, string) (DirectiveOperation, bool, error)
 	ReconcileDirectiveOperation(context.Context, string, time.Time, time.Duration) (DirectiveOperation, bool, error)

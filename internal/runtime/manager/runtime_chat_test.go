@@ -242,7 +242,7 @@ func (s *directiveEventStore) FinalizeDirectiveSuccess(_ context.Context, operat
 	return op, nil
 }
 
-func (s *directiveEventStore) FinalizeDirectiveFailure(_ context.Context, operationID, ownerID, code, message string, details json.RawMessage, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+func (s *directiveEventStore) FinalizeDirectiveFailure(_ context.Context, operationID, ownerID string, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
 	unlock := s.lockMutationGate()
 	defer unlock()
 	s.mu.Lock()
@@ -252,8 +252,8 @@ func (s *directiveEventStore) FinalizeDirectiveFailure(_ context.Context, operat
 	if op.State != runtimeagentcontrol.DirectiveOperationExecuting || op.ExecutionOwnerID != ownerID {
 		return op, runtimeagentcontrol.ErrorForDirectiveOperation(op)
 	}
-	op.State, op.ErrorCode, op.ErrorMessage = runtimeagentcontrol.DirectiveOperationFailed, code, message
-	op.ErrorDetails = append(json.RawMessage(nil), details...)
+	op.State = runtimeagentcontrol.DirectiveOperationFailed
+	op.Failure = runtimefailures.CloneEnvelope(&failure)
 	op.CompletedAt, op.UpdatedAt, op.ExpiresAt = now, now, now.Add(ttl)
 	s.operations[operationID] = op
 	return op, nil
@@ -296,8 +296,8 @@ func (s *directiveEventStore) ReconcileDirectiveOperation(_ context.Context, ope
 	}
 	if op.State == runtimeagentcontrol.DirectiveOperationExecuting && !op.ExecutionLeaseExpiresAt.After(now) {
 		op.State = runtimeagentcontrol.DirectiveOperationIndeterminate
-		op.ErrorCode = "execution_lease_expired"
-		op.ErrorMessage = "directive execution lease expired before a durable outcome"
+		failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+		op.Failure = &failure
 		op.ExecutionLeaseExpiresAt = time.Time{}
 		op.UpdatedAt = now
 		s.operations[operationID] = op
@@ -801,7 +801,7 @@ func TestAgentManager_SendDirectiveExecutionFailureIsDurableAndReplaySafe(t *tes
 		}
 	}
 	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
-	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationFailed || operation.ErrorCode != "board_step_failed" {
+	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationFailed || operation.Failure == nil || operation.Failure.Detail.Code != runtimeagentcontrol.DirectiveBoardStepFailedDetail {
 		t.Fatalf("failed operation = %#v ok=%v err=%v", operation, ok, err)
 	}
 	if agent.calls != 1 || len(directiveStore.events) != 1 {
