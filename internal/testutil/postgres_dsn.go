@@ -30,10 +30,43 @@ func parseTestPostgresDSN(raw string) (testPostgresDSN, error) {
 }
 
 func newTestPostgresDSN(cfg pq.Config) (testPostgresDSN, error) {
+	if cfg.SSLNegotiation == "" {
+		cfg.SSLNegotiation = pq.SSLNegotiationPostgres
+	}
+	if cfg.TargetSessionAttrs == "" {
+		cfg.TargetSessionAttrs = pq.TargetSessionAttrsAny
+	}
+	if cfg.LoadBalanceHosts == "" {
+		cfg.LoadBalanceHosts = pq.LoadBalanceHostsDisable
+	}
+	if cfg.ClientEncoding == "" {
+		cfg.ClientEncoding = "UTF8"
+	}
+	if cfg.Datestyle == "" {
+		cfg.Datestyle = "ISO, MDY"
+	}
 	if err := validateTestPostgresConfig(cfg); err != nil {
 		return testPostgresDSN{}, err
 	}
 	return testPostgresDSN{config: cfg.Clone()}, nil
+}
+
+func newOwnedDockerPostgresDSN(port uint16) (testPostgresDSN, error) {
+	if port == 0 {
+		return testPostgresDSN{}, fmt.Errorf("owned Docker postgres port is required")
+	}
+	return newTestPostgresDSN(pq.Config{
+		Host:           "127.0.0.1",
+		Hostaddr:       netip.MustParseAddr("127.0.0.1"),
+		Port:           port,
+		Database:       "postgres",
+		User:           "postgres",
+		Password:       "postgres",
+		SSLMode:        pq.SSLModeDisable,
+		SSLSNI:         true,
+		ClientEncoding: "UTF8",
+		Datestyle:      "ISO, MDY",
+	})
 }
 
 func validateTestPostgresConfig(cfg pq.Config) error {
@@ -162,7 +195,19 @@ func serializeTestPostgresConfig(cfg pq.Config) (string, error) {
 func shouldSerializePostgresConfigField(value reflect.Value, key string) bool {
 	switch value.Kind() {
 	case reflect.String:
-		return key == "host" || value.String() != ""
+		if value.String() != "" {
+			return true
+		}
+		// lib/pq rejects empty enum and encoding values. Their effective
+		// defaults are materialized before serialization; every other empty
+		// string is emitted to preserve explicit-empty and env-shadowing
+		// semantics across the string transport boundary.
+		switch key {
+		case "sslmode", "sslnegotiation", "target_session_attrs", "load_balance_hosts", "client_encoding", "datestyle":
+			return false
+		default:
+			return true
+		}
 	case reflect.Struct:
 		if value.Type() == reflect.TypeOf(netip.Addr{}) {
 			return value.Interface().(netip.Addr).IsValid()
