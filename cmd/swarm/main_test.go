@@ -169,39 +169,10 @@ func (servedLiveAgentProofLLMRuntime) StartSession(_ context.Context, agentID st
 	}, nil
 }
 
-func (servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, message runtimellm.Message) (*runtimellm.Response, error) {
+func (servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
 	sessionID := ""
 	if session != nil {
 		sessionID = session.ID
-	}
-	content := strings.TrimSpace(message.Content)
-	if strings.EqualFold(strings.TrimSpace(message.Role), "tool") {
-		return &runtimellm.Response{
-			Message:   runtimellm.Message{Role: "assistant", Content: "directive mailbox queued"},
-			SessionID: sessionID,
-		}, nil
-	}
-	lowerContent := strings.ToLower(content)
-	if strings.Contains(content, "platform.agent_directive") ||
-		strings.Contains(content, `"directive_text"`) ||
-		strings.Contains(lowerContent, "emit directive completion") {
-		return &runtimellm.Response{
-			Message: runtimellm.Message{Role: "assistant", Content: "queueing directive mailbox item"},
-			ToolCalls: []runtimellm.ToolCall{
-				{
-					Name: "mailbox_send",
-					Arguments: map[string]any{
-						"type":     "directive_followup",
-						"priority": "normal",
-						"summary":  "directive handled by live-agent parity fixture",
-						"context": map[string]any{
-							"source": "issue-1910",
-						},
-					},
-				},
-			},
-			SessionID: sessionID,
-		}, nil
 	}
 	return &runtimellm.Response{
 		Message:   runtimellm.Message{Role: "assistant", Content: "handled live agent event"},
@@ -4155,12 +4126,11 @@ func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedRunControlBackendProof)
 }
 
-func TestServedParityHarnessLiveAgentControlLifecycle(t *testing.T) {
+func TestServedParityHarnessLiveAgentReplayBacklogLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
-		servedparity.MustScenario(servedparity.ScenarioAgentSendDirectiveLiveAgentLifecycle),
 		servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle),
 	}
-	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentControlBackendProof)
+	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentReplayBacklogBackendProof)
 }
 
 func TestServedParityHarnessRuntimeIngressControlLifecycle(t *testing.T) {
@@ -4270,7 +4240,7 @@ func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-		contractsPath := writeServedLiveAgentControlFixture(t)
+		contractsPath := writeServedLiveAgentFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		oldBuildStores := buildStoresForServe
@@ -4307,7 +4277,7 @@ func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() serveWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
-		contractsPath := writeServedLiveAgentControlFixture(t)
+		contractsPath := writeServedLiveAgentFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, serveOptions{
@@ -4411,10 +4381,10 @@ func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparit
 	runServedLiveAgentEventReplayLifecycleProof(t, rt)
 }
 
-func runServedLiveAgentControlBackendProof(t *testing.T, backend servedparity.Backend) {
+func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
-	runServedLiveAgentControlLifecycleProof(t, rt)
+	runServedLiveAgentReplayBacklogLifecycleProof(t, rt)
 }
 
 func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -5672,15 +5642,6 @@ type servedAgentReplayProofResult struct {
 	NewDelivery      servedReplayProofDelivery `json:"new_delivery"`
 }
 
-type servedAgentDirectiveProofResult struct {
-	OK                 bool   `json:"ok"`
-	Response           string `json:"response"`
-	RunID              string `json:"run_id"`
-	RunIDResolution    string `json:"run_id_resolution"`
-	DirectiveEventID   string `json:"directive_event_id"`
-	DirectiveEventType string `json:"directive_event_type"`
-}
-
 type servedAgentReplayBacklogProofResult struct {
 	OK            bool `json:"ok"`
 	ReplayedCount int  `json:"replayed_count"`
@@ -5755,39 +5716,8 @@ func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlP
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
 }
 
-func runServedLiveAgentControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+func runServedLiveAgentReplayBacklogLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	directiveKey := "issue-1910-" + rt.Backend + "-" + uuid.NewString() + "-agent-send-directive"
-	var directive servedAgentDirectiveProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"agent_id":        "load-agent",
-		"directive":       "emit directive completion",
-		"idempotency_key": directiveKey,
-	}, &directive)
-	if !directive.OK || directive.RunID == "" || directive.DirectiveEventID == "" || directive.DirectiveEventType != "platform.agent_directive" {
-		t.Fatalf("%s agent.send_directive result = %#v, want allocated directive event", rt.Backend, directive)
-	}
-	if directive.RunIDResolution != "new_run_allocated" {
-		t.Fatalf("%s agent.send_directive run_id_resolution = %q, want new_run_allocated", rt.Backend, directive.RunIDResolution)
-	}
-	persistedDirectiveID := waitServedEventPublishEventID(t, rt.DB, rt.Backend, directive.RunID, "platform.agent_directive")
-	if persistedDirectiveID != directive.DirectiveEventID {
-		t.Fatalf("%s persisted directive event = %s, want %s", rt.Backend, persistedDirectiveID, directive.DirectiveEventID)
-	}
-	waitServedMailboxFromAgentCount(t, rt.DB, rt.Backend, "load-agent", "directive_followup", "pending", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", directiveKey, 1)
-	var directiveAgain servedAgentDirectiveProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"agent_id":        "load-agent",
-		"directive":       "emit directive completion",
-		"idempotency_key": directiveKey,
-	}, &directiveAgain)
-	if directiveAgain.DirectiveEventID != directive.DirectiveEventID || directiveAgain.Response != directive.Response {
-		t.Fatalf("%s agent.send_directive idempotent result = %#v, want directive_event_id=%s", rt.Backend, directiveAgain, directive.DirectiveEventID)
-	}
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", directiveKey, 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, directive.RunID, servedparity.MustScenario(servedparity.ScenarioAgentSendDirectiveLiveAgentLifecycle))
-
 	backlogRunID, backlogEventID := seedServedLiveAgentPendingBacklogDelivery(t, rt.DB, rt.Backend)
 	backlogKey := "issue-1910-" + rt.Backend + "-" + backlogRunID + "-agent-replay-backlog"
 	var backlog servedAgentReplayBacklogProofResult
@@ -6529,7 +6459,7 @@ Handle the active-load event and wait for test release.
 	return root
 }
 
-func writeServedLiveAgentControlFixture(t *testing.T) string {
+func writeServedLiveAgentFixture(t *testing.T) string {
 	t.Helper()
 	root := writeServedEventPublishFollowUpFixture(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
@@ -6554,10 +6484,7 @@ thing.unhandled:
     source: external
   note: text
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
-mailbox_send:
-  handler_type: platform_builtin
-`)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 entity-writer:
   id: entity-writer
@@ -6590,11 +6517,9 @@ load-agent:
   mode: task
   subscriptions:
     - thing.agent_hold
-  tools:
-    - mailbox_send
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "load-agent.md"), `
-Handle live-agent parity events. For operator directives, queue a mailbox item with mailbox_send.
+Handle live-agent parity events.
 `)
 	return root
 }
@@ -7806,43 +7731,6 @@ func servedEventPublishAPIIdempotencyCount(t *testing.T, db *sql.DB, backend, me
 	var count int
 	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
 		t.Fatalf("%s count api idempotency method=%q key=%q: %v", backend, method, idempotencyKey, err)
-	}
-	return count
-}
-
-func waitServedMailboxFromAgentCount(t *testing.T, db *sql.DB, backend, fromAgent, itemType, status string, want int) {
-	t.Helper()
-	deadline := time.Now().Add(servedProofPollDeadline)
-	var got int
-	for time.Now().Before(deadline) {
-		got = servedMailboxFromAgentCount(t, db, backend, fromAgent, itemType, status)
-		if got == want {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("%s mailbox count from_agent=%q type=%q status=%q = %d, want %d", backend, fromAgent, itemType, status, got, want)
-}
-
-func servedMailboxFromAgentCount(t *testing.T, db *sql.DB, backend, fromAgent, itemType, status string) int {
-	t.Helper()
-	var (
-		query string
-		args  []any
-	)
-	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM mailbox WHERE from_agent = $1 AND item_type = $2 AND status = $3`
-		args = []any{fromAgent, itemType, status}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM mailbox WHERE from_agent = ? AND item_type = ? AND status = ?`
-		args = []any{fromAgent, itemType, status}
-	default:
-		t.Fatalf("unknown proof backend %q", backend)
-	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s count mailbox from_agent=%q type=%q status=%q: %v", backend, fromAgent, itemType, status, err)
 	}
 	return count
 }

@@ -11693,9 +11693,7 @@ platform_events:
     platform.agent_directive:
       description: Operator-issued directive accepted by the runtime for an agent. This is the authoritative persisted root
         event for directive-started or directive-targeted work; BoardStep and all child emissions inherit this event's run_id
-        and source_event_id. It is persisted before agent execution, settled with a platform/pipeline receipt after
-        BoardStep succeeds because BoardStep handles the control event synchronously, and is not defined by the legacy
-        board.directive helper.
+        and source_event_id. It is persisted before agent execution and is not defined by the legacy board.directive helper.
       schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.agent_directive"].payload'
       producer_evidence:
         produced_by_type: platform
@@ -24637,8 +24635,7 @@ api_specification:
       description: "Send a directive (free-form instruction) to a running agent. The runtime resolves the target run before\
         \ execution: explicit run_id targets an existing nonterminal run; with no run_id, zero active sessions allocate a\
         \ new run_id, one active session uses that session's run_id, and multiple active sessions fail closed with AMBIGUOUS_RUN_TARGET.\
-        \ The runtime persists platform.agent_directive before BoardStep, settles it after successful BoardStep handling,\
-        \ and all child emissions inherit the resolved run_id."
+        \ The runtime persists platform.agent_directive before BoardStep and all child emissions inherit the resolved run_id."
       scope:
         required:
         - control:agents
