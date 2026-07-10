@@ -380,7 +380,7 @@ func activityRequestEmitIntent(intent runtimeengine.ActivityIntent) (runtimeengi
 		},
 		time.Now().UTC(),
 	)
-	return runtimeengine.EmitIntent{Event: evt}, nil
+	return runtimeengine.EmitIntent{Event: evt, Context: intent.Context}, nil
 }
 
 func activityRequestEventID(intent runtimeengine.ActivityIntent) string {
@@ -494,6 +494,7 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
 	}
 	intent := runtimeengine.ActivityIntent{
+		Context:          evt.DeliveryContext(),
 		ActivityID:       payload.ActivityID,
 		Tool:             payload.Tool,
 		Input:            cloneStringAnyMap(payload.Input),
@@ -1209,6 +1210,7 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 }
 
 func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any) error {
+	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -1274,6 +1276,9 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 		return fmt.Errorf("activity attempt %s has no terminal journal result", rec.RequestEventID)
 	}
 	intent.Attempt = rec.Attempt
+	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
+		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
+	}
 	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload)
 }
 
@@ -1296,6 +1301,7 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 		SuccessEvent:    intent.SuccessEvent,
 		FailureEvent:    intent.FailureEvent,
 		InputHash:       inputHash,
+		ReplyContextID:  intent.Context.ReplyContextID(),
 	}
 }
 

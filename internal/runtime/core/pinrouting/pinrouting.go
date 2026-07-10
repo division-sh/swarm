@@ -28,6 +28,8 @@ const (
 	FailureTargetSenderEmptySourceRuntime TargetFailure = "target_sender_empty_source_runtime"
 	FailureProducerTargetCommonPath       TargetFailure = "producer_target_common_path_forbidden"
 	FailureProducerBroadcastCommonPath    TargetFailure = "producer_broadcast_common_path_forbidden"
+	FailureReplyAlreadyTerminal           TargetFailure = "platform.reply_already_terminal"
+	FailureStaleArrival                   TargetFailure = "platform.stale_arrival"
 )
 
 type AuthoredTarget struct {

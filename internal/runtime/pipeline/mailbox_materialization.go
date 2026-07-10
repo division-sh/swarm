@@ -16,16 +16,17 @@ import (
 )
 
 type MailboxWriteMaterialization struct {
-	ItemID        string
-	EntityID      string
-	FlowInstance  string
-	Scope         string
-	ItemType      string
-	SourceEventID string
-	FromAgent     string
-	Severity      string
-	Summary       string
-	Payload       json.RawMessage
+	ItemID         string
+	EntityID       string
+	FlowInstance   string
+	Scope          string
+	ItemType       string
+	SourceEventID  string
+	FromAgent      string
+	Severity       string
+	Summary        string
+	Payload        json.RawMessage
+	ReplyContextID string
 }
 
 type MailboxWriteMaterializationStore interface {
@@ -109,16 +110,17 @@ func (pc *PipelineCoordinator) materializeMailboxItem(ctx context.Context, actio
 	}
 	itemID := deterministicMailboxItemID(sourceEventID, nodeID)
 	record := MailboxWriteMaterialization{
-		ItemID:        itemID,
-		EntityID:      strings.TrimSpace(entityID),
-		FlowInstance:  flowInstance,
-		Scope:         scope,
-		ItemType:      normalizedType,
-		SourceEventID: sourceEventID,
-		FromAgent:     "system_node:" + nodeID,
-		Severity:      severity,
-		Summary:       summary,
-		Payload:       json.RawMessage(payloadJSON),
+		ItemID:         itemID,
+		EntityID:       strings.TrimSpace(entityID),
+		FlowInstance:   flowInstance,
+		Scope:          scope,
+		ItemType:       normalizedType,
+		SourceEventID:  sourceEventID,
+		FromAgent:      "system_node:" + nodeID,
+		Severity:       severity,
+		Summary:        summary,
+		Payload:        json.RawMessage(payloadJSON),
+		ReplyContextID: events.DeliveryContextFromContext(ctx).ReplyContextID(),
 	}
 	if err := pc.mailboxMaterializer.MaterializeMailboxWrite(ctx, record); err != nil {
 		return fmt.Errorf("mailbox_write materialize: %w", err)

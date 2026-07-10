@@ -55,6 +55,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
+	if req.Context.Empty() {
+		req.Context = events.DeliveryContextFromContext(ctx)
+	}
+	ctx = events.WithDeliveryContext(ctx, req.Context)
 	if req.ContractBundle == nil {
 		return fmt.Errorf("contract bundle is required")
 	}
@@ -157,9 +161,10 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 		return fmt.Errorf("event bus does not support derived flow-instance routing for %s", flowPath)
 	}
 	if strings.TrimSpace(autoEmitName) != "" {
+		autoEmitCtx := events.WithDeliveryContext(context.Background(), req.Context)
 		publishAutoEmit := func() {
-			if err := am.bus.Publish(context.Background(), autoEmitEvent); err != nil {
-				am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+			if err := am.bus.Publish(autoEmitCtx, autoEmitEvent); err != nil {
+				am.bus.LogRuntime(autoEmitCtx, runtimepipeline.RuntimeLogEntry{
 					Level:     "warn",
 					Message:   "Auto-emitting the flow activation event failed",
 					Component: "flow_activation",

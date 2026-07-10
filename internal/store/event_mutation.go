@@ -48,9 +48,22 @@ func (m *sqlEventMutation) operationContext(ctx context.Context) context.Context
 	return ctx
 }
 
+func (m *sqlEventMutation) validatePipelineTransaction(ctx context.Context) error {
+	if m == nil || m.tx == nil {
+		return fmt.Errorf("event mutation transaction is required")
+	}
+	if tx, ok := runtimepipeline.PipelineSQLTxFromContext(ctx); ok && tx != m.tx {
+		return fmt.Errorf("event mutation belongs to a different pipeline transaction")
+	}
+	return nil
+}
+
 func (m *sqlEventMutation) AppendEvent(ctx context.Context, evt events.Event) error {
 	if m == nil || m.txStore == nil {
 		return fmt.Errorf("event mutation store is required")
+	}
+	if err := m.validatePipelineTransaction(ctx); err != nil {
+		return err
 	}
 	return m.txStore.AppendEventTx(m.operationContext(ctx), m.tx, evt)
 }

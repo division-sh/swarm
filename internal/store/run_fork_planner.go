@@ -109,6 +109,7 @@ type runForkAdmissionEvidence struct {
 	ActiveSession           bool
 	ActiveConversationAudit bool
 	ActiveTurn              bool
+	OpenReplyContext        bool
 }
 
 type runForkSourceFacts struct {
@@ -139,6 +140,7 @@ func RequireCanonicalRunForkPlannerCapabilities(caps StoreSchemaCapabilities, ca
 		"event_receipts":   {"event_id", "subscriber_type", "subscriber_id", "outcome", "reason_code", "processed_at"},
 		"dead_letters":     {"original_event_id", "handler_node", "created_at"},
 		"entity_mutations": {"mutation_id", "run_id", "entity_id", "field", "new_value", "caused_by_event", "created_at"},
+		"reply_contexts":   {"reply_context_id", "run_id", "request_event_id", "state"},
 	}
 	for tableName, columns := range required {
 		if catalog.hasColumns(tableName, columns...) {
@@ -632,6 +634,10 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 			return runForkAdmissionEvidence{}, err
 		}
 	}
+	openReplyContext, err := s.hasRunForkOpenReplyContext(ctx, runID, cursor)
+	if err != nil {
+		return runForkAdmissionEvidence{}, err
+	}
 	return runForkAdmissionEvidence{
 		Pending:                 pending,
 		RelevantTimer:           relevantTimer,
@@ -639,7 +645,25 @@ func (s *PostgresStore) loadRunForkAdmissionEvidence(ctx context.Context, catalo
 		ActiveSession:           activeSession,
 		ActiveConversationAudit: activeConversationAudit,
 		ActiveTurn:              activeTurn,
+		OpenReplyContext:        openReplyContext,
 	}, nil
+}
+
+func (s *PostgresStore) hasRunForkOpenReplyContext(ctx context.Context, runID string, cursor runForkEventCursor) (bool, error) {
+	var exists bool
+	if err := s.DB.QueryRowContext(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM reply_contexts rc
+			JOIN events request_event ON request_event.event_id = rc.request_event_id
+			WHERE rc.run_id = $1::uuid
+			  AND rc.state = 'open'
+			  AND (request_event.created_at, request_event.event_id) <= ($2::timestamptz, $3::uuid)
+		)
+	`, runID, cursor.CreatedAt, cursor.EventID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check fork open reply contexts: %w", err)
+	}
+	return exists, nil
 }
 
 func (s *PostgresStore) loadRunForkSourceFacts(ctx context.Context, runID string, cursor runForkEventCursor, entities []RunForkEntityState) (runForkSourceFacts, error) {

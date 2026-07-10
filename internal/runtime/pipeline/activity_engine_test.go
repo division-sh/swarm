@@ -122,11 +122,12 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent(inputURL)
+	intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:activity-round-trip"}}
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, err := pc.handleEventResult(context.Background(), request.Event)
+	handled, err := pc.handleEventResult(context.Background(), request.Event.WithDeliveryContext(intent.Context))
 	if err != nil {
 		t.Fatalf("handleEventResult: %v", err)
 	}
@@ -138,6 +139,9 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	}
 	if len(bus.publishes) != 1 {
 		t.Fatalf("published events = %d, want 1", len(bus.publishes))
+	}
+	if len(bus.publishContexts) != 1 || bus.publishContexts[0].ReplyContextID() != intent.Context.ReplyContextID() {
+		t.Fatalf("published activity result contexts = %#v, want %q", bus.publishContexts, intent.Context.ReplyContextID())
 	}
 	evt := bus.publishes[0]
 	if got := evt.Type(); got != events.EventType("research.scanner_source_scrape.succeeded") {
@@ -1091,6 +1095,7 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			result_payload TEXT,
 			error TEXT,
 			input_hash TEXT NOT NULL,
+			reply_context_id TEXT,
 			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			completed_at TEXT,
 			updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

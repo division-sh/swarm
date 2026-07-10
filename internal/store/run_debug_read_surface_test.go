@@ -407,6 +407,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()
 	entityID := uuid.NewString()
+	replyContextID := "reply-v1:trace-context"
 	now := time.Unix(1700000400, 0).UTC()
 
 	if _, err := db.ExecContext(ctx, `
@@ -441,13 +442,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-			retry_count, reason_code, last_error, active_session_id, started_at, created_at
+			retry_count, reason_code, last_error, active_session_id, delivery_context, started_at, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-source', 'failed',
-			2, 'handler_error', 'trace boom', $4::uuid, $5, $6
+			2, 'handler_error', 'trace boom', $4::uuid, jsonb_build_object('reply', jsonb_build_object('id', $7::text)), $5, $6
 		)
-	`, deliveryID, runID, eventID, sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond)); err != nil {
+	`, deliveryID, runID, eventID, sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -483,6 +484,9 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 	if got.DeliveryReasonCode != "handler_error" || got.DeliveryLastError != "trace boom" || got.DeliveryRetryCount != 2 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
 		t.Fatalf("delivery failure trace evidence = %#v", got)
+	}
+	if got.ReplyContextID != replyContextID {
+		t.Fatalf("delivery reply context = %q, want %q", got.ReplyContextID, replyContextID)
 	}
 	if got.SessionID != sessionID || got.SessionKind != "live_session" || got.SessionRuntimeMode != "session" {
 		t.Fatalf("session trace = %#v", got)

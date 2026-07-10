@@ -188,7 +188,8 @@ func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts MailboxV1Li
 			COALESCE(m.decided_by, ''),
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
-			COALESCE(e.run_id::text, '')
+			COALESCE(e.run_id::text, ''),
+			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
 		`+where+`
@@ -381,6 +382,10 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 	outcome.Result.DownstreamEventName = strings.TrimSpace(input.DecisionEventType)
 	outcome.Result.DownstreamSubscribers = &subscribers
 	outcome.Result.DownstreamSubscriberSource = subscriberSource
+	deliveryContext := replyDeliveryContext(row.ReplyContextID)
+	if !deliveryContext.Empty() {
+		evt = evt.WithDeliveryContext(deliveryContext)
+	}
 	outcome.DecisionEvent = &evt
 
 	var res sql.Result
@@ -424,13 +429,17 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 		}
 	}
 	if outcome.DecisionEvent != nil {
+		publishCtx := txctx
+		if !deliveryContext.Empty() {
+			publishCtx = events.WithDeliveryContext(txctx, deliveryContext)
+		}
 		publish := input.DecisionEventPublish
 		if publish == nil {
 			publish = func(ctx context.Context, evt events.Event) error {
 				return s.appendMailboxV1DecisionEventTx(ctx, tx, evt)
 			}
 		}
-		if err := publish(txctx, *outcome.DecisionEvent); err != nil {
+		if err := publish(publishCtx, *outcome.DecisionEvent); err != nil {
 			return MailboxV1DecisionOutcome{}, fmt.Errorf("publish v1 mailbox decision event: %w", err)
 		}
 	}
@@ -452,6 +461,14 @@ func (s *PostgresStore) DecideV1MailboxItem(ctx context.Context, input MailboxV1
 	committed = true
 	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	return outcome, nil
+}
+
+func replyDeliveryContext(replyContextID string) events.DeliveryContext {
+	replyContextID = strings.TrimSpace(replyContextID)
+	if replyContextID == "" {
+		return events.DeliveryContext{}
+	}
+	return events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}.Normalized()
 }
 
 func prepareMailboxV1IdempotencyRequest(input MailboxV1DecisionRequest) (APIIdempotencyRequest, bool, error) {
@@ -606,24 +623,25 @@ func mailboxV1ListWhere(opts MailboxV1ListOptions, cursor mailboxV1Cursor) (stri
 }
 
 type mailboxV1Row struct {
-	ID            string
-	Type          string
-	Status        string
-	Decision      string
-	Priority      string
-	SourceEventID string
-	FlowInstance  string
-	EntityID      string
-	Payload       map[string]any
-	RawPayload    json.RawMessage
-	ExpiresAt     sql.NullTime
-	DeferredUntil sql.NullTime
-	CreatedAtTime time.Time
-	DecidedAt     sql.NullTime
-	DecidedBy     string
-	DecisionNotes string
-	FromAgent     string
-	RunID         string
+	ID             string
+	Type           string
+	Status         string
+	Decision       string
+	Priority       string
+	SourceEventID  string
+	FlowInstance   string
+	EntityID       string
+	Payload        map[string]any
+	RawPayload     json.RawMessage
+	ExpiresAt      sql.NullTime
+	DeferredUntil  sql.NullTime
+	CreatedAtTime  time.Time
+	DecidedAt      sql.NullTime
+	DecidedBy      string
+	DecisionNotes  string
+	FromAgent      string
+	RunID          string
+	ReplyContextID string
 }
 
 type mailboxV1RowQueryer interface {
@@ -661,7 +679,8 @@ func (s *PostgresStore) loadMailboxV1RowTx(ctx context.Context, tx *sql.Tx, id s
 			COALESCE(m.decided_by, ''),
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
-			COALESCE(e.run_id::text, '')
+			COALESCE(e.run_id::text, ''),
+			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
 		WHERE m.item_id = $1::uuid
@@ -703,6 +722,7 @@ func scanMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 			&row.DecisionNotes,
 			&row.FromAgent,
 			&row.RunID,
+			&row.ReplyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan v1 mailbox item: %w", err)
 		}

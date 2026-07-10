@@ -317,6 +317,20 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, exec d
 				  )
 			`,
 		},
+		{
+			name: "mailbox.reply_context_id",
+			query: `
+				UPDATE mailbox preserved
+				SET reply_context_id = NULL
+				WHERE preserved.reply_context_id IS NOT NULL
+				  AND EXISTS (
+					SELECT 1
+					FROM reply_contexts cleanup
+					WHERE cleanup.reply_context_id = preserved.reply_context_id
+					  AND cleanup.run_id = ANY($1::uuid[])
+				  )
+			`,
+		},
 	}
 	for _, stmt := range statements {
 		if _, err := exec.ExecContext(ctx, stmt.query, pq.Array(runIDs)); err != nil {
@@ -428,7 +442,7 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 			return `SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
 		}
 		return `DELETE FROM event_deliveries d WHERE d.run_id = ANY($1::uuid[]) OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = d.event_id AND e.run_id = ANY($1::uuid[]))`, args, nil
-	case "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "events", "runs":
+	case "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "entity_mutations", "entity_state", "run_control_state", "reply_contexts", "events", "runs":
 		if mode == "count" {
 			return fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE run_id = ANY($1::uuid[])`, quoteIdent(table)), args, nil
 		}

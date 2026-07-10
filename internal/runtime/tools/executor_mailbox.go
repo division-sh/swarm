@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
@@ -69,15 +70,16 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	}
 
 	id, err := store.InsertMailboxItem(ctx, MailboxItem{
-		EventID:   in.EventID,
-		EntityID:  in.EntityID,
-		FromAgent: actor.ID,
-		Type:      in.Type,
-		Priority:  in.Priority,
-		Status:    "pending",
-		Context:   ctxJSON,
-		Summary:   in.Summary,
-		TimeoutAt: timeout,
+		EventID:        in.EventID,
+		EntityID:       in.EntityID,
+		FromAgent:      actor.ID,
+		Type:           in.Type,
+		Priority:       in.Priority,
+		Status:         "pending",
+		Context:        ctxJSON,
+		Summary:        in.Summary,
+		TimeoutAt:      timeout,
+		ReplyContextID: events.DeliveryContextFromContext(ctx).ReplyContextID(),
 	})
 	if err != nil {
 		return nil, err

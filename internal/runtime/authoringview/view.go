@@ -205,6 +205,7 @@ type ConnectRoutePlanView struct {
 	ResolutionKind            string                  `json:"resolution_kind"`
 	Address                   *ConnectAddressView     `json:"address,omitempty"`
 	InstanceKey               *ConnectInstanceKeyView `json:"instance_key,omitempty"`
+	Reply                     *ConnectReplyView       `json:"reply,omitempty"`
 	Map                       []ConnectMapEntryView   `json:"map,omitempty"`
 	RequiresRuntimeResolution bool                    `json:"requires_runtime_resolution"`
 	SourceFile                string                  `json:"source_file,omitempty"`
@@ -235,6 +236,17 @@ type ConnectInstanceKeyView struct {
 	Mappings   []ConnectInstanceKeyMappingView `json:"mappings,omitempty"`
 	OnMissing  string                          `json:"on_missing,omitempty"`
 	OnConflict string                          `json:"on_conflict,omitempty"`
+}
+
+type ConnectReplyView struct {
+	Role              string `json:"role"`
+	RequesterFlowID   string `json:"requester_flow_id"`
+	RequestOutputPin  string `json:"request_output_pin"`
+	ReplyInputPin     string `json:"reply_input_pin"`
+	ProviderFlowID    string `json:"provider_flow_id"`
+	ProviderInputPin  string `json:"provider_input_pin"`
+	ProviderOutputPin string `json:"provider_output_pin"`
+	CorrelationKey    string `json:"correlation_key,omitempty"`
 }
 
 type ConnectInstanceKeyMappingView struct {
@@ -981,6 +993,18 @@ func buildConnectRoutePlans(bundle *runtimecontracts.WorkflowContractBundle, pla
 		}
 		if plan.InstanceKey != nil {
 			item.InstanceKey = connectInstanceKeyView(plan.InstanceKey)
+		}
+		if plan.ReplyResolution != nil {
+			item.Reply = &ConnectReplyView{
+				Role:              strings.TrimSpace(plan.ReplyResolution.Role),
+				RequesterFlowID:   strings.TrimSpace(plan.ReplyResolution.RequesterFlowID),
+				RequestOutputPin:  strings.TrimSpace(plan.ReplyResolution.RequestOutputPin),
+				ReplyInputPin:     strings.TrimSpace(plan.ReplyResolution.ReplyInputPin),
+				ProviderFlowID:    strings.TrimSpace(plan.ReplyResolution.ProviderFlowID),
+				ProviderInputPin:  strings.TrimSpace(plan.ReplyResolution.ProviderInputPin),
+				ProviderOutputPin: strings.TrimSpace(plan.ReplyResolution.ProviderOutputPin),
+				CorrelationKey:    strings.TrimSpace(plan.ReplyResolution.CorrelationKey),
+			}
 		}
 		out = append(out, item)
 	}

@@ -230,6 +230,28 @@ func (s *PostgresStore) ensureSchemaCompatibilityColumns(ctx context.Context) er
 			return fmt.Errorf("ensure event_deliveries.delivery_target_route column: %w", err)
 		}
 	}
+	if catalog.hasTable("event_deliveries") && !catalog.hasColumns("event_deliveries", "delivery_context") {
+		if _, err := s.DB.ExecContext(ctx, `ALTER TABLE event_deliveries ADD COLUMN IF NOT EXISTS delivery_context JSONB NOT NULL DEFAULT '{}'::jsonb`); err != nil {
+			return fmt.Errorf("ensure event_deliveries.delivery_context column: %w", err)
+		}
+	}
+	if catalog.hasTable("reply_contexts") {
+		for _, column := range []struct {
+			table string
+			name  string
+		}{
+			{table: "activity_attempts", name: "reply_context_id"},
+			{table: "timers", name: "reply_context_id"},
+			{table: "mailbox", name: "reply_context_id"},
+		} {
+			if !catalog.hasTable(column.table) || catalog.hasColumns(column.table, column.name) {
+				continue
+			}
+			if _, err := s.DB.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS %s TEXT REFERENCES reply_contexts(reply_context_id)`, column.table, column.name)); err != nil {
+				return fmt.Errorf("ensure %s.%s column: %w", column.table, column.name, err)
+			}
+		}
+	}
 	if catalog.hasTable("event_receipts") && catalog.hasColumns("event_receipts", "event_id", "subscriber_type", "subscriber_id") {
 		if err := s.ensureEventReceiptsTypedSubscriberIdentity(ctx); err != nil {
 			return err

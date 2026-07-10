@@ -3,6 +3,8 @@ package pipeline
 import (
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/events"
 )
 
 func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
@@ -46,4 +48,31 @@ func TestSchedulerKeysSchedulesByRunID(t *testing.T) {
 		t.Fatalf("run B schedule was cancelled by run A exact cancel")
 	}
 	s.Stop()
+}
+
+func TestSchedulerOneShotPreservesReplyContextToFire(t *testing.T) {
+	fired := make(chan Schedule, 1)
+	scheduler := NewScheduler(func(schedule Schedule) {
+		fired <- schedule
+	})
+	t.Cleanup(scheduler.Stop)
+	want := "reply-v1:one-shot-fire"
+	if err := scheduler.Register(Schedule{
+		Context:   events.DeliveryContext{Reply: &events.ReplyContextRef{ID: want}},
+		AgentID:   "provider-agent",
+		EventType: "provider.resume",
+		Mode:      "once",
+		At:        time.Now().Add(10 * time.Millisecond),
+		TaskID:    "reply-resume",
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	select {
+	case got := <-fired:
+		if got.Context.ReplyContextID() != want {
+			t.Fatalf("fired reply context = %q, want %q", got.Context.ReplyContextID(), want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("one-shot schedule did not fire")
+	}
 }

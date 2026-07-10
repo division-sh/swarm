@@ -158,6 +158,7 @@ type RoutePlan struct {
 	ContradictionReason  string
 	BlockedByCycle       bool
 	CycleEscalation      *events.Event
+	ReplyContextConsumed bool
 }
 
 type RoutePlanLiveRecipient struct {
@@ -171,6 +172,7 @@ type RoutePlanDeliveryIntent struct {
 	SubscriberType string
 	SubscriberID   string
 	Target         events.RouteIdentity
+	Context        events.DeliveryContext
 	Producer       routeIntentProducer
 	Persist        bool
 }
@@ -272,6 +274,20 @@ func (p *RoutePlan) AddDeliveryIntents(intents ...RoutePlanDeliveryIntent) {
 	p.DeliveryIntents = normalizeRoutePlanDeliveryIntents(append(p.DeliveryIntents, intents...))
 }
 
+func (p RoutePlan) WithDefaultDeliveryContext(deliveryContext events.DeliveryContext) RoutePlan {
+	p = p.Normalized()
+	deliveryContext = deliveryContext.Normalized()
+	if deliveryContext.Empty() || p.ReplyContextConsumed {
+		return p
+	}
+	for i := range p.DeliveryIntents {
+		if p.DeliveryIntents[i].Context.Empty() {
+			p.DeliveryIntents[i].Context = deliveryContext
+		}
+	}
+	return p.Normalized()
+}
+
 func (p RoutePlan) RecipientIDs() []string {
 	p = p.Normalized()
 	out := make([]string, 0, len(p.LiveRecipients))
@@ -322,6 +338,7 @@ func (p RoutePlan) DeliveryRoutes() []events.DeliveryRoute {
 			SubscriberType: intent.SubscriberType,
 			SubscriberID:   intent.SubscriberID,
 			Target:         intent.Target,
+			Context:        intent.Context,
 		})
 	}
 	return events.NormalizeDeliveryRoutes(out)
@@ -402,6 +419,7 @@ func routePlanDeliveryIntentsFromRoutes(routes []events.DeliveryRoute, producer 
 			SubscriberType: route.SubscriberType,
 			SubscriberID:   route.SubscriberID,
 			Target:         route.Target,
+			Context:        route.Context,
 			Producer:       producer,
 			Persist:        true,
 		})
@@ -481,11 +499,12 @@ func normalizeRoutePlanDeliveryIntents(in []RoutePlanDeliveryIntent) []RoutePlan
 		intent.SubscriberType = strings.TrimSpace(intent.SubscriberType)
 		intent.SubscriberID = strings.TrimSpace(intent.SubscriberID)
 		intent.Target = intent.Target.Normalized()
+		intent.Context = intent.Context.Normalized()
 		intent.Producer = intent.Producer.Normalized()
 		if intent.SubscriberType == "" || intent.SubscriberID == "" {
 			continue
 		}
-		key := strings.Join([]string{intent.SubscriberType, intent.SubscriberID, intent.Target.FlowID, intent.Target.FlowInstance, intent.Target.EntityID}, "\x00")
+		key := strings.Join([]string{intent.SubscriberType, intent.SubscriberID, intent.Target.FlowID, intent.Target.FlowInstance, intent.Target.EntityID, intent.Context.ReplyContextID()}, "\x00")
 		if idx, ok := indexByKey[key]; ok {
 			out[idx].Persist = out[idx].Persist || intent.Persist
 			if out[idx].Producer.Empty() {

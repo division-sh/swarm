@@ -57,7 +57,8 @@ func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts Mailbo
 			COALESCE(m.decided_by, ''),
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
-			COALESCE(e.run_id, '')
+			COALESCE(e.run_id, ''),
+			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
 		`+where+`
@@ -231,6 +232,10 @@ func (s *SQLiteRuntimeStore) DecideV1MailboxItem(ctx context.Context, input Mail
 		outcome.Result.DownstreamEventName = strings.TrimSpace(input.DecisionEventType)
 		outcome.Result.DownstreamSubscribers = &subscribers
 		outcome.Result.DownstreamSubscriberSource = subscriberSource
+		deliveryContext := replyDeliveryContext(row.ReplyContextID)
+		if !deliveryContext.Empty() {
+			evt = evt.WithDeliveryContext(deliveryContext)
+		}
 		outcome.DecisionEvent = &evt
 
 		var res sql.Result
@@ -274,13 +279,17 @@ func (s *SQLiteRuntimeStore) DecideV1MailboxItem(ctx context.Context, input Mail
 			}
 		}
 		if outcome.DecisionEvent != nil {
+			publishCtx := txctx
+			if !deliveryContext.Empty() {
+				publishCtx = events.WithDeliveryContext(txctx, deliveryContext)
+			}
 			publish := input.DecisionEventPublish
 			if publish == nil {
 				publish = func(ctx context.Context, evt events.Event) error {
 					return s.appendSQLiteMailboxV1DecisionEventTx(ctx, tx, evt)
 				}
 			}
-			if err := publish(txctx, *outcome.DecisionEvent); err != nil {
+			if err := publish(publishCtx, *outcome.DecisionEvent); err != nil {
 				return fmt.Errorf("publish sqlite v1 mailbox decision event: %w", err)
 			}
 		}
@@ -369,7 +378,8 @@ func (s *SQLiteRuntimeStore) loadSQLiteMailboxV1RowTx(ctx context.Context, tx *s
 			COALESCE(m.decided_by, ''),
 			COALESCE(m.decision_notes, ''),
 			COALESCE(m.from_agent, ''),
-			COALESCE(e.run_id, '')
+			COALESCE(e.run_id, ''),
+			COALESCE(m.reply_context_id, '')
 		FROM mailbox m
 		LEFT JOIN events e ON e.event_id = m.source_event_id
 		WHERE m.item_id = ?
@@ -415,6 +425,7 @@ func scanSQLiteMailboxV1Rows(rows *sql.Rows) ([]mailboxV1Row, error) {
 			&row.DecisionNotes,
 			&row.FromAgent,
 			&row.RunID,
+			&row.ReplyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan sqlite v1 mailbox item: %w", err)
 		}

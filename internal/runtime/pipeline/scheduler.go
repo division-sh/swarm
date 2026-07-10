@@ -7,10 +7,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/robfig/cron/v3"
 )
 
 type Schedule struct {
+	Context      events.DeliveryContext
 	RunID        string
 	AgentID      string
 	EventType    string
@@ -32,6 +34,13 @@ func (s *Schedule) NormalizeRunID() {
 		return
 	}
 	s.RunID = s.EffectiveRunID()
+}
+
+func (s *Schedule) NormalizeDeliveryContext() {
+	if s == nil {
+		return
+	}
+	s.Context = s.Context.Normalized()
 }
 
 func (s Schedule) EffectiveEntityID() string {
@@ -89,6 +98,7 @@ func (s *Scheduler) Register(sc Schedule) error {
 		return errors.New("agent_id and event_type are required")
 	}
 	sc.NormalizeRunID()
+	sc.NormalizeDeliveryContext()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
 	if sc.Mode == "" {

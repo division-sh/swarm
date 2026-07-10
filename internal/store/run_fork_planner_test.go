@@ -59,6 +59,52 @@ func TestRunForkPlanner_ResolvesEventAndTimestampForkPoints(t *testing.T) {
 	}
 }
 
+func TestRunForkPlanner_FailsClosedForOpenReplyContextAtForkPoint(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	pg := &PostgresStore{DB: db}
+	ctx := context.Background()
+	runID := uuid.NewString()
+	requestEventID := uuid.NewString()
+	at := time.Unix(1700000050, 0).UTC()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO runs (run_id, status, started_at)
+		VALUES ($1::uuid, 'running', $2)
+	`, runID, at.Add(-time.Minute)); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+		VALUES ($1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'test', 'platform', $3)
+	`, runID, requestEventID, at); err != nil {
+		t.Fatalf("seed request event: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO reply_contexts (
+			reply_context_id, run_id, request_event_id, requester_flow_id,
+			request_output_pin, reply_input_pin, provider_flow_id, provider_input_pin,
+			provider_output_pin, origin_route, request_correlation_id, state
+		)
+		VALUES (
+			'reply-v1:test-open', $1::uuid, $2::uuid, 'requester',
+			'provider_requested', 'provider_replied', 'provider', 'requested',
+			'replied', '{"flow_instance":"requester"}'::jsonb, $2, 'open'
+		)
+	`, runID, requestEventID); err != nil {
+		t.Fatalf("seed reply context: %v", err)
+	}
+
+	plan, err := pg.PlanRunFork(ctx, RunForkPlanRequest{SourceRunID: runID, At: at.Format(time.RFC3339Nano)})
+	if err != nil {
+		t.Fatalf("PlanRunFork: %v", err)
+	}
+	if plan.ExecutionReady {
+		t.Fatalf("open reply context plan unexpectedly execution-ready: %#v", plan)
+	}
+	if !runForkTestHasPlanBlocker(plan, RunForkBlockerOpenReplyContextUnsupported) {
+		t.Fatalf("open reply context blocker missing: %#v", plan.UnsupportedBlockers)
+	}
+}
+
 func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}

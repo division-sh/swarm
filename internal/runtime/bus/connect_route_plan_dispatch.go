@@ -3,8 +3,10 @@ package bus
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -12,6 +14,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -24,20 +27,26 @@ type connectRoutePlanResolver struct {
 	issues          []runtimepinrouting.ConnectRoutePlanIssue
 	loadDescriptors connectRoutePlanDescriptorLoader
 	lifecycle       templateInstanceLifecycleOwner
+	replyStore      runtimereplycontext.Store
 }
 
 type connectRoutePlanDispatch struct {
-	Matched          bool
-	Failure          runtimepinrouting.TargetFailure
-	LiveRecipients   []RoutePlanLiveRecipient
-	DeliveryIntents  []RoutePlanDeliveryIntent
-	RoutedRecipients []Subscriber
-	ExtraDetail      map[string]any
+	Matched              bool
+	Failure              runtimepinrouting.TargetFailure
+	LiveRecipients       []RoutePlanLiveRecipient
+	DeliveryIntents      []RoutePlanDeliveryIntent
+	RoutedRecipients     []Subscriber
+	ExtraDetail          map[string]any
+	ReplyContextConsumed bool
 }
 
-func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator) connectRoutePlanResolver {
+func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTable, loadDescriptors connectRoutePlanDescriptorLoader, activator runtimepipeline.FlowInstanceActivator, stores ...any) connectRoutePlanResolver {
+	var replyStore runtimereplycontext.Store
+	if len(stores) > 0 {
+		replyStore, _ = stores[0].(runtimereplycontext.Store)
+	}
 	if source == nil {
-		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors}
+		return connectRoutePlanResolver{routeTable: routeTable, loadDescriptors: loadDescriptors, replyStore: replyStore}
 	}
 	plans, issues := runtimepinrouting.LowerCompositionConnectRoutePlans(source)
 	return connectRoutePlanResolver{
@@ -47,6 +56,7 @@ func newConnectRoutePlanResolver(source semanticview.Source, routeTable *RouteTa
 		issues:          append([]runtimepinrouting.ConnectRoutePlanIssue(nil), issues...),
 		loadDescriptors: loadDescriptors,
 		lifecycle:       newTemplateInstanceLifecycleOwner(source, routeTable, loadDescriptors, activator),
+		replyStore:      replyStore,
 	}
 }
 
@@ -84,6 +94,24 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 		},
 	}
 	for _, plan := range matched {
+		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse {
+			routes, subscribers, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan)
+			if err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
+			if failure != "" {
+				out.Failure = failure
+				for key, value := range detail {
+					out.ExtraDetail[key] = value
+				}
+				return out, nil
+			}
+			out.ReplyContextConsumed = true
+			out.DeliveryIntents = append(out.DeliveryIntents, routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerConnectRoutePlan)...)
+			out.LiveRecipients = append(out.LiveRecipients, connectRoutePlanLiveRecipients(routes)...)
+			out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
+			continue
+		}
 		materialized, decision, err := r.materializeConnectRoutePlan(ctx, evt, plan, values, descriptors)
 		if err != nil {
 			return connectRoutePlanDispatch{}, err
@@ -106,6 +134,12 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			return connectRoutePlanDispatch{}, err
 		}
 		routes, subscribers := r.deliveryRoutesForMaterialization(plan, materialized)
+		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleRequest {
+			routes, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
+			if err != nil {
+				return connectRoutePlanDispatch{}, err
+			}
+		}
 		if cleanupPreview != nil {
 			cleanupPreview()
 		}
@@ -134,6 +168,136 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	out.DeliveryIntents = normalizeRoutePlanDeliveryIntents(out.DeliveryIntents)
 	out.RoutedRecipients = dedupeSubscribers(out.RoutedRecipients)
 	return out, nil
+}
+
+func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, routes []events.DeliveryRoute, values map[string]string) ([]events.DeliveryRoute, error) {
+	reply := plan.ReplyResolution
+	if reply == nil || reply.Role != runtimepinrouting.ConnectReplyRoleRequest {
+		return routes, nil
+	}
+	origin := evt.SourceRoute().Normalized()
+	if origin.Empty() {
+		origin = events.RouteIdentity{
+			FlowID:       strings.TrimSpace(reply.RequesterFlowID),
+			FlowInstance: strings.Trim(evt.FlowInstance(), "/"),
+			EntityID:     strings.TrimSpace(evt.EntityID()),
+		}.Normalized()
+	}
+	if origin.Empty() {
+		return nil, fmt.Errorf("reply request %s.%s has no concrete origin route", reply.RequesterFlowID, reply.RequestOutputPin)
+	}
+	correlation := strings.TrimSpace(evt.ID())
+	if key := strings.TrimSpace(reply.CorrelationKey); key != "" {
+		correlation = strings.TrimSpace(values["payload."+key])
+		if correlation == "" {
+			return nil, fmt.Errorf("reply request %s.%s is missing declared carried correlation key %s", reply.RequesterFlowID, reply.RequestOutputPin, key)
+		}
+	}
+	now := evt.CreatedAt()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	record := runtimereplycontext.Record{
+		RunID:                evt.RunID(),
+		RequestEventID:       evt.ID(),
+		RequesterFlowID:      reply.RequesterFlowID,
+		RequestOutputPin:     reply.RequestOutputPin,
+		ReplyInputPin:        reply.ReplyInputPin,
+		ProviderFlowID:       reply.ProviderFlowID,
+		ProviderInputPin:     reply.ProviderInputPin,
+		ProviderOutputPin:    reply.ProviderOutputPin,
+		Origin:               origin,
+		RequestCorrelationID: correlation,
+		CorrelationKey:       reply.CorrelationKey,
+		State:                runtimereplycontext.StateOpen,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
+	if r.replyStore == nil {
+		return nil, fmt.Errorf("ReplyContextStore is required for resolution mode reply")
+	}
+	if !templateInstanceLifecyclePreview(ctx) {
+		if err := r.replyStore.CreateReplyContext(ctx, record); err != nil {
+			return nil, err
+		}
+	}
+	deliveryContext := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}}
+	for i := range routes {
+		routes[i].Context = deliveryContext
+	}
+	return events.NormalizeDeliveryRoutes(routes), nil
+}
+
+func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan) ([]events.DeliveryRoute, []Subscriber, runtimepinrouting.TargetFailure, map[string]any, error) {
+	reply := plan.ReplyResolution
+	contextID := events.DeliveryContextFromContext(ctx).ReplyContextID()
+	detail := map[string]any{
+		"connect_route_plan_resolution_mode": "reply",
+		"connect_route_plan_request_pin":     reply.RequesterFlowID + "." + reply.RequestOutputPin,
+		"connect_route_plan_reply_pin":       reply.RequesterFlowID + "." + reply.ReplyInputPin,
+	}
+	if contextID == "" || r.replyStore == nil {
+		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
+	}
+	record, err := r.replyStore.LoadReplyContext(ctx, contextID)
+	if err != nil {
+		if errors.Is(err, runtimereplycontext.ErrNotFound) {
+			detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+			return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
+		}
+		return nil, nil, "", nil, err
+	}
+	if record.RequesterFlowID != reply.RequesterFlowID || record.RequestOutputPin != reply.RequestOutputPin || record.ReplyInputPin != reply.ReplyInputPin || record.ProviderFlowID != reply.ProviderFlowID || record.ProviderInputPin != reply.ProviderInputPin || record.ProviderOutputPin != reply.ProviderOutputPin {
+		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
+	}
+	target := record.Origin.Normalized()
+	subscribers := r.resolveSelectedReceiverCarriers(plan, target)
+	if target.Empty() || len(subscribers) == 0 {
+		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+		detail["reply_origin"] = target
+		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
+	}
+	claimed := record
+	outcome := runtimereplycontext.ClaimAccepted
+	if templateInstanceLifecyclePreview(ctx) {
+		if record.State == runtimereplycontext.StateTerminal {
+			if record.AcceptedReplyEventID == evt.ID() {
+				outcome = runtimereplycontext.ClaimIdempotent
+			} else {
+				outcome = runtimereplycontext.ClaimTerminal
+			}
+		}
+	} else {
+		claimed, outcome, err = r.replyStore.ClaimReplyContext(ctx, contextID, evt.ID())
+		if err != nil {
+			return nil, nil, "", nil, err
+		}
+	}
+	if outcome == runtimereplycontext.ClaimTerminal {
+		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureReplyAlreadyTerminal)
+		detail["accepted_reply_event_id"] = claimed.AcceptedReplyEventID
+		return nil, nil, runtimepinrouting.FailureReplyAlreadyTerminal, detail, nil
+	}
+	routes := make([]events.DeliveryRoute, 0, len(subscribers))
+	for _, subscriber := range subscribers {
+		subscriberType := strings.TrimSpace(subscriber.Type)
+		if subscriberType == "" {
+			subscriberType = "node"
+		}
+		routes = append(routes, events.DeliveryRoute{
+			SubscriberType: subscriberType,
+			SubscriberID:   strings.TrimSpace(subscriber.ID),
+			Target:         target,
+		})
+	}
+	detail["reply_context_id"] = contextID
+	detail["request_event_id"] = record.RequestEventID
+	detail["request_correlation_id"] = record.RequestCorrelationID
+	detail["reply_claim_outcome"] = outcome
+	return events.NormalizeDeliveryRoutes(routes), dedupeSubscribers(subscribers), "", detail, nil
 }
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {

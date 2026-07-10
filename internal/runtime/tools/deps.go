@@ -30,6 +30,10 @@ type EventPublisher interface {
 	PublishDirect(ctx context.Context, evt events.Event, recipients []string) error
 }
 
+type MutationEventPublisher interface {
+	PublishInMutation(ctx context.Context, evt events.Event) error
+}
+
 type Scheduler interface {
 	Register(runtimepipeline.Schedule) error
 	Stop()

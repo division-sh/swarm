@@ -685,6 +685,7 @@ seam_families:
       - internal/runtime/bus/sealed_flow_package_fixture_test.go
       - internal/runtime/conformance/sealed_flow_package_conformance_test.go
       - internal/runtime/conformance/final_flow_instance_authoring_conformance_test.go
+      - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/singleton_coordinator_pilot_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
       - internal/runtime/swarmflowtest/catalog_runner_test.go
@@ -701,7 +702,9 @@ seam_families:
       package-boundary proof consumer for the existing route-authority owners.
       #1553 adds the singleton coordinator pilot conformance fixture as a
       consumer that proves contained map/list state does not produce lowered
-      connect route authority.
+      connect route authority. #1924 adds the reply-resolution conformance
+      fixture as a consumer of lowered connect plans and typed route authority;
+      it does not introduce an alternate routing owner.
   - id: route_authority_conformance_artifacts
     layer: conformance_guardrails
     classification: canonical_owner

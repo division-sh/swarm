@@ -178,7 +178,7 @@ func (eb *EventBus) rebuildRoutePlanners() {
 	if eb == nil {
 		return
 	}
-	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator)
+	eb.connectRoutePlanner = newConnectRoutePlanResolver(eb.semanticSource, eb.routeTable, eb.PinRoutingDescriptors, eb.templateInstanceActivator, eb.store)
 	eb.deliveryPlanner = eb.newEventBusDeliveryPlanner()
 }
 

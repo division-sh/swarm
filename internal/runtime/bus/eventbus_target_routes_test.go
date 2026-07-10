@@ -374,6 +374,45 @@ func TestEventBusAgentDispatchIgnoresSameIDNodeRouteTargets(t *testing.T) {
 	}
 }
 
+func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t *testing.T) {
+	eb, err := NewEventBus(newTargetRouteMemoryStore())
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	ch := eb.SubscribeInternal(workflowRuntimeInternalCarrierID, events.EventType("review/task.started"))
+	defer eb.Unsubscribe(workflowRuntimeInternalCarrierID)
+
+	contextRef := events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:route-carrier"}}
+	evt := eventtest.RootIngress(uuid.NewString(), events.EventType("review/task.started"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
+	routes := []events.DeliveryRoute{
+		{
+			SubscriberType: "node",
+			SubscriberID:   "review-node",
+			Target:         events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1", EntityID: "entity-1"},
+			Context:        contextRef,
+		},
+		{
+			SubscriberType: "node",
+			SubscriberID:   workflowRuntimeInternalCarrierID,
+		},
+	}
+	if err := eb.deliverToRecipientsWithRoutes(context.Background(), evt, []string{workflowRuntimeInternalCarrierID}, routes); err != nil {
+		t.Fatalf("deliverToRecipientsWithRoutes: %v", err)
+	}
+	got := requireBusEvent(t, ch, "workflow runtime concrete route delivery")
+	if got.TargetRoute().Normalized() != routes[0].Target.Normalized() {
+		t.Fatalf("workflow runtime target = %#v, want %#v", got.TargetRoute(), routes[0].Target)
+	}
+	if got.DeliveryContext().ReplyContextID() != contextRef.ReplyContextID() {
+		t.Fatalf("workflow runtime delivery context = %#v, want %#v", got.DeliveryContext(), contextRef)
+	}
+	select {
+	case extra := <-ch:
+		t.Fatalf("workflow runtime received placeholder delivery %#v", extra.TargetRoute())
+	case <-time.After(25 * time.Millisecond):
+	}
+}
+
 func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
 	for _, got := range events.NormalizeDeliveryRoutes(routes) {

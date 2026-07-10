@@ -169,6 +169,9 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 		fmt.Fprintln(out, "connect route plans:")
 		for _, plan := range view.ConnectRoutePlans {
 			fmt.Fprintf(out, "  - %s.%s -> %s.%s resolution=%s delivery=%s\n", plan.Source.FlowID, plan.Source.Pin, plan.Receiver.FlowID, plan.Receiver.Pin, plan.ResolutionKind, plan.Delivery)
+			if plan.Reply != nil {
+				fmt.Fprintf(out, "    reply: role=%s request=%s.%s reply=%s.%s provider=%s.%s->%s\n", plan.Reply.Role, plan.Reply.RequesterFlowID, plan.Reply.RequestOutputPin, plan.Reply.RequesterFlowID, plan.Reply.ReplyInputPin, plan.Reply.ProviderFlowID, plan.Reply.ProviderInputPin, plan.Reply.ProviderOutputPin)
+			}
 		}
 	}
 	if len(view.StageGraphs) > 0 {

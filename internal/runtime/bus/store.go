@@ -265,6 +265,16 @@ func EventMutationFromContext(ctx context.Context) (EventMutation, bool) {
 	return mutation, ok && mutation != nil
 }
 
+// WithoutEventMutationContext crosses the commit boundary without retaining a
+// mutation whose transaction is no longer usable. Post-commit consumers must
+// acquire a fresh mutation from their own active transaction.
+func WithoutEventMutationContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, eventMutationContextKey{}, nil)
+}
+
 type TransactionalEventReplayScopePersistence interface {
 	UpsertCommittedReplayScopeTx(ctx context.Context, tx *sql.Tx, eventID string, scope runtimereplayclaim.CommittedReplayScope) error
 }

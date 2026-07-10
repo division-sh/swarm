@@ -434,6 +434,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	predecessorSessionID := uuid.NewString()
 	cleanupTimerID := uuid.NewString()
 	preservedTimerID := uuid.NewString()
+	replyContextID := "reply-v1:cleanup-" + uuid.NewString()
+	mailboxID := uuid.NewString()
 	crossRunDeliveryID := uuid.NewString()
 	entityID := uuid.NewString()
 	if _, err := pg.DB.ExecContext(ctx, `INSERT INTO agents (agent_id, role, model, conversation_mode) VALUES ('agent-a', 'operator', 'default', 'session')`); err != nil {
@@ -492,6 +494,26 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 		VALUES ($1::uuid, 'preserved source timer', $2::uuid, 'timer.global', now(), 'global_recurring')
 	`, preservedTimerID, cleanupTimerID); err != nil {
 		t.Fatalf("seed preserved source timer: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO reply_contexts (
+			reply_context_id, run_id, request_event_id, requester_flow_id, request_output_pin,
+			reply_input_pin, provider_flow_id, provider_input_pin, provider_output_pin,
+			origin_route, request_correlation_id, state
+		)
+		VALUES (
+			$1, $2::uuid, $3::uuid, 'requester', 'provider_requested', 'provider_replied',
+			'provider', 'provider_requested', 'provider_replied',
+			'{"flow_id":"requester","flow_instance":"requester/a"}'::jsonb, $3::text, 'open'
+		)
+	`, replyContextID, runID, eventID); err != nil {
+		t.Fatalf("seed cleanup reply context: %v", err)
+	}
+	if _, err := pg.DB.ExecContext(ctx, `
+		INSERT INTO mailbox (item_id, item_type, source_event_id, from_agent, summary, reply_context_id)
+		VALUES ($1::uuid, 'human_task', $2::uuid, 'agent-a', 'preserved reply mailbox', $3)
+	`, mailboxID, eventID, replyContextID); err != nil {
+		t.Fatalf("seed preserved reply mailbox: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
 		INSERT INTO runtime_ingress_state (status, controlled_by, transition_event_id)
@@ -583,6 +605,16 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesInt
 	}
 	if sourceTimer.Valid {
 		t.Fatalf("preserved timer source_timer_id = %q, want NULL", sourceTimer.String)
+	}
+	if got := countRowsWhere(t, ctx, pg, "reply_contexts", `reply_context_id = $1`, replyContextID); got != 0 {
+		t.Fatalf("cleanup reply context rows = %d, want deleted", got)
+	}
+	var mailboxReplyContext sql.NullString
+	if err := pg.DB.QueryRowContext(ctx, `SELECT reply_context_id FROM mailbox WHERE item_id = $1::uuid`, mailboxID).Scan(&mailboxReplyContext); err != nil {
+		t.Fatalf("read preserved mailbox reply context: %v", err)
+	}
+	if mailboxReplyContext.Valid {
+		t.Fatalf("preserved mailbox reply_context_id = %q, want NULL", mailboxReplyContext.String)
 	}
 }
 

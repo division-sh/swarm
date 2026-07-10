@@ -164,6 +164,7 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	}
 	routePlan.RoutedRecipients = dedupeSubscribers(connectPlan.RoutedRecipients)
 	routePlan.ExtraDetail = cloneAnyMap(connectPlan.ExtraDetail)
+	routePlan.ReplyContextConsumed = connectPlan.ReplyContextConsumed
 	return routePlan.Normalized()
 }
 
@@ -319,7 +320,7 @@ func targetedConcreteEventKeysForPlan(evt events.Event) []string {
 		if flowInstance == "" {
 			continue
 		}
-		staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
+		staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
 		if staticScope == "" {
 			continue
 		}
@@ -339,7 +340,7 @@ func concreteFlowInstanceEventKey(evt events.Event) string {
 	if eventType == "" || flowInstance == "" {
 		return ""
 	}
-	staticScope := runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance)
+	staticScope := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(flowInstance)
 	if staticScope == "" {
 		return ""
 	}
