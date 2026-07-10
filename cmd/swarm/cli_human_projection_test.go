@@ -211,19 +211,13 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 	}
 	actual := map[string][]string{}
 	rawOutput := map[string][]string{}
-	for _, path := range productionCLIGoFiles(t) {
-		fileSet := token.NewFileSet()
-		file, err := parser.ParseFile(fileSet, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		projected, raw := inspectCLIHumanCodeConsumers(t, fileSet, file, filepath.Base(path), familyValues)
-		for key, values := range projected {
-			actual[key] = append(actual[key], values...)
-		}
-		for key, values := range raw {
-			rawOutput[key] = append(rawOutput[key], values...)
-		}
+	_, files := parseProductionCLIHumanCodeFiles(t)
+	projected, raw := inspectCLIHumanCodeConsumers(t, files, familyValues)
+	for key, values := range projected {
+		actual[key] = append(actual[key], values...)
+	}
+	for key, values := range raw {
+		rawOutput[key] = append(rawOutput[key], values...)
 	}
 
 	for key, want := range required {
@@ -260,24 +254,51 @@ import (
 	"fmt"
 	"io"
 )
-func reviewProbeRawRunStatus(out io.Writer, status string) {
-	fmt.Fprintln(out, status)
+type reviewProbeRun struct { Status string }
+func reviewProbeWriteCode(out io.Writer, value string) {
+	fmt.Fprintln(out, value)
 }
-func reviewProbeRawRunStatusViaRows(out io.Writer, status string) {
-	rows := [][]string{{status}}
+func reviewProbeRawRunStatus(out io.Writer, run reviewProbeRun) {
+	fmt.Fprintln(out, run.Status)
+}
+func reviewProbeRawRunStatusViaRows(out io.Writer, run reviewProbeRun) {
+	rows := [][]string{{run.Status}}
 	writeCLITable(out, cliTable{Rows: rows})
+}
+func reviewProbeRawRunStatusViaHelper(out io.Writer, run reviewProbeRun) {
+	reviewProbeWriteCode(out, run.Status)
+}
+func reviewProbeRawRunStatusViaWriter(out io.Writer, run reviewProbeRun) {
+	_, _ = out.Write([]byte(run.Status))
+}
+func reviewProbeRawRunStatusViaEmptyState(out io.Writer, run reviewProbeRun) {
+	writeCLIEmptyState(out, run.Status)
+}
+func reviewProbeRawRunStatusViaFooter(out io.Writer, run reviewProbeRun) {
+	writeCLIFooterLines(out, []string{run.Status})
 }`
-	fileSet := token.NewFileSet()
+	fileSet, files := parseProductionCLIHumanCodeFiles(t)
 	file, err := parser.ParseFile(fileSet, "review_probe.go", source, 0)
 	if err != nil {
 		t.Fatalf("parse review probe: %v", err)
 	}
-	_, raw := inspectCLIHumanCodeConsumers(t, fileSet, file, "review_probe.go", map[string]string{})
+	files = append(files, cliHumanCodeSourceFile{base: "review_probe.go", file: file})
+	_, raw := inspectCLIHumanCodeConsumers(t, files, map[string]string{})
 	if got := raw["review_probe.go\x00reviewProbeRawRunStatus"]; !reflect.DeepEqual(got, []string{"status"}) {
 		t.Fatalf("raw registered-code review probe findings = %v, want [status]", got)
 	}
 	if got := raw["review_probe.go\x00reviewProbeRawRunStatusViaRows"]; !reflect.DeepEqual(got, []string{"status"}) {
 		t.Fatalf("raw registered-code row-indirection probe findings = %v, want [status]", got)
+	}
+	for _, name := range []string{
+		"reviewProbeRawRunStatusViaHelper",
+		"reviewProbeRawRunStatusViaWriter",
+		"reviewProbeRawRunStatusViaEmptyState",
+		"reviewProbeRawRunStatusViaFooter",
+	} {
+		if got := raw["review_probe.go\x00"+name]; !reflect.DeepEqual(got, []string{"status"}) {
+			t.Fatalf("%s raw registered-code findings = %v, want [status]", name, got)
+		}
 	}
 }
 
@@ -331,13 +352,17 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"status"},
 		Reason: "mailbox item status is a separate control taxonomy",
 	},
+	"control_mailbox.go\x00runMailboxDecisionCommand": {
+		Names:  []string{"action", "action"},
+		Reason: "mailbox decision action is a separate control taxonomy propagated through validation and result rendering",
+	},
 	"control_nuke.go\x00writeRuntimeNukeResult": {
 		Names:  []string{"status"},
 		Reason: "runtime.nuke mutation outcome is a separate destructive-control taxonomy",
 	},
 	"control_run.go\x00runControlRunCommand": {
-		Names:  []string{"action"},
-		Reason: "control command action is command input, not a registered human-code family",
+		Names:  []string{"action", "action", "action"},
+		Reason: "control command action is command input and mutation-result prose, not a registered human-code family",
 	},
 	"control_run.go\x00writeControlOK": {
 		Names:  []string{"action"},
@@ -379,6 +404,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"status"},
 		Reason: "serve boot progress status is process-progress output, not a registered API code family",
 	},
+	"main.go\x00runtimeSink": {
+		Names:  []string{"status"},
+		Reason: "serve boot runtime event status feeds process-progress output, not a registered API code family",
+	},
 	"main.go\x00printRunForkActivation": {
 		Names:  []string{"forkrunstatus", "sourcerunstatus"},
 		Reason: "private legacy run-fork runtime-owner harness explicitly excluded by the approved gate",
@@ -401,36 +430,63 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 	},
 }
 
+type cliHumanCodeSourceFile struct {
+	base string
+	file *ast.File
+}
+
+type cliHumanCodeFunction struct {
+	base          string
+	declaration   *ast.FuncDecl
+	assignments   map[string][]ast.Expr
+	parameters    map[string]int
+	variadicIndex int
+}
+
+type cliHumanCodeCallFlow struct {
+	parameters map[int]bool
+	variadic   map[int]bool
+}
+
+func parseProductionCLIHumanCodeFiles(t *testing.T) (*token.FileSet, []cliHumanCodeSourceFile) {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	files := make([]cliHumanCodeSourceFile, 0)
+	for _, path := range productionCLIGoFiles(t) {
+		file, err := parser.ParseFile(fileSet, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		files = append(files, cliHumanCodeSourceFile{base: filepath.Base(path), file: file})
+	}
+	return fileSet, files
+}
+
 func inspectCLIHumanCodeConsumers(
 	t *testing.T,
-	fileSet *token.FileSet,
-	file *ast.File,
-	base string,
+	files []cliHumanCodeSourceFile,
 	familyValues map[string]string,
 ) (map[string][]string, map[string][]string) {
 	t.Helper()
+	functions := cliHumanCodeFunctions(files)
+	callFlow := cliHumanCodeOutputCallFlow(functions)
 	projected := map[string][]string{}
 	rawPositions := map[string]map[token.Pos]string{}
-	for _, declaration := range file.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
-		}
-		key := base + "\x00" + function.Name.Name
-		assignments := cliHumanCodeLocalAssignments(function.Body)
-		ast.Inspect(function.Body, func(node ast.Node) bool {
+	for _, function := range functions {
+		key := function.base + "\x00" + function.declaration.Name.Name
+		ast.Inspect(function.declaration.Body, func(node ast.Node) bool {
 			switch value := node.(type) {
 			case *ast.CallExpr:
 				if family, ok := cliHumanCodeProjectionFamily(value, familyValues); ok {
 					projected[key] = append(projected[key], family)
 					return true
 				}
-				if isCLIHumanOutputSink(value) {
-					collectRawCLIHumanCodeExpressions(value, assignments, map[string]bool{}, rawPositionsForKey(rawPositions, key))
+				for _, expression := range cliHumanCodeOutputCallExpressions(value, callFlow) {
+					collectRawCLIHumanCodeExpressions(expression, function.assignments, map[string]bool{}, rawPositionsForKey(rawPositions, key))
 				}
 			case *ast.CompositeLit:
 				if isCLIHumanOutputComposite(value) {
-					collectRawCLIHumanCodeExpressions(value, assignments, map[string]bool{}, rawPositionsForKey(rawPositions, key))
+					collectRawCLIHumanCodeExpressions(value, function.assignments, map[string]bool{}, rawPositionsForKey(rawPositions, key))
 				}
 			}
 			return true
@@ -444,6 +500,175 @@ func inspectCLIHumanCodeConsumers(
 		sort.Strings(raw[key])
 	}
 	return projected, raw
+}
+
+func cliHumanCodeFunctions(files []cliHumanCodeSourceFile) []cliHumanCodeFunction {
+	functions := make([]cliHumanCodeFunction, 0)
+	for _, source := range files {
+		for _, declaration := range source.file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			parameters, variadicIndex := cliHumanCodeFunctionParameters(function)
+			functions = append(functions, cliHumanCodeFunction{
+				base:          source.base,
+				declaration:   function,
+				assignments:   cliHumanCodeLocalAssignments(function.Body),
+				parameters:    parameters,
+				variadicIndex: variadicIndex,
+			})
+		}
+	}
+	return functions
+}
+
+func cliHumanCodeFunctionParameters(function *ast.FuncDecl) (map[string]int, int) {
+	parameters := map[string]int{}
+	if function.Recv != nil {
+		for _, field := range function.Recv.List {
+			for _, name := range field.Names {
+				parameters[name.Name] = -1
+			}
+		}
+	}
+	variadicIndex := -1
+	index := 0
+	if function.Type.Params == nil {
+		return parameters, variadicIndex
+	}
+	for _, field := range function.Type.Params.List {
+		if _, ok := field.Type.(*ast.Ellipsis); ok {
+			variadicIndex = index
+		}
+		for _, name := range field.Names {
+			parameters[name.Name] = index
+			index++
+		}
+	}
+	return parameters, variadicIndex
+}
+
+func cliHumanCodeOutputCallFlow(functions []cliHumanCodeFunction) map[string]cliHumanCodeCallFlow {
+	flow := map[string]cliHumanCodeCallFlow{}
+	for _, function := range functions {
+		name := function.declaration.Name.Name
+		entry := flow[name]
+		if entry.parameters == nil {
+			entry.parameters = map[int]bool{}
+		}
+		if entry.variadic == nil {
+			entry.variadic = map[int]bool{}
+		}
+		if function.variadicIndex >= 0 {
+			entry.variadic[function.variadicIndex] = true
+		}
+		flow[name] = entry
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for _, function := range functions {
+			name := function.declaration.Name.Name
+			entry := flow[name]
+			for _, expression := range cliHumanCodeFunctionOutputExpressions(function.declaration.Body, flow) {
+				sources := map[string]bool{}
+				collectCLIHumanDataflowIdentifiers(expression, function.assignments, map[string]bool{}, sources)
+				for source := range sources {
+					index, ok := function.parameters[source]
+					if ok && !entry.parameters[index] {
+						entry.parameters[index] = true
+						changed = true
+					}
+				}
+			}
+			flow[name] = entry
+		}
+	}
+	return flow
+}
+
+func cliHumanCodeFunctionOutputExpressions(body *ast.BlockStmt, flow map[string]cliHumanCodeCallFlow) []ast.Expr {
+	expressions := make([]ast.Expr, 0)
+	ast.Inspect(body, func(node ast.Node) bool {
+		switch value := node.(type) {
+		case *ast.CallExpr:
+			expressions = append(expressions, cliHumanCodeOutputCallExpressions(value, flow)...)
+		case *ast.CompositeLit:
+			if isCLIHumanOutputComposite(value) {
+				expressions = append(expressions, value)
+			}
+		}
+		return true
+	})
+	return expressions
+}
+
+func cliHumanCodeOutputCallExpressions(call *ast.CallExpr, flow map[string]cliHumanCodeCallFlow) []ast.Expr {
+	if callee, ok := call.Fun.(*ast.Ident); ok {
+		if callee.Name == "formatCLIHumanCode" {
+			return nil
+		}
+		if summary, ok := flow[callee.Name]; ok {
+			return cliHumanCodeFlowingCallArguments(call, summary, nil)
+		}
+		return nil
+	}
+	callee, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	qualifier, _ := callee.X.(*ast.Ident)
+	if qualifier != nil && qualifier.Name == "fmt" {
+		switch callee.Sel.Name {
+		case "Fprint", "Fprintf", "Fprintln":
+			return call.Args[minCLIHumanCodeInt(1, len(call.Args)):]
+		}
+	}
+	if qualifier != nil && qualifier.Name == "io" && callee.Sel.Name == "WriteString" {
+		return call.Args[minCLIHumanCodeInt(1, len(call.Args)):]
+	}
+	switch callee.Sel.Name {
+	case "Write", "Print", "Printf", "Println":
+		return call.Args
+	}
+	if summary, ok := flow[callee.Sel.Name]; ok {
+		return cliHumanCodeFlowingCallArguments(call, summary, callee.X)
+	}
+	return nil
+}
+
+func cliHumanCodeFlowingCallArguments(call *ast.CallExpr, summary cliHumanCodeCallFlow, receiver ast.Expr) []ast.Expr {
+	expressions := make([]ast.Expr, 0, len(summary.parameters))
+	indexes := make([]int, 0, len(summary.parameters))
+	for index := range summary.parameters {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		if index == -1 {
+			if receiver != nil {
+				expressions = append(expressions, receiver)
+			}
+			continue
+		}
+		if index >= len(call.Args) {
+			continue
+		}
+		if summary.variadic[index] {
+			expressions = append(expressions, call.Args[index:]...)
+			continue
+		}
+		expressions = append(expressions, call.Args[index])
+	}
+	return expressions
+}
+
+func minCLIHumanCodeInt(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func cliHumanCodeProjectionFamily(call *ast.CallExpr, familyValues map[string]string) (string, bool) {
@@ -494,15 +719,59 @@ func cliHumanCodeLocalAssignments(body *ast.BlockStmt) map[string][]ast.Expr {
 					assignments[name.Name] = append(assignments[name.Name], value.Values[i])
 				}
 			}
+		case *ast.RangeStmt:
+			for _, expression := range []ast.Expr{value.Key, value.Value} {
+				if ident, ok := expression.(*ast.Ident); ok && ident.Name != "_" {
+					assignments[ident.Name] = append(assignments[ident.Name], value.X)
+				}
+			}
 		}
 		return true
 	})
 	return assignments
 }
 
+func collectCLIHumanDataflowIdentifiers(node ast.Node, assignments map[string][]ast.Expr, visiting map[string]bool, found map[string]bool) {
+	ast.Inspect(node, func(candidate ast.Node) bool {
+		switch value := candidate.(type) {
+		case *ast.KeyValueExpr:
+			collectCLIHumanDataflowIdentifiers(value.Value, assignments, visiting, found)
+			return false
+		case *ast.CallExpr:
+			if callee, ok := value.Fun.(*ast.Ident); ok && callee.Name == "formatCLIHumanCode" {
+				return false
+			}
+			for _, argument := range value.Args {
+				collectCLIHumanDataflowIdentifiers(argument, assignments, visiting, found)
+			}
+			return false
+		case *ast.SelectorExpr:
+			collectCLIHumanDataflowIdentifiers(value.X, assignments, visiting, found)
+			return false
+		case *ast.Ident:
+			if !visiting[value.Name] {
+				if assigned := assignments[value.Name]; len(assigned) > 0 {
+					visiting[value.Name] = true
+					for _, expression := range assigned {
+						collectCLIHumanDataflowIdentifiers(expression, assignments, visiting, found)
+					}
+					delete(visiting, value.Name)
+					return false
+				}
+			}
+			found[value.Name] = true
+			return false
+		}
+		return true
+	})
+}
+
 func collectRawCLIHumanCodeExpressions(node ast.Node, assignments map[string][]ast.Expr, visiting map[string]bool, found map[token.Pos]string) {
 	ast.Inspect(node, func(candidate ast.Node) bool {
 		switch value := candidate.(type) {
+		case *ast.KeyValueExpr:
+			collectRawCLIHumanCodeExpressions(value.Value, assignments, visiting, found)
+			return false
 		case *ast.CallExpr:
 			if callee, ok := value.Fun.(*ast.Ident); ok && callee.Name == "formatCLIHumanCode" {
 				return false
@@ -541,28 +810,6 @@ func cliHumanCodeLikeName(raw string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func isCLIHumanOutputSink(call *ast.CallExpr) bool {
-	switch callee := call.Fun.(type) {
-	case *ast.Ident:
-		switch callee.Name {
-		case "writeCLITable", "writeCLILabeledDetail", "writeCLIFieldLine", "writeCLITitle":
-			return true
-		}
-	case *ast.SelectorExpr:
-		qualifier, _ := callee.X.(*ast.Ident)
-		if qualifier != nil && qualifier.Name == "fmt" {
-			switch callee.Sel.Name {
-			case "Fprint", "Fprintf", "Fprintln":
-				return true
-			}
-		}
-		if qualifier != nil && qualifier.Name == "io" && callee.Sel.Name == "WriteString" {
-			return true
-		}
-	}
-	return false
 }
 
 func isCLIHumanOutputComposite(literal *ast.CompositeLit) bool {
