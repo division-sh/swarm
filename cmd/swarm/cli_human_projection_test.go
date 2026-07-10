@@ -1,9 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
+	"go/types"
+	"io"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -211,8 +217,8 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 	}
 	actual := map[string][]string{}
 	rawOutput := map[string][]string{}
-	_, files := parseProductionCLIHumanCodeFiles(t)
-	projected, raw := inspectCLIHumanCodeConsumers(t, files, familyValues)
+	fileSet, files := parseProductionCLIHumanCodeFiles(t)
+	projected, raw := inspectCLIHumanCodeConsumers(t, fileSet, files, familyValues)
 	for key, values := range projected {
 		actual[key] = append(actual[key], values...)
 	}
@@ -258,8 +264,12 @@ import (
 	"github.com/spf13/cobra"
 )
 type reviewProbeRun struct { Status string }
+type reviewProbeBufferHolder struct { Buffer strings.Builder }
 func reviewProbeWriteCode(out io.Writer, value string) {
 	fmt.Fprintln(out, value)
+}
+func reviewProbeRawRunStatusValue(run reviewProbeRun) string {
+	return run.Status
 }
 func reviewProbeRawRunStatus(out io.Writer, run reviewProbeRun) {
 	fmt.Fprintln(out, run.Status)
@@ -292,6 +302,30 @@ func reviewProbeRawRunStatusViaBuffer(out io.Writer, run reviewProbeRun) {
 	var buffer strings.Builder
 	buffer.WriteString(run.Status)
 	fmt.Fprint(out, buffer.String())
+}
+func reviewProbeRawRunStatusViaReturn(out io.Writer, run reviewProbeRun) {
+	fmt.Fprint(out, reviewProbeRawRunStatusValue(run))
+}
+func reviewProbeRawRunStatusViaAddressedBuffer(out io.Writer, run reviewProbeRun) {
+	var buffer strings.Builder
+	(&buffer).WriteString(run.Status)
+	fmt.Fprint(out, buffer.String())
+}
+func reviewProbeRawRunStatusViaSelectedBuffer(out io.Writer, run reviewProbeRun) {
+	var holder reviewProbeBufferHolder
+	(&holder.Buffer).WriteString(run.Status)
+	fmt.Fprint(out, holder.Buffer.String())
+}
+func reviewProbeRawRunStatusViaIndexedBuffer(out io.Writer, run reviewProbeRun) {
+	var buffers [1]strings.Builder
+	(&buffers[0]).WriteString(run.Status)
+	fmt.Fprint(out, buffers[0].String())
+}
+func reviewProbeRawRunStatusViaBufferAlias(out io.Writer, run reviewProbeRun) {
+	var buffer strings.Builder
+	alias := &buffer
+	alias.WriteString(run.Status)
+	fmt.Fprint(out, buffer.String())
 }`
 	fileSet, files := parseProductionCLIHumanCodeFiles(t)
 	file, err := parser.ParseFile(fileSet, "review_probe.go", source, 0)
@@ -299,7 +333,7 @@ func reviewProbeRawRunStatusViaBuffer(out io.Writer, run reviewProbeRun) {
 		t.Fatalf("parse review probe: %v", err)
 	}
 	files = append(files, cliHumanCodeSourceFile{base: "review_probe.go", file: file})
-	_, raw := inspectCLIHumanCodeConsumers(t, files, map[string]string{})
+	_, raw := inspectCLIHumanCodeConsumers(t, fileSet, files, map[string]string{})
 	if got := raw["review_probe.go\x00reviewProbeRawRunStatus"]; !reflect.DeepEqual(got, []string{"status"}) {
 		t.Fatalf("raw registered-code review probe findings = %v, want [status]", got)
 	}
@@ -312,6 +346,11 @@ func reviewProbeRawRunStatusViaBuffer(out io.Writer, run reviewProbeRun) {
 		"reviewProbeRawRunStatusViaEmptyState",
 		"reviewProbeRawRunStatusViaFooter",
 		"reviewProbeRawRunStatusViaBuffer",
+		"reviewProbeRawRunStatusViaReturn",
+		"reviewProbeRawRunStatusViaAddressedBuffer",
+		"reviewProbeRawRunStatusViaSelectedBuffer",
+		"reviewProbeRawRunStatusViaIndexedBuffer",
+		"reviewProbeRawRunStatusViaBufferAlias",
 	} {
 		if got := raw["review_probe.go\x00"+name]; !reflect.DeepEqual(got, []string{"status"}) {
 			t.Fatalf("%s raw registered-code findings = %v, want [status]", name, got)
@@ -384,10 +423,6 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"action", "action", "action"},
 		Reason: "control command action is command input and mutation-result prose, not a registered human-code family",
 	},
-	"control_run.go\x00newControlRunCommand": {
-		Names:  []string{"action", "action"},
-		Reason: "control command action appears in Cobra command help, not a registered human-code family",
-	},
 	"control_run.go\x00writeControlOK": {
 		Names:  []string{"action"},
 		Reason: "control command action is command input, not a registered human-code family",
@@ -417,8 +452,12 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Reason: "flow composition mode is an authoring-view concept, not ConversationMode",
 	},
 	"local_preflight.go\x00writeLocalPreflightText": {
-		Names:  []string{"mode", "status"},
-		Reason: "preflight mode and aggregate result are typed diagnostic rendering inputs",
+		Names:  []string{"mode"},
+		Reason: "preflight mode is a typed diagnostic rendering input, not a registered conversation mode",
+	},
+	"logs.go\x00writeRuntimeLogListResult": {
+		Names:  []string{"action"},
+		Reason: "runtime-log action is exact log evidence owned by #1819, not a registered watchdog action",
 	},
 	"logs.go\x00writeRuntimeLogFollowEntry": {
 		Names:  []string{"action"},
@@ -449,7 +488,7 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Reason: "private legacy run-fork runtime-owner harness explicitly excluded by the approved gate",
 	},
 	"target_resolution.go\x00writeDoctorTargetText": {
-		Names:  []string{"mode", "mode", "status", "status", "status", "status", "status", "status", "status", "status", "status", "status", "status"},
+		Names:  []string{"mode", "mode", "status", "status", "status", "status", "status", "status", "status", "status", "status", "status"},
 		Reason: "doctor target/context/config statuses are separate targeting and typed-diagnostic taxonomies",
 	},
 }
@@ -462,7 +501,9 @@ type cliHumanCodeSourceFile struct {
 type cliHumanCodeFunction struct {
 	base          string
 	declaration   *ast.FuncDecl
+	callable      *types.Func
 	assignments   map[string][]ast.Expr
+	receiverData  map[string][]ast.Expr
 	parameters    map[string]int
 	variadicIndex int
 }
@@ -470,6 +511,16 @@ type cliHumanCodeFunction struct {
 type cliHumanCodeCallFlow struct {
 	parameters map[int]bool
 	variadic   map[int]bool
+}
+
+type cliHumanCodeReturnFlow struct {
+	cliHumanCodeCallFlow
+	names map[string]bool
+}
+
+type cliHumanCodeRawFinding struct {
+	position token.Pos
+	name     string
 }
 
 func parseProductionCLIHumanCodeFiles(t *testing.T) (*token.FileSet, []cliHumanCodeSourceFile) {
@@ -488,14 +539,17 @@ func parseProductionCLIHumanCodeFiles(t *testing.T) (*token.FileSet, []cliHumanC
 
 func inspectCLIHumanCodeConsumers(
 	t *testing.T,
+	fileSet *token.FileSet,
 	files []cliHumanCodeSourceFile,
 	familyValues map[string]string,
 ) (map[string][]string, map[string][]string) {
 	t.Helper()
-	functions := cliHumanCodeFunctions(files)
-	callFlow := cliHumanCodeOutputCallFlow(functions)
+	typeInfo := cliHumanCodeTypeCheck(t, fileSet, files)
+	functions := cliHumanCodeFunctions(files, typeInfo)
+	returnFlow := cliHumanCodeReturnCallFlow(functions, typeInfo)
+	callFlow := cliHumanCodeOutputCallFlow(functions, returnFlow, typeInfo)
 	projected := map[string][]string{}
-	rawPositions := map[string]map[token.Pos]string{}
+	rawPositions := map[string]map[cliHumanCodeRawFinding]struct{}{}
 	for _, function := range functions {
 		key := function.base + "\x00" + function.declaration.Name.Name
 		ast.Inspect(function.declaration.Body, func(node ast.Node) bool {
@@ -505,28 +559,67 @@ func inspectCLIHumanCodeConsumers(
 					projected[key] = append(projected[key], family)
 					return true
 				}
-				for _, expression := range cliHumanCodeOutputCallExpressions(value, callFlow) {
-					collectRawCLIHumanCodeExpressions(expression, function.assignments, map[string]bool{}, rawPositionsForKey(rawPositions, key))
+				expressions := cliHumanCodeOutputCallExpressions(value, callFlow, typeInfo)
+				for _, expression := range expressions {
+					collectRawCLIHumanCodeExpressions(expression, function.assignments, function.receiverData, returnFlow, typeInfo, map[string]bool{}, rawPositionsForKey(rawPositions, key))
 				}
 			case *ast.CompositeLit:
 				if isCLIHumanOutputComposite(value) {
-					collectRawCLIHumanCodeExpressions(value, function.assignments, map[string]bool{}, rawPositionsForKey(rawPositions, key))
+					collectRawCLIHumanCodeExpressions(value, function.assignments, function.receiverData, returnFlow, typeInfo, map[string]bool{}, rawPositionsForKey(rawPositions, key))
 				}
 			}
 			return true
 		})
 	}
 	raw := map[string][]string{}
-	for key, positions := range rawPositions {
-		for _, name := range positions {
-			raw[key] = append(raw[key], name)
+	for key, findings := range rawPositions {
+		for finding := range findings {
+			raw[key] = append(raw[key], finding.name)
 		}
 		sort.Strings(raw[key])
 	}
 	return projected, raw
 }
 
-func cliHumanCodeFunctions(files []cliHumanCodeSourceFile) []cliHumanCodeFunction {
+func cliHumanCodeTypeCheck(t *testing.T, fileSet *token.FileSet, files []cliHumanCodeSourceFile) *types.Info {
+	t.Helper()
+	astFiles := make([]*ast.File, 0, len(files))
+	for _, file := range files {
+		astFiles = append(astFiles, file.file)
+	}
+	info := &types.Info{
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	config := types.Config{Importer: importer.ForCompiler(fileSet, "gc", cliHumanCodeExportLookup())}
+	if _, err := config.Check("github.com/division-sh/swarm/cmd/swarm", fileSet, astFiles, info); err != nil {
+		t.Fatalf("type-check production CLI consumer audit: %v", err)
+	}
+	return info
+}
+
+func cliHumanCodeExportLookup() func(string) (io.ReadCloser, error) {
+	exports := map[string]string{}
+	return func(path string) (io.ReadCloser, error) {
+		exportPath, ok := exports[path]
+		if !ok {
+			command := exec.Command("go", "list", "-export", "-f={{.Export}}", path)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				return nil, fmt.Errorf("go list export for %s: %w: %s", path, err, strings.TrimSpace(string(output)))
+			}
+			exportPath = strings.TrimSpace(string(output))
+			if exportPath == "" {
+				return nil, fmt.Errorf("go list export for %s returned an empty path", path)
+			}
+			exports[path] = exportPath
+		}
+		return os.Open(exportPath)
+	}
+}
+
+func cliHumanCodeFunctions(files []cliHumanCodeSourceFile, typeInfo *types.Info) []cliHumanCodeFunction {
 	functions := make([]cliHumanCodeFunction, 0)
 	for _, source := range files {
 		for _, declaration := range source.file.Decls {
@@ -535,10 +628,17 @@ func cliHumanCodeFunctions(files []cliHumanCodeSourceFile) []cliHumanCodeFunctio
 				continue
 			}
 			parameters, variadicIndex := cliHumanCodeFunctionParameters(function)
+			assignments, receiverData := cliHumanCodeLocalAssignments(function.Body)
+			callable, _ := typeInfo.Defs[function.Name].(*types.Func)
+			if callable == nil {
+				continue
+			}
 			functions = append(functions, cliHumanCodeFunction{
 				base:          source.base,
 				declaration:   function,
-				assignments:   cliHumanCodeLocalAssignments(function.Body),
+				callable:      callable,
+				assignments:   assignments,
+				receiverData:  receiverData,
 				parameters:    parameters,
 				variadicIndex: variadicIndex,
 			})
@@ -573,11 +673,115 @@ func cliHumanCodeFunctionParameters(function *ast.FuncDecl) (map[string]int, int
 	return parameters, variadicIndex
 }
 
-func cliHumanCodeOutputCallFlow(functions []cliHumanCodeFunction) map[string]cliHumanCodeCallFlow {
-	flow := map[string]cliHumanCodeCallFlow{}
+func cliHumanCodeReturnCallFlow(functions []cliHumanCodeFunction, typeInfo *types.Info) map[*types.Func]cliHumanCodeReturnFlow {
+	flow := map[*types.Func]cliHumanCodeReturnFlow{}
 	for _, function := range functions {
-		name := function.declaration.Name.Name
-		entry := flow[name]
+		entry := flow[function.callable]
+		if entry.parameters == nil {
+			entry.parameters = map[int]bool{}
+		}
+		if entry.variadic == nil {
+			entry.variadic = map[int]bool{}
+		}
+		if entry.names == nil {
+			entry.names = map[string]bool{}
+		}
+		if function.variadicIndex >= 0 {
+			entry.variadic[function.variadicIndex] = true
+		}
+		flow[function.callable] = entry
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for _, function := range functions {
+			if !cliHumanCodeCallableReturnsText(function.callable) {
+				continue
+			}
+			entry := flow[function.callable]
+			parameterSemanticNames := map[string]bool{}
+			for parameter := range function.parameters {
+				if semanticName, ok := cliHumanCodeLikeName(parameter); ok {
+					parameterSemanticNames[semanticName] = true
+				}
+			}
+			for _, expression := range cliHumanCodeFunctionReturnExpressions(function.declaration.Body) {
+				sources := map[string]bool{}
+				collectCLIHumanDataflowIdentifiers(expression, function.assignments, function.receiverData, flow, typeInfo, map[string]bool{}, sources)
+				for source := range sources {
+					index, ok := function.parameters[source]
+					if ok && !entry.parameters[index] {
+						entry.parameters[index] = true
+						changed = true
+					}
+				}
+				findings := map[cliHumanCodeRawFinding]struct{}{}
+				collectRawCLIHumanCodeExpressions(expression, function.assignments, function.receiverData, flow, typeInfo, map[string]bool{}, findings)
+				for finding := range findings {
+					if parameterSemanticNames[finding.name] {
+						continue
+					}
+					if !entry.names[finding.name] {
+						entry.names[finding.name] = true
+						changed = true
+					}
+				}
+			}
+			flow[function.callable] = entry
+		}
+	}
+	return flow
+}
+
+func cliHumanCodeCallableReturnsText(function *types.Func) bool {
+	signature, ok := function.Type().(*types.Signature)
+	if !ok || signature.Results() == nil {
+		return false
+	}
+	for index := 0; index < signature.Results().Len(); index++ {
+		if cliHumanCodeTypeCarriesText(signature.Results().At(index).Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+func cliHumanCodeTypeCarriesText(value types.Type) bool {
+	switch typed := value.Underlying().(type) {
+	case *types.Basic:
+		return typed.Kind() == types.String
+	case *types.Slice:
+		if basic, ok := typed.Elem().Underlying().(*types.Basic); ok {
+			return basic.Kind() == types.String || basic.Kind() == types.Uint8
+		}
+	case *types.Array:
+		if basic, ok := typed.Elem().Underlying().(*types.Basic); ok {
+			return basic.Kind() == types.String || basic.Kind() == types.Uint8
+		}
+	}
+	return false
+}
+
+func cliHumanCodeFunctionReturnExpressions(body *ast.BlockStmt) []ast.Expr {
+	expressions := make([]ast.Expr, 0)
+	ast.Inspect(body, func(node ast.Node) bool {
+		if _, nested := node.(*ast.FuncLit); nested {
+			return false
+		}
+		statement, ok := node.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		expressions = append(expressions, statement.Results...)
+		return false
+	})
+	return expressions
+}
+
+func cliHumanCodeOutputCallFlow(functions []cliHumanCodeFunction, returnFlow map[*types.Func]cliHumanCodeReturnFlow, typeInfo *types.Info) map[*types.Func]cliHumanCodeCallFlow {
+	flow := map[*types.Func]cliHumanCodeCallFlow{}
+	for _, function := range functions {
+		entry := flow[function.callable]
 		if entry.parameters == nil {
 			entry.parameters = map[int]bool{}
 		}
@@ -587,17 +791,16 @@ func cliHumanCodeOutputCallFlow(functions []cliHumanCodeFunction) map[string]cli
 		if function.variadicIndex >= 0 {
 			entry.variadic[function.variadicIndex] = true
 		}
-		flow[name] = entry
+		flow[function.callable] = entry
 	}
 
 	for changed := true; changed; {
 		changed = false
 		for _, function := range functions {
-			name := function.declaration.Name.Name
-			entry := flow[name]
-			for _, expression := range cliHumanCodeFunctionOutputExpressions(function.declaration.Body, flow) {
+			entry := flow[function.callable]
+			for _, expression := range cliHumanCodeFunctionOutputExpressions(function.declaration.Body, flow, typeInfo) {
 				sources := map[string]bool{}
-				collectCLIHumanDataflowIdentifiers(expression, function.assignments, map[string]bool{}, sources)
+				collectCLIHumanDataflowIdentifiers(expression, function.assignments, function.receiverData, returnFlow, typeInfo, map[string]bool{}, sources)
 				for source := range sources {
 					index, ok := function.parameters[source]
 					if ok && !entry.parameters[index] {
@@ -606,18 +809,18 @@ func cliHumanCodeOutputCallFlow(functions []cliHumanCodeFunction) map[string]cli
 					}
 				}
 			}
-			flow[name] = entry
+			flow[function.callable] = entry
 		}
 	}
 	return flow
 }
 
-func cliHumanCodeFunctionOutputExpressions(body *ast.BlockStmt, flow map[string]cliHumanCodeCallFlow) []ast.Expr {
+func cliHumanCodeFunctionOutputExpressions(body *ast.BlockStmt, flow map[*types.Func]cliHumanCodeCallFlow, typeInfo *types.Info) []ast.Expr {
 	expressions := make([]ast.Expr, 0)
 	ast.Inspect(body, func(node ast.Node) bool {
 		switch value := node.(type) {
 		case *ast.CallExpr:
-			expressions = append(expressions, cliHumanCodeOutputCallExpressions(value, flow)...)
+			expressions = append(expressions, cliHumanCodeOutputCallExpressions(value, flow, typeInfo)...)
 		case *ast.CompositeLit:
 			if isCLIHumanOutputComposite(value) {
 				expressions = append(expressions, value)
@@ -628,12 +831,12 @@ func cliHumanCodeFunctionOutputExpressions(body *ast.BlockStmt, flow map[string]
 	return expressions
 }
 
-func cliHumanCodeOutputCallExpressions(call *ast.CallExpr, flow map[string]cliHumanCodeCallFlow) []ast.Expr {
+func cliHumanCodeOutputCallExpressions(call *ast.CallExpr, flow map[*types.Func]cliHumanCodeCallFlow, typeInfo *types.Info) []ast.Expr {
 	if callee, ok := call.Fun.(*ast.Ident); ok {
 		if callee.Name == "formatCLIHumanCode" {
 			return nil
 		}
-		if summary, ok := flow[callee.Name]; ok {
+		if summary, ok := flow[cliHumanCodeCalledFunction(call, typeInfo)]; ok {
 			return cliHumanCodeFlowingCallArguments(call, summary, nil)
 		}
 		return nil
@@ -656,7 +859,7 @@ func cliHumanCodeOutputCallExpressions(call *ast.CallExpr, flow map[string]cliHu
 	case "Write", "Print", "Printf", "Println", "PrintErr", "PrintErrf", "PrintErrln":
 		return call.Args
 	}
-	if summary, ok := flow[callee.Sel.Name]; ok {
+	if summary, ok := flow[cliHumanCodeCalledFunction(call, typeInfo)]; ok {
 		return cliHumanCodeFlowingCallArguments(call, summary, callee.X)
 	}
 	return nil
@@ -714,15 +917,22 @@ func cliHumanCodeProjectionFamily(call *ast.CallExpr, familyValues map[string]st
 	}
 }
 
-func rawPositionsForKey(target map[string]map[token.Pos]string, key string) map[token.Pos]string {
+func rawPositionsForKey(target map[string]map[cliHumanCodeRawFinding]struct{}, key string) map[cliHumanCodeRawFinding]struct{} {
 	if target[key] == nil {
-		target[key] = map[token.Pos]string{}
+		target[key] = map[cliHumanCodeRawFinding]struct{}{}
 	}
 	return target[key]
 }
 
-func cliHumanCodeLocalAssignments(body *ast.BlockStmt) map[string][]ast.Expr {
+func cliHumanCodeLocalAssignments(body *ast.BlockStmt) (map[string][]ast.Expr, map[string][]ast.Expr) {
 	assignments := map[string][]ast.Expr{}
+	receiverData := map[string][]ast.Expr{}
+	aliases := map[string]map[string]bool{}
+	type receiverMutation struct {
+		key       string
+		arguments []ast.Expr
+	}
+	mutations := make([]receiverMutation, 0)
 	ast.Inspect(body, func(node ast.Node) bool {
 		switch value := node.(type) {
 		case *ast.CallExpr:
@@ -730,18 +940,17 @@ func cliHumanCodeLocalAssignments(body *ast.BlockStmt) map[string][]ast.Expr {
 			if !ok || !isCLIHumanCodeReceiverMutation(callee.Sel.Name) {
 				return true
 			}
-			receiver, ok := callee.X.(*ast.Ident)
-			if !ok || receiver.Name == "_" {
-				return true
+			if key, ok := cliHumanCodeIdentityKey(callee.X); ok {
+				mutations = append(mutations, receiverMutation{key: key, arguments: value.Args})
 			}
-			assignments[receiver.Name] = append(assignments[receiver.Name], value.Args...)
 		case *ast.AssignStmt:
 			if len(value.Lhs) != len(value.Rhs) {
 				return true
 			}
 			for i, lhs := range value.Lhs {
-				if ident, ok := lhs.(*ast.Ident); ok && ident.Name != "_" {
-					assignments[ident.Name] = append(assignments[ident.Name], value.Rhs[i])
+				if key, ok := cliHumanCodeIdentityKey(lhs); ok {
+					assignments[key] = append(assignments[key], value.Rhs[i])
+					cliHumanCodeRecordAlias(aliases, key, value.Rhs[i])
 				}
 			}
 		case *ast.ValueSpec:
@@ -751,6 +960,7 @@ func cliHumanCodeLocalAssignments(body *ast.BlockStmt) map[string][]ast.Expr {
 			for i, name := range value.Names {
 				if name.Name != "_" {
 					assignments[name.Name] = append(assignments[name.Name], value.Values[i])
+					cliHumanCodeRecordAlias(aliases, name.Name, value.Values[i])
 				}
 			}
 		case *ast.RangeStmt:
@@ -762,39 +972,122 @@ func cliHumanCodeLocalAssignments(body *ast.BlockStmt) map[string][]ast.Expr {
 		}
 		return true
 	})
-	return assignments
+	for _, mutation := range mutations {
+		for alias := range cliHumanCodeAliasClosure(mutation.key, aliases) {
+			receiverData[alias] = append(receiverData[alias], mutation.arguments...)
+		}
+	}
+	return assignments, receiverData
 }
 
-func collectCLIHumanDataflowIdentifiers(node ast.Node, assignments map[string][]ast.Expr, visiting map[string]bool, found map[string]bool) {
+func cliHumanCodeRecordAlias(aliases map[string]map[string]bool, left string, right ast.Expr) {
+	rightKey, ok := cliHumanCodeIdentityKey(right)
+	if !ok || left == rightKey {
+		return
+	}
+	if aliases[left] == nil {
+		aliases[left] = map[string]bool{}
+	}
+	if aliases[rightKey] == nil {
+		aliases[rightKey] = map[string]bool{}
+	}
+	aliases[left][rightKey] = true
+	aliases[rightKey][left] = true
+}
+
+func cliHumanCodeAliasClosure(start string, aliases map[string]map[string]bool) map[string]bool {
+	found := map[string]bool{}
+	pending := []string{start}
+	for len(pending) > 0 {
+		key := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if found[key] {
+			continue
+		}
+		found[key] = true
+		for alias := range aliases[key] {
+			pending = append(pending, alias)
+		}
+	}
+	return found
+}
+
+func cliHumanCodeIdentityKey(expression ast.Expr) (string, bool) {
+	switch value := expression.(type) {
+	case *ast.Ident:
+		return value.Name, value.Name != "_"
+	case *ast.ParenExpr:
+		return cliHumanCodeIdentityKey(value.X)
+	case *ast.StarExpr:
+		return cliHumanCodeIdentityKey(value.X)
+	case *ast.UnaryExpr:
+		if value.Op == token.AND || value.Op == token.MUL {
+			return cliHumanCodeIdentityKey(value.X)
+		}
+	case *ast.SelectorExpr:
+		base, ok := cliHumanCodeIdentityKey(value.X)
+		if ok {
+			return base + "." + value.Sel.Name, true
+		}
+	case *ast.IndexExpr:
+		base, baseOK := cliHumanCodeIdentityKey(value.X)
+		index, indexOK := cliHumanCodeIdentityKey(value.Index)
+		if baseOK && indexOK {
+			return base + "[" + index + "]", true
+		}
+	case *ast.BasicLit:
+		return value.Value, true
+	}
+	return "", false
+}
+
+func collectCLIHumanDataflowIdentifiers(
+	node ast.Node,
+	assignments map[string][]ast.Expr,
+	receiverData map[string][]ast.Expr,
+	returnFlow map[*types.Func]cliHumanCodeReturnFlow,
+	typeInfo *types.Info,
+	visiting map[string]bool,
+	found map[string]bool,
+) {
 	ast.Inspect(node, func(candidate ast.Node) bool {
 		switch value := candidate.(type) {
 		case *ast.KeyValueExpr:
-			collectCLIHumanDataflowIdentifiers(value.Value, assignments, visiting, found)
+			collectCLIHumanDataflowIdentifiers(value.Value, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			return false
 		case *ast.CallExpr:
 			if callee, ok := value.Fun.(*ast.Ident); ok && callee.Name == "formatCLIHumanCode" {
 				return false
 			}
+			if summary, receiver, ok := cliHumanCodeReturnSummary(value, returnFlow, typeInfo); ok {
+				for _, expression := range cliHumanCodeFlowingCallArguments(value, summary.cliHumanCodeCallFlow, receiver) {
+					collectCLIHumanDataflowIdentifiers(expression, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+				}
+				return false
+			}
 			if callee, ok := value.Fun.(*ast.SelectorExpr); ok {
-				collectCLIHumanDataflowIdentifiers(callee.X, assignments, visiting, found)
+				collectCLIHumanReceiverDataflow(callee.X, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			}
 			for _, argument := range value.Args {
-				collectCLIHumanDataflowIdentifiers(argument, assignments, visiting, found)
+				collectCLIHumanDataflowIdentifiers(argument, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			}
 			return false
 		case *ast.SelectorExpr:
-			collectCLIHumanDataflowIdentifiers(value.X, assignments, visiting, found)
+			if cliHumanCodeCollectAssignedDataflow(value, assignments, receiverData, returnFlow, typeInfo, visiting, found) {
+				return false
+			}
+			collectCLIHumanDataflowIdentifiers(value.X, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+			return false
+		case *ast.IndexExpr:
+			if cliHumanCodeCollectAssignedDataflow(value, assignments, receiverData, returnFlow, typeInfo, visiting, found) {
+				return false
+			}
+			collectCLIHumanDataflowIdentifiers(value.X, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+			collectCLIHumanDataflowIdentifiers(value.Index, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			return false
 		case *ast.Ident:
-			if !visiting[value.Name] {
-				if assigned := assignments[value.Name]; len(assigned) > 0 {
-					visiting[value.Name] = true
-					for _, expression := range assigned {
-						collectCLIHumanDataflowIdentifiers(expression, assignments, visiting, found)
-					}
-					delete(visiting, value.Name)
-					return false
-				}
+			if cliHumanCodeCollectAssignedDataflow(value, assignments, receiverData, returnFlow, typeInfo, visiting, found) {
+				return false
 			}
 			found[value.Name] = true
 			return false
@@ -803,47 +1096,189 @@ func collectCLIHumanDataflowIdentifiers(node ast.Node, assignments map[string][]
 	})
 }
 
-func collectRawCLIHumanCodeExpressions(node ast.Node, assignments map[string][]ast.Expr, visiting map[string]bool, found map[token.Pos]string) {
+func cliHumanCodeCollectAssignedDataflow(
+	expression ast.Expr,
+	assignments map[string][]ast.Expr,
+	receiverData map[string][]ast.Expr,
+	returnFlow map[*types.Func]cliHumanCodeReturnFlow,
+	typeInfo *types.Info,
+	visiting map[string]bool,
+	found map[string]bool,
+) bool {
+	key, ok := cliHumanCodeIdentityKey(expression)
+	if !ok || visiting[key] || (len(assignments[key]) == 0 && len(receiverData[key]) == 0) {
+		return false
+	}
+	visiting[key] = true
+	for _, assigned := range assignments[key] {
+		collectCLIHumanDataflowIdentifiers(assigned, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+	}
+	for _, written := range receiverData[key] {
+		collectCLIHumanDataflowIdentifiers(written, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+	}
+	delete(visiting, key)
+	return true
+}
+
+func collectCLIHumanReceiverDataflow(
+	expression ast.Expr,
+	assignments map[string][]ast.Expr,
+	receiverData map[string][]ast.Expr,
+	returnFlow map[*types.Func]cliHumanCodeReturnFlow,
+	typeInfo *types.Info,
+	visiting map[string]bool,
+	found map[string]bool,
+) {
+	key, ok := cliHumanCodeIdentityKey(expression)
+	if ok && !visiting[key] && len(receiverData[key]) > 0 {
+		visiting[key] = true
+		for _, written := range receiverData[key] {
+			collectCLIHumanDataflowIdentifiers(written, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+		}
+		delete(visiting, key)
+		return
+	}
+	collectCLIHumanDataflowIdentifiers(expression, map[string][]ast.Expr{}, map[string][]ast.Expr{}, returnFlow, typeInfo, visiting, found)
+}
+
+func collectRawCLIHumanCodeExpressions(
+	node ast.Node,
+	assignments map[string][]ast.Expr,
+	receiverData map[string][]ast.Expr,
+	returnFlow map[*types.Func]cliHumanCodeReturnFlow,
+	typeInfo *types.Info,
+	visiting map[string]bool,
+	found map[cliHumanCodeRawFinding]struct{},
+) {
 	ast.Inspect(node, func(candidate ast.Node) bool {
 		switch value := candidate.(type) {
 		case *ast.KeyValueExpr:
-			collectRawCLIHumanCodeExpressions(value.Value, assignments, visiting, found)
+			collectRawCLIHumanCodeExpressions(value.Value, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			return false
 		case *ast.CallExpr:
 			if callee, ok := value.Fun.(*ast.Ident); ok && callee.Name == "formatCLIHumanCode" {
 				return false
 			}
+			if summary, receiver, ok := cliHumanCodeReturnSummary(value, returnFlow, typeInfo); ok {
+				for name := range summary.names {
+					found[cliHumanCodeRawFinding{position: value.Pos(), name: name}] = struct{}{}
+				}
+				for _, expression := range cliHumanCodeFlowingCallArguments(value, summary.cliHumanCodeCallFlow, receiver) {
+					collectRawCLIHumanCodeExpressions(expression, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+				}
+				return false
+			}
 			if callee, ok := value.Fun.(*ast.SelectorExpr); ok {
-				collectRawCLIHumanCodeExpressions(callee.X, assignments, visiting, found)
+				collectCLIHumanReceiverRaw(callee.X, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			}
 			for _, argument := range value.Args {
-				collectRawCLIHumanCodeExpressions(argument, assignments, visiting, found)
+				collectRawCLIHumanCodeExpressions(argument, assignments, receiverData, returnFlow, typeInfo, visiting, found)
 			}
 			return false
 		case *ast.SelectorExpr:
+			if cliHumanCodeCollectAssignedRaw(value, assignments, receiverData, returnFlow, typeInfo, visiting, found) {
+				return false
+			}
 			if name, ok := cliHumanCodeLikeName(value.Sel.Name); ok {
-				found[value.Sel.Pos()] = name
+				found[cliHumanCodeRawFinding{position: value.Sel.Pos(), name: name}] = struct{}{}
 			}
 			// The selected field is the value expression. Its receiver is an
 			// object/container identity, not another rendered value.
 			return false
-		case *ast.Ident:
-			if name, ok := cliHumanCodeLikeName(value.Name); ok {
-				found[value.Pos()] = name
+		case *ast.IndexExpr:
+			if cliHumanCodeCollectAssignedRaw(value, assignments, receiverData, returnFlow, typeInfo, visiting, found) {
 				return false
 			}
-			if !visiting[value.Name] {
-				if assigned := assignments[value.Name]; len(assigned) > 0 {
-					visiting[value.Name] = true
-					for _, expression := range assigned {
-						collectRawCLIHumanCodeExpressions(expression, assignments, visiting, found)
-					}
-					delete(visiting, value.Name)
-				}
+			return true
+		case *ast.Ident:
+			if cliHumanCodeCollectAssignedRaw(value, assignments, receiverData, returnFlow, typeInfo, visiting, found) {
+				return false
+			}
+			if name, ok := cliHumanCodeLikeName(value.Name); ok {
+				found[cliHumanCodeRawFinding{position: value.Pos(), name: name}] = struct{}{}
+				return false
 			}
 		}
 		return true
 	})
+}
+
+func cliHumanCodeCollectAssignedRaw(
+	expression ast.Expr,
+	assignments map[string][]ast.Expr,
+	receiverData map[string][]ast.Expr,
+	returnFlow map[*types.Func]cliHumanCodeReturnFlow,
+	typeInfo *types.Info,
+	visiting map[string]bool,
+	found map[cliHumanCodeRawFinding]struct{},
+) bool {
+	key, ok := cliHumanCodeIdentityKey(expression)
+	if !ok || visiting[key] || (len(assignments[key]) == 0 && len(receiverData[key]) == 0) {
+		return false
+	}
+	visiting[key] = true
+	for _, assigned := range assignments[key] {
+		collectRawCLIHumanCodeExpressions(assigned, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+	}
+	for _, written := range receiverData[key] {
+		collectRawCLIHumanCodeExpressions(written, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+	}
+	delete(visiting, key)
+	return true
+}
+
+func collectCLIHumanReceiverRaw(
+	expression ast.Expr,
+	assignments map[string][]ast.Expr,
+	receiverData map[string][]ast.Expr,
+	returnFlow map[*types.Func]cliHumanCodeReturnFlow,
+	typeInfo *types.Info,
+	visiting map[string]bool,
+	found map[cliHumanCodeRawFinding]struct{},
+) {
+	key, ok := cliHumanCodeIdentityKey(expression)
+	if ok && !visiting[key] && len(receiverData[key]) > 0 {
+		visiting[key] = true
+		for _, written := range receiverData[key] {
+			collectRawCLIHumanCodeExpressions(written, assignments, receiverData, returnFlow, typeInfo, visiting, found)
+		}
+		delete(visiting, key)
+		return
+	}
+	collectRawCLIHumanCodeExpressions(expression, map[string][]ast.Expr{}, map[string][]ast.Expr{}, returnFlow, typeInfo, visiting, found)
+}
+
+func cliHumanCodeCalledFunction(call *ast.CallExpr, typeInfo *types.Info) *types.Func {
+	if typeInfo == nil {
+		return nil
+	}
+	switch callee := call.Fun.(type) {
+	case *ast.Ident:
+		function, _ := typeInfo.Uses[callee].(*types.Func)
+		return function
+	case *ast.SelectorExpr:
+		if selection := typeInfo.Selections[callee]; selection != nil {
+			function, _ := selection.Obj().(*types.Func)
+			return function
+		}
+		function, _ := typeInfo.Uses[callee.Sel].(*types.Func)
+		return function
+	default:
+		return nil
+	}
+}
+
+func cliHumanCodeReturnSummary(call *ast.CallExpr, flow map[*types.Func]cliHumanCodeReturnFlow, typeInfo *types.Info) (cliHumanCodeReturnFlow, ast.Expr, bool) {
+	switch callee := call.Fun.(type) {
+	case *ast.Ident:
+		summary, ok := flow[cliHumanCodeCalledFunction(call, typeInfo)]
+		return summary, nil, ok && (len(summary.parameters) > 0 || len(summary.names) > 0)
+	case *ast.SelectorExpr:
+		summary, ok := flow[cliHumanCodeCalledFunction(call, typeInfo)]
+		return summary, callee.X, ok && (len(summary.parameters) > 0 || len(summary.names) > 0)
+	default:
+		return cliHumanCodeReturnFlow{}, nil, false
+	}
 }
 
 func isCLIHumanCodeReceiverMutation(method string) bool {
