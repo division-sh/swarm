@@ -1,10 +1,9 @@
 trigger:
-  event: request.start
+  event: analyzer-flow/analysis.requested
   payload:
 expected:
 
   handler_outcome: success
-  entity_state: idle
   agent_received:
     analyzer:
       - analyzer-flow/analysis.requested

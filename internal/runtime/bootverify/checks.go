@@ -212,6 +212,7 @@ var bootCheckRegistry = []Check{
 	{ID: "event_chain_integrity", Severity: "warning", Run: checkEventChainIntegrity},
 	{ID: "event_consumer_exists", Severity: "warning", Run: checkEventConsumerExists},
 	{ID: "event_producer_exists", Severity: "warning", Run: checkEventProducerExists},
+	{ID: "legacy_qualified_subscription", Severity: "warning", Run: checkLegacyQualifiedSubscription},
 	{ID: "semantic_drift_dead_event_schema", Severity: "warning", Run: checkSemanticDriftDeadEventSchema},
 	{ID: "entity_writer_coverage", Severity: SeverityHardInvalidity, Run: checkEntityWriterCoverage},
 	{ID: "payload_field_coverage", Severity: "error", Run: checkPayloadFieldCoverage},
@@ -1120,25 +1121,6 @@ func (c *checkerContext) platformNamespace() []Finding {
 		}
 	}
 
-	addAgentProducerClaims := func(agentLabel string, agent runtimecontracts.AgentRegistryEntry) {
-		for _, eventType := range agent.EmitEvents {
-			eventType = strings.TrimSpace(eventType)
-			if finding, ok := platformProducerClaimFinding(
-				c.source,
-				eventType,
-				agentLabel,
-				func(eventType string) string {
-					return fmt.Sprintf("agent %s emit_events references platform-emitted event %s; platform owns this event", strings.TrimSpace(agentLabel), eventType)
-				},
-				func(eventType string) string {
-					return fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", strings.TrimSpace(agentLabel), eventType)
-				},
-			); ok {
-				c.namespaceFindings = append(c.namespaceFindings, finding)
-			}
-		}
-	}
-
 	for eventType := range c.source.EventEntries() {
 		eventType = strings.TrimSpace(eventType)
 		addEventCatalogClaim(eventType, eventType)
@@ -1158,104 +1140,52 @@ func (c *checkerContext) platformNamespace() []Finding {
 		}
 	}
 
-	for _, scope := range c.source.ProjectScopes() {
-		scopeLabel := projectScopeLabel(scope.Key, scope.Manifest.Name)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			if agentID == "" {
-				continue
-			}
-			addAgentProducerClaims(scopedObjectLabel(scopeLabel, agentID), agent)
-		}
-	}
-	for _, scope := range c.source.FlowScopes() {
-		scopeLabel := flowScopeLabel(scope.ID, scope.Path)
-		for agentID, agent := range scope.Agents {
-			agentID = strings.TrimSpace(agentID)
-			if agentID == "" {
-				continue
-			}
-			addAgentProducerClaims(scopedObjectLabel(scopeLabel, agentID), agent)
-		}
-	}
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		addAgentProducerClaims(agentID, agent)
-	}
-
-	for nodeID, node := range c.source.NodeEntries() {
-		for _, eventType := range node.Produces {
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	for _, assertion := range census.ProducerAssertions() {
+		for _, eventType := range assertion.EventTypes {
 			eventType = strings.TrimSpace(eventType)
 			if finding, ok := platformProducerClaimFinding(
 				c.source,
 				eventType,
-				nodeID,
+				assertion.NodeID,
 				func(eventType string) string {
-					return fmt.Sprintf("node %s produces references platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), eventType)
+					return fmt.Sprintf("node %s produces references platform-emitted event %s; platform owns this event", strings.TrimSpace(assertion.NodeID), eventType)
 				},
 				func(eventType string) string {
-					return fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(nodeID), eventType)
+					return fmt.Sprintf("node %s produces references reserved platform.* namespace event %s", strings.TrimSpace(assertion.NodeID), eventType)
 				},
 			); ok {
 				c.namespaceFindings = append(c.namespaceFindings, finding)
 			}
 		}
-		for eventType, handler := range c.source.NodeEventHandlers(nodeID) {
-			for _, emitted := range handlerEmits(handler) {
-				emitted = strings.TrimSpace(emitted)
-				if finding, ok := platformProducerClaimFinding(
-					c.source,
-					emitted,
-					nodeID,
-					func(emitted string) string {
-						return fmt.Sprintf("node %s handler %s emits platform-emitted event %s; platform owns this event", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted)
-					},
-					func(emitted string) string {
-						return fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", strings.TrimSpace(nodeID), strings.TrimSpace(eventType), emitted)
-					},
-				); ok {
-					c.namespaceFindings = append(c.namespaceFindings, finding)
-				}
-			}
-		}
 	}
-	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil && bundle.RootSchema != nil {
-		for _, eventType := range bundle.RootSchema.Pins.Outputs.Events {
-			eventType = strings.TrimSpace(eventType)
-			if finding, ok := platformProducerClaimFinding(
-				c.source,
-				eventType,
-				"root schema",
-				func(eventType string) string {
+	for _, endpoint := range census.Producers() {
+		c.namespaceFindings = append(c.namespaceFindings, platformProducerEndpointFindings(c.source, endpoint)...)
+	}
+	for _, endpoint := range census.OutputPins() {
+		flowID := strings.TrimSpace(endpoint.FlowID)
+		location := flowID
+		if flowID == "" {
+			location = "root schema"
+		}
+		if finding, ok := platformProducerClaimFinding(
+			c.source,
+			endpoint.Event.Authored,
+			location,
+			func(eventType string) string {
+				if flowID == "" {
 					return fmt.Sprintf("root schema pins.outputs.events references platform-emitted event %s; platform owns this event", eventType)
-				},
-				func(eventType string) string {
+				}
+				return fmt.Sprintf("flow %s pins.outputs.events references platform-emitted event %s; platform owns this event", flowID, eventType)
+			},
+			func(eventType string) string {
+				if flowID == "" {
 					return fmt.Sprintf("root schema pins.outputs.events references reserved platform.* namespace event %s", eventType)
-				},
-			); ok {
-				c.namespaceFindings = append(c.namespaceFindings, finding)
-			}
-		}
-	}
-	for flowID, schema := range c.source.FlowSchemaEntries() {
-		for _, eventType := range schema.Pins.Outputs.Events {
-			eventType = strings.TrimSpace(eventType)
-			if finding, ok := platformProducerClaimFinding(
-				c.source,
-				eventType,
-				flowID,
-				func(eventType string) string {
-					return fmt.Sprintf("flow %s pins.outputs.events references platform-emitted event %s; platform owns this event", strings.TrimSpace(flowID), eventType)
-				},
-				func(eventType string) string {
-					return fmt.Sprintf("flow %s pins.outputs.events references reserved platform.* namespace event %s", strings.TrimSpace(flowID), eventType)
-				},
-			); ok {
-				c.namespaceFindings = append(c.namespaceFindings, finding)
-			}
+				}
+				return fmt.Sprintf("flow %s pins.outputs.events references reserved platform.* namespace event %s", flowID, eventType)
+			},
+		); ok {
+			c.namespaceFindings = append(c.namespaceFindings, finding)
 		}
 	}
 	c.namespaceFindings = uniqueFindings(c.namespaceFindings)
@@ -1266,6 +1196,78 @@ func (c *checkerContext) platformNamespace() []Finding {
 		return c.namespaceFindings[i].Location < c.namespaceFindings[j].Location
 	})
 	return c.namespaceFindings
+}
+
+func platformProducerEndpointFindings(source semanticview.Source, endpoint semanticview.AuthoredEventEndpoint) []Finding {
+	if endpoint.Kind == semanticview.EventEndpointExternal || endpoint.Kind == semanticview.EventEndpointPlatform {
+		return nil
+	}
+	eventType := endpoint.Event.Authored
+	location := strings.TrimSpace(endpoint.FlowID)
+	if location == "" {
+		location = "root"
+	}
+	var catalogMessage, reservedMessage func(string) string
+	switch endpoint.Kind {
+	case semanticview.EventEndpointAgent:
+		label := strings.TrimSpace(endpoint.AgentID)
+		location = label
+		if endpoint.FlowID != "" {
+			location = scopedObjectLabel(flowScopeLabel(endpoint.FlowID, endpoint.FlowPath), label)
+		}
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("agent %s emit_events references platform-emitted event %s; platform owns this event", location, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("agent %s emit_events references reserved platform.* namespace event %s", location, eventType)
+		}
+	case semanticview.EventEndpointNodeHandler:
+		location = strings.TrimSpace(endpoint.NodeID)
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("node %s handler %s emits platform-emitted event %s; platform owns this event", endpoint.NodeID, endpoint.HandlerEvent, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("node %s handler %s emits reserved platform.* namespace event %s", endpoint.NodeID, endpoint.HandlerEvent, eventType)
+		}
+	case semanticview.EventEndpointNodeGenerated:
+		location = strings.TrimSpace(endpoint.NodeID)
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("node %s produces platform-emitted event %s; platform owns this event", endpoint.NodeID, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("node %s produces reserved platform.* namespace event %s", endpoint.NodeID, eventType)
+		}
+	case semanticview.EventEndpointRequiredAgentRole:
+		location = strings.TrimSpace(endpoint.Role)
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("required agent role %s emits platform-emitted event %s; platform owns this event", endpoint.Role, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("required agent role %s emits reserved platform.* namespace event %s", endpoint.Role, eventType)
+		}
+	case semanticview.EventEndpointTimer:
+		location = strings.TrimSpace(endpoint.TimerID)
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("timer %s fires platform-emitted event %s; platform owns this event", endpoint.TimerID, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("timer %s fires reserved platform.* namespace event %s", endpoint.TimerID, eventType)
+		}
+	case semanticview.EventEndpointAutoEmit:
+		catalogMessage = func(eventType string) string {
+			return fmt.Sprintf("flow %s auto_emit_on_create references platform-emitted event %s; platform owns this event", location, eventType)
+		}
+		reservedMessage = func(eventType string) string {
+			return fmt.Sprintf("flow %s auto_emit_on_create references reserved platform.* namespace event %s", location, eventType)
+		}
+	default:
+		return nil
+	}
+	finding, ok := platformProducerClaimFinding(source, eventType, location, catalogMessage, reservedMessage)
+	if !ok {
+		return nil
+	}
+	return []Finding{finding}
 }
 
 func platformProducerClaimFinding(source semanticview.Source, eventType, location string, catalogMessage, reservedMessage func(string) string) (Finding, bool) {

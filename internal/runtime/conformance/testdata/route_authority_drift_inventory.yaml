@@ -1,7 +1,7 @@
 version: 1
 kind: route_authority_drift_inventory
 issue: 1364
-implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577]
+implementation_issues: [1364, 1494, 1495, 1496, 1545, 1546, 1552, 1577, 1826]
 parent_issues: [1340, 1353, 1481, 1493]
 watchlist: runtime_operations.delivery_and_replay_ownership
 policy:
@@ -384,22 +384,27 @@ seam_families:
       connect.map remains non-authoritative for that class. #1577 adds the
       connect-time template lifecycle owner that consumes the lowered instance
       key plan and creates, reuses, or fails closed before delivery rows commit.
-  - id: authoring_describe_connect_route_plan_projection
+  - id: authoring_routing_topology_projection
     layer: public_projection_non_authority
     classification: non_authoritative_observer_projection
     paths:
       - internal/runtime/authoringview/view.go
       - internal/runtime/authoringview/view_test.go
+      - internal/runtime/routingtopology/topology.go
+      - internal/runtime/routingtopology/topology_test.go
     search_dimensions: [connect_route_plan]
     invalid_authority:
       - route authority decisions
       - route-plan fallback repair
       - verifier/runtime reimplementation
     notes: >
-      The `swarm describe` authoring view consumes
-      LowerCompositionConnectRoutePlans for author-facing readback only. It is
-      projection-only and must not become canonical connect route-plan
-      authority.
+      The versioned `routing-topology/v1` projection consumes the authored
+      endpoint census and LowerCompositionConnectRoutePlans for author-facing
+      readback only. It is projection-only and must not become runtime route
+      authority, materialize recipients, or repair invalid route plans. Its
+      `legacy_qualified_subscriptions` rows are the E1a retirement inventory:
+      each row carries an exact authored site and remains explicitly outside
+      canonical edges while documenting runtime delivery debt.
   - id: route_table_resolve_role_separation
     layer: route_topology
     classification: valid_consumer

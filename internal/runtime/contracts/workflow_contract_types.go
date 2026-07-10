@@ -1727,6 +1727,7 @@ type SystemNodeContract struct {
 	Implementation   string                            `yaml:"-"`
 	SubscribesTo     []string                          `yaml:"subscribes_to"`
 	Produces         []string                          `yaml:"produces"`
+	ProducesDeclared bool                              `yaml:"-" json:"-"`
 	OwnedTransitions []string                          `yaml:"-"`
 	StateTable       string                            `yaml:"state_table"`
 	IdempotencyTable string                            `yaml:"-"`

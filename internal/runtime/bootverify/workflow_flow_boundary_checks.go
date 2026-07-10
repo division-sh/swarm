@@ -219,19 +219,15 @@ func (c *checkerContext) inputPinTargetRefs(flowID, eventType string) string {
 		return inputPinTargetRef(flowID, eventType)
 	}
 	refs := make([]string, 0)
-	for _, pin := range c.source.FlowInputEventPins(flowID) {
-		if !inputEventMatches(c.source, flowID, pin.EventType(), eventType) &&
-			!inputEventMatches(c.source, flowID, pin.PinName(), eventType) {
-			continue
-		}
-		pinName := strings.TrimSpace(pin.PinName())
+	association := semanticview.BuildAuthoredEventEndpointCensus(c.source).ResolveDeclaredInputEndpoint(flowID, eventType)
+	if endpoint, ok := association.Endpoint(); ok {
+		pinName := strings.TrimSpace(endpoint.PinName)
 		if pinName == "" {
-			pinName = strings.TrimSpace(pin.EventType())
+			pinName = strings.TrimSpace(endpoint.Event.Authored)
 		}
-		if pinName == "" {
-			continue
+		if pinName != "" {
+			refs = append(refs, inputPinTargetRef(flowID, pinName))
 		}
-		refs = append(refs, inputPinTargetRef(flowID, pinName))
 	}
 	if len(refs) == 0 {
 		refs = append(refs, inputPinTargetRef(flowID, eventType))
@@ -719,25 +715,8 @@ func flowInputHandlerUsesResolutionMode(source semanticview.Source, flowID, hand
 	if handlerEvent == "" || mode == "" {
 		return false
 	}
-	for _, pin := range source.FlowInputEventPins(flowID) {
-		if strings.TrimSpace(pin.Resolution.Mode) != mode {
-			continue
-		}
-		pinEvent := strings.TrimSpace(pin.EventType())
-		if pinEvent == "" {
-			continue
-		}
-		if source.FlowEventMatches(flowID, handlerEvent, pinEvent) {
-			return true
-		}
-		handler := eventidentity.Normalize(handlerEvent)
-		if handler == eventidentity.Normalize(source.ResolveFlowEventReference(flowID, pinEvent)) ||
-			handler == eventidentity.Normalize(pinEvent) ||
-			handler == eventidentity.Normalize(pin.PinName()) {
-			return true
-		}
-	}
-	return false
+	endpoint, ok := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, handlerEvent).Endpoint()
+	return ok && strings.TrimSpace(endpoint.ResolutionMode) == mode
 }
 
 func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, field string) bool {

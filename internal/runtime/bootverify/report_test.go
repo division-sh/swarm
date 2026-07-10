@@ -4557,6 +4557,43 @@ func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testi
 	}
 }
 
+func TestRun_ReportsLegacyQualifiedSubscriptionWithExactRuntimeEvidence(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-absolute-path"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	var found *Finding
+	for i := range report.Findings {
+		finding := &report.Findings[i]
+		if finding.CheckID == "event_consumer_exists" && finding.Location == "child/task.done" {
+			found = finding
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("findings = %#v, want legacy qualified subscription finding", report.Findings)
+	}
+	if found.Severity != SeveritySemanticDriftWarn || !strings.Contains(found.Message, "no canonical consumer") || !strings.Contains(found.Message, "nodes.yaml:13 still delivers at runtime") {
+		t.Fatalf("legacy finding = %#v, want warning with exact runtime evidence", *found)
+	}
+	if !strings.Contains(found.Remediation, "output/input pins and a connect") || len(found.Evidence) != 1 || !strings.Contains(found.Evidence[0], `"child/task.done"`) {
+		t.Fatalf("legacy remediation/evidence = %#v / %#v", found.Remediation, found.Evidence)
+	}
+}
+
+func TestRun_PromotesLegacyQualifiedSubscriptionToErrorForStagesFlow(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-child-flow-absolute-path"))
+	schema := bundle.FlowSchemas["child"]
+	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true}
+	bundle.FlowSchemas["child"] = schema
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "event_consumer_exists", "child/task.done") {
+		t.Fatalf("errors = %#v, want stages-era legacy subscription hard invalidity", report.Errors())
+	}
+}
+
 func TestRun_ReportsExpressionFieldReferenceWarning(t *testing.T) {
 	bundle := loadWave1ExpressionFixtureBundle(t)
 	flowID, nodeID, eventType, handler := firstFlowHandlerInFlowView(t, bundle)
@@ -7532,6 +7569,9 @@ flows:
   - id: consumer
     flow: consumer
     mode: static
+connect:
+  - from: producer.ticket_ready
+    to: consumer.ticket_ready
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
@@ -7553,7 +7593,8 @@ pins:
     events: []
   outputs:
     events:
-      - ticket.ready
+      - name: ticket_ready
+        event: ticket.ready
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
@@ -7581,7 +7622,8 @@ states: [waiting, done]
 pins:
   inputs:
     events:
-      - ticket.ready
+      - name: ticket_ready
+        event: ticket.ready
   outputs:
     events: []
 `)

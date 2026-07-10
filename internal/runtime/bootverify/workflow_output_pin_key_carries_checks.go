@@ -28,9 +28,7 @@ func checkOutputPinKeyCarriesValidation(c *checkerContext) []Finding {
 		findings = append(findings, validateOutputPinKeyCarriesForFlow(source, flowID, addressedConnects)...)
 	}
 	findings = append(findings, validateOutputPinKeyCarriesNodeEmitSites(source)...)
-	findings = append(findings, validateOutputPinKeyCarriesAgentEmitSites(source)...)
-	findings = append(findings, validateOutputPinKeyCarriesAutoEmitSites(source)...)
-	findings = append(findings, validateOutputPinKeyCarriesTimerSites(source)...)
+	findings = append(findings, validateOutputPinKeyCarriesNonNodeProducerSites(source)...)
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Location != findings[j].Location {
 			return findings[i].Location < findings[j].Location
@@ -111,52 +109,31 @@ func validateOutputPinKeyCarriesDeclaration(source semanticview.Source, flowID s
 	return findings
 }
 
-func validateOutputPinKeyCarriesAutoEmitSites(source semanticview.Source) []Finding {
+func validateOutputPinKeyCarriesNonNodeProducerSites(source semanticview.Source) []Finding {
 	if source == nil {
 		return nil
 	}
 	var findings []Finding
-	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
-		eventType := strings.TrimSpace(bundle.RootSchema.AutoEmitOnCreate.Event)
-		for _, pin := range outputPinKeyCarriesPinsForEvent(source, "", eventType) {
-			if len(outputPinRequiredFields(pin)) == 0 {
-				continue
-			}
-			findings = append(findings, outputPinKeyCarriesFinding("", pin, "auto_emit_payload_unproven", fmt.Sprintf("root auto_emit_on_create declares output pin %s event %s, but activation config payload cannot be statically proven for key/carries fields %s", pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
-		}
-	}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		eventType := strings.TrimSpace(scope.AutoEmitEvent)
-		if flowID == "" || eventType == "" {
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).Producers() {
+		if endpoint.Kind != semanticview.EventEndpointAgent && endpoint.Kind != semanticview.EventEndpointTimer && endpoint.Kind != semanticview.EventEndpointAutoEmit {
 			continue
 		}
-		for _, pin := range outputPinKeyCarriesPinsForEvent(source, flowID, eventType) {
+		for _, pin := range outputPinKeyCarriesPinsForEvent(source, endpoint.FlowID, endpoint.Event.EventKey()) {
 			if len(outputPinRequiredFields(pin)) == 0 {
 				continue
 			}
-			findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "auto_emit_payload_unproven", fmt.Sprintf("auto_emit_on_create declares output pin %s event %s, but activation config payload cannot be statically proven for key/carries fields %s", pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
-		}
-	}
-	return findings
-}
-
-func validateOutputPinKeyCarriesTimerSites(source semanticview.Source) []Finding {
-	if source == nil {
-		return nil
-	}
-	var findings []Finding
-	for _, timer := range source.WorkflowTimers() {
-		flowID := strings.TrimSpace(timer.FlowID)
-		eventType := strings.TrimSpace(timer.Event)
-		if eventType == "" {
-			continue
-		}
-		for _, pin := range outputPinKeyCarriesPinsForEvent(source, flowID, eventType) {
-			if len(outputPinRequiredFields(pin)) == 0 {
-				continue
+			switch endpoint.Kind {
+			case semanticview.EventEndpointAgent:
+				findings = append(findings, outputPinKeyCarriesFinding(endpoint.FlowID, pin, "agent_emit_payload_unproven", fmt.Sprintf("agent %s emit_events declares output pin %s event %s, but agent emit_events has no static payload construction surface for key/carries fields %s", endpoint.AgentID, pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
+			case semanticview.EventEndpointTimer:
+				findings = append(findings, outputPinKeyCarriesFinding(endpoint.FlowID, pin, "timer_payload_unproven", fmt.Sprintf("workflow timer %s declares output pin %s event %s, but timer payload construction cannot be statically proven for key/carries fields %s", endpoint.TimerID, pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
+			case semanticview.EventEndpointAutoEmit:
+				prefix := "auto_emit_on_create"
+				if strings.TrimSpace(endpoint.FlowID) == "" {
+					prefix = "root auto_emit_on_create"
+				}
+				findings = append(findings, outputPinKeyCarriesFinding(endpoint.FlowID, pin, "auto_emit_payload_unproven", fmt.Sprintf("%s declares output pin %s event %s, but activation config payload cannot be statically proven for key/carries fields %s", prefix, pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
 			}
-			findings = append(findings, outputPinKeyCarriesFinding(flowID, pin, "timer_payload_unproven", fmt.Sprintf("workflow timer %s declares output pin %s event %s, but timer payload construction cannot be statically proven for key/carries fields %s", strings.TrimSpace(timer.ID), pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
 		}
 	}
 	return findings
@@ -178,19 +155,6 @@ func validateOutputPinKeyCarriesNodeEmitSites(source semanticview.Source) []Find
 				seen[key] = struct{}{}
 				findings = append(findings, outputPinKeyCarriesFinding(site.FlowID, pin, "emit_payload_missing_key", fmt.Sprintf("node %s emit site %s emits output pin %s event %s but emit.fields does not statically prove carried field %s", site.NodeID, site.Site, pin.PinName(), pin.EventType(), field)))
 			}
-		}
-	}
-	return findings
-}
-
-func validateOutputPinKeyCarriesAgentEmitSites(source semanticview.Source) []Finding {
-	var findings []Finding
-	for _, site := range pinRoutingAgentEmitSites(source) {
-		for _, pin := range outputPinKeyCarriesPinsForEvent(source, site.FlowID, site.EventType) {
-			if len(outputPinRequiredFields(pin)) == 0 {
-				continue
-			}
-			findings = append(findings, outputPinKeyCarriesFinding(site.FlowID, pin, "agent_emit_payload_unproven", fmt.Sprintf("agent %s emit_events declares output pin %s event %s, but agent emit_events has no static payload construction surface for key/carries fields %s", site.AgentID, pin.PinName(), pin.EventType(), strings.Join(outputPinRequiredFields(pin), ", "))))
 		}
 	}
 	return findings
@@ -319,17 +283,9 @@ func outputPinKeyCarriesPinsForEvent(source semanticview.Source, flowID, eventTy
 	if source == nil {
 		return nil
 	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return nil
-	}
-	normalizedEvent := eventidentity.Normalize(eventType)
-	resolvedEvent := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
 	var out []runtimecontracts.FlowOutputEventPin
-	for _, pin := range source.FlowOutputEventPins(flowID) {
-		pinEvent := eventidentity.Normalize(pin.EventType())
-		pinResolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, pin.EventType()))
-		if normalizedEvent == pinEvent || (resolvedEvent != "" && resolvedEvent == pinResolved) {
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingOutputPins(flowID, eventType) {
+		if pin, ok := source.FlowOutputEventPin(flowID, endpoint.PinName); ok {
 			out = append(out, pin)
 		}
 	}

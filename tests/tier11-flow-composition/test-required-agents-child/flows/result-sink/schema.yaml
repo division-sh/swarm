@@ -1,0 +1,8 @@
+name: result-sink
+pins:
+  inputs:
+    events:
+    - name: analysis_done
+      event: analysis.done
+  outputs:
+    events: []

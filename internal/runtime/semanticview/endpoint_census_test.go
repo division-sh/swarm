@@ -1,0 +1,314 @@
+package semanticview
+
+import (
+	"errors"
+	"path/filepath"
+	"testing"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+)
+
+func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *testing.T) {
+	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
+		Name:  "work",
+		Event: "work.requested",
+		Resolution: runtimecontracts.FlowInputPinResolution{
+			Mode:        "fan-in",
+			Aggregation: "stream",
+			Window:      "5m",
+			DedupBy:     []string{"work_id"},
+		},
+	}})
+
+	census := BuildAuthoredEventEndpointCensus(source)
+	if got := endpointCount(census.Producers(), EventEndpointNodeHandler, "worker", "work.completed"); got != 1 {
+		t.Fatalf("node handler producers = %d, want 1: %#v", got, census.Producers())
+	}
+	if got := endpointCount(census.Consumers(), EventEndpointNodeHandler, "worker", "work.requested"); got != 1 {
+		t.Fatalf("node handler consumers = %d, want 1: %#v", got, census.Consumers())
+	}
+	if got := endpointCount(census.InputPins(), EventEndpointFlowInputPin, "worker", "work.requested"); got != 1 {
+		t.Fatalf("input endpoints = %d, want 1: %#v", got, census.InputPins())
+	}
+	assertions := census.ProducerAssertions()
+	if len(assertions) != 1 || assertions[0].NodeID != "worker-node" || !assertions[0].Declared || len(assertions[0].EventTypes) != 0 {
+		t.Fatalf("producer assertions = %#v, want explicit empty worker-node assertion", assertions)
+	}
+
+	producers := census.Producers()
+	producers[0].NodeID = "mutated"
+	if got := census.Producers()[0].NodeID; got == "mutated" {
+		t.Fatal("census exposed mutable producer storage")
+	}
+}
+
+func TestAuthoredEventEndpointCensusIncludesCompiledHandlersOutsideEffectiveSubscriptions(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {ID: "worker"},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+				"worker": {"work.requested": {}},
+			},
+			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
+				"worker": {ID: "worker"},
+			},
+		},
+	}
+
+	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	if got := endpointCount(census.Consumers(), EventEndpointNodeHandler, "", "work.requested"); got != 1 {
+		t.Fatalf("compiled handler consumers = %d, want 1: %#v", got, census.Consumers())
+	}
+}
+
+func TestAuthoredEventEndpointCensusClassifiesInternalStageTimerAsPlatform(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+		Timers: []runtimecontracts.WorkflowTimerContract{{
+			ID:         "active.timed_out",
+			Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
+			StageOwned: true,
+			AdvancesTo: "timed_out",
+		}},
+	}}
+	producers := BuildAuthoredEventEndpointCensus(Wrap(bundle)).Producers()
+	if got := endpointCount(producers, EventEndpointPlatform, "", runtimecontracts.WorkflowStageTimerInternalEvent); got != 1 {
+		t.Fatalf("internal stage timer producers = %#v, want one platform endpoint", producers)
+	}
+	if got := endpointCount(producers, EventEndpointTimer, "", runtimecontracts.WorkflowStageTimerInternalEvent); got != 0 {
+		t.Fatalf("internal stage timer was classified as authored timer: %#v", producers)
+	}
+}
+
+func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{
+			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{Event: "flow.created"},
+			Pins: runtimecontracts.FlowPins{
+				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"flow.started"}},
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"flow.completed"}},
+			},
+			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{Role: "reviewer", SubscribesTo: []string{"review.requested"}, Emits: []string{"review.completed"}}},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {ID: "worker", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {Emit: runtimecontracts.EmitSpec{Event: "work.completed"}}}},
+		},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"analyst": {ID: "analyst", Role: "analyst", Subscriptions: []string{"analysis.requested"}, EmitEvents: []string{"analysis.completed"}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"external.received": {Swarm: runtimecontracts.EventSwarmMetadata{Source: "external", Consumer: []string{"dashboard"}}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},
+		},
+	}
+	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	producerKinds := endpointKindSet(census.Producers())
+	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {
+		if !producerKinds[kind] {
+			t.Fatalf("producer kinds = %#v, missing %s", producerKinds, kind)
+		}
+	}
+	consumerKinds := endpointKindSet(census.Consumers())
+	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointExternal} {
+		if !consumerKinds[kind] {
+			t.Fatalf("consumer kinds = %#v, missing %s", consumerKinds, kind)
+		}
+	}
+	if len(census.InputPins()) != 1 || len(census.OutputPins()) != 1 {
+		t.Fatalf("interface endpoints = inputs %#v outputs %#v", census.InputPins(), census.OutputPins())
+	}
+}
+
+func TestResolveDeclaredInputEndpointUsesAllDeclaredIdentitiesAndFailsClosed(t *testing.T) {
+	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
+		Name:  "work",
+		Event: "work.requested",
+	}})
+	census := BuildAuthoredEventEndpointCensus(source)
+
+	for _, identity := range []string{"work", "work.requested"} {
+		result := census.ResolveDeclaredInputEndpoint("worker", identity)
+		endpoint, ok := result.Endpoint()
+		if !ok || endpoint.PinName != "work" {
+			t.Fatalf("identity %q result = %#v, want work input", identity, result)
+		}
+	}
+
+	missing := census.ResolveDeclaredInputEndpoint("worker", "work.missing")
+	if missing.Status != EndpointAssociationNotFound {
+		t.Fatalf("missing status = %q, want not_found", missing.Status)
+	}
+	var associationErr *EndpointAssociationError
+	if !errors.As(missing.Err(), &associationErr) || associationErr.Status != EndpointAssociationNotFound {
+		t.Fatalf("missing error = %#v, want typed not-found", missing.Err())
+	}
+}
+
+func TestResolveDeclaredInputEndpointRejectsAmbiguousIdentity(t *testing.T) {
+	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{
+		{Name: "work-primary", Event: "work.requested"},
+		{Name: "work-secondary", Event: "work.requested"},
+	})
+
+	result := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("worker", "work.requested")
+	if result.Status != EndpointAssociationAmbiguous || len(result.Candidates) != 2 {
+		t.Fatalf("result = %#v, want two-candidate ambiguity", result)
+	}
+}
+
+func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t *testing.T) {
+	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
+		Name:       "work",
+		Event:      "work.requested",
+		Resolution: runtimecontracts.FlowInputPinResolution{Mode: "fan-in"},
+	}})
+	census := BuildAuthoredEventEndpointCensus(source)
+	for _, identity := range []string{"work.requested", "work"} {
+		result := census.ResolveFanInInputForHandler("worker", "worker-node", identity)
+		endpoint, ok := result.Endpoint()
+		if !ok || endpoint.PinName != "work" {
+			t.Fatalf("handler identity %q result = %#v, want work input", identity, result)
+		}
+	}
+
+	ambiguousSource := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{
+		{Name: "work-a", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: "fan-in"}},
+		{Name: "work-b", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: "fan-in"}},
+	})
+	ambiguous := BuildAuthoredEventEndpointCensus(ambiguousSource).ResolveFanInInputForHandler("worker", "worker-node", "work.requested")
+	if ambiguous.Status != EndpointAssociationAmbiguous || len(ambiguous.Candidates) != 2 {
+		t.Fatalf("ambiguous result = %#v, want two candidates", ambiguous)
+	}
+}
+
+func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	tests := []struct {
+		name      string
+		fixture   string
+		eventType string
+		pattern   string
+		nodeID    string
+	}{
+		{name: "root wildcard", fixture: filepath.Join("tests", "tier5-flow-lifecycle", "test-wildcard-subscription"), eventType: "task.completed", pattern: "*.completed", nodeID: "test-node"},
+		{name: "deep imported scope", fixture: filepath.Join("tests", "tier11-flow-composition", "test-wildcard-deep-subscription"), eventType: "child/grandchild/task.done", pattern: "**/task.done", nodeID: "collector"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, tc.fixture), runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if err != nil {
+				t.Fatalf("load fixture: %v", err)
+			}
+			matched := BuildAuthoredEventEndpointCensus(Wrap(bundle)).MatchingConsumers("", tc.eventType)
+			found := false
+			for _, endpoint := range matched {
+				if endpoint.NodeID == tc.nodeID && endpoint.Pattern && endpoint.Event.Authored == tc.pattern {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("scoped event %q consumers = %#v, want authored %s endpoint", tc.eventType, matched, tc.pattern)
+			}
+		})
+	}
+}
+
+func TestLegacyQualifiedSubscriptionsUseDeclaredFlowIdentityAndExactSourceLine(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load legacy fixture: %v", err)
+	}
+
+	legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions()
+	if len(legacy) != 1 {
+		t.Fatalf("legacy subscriptions = %#v, want one direct qualified consumer", legacy)
+	}
+	got := legacy[0]
+	if got.Consumer.NodeID != "listener" || got.Consumer.Event.Authored != "child/task.done" || got.TargetFlowID != "child" {
+		t.Fatalf("legacy subscription = %#v, want root listener targeting child", got)
+	}
+	if got.Consumer.SourceFile != filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-child-flow-absolute-path", "nodes.yaml") || got.Consumer.SourceLine != 13 {
+		t.Fatalf("legacy source = %s:%d, want nodes.yaml:13", got.Consumer.SourceFile, got.Consumer.SourceLine)
+	}
+}
+
+func TestLegacyQualifiedSubscriptionsExcludeConnectedInputDelivery(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests", "tier7-composition", "test-cross-flow-subscription"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load connected fixture: %v", err)
+	}
+
+	if legacy := BuildAuthoredEventEndpointCensus(Wrap(bundle)).LegacyQualifiedSubscriptions(); len(legacy) != 0 {
+		t.Fatalf("connected input delivery misclassified as legacy direct delivery: %#v", legacy)
+	}
+}
+
+func endpointCensusFixture(inputPins []runtimecontracts.FlowInputEventPin) Source {
+	node := runtimecontracts.SystemNodeContract{
+		ID:               "worker-node",
+		ProducesDeclared: true,
+		Produces:         []string{},
+		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+			"work.requested": {
+				Emit: runtimecontracts.EmitSpec{Event: "work.completed"},
+			},
+		},
+	}
+	inputEvents := make([]string, 0, len(inputPins))
+	for _, pin := range inputPins {
+		inputEvents = append(inputEvents, pin.EventType())
+	}
+	worker := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{ID: "worker", Flow: "worker", PackageKey: "flows/worker"},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Pins: runtimecontracts.FlowPins{
+				Inputs:  runtimecontracts.FlowInputPins{Events: inputEvents, EventPins: inputPins},
+				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"work.completed"}},
+			},
+		},
+		Nodes: map[string]runtimecontracts.SystemNodeContract{"worker-node": node},
+		Path:  "worker",
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{worker}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"worker": &root.Children[0]},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"worker": worker.Schema},
+	}
+	return Wrap(bundle)
+}
+
+func endpointCount(endpoints []AuthoredEventEndpoint, kind EventEndpointKind, flowID, eventType string) int {
+	count := 0
+	for _, endpoint := range endpoints {
+		if endpoint.Kind == kind && endpoint.FlowID == flowID && (endpoint.Event.EventKey() == eventType || endpoint.Event.Local == eventType || endpoint.Event.Authored == eventType) {
+			count++
+		}
+	}
+	return count
+}
+
+func endpointKindSet(endpoints []AuthoredEventEndpoint) map[EventEndpointKind]bool {
+	out := map[EventEndpointKind]bool{}
+	for _, endpoint := range endpoints {
+		out[endpoint.Kind] = true
+	}
+	return out
+}

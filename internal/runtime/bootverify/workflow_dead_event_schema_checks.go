@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -145,205 +146,51 @@ func (c *checkerContext) deadEventSchemaUsageFor(decl deadEventDeclaration) dead
 		externalConsumer: deadEventExternalConsumer(decl.Entry),
 	}
 
-	for _, required := range c.source.RequiredAgents() {
-		for _, eventType := range required.Emits {
-			if deadEventRoleMatches(c.source, decl, "", eventType) {
-				usage.agentEmitEvents++
-			}
-		}
-		for _, eventType := range required.SubscribesTo {
-			if deadEventRoleMatches(c.source, decl, "", eventType) {
-				usage.agentSubscriptions++
-			}
-		}
-	}
-	for _, scope := range c.source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		if deadEventSameScope(decl.FlowID, flowID) && deadEventRoleMatches(c.source, decl, flowID, scope.AutoEmitEvent) {
-			usage.autoEmitOnCreate = true
-		}
-		for _, required := range c.source.FlowRequiredAgents(flowID) {
-			for _, eventType := range required.Emits {
-				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-					usage.agentEmitEvents++
-				}
-			}
-			for _, eventType := range required.SubscribesTo {
-				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-					usage.agentSubscriptions++
-				}
-			}
-		}
-	}
-	for _, scope := range semanticview.ProjectScopes(c.source) {
-		flowID := strings.TrimSpace(scope.OwningFlowID)
-		for _, agent := range scope.Agents {
-			for _, eventType := range agent.EmitEvents {
-				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-					usage.agentEmitEvents++
-				}
-			}
-			for _, eventType := range agent.Subscriptions {
-				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-					usage.agentSubscriptions++
-				}
-			}
-		}
-		for _, node := range scope.Nodes {
-			for _, eventType := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
-				if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-					usage.handlerSubscribes++
-				}
-			}
-			for handlerEvent, handler := range node.EventHandlers {
-				if deadEventRoleMatches(c.source, decl, flowID, handlerEvent) {
-					usage.handlerSubscribes++
-				}
-				for _, emitted := range deadEventHandlerEmits(handler) {
-					if deadEventRoleMatches(c.source, decl, flowID, emitted) {
-						usage.handlerEmits++
-					}
-				}
-				for _, emitted := range deadEventHandlerFanOutEmits(handler) {
-					if deadEventSameScope(decl.FlowID, flowID) && deadEventRoleMatches(c.source, decl, flowID, emitted) {
-						usage.fanOutEmit++
-					}
-				}
-			}
-		}
-	}
-	if bundle, ok := semanticview.Bundle(c.source); ok && bundle != nil && bundle.RootSchema != nil {
-		if deadEventSameScope(decl.FlowID, "") && deadEventRoleMatches(c.source, decl, "", bundle.RootSchema.AutoEmitOnCreate.Event) {
-			usage.autoEmitOnCreate = true
-		}
-	}
-
-	for agentID, agent := range c.source.AgentEntries() {
-		agentSource, _ := c.source.AgentContractSource(agentID)
-		flowID := strings.TrimSpace(agentSource.FlowID)
-		for _, eventType := range agent.EmitEvents {
-			if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-				usage.agentEmitEvents++
-			}
-		}
-		for _, eventType := range agent.Subscriptions {
-			if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-				usage.agentSubscriptions++
-			}
-		}
-	}
-
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeSource, _ := c.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range semanticview.NodeEffectiveSubscriptions(c.source, nodeID) {
-			if deadEventRoleMatches(c.source, decl, flowID, eventType) {
-				usage.handlerSubscribes++
-			}
-		}
-		for handlerEvent, handler := range node.EventHandlers {
-			if deadEventRoleMatches(c.source, decl, flowID, handlerEvent) {
-				usage.handlerSubscribes++
-			}
-			for _, emitted := range deadEventHandlerEmits(handler) {
-				if deadEventRoleMatches(c.source, decl, flowID, emitted) {
-					usage.handlerEmits++
-				}
-			}
-			for _, emitted := range deadEventHandlerFanOutEmits(handler) {
-				if deadEventSameScope(decl.FlowID, flowID) && deadEventRoleMatches(c.source, decl, flowID, emitted) {
-					usage.fanOutEmit++
-				}
-			}
-		}
-	}
-
-	for _, timer := range c.source.WorkflowTimers() {
-		timerFlowID := strings.TrimSpace(timer.FlowID)
-		if !deadEventSameScope(decl.FlowID, timerFlowID) {
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	for _, endpoint := range census.Producers() {
+		if !endpointMatchesDeadEventDeclaration(endpoint, decl) {
 			continue
 		}
-		for _, eventType := range deadEventTimerReferences(timer) {
-			if deadEventRoleMatches(c.source, decl, timerFlowID, eventType) {
-				usage.timerReferences++
+		switch endpoint.Kind {
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointNodeGenerated:
+			usage.handlerEmits++
+			if strings.Contains(endpoint.Site, "fan_out") {
+				usage.fanOutEmit++
 			}
+		case semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
+			usage.agentEmitEvents++
+		case semanticview.EventEndpointTimer:
+			usage.timerReferences++
+		case semanticview.EventEndpointAutoEmit:
+			usage.autoEmitOnCreate = true
 		}
 	}
-	for _, connect := range c.source.CompositionConnects() {
-		from, fromErr := connect.FromRef()
-		if fromErr == nil {
-			if outputPin, ok := c.source.FlowOutputEventPin(from.FlowID, from.Pin); ok && deadEventRoleMatches(c.source, decl, from.FlowID, outputPin.EventType()) {
-				usage.connectOutputs++
-			}
+	for _, endpoint := range census.Consumers() {
+		if !endpointMatchesDeadEventDeclaration(endpoint, decl) {
+			continue
 		}
-		to, toErr := connect.ToRef()
-		if toErr == nil {
-			if inputPin, ok := c.source.FlowInputEventPin(to.FlowID, to.Pin); ok && deadEventRoleMatches(c.source, decl, to.FlowID, inputPin.EventType()) {
-				usage.connectInputs++
-			}
+		switch endpoint.Kind {
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointNodeGenerated:
+			usage.handlerSubscribes++
+		case semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
+			usage.agentSubscriptions++
+		case semanticview.EventEndpointTimer:
+			usage.timerReferences++
+		}
+	}
+	for _, edge := range routingtopology.Build(c.source).Edges {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlow {
+			continue
+		}
+		if deadEventSameScope(decl.FlowID, edge.Producer.FlowID) && eventidentity.Normalize(edge.Producer.Event.Canonical) == eventidentity.Normalize(decl.Canonical) {
+			usage.connectOutputs++
+		}
+		if deadEventSameScope(decl.FlowID, edge.Consumer.FlowID) && eventidentity.Normalize(edge.Consumer.Event.Canonical) == eventidentity.Normalize(decl.Canonical) {
+			usage.connectInputs++
 		}
 	}
 
 	return usage
-}
-
-func deadEventHandlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
-	return runtimecontracts.HandlerEmitEvents(handler)
-}
-
-func deadEventHandlerFanOutEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
-	out := make([]string, 0, 1+len(handler.Rules)+len(handler.OnComplete)+2)
-	if handler.FanOut != nil {
-		if emitted := handler.FanOut.Emit.EventType(); emitted != "" {
-			out = append(out, emitted)
-		}
-	}
-	for _, rule := range handler.Rules {
-		if rule.FanOut != nil {
-			if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
-				out = append(out, emitted)
-			}
-		}
-	}
-	for _, rule := range handler.OnComplete {
-		if rule.FanOut != nil {
-			if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
-				out = append(out, emitted)
-			}
-		}
-	}
-	if handler.Accumulate != nil {
-		for _, rule := range handler.Accumulate.OnComplete {
-			if rule.FanOut != nil {
-				if emitted := rule.FanOut.Emit.EventType(); emitted != "" {
-					out = append(out, emitted)
-				}
-			}
-		}
-		if handler.Accumulate.OnTimeout != nil && handler.Accumulate.OnTimeout.FanOut != nil {
-			if emitted := handler.Accumulate.OnTimeout.FanOut.Emit.EventType(); emitted != "" {
-				out = append(out, emitted)
-			}
-		}
-	}
-	return out
-}
-
-func deadEventTimerReferences(timer runtimecontracts.WorkflowTimerContract) []string {
-	out := make([]string, 0, 3)
-	if eventType := strings.TrimSpace(timer.Event); eventType != "" {
-		out = append(out, eventType)
-	}
-	for _, gate := range []string{timer.StartOn, timer.CancelOn} {
-		gate = strings.TrimSpace(gate)
-		if !strings.HasPrefix(gate, "event:") {
-			continue
-		}
-		if eventType := strings.TrimSpace(strings.TrimPrefix(gate, "event:")); eventType != "" {
-			out = append(out, eventType)
-		}
-	}
-	return out
 }
 
 func deadEventRoleMatches(source semanticview.Source, decl deadEventDeclaration, referenceFlowID, reference string) bool {

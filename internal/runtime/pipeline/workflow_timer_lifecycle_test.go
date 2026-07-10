@@ -1330,6 +1330,51 @@ func TestReconcileAccumulationTimeoutScheduleUsesFanInPinDerivedWindow(t *testin
 	}
 }
 
+func TestReconcileAccumulationTimeoutScheduleRejectsAmbiguousFanInInput(t *testing.T) {
+	bundle := templatefanin.LoadBundle(t, templatefanin.Options{AmbiguousReceiverInput: true})
+	module, err := newPipelineFixtureWorkflowModule(bundle)
+	if err != nil {
+		t.Fatalf("newPipelineFixtureWorkflowModule: %v", err)
+	}
+	_, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	store := &recordingSchedulePersistence{}
+	pc := newTimerLifecycleCoordinator(noopPipelineBus{}, db, module, store)
+	if pc == nil {
+		t.Fatal("expected coordinator")
+	}
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:       "operating_reports",
+			From:       "payload",
+			Completion: runtimecontracts.ParseAccumulateCompletion("timeout"),
+			TimeoutMS:  5000,
+		},
+	}
+	evt := eventtest.RootIngress(
+		"evt-operating-ambiguous",
+		events.EventType(templatefanin.ReceiverEvent),
+		"cataloge2e",
+		"",
+		[]byte(`{"portfolio_id":"portfolio/default","report_id":"report-1","period_id":"2026-Q1","operating_id":"opco-a","revenue":42}`),
+		0,
+		"",
+		"",
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, templatefanin.ReceiverFlowInstance), templatefanin.ReceiverFlowInstance),
+		time.Now().UTC(),
+	)
+
+	ctx := withPipelineFlowScope(testPipelineCoordinatorRunContext(t, pc), templatefanin.ReceiverFlowID)
+	err = pc.reconcileAccumulationTimeoutSchedule(ctx, templatefanin.ReceiverFlowInstance, templatefanin.ReceiverNodeID, handler, evt, templatefanin.ReceiverEvent, map[string]any{}, true)
+	if err == nil || !strings.Contains(err.Error(), "matches multiple fan-in input pins [operating_reported operating_reported_duplicate]") {
+		t.Fatalf("ambiguity error = %v, want both matching input pins", err)
+	}
+	if len(store.schedules) != 0 || len(store.cancels) != 0 {
+		t.Fatalf("ambiguous input persisted timer operations: schedules=%#v cancels=%#v", store.schedules, store.cancels)
+	}
+}
+
 func TestExecuteNodeHandlerPlan_AccumulateTimeoutCancelsScheduleOnTimeout(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier2-accumulation", "test-accumulate-timeout")

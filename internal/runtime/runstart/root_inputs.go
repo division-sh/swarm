@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -28,8 +29,9 @@ func DeriveRootInputSet(source semanticview.Source) (RootInputSet, error) {
 		return RootInputSet{}, err
 	}
 	routable := make([]string, 0, len(declared))
+	topology := routingtopology.Build(source)
 	for _, eventType := range declared {
-		if len(routeTable.Resolve(eventType)) > 0 || rootInputConsumedByFlow(source, eventType) {
+		if len(routeTable.Resolve(eventType)) > 0 || rootInputRoutableInTopology(topology, eventType) {
 			routable = append(routable, eventType)
 		}
 	}
@@ -87,37 +89,16 @@ func stringSet(values []string) map[string]struct{} {
 	return out
 }
 
-func rootInputConsumedByFlow(source semanticview.Source, eventType string) bool {
+func rootInputRoutableInTopology(topology routingtopology.Topology, eventType string) bool {
 	eventType = strings.TrimSpace(eventType)
-	if source == nil || eventType == "" {
+	if eventType == "" {
 		return false
 	}
-	for _, scope := range source.FlowScopes() {
-		if !containsString(scope.InputEvents, eventType) {
+	for _, edge := range topology.Edges {
+		if edge.Scope != routingtopology.DeliveryScopeIntraFlow || edge.Producer.Direction != semanticview.EventEndpointInputPin {
 			continue
 		}
-		for _, node := range scope.Nodes {
-			nodeID := strings.TrimSpace(node.ID)
-			if nodeID == "" {
-				continue
-			}
-			if containsString(source.NodeRuntimeSubscriptions(nodeID), eventType) {
-				return true
-			}
-		}
-		for _, agent := range scope.Agents {
-			if containsString(agent.Subscriptions, eventType) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func containsString(values []string, needle string) bool {
-	needle = strings.TrimSpace(needle)
-	for _, value := range values {
-		if strings.TrimSpace(value) == needle {
+		if edge.Producer.Event.Authored == eventType || edge.Producer.Event.Local == eventType || edge.Producer.Event.Canonical == eventType {
 			return true
 		}
 	}

@@ -112,6 +112,12 @@ func (n *SystemNodeContract) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*n = SystemNodeContract(aux)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if strings.TrimSpace(node.Content[i].Value) == "produces" {
+			n.ProducesDeclared = true
+			break
+		}
+	}
 	return nil
 }
 

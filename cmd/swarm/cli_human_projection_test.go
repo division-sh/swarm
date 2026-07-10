@@ -263,6 +263,7 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"diagnostics.go\x00writeDiagnosticRunTrace":                    {string(cliHumanCodeDeliveryStatus)},
 		"diagnostics.go\x00writeDiagnosticRunTraceDeliverySummary":     {string(cliHumanCodeDeliveryStatus)},
 		"diagnostics.go\x00writeDiagnosticRunTraceDeliveryDetail":      {string(cliHumanCodeDeliveryStatus)},
+		"describe.go\x00writeRoutingTopologyText":                      {string(cliHumanCodeRoutingTopology)},
 		"event_publish.go\x00writeEventPublishResult":                  {string(cliHumanCodeDeliveryStatus)},
 		"events.go\x00writeEventDetailResult":                          {string(cliHumanCodeDeliveryStatus)},
 		"events.go\x00writeEventReplayResult":                          {string(cliHumanCodeDeliveryStatus)},
@@ -293,6 +294,7 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"cliHumanCodeProviderCapability":          string(cliHumanCodeProviderCapability),
 		"cliHumanCodeProviderGuarantee":           string(cliHumanCodeProviderGuarantee),
 		"cliHumanCodeProviderRequirementStatus":   string(cliHumanCodeProviderRequirementStatus),
+		"cliHumanCodeRoutingTopology":             string(cliHumanCodeRoutingTopology),
 	}
 	actual := map[string][]string{}
 	rawOutput := map[string][]string{}

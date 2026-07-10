@@ -133,13 +133,26 @@ func (c *checkerContext) transitionOwnership() []Finding {
 		}
 	}
 	usesOwningNodeModel := contractBundleUsesOwningNodeModel(c.source)
+	consumerEventsByNode := map[string]map[string]struct{}{}
+	producerEventsByNode := map[string]map[string]struct{}{}
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	for _, endpoint := range census.Consumers() {
+		if endpoint.NodeID != "" {
+			addTransitionEndpointEvent(consumerEventsByNode, endpoint.NodeID, endpoint.Event)
+		}
+	}
+	for _, endpoint := range census.Producers() {
+		if endpoint.NodeID != "" {
+			addTransitionEndpointEvent(producerEventsByNode, endpoint.NodeID, endpoint.Event)
+		}
+	}
 	for nodeID, node := range c.source.NodeEntries() {
 		nodeID = strings.TrimSpace(nodeID)
 		if nodeID == "" {
 			continue
 		}
-		subs := stringSet(c.source.NodeRuntimeSubscriptions(nodeID))
-		produces := stringSet(semanticview.NodeEffectiveProduces(c.source, nodeID))
+		subs := consumerEventsByNode[nodeID]
+		produces := producerEventsByNode[nodeID]
 		for _, transitionID := range node.OwnedTransitions {
 			transitionID = strings.TrimSpace(transitionID)
 			if transitionID == "" {
@@ -181,12 +194,28 @@ func (c *checkerContext) transitionOwnership() []Finding {
 	return c.transitionOwnerFindings
 }
 
+func addTransitionEndpointEvent(byNode map[string]map[string]struct{}, nodeID string, proof semanticview.FlowEventProof) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return
+	}
+	if byNode[nodeID] == nil {
+		byNode[nodeID] = map[string]struct{}{}
+	}
+	for _, value := range []string{proof.Authored, proof.Local, proof.Canonical, proof.CatalogKey} {
+		if value = strings.TrimSpace(value); value != "" {
+			byNode[nodeID][value] = struct{}{}
+		}
+	}
+}
+
 func (c *checkerContext) eventRuntimeWiring() []Finding {
 	if c.eventRuntimeLoaded {
 		return c.eventRuntimeFindings
 	}
 	c.eventRuntimeLoaded = true
 	nodes := c.source.NodeEntries()
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
 	for _, requirement := range runtimeHandledEventRequirements(c.source) {
 		if requirement.owner == "" {
 			c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
@@ -207,7 +236,15 @@ func (c *checkerContext) eventRuntimeWiring() []Finding {
 			continue
 		}
 		if handlers := c.source.NodeEventHandlers(requirement.owner); len(handlers) > 0 {
-			if _, ok := c.source.NodeEventHandler(requirement.owner, requirement.eventType); !ok {
+			sourceRef, _ := c.source.NodeContractSource(requirement.owner)
+			matched := false
+			for _, endpoint := range census.MatchingConsumers(sourceRef.FlowID, requirement.eventType) {
+				if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == requirement.owner {
+					matched = true
+					break
+				}
+			}
+			if !matched {
 				c.eventRuntimeFindings = append(c.eventRuntimeFindings, Finding{
 					CheckID:  "event_runtime_wiring_validation",
 					Severity: "error",

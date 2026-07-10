@@ -57,6 +57,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm forkchat view":     {Constructor: "newForkChatViewCommand", Runner: "runForkChatViewCommand"},
 	"swarm forkchat delete":   {Constructor: "newForkChatDeleteCommand", Runner: "runForkChatDeleteCommand"},
 	"swarm describe":          {Constructor: "newDescribeCommand", Runner: "runDescribeCommandWithOutput"},
+	"swarm describe routes":   {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
 }
 
 var cliOutputGrandfatheredNonSharedRows = map[string]string{

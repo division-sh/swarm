@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -442,46 +443,40 @@ func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtime
 
 func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
 	var findings []Finding
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
+	if _, ok := source.FlowScopeByID(flowID); !ok {
 		return []Finding{inputPinResolutionFinding(flowID, pin, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", flowID), flowID)}
 	}
 	matchedHandler := false
-	for nodeID := range scope.Nodes {
-		for handlerEvent, handler := range source.NodeEventHandlers(nodeID) {
-			if !fanInHandlerMatchesInputEvent(source, flowID, handlerEvent, pin.EventType()) {
-				continue
-			}
-			matchedHandler = true
-			if handler.Accumulate == nil {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s for fan-in input must declare accumulate", nodeID, handlerEvent), flowID))
-				continue
-			}
-			if dedup := strings.TrimSpace(handler.Accumulate.DedupBy); dedup != "" {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", nodeID, handlerEvent, dedup), flowID))
-			}
-			if window := strings.TrimSpace(handler.Accumulate.Window); window != "" {
-				findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", nodeID, handlerEvent, window), flowID))
-			}
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	for _, endpoint := range census.MatchingConsumers(flowID, pin.EventType()) {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.NodeID) == "" {
+			continue
+		}
+		association := census.ResolveFanInInputForHandler(flowID, endpoint.NodeID, endpoint.HandlerEvent)
+		matchedPin, ok := association.Endpoint()
+		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.PinName()) {
+			continue
+		}
+		handler, ok := source.NodeEventHandler(endpoint.NodeID, endpoint.HandlerEvent)
+		if !ok {
+			continue
+		}
+		matchedHandler = true
+		if handler.Accumulate == nil {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s for fan-in input must declare accumulate", endpoint.NodeID, endpoint.HandlerEvent), flowID))
+			continue
+		}
+		if dedup := strings.TrimSpace(handler.Accumulate.DedupBy); dedup != "" {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.dedup_by %q must not redeclare fan-in dedup_by; declare it once on the receiver input pin resolution", endpoint.NodeID, endpoint.HandlerEvent, dedup), flowID))
+		}
+		if window := strings.TrimSpace(handler.Accumulate.Window); window != "" {
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", endpoint.NodeID, endpoint.HandlerEvent, window), flowID))
 		}
 	}
 	if !matchedHandler {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s has no handler for fan-in input event %s", flowID, pin.EventType()), flowID))
 	}
 	return findings
-}
-
-func fanInHandlerMatchesInputEvent(source semanticview.Source, flowID, handlerEvent, inputEvent string) bool {
-	handlerEvent = strings.TrimSpace(handlerEvent)
-	inputEvent = strings.TrimSpace(inputEvent)
-	if handlerEvent == "" || inputEvent == "" {
-		return false
-	}
-	if source.FlowEventMatches(flowID, handlerEvent, inputEvent) {
-		return true
-	}
-	resolvedInput := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputEvent))
-	return eventidentity.Normalize(handlerEvent) == resolvedInput || eventidentity.Normalize(handlerEvent) == eventidentity.Normalize(inputEvent)
 }
 
 func validTopLevelPayloadPath(path string) bool {
@@ -874,25 +869,6 @@ func compositionConnectTypeFamily(raw string) string {
 	}
 }
 
-func compositionConnectsToInput(source semanticview.Source, flowID, pinOrEvent string) bool {
-	if source == nil {
-		return false
-	}
-	pinOrEvent = eventidentity.Normalize(pinOrEvent)
-	if pinOrEvent == "" {
-		return false
-	}
-	for _, pin := range source.FlowInputEventPins(flowID) {
-		if eventidentity.Normalize(pin.PinName()) != pinOrEvent && eventidentity.Normalize(pin.EventType()) != pinOrEvent {
-			continue
-		}
-		if len(source.CompositionConnectsTo(flowID, pin.PinName())) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, eventType string) bool {
 	if source == nil {
 		return false
@@ -901,11 +877,11 @@ func compositionConnectsFromOutputEvent(source semanticview.Source, flowID, even
 	if eventType == "" {
 		return false
 	}
-	for _, pin := range source.FlowOutputEventPins(flowID) {
-		if eventidentity.Normalize(pin.PinName()) != eventType && eventidentity.Normalize(pin.EventType()) != eventType {
+	for _, edge := range routingtopology.Build(source).Edges {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlow || strings.TrimSpace(edge.Producer.FlowID) != strings.TrimSpace(flowID) {
 			continue
 		}
-		if len(source.CompositionConnectsFrom(flowID, pin.PinName())) > 0 {
+		if eventidentity.Normalize(edge.Producer.Event.Authored) == eventType || eventidentity.Normalize(edge.Producer.Event.Local) == eventType || eventidentity.Normalize(edge.Producer.Event.Canonical) == eventType {
 			return true
 		}
 	}

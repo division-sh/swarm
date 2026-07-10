@@ -36,12 +36,32 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 		return nil
 	}
 	builder := authoredEmitSiteBuilder{
-		seen: map[string]struct{}{},
+		seen:              map[string]struct{}{},
+		representedNodes:  map[string]struct{}{},
+		scopeNodeCounts:   map[string]int{},
+		countedScopeNodes: map[string]struct{}{},
+		effectiveNodes:    source.NodeEntries(),
 	}
 	if bundle, ok := Bundle(source); ok {
 		builder.bundle = bundle
 	}
 	projectScopes := sortedAuthoredProjectScopes(source.ProjectScopes())
+	flowScopes := sortedAuthoredFlowScopes(source.FlowScopes())
+	preferredFlowScopeKeys := authoredPreferredFlowScopeKeys(projectScopes, flowScopes)
+	for _, scope := range projectScopes {
+		if authoredEmitSiteSkipsProjectScope(scope) {
+			continue
+		}
+		builder.countScopeNodes(strings.TrimSpace(scope.Key), strings.TrimSpace(scope.OwningFlowID), scope.Nodes)
+	}
+	for _, scope := range flowScopes {
+		flowID := strings.TrimSpace(scope.ID)
+		scopeKey := authoredEmitSiteFlowScopeKey(scope)
+		if preferred := preferredFlowScopeKeys[flowID]; preferred != "" && scopeKey != preferred {
+			continue
+		}
+		builder.countScopeNodes(scopeKey, flowID, scope.Nodes)
+	}
 	for _, scope := range projectScopes {
 		if authoredEmitSiteSkipsProjectScope(scope) {
 			continue
@@ -50,8 +70,6 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 		flowPath, flowPackageKey := authoredEmitSiteFlowIdentity(source, flowID)
 		builder.appendScope(AuthoredEmitSiteSourceProject, strings.TrimSpace(scope.Key), flowID, flowPath, flowPackageKey, scope.Nodes)
 	}
-	flowScopes := sortedAuthoredFlowScopes(source.FlowScopes())
-	preferredFlowScopeKeys := authoredPreferredFlowScopeKeys(projectScopes, flowScopes)
 	for _, scope := range flowScopes {
 		flowID := strings.TrimSpace(scope.ID)
 		scopeKey := authoredEmitSiteFlowScopeKey(scope)
@@ -59,6 +77,30 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 			continue
 		}
 		builder.appendScope(AuthoredEmitSiteSourceFlow, scopeKey, flowID, strings.TrimSpace(scope.Path), strings.TrimSpace(scope.PackageKey), scope.Nodes)
+	}
+	// Programmatic contract bundles can populate the effective flat registry
+	// without constructing package/flow views. Keep authored endpoint discovery
+	// exhaustive while preserving scoped declarations as the preferred source.
+	for _, nodeKey := range sortedAuthoredNodeKeys(source.NodeEntries()) {
+		node := source.NodeEntries()[nodeKey]
+		nodeID := strings.TrimSpace(node.ID)
+		if nodeID == "" {
+			nodeID = strings.TrimSpace(nodeKey)
+		}
+		if _, ok := builder.representedNodes[nodeID]; ok {
+			continue
+		}
+		contractSource, _ := source.NodeContractSource(nodeID)
+		flowID := strings.TrimSpace(contractSource.FlowID)
+		flowPath, flowPackageKey := authoredEmitSiteFlowIdentity(source, flowID)
+		if flowPackageKey == "" {
+			flowPackageKey = strings.TrimSpace(contractSource.PackageKey)
+		}
+		kind := AuthoredEmitSiteSourceProject
+		if flowID != "" {
+			kind = AuthoredEmitSiteSourceFlow
+		}
+		builder.appendScope(kind, flowPackageKey, flowID, flowPath, flowPackageKey, map[string]runtimecontracts.SystemNodeContract{nodeKey: node})
 	}
 	sort.SliceStable(builder.sites, func(i, j int) bool {
 		return builder.sites[i].ID < builder.sites[j].ID
@@ -73,9 +115,28 @@ func authoredEmitSiteSkipsProjectScope(scope ProjectScope) bool {
 }
 
 type authoredEmitSiteBuilder struct {
-	bundle *runtimecontracts.WorkflowContractBundle
-	seen   map[string]struct{}
-	sites  []AuthoredEmitSite
+	bundle            *runtimecontracts.WorkflowContractBundle
+	seen              map[string]struct{}
+	representedNodes  map[string]struct{}
+	scopeNodeCounts   map[string]int
+	countedScopeNodes map[string]struct{}
+	effectiveNodes    map[string]runtimecontracts.SystemNodeContract
+	sites             []AuthoredEmitSite
+}
+
+func (b *authoredEmitSiteBuilder) countScopeNodes(scopeKey, flowID string, nodes map[string]runtimecontracts.SystemNodeContract) {
+	for _, nodeKey := range sortedAuthoredNodeKeys(nodes) {
+		nodeID := strings.TrimSpace(nodes[nodeKey].ID)
+		if nodeID == "" {
+			nodeID = strings.TrimSpace(nodeKey)
+		}
+		occurrence := strings.Join([]string{strings.TrimSpace(flowID), strings.TrimSpace(scopeKey), nodeID}, "\x00")
+		if _, exists := b.countedScopeNodes[occurrence]; exists {
+			continue
+		}
+		b.countedScopeNodes[occurrence] = struct{}{}
+		b.scopeNodeCounts[nodeID]++
+	}
 }
 
 func (b *authoredEmitSiteBuilder) appendScope(kind AuthoredEmitSiteSourceKind, scopeKey, flowID, flowPath, flowPackageKey string, nodes map[string]runtimecontracts.SystemNodeContract) {
@@ -89,6 +150,12 @@ func (b *authoredEmitSiteBuilder) appendScope(kind AuthoredEmitSiteSourceKind, s
 		if nodeID == "" {
 			nodeID = strings.TrimSpace(nodeKey)
 		}
+		if b.scopeNodeCounts[nodeID] == 1 {
+			if effective, ok := b.effectiveNodes[nodeID]; ok {
+				node = effective
+			}
+		}
+		b.representedNodes[nodeID] = struct{}{}
 		for _, handlerEvent := range sortedAuthoredHandlerEvents(node.EventHandlers) {
 			handler := node.EventHandlers[handlerEvent]
 			b.appendHandlerSites(kind, scopeKey, flowID, flowPath, flowPackageKey, strings.TrimSpace(nodeKey), nodeID, handlerEvent, handler)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -18,6 +19,10 @@ func checkEventConsumerExists(c *checkerContext) []Finding {
 
 func checkEventProducerExists(c *checkerContext) []Finding {
 	return c.eventWarningsByCheck("event_producer_exists")
+}
+
+func checkLegacyQualifiedSubscription(c *checkerContext) []Finding {
+	return c.eventWarningsByCheck("legacy_qualified_subscription")
 }
 
 func checkEventCycleDetection(c *checkerContext) []Finding { return c.eventCycleDetection() }
@@ -38,103 +43,30 @@ func (c *checkerContext) eventWarnings() []Finding {
 		return c.eventWarningFindings
 	}
 	c.eventWarningLoaded = true
-	emittedRefs := map[string]semanticview.FlowEventProof{}
-	subscribedRefs := map[string]semanticview.FlowEventProof{}
-	subscriptionPatterns := map[string]eventPatternLocal{}
-	for _, scope := range c.source.FlowScopes() {
-		if eventType := strings.TrimSpace(scope.AutoEmitEvent); eventType != "" {
-			addEventProofLocal(emittedRefs, c.source, scope.ID, eventType)
-		}
-		for _, eventType := range scope.InputEvents {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, scope.PackageKey, scope.ID, eventType)
-			} else {
-				addEventProofLocal(subscribedRefs, c.source, scope.ID, eventType)
-			}
-		}
-		for _, required := range c.source.FlowRequiredAgents(scope.ID) {
-			for _, eventType := range required.Emits {
-				addEventProofLocal(emittedRefs, c.source, scope.ID, eventType)
-			}
-			for _, eventType := range required.SubscribesTo {
-				eventType = strings.TrimSpace(eventType)
-				if eventType == "" {
-					continue
-				}
-				if strings.Contains(eventType, "*") {
-					addEventPatternLocal(subscriptionPatterns, scope.PackageKey, scope.ID, eventType)
-				} else {
-					addEventProofLocal(subscribedRefs, c.source, scope.ID, eventType)
-				}
-			}
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	topology := routingtopology.Build(c.source)
+	for _, subscription := range topology.LegacyQualifiedSubscriptions {
+		message := fmt.Sprintf("legacy qualified subscription '%s' at %s still delivers at runtime but is outside canonical same-flow pub/sub and pin/connect topology; migrate to pins/connect", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)
+		remediation := subscription.Migration
+		evidence := []string{fmt.Sprintf("legacy qualified subscription %q at %q", subscription.Consumer.Event.Authored, subscription.AuthoredLocation)}
+		if flowUsesAuthoredStages(c.source, subscription.Consumer.FlowID) {
+			c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("legacy_qualified_subscription", subscription.AuthoredLocation, message, remediation, evidence...))
+		} else {
+			c.eventWarningFindings = append(c.eventWarningFindings, Finding{
+				CheckID:     "legacy_qualified_subscription",
+				Severity:    SeveritySemanticDriftWarn,
+				Message:     message,
+				Location:    subscription.AuthoredLocation,
+				Remediation: remediation,
+				Evidence:    evidence,
+			})
 		}
 	}
-	for _, required := range c.source.RequiredAgents() {
-		for _, eventType := range required.Emits {
-			addEventProofLocal(emittedRefs, c.source, "", eventType)
-		}
-		for _, eventType := range required.SubscribesTo {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, "", "", eventType)
-			} else {
-				addEventProofLocal(subscribedRefs, c.source, "", eventType)
-			}
-		}
-	}
-	for nodeID, node := range c.source.NodeEntries() {
-		nodeSource, _ := c.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range semanticview.NodeEffectiveSubscriptions(c.source, nodeID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, nodeSource.PackageKey, flowID, eventType)
-			} else {
-				addEventProofLocal(subscribedRefs, c.source, flowID, eventType)
-			}
-			handler, ok := c.source.NodeEventHandler(nodeID, eventType)
-			if !ok {
-				continue
-			}
-			for _, emitted := range handlerEmits(handler) {
-				addEventProofLocal(emittedRefs, c.source, flowID, emitted)
-			}
-		}
-		for _, timer := range node.Timers {
-			addEventProofLocal(emittedRefs, c.source, flowID, strings.TrimSpace(timer.Event))
-		}
-	}
-	for agentID, agent := range c.source.AgentEntries() {
-		agentSource, _ := c.source.AgentContractSource(agentID)
-		flowID := strings.TrimSpace(agentSource.FlowID)
-		for _, eventType := range agent.EmitEvents {
-			addEventProofLocal(emittedRefs, c.source, flowID, eventType)
-		}
-		for _, eventType := range agent.Subscriptions {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			if strings.Contains(eventType, "*") {
-				addEventPatternLocal(subscriptionPatterns, agentSource.PackageKey, flowID, eventType)
-			} else {
-				addEventProofLocal(subscribedRefs, c.source, flowID, eventType)
-			}
-		}
-	}
-	addCompositionConnectEventProofsLocal(c.source, emittedRefs, subscribedRefs)
-	for _, key := range sortedSetKeysLocal(emittedRefs) {
-		ref := emittedRefs[key]
+	emitted := topologyWarningEndpoints(census.Producers(), true)
+	subscribed := topologyWarningEndpoints(append(census.Consumers(), census.InputPins()...), false)
+	for _, key := range sortedSetKeysLocal(emitted) {
+		entry := emitted[key]
+		ref := entry.Event
 		if !ref.HasSchema {
 			if strings.HasPrefix(ref.DisplayName(), "timer.") || strings.HasPrefix(ref.DisplayName(), "platform.") {
 				continue
@@ -147,7 +79,29 @@ func (c *checkerContext) eventWarnings() []Finding {
 			})
 			continue
 		}
-		if eventRefConsumedLocal(c.source, ref.Canonical, subscribedRefs, subscriptionPatterns) || len(c.source.RuntimeEventOwners(ref.Canonical)) > 0 || eventHasExternalConsumerLocal(ref.Entry) || ref.CrossesDeclaredOutputBoundary(c.source) {
+		if topologyRoutesProducer(topology, entry.ID) || eventHasExternalConsumerLocal(ref.Entry) {
+			continue
+		}
+		if legacy := legacyQualifiedConsumersForEvent(topology, ref.Canonical); len(legacy) > 0 {
+			location := legacy[0].AuthoredLocation
+			message := fmt.Sprintf("'%s' has no canonical consumer (same-flow subscriber or connected pin); legacy qualified subscription '%s' at %s still delivers at runtime; migrate to pins/connect", ref.Canonical, legacy[0].Consumer.Event.Authored, location)
+			remediation := fmt.Sprintf("Declare output/input pins and a connect for %s, then replace every legacy qualified subscription with a flow-local subscription.", ref.Canonical)
+			evidence := make([]string, 0, len(legacy))
+			for _, subscription := range legacy {
+				evidence = append(evidence, fmt.Sprintf("legacy qualified subscription %q at %q", subscription.Consumer.Event.Authored, subscription.AuthoredLocation))
+			}
+			if flowUsesAuthoredStages(c.source, entry.FlowID) {
+				c.eventWarningFindings = append(c.eventWarningFindings, NewHardInvalidityFinding("event_consumer_exists", ref.Canonical, message, remediation, evidence...))
+			} else {
+				c.eventWarningFindings = append(c.eventWarningFindings, Finding{
+					CheckID:     "event_consumer_exists",
+					Severity:    SeveritySemanticDriftWarn,
+					Message:     message,
+					Location:    ref.Canonical,
+					Remediation: remediation,
+					Evidence:    evidence,
+				})
+			}
 			continue
 		}
 		c.eventWarningFindings = append(c.eventWarningFindings, Finding{
@@ -157,12 +111,13 @@ func (c *checkerContext) eventWarnings() []Finding {
 			Location: ref.Canonical,
 		})
 	}
-	for _, key := range sortedSetKeysLocal(subscribedRefs) {
-		ref := subscribedRefs[key]
+	for _, key := range sortedSetKeysLocal(subscribed) {
+		entry := subscribed[key]
+		ref := entry.Event
 		if !ref.HasSchema {
 			continue
 		}
-		if eventRefProducedLocal(c.source, ref, emittedRefs) {
+		if len(census.MatchingProducers(ref.FlowID, ref.Authored)) > 0 || topologyRoutesConsumer(topology, entry.ID) {
 			continue
 		}
 		if runtimecontracts.PlatformEventCatalogContains(c.source.PlatformSpec(), ref.Canonical) {
@@ -188,83 +143,71 @@ func (c *checkerContext) eventWarnings() []Finding {
 	return c.eventWarningFindings
 }
 
-func addCompositionConnectEventProofsLocal(source semanticview.Source, emittedRefs, subscribedRefs map[string]semanticview.FlowEventProof) {
-	if source == nil {
-		return
-	}
-	for _, connect := range source.CompositionConnects() {
-		from, fromErr := connect.FromRef()
-		to, toErr := connect.ToRef()
-		if fromErr == nil {
-			if outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin); ok {
-				eventType := outputPin.EventType()
-				addEventProofLocal(emittedRefs, source, from.FlowID, eventType)
-				addEventProofLocal(subscribedRefs, source, from.FlowID, eventType)
-			}
-		}
-		if toErr == nil {
-			if inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin); ok {
-				eventType := inputPin.EventType()
-				addEventProofLocal(emittedRefs, source, to.FlowID, eventType)
-				addEventProofLocal(subscribedRefs, source, to.FlowID, eventType)
-			}
+func legacyQualifiedConsumersForEvent(topology routingtopology.Topology, canonical string) []routingtopology.LegacyQualifiedSubscription {
+	canonical = strings.TrimSpace(canonical)
+	out := make([]routingtopology.LegacyQualifiedSubscription, 0)
+	for _, subscription := range topology.LegacyQualifiedSubscriptions {
+		if strings.TrimSpace(subscription.Event.Canonical) == canonical {
+			out = append(out, subscription)
 		}
 	}
+	return out
 }
 
-type eventPatternLocal struct {
-	PackageKey string
-	FlowID     string
-	Base       string
-}
-
-func addEventProofLocal(refs map[string]semanticview.FlowEventProof, source semanticview.Source, flowID, eventType string) {
-	ref := semanticview.ResolveFlowEventProof(source, flowID, eventType)
-	if strings.TrimSpace(ref.DisplayName()) == "" {
-		return
-	}
-	key := strings.TrimSpace(ref.FlowID) + "::" + ref.DisplayName()
-	refs[key] = ref
-}
-
-func addEventPatternLocal(refs map[string]eventPatternLocal, packageKey, flowID, eventType string) {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return
-	}
-	ref := eventPatternLocal{
-		PackageKey: strings.TrimSpace(packageKey),
-		FlowID:     strings.TrimSpace(flowID),
-		Base:       eventType,
-	}
-	key := ref.PackageKey + "::" + ref.FlowID + "::" + ref.Base
-	refs[key] = ref
-}
-
-func eventRefConsumedLocal(source semanticview.Source, eventType string, subscribedRefs map[string]semanticview.FlowEventProof, patterns map[string]eventPatternLocal) bool {
-	for _, subscribed := range subscribedRefs {
-		if source.FlowEventMatches(subscribed.FlowID, subscribed.Authored, eventType) {
-			return true
-		}
-	}
-	for _, pattern := range patterns {
-		if matched, scoped := semanticview.ImportBoundaryWildcardSubscriptionMatches(source, pattern.PackageKey, pattern.FlowID, "", nil, pattern.Base, eventType); scoped {
-			if matched {
-				return true
-			}
+func topologyWarningEndpoints(endpoints []semanticview.AuthoredEventEndpoint, producers bool) map[string]semanticview.AuthoredEventEndpoint {
+	out := map[string]semanticview.AuthoredEventEndpoint{}
+	for _, endpoint := range endpoints {
+		if producers && (endpoint.Kind == semanticview.EventEndpointExternal || endpoint.Kind == semanticview.EventEndpointPlatform) {
 			continue
 		}
-		if source.FlowEventMatches(pattern.FlowID, pattern.Base, eventType) {
+		if !producers && (endpoint.Kind == semanticview.EventEndpointExternal || endpoint.Kind == semanticview.EventEndpointTimer) {
+			continue
+		}
+		if endpoint.Pattern || strings.TrimSpace(endpoint.Event.DisplayName()) == "" {
+			continue
+		}
+		key := strings.TrimSpace(endpoint.FlowID) + "::" + endpoint.Event.DisplayName()
+		if _, exists := out[key]; !exists {
+			out[key] = endpoint
+		}
+	}
+	return out
+}
+
+func topologyRoutesProducer(topology routingtopology.Topology, endpointID string) bool {
+	for _, edge := range topology.Edges {
+		if edge.Producer.ID == endpointID {
 			return true
+		}
+	}
+	for _, exposure := range topology.BoundaryExposures {
+		if exposure.Producer.ID != endpointID {
+			continue
+		}
+		if strings.TrimSpace(exposure.Output.FlowID) == "" {
+			return true
+		}
+		for _, edge := range topology.Edges {
+			if edge.Scope == routingtopology.DeliveryScopeInterFlow && edge.Producer.ID == exposure.Output.ID {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func eventRefProducedLocal(source semanticview.Source, ref semanticview.FlowEventProof, emittedRefs map[string]semanticview.FlowEventProof) bool {
-	for _, emitted := range emittedRefs {
-		if source.FlowEventMatches(ref.FlowID, ref.Authored, emitted.Canonical) {
+func topologyRoutesConsumer(topology routingtopology.Topology, endpointID string) bool {
+	for _, edge := range topology.Edges {
+		if edge.Consumer.ID == endpointID && edge.Scope == routingtopology.DeliveryScopeInterFlow {
 			return true
+		}
+		if edge.Consumer.ID != endpointID || edge.Scope != routingtopology.DeliveryScopeIntraFlow || edge.Producer.Direction != semanticview.EventEndpointInputPin {
+			continue
+		}
+		for _, upstream := range topology.Edges {
+			if upstream.Scope == routingtopology.DeliveryScopeInterFlow && upstream.Consumer.ID == edge.Producer.ID {
+				return true
+			}
 		}
 	}
 	return false
@@ -279,35 +222,18 @@ func (c *checkerContext) eventCycleDetection() []Finding {
 		return c.cycleFindings
 	}
 	c.cycleLoaded = true
-	for nodeID := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		nodeSource, _ := c.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			trigger := semanticview.ResolveFlowEventProof(c.source, flowID, eventType).EventKey()
-			if trigger == "" {
-				continue
-			}
-			handler, ok := c.source.NodeEventHandler(nodeID, eventType)
-			if !ok {
-				continue
-			}
-			for _, emitted := range handlerEmits(handler) {
-				emitted = semanticview.ResolveFlowEventProof(c.source, flowID, emitted).EventKey()
-				if emitted == "" || emitted != trigger {
-					continue
-				}
-				c.cycleFindings = append(c.cycleFindings, Finding{
-					CheckID:  "event_cycle_detection",
-					Severity: "error",
-					Message:  fmt.Sprintf("node %s handler %s emits its own trigger event", nodeID, trigger),
-					Location: nodeID,
-				})
-			}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).Producers() {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.HandlerEvent) == "" {
+			continue
+		}
+		trigger := semanticview.ResolveFlowEventProof(c.source, endpoint.FlowID, endpoint.HandlerEvent).EventKey()
+		if trigger != "" && endpoint.Event.EventKey() == trigger {
+			c.cycleFindings = append(c.cycleFindings, Finding{
+				CheckID:  "event_cycle_detection",
+				Severity: "error",
+				Message:  fmt.Sprintf("node %s handler %s emits its own trigger event", endpoint.NodeID, trigger),
+				Location: endpoint.NodeID,
+			})
 		}
 	}
 	if err := detectEventCyclesSemanticModel(c.source); err != nil {
@@ -326,33 +252,19 @@ func detectEventCyclesSemanticModel(source semanticview.Source) error {
 		return nil
 	}
 	graph := map[string]map[string]struct{}{}
-	for nodeID := range source.NodeEntries() {
-		nodeSource, _ := source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range source.NodeHandlerSubscriptions(nodeID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" || strings.Contains(eventType, "*") {
-				continue
-			}
-			trigger := semanticview.ResolveFlowEventProof(source, flowID, eventType).EventKey()
-			if trigger == "" {
-				continue
-			}
-			handler, ok := source.NodeEventHandler(nodeID, eventType)
-			if !ok {
-				continue
-			}
-			for _, emitted := range handlerEmits(handler) {
-				emitted = semanticview.ResolveFlowEventProof(source, flowID, emitted).EventKey()
-				if emitted == "" || strings.Contains(emitted, "*") || emitted == trigger {
-					continue
-				}
-				if graph[trigger] == nil {
-					graph[trigger] = map[string]struct{}{}
-				}
-				graph[trigger][emitted] = struct{}{}
-			}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).Producers() {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.HandlerEvent) == "" || endpoint.Pattern {
+			continue
 		}
+		trigger := semanticview.ResolveFlowEventProof(source, endpoint.FlowID, endpoint.HandlerEvent).EventKey()
+		emitted := endpoint.Event.EventKey()
+		if trigger == "" || emitted == "" || strings.Contains(emitted, "*") || emitted == trigger {
+			continue
+		}
+		if graph[trigger] == nil {
+			graph[trigger] = map[string]struct{}{}
+		}
+		graph[trigger][emitted] = struct{}{}
 	}
 	cycles := workflowFindEventCyclesLocal(graph)
 	if len(cycles) == 0 {
