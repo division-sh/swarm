@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/userfacing"
 	"gopkg.in/yaml.v3"
 )
@@ -37,6 +38,72 @@ func TestCLIHumanCodePhraseParityRejectsSpecOnlyDrift(t *testing.T) {
 	if got := cliHumanCodePhrasesFromSpec(t, projection); reflect.DeepEqual(cliHumanCodePhrases, got) {
 		t.Fatal("spec-only phrase drift did not break implementation parity")
 	}
+}
+
+func TestProviderHumanCodePhrasesMatchMachineOwnersAndCapabilitySpec(t *testing.T) {
+	machineValues := packs.ProviderHumanCodeValues()
+	for family, want := range machineValues {
+		got := make([]string, 0, len(cliHumanCodePhrases[family]))
+		for code := range cliHumanCodePhrases[family] {
+			got = append(got, code)
+		}
+		sort.Strings(got)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("provider human-code family %s differs from machine owner:\ngot:  %v\nwant: %v", family, got, want)
+		}
+	}
+	capabilityValues := machineValues[userfacing.HumanCodeProviderCapability]
+	if specValues := providerKnownCapabilityCodesFromSpec(t, loadPlatformSpecRootForHumanProjection(t)); !reflect.DeepEqual(specValues, capabilityValues) {
+		t.Fatalf("known provider capability spec differs from machine owner:\ngot:  %v\nwant: %v", specValues, capabilityValues)
+	}
+}
+
+func TestProviderHumanCodeParityRejectsKnownCapabilitySpecDrift(t *testing.T) {
+	root := loadPlatformSpecRootForHumanProjection(t)
+	toolModel := driftMappingValue(root, "tool_model")
+	surface := driftMappingValue(toolModel, "provider_capability_surface")
+	facts := driftMappingValue(surface, "facts")
+	known := driftMappingValue(facts, "known_capability_codes")
+	known.Content = append(known.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "adversarial_current_capability"})
+
+	got := providerKnownCapabilityCodesFromSpec(t, root)
+	want := packs.ProviderHumanCodeValues()[userfacing.HumanCodeProviderCapability]
+	if reflect.DeepEqual(got, want) {
+		t.Fatal("known capability spec drift did not break machine-owner parity")
+	}
+}
+
+func loadPlatformSpecRootForHumanProjection(t *testing.T) *yaml.Node {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(driftTestRepoRoot(t), "platform-spec.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Content) != 1 {
+		t.Fatalf("platform spec document content = %d, want 1", len(doc.Content))
+	}
+	return doc.Content[0]
+}
+
+func providerKnownCapabilityCodesFromSpec(t *testing.T, root *yaml.Node) []string {
+	t.Helper()
+	toolModel := driftMappingValue(root, "tool_model")
+	surface := driftMappingValue(toolModel, "provider_capability_surface")
+	facts := driftMappingValue(surface, "facts")
+	known := driftMappingValue(facts, "known_capability_codes")
+	if known == nil || known.Kind != yaml.SequenceNode {
+		t.Fatal("provider_capability_surface.facts.known_capability_codes must be a sequence")
+	}
+	out := make([]string, 0, len(known.Content))
+	for _, node := range known.Content {
+		out = append(out, strings.TrimSpace(node.Value))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func loadCLIHumanCodeProjectionSpec(t *testing.T) *yaml.Node {
