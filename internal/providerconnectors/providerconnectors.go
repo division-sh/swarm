@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
@@ -17,30 +18,6 @@ import (
 )
 
 const Category = "provider_connector"
-
-type RequirementStatus struct {
-	Kind                string
-	Name                string
-	Status              string
-	Bound               bool
-	GrantType           string
-	Scopes              []string
-	GrantModel          string
-	TokenRequest        managedcredentialmodel.TokenRequestProfile
-	InstallationIDInput string
-}
-
-type Surface struct {
-	ToolID       string
-	Provider     string
-	Action       string
-	EndpointHost string
-	EffectClass  string
-	Generation   *GenerationSurface
-	Can          []string
-	Cannot       []string
-	Requires     []RequirementStatus
-}
 
 type GenerationSurface struct {
 	GeneratorVersion string
@@ -56,9 +33,11 @@ type GenerationSurface struct {
 	ReviewStatus     string
 }
 
-type SurfaceOptions struct {
+type CapabilityOptions struct {
 	StaticCredentials  runtimecredentials.Store
 	ManagedCredentials runtimemanagedcredentials.Store
+	Registry           *PackRegistry
+	IncludeInstalled   bool
 }
 
 func ValidateSource(source semanticview.Source) []error {
@@ -83,13 +62,24 @@ func ValidateSource(source semanticview.Source) []error {
 	return errs
 }
 
-func Surfaces(ctx context.Context, source semanticview.Source, store runtimecredentials.Store) ([]Surface, error) {
-	return SurfacesWithOptions(ctx, source, SurfaceOptions{StaticCredentials: store})
+func HasEffectiveConnectors(source semanticview.Source) bool {
+	if source == nil {
+		return false
+	}
+	for _, tool := range source.ToolEntries() {
+		if isProviderConnector(tool) {
+			return true
+		}
+	}
+	return false
 }
 
-func SurfacesWithOptions(ctx context.Context, source semanticview.Source, opts SurfaceOptions) ([]Surface, error) {
+func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts CapabilityOptions) ([]packs.Subject, error) {
 	if source == nil {
 		return nil, nil
+	}
+	if opts.Registry == nil {
+		opts.Registry = DefaultPackRegistry()
 	}
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
@@ -97,19 +87,33 @@ func SurfacesWithOptions(ctx context.Context, source semanticview.Source, opts S
 		names = append(names, strings.TrimSpace(name))
 	}
 	sort.Strings(names)
-	out := make([]Surface, 0)
+	out := make([]packs.Subject, 0)
+	effective := map[string]struct{}{}
 	for _, name := range names {
 		tool := tools[name]
 		if !isProviderConnector(tool) {
 			continue
 		}
-		surface, err := surfaceForTool(ctx, source, name, tool, opts)
+		surface, err := capabilitySubjectForTool(ctx, source, name, tool, opts)
 		if err != nil {
 			return nil, err
 		}
+		effective[name] = struct{}{}
 		out = append(out, surface)
 	}
-	return out, nil
+	if opts.IncludeInstalled {
+		for _, installed := range opts.Registry.Inventory() {
+			if _, exists := effective[installed.ToolID]; exists {
+				continue
+			}
+			subject, err := availableCapabilitySubject(installed)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, subject)
+		}
+	}
+	return packs.NormalizeSubjects(out)
 }
 
 func isProviderConnector(tool runtimecontracts.ToolSchemaEntry) bool {
@@ -216,7 +220,7 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 	return errs
 }
 
-func surfaceForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, opts SurfaceOptions) (Surface, error) {
+func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, opts CapabilityOptions) (packs.Subject, error) {
 	provider, action, _ := splitToolID(toolID)
 	host := ""
 	if tool.HTTP != nil {
@@ -225,10 +229,10 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 			host = strings.TrimSpace(parsed.Host)
 		}
 	}
-	requires := make([]RequirementStatus, 0, len(tool.Credentials)+1)
+	requires := make([]packs.Requirement, 0, len(tool.Credentials)+1)
 	flowID, err := connectorToolFlowID(source, toolID, tool)
 	if err != nil {
-		return Surface{}, err
+		return packs.Subject{}, err
 	}
 	for _, key := range tool.Credentials {
 		key = strings.TrimSpace(key)
@@ -239,19 +243,18 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 		if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
 			storeKey = strings.TrimSpace(resolved)
 		}
-		bound := false
-		if opts.StaticCredentials != nil && storeKey != "" {
-			_, ok, err := opts.StaticCredentials.Get(ctx, storeKey)
-			if err != nil {
-				return Surface{}, err
-			}
-			bound = ok
+		if storeKey == "" {
+			return packs.Subject{}, fmt.Errorf("provider connector tool %q credential %q has no deployment binding", toolID, key)
+		}
+		descriptor, err := runtimecredentials.Describe(ctx, opts.StaticCredentials, source, storeKey)
+		if err != nil {
+			return packs.Subject{}, err
 		}
 		status := "UNBOUND"
-		if bound {
+		if descriptor.Present {
 			status = "BOUND"
 		}
-		requires = append(requires, RequirementStatus{Kind: "secret", Name: key, Status: status, Bound: bound})
+		requires = append(requires, packs.RequirementWithStatus(packs.RequirementSecret, storeKey, "deployment", status, descriptor.Source))
 	}
 	if tool.ManagedCredential != nil {
 		key := strings.TrimSpace(tool.ManagedCredential.Key)
@@ -263,69 +266,45 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 			if resolved, mapped := semanticview.CredentialStoreKeyForFlow(source, flowID, key); mapped {
 				storeKey = strings.TrimSpace(resolved)
 			}
-			status := "UNBOUND"
-			bound := false
-			if opts.ManagedCredentials != nil && strings.TrimSpace(storeKey) != "" {
-				record, ok, err := opts.ManagedCredentials.Get(ctx, storeKey)
-				if err != nil {
-					return Surface{}, err
-				}
-				if ok {
-					desc := record.Descriptor()
-					status = strings.ToUpper(strings.TrimSpace(desc.Status))
-					bound = desc.Status == runtimemanagedcredentials.StatusConnected
-					if bound {
-						if err := runtimemanagedcredentials.GrantTypeCovers(desc.GrantType, requiredGrantType); err != nil {
-							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
-							bound = false
-						}
-					}
-					if bound {
-						if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, requiredGrantModel); err != nil {
-							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
-							bound = false
-						}
-					}
-					if bound {
-						if err := managedcredentialmodel.TokenRequestProfileCovers(desc.TokenRequest, requiredTokenRequest); err != nil {
-							status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
-							bound = false
-						}
-					}
-					if bound && !managedCredentialScopesCover(desc.Scopes, tool.ManagedCredential.Scopes) {
-						status = strings.ToUpper(runtimemanagedcredentials.StatusScopeInsufficient)
-						bound = false
-					}
+			if storeKey == "" {
+				return packs.Subject{}, fmt.Errorf("provider connector tool %q managed credential %q has no deployment binding", toolID, key)
+			}
+			descriptors, err := runtimemanagedcredentials.ListRequirementDescriptors(ctx, opts.ManagedCredentials, source)
+			if err != nil {
+				return packs.Subject{}, err
+			}
+			descriptor := runtimemanagedcredentials.RequirementDescriptor{Descriptor: runtimemanagedcredentials.Descriptor{Key: storeKey, Status: runtimemanagedcredentials.StatusUnconnected}}
+			for _, candidate := range descriptors {
+				if strings.TrimSpace(candidate.Key) == storeKey {
+					descriptor = candidate
+					break
 				}
 			}
-			if strings.TrimSpace(status) == "" {
-				status = "UNBOUND"
-			}
-			requires = append(requires, RequirementStatus{
-				Kind:                "managed_credential",
-				Name:                key,
-				Status:              status,
-				Bound:               bound,
+			required := runtimemanagedcredentials.Requirement{
+				Kind:                "tool",
+				Name:                toolID,
 				GrantType:           requiredGrantType,
 				Scopes:              append([]string{}, tool.ManagedCredential.Scopes...),
 				GrantModel:          requiredGrantModel,
 				TokenRequest:        requiredTokenRequest,
 				InstallationIDInput: strings.TrimSpace(tool.ManagedCredential.InstallationIDInput),
-			})
+			}
+			evaluation := runtimemanagedcredentials.EvaluateRequirement(descriptor, required)
+			status := strings.ToUpper(strings.TrimSpace(evaluation.Descriptor.Status))
+			if status == "" {
+				status = "UNCONNECTED"
+			}
+			requirement := packs.RequirementWithStatus(packs.RequirementManagedCredential, storeKey, "deployment", status, "managed_credential_store")
+			requirement.GrantType = requiredGrantType
+			requirement.Scopes = normalizeStringSet(tool.ManagedCredential.Scopes)
+			requirement.GrantModel = requiredGrantModel
+			tokenRequest := tokenRequestFields(requiredTokenRequest)
+			requirement.TokenRequest = &tokenRequest
+			requirement.InstallationIDInput = strings.TrimSpace(tool.ManagedCredential.InstallationIDInput)
+			requires = append(requires, requirement)
 		}
 	}
-	sort.Slice(requires, func(i, j int) bool {
-		if requires[i].Kind != requires[j].Kind {
-			return requires[i].Kind < requires[j].Kind
-		}
-		return requires[i].Name < requires[j].Name
-	})
 	actionLabel := connectorActionLabel(provider, action, tool)
-	can := []string{
-		strings.TrimSpace(actionLabel + endpointSuffix(host)),
-		"lower through platform.activity_requested",
-		"journal non-idempotent attempts in activity_attempts",
-	}
 	var generation *GenerationSurface
 	type generationSource interface {
 		ConnectorGenerationSurface(string) (GenerationSurface, bool)
@@ -336,37 +315,134 @@ func surfaceForTool(ctx context.Context, source semanticview.Source, toolID stri
 			generation = &copy
 		}
 	}
-	return Surface{
-		ToolID:       strings.TrimSpace(toolID),
-		Provider:     provider,
-		Action:       action,
-		EndpointHost: host,
-		EffectClass:  string(runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)),
-		Generation:   generation,
-		Can:          can,
-		Cannot: []string{
-			"bypass activity_attempts",
-			"retry non_idempotent_write automatically",
-			"expose credential values",
-		},
-		Requires: requires,
-	}, nil
-}
-
-func managedCredentialScopesCover(actual, required []string) bool {
-	if len(required) == 0 {
-		return true
+	sourceKind := "flow_local"
+	provenance := ""
+	sourcePath := ""
+	type importedSource interface {
+		ConnectorPackImportSource(string) (string, bool)
 	}
-	have := map[string]struct{}{}
-	for _, scope := range normalizeStringSet(actual) {
-		have[scope] = struct{}{}
-	}
-	for _, scope := range normalizeStringSet(required) {
-		if _, ok := have[scope]; !ok {
-			return false
+	if imported, ok := source.(importedSource); ok {
+		if importSource, exists := imported.ConnectorPackImportSource(toolID); exists {
+			sourceKind = "connector_pack_import"
+			sourcePath = strings.TrimSpace(importSource)
+			if loaded, found := opts.Registry.Lookup(provider, toolID); found {
+				provenance = strings.TrimSpace(loaded.Envelope.Provenance.Source)
+			}
 		}
 	}
-	return true
+	subject := packs.Subject{
+		ID:            strings.TrimSpace(toolID),
+		Kind:          packs.SubjectProviderConnector,
+		Provider:      provider,
+		Action:        action,
+		Source:        sourceKind,
+		Provenance:    provenance,
+		SourcePath:    sourcePath,
+		Applicability: "effective",
+		Status:        packs.StatusReady,
+		Capabilities: []packs.Capability{
+			{Code: packs.CapabilityCallProviderAction, Target: strings.TrimSpace(actionLabel + endpointSuffix(host))},
+			{Code: packs.CapabilityLowerThroughActivity},
+			{Code: packs.CapabilityJournalAttempts},
+		},
+		Requirements: requires,
+		Evidence: []packs.Evidence{{Kind: "connector", Fields: map[string]string{
+			"effect_class":  string(runtimecontracts.NormalizeActivityEffectClass(tool.EffectClass)),
+			"endpoint_host": host,
+		}}},
+	}
+	for _, code := range []string{packs.GuaranteeActivityJournal, packs.GuaranteeNoAutomaticWriteRetry, packs.GuaranteeCredentialRedaction} {
+		guarantee, err := packs.NewGuarantee(code)
+		if err != nil {
+			return packs.Subject{}, err
+		}
+		subject.Guarantees = append(subject.Guarantees, guarantee)
+	}
+	for _, requirement := range subject.Requirements {
+		if requirement.Satisfied != nil && !*requirement.Satisfied {
+			subject.Status = packs.StatusNotReady
+			break
+		}
+	}
+	if generation != nil {
+		subject.Evidence = append(subject.Evidence, generationEvidence(*generation))
+	}
+	normalized, err := packs.NormalizeSubjects([]packs.Subject{subject})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	return normalized[0], nil
+}
+
+func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) {
+	provider, action, _ := splitToolID(installed.ToolID)
+	host := ""
+	if installed.Tool.HTTP != nil {
+		if parsed, err := url.Parse(strings.TrimSpace(installed.Tool.HTTP.URL)); err == nil {
+			host = strings.TrimSpace(parsed.Host)
+		}
+	}
+	subject := packs.Subject{
+		ID:            strings.TrimSpace(installed.ToolID),
+		Kind:          packs.SubjectProviderConnector,
+		Provider:      provider,
+		Action:        action,
+		Source:        "connector_pack",
+		Provenance:    strings.TrimSpace(installed.Pack.Envelope.Provenance.Source),
+		SourcePath:    strings.TrimSpace(installed.Pack.Directory),
+		Applicability: "installed",
+		Status:        packs.StatusAvailable,
+		Capabilities: []packs.Capability{
+			{Code: packs.CapabilityCallProviderAction, Target: strings.TrimSpace(connectorActionLabel(provider, action, installed.Tool) + endpointSuffix(host))},
+			{Code: packs.CapabilityLowerThroughActivity},
+			{Code: packs.CapabilityJournalAttempts},
+		},
+		Requirements: []packs.Requirement{packs.RequirementWithStatus(packs.RequirementImport, installed.ToolID, "package", "NOT_IMPORTED", "connector_pack_registry")},
+	}
+	for _, code := range []string{packs.GuaranteeActivityJournal, packs.GuaranteeNoAutomaticWriteRetry, packs.GuaranteeCredentialRedaction} {
+		guarantee, err := packs.NewGuarantee(code)
+		if err != nil {
+			return packs.Subject{}, err
+		}
+		subject.Guarantees = append(subject.Guarantees, guarantee)
+	}
+	if generation, ok := GenerationSurfaceForPackTool(installed.Pack, installed.ToolID); ok {
+		subject.Evidence = append(subject.Evidence, generationEvidence(generation))
+	}
+	normalized, err := packs.NormalizeSubjects([]packs.Subject{subject})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	return normalized[0], nil
+}
+
+func tokenRequestFields(profile managedcredentialmodel.TokenRequestProfile) packs.TokenRequestProfile {
+	profile = managedcredentialmodel.NormalizeTokenRequestProfile(profile)
+	headers := make(map[string]string, len(profile.StaticHeaders))
+	for key, value := range profile.StaticHeaders {
+		headers[key] = value
+	}
+	return packs.TokenRequestProfile{ClientAuth: profile.ClientAuth, Body: profile.Body, StaticHeaders: headers}
+}
+
+func generationEvidence(generation GenerationSurface) packs.Evidence {
+	permissions := make([]string, 0, len(generation.Permissions))
+	for _, permission := range generation.Permissions {
+		permissions = append(permissions, strings.TrimSpace(permission.ID)+":"+strings.TrimSpace(permission.Note))
+	}
+	sort.Strings(permissions)
+	return packs.Evidence{Kind: "generation", Fields: map[string]string{
+		"generator":     strings.TrimSpace(generation.GeneratorVersion),
+		"source":        strings.TrimSpace(generation.SourcePath),
+		"source_hash":   strings.TrimSpace(generation.SourceSHA256),
+		"profile":       strings.TrimSpace(generation.ProfilePath),
+		"profile_hash":  strings.TrimSpace(generation.ProfileSHA256),
+		"manifest_hash": strings.TrimSpace(generation.ManifestSHA256),
+		"operation":     strings.TrimSpace(generation.OperationID),
+		"permissions":   strings.Join(permissions, "; "),
+		"fixture":       strings.TrimSpace(generation.FixtureID) + ":" + strings.TrimSpace(generation.FixtureStatus),
+		"review":        strings.TrimSpace(generation.ReviewStatus),
+	}}
 }
 
 func normalizeStringSet(values []string) []string {

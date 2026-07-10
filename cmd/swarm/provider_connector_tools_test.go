@@ -1,37 +1,34 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/providerconnectors"
+	"github.com/division-sh/swarm/internal/packs"
 )
 
 func TestProviderConnectorSurfaceMessageIncludesGeneratedReviewEvidence(t *testing.T) {
-	message := providerConnectorSurfaceMessage(providerconnectors.Surface{
-		ToolID:   "github.create_issue",
-		Can:      []string{"create GitHub issues"},
-		Cannot:   []string{"bypass activity_attempts"},
-		Requires: nil,
-		Generation: &providerconnectors.GenerationSurface{
-			GeneratorVersion: "swarm-openapi-gen/v1",
-			SourcePath:       "catalog/sources/github.json.gz",
-			SourceSHA256:     "sha256:source",
-			ProfilePath:      "catalog/generator-profiles/github.yaml",
-			ProfileSHA256:    "sha256:profile",
-			ManifestSHA256:   "sha256:manifest",
-			OperationID:      "issues/create",
-			Permissions: []providerconnectors.GenerationPermission{
-				{ID: "issues:write", Note: "GitHub App Issues permission at write level"},
-			},
-			FixtureID:     "github/issues-create",
-			FixtureStatus: "passing",
-			ReviewStatus:  "approved",
-		},
-	})
+	guarantee, err := packs.NewGuarantee(packs.GuaranteeActivityJournal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := packs.RenderSubject(packs.Subject{
+		ID: "github.create_issue", Kind: packs.SubjectProviderConnector, Provider: "github", Action: "create_issue",
+		Source: "connector_pack_import", Applicability: "effective", Status: packs.StatusReady,
+		Capabilities: []packs.Capability{{Code: packs.CapabilityCallProviderAction, Target: "create GitHub issues"}},
+		Guarantees:   []packs.Guarantee{guarantee},
+		Evidence: []packs.Evidence{{Kind: "generation", Fields: map[string]string{
+			"generator": "swarm-openapi-gen/v1", "source": "catalog/sources/github.json.gz", "source_hash": "sha256:source",
+			"profile": "catalog/generator-profiles/github.yaml", "profile_hash": "sha256:profile", "manifest_hash": "sha256:manifest",
+			"operation": "issues/create", "permissions": "issues:write:GitHub App Issues permission at write level",
+			"fixture": "github/issues-create:passing", "review": "approved",
+		}}},
+	}, true)
 	for _, want := range []string{
 		"operation=issues/create",
-		"permissions=[issues:write:GitHub App Issues permission at write level]",
+		"permissions=issues:write:GitHub App Issues permission at write level",
 		"source_hash=sha256:source",
 		"profile_hash=sha256:profile",
 		"manifest_hash=sha256:manifest",
@@ -40,6 +37,38 @@ func TestProviderConnectorSurfaceMessageIncludesGeneratedReviewEvidence(t *testi
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("message = %q, want %q", message, want)
+		}
+	}
+}
+
+func TestProviderCapabilitySurfaceRetiresDuplicateOwnersAndTargetBindingGuess(t *testing.T) {
+	files := map[string][]string{
+		"internal/packs/envelope.go": {
+			"func (e Envelope) Surface", "type CapabilitySurface", "type RequirementStatus",
+		},
+		"internal/providerconnectors/providerconnectors.go": {
+			"type Surface struct", "SurfacesWithOptions", "type RequirementStatus", "ResolveInboundTarget", "SQLiteRuntimeStore", "PostgresRuntimeStore",
+		},
+		"internal/providertriggers/providertriggers.go": {
+			"CapabilitySurface(", "ResolveInboundTarget", "SQLiteRuntimeStore", "PostgresRuntimeStore",
+		},
+		"cmd/swarm/provider_connector_tools.go": {
+			"providerConnectorSurfaceMessage", "formatProviderConnectorSurfaceVerbs", "formatProviderConnectorRequirements",
+		},
+		"cmd/swarm/provider_trigger_packs.go": {
+			"providerTriggerPackSurfaceMessage", "formatProviderTriggerPackRequirements", "ResolveInboundTarget",
+		},
+		"cmd/swarm/doctor.go": {"appendProviderTriggerPackSurfaceFindings"},
+	}
+	for name, forbidden := range files {
+		body, err := os.ReadFile(filepath.Join(repoRoot(), name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		for _, token := range forbidden {
+			if strings.Contains(string(body), token) {
+				t.Fatalf("%s retains forbidden provider capability owner or target-binding seam %q", name, token)
+			}
 		}
 	}
 }

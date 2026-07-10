@@ -408,8 +408,45 @@ func DerivedRequires(manifest Manifest) packs.Requires {
 	return packs.Requires{}
 }
 
-func (p LoadedPack) CapabilitySurface(boundSecrets map[string]bool) packs.CapabilitySurface {
-	return p.Envelope.Surface(boundSecrets)
+func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
+	capabilities := DerivedCapabilities(p.Manifest)
+	subject := packs.Subject{
+		ID:            strings.TrimSpace(p.Envelope.ID),
+		Kind:          packs.SubjectProviderTrigger,
+		Provider:      NormalizeProviderName(p.Manifest.Provider),
+		Source:        "trigger_pack",
+		Provenance:    strings.TrimSpace(p.Envelope.Provenance.Source),
+		SourcePath:    strings.TrimSpace(p.SourcePath),
+		Applicability: "installed",
+		Status:        packs.StatusAvailable,
+	}
+	if route := strings.TrimSpace(capabilities.Can.ReceiveHTTPSRoute); route != "" {
+		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: route})
+	}
+	if secret := strings.TrimSpace(capabilities.Can.VerifySecret); secret != "" {
+		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityVerifySecret, Target: secret})
+	}
+	for _, event := range capabilities.Can.EmitEvents {
+		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityEmitEvent, Target: strings.TrimSpace(event)})
+	}
+	if capabilities.Can.PersistDedupeMarkers {
+		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityPersistDedupeMarkers})
+	}
+	for _, code := range capabilities.Cannot {
+		guarantee, err := packs.NewGuarantee(code)
+		if err != nil {
+			return packs.Subject{}, err
+		}
+		subject.Guarantees = append(subject.Guarantees, guarantee)
+	}
+	for _, secret := range DerivedRequires(p.Manifest).Secrets {
+		subject.Requirements = append(subject.Requirements, packs.TargetScopedRequirement(packs.RequirementSecret, secret))
+	}
+	normalized, err := packs.NormalizeSubjects([]packs.Subject{subject})
+	if err != nil {
+		return packs.Subject{}, err
+	}
+	return normalized[0], nil
 }
 
 func (r *Registry) Accept(req Request) (Delivery, error) {

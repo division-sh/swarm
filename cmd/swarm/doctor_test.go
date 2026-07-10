@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packs"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -134,6 +135,30 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 	if !report.OK || report.Owner != localPreflightOwner || report.Mode != "doctor" || report.Backend != "claude_cli" {
 		t.Fatalf("report = %#v", report)
 	}
+	if len(report.CapabilitySubjects) != 15 {
+		t.Fatalf("capability subjects = %#v, want eight triggers plus seven connector actions", report.CapabilitySubjects)
+	}
+	for _, subject := range report.CapabilitySubjects {
+		code := "provider_connector_" + findingCode(subject.ID)
+		if subject.Kind != packs.SubjectProviderTrigger {
+			if finding, ok := localPreflightReportFinding(report, code); !ok || finding.Message != packs.RenderSubject(subject, false) {
+				t.Fatalf("connector subject/finding projection drift for %s: subject=%#v finding=%#v", subject.ID, subject, finding)
+			}
+			continue
+		}
+		code = "provider_trigger_pack_" + findingCode(subject.Provider)
+		if finding, ok := localPreflightReportFinding(report, code); !ok || finding.Message != packs.RenderSubject(subject, false) {
+			t.Fatalf("trigger subject/finding projection drift for %s: subject=%#v finding=%#v", subject.ID, subject, finding)
+		}
+		if subject.Status != packs.StatusAvailable {
+			t.Fatalf("trigger subject %s status = %s, want AVAILABLE", subject.ID, subject.Status)
+		}
+		for _, requirement := range subject.Requirements {
+			if requirement.Scope != packs.RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" || requirement.Remediation != "" {
+				t.Fatalf("trigger subject %s requirement = %#v, want target-scoped unevaluated", subject.ID, requirement)
+			}
+		}
+	}
 	for _, want := range []string{"backend_credential_present", "docker_available", "workspace_image_available", "workspace_claude_cli_available"} {
 		if !localPreflightReportHasCode(report, want) {
 			t.Fatalf("report missing finding %q: %#v", want, report.Findings)
@@ -159,18 +184,18 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 		}
 	}
 	if !localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CAN receive HTTPS route /webhooks/{entity}/github") ||
-		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CANNOT emit_undeclared_events") ||
-		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "requires webhook_signing.github=UNBOUND") {
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "guarantee: cannot emit undeclared events") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "requires webhook_signing.github (target-scoped)") {
 		t.Fatalf("github provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
 	if !localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CAN receive HTTPS route /webhooks/{entity}/stripe") ||
-		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "CANNOT emit_undeclared_events") ||
-		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "requires webhook_signing.stripe=UNBOUND") {
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "guarantee: cannot emit undeclared events") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_stripe", "requires webhook_signing.stripe (target-scoped)") {
 		t.Fatalf("stripe provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
 	if !localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "CAN receive HTTPS route /webhooks/{entity}/telegram") ||
-		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "CANNOT emit_undeclared_events") ||
-		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "requires webhook_signing.telegram=UNBOUND") {
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "guarantee: cannot emit undeclared events") ||
+		!localPreflightReportFindingContains(report, "provider_trigger_pack_telegram", "requires webhook_signing.telegram (target-scoped)") {
 		t.Fatalf("telegram provider pack surface missing CAN/CANNOT/requires readback: %#v", report.Findings)
 	}
 }
@@ -238,10 +263,10 @@ func TestDoctorClaudeCLIPreflightReportsTelegramConnectorToolSurface(t *testing.
 		t.Fatalf("report missing telegram connector finding: %#v", report.Findings)
 	}
 	for _, want := range []string{
-		"CAN send Telegram messages via api.telegram.org",
+		"CAN call provider action send Telegram messages via api.telegram.org",
 		"CAN lower through platform.activity_requested",
 		"CAN journal non-idempotent attempts in activity_attempts",
-		"CANNOT expose credential values",
+		"guarantee: cannot expose credential values",
 		"requires telegram_bot_token=BOUND",
 	} {
 		if !localPreflightReportFindingContains(report, "provider_connector_telegram_send_message", want) {
@@ -293,10 +318,10 @@ func TestDoctorClaudeCLIPreflightReportsSlackManagedConnectorPackSurface(t *test
 		t.Fatalf("report missing slack connector finding: %#v", report.Findings)
 	}
 	for _, want := range []string{
-		"CAN post Slack messages via slack.com",
+		"CAN call provider action post Slack messages via slack.com",
 		"CAN lower through platform.activity_requested",
 		"CAN journal non-idempotent attempts in activity_attempts",
-		"CANNOT expose credential values",
+		"guarantee: cannot expose credential values",
 		"requires managed_credential:slack_oauth=CONNECTED",
 	} {
 		if !localPreflightReportFindingContains(report, "provider_connector_slack_post_message", want) {
@@ -1346,6 +1371,15 @@ func localPreflightReportFindingContains(report localPreflightReport, code, want
 		}
 	}
 	return false
+}
+
+func localPreflightReportFinding(report localPreflightReport, code string) (localPreflightFinding, bool) {
+	for _, finding := range report.Findings {
+		if finding.Code == code {
+			return finding, true
+		}
+	}
+	return localPreflightFinding{}, false
 }
 
 func stringSliceContainsPrefix(values []string, prefix string) bool {

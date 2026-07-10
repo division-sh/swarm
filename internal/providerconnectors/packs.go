@@ -38,6 +38,13 @@ type PackRegistry struct {
 	byProvider map[string]map[string]LoadedPack
 }
 
+type InstalledTool struct {
+	Provider string
+	ToolID   string
+	Tool     runtimecontracts.ToolSchemaEntry
+	Pack     LoadedPack
+}
+
 var (
 	defaultPackRegistryOnce sync.Once
 	defaultPackRegistry     *PackRegistry
@@ -158,6 +165,58 @@ func (r *PackRegistry) Lookup(provider, toolID string) (LoadedPack, bool) {
 	}
 	pack, ok := byTool[toolID]
 	return pack, ok
+}
+
+func (r *PackRegistry) Inventory() []InstalledTool {
+	if r == nil {
+		return nil
+	}
+	providers := make([]string, 0, len(r.byProvider))
+	for provider := range r.byProvider {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+	var out []InstalledTool
+	for _, provider := range providers {
+		toolIDs := make([]string, 0, len(r.byProvider[provider]))
+		for toolID := range r.byProvider[provider] {
+			toolIDs = append(toolIDs, toolID)
+		}
+		sort.Strings(toolIDs)
+		for _, toolID := range toolIDs {
+			pack := r.byProvider[provider][toolID]
+			out = append(out, InstalledTool{
+				Provider: provider,
+				ToolID:   toolID,
+				Tool:     pack.Manifest.Tools[toolID],
+				Pack:     pack,
+			})
+		}
+	}
+	return out
+}
+
+func GenerationSurfaceForPackTool(pack LoadedPack, toolID string) (GenerationSurface, bool) {
+	if pack.Manifest.Generation == nil {
+		return GenerationSurface{}, false
+	}
+	operation, ok := pack.Manifest.Generation.OperationForTool(strings.TrimSpace(toolID))
+	if !ok {
+		return GenerationSurface{}, false
+	}
+	return GenerationSurface{
+		GeneratorVersion: pack.Manifest.Generation.GeneratorVersion,
+		SourcePath:       pack.Manifest.Generation.Source.Path,
+		SourceSHA256:     pack.Manifest.Generation.Source.SHA256,
+		ProfilePath:      pack.Manifest.Generation.Profile.Path,
+		ProfileSHA256:    pack.Manifest.Generation.Profile.SHA256,
+		ManifestSHA256:   pack.Envelope.ManifestHash,
+		OperationID:      operation.OperationID,
+		Permissions:      append([]GenerationPermission(nil), operation.Permissions...),
+		FixtureID:        operation.FixtureID,
+		FixtureStatus:    operation.FixtureStatus,
+		ReviewStatus:     operation.ReviewStatus,
+	}, true
 }
 
 func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
@@ -334,22 +393,8 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		}
 		tool := pack.Manifest.Tools[item.toolID]
 		importedTools[item.toolID] = tool
-		if pack.Manifest.Generation != nil {
-			if operation, exists := pack.Manifest.Generation.OperationForTool(item.toolID); exists {
-				importedGeneration[item.toolID] = GenerationSurface{
-					GeneratorVersion: pack.Manifest.Generation.GeneratorVersion,
-					SourcePath:       pack.Manifest.Generation.Source.Path,
-					SourceSHA256:     pack.Manifest.Generation.Source.SHA256,
-					ProfilePath:      pack.Manifest.Generation.Profile.Path,
-					ProfileSHA256:    pack.Manifest.Generation.Profile.SHA256,
-					ManifestSHA256:   pack.Envelope.ManifestHash,
-					OperationID:      operation.OperationID,
-					Permissions:      append([]GenerationPermission(nil), operation.Permissions...),
-					FixtureID:        operation.FixtureID,
-					FixtureStatus:    operation.FixtureStatus,
-					ReviewStatus:     operation.ReviewStatus,
-				}
-			}
+		if generation, exists := GenerationSurfaceForPackTool(pack, item.toolID); exists {
+			importedGeneration[item.toolID] = generation
 		}
 		importSources[item.toolID] = item.source
 		if importedByProjectScope[item.projectScopeKey] == nil {
@@ -361,6 +406,7 @@ func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, regi
 		Source:                 source,
 		importedTools:          importedTools,
 		importedGeneration:     importedGeneration,
+		importSources:          importSources,
 		importedByProjectScope: importedByProjectScope,
 	}, nil
 }
@@ -398,6 +444,7 @@ type connectorPackSource struct {
 	semanticview.Source
 	importedTools          map[string]runtimecontracts.ToolSchemaEntry
 	importedGeneration     map[string]GenerationSurface
+	importSources          map[string]string
 	importedByProjectScope map[string]map[string]runtimecontracts.ToolSchemaEntry
 }
 
@@ -412,6 +459,11 @@ func (s connectorPackSource) ConnectorPackImportsApplied() bool {
 func (s connectorPackSource) ConnectorGenerationSurface(toolID string) (GenerationSurface, bool) {
 	evidence, ok := s.importedGeneration[strings.TrimSpace(toolID)]
 	return evidence, ok
+}
+
+func (s connectorPackSource) ConnectorPackImportSource(toolID string) (string, bool) {
+	source, ok := s.importSources[strings.TrimSpace(toolID)]
+	return source, ok
 }
 
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packs"
@@ -80,45 +79,18 @@ func resolveProviderTriggerPackDirs(repo, configPath string, dirs []string) []st
 	return out
 }
 
-func appendProviderTriggerPackSurfaceFindings(report *localPreflightReport, loaded []providertriggers.LoadedPack) {
+func appendProviderTriggerCapabilitySubjects(report *localPreflightReport, loaded []providertriggers.LoadedPack) {
 	if report == nil || len(loaded) == 0 {
 		return
 	}
-	sort.SliceStable(loaded, func(i, j int) bool {
-		return strings.TrimSpace(loaded[i].Manifest.Provider) < strings.TrimSpace(loaded[j].Manifest.Provider)
-	})
+	subjects := make([]packs.Subject, 0, len(loaded))
 	for _, pack := range loaded {
-		provider := providertriggers.NormalizeProviderName(pack.Manifest.Provider)
-		if provider == "" {
-			provider = strings.TrimSpace(pack.Envelope.ID)
+		subject, err := pack.CapabilitySubject()
+		if err != nil {
+			report.add(localPreflightProviderPackPrerequisite, "provider_trigger_surface_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider trigger pack capability declarations")
+			return
 		}
-		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_"+provider, localPreflightSeverityInfo, localPreflightStatusOK, providerTriggerPackSurfaceMessage(pack), "")
+		subjects = append(subjects, subject)
 	}
-}
-
-func providerTriggerPackSurfaceMessage(pack providertriggers.LoadedPack) string {
-	surface := pack.CapabilitySurface(nil)
-	return fmt.Sprintf("provider trigger pack %s source_path=%s provenance=%s CAN %s CANNOT %s requires %s",
-		strings.TrimSpace(pack.Envelope.ID),
-		strings.TrimSpace(pack.SourcePath),
-		strings.TrimSpace(pack.Envelope.Provenance.Source),
-		strings.Join(surface.Can, "; "),
-		strings.Join(surface.Cannot, "; "),
-		formatProviderTriggerPackRequirements(surface.Requires),
-	)
-}
-
-func formatProviderTriggerPackRequirements(requirements []packs.RequirementStatus) string {
-	if len(requirements) == 0 {
-		return "none"
-	}
-	parts := make([]string, 0, len(requirements))
-	for _, requirement := range requirements {
-		status := "UNBOUND"
-		if requirement.Bound {
-			status = "BOUND"
-		}
-		parts = append(parts, strings.TrimSpace(requirement.Name)+"="+status)
-	}
-	return strings.Join(parts, "; ")
+	report.addCapabilitySubjects(subjects)
 }
