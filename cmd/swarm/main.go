@@ -1120,7 +1120,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 
 	var ready atomic.Bool
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, &ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Registry, contractsRoot, bundle, source, rt, opts.Dev)
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
@@ -2421,6 +2421,7 @@ type runtimeConfigLoadResult struct {
 	Source      string
 	Path        string
 	Layers      []unifiedConfigLayer
+	KeyOrigins  map[string]unifiedConfigKeyOrigin
 	Diagnostics []unifiedConfigDiagnostic
 }
 
@@ -2455,6 +2456,7 @@ func loadRuntimeConfigWithOptions(opts runtimeConfigLoadOptions) (runtimeConfigL
 		Source:      loaded.Source,
 		Path:        loaded.Path,
 		Layers:      loaded.Layers,
+		KeyOrigins:  loaded.KeyOrigins,
 		Diagnostics: loaded.Diagnostics,
 	}
 	if err != nil {

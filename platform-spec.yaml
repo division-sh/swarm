@@ -6991,11 +6991,16 @@ tool_model:
         E5 source-authority path. Provider-trigger packs and provider-connector packs wrap their body-specific canonical
         vocabulary in a universal pack envelope before registration/import. The envelope is a trust/admission artifact, not
         a provider-specific adapter and not a new body vocabulary owner. First-party configured-provider manifests are
-        platform packs, not embed-only trust fixtures. Runtime config declares external provider-trigger pack directories at
-        `provider_triggers.packs.external_dirs`; `swarm serve` resolves those directories at boot and fails closed before
-        runtime construction if any declared pack cannot be verified. Connector packs in this first slice are built-in
-        platform packs explicitly imported by package.yaml `connector_packs.imports[]`; external connector-pack directories
-        require a later gated surface.
+        filesystem-distributed platform packs, never embedded/default trust fixtures. Elevated runtime config declares their
+        required inventory at `provider_triggers.packs.platform_dirs`; project config cannot select that platform-authored
+        capability source. Runtime config declares external provider-trigger packs separately at
+        `provider_triggers.packs.external_dirs`. Relative paths in both lists resolve against the config layer that declares
+        the effective key. `swarm serve` verifies the complete declared set before runtime construction and injects one
+        registry into every runtime and Builder replacement runtime. Missing, malformed, incompatible, tampered, or
+        colliding declared packs fail boot; no executable-relative, current-directory, source-checkout, embedded, package-
+        global default, or nil-registry discovery fallback exists. Connector packs in this first slice are platform packs
+        explicitly imported by package.yaml `connector_packs.imports[]`; external connector-pack directories require a later
+        gated surface.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -7026,7 +7031,12 @@ tool_model:
           Required metadata in this slice. Entries must parse as non-empty test references. Executing pack-declared tests is
           a later gated harness; current behavioral proof remains the provider-trigger conformance/runtime suite.
       verification_order:
-      - read declared external pack directories from `provider_triggers.packs.external_dirs`
+      - >
+        read declared elevated platform pack directories from `provider_triggers.packs.platform_dirs` and external pack
+        directories from `provider_triggers.packs.external_dirs`, preserving each effective key's declaring config layer
+      - >
+        require platform directory envelopes to declare `provenance.source: platform` and external directory envelopes to
+        declare `provenance.source: external`
       - parse envelope with strict known fields
       - validate id/version/platform_version/type/provenance/tests metadata
       - read body manifest bytes selected by pack type, such as trigger.yaml or connector.yaml
@@ -7034,15 +7044,17 @@ tool_model:
       - parse and validate the body manifest through the matching body-specific owner
       - derive body capabilities and requires mechanically from the manifest
       - compare declared capabilities/requires to derived values
-      - reject provider-name/tool-name collisions according to the body-specific collision rule
+      - reject competing immutable identities and duplicate universal pack ids across the composed set
+      - reject provider-name/tool-name collisions independently according to the body-specific collision rule
       - register/import only verified body manifests
       trust_tiers: >
         Trust tiers differ by provenance value and by readback/operational policy only. First-party bundled packs and
         future external packs use the identical verifier path. No pack is trusted merely because the platform ships it.
       shadowing_policy: >
-        No provider-name shadowing is allowed in this slice. Any duplicate normalized provider name across first-party
-        bundled packs or external packs fails closed and reports both sources. Explicit override or replacement semantics
-        require a later gated affordance.
+        No pack-id or provider-name shadowing is allowed in this slice. Any duplicate universal pack id or duplicate
+        normalized provider name across platform and external inventories fails closed independently and reports both source
+        paths and provenance values. The tuple `(id, version, manifest_hash)` is immutable within boot admission; competing
+        instances fail before registration. Explicit override or replacement semantics require a later gated affordance.
       capability_surface: >
         Provider-trigger pack readback renders CAN/CANNOT truth from the verified envelope after derivation/equality checks.
         The first trigger surface includes CAN receive HTTPS at `/webhooks/{entity}/{provider}`, CAN verify the named signing
@@ -7061,8 +7073,10 @@ tool_model:
         connector credential is unavailable or unusable.
       first_party_pack_migration: >
         GitHub, Slack, Stripe, Twilio, Shopify, Typeform, Intercom, and Telegram provider-trigger manifests are first-party
-        bundled packs loaded through this envelope path. There is no permanent built-in-control exemption for
-        configured-provider manifests.
+        platform packs distributed as filesystem inventory and loaded through this envelope path. Their trigger bodies are
+        absent from binary embed inputs. There is no permanent built-in-control exemption, package-global default registry,
+        or nil-registry reconstruction path for configured-provider manifests. Envelope `manifest_hash`, `capabilities`, and
+        `requires` are deterministic build-stamped summaries; import verifies exact-byte body hash and body-derived equality.
       non_goals:
       - provider-trigger manifest vocabulary changes
       - pack signing, remote distribution, ownership transfer, or marketplace trust economics
@@ -13074,14 +13088,17 @@ configuration_source_authority:
             or model policy MUST fail closed as unknown config keys before YAML struct decoding can silently ignore
             them. Nested `models` maps under model-specific policy entries remain unsupported and fail closed.
         provider_triggers:
-          trust: project_contained_path_or_elevated
+          trust: split_by_pack_authorship
           keys:
+            packs.platform_dirs: elevated
             packs.external_dirs: project_contained_path_or_elevated
           owner: contract_formats.configured_provider_triggers
           path_rule: >
-            Project config may name only project-contained relative directories. Absolute paths, parent escapes,
-            symlink escapes, or paths outside the canonical project root are elevated and require local-operator,
-            user-global, explicit config, or a future promoted flag.
+            Project config cannot declare `packs.platform_dirs`; platform-authored capability inventory requires
+            local-operator, user-global, explicit config, or a future promoted flag. Project config may name external packs
+            only through project-contained relative directories. Absolute paths, parent escapes, symlink escapes, or paths
+            outside the canonical project root are elevated. Relative entries in each effective directory-list key resolve
+            from the config layer that declared that key, not from an aggregate or highest-precedence config path.
         budget:
           trust: project_safe
           keys:
@@ -13198,6 +13215,7 @@ configuration_source_authority:
       runtime_config_loader: consumed_by_unified_owner_first_slice_implemented
       executable_adjacent_config_yaml: invalid_ambient_reader_removed_by_1858
       env_guard_delegated_env_sources: consumed_by_unified_owner_first_slice_implemented
+      provider_triggers_packs_platform_dirs: consumed_by_unified_owner
       provider_triggers_packs_external_dirs: consumed_by_unified_owner
       budget_human_tasks_inline_extension: consumed_by_unified_owner_code_migration_split
       llm_retired_model_selection_keys: split_unsupported_retired_use_llm.models

@@ -123,7 +123,7 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 	})
 	source := slackManagedConnectorSource(t, fake.server.URL)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456789", "hello from telegram")
@@ -513,7 +513,7 @@ func assertSlackManagedConnectorMissingCredential(t *testing.T, backend slackMan
 	t.Helper()
 	source := slackManagedConnectorSource(t, baseURL)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "123456791", "missing credential")
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "123456791")

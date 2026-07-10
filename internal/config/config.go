@@ -38,6 +38,7 @@ type ProviderTriggersConfig struct {
 }
 
 type ProviderTriggerPacksConfig struct {
+	PlatformDirs []string `yaml:"platform_dirs"`
 	ExternalDirs []string `yaml:"external_dirs"`
 }
 
@@ -315,14 +316,21 @@ func (c *Config) validateProviderTriggerPacks() error {
 	if c == nil {
 		return nil
 	}
+	if err := validateProviderTriggerPackDirs("platform_dirs", c.ProviderTriggers.Packs.PlatformDirs); err != nil {
+		return err
+	}
+	return validateProviderTriggerPackDirs("external_dirs", c.ProviderTriggers.Packs.ExternalDirs)
+}
+
+func validateProviderTriggerPackDirs(key string, dirs []string) error {
 	seen := map[string]struct{}{}
-	for i, dir := range c.ProviderTriggers.Packs.ExternalDirs {
+	for i, dir := range dirs {
 		dir = strings.TrimSpace(dir)
 		if dir == "" {
-			return fmt.Errorf("provider_triggers.packs.external_dirs[%d] must be non-empty", i)
+			return fmt.Errorf("provider_triggers.packs.%s[%d] must be non-empty", key, i)
 		}
 		if _, exists := seen[dir]; exists {
-			return fmt.Errorf("provider_triggers.packs.external_dirs contains duplicate %q", dir)
+			return fmt.Errorf("provider_triggers.packs.%s contains duplicate %q", key, dir)
 		}
 		seen[dir] = struct{}{}
 	}

@@ -1,0 +1,23 @@
+id: provider.github
+version: 0.1.0
+platform_version: '>=0.7.0 <0.8.0'
+type: trigger
+manifest_hash: sha256:ce858bd39b8344db3dd6085e1375f9e1cb6d4a7141bbecab92be4e05d773a80c
+provenance:
+    source: platform
+capabilities:
+    can:
+        receive_https_route: /webhooks/{entity}/github
+        verify_secret: webhook_signing.github
+        emit_events:
+            - inbound.github.{event_type}
+        persist_dedupe_markers: true
+    cannot:
+        - emit_undeclared_events
+        - run_code_before_admission
+        - touch_unbound_resources
+requires:
+    secrets:
+        - webhook_signing.github
+tests:
+    - providertriggers/github

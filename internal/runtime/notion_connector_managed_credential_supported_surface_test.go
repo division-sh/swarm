@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -116,7 +115,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	})
 	source := notionManagedConnectorSource(t, fake.server.URL)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456789", "append first block")
@@ -443,7 +442,7 @@ func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackMa
 	t.Helper()
 	source := notionManagedConnectorSource(t, baseURL)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "223456792", "missing credential")
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, "223456792")

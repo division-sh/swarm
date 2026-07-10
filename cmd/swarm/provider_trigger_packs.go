@@ -14,6 +14,7 @@ import (
 type providerTriggerPackLoad struct {
 	Registry     *providertriggers.Registry
 	Loaded       []providertriggers.LoadedPack
+	PlatformDirs []string
 	ExternalDirs []string
 }
 
@@ -25,16 +26,25 @@ func loadConfiguredProviderTriggerPacks(repo string, cfgResult runtimeConfigLoad
 	if err != nil {
 		return providerTriggerPackLoad{}, err
 	}
-	dirs := resolveProviderTriggerPackDirs(repo, cfgResult.Path, cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
-	registry, loaded, err := providertriggers.NewRegistryWithExternalPackDirs(runningVersion, dirs...)
+	platformDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.platform_dirs"), cfgResult.Config.ProviderTriggers.Packs.PlatformDirs)
+	externalDirs := resolveProviderTriggerPackDirs(repo, providerTriggerPackConfigOrigin(cfgResult, "provider_triggers.packs.external_dirs"), cfgResult.Config.ProviderTriggers.Packs.ExternalDirs)
+	registry, loaded, err := providertriggers.NewRegistryFromPackDirs(runningVersion, platformDirs, externalDirs)
 	if err != nil {
 		return providerTriggerPackLoad{}, err
 	}
 	return providerTriggerPackLoad{
 		Registry:     registry,
 		Loaded:       loaded,
-		ExternalDirs: dirs,
+		PlatformDirs: platformDirs,
+		ExternalDirs: externalDirs,
 	}, nil
+}
+
+func providerTriggerPackConfigOrigin(cfgResult runtimeConfigLoadResult, key string) string {
+	if origin, ok := cfgResult.KeyOrigins[strings.TrimSpace(key)]; ok {
+		return strings.TrimSpace(origin.Path)
+	}
+	return ""
 }
 
 func resolveProviderTriggerPackDirs(repo, configPath string, dirs []string) []string {
@@ -75,9 +85,10 @@ func appendProviderTriggerPackSurfaceFindings(report *localPreflightReport, load
 
 func providerTriggerPackSurfaceMessage(pack providertriggers.LoadedPack) string {
 	surface := pack.CapabilitySurface(nil)
-	return fmt.Sprintf("provider trigger pack %s source=%s CAN %s CANNOT %s requires %s",
+	return fmt.Sprintf("provider trigger pack %s source_path=%s provenance=%s CAN %s CANNOT %s requires %s",
 		strings.TrimSpace(pack.Envelope.ID),
-		strings.TrimSpace(pack.Source),
+		strings.TrimSpace(pack.SourcePath),
+		strings.TrimSpace(pack.Envelope.Provenance.Source),
 		strings.Join(surface.Can, "; "),
 		strings.Join(surface.Cannot, "; "),
 		formatProviderTriggerPackRequirements(surface.Requires),

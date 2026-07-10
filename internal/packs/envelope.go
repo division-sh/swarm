@@ -202,6 +202,22 @@ func (e Envelope) VerifyManifestHash(manifestBody []byte) error {
 	return nil
 }
 
+// StampEnvelope derives the exact-byte body digest and emits the canonical
+// checked-in envelope representation used by every pack body kind.
+func StampEnvelope(envelope Envelope, manifestBody []byte) (Envelope, []byte, error) {
+	envelope.ManifestHash = ManifestHash(manifestBody)
+	body, err := yaml.Marshal(envelope)
+	if err != nil {
+		return Envelope{}, nil, fmt.Errorf("marshal pack %q envelope: %w", envelope.ID, err)
+	}
+	return envelope, body, nil
+}
+
+func ManifestHash(manifestBody []byte) string {
+	sum := sha256.Sum256(manifestBody)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 func (c Capabilities) Validate(packID string) error {
 	return c.ValidateForType(packID, TypeTrigger)
 }

@@ -37,7 +37,13 @@ type unifiedConfigLoadResult struct {
 	Source      string
 	Path        string
 	Layers      []unifiedConfigLayer
+	KeyOrigins  map[string]unifiedConfigKeyOrigin
 	Diagnostics []unifiedConfigDiagnostic
+}
+
+type unifiedConfigKeyOrigin struct {
+	Layer unifiedConfigLayerName
+	Path  string
 }
 
 type unifiedConfigLayer struct {
@@ -116,6 +122,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	}
 	repoRoot := unifiedConfigRepoRoot(opts.RepoRoot)
 	layers, diagnostics := discoverUnifiedConfigLayers(repoRoot, opts.ExplicitPath)
+	keyOrigins := map[string]unifiedConfigKeyOrigin{}
 	var merged yaml.Node
 	merged.Kind = yaml.MappingNode
 	for _, layer := range layers {
@@ -156,6 +163,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 			})
 			continue
 		}
+		recordUnifiedConfigKeyOrigins(root, nil, layer, keyOrigins)
 		diagnostics = append(diagnostics, validateUnifiedConfigNode(root, layer, repoRoot)...)
 		if len(unifiedConfigBlockers(diagnostics)) == 0 {
 			mergeYAMLMapping(&merged, root)
@@ -221,12 +229,32 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		Source:      source,
 		Path:        path,
 		Layers:      layers,
+		KeyOrigins:  keyOrigins,
 		Diagnostics: diagnostics,
 	}
 	if blockers := unifiedConfigBlockers(diagnostics); len(blockers) > 0 {
 		return result, unifiedConfigError{Diagnostics: blockers}
 	}
 	return result, nil
+}
+
+func recordUnifiedConfigKeyOrigins(node *yaml.Node, prefix []string, layer unifiedConfigLayer, origins map[string]unifiedConfigKeyOrigin) {
+	if node == nil || node.Kind != yaml.MappingNode || origins == nil {
+		return
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if key == "" {
+			continue
+		}
+		pathParts := append(append([]string{}, prefix...), key)
+		value := node.Content[i+1]
+		if value.Kind == yaml.MappingNode {
+			recordUnifiedConfigKeyOrigins(value, pathParts, layer, origins)
+			continue
+		}
+		origins[strings.Join(pathParts, ".")] = unifiedConfigKeyOrigin{Layer: layer.Name, Path: layer.Path}
+	}
 }
 
 func rejectRetiredLLMEnvSelectors() error {
@@ -672,7 +700,6 @@ func unifiedConfigProviderLimitPolicyLeaves() map[string]struct{} {
 func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 	section := unifiedConfigKeyRule{Container: true}
 	elevatedSection := unifiedConfigKeyRule{Container: true, Elevated: true}
-	pathSection := unifiedConfigKeyRule{Container: true, ProjectContainedPath: true}
 	return map[string]unifiedConfigKeyRule{
 		"connection":                            elevatedSection,
 		"connection.api_server":                 {Elevated: true},
@@ -736,8 +763,9 @@ func unifiedConfigRules() map[string]unifiedConfigKeyRule {
 		"llm.openai_compatible.low_cost_model":  {Split: "retired model-selection input; use llm.models"},
 		"llm.openai_responses":                  section,
 		"llm.openai_responses.base_url":         {Elevated: true},
-		"provider_triggers":                     pathSection,
-		"provider_triggers.packs":               pathSection,
+		"provider_triggers":                     section,
+		"provider_triggers.packs":               section,
+		"provider_triggers.packs.platform_dirs": {Elevated: true},
 		"provider_triggers.packs.external_dirs": {ProjectContainedPath: true},
 		"budget":                                section,
 		"budget.global_monthly_cap":             {},

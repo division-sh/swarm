@@ -12,6 +12,7 @@ import (
 
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -33,6 +34,7 @@ type runtimeProjectSupervisor struct {
 	workspaceBackend    workspaceBackendSelection
 	credentials         runtimecredentials.Store
 	providerCredentials runtimecredentials.Store
+	providerTriggers    *providertriggers.Registry
 	startRuntime        func(context.Context, *runtime.Runtime) error
 	shutdownRuntime     func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	loadWorkflow        func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
@@ -59,6 +61,7 @@ func newRuntimeProjectSupervisor(
 	workspaceBackend workspaceBackendSelection,
 	credentials runtimecredentials.Store,
 	providerCredentials runtimecredentials.Store,
+	providerTriggers *providertriggers.Registry,
 	initialRoot string,
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
@@ -80,6 +83,7 @@ func newRuntimeProjectSupervisor(
 		workspaceBackend:    workspaceBackend,
 		credentials:         credentials,
 		providerCredentials: providerCredentials,
+		providerTriggers:    providerTriggers,
 		startRuntime: func(ctx context.Context, rt *runtime.Runtime) error {
 			return rt.Start(ctx)
 		},
@@ -224,13 +228,14 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		Config: s.cfg,
 		Stores: s.stores.runtimeStores(),
 		Options: runtime.RuntimeOptions{
-			SelfCheck:           false,
-			WorkflowModule:      module,
-			WorkspaceLifecycle:  workspaces,
-			BundleFingerprint:   bundleIdentity.Fingerprint,
-			BundleSourceFact:    bundleSourceFact,
-			Credentials:         s.credentials,
-			ProviderCredentials: s.providerCredentials,
+			SelfCheck:               false,
+			WorkflowModule:          module,
+			WorkspaceLifecycle:      workspaces,
+			BundleFingerprint:       bundleIdentity.Fingerprint,
+			BundleSourceFact:        bundleSourceFact,
+			Credentials:             s.credentials,
+			ProviderCredentials:     s.providerCredentials,
+			ProviderTriggerRegistry: s.providerTriggers,
 		},
 	})
 	if err != nil {

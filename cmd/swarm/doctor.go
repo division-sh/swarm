@@ -119,7 +119,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	providerPackLoad, err := loadConfiguredProviderTriggerPacks(repo, cfgResult)
 	if err != nil {
 		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider_triggers.packs.external_dirs or the referenced provider pack envelope")
+		report.add(localPreflightProviderPackPrerequisite, "provider_trigger_pack_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider_triggers.packs.platform_dirs, provider_triggers.packs.external_dirs, or the referenced provider pack envelope")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	apiListenAddr, mcpListenAddr, err := resolveCLIServeListenerAddresses(cliServeListenerAddressOptions{

@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -176,10 +177,10 @@ func TestRuntimeProjectSupervisorReplaceCurrentRuntime_WaitsForRuntimeStartBefor
 
 func TestRuntimeProjectInboundHandlerRoutesThroughCurrentRuntimeAfterReplacement(t *testing.T) {
 	oldRT := &runtimepkg.Runtime{
-		InboundGateway: runtimepkg.NewInboundGateway(nil, nil, func() bool { return true }),
+		InboundGateway: runtimepkg.NewInboundGatewayWithProviderRegistry(nil, nil, func() bool { return true }, emptyProviderTriggerRegistry(t)),
 	}
 	newRT := &runtimepkg.Runtime{
-		InboundGateway: runtimepkg.NewInboundGateway(nil, nil, nil),
+		InboundGateway: runtimepkg.NewInboundGatewayWithProviderRegistry(nil, nil, nil, emptyProviderTriggerRegistry(t)),
 	}
 	var ready atomic.Bool
 	ready.Store(true)
@@ -325,7 +326,7 @@ func newSupervisorForLoadProjectFailureTest(
 	bundle := testBuilderSupervisorBundle(t)
 	source := semanticview.Wrap(bundle)
 	module := stubWorkflowModule{source: source}
-	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), workspaceMountSources{}, workspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, "", nil, nil, nil)
+	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), workspaceMountSources{}, workspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, nil, "", nil, nil, nil)
 	supervisor.dev = true
 	supervisor.loadWorkflow = func(repoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
@@ -371,6 +372,26 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 	}
 	if gotMountSources != wantMountSources {
 		t.Fatalf("workspace mount sources = %#v, want %#v", gotMountSources, wantMountSources)
+	}
+}
+
+func TestRuntimeProjectSupervisorCarriesBootAdmittedProviderRegistryIntoReplacement(t *testing.T) {
+	projectRoot := writeProjectRoot(t)
+	wantRegistry := testProviderTriggerRegistry(t)
+	var gotRegistry *providertriggers.Registry
+	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
+		gotRegistry = deps.Options.ProviderTriggerRegistry
+		return &runtimepkg.Runtime{}, nil
+	})
+	supervisor.providerTriggers = wantRegistry
+	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
+	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
+
+	if _, err := supervisor.OpenProject(context.Background(), projectRoot); err != nil {
+		t.Fatalf("OpenProject: %v", err)
+	}
+	if gotRegistry != wantRegistry {
+		t.Fatalf("replacement provider registry = %p, want boot-admitted %p", gotRegistry, wantRegistry)
 	}
 }
 

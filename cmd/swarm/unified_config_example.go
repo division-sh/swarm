@@ -95,6 +95,7 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("llm.claude_cli.command", "claude", "Claude CLI executable path/name.", unifiedConfigExampleTierElevated),
 		e("llm.openai_compatible.base_url", "https://api.example.com/v1", "OpenAI-compatible endpoint base URL.", unifiedConfigExampleTierElevated),
 		e("llm.openai_responses.base_url", "https://api.openai.com/v1", "OpenAI Responses endpoint base URL.", unifiedConfigExampleTierElevated),
+		e("provider_triggers.packs.platform_dirs", `["packs/provider-triggers/github", "packs/provider-triggers/intercom", "packs/provider-triggers/shopify", "packs/provider-triggers/slack", "packs/provider-triggers/stripe", "packs/provider-triggers/telegram", "packs/provider-triggers/twilio", "packs/provider-triggers/typeform"]`, "Required first-party provider trigger pack directories; machine/operator config only.", unifiedConfigExampleTierElevated),
 		e("paths.swarm_dir", ".swarm", "Swarm state directory.", unifiedConfigExampleTierElevated),
 		e("paths.artifact_root", ".swarm/artifacts", "Runtime artifact root.", unifiedConfigExampleTierElevated),
 		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory.", unifiedConfigExampleTierElevated),

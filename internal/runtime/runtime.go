@@ -347,6 +347,9 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	if blocker := strings.TrimSpace(stores.ConstructionBlocker); blocker != "" {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime store boundary is not construction-ready: %s", blocker)
 	}
+	if stores.InboundStore != nil && opts.ProviderTriggerRegistry == nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("provider trigger registry is required when inbound store is configured")
+	}
 	var source semanticview.Source
 	if opts.WorkflowModule != nil {
 		workflowModule, wrappedSource, err := workflowModuleWithConnectorPacks(opts.WorkflowModule)

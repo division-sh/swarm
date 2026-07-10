@@ -93,7 +93,7 @@ func startProviderTriggerSmokeServer(
 	if strings.TrimSpace(listenAddr) == "" {
 		listenAddr = "localhost:0"
 	}
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+	gateway := runtimepkg.NewInboundGatewayWithProviderRegistry(bus, nil, nil, testProviderTriggerRegistry(t), sqliteStore)
 	inboundHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &providerTriggerSmokeCaptureWriter{ResponseWriter: w, status: http.StatusOK}
 		gateway.Handler().ServeHTTP(rec, r.WithContext(ctx))
