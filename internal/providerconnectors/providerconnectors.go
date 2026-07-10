@@ -339,7 +339,6 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 		Provenance:    provenance,
 		SourcePath:    sourcePath,
 		Applicability: "effective",
-		Status:        packs.StatusReady,
 		Capabilities: []packs.Capability{
 			{Code: packs.CapabilityCallProviderAction, Target: strings.TrimSpace(actionLabel + endpointSuffix(host))},
 			{Code: packs.CapabilityLowerThroughActivity},
@@ -357,12 +356,6 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 			return packs.Subject{}, err
 		}
 		subject.Guarantees = append(subject.Guarantees, guarantee)
-	}
-	for _, requirement := range subject.Requirements {
-		if requirement.Satisfied != nil && !*requirement.Satisfied {
-			subject.Status = packs.StatusNotReady
-			break
-		}
 	}
 	if generation != nil {
 		subject.Evidence = append(subject.Evidence, generationEvidence(*generation))
@@ -391,7 +384,6 @@ func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) 
 		Provenance:    strings.TrimSpace(installed.Pack.Envelope.Provenance.Source),
 		SourcePath:    strings.TrimSpace(installed.Pack.Directory),
 		Applicability: "installed",
-		Status:        packs.StatusAvailable,
 		Capabilities: []packs.Capability{
 			{Code: packs.CapabilityCallProviderAction, Target: strings.TrimSpace(connectorActionLabel(provider, action, installed.Tool) + endpointSuffix(host))},
 			{Code: packs.CapabilityLowerThroughActivity},

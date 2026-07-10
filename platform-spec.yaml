@@ -6929,7 +6929,7 @@ tool_model:
       \ \"{{response.body.status[0].summary}}\"\n  credentials:\n    - domainr_api_key"
   provider_capability_surface:
     promoted_by: '#1929'
-    owner: internal/packs typed capability-surface model and deterministic renderer
+    owner: internal/packs typed capability-surface model and deterministic renderer consuming internal/userfacing human-code projection
     description: >
       Provider trigger packs and provider connector declarations expose one typed proof-ready model to local preflight and
       doctor. Body-specific owners derive capability and guarantee facts from accepted manifests or ToolSchemaEntry values;
@@ -6962,6 +6962,11 @@ tool_model:
         Installed capability that is not effective in the current contract. All provider-trigger pack subjects are
         AVAILABLE until #1944 contributes a selected-target readiness subject. Unimported connector actions are AVAILABLE
         and carry import remediation but MUST remain absent from ToolEntries, agent surfaces, validation, and execution.
+      rollup_rule: >
+        `internal/packs NormalizeSubjects` derives status from kind, applicability, and validated requirement state.
+        Body adapters MUST NOT compute status. A supplied status that contradicts the derived tuple, an installed connector
+        without import remediation, an effective connector with an import requirement, or a status/satisfied/remediation
+        inconsistency fails closed.
     facts:
       capability_shape: {code: stable_machine_code, target: optional_body_derived_target}
       guarantee_shape: {code: stable_machine_code, enforced_by: registry_pinned_enforcement_id}
@@ -6978,12 +6983,25 @@ tool_model:
       - journal_activity_attempts
       unknown_projection: Unknown capability codes remain verbatim in human output and structured JSON.
     guarantee_enforcement_registry:
-      emit_undeclared_events: provider_trigger_event_name_policy
-      run_code_before_admission: provider_trigger_admission_sequence
-      touch_unbound_resources: provider_trigger_resource_binding_gate
-      bypass_activity_attempts: activity_attempts
-      retry_non_idempotent_write_automatically: activity_effect_retry_policy
-      expose_credential_values: credential_redaction_boundary
+      claims:
+        emit_undeclared_events:
+          enforced_by: internal/providertriggers.Manifest.resolveEventName
+          execution_proof: internal/providertriggers TestStripeManifestAcceptsLiteralEventType
+        run_code_before_admission:
+          enforced_by: internal/providertriggers.Manifest.Accept
+          execution_proof: internal/runtime TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPublish
+        touch_unbound_resources:
+          enforced_by: internal/runtime.InboundGateway.handleWebhook
+          execution_proof: internal/runtime TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission
+        bypass_activity_attempts:
+          enforced_by: internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent
+          execution_proof: internal/runtime/pipeline TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay
+        retry_non_idempotent_write_automatically:
+          enforced_by: internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent
+          execution_proof: internal/runtime/pipeline TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry
+        expose_credential_values:
+          enforced_by: internal/runtime/pipeline.executePreparedActivityHTTPTool
+          execution_proof: internal/runtime/pipeline TestActivityHTTPResponseSuccessPolicyParityCases/secret_redaction
       rule: >
         A known guarantee without exactly one registry enforcement owner fails closed. Human output renders guarantees as
         `cannot <verb> - enforced by <id>`; it does not present CANNOT as a product limitation.
@@ -7016,6 +7034,7 @@ tool_model:
         redacted SQLite/Postgres signing-binding readback, ambiguity, and mutation/remediation.
     projection:
       structured_owner: local preflight report capability_subjects
+      human_phrase_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
       text_rule: Human text is a deterministic projection of the same typed records emitted in JSON.
       ordering:
       - unsatisfied requirements with inline remediation
@@ -16488,7 +16507,7 @@ cli_specification:
         human_code_projection:
           promoted_by: '#1817'
           canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
-          implementation_owner: cmd/swarm/cli_output.go formatCLIHumanCode and cliHumanCodePhrases
+          implementation_owner: internal/userfacing/human_code_projection.go ProjectHumanCode and HumanCodePhrases; cmd/swarm/cli_output.go formatCLIHumanCode is the CLI adapter
           scope: >
             Authoritative human projection for current public status, mode, state, layer, action, outcome, and
             blocking-reason codes rendered by CLI detail, table, summary, stream, mutation, fork, and identifier
@@ -16522,6 +16541,43 @@ cli_specification:
             delivery_status:
               machine_owner: persisted event_deliveries.status contract and components.schemas.DeliveryStatus
               phrases: {pending: pending, in_progress: in progress, delivered: delivered, failed: failed, dead_letter: dead letter}
+            provider_subject_kind:
+              machine_owner: internal/packs SubjectKind
+              phrases: {provider_trigger: provider trigger pack, provider_connector: provider connector}
+            provider_subject_status:
+              machine_owner: internal/packs NormalizeSubjects derived SubjectStatus
+              phrases: {READY: READY, NOT_READY: NOT READY, AVAILABLE: AVAILABLE}
+            provider_capability:
+              machine_owner: internal/packs capability code constants populated from accepted provider bodies
+              phrases:
+                receive_https_route: receive HTTPS route
+                verify_secret: verify named secret
+                emit_event: emit named event
+                persist_dedupe_markers: persist dedupe markers
+                call_provider_action: call provider action
+                lower_through_activity: lower through platform.activity_requested
+                journal_activity_attempts: journal non-idempotent attempts in activity_attempts
+            provider_guarantee:
+              machine_owner: tool_model.provider_capability_surface.guarantee_enforcement_registry.claims
+              phrases:
+                emit_undeclared_events: emit undeclared events
+                run_code_before_admission: run code before admission
+                touch_unbound_resources: touch unbound resources
+                bypass_activity_attempts: bypass activity_attempts
+                retry_non_idempotent_write_automatically: retry non_idempotent_write automatically
+                expose_credential_values: expose credential values
+            provider_requirement_status:
+              machine_owner: internal/packs requirement validation consuming canonical credential descriptors
+              phrases:
+                BOUND: BOUND
+                UNBOUND: UNBOUND
+                CONNECTED: CONNECTED
+                UNCONNECTED: UNCONNECTED
+                PENDING_CONSENT: PENDING CONSENT
+                REFRESH_FAILED: REFRESH FAILED
+                SCOPE_INSUFFICIENT: SCOPE INSUFFICIENT
+                NOT_IMPORTED: NOT IMPORTED
+                UNKNOWN: UNKNOWN
             operational_state:
               machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
               phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
@@ -16577,7 +16633,8 @@ cli_specification:
             Every public human renderer of a registered family must call the shared projector, including identity
             phrases. Current consumers include run list/status/start/reattach/terminal/fork, run trace snapshot/detail/
             summary/follow and foreground start trace, agent list/view/diagnose/deliveries and agent ambiguity,
-            bundle agents, event view/publish/replay, and their shared row/detail writers. Validators, replay-only
+            bundle agents, event view/publish/replay, provider capability findings through internal/packs RenderSubject,
+            and their shared row/detail writers. Validators, replay-only
             validation, event-follow counts, machine output, and the private run-fork runtime-owner harness are not
             human phrase consumers.
           vocabulary_guard:

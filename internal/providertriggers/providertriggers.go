@@ -418,7 +418,6 @@ func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 		Provenance:    strings.TrimSpace(p.Envelope.Provenance.Source),
 		SourcePath:    strings.TrimSpace(p.SourcePath),
 		Applicability: "installed",
-		Status:        packs.StatusAvailable,
 	}
 	if route := strings.TrimSpace(capabilities.Can.ReceiveHTTPSRoute); route != "" {
 		subject.Capabilities = append(subject.Capabilities, packs.Capability{Code: packs.CapabilityReceiveHTTPSRoute, Target: route})
