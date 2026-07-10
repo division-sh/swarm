@@ -67,6 +67,48 @@ func TestWave1EntityResolverRejectsLegacyAndUnsupportedPlatformEntityFields(t *t
 	}
 }
 
+func TestEntityContractDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
+	t.Run("missing contract path", func(t *testing.T) {
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+		_, _, err := wave1ResolveEntityPathWithOwner(source, "", "summary")
+		if err == nil || !strings.Contains(err.Error(), "no declared entity contract") {
+			t.Fatalf("error = %v, want declared entity contract guidance", err)
+		}
+		if strings.Contains(err.Error(), "Wave 1") {
+			t.Fatalf("error leaks internal rollout vocabulary: %v", err)
+		}
+	})
+
+	t.Run("write coverage finding", func(t *testing.T) {
+		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+			Nodes: map[string]runtimecontracts.SystemNodeContract{
+				"node-1": {
+					ID: "node-1",
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+						"item.received": {
+							Compute: &runtimecontracts.ComputeSpec{
+								Operation: runtimecontracts.ComputeOpCount,
+								StoreAs:   "entity.summary",
+							},
+						},
+					},
+				},
+			},
+		})
+		report := Run(context.Background(), source, Options{})
+		for _, finding := range report.Errors() {
+			if finding.CheckID != "entity_write_target_compliance" || !strings.Contains(finding.Message, "missing from the declared entity contract") {
+				continue
+			}
+			if strings.Contains(finding.Message, "Wave 1") {
+				t.Fatalf("finding leaks internal rollout vocabulary: %#v", finding)
+			}
+			return
+		}
+		t.Fatalf("missing author-facing entity_write_target_compliance finding: %#v", report.Errors())
+	})
+}
+
 func TestRun_RejectsSelectEntityByPlatformEntitySourceAuthority(t *testing.T) {
 	for _, acquisition := range []string{"select_entity", "select_or_create_entity"} {
 		t.Run(acquisition, func(t *testing.T) {

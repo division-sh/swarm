@@ -790,7 +790,7 @@ func (s *ScalarTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	if !isBuiltinWave1Scalar(base) {
-		return fmt.Errorf("RETIRED: scalar alias %q must resolve to a built-in Wave 1 scalar", strings.TrimSpace(base))
+		return fmt.Errorf("RETIRED: scalar alias %q must resolve to a supported built-in scalar", strings.TrimSpace(base))
 	}
 	s.Base = base
 	return nil
@@ -1346,7 +1346,7 @@ func validateWave1TypeRef(raw, context string) error {
 		return fmt.Errorf("RETIRED: %s type %q is retired; declare a named type in types.yaml", context, raw)
 	}
 	if strings.HasPrefix(raw, "Optional<") {
-		return fmt.Errorf("RETIRED: %s type %q is not part of the Wave 1 type system", context, raw)
+		return fmt.Errorf("RETIRED: %s type %q is not supported by the current type system", context, raw)
 	}
 	if keyType, valueType, ok := parseWave1MapTypeRef(raw); ok {
 		if keyType == "" || valueType == "" {

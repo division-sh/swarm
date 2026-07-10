@@ -39,6 +39,9 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm run list":          {Constructor: "newRunsCommand", Runner: "runDiagnosticRunListCommand"},
 	"swarm run status":        {Constructor: "newStatusCommand", Runner: "runDiagnosticRunCommand"},
 	"swarm run fork":          {Constructor: "newForkCommand", Runner: "runForkCommand"},
+	"swarm agent view":        {Constructor: "newAgentViewCommand", Runner: "runAgentViewCommand"},
+	"swarm agent diagnose":    {Constructor: "newAgentDiagnoseCommand", Runner: "runAgentDiagnoseCommand"},
+	"swarm agent deliveries":  {Constructor: "newAgentDeliveriesCommand", Runner: "runAgentDeliveriesCommand"},
 	"swarm health":            {Constructor: "newHealthCommand", Runner: "runDiagnosticHealthCommand"},
 	"swarm conversation list": {Constructor: "newConversationsListCommand", Runner: "runConversationsListCommand"},
 	"swarm conversation view": {Constructor: "newConversationViewCommand", Runner: "runConversationViewCommand"},
@@ -91,9 +94,6 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm control nuke":           "split",
 	"swarm agent":                  "exception",
 	"swarm agent list":             "split",
-	"swarm agent view":             "split",
-	"swarm agent diagnose":         "split",
-	"swarm agent deliveries":       "split",
 	"swarm agent restart":          "split",
 	"swarm agent replay":           "split",
 	"swarm agent replay-backlog":   "split",
@@ -121,15 +121,20 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 }
 
 var cliOutputExpectedFactOwners = map[string]string{
-	"swarm bundle list":     "/v1/rpc bundle.list",
-	"swarm bundle show":     "/v1/rpc bundle.get",
-	"swarm bundle agents":   "/v1/rpc bundle.agents",
-	"swarm bundle register": "/v1/rpc bundle.register",
-	"swarm bundle delete":   "/v1/rpc bundle.delete",
+	"swarm bundle list":      "/v1/rpc bundle.list",
+	"swarm bundle show":      "/v1/rpc bundle.get",
+	"swarm bundle agents":    "/v1/rpc bundle.agents",
+	"swarm bundle register":  "/v1/rpc bundle.register",
+	"swarm bundle delete":    "/v1/rpc bundle.delete",
+	"swarm agent view":       "/v1/rpc agent.get",
+	"swarm agent diagnose":   "/v1/rpc agent.diagnose",
+	"swarm agent deliveries": "/v1/rpc agent.delivery_lifecycle",
 }
 
 var cliOutputSharedDisplayProofs = map[string][]string{
 	"writeAgentDeliveryLifecycleListResult":  {"writeCLITable"},
+	"writeAgentDiagnosisResult":              {"writeCLILabeledDetail"},
+	"writeAgentDetailResult":                 {"writeCLILabeledDetail"},
 	"writeAgentListResult":                   {"writeCLITable"},
 	"writeBundleAgentsHuman":                 {"writeCLITable"},
 	"writeBundleDetailHuman":                 {"writeCLIFieldLine"},
@@ -140,6 +145,8 @@ var cliOutputSharedDisplayProofs = map[string][]string{
 	"writeConversationListResult":            {"writeCLITable"},
 	"writeConversationTurnDetailResult":      {"writeCLIFieldLine"},
 	"writeDiagnosticRunList":                 {"writeCLITable"},
+	"writeDiagnosticRunHeader":               {"writeCLILabeledDetail"},
+	"writeDiagnosticRunDiagnosis":            {"writeCLILabeledDetail"},
 	"writeDiagnosticRunTrace":                {"writeCLITable"},
 	"writeDiagnosticRunTraceDeliveryDetail":  {"writeCLITable"},
 	"writeDiagnosticRunTraceDeliverySummary": {"writeCLITable"},
@@ -626,7 +633,7 @@ func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 					return true
 				}
 				switch ident.Name {
-				case "bindCLIOutputFlags", "renderCLIOutput", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState":
+				case "bindCLIOutputFlags", "renderCLIOutput", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
 					calls[fn.Name.Name][ident.Name] = true
 				}
 				return true

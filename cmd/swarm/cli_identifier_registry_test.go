@@ -306,7 +306,7 @@ func TestCLIIdentifierResolverCallsitesUseRegisteredReadRows(t *testing.T) {
 func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 	expected := map[string]cliIdentifierFamily{
 		"agents.go\x00AGENT_ID":              cliIdentifierFamilyAgent,
-		"agents.go\x00EVENT_ID":              cliIdentifierFamilyEvent,
+		"agents.go\x00EVENT ID":              cliIdentifierFamilyEvent,
 		"agents.go\x00RUN":                   cliIdentifierFamilyRun,
 		"agents.go\x00ENTITY":                cliIdentifierFamilyEntity,
 		"bundle.go\x00BUNDLE":                cliIdentifierFamilyBundle,
@@ -337,7 +337,7 @@ func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 	}
 	seen := map[string]int{}
 	keyColumnExceptions := map[string]bool{
-		"agents.go\x00DELIVERY_ID":      true,
+		"agents.go\x00DELIVERY ID":      true,
 		"connections.go\x00KEY":         true,
 		"conversations.go\x00TURN_ID":   true,
 		"diagnostics.go\x00DELIVERY ID": true,

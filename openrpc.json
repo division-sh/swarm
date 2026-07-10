@@ -8465,6 +8465,7 @@
         "additionalProperties": false,
         "properties": {
           "blocking_layer": {
+            "description": "Current producer owner is internal/store/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming deliverylifecycle.StateFromDelivery. Current reachable state/layer pairs are queued/delivery_queue, launching/session_launch, active/session_execution, retrying/delivery_retry, and exhausted/delivery_terminal. The field remains string-valued for compatible additive server values; current in-repo producer additions must update the authoritative human-code projection and parity tests in the same change. Delivered is not a current diagnosis state.\n",
             "minLength": 1,
             "type": "string"
           },

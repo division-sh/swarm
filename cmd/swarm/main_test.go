@@ -32,7 +32,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -5676,7 +5675,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, "operating/component_scaffold.spawn_requested", "component-scaffold")
 	requireServedRunStatus(t, endpoint, runID, "completed")
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
-	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
+	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
 	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
 	requireServedParitySettlementPostconditions(t, endpoint, db, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
@@ -7469,7 +7468,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("trace readback missing %q:\n%s", want, traceStdout)
 		}
 	}
-	requireServedStatusCLIReadback(t, endpoint, runID, "status=completed")
+	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
 	entityListStdout, entityListStderr, entityListCode := runServedCLICommand(t, endpoint, []string{"entity", "list", "--run-id", runID, "--limit", "10"})
 	if entityListCode != 0 {
 		t.Fatalf("entities list readback code=%d stderr=%s stdout=%s", entityListCode, entityListStderr, entityListStdout)
@@ -10026,78 +10025,6 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func TestPrintRunStatusReport(t *testing.T) {
-	var buf bytes.Buffer
-	started := time.Unix(1700000000, 0).UTC()
-	last := started.Add(5 * time.Minute)
-	report := runStatusReport{
-		RunID:             "run-123",
-		RunTableStatus:    "running",
-		OperationalState:  "stalled",
-		BlockingLayer:     "scoring_terminal_outcome",
-		BlockingReason:    "terminal_scoring_outcome_missing",
-		RootEventID:       "evt-1",
-		RootEventType:     "scan.requested",
-		StartedAt:         started,
-		LastEventAt:       last,
-		EventCount:        7,
-		WarnErrorLogCount: 1,
-		Heuristics: []string{
-			"run appears settled after scoring started but no terminal scoring outcome was emitted",
-		},
-		EventCounts: []runStatusEventCount{
-			{EventName: "scan.requested", Count: 1},
-			{EventName: "vertical.discovered", Count: 2},
-		},
-		Deliveries: []runStatusDeliveryCount{
-			{SubscriberID: "analysis-agent", Status: "delivered", Count: 2},
-		},
-		AgentTurns: []runStatusAgentTurn{
-			{AgentID: "analysis-agent", Turns: 2, ErrorCount: 0, LastAt: last},
-		},
-		RuntimeLogSummary: []runStatusRuntimeSummary{
-			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Count: 3},
-		},
-		RuntimeLogs: []runStatusRuntimeLog{
-			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Failure: testRuntimeFailure("context_fallback_used"), CreatedAt: last},
-		},
-		RecentEvents: []runStatusEvent{
-			{EventName: "vertical.discovered", EntityID: "ent-1", CreatedAt: last},
-		},
-		Mutations: []runStatusMutation{
-			{Field: "current_state", EntityID: "ent-1", WriterType: "workflow", WriterID: "router", HandlerStep: "step-1", CreatedAt: last},
-		},
-	}
-
-	printRunStatusReport(&buf, report)
-	out := buf.String()
-	for _, want := range []string{
-		"Run run-123",
-		"Root: scan.requested (evt-1)",
-		"Run Table Status: running",
-		"Operational State: stalled",
-		"Blocking Layer: scoring_terminal_outcome",
-		"Blocking Reason: terminal_scoring_outcome_missing",
-		"Summary: events=7 deliveries=1 dead_letters=0 agent_turns=1 runtime_warn_errors=1",
-		"Heuristics:",
-		"run appears settled after scoring started but no terminal scoring outcome was emitted",
-		"Event Counts:",
-		"analysis-agent  status=delivered  count=2",
-		"Runtime Log Summary:",
-		"WARN  mcp-gateway/mcp.context.fallback_used  count=3",
-		"Runtime Warnings/Errors:",
-		"WARN  mcp-gateway/mcp.context.fallback_used",
-		"Recent Events:",
-		"vertical.discovered  entity=ent-1",
-		"Recent Mutations:",
-		"current_state  entity=ent-1  writer=workflow/router  step=step-1",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("status output missing %q:\n%s", want, out)
-		}
-	}
-}
-
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
 	report := store.RunDebugReport{
 		RunTableStatus: "running",
@@ -10185,128 +10112,6 @@ func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveries
 	}
 	if got.BlockingLayer != "" || got.BlockingReason != "" {
 		t.Fatalf("unexpected blocking projection: %#v", got)
-	}
-}
-
-func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutations(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	targetRunID := uuid.NewString()
-	otherRunID := uuid.NewString()
-	targetEntityID := uuid.NewString()
-	otherEntityID := uuid.NewString()
-	targetEventID := uuid.NewString()
-	otherEventID := uuid.NewString()
-	now := time.Unix(1700000000, 0).UTC()
-
-	insertRuntimeLog := func(runID string, payloadRunID string, component string, action string, createdAt time.Time) {
-		t.Helper()
-		failure := testRuntimeFailure(strings.ReplaceAll(action, "-", "_") + "_error")
-		payload, err := json.Marshal(map[string]any{
-			"log_level": "warn",
-			"message":   action,
-			"details": map[string]any{
-				"run_id":    payloadRunID,
-				"component": component,
-				"action":    action,
-				"failure":   failure,
-			},
-		})
-		if err != nil {
-			t.Fatalf("marshal runtime log payload: %v", err)
-		}
-		if _, err := db.Exec(`
-			INSERT INTO events (
-				run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-			)
-			VALUES (
-				$1::uuid, gen_random_uuid(), 'platform.runtime_log', NULL, NULL, 'global', $2::jsonb, 'test', 'agent', $3
-			)
-		`, runID, string(payload), createdAt); err != nil {
-			t.Fatalf("insert runtime log for run %s: %v", runID, err)
-		}
-	}
-
-	for _, runID := range []string{targetRunID, otherRunID} {
-		if _, err := db.Exec(`
-			INSERT INTO runs (run_id, status, started_at)
-			VALUES ($1::uuid, 'running', $2)
-			ON CONFLICT (run_id) DO NOTHING
-		`, runID, now.Add(-5*time.Minute)); err != nil {
-			t.Fatalf("insert run %s: %v", runID, err)
-		}
-	}
-	if _, err := db.Exec(`
-		INSERT INTO events (
-			run_id, event_id, event_name, entity_id, flow_instance, scope, payload, produced_by, produced_by_type, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'scan.requested', $3::uuid, NULL, 'global', '{}'::jsonb, 'test', 'agent', $4),
-			($5::uuid, $6::uuid, 'scan.requested', $7::uuid, NULL, 'global', '{}'::jsonb, 'test', 'agent', $8)
-	`, targetRunID, targetEventID, targetEntityID, now.Add(-4*time.Minute), otherRunID, otherEventID, otherEntityID, now.Add(-3*time.Minute)); err != nil {
-		t.Fatalf("insert root events: %v", err)
-	}
-	insertRuntimeLog(targetRunID, otherRunID, "scheduler", "canonical-owner", now)
-	insertRuntimeLog(otherRunID, targetRunID, "scheduler", "payload-only", now.Add(1*time.Minute))
-	if _, err := db.Exec(`
-		INSERT INTO entity_mutations (
-			run_id, entity_id, field, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'current_state', $4::jsonb, $5::jsonb, $3::uuid, 'platform', 'runner', 'step-a', $6),
-			($7::uuid, $8::uuid, 'current_state', $10::jsonb, $11::jsonb, $9::uuid, 'platform', 'runner', 'step-b', $12)
-	`, targetRunID, targetEntityID, targetEventID, `"queued"`, `"running"`, now.Add(2*time.Minute), otherRunID, otherEntityID, otherEventID, `"queued"`, `"failed"`, now.Add(3*time.Minute)); err != nil {
-		t.Fatalf("insert mutations: %v", err)
-	}
-	if _, err := db.Exec(`
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, delivered_at, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'delivered', $3, $4)
-	`, targetRunID, targetEventID, now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
-		t.Fatalf("insert delivery: %v", err)
-	}
-	if err := runtimedeadletters.Insert(context.Background(), db, runtimedeadletters.Record{
-		OriginalEventID: targetEventID,
-		OriginalEvent:   "scan.requested",
-		EntityID:        targetEntityID,
-		Failure:         *testRuntimeFailure("handler_failed"),
-		HandlerNode:     "node-a",
-		Timestamp:       now.Add(4 * time.Minute).Format(time.RFC3339Nano),
-	}); err != nil {
-		t.Fatalf("insert dead letter: %v", err)
-	}
-
-	report, err := loadRunStatusReport(context.Background(), pg, targetRunID, runStatusOptions{
-		LogsOnly:  true,
-		Component: "scheduler",
-	})
-	if err != nil {
-		t.Fatalf("loadRunStatusReport: %v", err)
-	}
-	if report.WarnErrorLogCount != 1 {
-		t.Fatalf("WarnErrorLogCount = %d, want 1", report.WarnErrorLogCount)
-	}
-	if len(report.RuntimeLogSummary) != 1 {
-		t.Fatalf("RuntimeLogSummary len = %d, want 1", len(report.RuntimeLogSummary))
-	}
-	if got := report.RuntimeLogSummary[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Count != 1 {
-		t.Fatalf("RuntimeLogSummary[0] = %#v", got)
-	}
-	if len(report.RuntimeLogs) != 1 {
-		t.Fatalf("RuntimeLogs len = %d, want 1", len(report.RuntimeLogs))
-	}
-	if got := report.RuntimeLogs[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Failure == nil || got.Failure.Detail.Code != "canonical_owner_error" {
-		t.Fatalf("RuntimeLogs[0] = %#v", got)
-	}
-	if len(report.Mutations) != 1 {
-		t.Fatalf("Mutations len = %d, want 1", len(report.Mutations))
-	}
-	if got := report.Mutations[0]; got.EntityID != targetEntityID || got.Field != "current_state" || got.WriterType != "platform" || got.WriterID != "runner" {
-		t.Fatalf("Mutations[0] = %#v", got)
-	}
-	if len(report.DeadLetters) != 1 {
-		t.Fatalf("DeadLetters len = %d, want 1", len(report.DeadLetters))
 	}
 }
 
@@ -11667,7 +11472,7 @@ func TestLoadRuntimeConfig_RejectsUnsupportedRuntimeControlsFromFile(t *testing.
 	}
 }
 
-func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
+func TestRunState_UsesDurableCompletedRunState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
@@ -11682,14 +11487,15 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 
 	ctx := context.Background()
 	deadline := time.Now().Add(2 * time.Second)
+	var endedAt sql.NullTime
 	for {
 		var status string
 		err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, '')
+			SELECT COALESCE(status, ''), ended_at
 			FROM runs
 			WHERE run_id = $1::uuid
-		`, runID).Scan(&status)
-		if err == nil && status == "completed" {
+		`, runID).Scan(&status, &endedAt)
+		if err == nil && status == "completed" && endedAt.Valid {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -11697,25 +11503,12 @@ func TestLoadRunStatusReport_UsesDurableCompletedRunState(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-
-	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
-	if err != nil {
-		t.Fatalf("loadRunStatusReport: %v", err)
-	}
-	if report.RunTableStatus != "completed" {
-		t.Fatalf("RunTableStatus = %q, want completed", report.RunTableStatus)
-	}
-	if report.EndedAt == nil || report.EndedAt.IsZero() {
-		t.Fatal("expected durable ended_at in run status report")
-	}
-	for _, heuristic := range report.Heuristics {
-		if strings.Contains(heuristic, "runs table still says running") {
-			t.Fatalf("unexpected running heuristic after durable completion: %#v", report.Heuristics)
-		}
+	if endedAt.Time.IsZero() {
+		t.Fatal("expected durable ended_at for completed run")
 	}
 }
 
-func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
+func TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
@@ -11826,17 +11619,9 @@ func TestLoadRunStatusReport_KeepsSupportedRunRunningUntilManagerWorkSettles(t *
 	if extraRunningRows != 0 {
 		t.Fatalf("extra running rows = %d, want 0", extraRunningRows)
 	}
-
-	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
-	if err != nil {
-		t.Fatalf("loadRunStatusReport: %v", err)
-	}
-	if report.RunTableStatus != "completed" {
-		t.Fatalf("RunTableStatus = %q, want completed", report.RunTableStatus)
-	}
 }
 
-func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
+func TestRunState_PreservesRunningTruthWhileManagerWorkIsActive(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	eb, err := runtimebus.NewEventBus(pg)
@@ -11910,28 +11695,6 @@ func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *te
 	if got := am.InFlightCount(); got == 0 {
 		t.Fatal("expected live in-flight manager work after builder timeout window")
 	}
-
-	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
-	if err != nil {
-		t.Fatalf("loadRunStatusReport: %v", err)
-	}
-	if report.RunTableStatus != "running" {
-		t.Fatalf("RunTableStatus after timeout window = %q, want running", report.RunTableStatus)
-	}
-	if report.OperationalState != "running" {
-		t.Fatalf("OperationalState after timeout window = %q, want running", report.OperationalState)
-	}
-	foundActiveDelivery := false
-	for _, item := range report.Deliveries {
-		if item.SubscriberID == "agent-1" && item.Status == "in_progress" && item.Count > 0 {
-			foundActiveDelivery = true
-			break
-		}
-	}
-	if !foundActiveDelivery {
-		t.Fatalf("expected supported status report to preserve active same-run delivery, got %#v", report.Deliveries)
-	}
-
 	close(releaseAgent)
 	waitRunStatusEventSettlement(t, db, runID, 2)
 	markRunStatusCompleted(t, pg, runID)
@@ -11950,109 +11713,6 @@ func TestLoadRunStatusReport_PreservesRunningTruthWhileManagerWorkIsActive(t *te
 			t.Fatalf("run %s did not reach coherent completed state after release: last err=%v status=%q ended_at_valid=%v", runID, err, status, endedAt.Valid)
 		}
 		time.Sleep(10 * time.Millisecond)
-	}
-
-}
-
-func TestLoadRunStatusReport_ProjectsExplicitStalledRunState(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
-
-	runID := uuid.NewString()
-	rootEventID := uuid.NewString()
-	deliveredEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', now() - interval '10 minutes')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	for _, eventID := range []string{rootEventID, deliveredEventID} {
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO events (
-				run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-			) VALUES (
-				$1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '5 minutes'
-			)
-		`, runID, eventID); err != nil {
-			t.Fatalf("seed event %s: %v", eventID, err)
-		}
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, delivered_at, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-1', 'delivered', now() - interval '2 minutes', now() - interval '4 minutes'
-		)
-	`, runID, deliveredEventID); err != nil {
-		t.Fatalf("seed delivery: %v", err)
-	}
-
-	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
-	if err != nil {
-		t.Fatalf("loadRunStatusReport: %v", err)
-	}
-	if report.RunTableStatus != "running" {
-		t.Fatalf("run_table_status = %q, want running", report.RunTableStatus)
-	}
-	if report.OperationalState != "stalled" {
-		t.Fatalf("operational_state = %q, want stalled", report.OperationalState)
-	}
-	if report.BlockingLayer != "delivery_lifecycle" {
-		t.Fatalf("blocking_layer = %q, want delivery_lifecycle", report.BlockingLayer)
-	}
-	if report.BlockingReason != "no_active_deliveries" {
-		t.Fatalf("blocking_reason = %q, want no_active_deliveries", report.BlockingReason)
-	}
-	for _, heuristic := range report.Heuristics {
-		if strings.Contains(heuristic, "runs table still says running") {
-			t.Fatalf("unexpected stalled heuristic fallback: %#v", report.Heuristics)
-		}
-	}
-}
-
-func TestLoadRunStatusReport_ProjectsScoringOutcomeStall(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := &store.PostgresStore{DB: db}
-	ctx := context.Background()
-
-	runID := uuid.NewString()
-	rootEventID := uuid.NewString()
-	scoringEventID := uuid.NewString()
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at)
-		VALUES ($1::uuid, 'running', now() - interval '10 minutes')
-	`, runID); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO events (
-			run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
-		) VALUES
-			($1::uuid, $2::uuid, 'scan.requested', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '9 minutes'),
-			($1::uuid, $3::uuid, 'scoring/scoring.requested', 'global', '{}'::jsonb, 'runtime', 'agent', now() - interval '2 minutes')
-	`, runID, rootEventID, scoringEventID); err != nil {
-		t.Fatalf("seed events: %v", err)
-	}
-
-	report, err := loadRunStatusReport(ctx, pg, runID, runStatusOptions{})
-	if err != nil {
-		t.Fatalf("loadRunStatusReport: %v", err)
-	}
-	if report.OperationalState != "stalled" {
-		t.Fatalf("operational_state = %q, want stalled", report.OperationalState)
-	}
-	if report.BlockingLayer != "scoring_terminal_outcome" {
-		t.Fatalf("blocking_layer = %q, want scoring_terminal_outcome", report.BlockingLayer)
-	}
-	if report.BlockingReason != "terminal_scoring_outcome_missing" {
-		t.Fatalf("blocking_reason = %q, want terminal_scoring_outcome_missing", report.BlockingReason)
-	}
-	for _, heuristic := range report.Heuristics {
-		if strings.Contains(heuristic, "run appears settled after scoring started") {
-			t.Fatalf("unexpected scoring heuristic fallback: %#v", report.Heuristics)
-		}
 	}
 }
 

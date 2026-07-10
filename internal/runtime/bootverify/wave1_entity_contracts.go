@@ -134,7 +134,7 @@ func wave1ResolveEntityPathWithOwner(source semanticview.Source, flowID, ref str
 		}
 	}
 	if !view.Defined {
-		return wave1ResolvedType{}, "", fmt.Errorf("flow %s has no declared Wave 1 entity contract for entity.%s", defaultFlowLabel(flowID), head)
+		return wave1ResolvedType{}, "", fmt.Errorf("flow %s has no declared entity contract for entity.%s", defaultFlowLabel(flowID), head)
 	}
 	field, ok := view.Contract.Fields[head]
 	if !ok && flowID != "" && view.FlowID != "" && wave1FlowReadsRootField(source, flowID, head) {

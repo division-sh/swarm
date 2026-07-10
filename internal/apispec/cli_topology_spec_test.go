@@ -142,6 +142,76 @@ func TestCLIOutputConformanceRegistryPromotedAsCurrentStateOwner(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, color, "consumer_registry"), "output_conformance_registry")
 }
 
+func TestCLIHumanCodeProjectionOwnsCurrentProducerTuples(t *testing.T) {
+	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
+	sharedRenderer := mustMappingValue(t, outputContract, "shared_renderer_contract")
+	projection := mustMappingValue(t, sharedRenderer, "human_code_projection")
+
+	assertScalarValue(t, mustMappingValue(t, projection, "promoted_by"), "#1817")
+	assertScalarValue(t, mustMappingValue(t, projection, "canonical_owner"), "platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection")
+	assertScalarContains(t, mustMappingValue(t, projection, "implementation_owner"), "formatCLIHumanCode")
+	assertScalarContains(t, mustMappingValue(t, projection, "machine_surface_rule"), "retain canonical machine field names and values exactly")
+	assertScalarContains(t, mustMappingValue(t, projection, "unknown_value_rule"), "exact original machine shape")
+
+	families := mustMappingValue(t, projection, "families")
+	lifecycle := mustMappingValue(t, families, "agent_lifecycle_tuples")
+	assertScalarContains(t, mustMappingValue(t, lifecycle, "machine_owner"), "agentLifecycleBlockingLayer")
+	assertScalarContains(t, mustMappingValue(t, lifecycle, "machine_owner"), "StateFromDelivery")
+	wantLifecycle := map[string]string{
+		"queued":    "delivery_queue",
+		"launching": "session_launch",
+		"active":    "session_execution",
+		"retrying":  "delivery_retry",
+		"exhausted": "delivery_terminal",
+	}
+	assertCurrentCodePairs(t, mustMappingValue(t, lifecycle, "current"), "state", "blocking_layer", wantLifecycle)
+	assertScalarContains(t, mustMappingValue(t, lifecycle, "delivered_exclusion"), "not an AgentDeliveryLifecycleState")
+
+	wantRunBlocking := map[string]string{
+		"scoring_terminal_outcome": "terminal_scoring_outcome_missing",
+		"delivery_lifecycle":       "no_active_deliveries",
+	}
+	assertCurrentCodePairs(t, mustMappingValue(t, mustMappingValue(t, families, "run_blocking_tuples"), "current_non_empty"), "blocking_layer", "blocking_reason", wantRunBlocking)
+
+	watchdog := mustMappingValue(t, mustMappingValue(t, families, "watchdog_tuples"), "current")
+	if len(watchdog.Content) != 2 {
+		t.Fatalf("watchdog current tuple count = %d, want 2", len(watchdog.Content))
+	}
+	wantWatchdog := map[string]string{
+		"healthy_long_running": "turn_long_running",
+		"no_output":            "session_no_output",
+	}
+	assertCurrentCodePairs(t, watchdog, "state", "action", wantWatchdog)
+
+	vocabulary := mustMappingValue(t, projection, "vocabulary_guard")
+	assertSequenceContainsSubstring(t, mustMappingValue(t, vocabulary, "global_terms"), "Wave 1")
+	assertSequenceContainsSubstring(t, mustMappingValue(t, vocabulary, "global_terms"), "unified")
+	assertScalarContains(t, mustMappingValue(t, vocabulary, "consumption_rule"), "generated public")
+
+	rows := mustMappingValue(t, mustMappingValue(t, mustMappingValue(t, outputContract, "command_support"), "output_conformance_registry"), "rows")
+	for _, key := range []string{"agent_view", "agent_diagnose", "agent_deliveries"} {
+		row := mustMappingValue(t, rows, key)
+		assertScalarValue(t, mustMappingValue(t, row, "classification"), "shared_output")
+		if mappingValue(row, "fact_owner") == nil || mappingValue(row, "json_shape") == nil || mappingValue(row, "quiet_values") == nil {
+			t.Errorf("%s shared output row is missing fact_owner/json_shape/quiet_values", key)
+		}
+	}
+}
+
+func assertCurrentCodePairs(t *testing.T, sequence *yaml.Node, keyField, valueField string, want map[string]string) {
+	t.Helper()
+	if sequence.Kind != yaml.SequenceNode {
+		t.Fatalf("current tuple node kind = %d, want sequence", sequence.Kind)
+	}
+	got := map[string]string{}
+	for _, row := range sequence.Content {
+		got[mustMappingValue(t, row, keyField).Value] = mustMappingValue(t, row, valueField).Value
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("current tuples = %v, want %v", got, want)
+	}
+}
+
 func TestCLIDiagnosticConventionPromotedToOutputContract(t *testing.T) {
 	outputContract := mustMappingValue(t, mustMappingValue(t, cliSpecification(t), "foundations"), "output_contract")
 	convention := mustMappingValue(t, outputContract, "diagnostic_convention")

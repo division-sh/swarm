@@ -469,7 +469,11 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 			}
 			return nil
 		},
-		wsRows: []map[string]any{validRunCommandTraceRow("evt-foreground")},
+		wsRows: []map[string]any{func() map[string]any {
+			row := validRunCommandTraceRow("evt-foreground")
+			row["delivery_status"] = "in_progress"
+			return row
+		}()},
 	})
 	defer server.Close()
 
@@ -491,7 +495,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 		}
 	}
 	assertRunCommandTraceSubscription(t, wsRequests, "run-foreground", true)
-	for _, want := range []string{"id=evt-foreground", "run terminal: run_id=run-foreground status=completed"} {
+	for _, want := range []string{"id=evt-foreground", "delivery=in progress", "run terminal: run_id=run-foreground status=completed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}

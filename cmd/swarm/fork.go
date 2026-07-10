@@ -193,6 +193,6 @@ func writeRunForkHuman(w io.Writer, result runForkResult) {
 	}
 	fmt.Fprintln(w, "Fork created")
 	fmt.Fprintf(w, "source_run_id=%s fork_run_id=%s fork_event_id=%s\n", result.SourceRunID, result.ForkRunID, result.ForkEventID)
-	fmt.Fprintf(w, "status=%s bundle_hash=%s executed_event_count=%d\n", result.ForkRunStatus, result.BundleHash, result.ExecutedEventCount)
+	fmt.Fprintf(w, "status=%s bundle_hash=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), result.BundleHash, result.ExecutedEventCount)
 	fmt.Fprintf(w, "owner=%s\n", result.Owner)
 }

@@ -396,14 +396,14 @@ func validateWave1ContractsLoadBoundary(bundle *WorkflowContractBundle) error {
 		if path := existingFile(filepath.Join(pkg.Paths.Dir, "types.yaml")); path != "" {
 			if _, ok := flowScopedTypesFiles[filepath.Clean(path)]; !ok {
 				return &LoadValidationError{Items: []error{
-					errString("RETIRED: package-scoped types.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
+					errString("RETIRED: package-scoped types.yaml is not supported; move declarations to bundle root or flow scope (" + path + ")"),
 				}}
 			}
 		}
 		if path := existingFile(filepath.Join(pkg.Paths.Dir, "entities.yaml")); path != "" {
 			if _, ok := flowScopedEntityFiles[filepath.Clean(path)]; !ok {
 				return &LoadValidationError{Items: []error{
-					errString("RETIRED: package-scoped entities.yaml is not supported in Wave 1; move declarations to bundle root or flow scope (" + path + ")"),
+					errString("RETIRED: package-scoped entities.yaml is not supported; move declarations to bundle root or flow scope (" + path + ")"),
 				}}
 			}
 		}

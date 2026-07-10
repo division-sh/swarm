@@ -625,6 +625,9 @@ flows: []
 	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "package-scoped types.yaml") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want package-scoped types.yaml rejection", err)
 	}
+	if strings.Contains(err.Error(), "Wave 1") {
+		t.Fatalf("package-scoped types error leaks internal rollout vocabulary: %v", err)
+	}
 }
 
 func TestLoadWorkflowContractBundle_RejectsPackageScopedEntityContracts(t *testing.T) {
@@ -652,6 +655,32 @@ flows: []
 	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "package-scoped entities.yaml") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want package-scoped entities.yaml rejection", err)
 	}
+	if strings.Contains(err.Error(), "Wave 1") {
+		t.Fatalf("package-scoped entities error leaks internal rollout vocabulary: %v", err)
+	}
+}
+
+func TestTypeDiagnosticsUseAuthorFacingVocabulary(t *testing.T) {
+	t.Run("scalar alias", func(t *testing.T) {
+		var scalar ScalarTypeDecl
+		err := yaml.Unmarshal([]byte("future_scalar\n"), &scalar)
+		if err == nil || !strings.Contains(err.Error(), "supported built-in scalar") {
+			t.Fatalf("scalar alias error = %v", err)
+		}
+		if strings.Contains(err.Error(), "Wave 1") {
+			t.Fatalf("scalar alias error leaks internal rollout vocabulary: %v", err)
+		}
+	})
+
+	t.Run("unsupported type form", func(t *testing.T) {
+		err := validateWave1TypeRef("Optional<text>", "field")
+		if err == nil || !strings.Contains(err.Error(), "current type system") {
+			t.Fatalf("type error = %v", err)
+		}
+		if strings.Contains(err.Error(), "Wave 1") {
+			t.Fatalf("type error leaks internal rollout vocabulary: %v", err)
+		}
+	})
 }
 
 func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T) {

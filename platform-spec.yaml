@@ -16324,9 +16324,11 @@ cli_specification:
         display_renderer_rule: >
           Successful human table/list/repeated-row/detail-display output MUST consume one shared `cmd/swarm`
           display renderer for column alignment, empty values, empty list states, color/no-color policy,
-          emoji-vocabulary policy, and truncation declarations. Command owners keep owning facts, row order,
-          filtering, and business vocabulary. The display renderer MUST NOT reorder rows, shorten identifiers by
-          default, hide fields, or infer semantics not supplied by the command's canonical fact owner.
+          emoji-vocabulary policy, reviewed code-to-phrase projection, and truncation declarations. Command/API
+          owners keep owning facts, machine codes, row order, and filtering. The shared human-code projector owns
+          only the reviewed phrases declared below; unregistered command-specific prose remains command-owned. The
+          display renderer MUST NOT reorder rows, shorten identifiers by default, hide fields outside an explicit
+          human-output contract, or infer facts not supplied by the command's canonical fact owner.
         row_model_rule: >
           For migrated read/list/detail surfaces, default text and JSON MUST derive from the same validated command
           result or row/detail model. A command MUST NOT assemble separate fact interpretations for human table rows
@@ -16360,7 +16362,8 @@ cli_specification:
         - Logs formatting and log table policy remain owned by #1819.
         - Broad short-ID adoption and ID-prefix drillability remain owned by #1815.
         - Run-trace business-event fidelity and runtime-log hiding remain owned by #1816.
-        - Vocabulary/status/detail-depth rewrites remain owned by #1817/#1820.
+        - Conversation/detail-depth rewrites remain owned by #1820.
+        - Failure-bearing reason_code/failure_type taxonomy and operator prose remain owned by #1869.
         - Unknown flags, unsupported enum values, domain flag conflicts, and non-positional validation remain
           outside #1818 arg-count diagnostics unless separately promoted.
         - Mutation summaries and streaming/follow rendering are not table/display closure proof for #1814.
@@ -16376,6 +16379,121 @@ cli_specification:
           Follow-style commands that use /v1/ws or another canonical stream consume the same shared output owner.
           Default text streams are human-readable; `--json` streams are NDJSON; `--quiet` is unsupported for streams
           unless the command row declares a specific quiet stream value.
+        human_code_projection:
+          promoted_by: '#1817'
+          canonical_owner: platform-spec.yaml#cli_specification.foundations.output_contract.shared_renderer_contract.human_code_projection
+          implementation_owner: cmd/swarm/cli_output.go formatCLIHumanCode and cliHumanCodePhrases
+          scope: >
+            Authoritative human projection for current public status, mode, state, layer, action, outcome, and
+            blocking-reason codes rendered by CLI detail, table, summary, stream, mutation, fork, and identifier
+            diagnostic surfaces. Canonical API/runtime owners continue to own the machine values; this registry owns
+            only reviewed human phrases.
+          machine_surface_rule: >
+            JSON, NDJSON, quiet output, API schemas, request filters, validators, and runtime/control decisions retain
+            canonical machine field names and values exactly. Human projection MUST NOT rename public JSON fields,
+            change accepted input, or become a validator or runtime semantic owner.
+          known_value_rule: >
+            Every current value or reachable tuple from the named canonical producer/schema owners MUST have an
+            explicit reviewed phrase. Adding a current producer value without updating this table and its parity
+            tests fails closed.
+          unknown_value_rule: >
+            A compatible newer server may return an additive value unknown to this client. Lookup may trim only to
+            find a known mapping; an unknown value renders in its exact original machine shape. Mechanical underscore
+            replacement, title casing, output trimming, or inferred prose is forbidden.
+          families:
+            run_status:
+              machine_owner: components.schemas.RunStatus and canonical runtime/store run lifecycle writers
+              phrases: {running: running, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
+            agent_status:
+              machine_owner: components.schemas.AgentStatus and operatorAgentProjection.v1Status
+              phrases: {idle: idle, running: running, paused: paused, failed: failed, terminated: terminated}
+            conversation_mode:
+              machine_owner: internal/runtime/sessions.RuntimeMode and components.schemas.ConversationMode
+              phrases: {task: task, session: session, session_per_entity: session per entity}
+            session_scope:
+              machine_owner: internal/runtime/sessions.SessionScope and components.schemas.SessionScope
+              phrases: {global: global, flow: flow, entity: entity}
+            delivery_status:
+              machine_owner: persisted event_deliveries.status contract and components.schemas.DeliveryStatus
+              phrases: {pending: pending, in_progress: in progress, delivered: delivered, failed: failed, dead_letter: dead letter}
+            operational_state:
+              machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
+              phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
+            run_blocking_tuples:
+              machine_owner: internal/store/run_operational_status_read_surface.go ProjectRunOperationalStatus
+              current_non_empty:
+              - state: stalled
+                blocking_layer: scoring_terminal_outcome
+                blocking_reason: terminal_scoring_outcome_missing
+                layer_phrase: scoring outcome
+                reason_phrase: waiting for a terminal scoring outcome
+              - state: stalled
+                blocking_layer: delivery_lifecycle
+                blocking_reason: no_active_deliveries
+                layer_phrase: delivery lifecycle
+                reason_phrase: no active deliveries
+              absence_rule: Non-stalled states carry empty layer/reason values and omit those rows from human output.
+            agent_lifecycle_tuples:
+              machine_owner: internal/store/agent_lifecycle_read_surface.go agentLifecycleBlockingLayer, consuming internal/runtime/deliverylifecycle.StateFromDelivery
+              current:
+              - {state: queued, blocking_layer: delivery_queue, state_phrase: queued, layer_phrase: delivery queue}
+              - {state: launching, blocking_layer: session_launch, state_phrase: launching, layer_phrase: session launch}
+              - {state: active, blocking_layer: session_execution, state_phrase: active, layer_phrase: session execution}
+              - {state: retrying, blocking_layer: delivery_retry, state_phrase: retrying, layer_phrase: delivery retry}
+              - {state: exhausted, blocking_layer: delivery_terminal, state_phrase: exhausted, layer_phrase: delivery terminal}
+              delivered_exclusion: >
+                deliverylifecycle.StateDelivered is not an AgentDeliveryLifecycleState. Delivered history remains a
+                DeliveryStatus and is not selected as a current/exhausted agent diagnosis fact.
+            watchdog_tuples:
+              machine_owner: internal/runtime/llm/session_watchdog.go plus ValidateConversationRuntimeWatchdogDescriptor
+              current:
+              - state: healthy_long_running
+                blocking_layer: session_execution
+                action: turn_long_running
+                outcome: observed
+                state_phrase: healthy, long-running
+                layer_phrase: session execution
+                action_phrase: turn running for a long time
+                outcome_phrase: observed
+              - state: no_output
+                blocking_layer: session_execution
+                action: session_no_output
+                outcome: warning_emitted
+                state_phrase: no output
+                layer_phrase: session execution
+                action_phrase: session produced no output
+                outcome_phrase: warning emitted
+          exact_evidence_exclusions: >
+            reason_code, failure_type, subscriber type/id, event/flow/entity names and IDs, tool names, result
+            payloads, and validation errors quoting invalid input remain exact evidence/addressability fields. They
+            are not phrase families and MUST NOT be mechanically prettified. Canonical failure prose remains #1869.
+          public_consumer_rule: >
+            Every public human renderer of a registered family must call the shared projector, including identity
+            phrases. Current consumers include run list/status/start/reattach/terminal/fork, run trace snapshot/detail/
+            summary/follow and foreground start trace, agent list/view/diagnose/deliveries and agent ambiguity,
+            bundle agents, event view/publish/replay, and their shared row/detail writers. Validators, replay-only
+            validation, event-follow counts, machine output, and the private run-fork runtime-owner harness are not
+            human phrase consumers.
+          vocabulary_guard:
+            implementation_owner: internal/userfacing/vocabulary.go
+            global_terms:
+            - Wave 1
+            - unified
+            status_detail_terms:
+            - test_
+            - heuristic
+            - quiescence
+            - runtime_state
+            - session_scope
+            - blocking_layer
+            - blocking_reason
+            - current_session_ref
+            - last_turn_ref
+            - last_tool_outcome
+            - next_cursor
+            consumption_rule: >
+              One scoped implementation registry is consumed by phrase/producer guards and the generated public
+              config-example guard. Test-local duplicate forbidden lists are invalid.
       command_support:
         default_eligible_scope: >
           All implemented, non-retired CLI v2 command rows are output-mode eligible unless this contract or their
@@ -16632,19 +16750,26 @@ cli_specification:
               reason: agent list table/default text consumes the shared display renderer; full shared output-mode route-through remains tracked by the active registry split-owner child.
             agent_view:
               command: swarm agent view
-              classification: split
-              owner_issue: '#1817'
-              reason: agent detail vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+              classification: shared_output
+              fact_owner: /v1/rpc agent.get
+              json_shape: agent.get AgentDetail result object
+              quiet_values:
+              - agent_id
             agent_diagnose:
               command: swarm agent diagnose
-              classification: split
-              owner_issue: '#1817'
-              reason: agent diagnostic vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+              classification: shared_output
+              fact_owner: /v1/rpc agent.diagnose
+              json_shape: agent.diagnose AgentDiagnosis result object
+              quiet_values:
+              - agent_id
+              - canonical AgentStatus
             agent_deliveries:
               command: swarm agent deliveries
-              classification: split
-              owner_issue: '#1817'
-              reason: agent delivery table/default text consumes the shared display renderer; vocabulary/sectioning remains on the vocabulary/status-detail migration path.
+              classification: shared_output
+              fact_owner: /v1/rpc agent.delivery_lifecycle
+              json_shape: agent.delivery_lifecycle AgentDeliveryLifecycleList result object
+              quiet_values:
+              - delivery_id, one per returned delivery, in API result order
             agent_restart:
               command: swarm agent restart
               classification: split
@@ -18580,6 +18705,11 @@ cli_specification:
       owner: /v1/rpc run.diagnose by default; /v1/rpc run.get for header-only mode if exposed
       defaulting: If run-id is omitted, resolve the target through run.list with active-run preference.
       behavior: Run-scoped operational status projection. This is the v2 replacement for `swarm investigate run`.
+      human_output: >
+        A labeled detail headed `Run <run-id>  <human operational state>`. Trigger, timing, scale, run status,
+        health, blocker, notes, and failed-delivery sections are rendered only when their owner-backed facts are
+        present. Test/internal labels such as test_quiescence_ready, heuristics, blocking_layer, and blocking_reason
+        never appear in human output. JSON preserves the exact run.diagnose or run.get result shape.
     trace:
       command: swarm run trace [<run-id>] [--verbose] [--delivery-detail|--delivery-summary] [--since <timestamp>] [--until <timestamp>] [--limit <n>] [--cursor <cursor>] [--event-name <name> ...] [--entity-id <entity-id> ...] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--subscriber-id <id> ...] [--subscriber-type <node|agent> ...] [--follow|-f] [--no-retry]
       group: run_operate
@@ -18986,16 +19116,17 @@ cli_specification:
       - malformed agent.list responses fail closed
       - no direct DB/store/runtime/EventBus/agentcontrol reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, or token fallback
     agent_view:
-      command: swarm agent view <agent-id>
+      command: swarm agent view <agent-id> [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.get
       behavior: Read-only single-agent detail CLI consumer. The CLI renders only AgentDetail and refs returned by /v1/rpc agent.get; it MUST NOT expand transcripts, call conversation.current_for_agent, call conversation.get, or reconstruct agent/session/turn state locally.
       output:
-        header: Agent <agent-id>
-        summary_line: role=<role> type=<type> status=<status> model=<model> mode=<mode> session_scope=<scope>
-        refs_only: optional current_session_ref and last_turn_ref lines when present
+        human: Labeled detail headed `Agent <agent-id>  <human status>` with identity, model, mode, optional scope, session, and last-turn rows.
+        json: --json emits the AgentDetail result shape exactly, with no CLI wrapper.
+        quiet: --quiet emits the canonical agent_id.
+        no_color: --no-color consumes the shared color owner without changing non-TTY text or machine output.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -19008,20 +19139,23 @@ cli_specification:
       - exact /v1/rpc agent.get call with agent_id
       - AGENT_NOT_FOUND and malformed AgentDetail responses fail closed
       - invalid args/flags make zero API calls
+      - --json, --quiet, --no-color, and --json/--quiet collision consume the shared output owner
       - output remains refs-only; no conversation.current_for_agent, conversation.get, transcript, direct DB/store/runtime/EventBus/agentcontrol, or legacy endpoint usage
     agent_diagnose:
-      command: swarm agent diagnose <agent-id> [--queue-limit <n>] [--queue-cursor <cursor>] [--json]
+      command: swarm agent diagnose <agent-id> [--queue-limit <n>] [--queue-cursor <cursor>] [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
       owner: /v1/rpc agent.diagnose
       behavior: Read-only single-agent diagnosis CLI consumer. The CLI sends only agent_id and explicitly provided queue_limit/queue_cursor to /v1/rpc agent.diagnose, renders only owner-backed AgentDiagnosis fields, and MUST NOT synthesize diagnosis from agent.get/list, conversation, run, trace, token, dashboard/Builder REST, DB/store, runtime, EventBus, or agentcontrol owners.
       output:
-        header: Agent <agent-id>
-        summary_line: status=<status>
-        queue_line: pending_count=<pending_count> oldest_pending_age_seconds=<seconds> next_cursor=<cursor-or-dash>
-        optional_refs: optional current_session_ref, last_turn_ref, delivery_lifecycle, runtime_state.watchdog, active, and last_tool_outcome lines when present
+        human: >
+          Labeled detail headed `Agent <agent-id>  <human status>` with optional session/turn rows, author-facing
+          queue, lifecycle, watchdog, active-turn, latest-tool rows, and a pending-deliveries section. Empty optional
+          rows/sections are omitted. Exact tool/result and event evidence remains raw.
         json: --json emits the AgentDiagnosis result shape exactly, with no CLI wrapper
+        quiet: --quiet emits canonical agent_id then canonical AgentStatus on separate lines
+        no_color: --no-color consumes the shared color owner without changing non-TTY text or machine output
       exit_codes:
         success: 0
         cli_validation: 2
@@ -19035,10 +19169,11 @@ cli_specification:
       - --queue-limit fails before API request unless it is in the API-owned 1..200 range
       - --queue-cursor fails before API request when explicitly blank
       - --json preserves the AgentDiagnosis result shape without adding token usage, failures, dead letters, full runtime_state enum, top-level watchdog, run_id, bundle_version, dashboard state, or richer per-tool diagnostics
+      - --quiet preserves canonical agent_id and AgentStatus; --json/--quiet collision fails before API calls
       - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDiagnosis responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation, run, trace, agent.get, or agent.list method usage
     agent_deliveries:
-      command: swarm agent deliveries <agent-id> [--run-id <run-id>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--limit <n>] [--cursor <cursor>] [--json]
+      command: swarm agent deliveries <agent-id> [--run-id <run-id>] [--delivery-status <pending|in_progress|delivered|failed|dead_letter> ...] [--limit <n>] [--cursor <cursor>] [--json|--quiet] [--no-color]
       group: run_operate
       tier: should_have
       implementation_status: implemented
@@ -19059,9 +19194,11 @@ cli_specification:
       output:
         header: Agent <agent-id> deliveries
         empty: No deliveries match the filter.
-        row_fields: delivery_id, event_name, event_id, run_id, entity_id, status, delivery_created_at, delivery_started_at, delivery_delivered_at, retry_count, reason_code, failure
-        pagination: next_cursor=<cursor> when the owner returns a cursor
+        row_fields: Delivery ID, event, event ID, run, entity, human status, created, started, delivered, retries, exact reason code, canonical failure class/detail summary
+        pagination: 'Next cursor: <cursor> when the owner returns a cursor'
         json: --json emits AgentDeliveryLifecycleList exactly, with no CLI wrapper
+        quiet: --quiet emits canonical delivery_id values, one per returned row in API order
+        no_color: --no-color consumes the shared color owner without changing non-TTY text or machine output
       exit_codes:
         success: 0
         cli_validation: 2
@@ -19077,6 +19214,7 @@ cli_specification:
       - human output renders only API-owned AgentDeliveryLifecycleRow facts, including optional fields as dash placeholders and next_cursor when present
       - empty results render an explicit no-match line
       - --json preserves the AgentDeliveryLifecycleList result shape without adding wrappers, aggregates, route-targets, dead-letter records, retry-policy recommendations, status hints, or reconstructed fields
+      - --quiet preserves canonical delivery_id values; --json/--quiet collision fails before API calls
       - AGENT_NOT_FOUND, invalid params, HTTP failures, and malformed AgentDeliveryLifecycleList / AgentDeliveryLifecycleRow responses fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/agentcontrol/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, run.trace, event.get, event.list, agent.diagnose, or agent.delivery_diagnostics method usage
     agent_restart:
@@ -22302,6 +22440,13 @@ api_specification:
           blocking_layer:
             type: string
             minLength: 1
+            description: >
+              Current producer owner is internal/store/agent_lifecycle_read_surface.go
+              agentLifecycleBlockingLayer, consuming deliverylifecycle.StateFromDelivery. Current reachable
+              state/layer pairs are queued/delivery_queue, launching/session_launch, active/session_execution,
+              retrying/delivery_retry, and exhausted/delivery_terminal. The field remains string-valued for
+              compatible additive server values; current in-repo producer additions must update the authoritative
+              human-code projection and parity tests in the same change. Delivered is not a current diagnosis state.
       AgentDeliveryLifecycleRow:
         type: object
         additionalProperties: false

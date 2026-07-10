@@ -19,11 +19,16 @@ type agentListCommandOptions struct {
 	role       string
 }
 
+type agentViewCommandOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
+}
+
 type agentDiagnoseCommandOptions struct {
 	apiOptions  rootCommandOptions
+	output      cliOutputOptions
 	queueLimit  int
 	queueCursor string
-	asJSON      bool
 
 	queueLimitSet  bool
 	queueCursorSet bool
@@ -31,11 +36,11 @@ type agentDiagnoseCommandOptions struct {
 
 type agentDeliveriesCommandOptions struct {
 	apiOptions       rootCommandOptions
+	output           cliOutputOptions
 	runID            string
 	deliveryStatuses []string
 	limit            int
 	cursor           string
-	asJSON           bool
 
 	runIDSet  bool
 	limitSet  bool
@@ -218,6 +223,9 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 			deliveryOpts.runIDSet = cmd.Flags().Changed("run-id")
 			deliveryOpts.limitSet = cmd.Flags().Changed("limit")
 			deliveryOpts.cursorSet = cmd.Flags().Changed("cursor")
+			if err := deliveryOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runAgentDeliveriesCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), deliveryOpts, args[0])
 		},
 	}
@@ -226,7 +234,7 @@ func newAgentDeliveriesCommand(opts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringArrayVar(&deliveryOpts.deliveryStatuses, "delivery-status", nil, "Delivery status filter; repeat to match any")
 	cmd.Flags().IntVar(&deliveryOpts.limit, "limit", 0, "Max lifecycle rows to return (1-200)")
 	cmd.Flags().StringVar(&deliveryOpts.cursor, "cursor", "", "Opaque cursor returned by the previous lifecycle result")
-	cmd.Flags().BoolVar(&deliveryOpts.asJSON, "json", false, cliOutputJSONFlagHelp)
+	bindCLIOutputFlags(cmd, &deliveryOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &deliveryOpts.apiOptions)
 	return cmd
 }
@@ -240,13 +248,16 @@ func newAgentDiagnoseCommand(opts rootCommandOptions) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			diagnoseOpts.queueLimitSet = cmd.Flags().Changed("queue-limit")
 			diagnoseOpts.queueCursorSet = cmd.Flags().Changed("queue-cursor")
+			if err := diagnoseOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
 			return runAgentDiagnoseCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), diagnoseOpts, args[0])
 		},
 	}
 	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
 	cmd.Flags().IntVar(&diagnoseOpts.queueLimit, "queue-limit", 0, "Max pending-delivery detail rows to return (1-200)")
 	cmd.Flags().StringVar(&diagnoseOpts.queueCursor, "queue-cursor", "", "Opaque queue cursor returned by the previous diagnosis result")
-	cmd.Flags().BoolVar(&diagnoseOpts.asJSON, "json", false, cliOutputJSONFlagHelp)
+	bindCLIOutputFlags(cmd, &diagnoseOpts.output)
 	bindCLIAPIConnectionFlags(cmd, &diagnoseOpts.apiOptions)
 	return cmd
 }
@@ -268,17 +279,21 @@ func newAgentsListCommand(opts rootCommandOptions) *cobra.Command {
 }
 
 func newAgentViewCommand(opts rootCommandOptions) *cobra.Command {
-	apiOpts := opts
+	viewOpts := agentViewCommandOptions{apiOptions: opts}
 	cmd := &cobra.Command{
 		Use:   "view <agent-id>",
 		Short: "View one agent's configuration and state.",
 		Args:  cliExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), apiOpts, args[0])
+			if err := viewOpts.output.validate(); err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			return runAgentViewCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), viewOpts, args[0])
 		},
 	}
 	setCLIArgDiscoveryHint(cmd, "List agent ids with `swarm agent list`.")
-	bindCLIAPIConnectionFlags(cmd, &apiOpts)
+	bindCLIOutputFlags(cmd, &viewOpts.output)
+	bindCLIAPIConnectionFlags(cmd, &viewOpts.apiOptions)
 	return cmd
 }
 
@@ -299,12 +314,12 @@ func runAgentListCommand(ctx context.Context, out, errOut io.Writer, opts agentL
 	return nil
 }
 
-func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, agentID string) error {
+func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts agentViewCommandOptions, agentID string) error {
 	agentID = strings.TrimSpace(agentID)
 	if agentID == "" {
 		return returnCLIValidationError(errOut, fmt.Errorf("agent id is required"))
 	}
-	client, err := newCLIAPIClient(opts)
+	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
@@ -323,8 +338,11 @@ func runAgentViewCommand(ctx context.Context, out, errOut io.Writer, opts rootCo
 	if err := validateAgentDetailResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, agentViewAPIErrorClassifier())
 	}
-	writeAgentDetailResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeAgentDetailResult(w, result)
+	}, func() ([]string, error) {
+		return []string{result.Agent.AgentID}, nil
+	})
 }
 
 func runAgentDeliveriesCommand(ctx context.Context, out, errOut io.Writer, opts agentDeliveriesCommandOptions, agentID string) error {
@@ -352,14 +370,15 @@ func runAgentDeliveriesCommand(ctx context.Context, out, errOut io.Writer, opts 
 	if err := validateAgentDeliveryLifecycleListResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, agentDeliveryLifecycleAPIErrorClassifier())
 	}
-	if opts.asJSON {
-		if err := json.NewEncoder(out).Encode(result); err != nil {
-			return returnCLIValidationError(errOut, fmt.Errorf("render json output: %w", err))
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeAgentDeliveryLifecycleListResult(w, result)
+	}, func() ([]string, error) {
+		values := make([]string, 0, len(result.Deliveries))
+		for _, delivery := range result.Deliveries {
+			values = append(values, delivery.DeliveryID)
 		}
-		return nil
-	}
-	writeAgentDeliveryLifecycleListResult(out, result)
-	return nil
+		return values, nil
+	})
 }
 
 func runAgentDiagnoseCommand(ctx context.Context, out, errOut io.Writer, opts agentDiagnoseCommandOptions, agentID string) error {
@@ -387,14 +406,11 @@ func runAgentDiagnoseCommand(ctx context.Context, out, errOut io.Writer, opts ag
 	if err := validateAgentDiagnosisResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, agentDiagnoseAPIErrorClassifier())
 	}
-	if opts.asJSON {
-		if err := json.NewEncoder(out).Encode(result); err != nil {
-			return returnCLIValidationError(errOut, fmt.Errorf("render json output: %w", err))
-		}
-		return nil
-	}
-	writeAgentDiagnosisResult(out, result)
-	return nil
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		writeAgentDiagnosisResult(w, result)
+	}, func() ([]string, error) {
+		return []string{result.AgentID, result.Status}, nil
+	})
 }
 
 func agentListAPIErrorClassifier() cliAPIErrorClassifier {
@@ -863,10 +879,10 @@ func writeAgentListResult(out io.Writer, result agentListResult) {
 			agent.AgentID,
 			agent.Role,
 			agent.Type,
-			agent.Status,
+			formatCLIHumanCode(cliHumanCodeAgentStatus, agent.Status),
 			agent.Model,
-			agent.Mode,
-			agent.SessionScope,
+			formatCLIHumanCode(cliHumanCodeConversationMode, agent.Mode),
+			formatCLIHumanCode(cliHumanCodeSessionScope, agent.SessionScope),
 		})
 	}
 	writeCLITable(out, cliTable{
@@ -897,7 +913,7 @@ func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLi
 			delivery.EventID,
 			agentOptionalStringDash(delivery.RunID),
 			agentOptionalStringDash(delivery.EntityID),
-			delivery.Status,
+			formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status),
 			delivery.DeliveryCreatedAt,
 			agentOptionalStringDash(delivery.DeliveryStartedAt),
 			agentOptionalStringDash(delivery.DeliveryDeliveredAt),
@@ -908,21 +924,21 @@ func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLi
 	}
 	footers := []string{}
 	if result.NextCursor != nil {
-		footers = append(footers, fmt.Sprintf("next_cursor=%s", strings.TrimSpace(*result.NextCursor)))
+		footers = append(footers, fmt.Sprintf("Next cursor: %s", strings.TrimSpace(*result.NextCursor)))
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
-			{Header: "DELIVERY_ID", KeyColumn: true},
+			{Header: "DELIVERY ID", KeyColumn: true},
 			{Header: "EVENT"},
-			{Header: "EVENT_ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
+			{Header: "EVENT ID", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyEvent},
 			{Header: "RUN", IdentifierFamily: cliIdentifierFamilyRun},
 			{Header: "ENTITY", IdentifierFamily: cliIdentifierFamilyEntity},
 			{Header: "STATUS"},
-			{Header: "DELIVERY_CREATED_AT"},
-			{Header: "DELIVERY_STARTED_AT"},
-			{Header: "DELIVERY_DELIVERED_AT"},
-			{Header: "RETRY_COUNT"},
-			{Header: "REASON_CODE"},
+			{Header: "CREATED"},
+			{Header: "STARTED"},
+			{Header: "DELIVERED"},
+			{Header: "RETRIES"},
+			{Header: "REASON"},
 			{Header: "FAILURE", Truncatable: true},
 		},
 		Rows:         rows,
@@ -935,63 +951,73 @@ func writeAgentDiagnosisResult(out io.Writer, result agentDiagnosisResult) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "Agent %s\n", result.AgentID)
-	fmt.Fprintf(out, "status=%s\n", result.Status)
+	rows := []cliLabeledDetailRow{}
 	if ref := result.CurrentSessionRef; ref != nil {
-		fmt.Fprintf(out, "current_session_ref: session_id=%s started_at=%s\n", ref.SessionID, ref.StartedAt)
+		rows = append(rows, cliLabeledDetailRow{Label: "session", Value: fmt.Sprintf("%s, started %s", ref.SessionID, ref.StartedAt)})
 	}
 	if ref := result.LastTurnRef; ref != nil {
-		fmt.Fprintf(out, "last_turn_ref: turn_id=%s completed_at=%s parse_ok=%t failure=%s\n",
-			ref.TurnID,
-			ref.CompletedAt,
-			*ref.ParseOK,
-			eventObservationFailureSummary(ref.Failure),
-		)
+		value := fmt.Sprintf("%s, completed %s, parsed %t", ref.TurnID, ref.CompletedAt, *ref.ParseOK)
+		if ref.Failure != nil {
+			value += ", failure " + eventObservationFailureSummary(ref.Failure)
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "last turn", Value: value})
 	}
 	queue := result.Queue
-	fmt.Fprintf(out, "queue: pending_count=%d oldest_pending_age_seconds=%d next_cursor=%s\n",
-		queue.PendingCount,
-		queue.OldestPendingAgeSeconds,
-		agentOptionalStringDash(queue.NextCursor),
-	)
+	queueValue := fmt.Sprintf("%s, oldest %ds", formatCLIHumanCount(queue.PendingCount, "pending delivery", "pending deliveries"), queue.OldestPendingAgeSeconds)
+	if queue.NextCursor != nil {
+		queueValue += ", next cursor " + strings.TrimSpace(*queue.NextCursor)
+	}
+	rows = append(rows, cliLabeledDetailRow{Label: "queue", Value: queueValue})
+	pending := make([]string, 0, len(queue.PendingDeliveries))
 	for _, delivery := range queue.PendingDeliveries {
-		fmt.Fprintf(out, "pending_delivery: event_id=%s event_name=%s enqueued_at=%s attempts=%d\n",
-			delivery.EventID,
-			delivery.EventName,
-			delivery.EnqueuedAt,
-			delivery.Attempts,
-		)
+		pending = append(pending, fmt.Sprintf("%s (%s), queued %s, %s", delivery.EventName, delivery.EventID, delivery.EnqueuedAt, formatCLIHumanCount(delivery.Attempts, "attempt", "attempts")))
 	}
 	if lifecycle := result.DeliveryLifecycle; lifecycle != nil {
-		fmt.Fprintf(out, "delivery_lifecycle: state=%s blocking_layer=%s\n", lifecycle.State, lifecycle.BlockingLayer)
+		rows = append(rows, cliLabeledDetailRow{Label: "lifecycle", Value: fmt.Sprintf("%s, %s",
+			formatCLIHumanCode(cliHumanCodeAgentLifecycleState, lifecycle.State),
+			formatCLIHumanCode(cliHumanCodeAgentLifecycleBlockingLayer, lifecycle.BlockingLayer),
+		)})
 	}
 	if state := result.RuntimeState; state != nil && state.Watchdog != nil {
 		watchdog := state.Watchdog
-		fmt.Fprintf(out, "runtime_state.watchdog: state=%s blocking_layer=%s action=%s outcome=%s last_output_at=%s recorded_at=%s\n",
-			watchdog.State,
-			watchdog.BlockingLayer,
-			watchdog.Action,
-			watchdog.Outcome,
-			agentOptionalStringDash(watchdog.LastOutputAt),
-			watchdog.RecordedAt,
-		)
+		rows = append(rows, cliLabeledDetailRow{Label: "watchdog", Value: fmt.Sprintf("%s, %s, %s, %s",
+			formatCLIHumanCode(cliHumanCodeWatchdogState, watchdog.State),
+			formatCLIHumanCode(cliHumanCodeWatchdogBlockingLayer, watchdog.BlockingLayer),
+			formatCLIHumanCode(cliHumanCodeWatchdogAction, watchdog.Action),
+			formatCLIHumanCode(cliHumanCodeWatchdogOutcome, watchdog.Outcome),
+		)})
+		if watchdog.LastOutputAt != nil {
+			rows = append(rows, cliLabeledDetailRow{Label: "last output", Value: strings.TrimSpace(*watchdog.LastOutputAt)})
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "observed", Value: watchdog.RecordedAt})
 	}
 	if active := result.Active; active != nil {
-		fmt.Fprintf(out, "active: turn_id=%s task_id=%s entity_id=%s\n",
-			active.TurnID,
-			agentOptionalStringDash(active.TaskID),
-			agentOptionalStringDash(active.EntityID),
-		)
+		value := "turn " + active.TurnID
+		if active.TaskID != nil {
+			value += ", task " + strings.TrimSpace(*active.TaskID)
+		}
+		if active.EntityID != nil {
+			value += ", entity " + strings.TrimSpace(*active.EntityID)
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "active", Value: value})
 	}
 	if outcome := result.LastToolOutcome; outcome != nil {
-		fmt.Fprintf(out, "last_tool_outcome: turn_id=%s tool_name=%s tool_use_id=%s ok=%t result=%s\n",
-			outcome.TurnID,
-			outcome.ToolName,
-			agentOptionalStringDash(outcome.ToolUseID),
-			*outcome.OK,
-			agentJSONRawMessageDash(outcome.Result),
-		)
+		value := fmt.Sprintf("%s on turn %s, ok %t", outcome.ToolName, outcome.TurnID, *outcome.OK)
+		if outcome.ToolUseID != nil {
+			value += ", use " + strings.TrimSpace(*outcome.ToolUseID)
+		}
+		if len(outcome.Result) > 0 {
+			value += ", result " + agentJSONRawMessageDash(outcome.Result)
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "latest tool", Value: value})
 	}
+	writeCLILabeledDetail(out, cliLabeledDetail{
+		Title: fmt.Sprintf("Agent %s  %s", result.AgentID, formatCLIHumanCode(cliHumanCodeAgentStatus, result.Status)),
+		Rows:  rows,
+		Sections: []cliLabeledDetailSection{
+			{Label: "pending deliveries", Items: pending},
+		},
+	})
 }
 
 func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
@@ -999,26 +1025,26 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 		return
 	}
 	agent := result.Agent
-	fmt.Fprintf(out, "Agent %s\n", agent.AgentID)
-	fmt.Fprintf(out, "role=%s type=%s status=%s model=%s mode=%s session_scope=%s\n",
-		agent.Role,
-		agent.Type,
-		agent.Status,
-		agent.Model,
-		agent.Mode,
-		agent.SessionScope,
-	)
+	rows := []cliLabeledDetailRow{
+		{Label: "identity", Value: fmt.Sprintf("role %s, type %s", agent.Role, agent.Type)},
+		{Label: "model", Value: agent.Model},
+		{Label: "mode", Value: formatCLIHumanCode(cliHumanCodeConversationMode, agent.Mode)},
+		{Label: "scope", Value: formatCLIHumanCode(cliHumanCodeSessionScope, agent.SessionScope)},
+	}
 	if ref := result.CurrentSessionRef; ref != nil {
-		fmt.Fprintf(out, "current_session_ref: session_id=%s started_at=%s\n", ref.SessionID, ref.StartedAt)
+		rows = append(rows, cliLabeledDetailRow{Label: "session", Value: fmt.Sprintf("%s, started %s", ref.SessionID, ref.StartedAt)})
 	}
 	if ref := result.LastTurnRef; ref != nil {
-		fmt.Fprintf(out, "last_turn_ref: turn_id=%s completed_at=%s parse_ok=%t failure=%s\n",
-			ref.TurnID,
-			ref.CompletedAt,
-			*ref.ParseOK,
-			eventObservationFailureSummary(ref.Failure),
-		)
+		value := fmt.Sprintf("%s, completed %s, parsed %t", ref.TurnID, ref.CompletedAt, *ref.ParseOK)
+		if ref.Failure != nil {
+			value += ", failure " + eventObservationFailureSummary(ref.Failure)
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "last turn", Value: value})
 	}
+	writeCLILabeledDetail(out, cliLabeledDetail{
+		Title: fmt.Sprintf("Agent %s  %s", agent.AgentID, formatCLIHumanCode(cliHumanCodeAgentStatus, agent.Status)),
+		Rows:  rows,
+	})
 }
 
 func agentOptionalStringDash(value *string) string {
