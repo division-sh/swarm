@@ -253,6 +253,9 @@ func TestCLIHumanCodeConsumerGuardRejectsRawRegisteredCode(t *testing.T) {
 import (
 	"fmt"
 	"io"
+	"strings"
+
+	"github.com/spf13/cobra"
 )
 type reviewProbeRun struct { Status string }
 func reviewProbeWriteCode(out io.Writer, value string) {
@@ -276,6 +279,19 @@ func reviewProbeRawRunStatusViaEmptyState(out io.Writer, run reviewProbeRun) {
 }
 func reviewProbeRawRunStatusViaFooter(out io.Writer, run reviewProbeRun) {
 	writeCLIFooterLines(out, []string{run.Status})
+}
+func reviewProbeRawRunStatusViaCommand(cmd *cobra.Command, run reviewProbeRun) {
+	cmd.Print(run.Status)
+	cmd.Printf("%s", run.Status)
+	cmd.Println(run.Status)
+	cmd.PrintErr(run.Status)
+	cmd.PrintErrf("%s", run.Status)
+	cmd.PrintErrln(run.Status)
+}
+func reviewProbeRawRunStatusViaBuffer(out io.Writer, run reviewProbeRun) {
+	var buffer strings.Builder
+	buffer.WriteString(run.Status)
+	fmt.Fprint(out, buffer.String())
 }`
 	fileSet, files := parseProductionCLIHumanCodeFiles(t)
 	file, err := parser.ParseFile(fileSet, "review_probe.go", source, 0)
@@ -295,10 +311,14 @@ func reviewProbeRawRunStatusViaFooter(out io.Writer, run reviewProbeRun) {
 		"reviewProbeRawRunStatusViaWriter",
 		"reviewProbeRawRunStatusViaEmptyState",
 		"reviewProbeRawRunStatusViaFooter",
+		"reviewProbeRawRunStatusViaBuffer",
 	} {
 		if got := raw["review_probe.go\x00"+name]; !reflect.DeepEqual(got, []string{"status"}) {
 			t.Fatalf("%s raw registered-code findings = %v, want [status]", name, got)
 		}
+	}
+	if got := raw["review_probe.go\x00reviewProbeRawRunStatusViaCommand"]; !reflect.DeepEqual(got, []string{"status", "status", "status", "status", "status", "status"}) {
+		t.Fatalf("Cobra command output family raw registered-code findings = %v, want six status findings", got)
 	}
 }
 
@@ -363,6 +383,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 	"control_run.go\x00runControlRunCommand": {
 		Names:  []string{"action", "action", "action"},
 		Reason: "control command action is command input and mutation-result prose, not a registered human-code family",
+	},
+	"control_run.go\x00newControlRunCommand": {
+		Names:  []string{"action", "action"},
+		Reason: "control command action appears in Cobra command help, not a registered human-code family",
 	},
 	"control_run.go\x00writeControlOK": {
 		Names:  []string{"action"},
@@ -629,7 +653,7 @@ func cliHumanCodeOutputCallExpressions(call *ast.CallExpr, flow map[string]cliHu
 		return call.Args[minCLIHumanCodeInt(1, len(call.Args)):]
 	}
 	switch callee.Sel.Name {
-	case "Write", "Print", "Printf", "Println":
+	case "Write", "Print", "Printf", "Println", "PrintErr", "PrintErrf", "PrintErrln":
 		return call.Args
 	}
 	if summary, ok := flow[callee.Sel.Name]; ok {
@@ -701,6 +725,16 @@ func cliHumanCodeLocalAssignments(body *ast.BlockStmt) map[string][]ast.Expr {
 	assignments := map[string][]ast.Expr{}
 	ast.Inspect(body, func(node ast.Node) bool {
 		switch value := node.(type) {
+		case *ast.CallExpr:
+			callee, ok := value.Fun.(*ast.SelectorExpr)
+			if !ok || !isCLIHumanCodeReceiverMutation(callee.Sel.Name) {
+				return true
+			}
+			receiver, ok := callee.X.(*ast.Ident)
+			if !ok || receiver.Name == "_" {
+				return true
+			}
+			assignments[receiver.Name] = append(assignments[receiver.Name], value.Args...)
 		case *ast.AssignStmt:
 			if len(value.Lhs) != len(value.Rhs) {
 				return true
@@ -741,6 +775,9 @@ func collectCLIHumanDataflowIdentifiers(node ast.Node, assignments map[string][]
 			if callee, ok := value.Fun.(*ast.Ident); ok && callee.Name == "formatCLIHumanCode" {
 				return false
 			}
+			if callee, ok := value.Fun.(*ast.SelectorExpr); ok {
+				collectCLIHumanDataflowIdentifiers(callee.X, assignments, visiting, found)
+			}
 			for _, argument := range value.Args {
 				collectCLIHumanDataflowIdentifiers(argument, assignments, visiting, found)
 			}
@@ -776,6 +813,13 @@ func collectRawCLIHumanCodeExpressions(node ast.Node, assignments map[string][]a
 			if callee, ok := value.Fun.(*ast.Ident); ok && callee.Name == "formatCLIHumanCode" {
 				return false
 			}
+			if callee, ok := value.Fun.(*ast.SelectorExpr); ok {
+				collectRawCLIHumanCodeExpressions(callee.X, assignments, visiting, found)
+			}
+			for _, argument := range value.Args {
+				collectRawCLIHumanCodeExpressions(argument, assignments, visiting, found)
+			}
+			return false
 		case *ast.SelectorExpr:
 			if name, ok := cliHumanCodeLikeName(value.Sel.Name); ok {
 				found[value.Sel.Pos()] = name
@@ -800,6 +844,15 @@ func collectRawCLIHumanCodeExpressions(node ast.Node, assignments map[string][]a
 		}
 		return true
 	})
+}
+
+func isCLIHumanCodeReceiverMutation(method string) bool {
+	switch method {
+	case "Write", "WriteByte", "WriteRune", "WriteString", "ReadFrom":
+		return true
+	default:
+		return false
+	}
 }
 
 func cliHumanCodeLikeName(raw string) (string, bool) {
