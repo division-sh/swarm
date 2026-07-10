@@ -83,14 +83,7 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 			}
 			return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 		}
-		errOut := summarizeCLIErrorOutput(stderrText)
-		if errOut == "" {
-			errOut = summarizeCLIErrorOutput(stdoutText)
-		}
-		if errOut == "" {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run", nil, err)
-		}
-		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run", nil, err)
+		return nil, claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run", err)
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
@@ -148,14 +141,7 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 			}
 			return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 		}
-		errOut := summarizeCLIErrorOutput(stderrText)
-		if errOut == "" {
-			errOut = summarizeCLIErrorOutput(stdoutText)
-		}
-		if errOut == "" {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run_streaming", nil, waitErr)
-		}
-		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run_streaming", nil, waitErr)
+		return nil, claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_process_failed", "run_streaming", waitErr)
 	}
 
 	acc := newCLIStreamAccumulator()
@@ -243,6 +229,17 @@ func summarizeCLIErrorOutput(raw string) string {
 		msg = msg[:maxLen] + "..."
 	}
 	return msg
+}
+
+func isClaudeAuthOutput(raw string) bool {
+	msg := strings.ToLower(strings.TrimSpace(raw))
+	if msg == "" {
+		return false
+	}
+	return strings.Contains(msg, "not logged in") ||
+		strings.Contains(msg, "please run /login") ||
+		strings.Contains(msg, "authentication required") ||
+		strings.Contains(msg, "oauth token")
 }
 
 func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, target *workspace.Target) (*exec.Cmd, error) {
