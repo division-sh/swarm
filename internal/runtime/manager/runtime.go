@@ -415,19 +415,28 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 			return runtimeagentcontrol.SendDirectiveResult{}, err
 		}
 		if ok {
-			if existing.RequestHash != req.RequestHash {
-				return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, OperationID: existing.OperationID}
-			}
-			if existing.State == runtimeagentcontrol.DirectiveOperationExecuting && !existing.ExecutionLeaseExpiresAt.IsZero() && !existing.ExecutionLeaseExpiresAt.After(time.Now().UTC()) {
-				existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, time.Now().UTC(), directiveOperationTTL)
+			now := time.Now().UTC()
+			if (existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed) && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
+				existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
 				if err != nil {
 					return runtimeagentcontrol.SendDirectiveResult{}, err
 				}
-				if !ok {
-					return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive operation disappeared during reconciliation")
-				}
 			}
-			return am.continueDirectiveOperation(ctx, operationStore, existing)
+			if ok {
+				if existing.RequestHash != req.RequestHash {
+					return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, OperationID: existing.OperationID}
+				}
+				if existing.State == runtimeagentcontrol.DirectiveOperationExecuting && !existing.ExecutionLeaseExpiresAt.IsZero() && !existing.ExecutionLeaseExpiresAt.After(now) {
+					existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
+					if err != nil {
+						return runtimeagentcontrol.SendDirectiveResult{}, err
+					}
+					if !ok {
+						return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive operation disappeared during reconciliation")
+					}
+				}
+				return am.continueDirectiveOperation(ctx, operationStore, existing)
+			}
 		}
 	}
 	if _, err := am.directiveBoardAgent(agentID); err != nil {
