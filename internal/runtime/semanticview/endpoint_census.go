@@ -151,6 +151,22 @@ func (c AuthoredEventEndpointCensus) MatchingConsumers(flowID, eventType string)
 	return c.matchingEndpoints(c.consumers, flowID, eventType)
 }
 
+func (c AuthoredEventEndpointCensus) MatchingWildcardConsumersAcrossFlows(flowID, eventType string) []AuthoredEventEndpoint {
+	flowID = strings.TrimSpace(flowID)
+	proof := ResolveFlowEventProof(c.source, flowID, eventType)
+	if c.source == nil || proof.EventKey() == "" {
+		return nil
+	}
+	out := make([]AuthoredEventEndpoint, 0)
+	for _, endpoint := range c.consumers {
+		if !endpoint.Pattern || !endpointMatchesProof(c.source, endpoint, proof) {
+			continue
+		}
+		out = append(out, endpoint)
+	}
+	return cloneEventEndpoints(out)
+}
+
 // LegacyQualifiedSubscriptions returns runtime-deliverable qualified subscriptions
 // that cross a flow boundary without using pins and connect. They are intentionally
 // excluded from the canonical routing graph.

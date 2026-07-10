@@ -4547,6 +4547,16 @@ func TestRun_DoesNotWarnForFlowLocalEmittedEventsWithOwningFlowSchemas(t *testin
 	}
 }
 
+func TestRun_DoesNotWarnForImportedWildcardConsumer(t *testing.T) {
+	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-wildcard-deep-subscription"))
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if reportContains(report.Warnings(), "event_consumer_exists", "child/grandchild/task.done") {
+		t.Fatalf("imported wildcard consumer was omitted from canonical topology: %#v", report.Warnings())
+	}
+}
+
 func TestRun_DoesNotWarnForFlowOwnedAgentEmissionsDeclaredAsFlowOutputs(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier11-flow-composition", "test-required-agents-child"))
 

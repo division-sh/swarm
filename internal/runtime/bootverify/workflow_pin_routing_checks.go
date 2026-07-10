@@ -2,6 +2,7 @@ package bootverify
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -225,7 +226,7 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	topology := routingtopology.Build(source)
 	sites := pinRoutingEmitSites(source)
-	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+	for _, endpoint := range pinRoutingKnownProducers(census, topology, flowID, eventType) {
 		if endpoint.Kind != semanticview.EventEndpointNodeHandler {
 			continue
 		}
@@ -250,6 +251,38 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	return producers > 0 && targeted == producers
 }
 
+func pinRoutingKnownProducers(census semanticview.AuthoredEventEndpointCensus, topology routingtopology.Topology, flowID, eventType string) []semanticview.AuthoredEventEndpoint {
+	byID := map[string]semanticview.AuthoredEventEndpoint{}
+	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+		byID[endpoint.ID] = endpoint
+	}
+	input, ok := census.ResolveDeclaredInputEndpoint(flowID, eventType).Endpoint()
+	if ok {
+		for _, edge := range topology.Edges {
+			if edge.Scope != routingtopology.DeliveryScopeInterFlow || edge.Consumer.ID != input.ID {
+				continue
+			}
+			if endpoint, exists := census.Endpoint(edge.Producer.ID); exists && endpoint.Direction == semanticview.EventEndpointProducer {
+				byID[endpoint.ID] = endpoint
+			}
+			for _, exposure := range topology.BoundaryExposures {
+				if exposure.Output.ID != edge.Producer.ID {
+					continue
+				}
+				if endpoint, exists := census.Endpoint(exposure.Producer.ID); exists {
+					byID[endpoint.ID] = endpoint
+				}
+			}
+		}
+	}
+	out := make([]semanticview.AuthoredEventEndpoint, 0, len(byID))
+	for _, endpoint := range byID {
+		out = append(out, endpoint)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
 func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoint semanticview.AuthoredEventEndpoint) (semanticview.AuthoredEmitSite, bool) {
 	for _, site := range sites {
 		if strings.TrimSpace(site.FlowID) == strings.TrimSpace(endpoint.FlowID) && strings.TrimSpace(site.NodeID) == strings.TrimSpace(endpoint.NodeID) && strings.TrimSpace(site.SiteKey) == strings.TrimSpace(endpoint.Site) {
@@ -261,8 +294,16 @@ func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoi
 
 func topologyConnectsProducerToReceiver(topology routingtopology.Topology, producerID, receiverFlowID string) bool {
 	for _, edge := range topology.Edges {
-		if edge.Scope == routingtopology.DeliveryScopeInterFlow && edge.Producer.ID == producerID && strings.TrimSpace(edge.Consumer.FlowID) == strings.TrimSpace(receiverFlowID) {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlow || strings.TrimSpace(edge.Consumer.FlowID) != strings.TrimSpace(receiverFlowID) {
+			continue
+		}
+		if edge.Producer.ID == producerID {
 			return true
+		}
+		for _, exposure := range topology.BoundaryExposures {
+			if exposure.Producer.ID == producerID && exposure.Output.ID == edge.Producer.ID {
+				return true
+			}
 		}
 	}
 	return false

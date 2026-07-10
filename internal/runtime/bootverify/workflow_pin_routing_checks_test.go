@@ -150,6 +150,21 @@ func TestRedundantInTopologySelectEntityFailsClosedForParentConnect(t *testing.T
 	}
 }
 
+func TestRedundantInTopologySelectEntityFailsClosedForRenamedConnectEvents(t *testing.T) {
+	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
+		consumerMode:      "static",
+		acquisition:       "select_entity",
+		withProducer:      true,
+		renameReceiverPin: true,
+	})
+
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+
+	if !reportContains(report.Errors(), "redundant_in_topology_select_entity", "instance.by plus parent connect") {
+		t.Fatalf("renamed connect must retain producer topology proof, got errors=%#v warnings=%#v", report.Errors(), report.Warnings())
+	}
+}
+
 func TestRedundantInTopologySelectEntityFailsClosedForStagedParentConnect(t *testing.T) {
 	bundle := loadSelectEntityDemotionBundle(t, selectEntityDemotionFixtureOptions{
 		consumerMode: "static",
@@ -860,6 +875,7 @@ type selectEntityDemotionFixtureOptions struct {
 	external               bool
 	withProducer           bool
 	connectProducerToOther bool
+	renameReceiverPin      bool
 }
 
 func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtureOptions) *runtimecontracts.WorkflowContractBundle {
@@ -887,13 +903,17 @@ func loadSelectEntityDemotionBundle(t *testing.T, opts selectEntityDemotionFixtu
 	connectBlock := ""
 	if opts.withProducer {
 		targetFlow := "consumer"
+		targetPin := "deploy_done"
 		if opts.connectProducerToOther {
 			targetFlow = "other_consumer"
+		}
+		if opts.renameReceiverPin && targetFlow == "consumer" {
+			targetPin = "deploy_completed"
 		}
 		connectBlock = `
 connect:
   - from: producer.deploy_done
-    to: ` + targetFlow + `.deploy_done
+    to: ` + targetFlow + `.` + targetPin + `
     delivery: one`
 		if consumerMode == "static" {
 			connectBlock += `
@@ -1030,9 +1050,15 @@ func writeSelectEntityDemotionConsumerFlow(t *testing.T, root string, opts selec
 		consumerMode = "static"
 	}
 	instanceBlock := ""
+	inputPinName := "deploy_done"
+	inputEvent := "deploy.done"
+	if opts.renameReceiverPin {
+		inputPinName = "deploy_completed"
+		inputEvent = "deploy.completed"
+	}
 	inputPin := `
-      - name: deploy_done
-        event: deploy.done
+      - name: ` + inputPinName + `
+        event: ` + inputEvent + `
         address:
           by: vertical_id
           source: payload.vertical_id
@@ -1046,12 +1072,12 @@ func writeSelectEntityDemotionConsumerFlow(t *testing.T, root string, opts selec
   on_conflict: reject
 `
 		inputPin = `
-      - name: deploy_done
-        event: deploy.done
+      - name: ` + inputPinName + `
+        event: ` + inputEvent + `
 `
 	}
 	if opts.external {
-		inputPin = strings.Replace(inputPin, "        event: deploy.done\n", "        event: deploy.done\n        source: external\n", 1)
+		inputPin = strings.Replace(inputPin, "        event: "+inputEvent+"\n", "        event: "+inputEvent+"\n        source: external\n", 1)
 	}
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "schema.yaml"), `
 name: consumer
@@ -1067,7 +1093,7 @@ pins:
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-deploy.done:
+`+inputEvent+`:
   vertical_id: string
 `)
 	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
@@ -1077,11 +1103,12 @@ deployment:
     indexed: true
     _unused_reason: select_entity demotion route-key proof field
 `)
-	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), selectEntityDemotionConsumerNodes(opts.acquisition))
+	writePinRoutingVerifyFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), selectEntityDemotionConsumerNodes(opts.acquisition, inputEvent))
 }
 
-func selectEntityDemotionConsumerNodes(acquisition string) string {
+func selectEntityDemotionConsumerNodes(acquisition, inputEvent string) string {
 	acquisition = strings.TrimSpace(acquisition)
+	inputEvent = strings.TrimSpace(inputEvent)
 	acquisitionBlock := ""
 	switch acquisition {
 	case "select_entity":
@@ -1099,9 +1126,9 @@ func selectEntityDemotionConsumerNodes(acquisition string) string {
 consumer-node:
   id: consumer-node
   execution_type: system_node
-  subscribes_to: [deploy.done]
+  subscribes_to: [` + inputEvent + `]
   event_handlers:
-    deploy.done:
+    ` + inputEvent + `:
 ` + acquisitionBlock + `      advances_to: done
 `
 }

@@ -218,6 +218,23 @@ func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T)
 	}
 }
 
+func TestAuthoredEventEndpointCensusMatchesImportedWildcardConsumersAcrossFlowScopes(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-wildcard-deep-subscription"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load wildcard fixture: %v", err)
+	}
+
+	matched := BuildAuthoredEventEndpointCensus(Wrap(bundle)).MatchingWildcardConsumersAcrossFlows("grandchild", "task.done")
+	if len(matched) != 1 || matched[0].NodeID != "collector" || matched[0].Event.Authored != "**/task.done" {
+		t.Fatalf("cross-flow wildcard consumers = %#v, want root collector", matched)
+	}
+}
+
 func TestLegacyQualifiedSubscriptionsUseDeclaredFlowIdentityAndExactSourceLine(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(

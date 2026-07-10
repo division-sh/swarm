@@ -235,9 +235,31 @@ func (b *topologyBuilder) addIntraFlowEdges() {
 				Consumer: endpointView(consumer),
 			})
 		}
+		for _, consumer := range b.census.MatchingWildcardConsumersAcrossFlows(producer.FlowID, producer.Event.EventKey()) {
+			if !isExecutableEndpoint(consumer) {
+				continue
+			}
+			b.addEdge(Edge{
+				Scope:    DeliveryScopeIntraFlow,
+				Event:    eventView(producer.Event),
+				Producer: endpointView(producer),
+				Consumer: endpointView(consumer),
+			})
+		}
 	}
 	for _, input := range b.census.InputPins() {
 		for _, consumer := range b.census.MatchingConsumers(input.FlowID, input.Event.EventKey()) {
+			if !isExecutableEndpoint(consumer) {
+				continue
+			}
+			b.addEdge(Edge{
+				Scope:    DeliveryScopeIntraFlow,
+				Event:    eventView(input.Event),
+				Producer: endpointView(input),
+				Consumer: endpointView(consumer),
+			})
+		}
+		for _, consumer := range b.census.MatchingWildcardConsumersAcrossFlows(input.FlowID, input.Event.EventKey()) {
 			if !isExecutableEndpoint(consumer) {
 				continue
 			}
