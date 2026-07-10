@@ -3471,6 +3471,10 @@ engine:
         durable_refs: [event_deliveries.delivery_context, activity_attempts.reply_context_id, timers.reply_context_id, mailbox.reply_context_id]
         rule: Durable consumers store only the opaque reply_context_id.
       terminal_claim:
+        explicit_correlation_validation: When correlation_key is declared, the provider reply MUST carry the same non-empty
+          scalar value persisted from the paired request. A missing or unequal response value fails closed as
+          platform.stale_arrival before origin resolution or terminal claim, persists no requester delivery, and leaves the
+          reply context open.
         first_reply: Atomically changes open to terminal and records accepted_reply_event_id.
         accepted_replay: The same reply event id is idempotent and reuses its persisted delivery.
         distinct_second_reply: Fails closed as platform.reply_already_terminal and names the accepted/rejected event ids.
