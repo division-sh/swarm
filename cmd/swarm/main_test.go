@@ -159,7 +159,9 @@ func (r servedEventPublishBlockingLLMRuntime) ContinueSession(ctx context.Contex
 	}, nil
 }
 
-type servedLiveAgentProofLLMRuntime struct{}
+type servedLiveAgentProofLLMRuntime struct {
+	calls *atomic.Int32
+}
 
 func (servedLiveAgentProofLLMRuntime) StartSession(_ context.Context, agentID string, systemPrompt string, tools []runtimellm.ToolDefinition) (*runtimellm.Session, error) {
 	return &runtimellm.Session{
@@ -170,13 +172,16 @@ func (servedLiveAgentProofLLMRuntime) StartSession(_ context.Context, agentID st
 	}, nil
 }
 
-func (servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
+func (r servedLiveAgentProofLLMRuntime) ContinueSession(_ context.Context, session *runtimellm.Session, _ runtimellm.Message) (*runtimellm.Response, error) {
+	if r.calls != nil {
+		r.calls.Add(1)
+	}
 	sessionID := ""
 	if session != nil {
 		sessionID = session.ID
 	}
 	return &runtimellm.Response{
-		Message:   runtimellm.Message{Role: "assistant", Content: "handled live agent event"},
+		Message:   runtimellm.Message{Role: "tool", Content: `[{"ok":true,"result":"handled live agent event"}]`},
 		SessionID: sessionID,
 	}, nil
 }
@@ -4134,6 +4139,11 @@ func TestServedParityHarnessLiveAgentReplayBacklogLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedLiveAgentReplayBacklogBackendProof)
 }
 
+func TestServedParityHarnessAgentDirectiveOutcomeLifecycle(t *testing.T) {
+	scenario := servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle)
+	servedparity.Run(t, scenario, runServedAgentDirectiveBackendProof)
+}
+
 func TestServedParityHarnessRuntimeIngressControlLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
 		servedparity.MustScenario(servedparity.ScenarioRuntimePauseIngressLifecycle),
@@ -4235,6 +4245,10 @@ type servedControlProofRuntime struct {
 }
 
 func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend) servedControlProofRuntime {
+	return startServedLiveAgentProofRuntimeWithLLM(t, backend, servedLiveAgentProofLLMRuntime{})
+}
+
+func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime) servedControlProofRuntime {
 	t.Helper()
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
@@ -4268,7 +4282,7 @@ func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend
 			Verbose:                 true,
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			TestLLMRuntime:          servedLiveAgentProofLLMRuntime{},
+			TestLLMRuntime:          llm,
 		})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for live-agent served parity proof")
@@ -4294,7 +4308,7 @@ func startServedLiveAgentProofRuntime(t *testing.T, backend servedparity.Backend
 			Verbose:                 true,
 			TestLifecycleProbe:      probe,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			TestLLMRuntime:          servedLiveAgentProofLLMRuntime{},
+			TestLLMRuntime:          llm,
 		})
 		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe}
 	default:
@@ -4386,6 +4400,13 @@ func runServedLiveAgentReplayBacklogBackendProof(t *testing.T, backend servedpar
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
 	runServedLiveAgentReplayBacklogLifecycleProof(t, rt)
+}
+
+func runServedAgentDirectiveBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	var effects atomic.Int32
+	rt := startServedLiveAgentProofRuntimeWithLLM(t, backend, servedLiveAgentProofLLMRuntime{calls: &effects})
+	runServedAgentDirectiveOutcomeLifecycleProof(t, rt, &effects)
 }
 
 func runServedRuntimeIngressControlBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -5742,6 +5763,142 @@ func runServedLiveAgentReplayBacklogLifecycleProof(t *testing.T, rt servedContro
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay_backlog", backlogKey, 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, backlogRunID, servedparity.MustScenario(servedparity.ScenarioAgentReplayBacklogLiveAgentLifecycle))
+}
+
+type servedAgentDirectiveProofResult struct {
+	OK                 bool   `json:"ok"`
+	OperationID        string `json:"operation_id"`
+	Response           string `json:"response"`
+	RunID              string `json:"run_id"`
+	RunIDResolution    string `json:"run_id_resolution"`
+	DirectiveEventID   string `json:"directive_event_id"`
+	DirectiveEventType string `json:"directive_event_type"`
+}
+
+func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32) {
+	t.Helper()
+	key := "issue-1932-" + rt.Backend + "-directive"
+	params := map[string]any{
+		"agent_id":        "load-agent",
+		"directive":       "perform one durable directive step",
+		"idempotency_key": key,
+	}
+	var first servedAgentDirectiveProofResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &first)
+	requireServedAgentDirectiveResult(t, rt.Backend, first)
+	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
+	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
+
+	var replay servedAgentDirectiveProofResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &replay)
+	if replay != first {
+		t.Fatalf("%s directive replay = %#v, want %#v", rt.Backend, replay, first)
+	}
+	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
+	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
+
+	conflict := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", map[string]any{
+		"agent_id":        "load-agent",
+		"directive":       "a conflicting directive body",
+		"idempotency_key": key,
+	})
+	if conflict.Data["code"] != apiv1.IdempotencyConflictCode {
+		t.Fatalf("%s directive conflict = %#v, want %s", rt.Backend, conflict.Data, apiv1.IdempotencyConflictCode)
+	}
+	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
+	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
+
+	var keylessA, keylessB servedAgentDirectiveProofResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
+		"agent_id":  "load-agent",
+		"directive": "keyless operation A",
+	}, &keylessA)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
+		"agent_id":  "load-agent",
+		"directive": "keyless operation B",
+	}, &keylessB)
+	requireServedAgentDirectiveResult(t, rt.Backend, keylessA)
+	requireServedAgentDirectiveResult(t, rt.Backend, keylessB)
+	if keylessA.OperationID == keylessB.OperationID || keylessA.DirectiveEventID == keylessB.DirectiveEventID {
+		t.Fatalf("%s keyless directive identities were reused: %#v / %#v", rt.Backend, keylessA, keylessB)
+	}
+	requireServedAgentDirectiveOperationCount(t, rt.DB, rt.Backend, 3)
+	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 3)
+	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", key, 1)
+	for _, runID := range []string{first.RunID, keylessA.RunID, keylessB.RunID} {
+		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle))
+	}
+}
+
+func requireServedAgentDirectiveEffectCount(t *testing.T, backend string, effects *atomic.Int32, want int32) {
+	t.Helper()
+	if got := effects.Load(); got != want {
+		t.Fatalf("%s directive BoardStep effects = %d, want %d", backend, got, want)
+	}
+}
+
+func requireServedAgentDirectiveResult(t *testing.T, backend string, result servedAgentDirectiveProofResult) {
+	t.Helper()
+	if !result.OK || result.OperationID == "" || result.RunID == "" || result.DirectiveEventID == "" || result.DirectiveEventType != "platform.agent_directive" || result.Response == "" {
+		t.Fatalf("%s directive result = %#v", backend, result)
+	}
+}
+
+func requireServedAgentDirectivePersistence(t *testing.T, rt servedControlProofRuntime, result servedAgentDirectiveProofResult, key string, wantOperations int) {
+	t.Helper()
+	ctx := context.Background()
+	var operationID, eventID, runID, state, projectionResource, payloadOperationID string
+	var operationCount, receiptCount int
+	switch rt.Backend {
+	case "postgres":
+		if err := rt.DB.QueryRowContext(ctx, `SELECT operation_id::text, directive_event_id::text, resolved_run_id::text, state FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&operationID, &eventID, &runID, &state); err != nil {
+			t.Fatalf("postgres load directive operation: %v", err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&operationCount); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT payload->>'operation_id' FROM events WHERE event_id = $1::uuid`, result.DirectiveEventID).Scan(&payloadOperationID); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, result.DirectiveEventID).Scan(&receiptCount); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT resource_id FROM api_idempotency WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&projectionResource); err != nil {
+			t.Fatal(err)
+		}
+	case "sqlite":
+		if err := rt.DB.QueryRowContext(ctx, `SELECT operation_id, directive_event_id, resolved_run_id, state FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&operationID, &eventID, &runID, &state); err != nil {
+			t.Fatalf("sqlite load directive operation: %v", err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&operationCount); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT json_extract(payload, '$.operation_id') FROM events WHERE event_id = ?`, result.DirectiveEventID).Scan(&payloadOperationID); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, result.DirectiveEventID).Scan(&receiptCount); err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.DB.QueryRowContext(ctx, `SELECT resource_id FROM api_idempotency WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&projectionResource); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+	if operationCount != wantOperations || operationID != result.OperationID || eventID != result.DirectiveEventID || runID != result.RunID || state != "succeeded" || projectionResource != result.OperationID || payloadOperationID != result.OperationID || receiptCount != 1 {
+		t.Fatalf("%s directive persistence count=%d operation=%s event=%s run=%s state=%s projection=%s payload_operation=%s receipts=%d result=%#v", rt.Backend, operationCount, operationID, eventID, runID, state, projectionResource, payloadOperationID, receiptCount, result)
+	}
+}
+
+func requireServedAgentDirectiveOperationCount(t *testing.T, db *sql.DB, backend string, want int) {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive'`).Scan(&count); err != nil {
+		t.Fatalf("%s count directive operations: %v", backend, err)
+	}
+	if count != want {
+		t.Fatalf("%s directive operation count = %d, want %d", backend, count, want)
+	}
 }
 
 func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime, runID, sourceEventID, label string) servedEventPublishRPCResult {

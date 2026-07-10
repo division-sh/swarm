@@ -791,6 +791,12 @@ func workflowInstanceStoreSQLiteBypassCandidate(site runtimeWriterCallSite) bool
 }
 
 func classifySQLiteRuntimeStoreCallSite(site runtimeWriterCallSite) (runtimeWriterClassification, string, bool) {
+	if site.Path == "internal/store/agent_directive_operations.go" {
+		switch site.Function {
+		case "AdmitDirectiveExecution", "RecordDirectiveExecuted":
+			return classConsumesCanonical, "SQLite directive transition executes through transitionSQLiteDirectiveOperation and its canonical runRuntimeMutation boundary", true
+		}
+	}
 	switch site.Function {
 	case "RunRuntimeMutation", "RunRuntimeMutationContext", "RunEventTransaction", "RunEventMutation", "runRuntimeMutation", "runRuntimeMutationOnce", "runRuntimeMutationOnceLocked":
 		return classConsumesCanonical, "canonical SQLite runtime mutation owner", true
@@ -953,6 +959,22 @@ func runtimeWriterRules() []runtimeWriterRule {
 			kinds:          kinds(primitiveRead),
 			classification: classDifferentConcept,
 			reason:         "agent directive helper is read-only",
+		},
+		{
+			name:           "agent directive postgres operation owner",
+			path:           rx(`^internal/store/agent_directive_operations\.go$`),
+			receiver:       rx(`^PostgresStore$`),
+			kinds:          allPrimitiveKinds(),
+			classification: classDifferentConcept,
+			reason:         "Postgres directive operation transactions are separate from the selected SQLite runtime mutation boundary",
+		},
+		{
+			name:           "agent directive sqlite operation owner",
+			path:           rx(`^internal/store/agent_directive_operations\.go$`),
+			receiver:       rx(`^SQLiteRuntimeStore$`),
+			kinds:          allPrimitiveKinds(),
+			classification: classConsumesCanonical,
+			reason:         "SQLite directive operation transitions consume SQLiteRuntimeStore.runRuntimeMutation and never hold a transaction across BoardStep",
 		},
 		{
 			name:           "read surface files",

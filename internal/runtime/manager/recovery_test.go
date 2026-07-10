@@ -31,6 +31,24 @@ type recoveryTestBus struct {
 	direct                  []events.Event
 }
 
+type directiveRecoveryTestBus struct {
+	*recoveryTestBus
+	runtimeagentcontrol.DirectiveOperationStore
+	order []string
+}
+
+func (b *directiveRecoveryTestBus) Store() runtimebus.EventStore { return b }
+
+func (b *directiveRecoveryTestBus) ReconcileDirectiveOperations(ctx context.Context, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {
+	b.order = append(b.order, "directive")
+	return b.DirectiveOperationStore.ReconcileDirectiveOperations(ctx, now, ttl)
+}
+
+func (b *directiveRecoveryTestBus) ListEventsMissingPipelineReceipt(ctx context.Context, before time.Time, limit int) ([]events.PersistedReplayEvent, error) {
+	b.order = append(b.order, "pipeline")
+	return b.recoveryTestBus.ListEventsMissingPipelineReceipt(ctx, before, limit)
+}
+
 func (*recoveryTestBus) Publish(context.Context, events.Event) error                 { return nil }
 func (*recoveryTestBus) PublishDirect(context.Context, events.Event, []string) error { return nil }
 func (b *recoveryTestBus) PublishPersistedRecipients(_ context.Context, evt events.Event, _ []string) error {
@@ -185,6 +203,21 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	}
 	if got := bus.restoredRequests[0].ActivationVariables["vertical_id"]; got != "11111111-1111-4111-8111-111111111111" {
 		t.Fatalf("restored activation variable vertical_id = %q, want persisted config value", got)
+	}
+}
+
+func TestRecoverReconcilesDirectiveOperationsBeforeGenericPipelineRecovery(t *testing.T) {
+	bus := &directiveRecoveryTestBus{
+		recoveryTestBus:         &recoveryTestBus{},
+		DirectiveOperationStore: &directiveEventStore{},
+	}
+	am := NewAgentManager(bus, nil, &recoveryTestStore{})
+
+	if err := am.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if len(bus.order) < 2 || bus.order[0] != "directive" || bus.order[1] != "pipeline" {
+		t.Fatalf("recovery order = %#v, want directive before pipeline", bus.order)
 	}
 }
 
