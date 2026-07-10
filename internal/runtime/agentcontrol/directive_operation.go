@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const DirectiveOperationMethod = "agent.send_directive"
@@ -51,9 +52,7 @@ type DirectiveOperation struct {
 	ExecutionOwnerID        string
 	ExecutionLeaseExpiresAt time.Time
 	Response                json.RawMessage
-	ErrorCode               string
-	ErrorMessage            string
-	ErrorDetails            json.RawMessage
+	Failure                 *runtimefailures.Envelope
 	ExecutionAdmittedAt     time.Time
 	ExecutedAt              time.Time
 	CompletedAt             time.Time
@@ -77,8 +76,7 @@ func (o DirectiveOperation) Normalized() DirectiveOperation {
 	o.OperatorID = strings.TrimSpace(o.OperatorID)
 	o.DirectiveEventID = strings.TrimSpace(o.DirectiveEventID)
 	o.ExecutionOwnerID = strings.TrimSpace(o.ExecutionOwnerID)
-	o.ErrorCode = strings.TrimSpace(o.ErrorCode)
-	o.ErrorMessage = strings.TrimSpace(o.ErrorMessage)
+	o.Failure = runtimefailures.CloneEnvelope(o.Failure)
 	return o
 }
 
@@ -107,7 +105,7 @@ type DirectiveOperationStore interface {
 	RenewDirectiveExecutionLease(context.Context, string, string, time.Time, time.Duration) error
 	RecordDirectiveExecuted(context.Context, string, string, json.RawMessage, time.Time) (DirectiveOperation, error)
 	FinalizeDirectiveSuccess(context.Context, string, time.Time, time.Duration) (DirectiveOperation, error)
-	FinalizeDirectiveFailure(context.Context, string, string, string, string, json.RawMessage, time.Time, time.Duration) (DirectiveOperation, error)
+	FinalizeDirectiveFailure(context.Context, string, string, runtimefailures.Envelope, time.Time, time.Duration) (DirectiveOperation, error)
 	LoadDirectiveOperation(context.Context, string) (DirectiveOperation, bool, error)
 	LoadDirectiveOperationByKey(context.Context, string, string, string) (DirectiveOperation, bool, error)
 	ReconcileDirectiveOperation(context.Context, string, time.Time, time.Duration) (DirectiveOperation, bool, error)
