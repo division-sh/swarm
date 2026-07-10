@@ -1213,7 +1213,8 @@ func writeCLIAPIConfigFile(t *testing.T, values map[string]string) string {
 		"serve_api_token_file":  "api_token_file",
 	})
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(path, []byte(body.String()), 0o600); err != nil {
+	configText := withTestProviderTriggerPlatformInventory(t, body.String())
+	if err := os.WriteFile(path, []byte(configText), 0o600); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
 	return path

@@ -764,7 +764,8 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
+	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}
 	return path
@@ -773,7 +774,7 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	contents := strings.Join([]string{
+	contents := withTestProviderTriggerPlatformInventory(t, strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
 		"workspace:",
@@ -786,7 +787,7 @@ func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend s
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
-	}, "\n") + "\n"
+	}, "\n")+"\n")
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write runtime config: %v", err)
 	}

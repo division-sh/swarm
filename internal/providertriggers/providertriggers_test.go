@@ -75,6 +75,69 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 	}
 }
 
+func TestRequiredPlatformPackInventoryAdmission(t *testing.T) {
+	dirs := testPlatformPackDirs(t)
+	registry, loaded, err := NewRegistryFromRequiredPlatformPackDirs("0.7.0", dirs, nil)
+	if err != nil {
+		t.Fatalf("load complete required platform inventory: %v", err)
+	}
+	if registry == nil || len(loaded) != len(RequiredPlatformPackIdentities()) {
+		t.Fatalf("required platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
+	}
+
+	omitted := make([]string, 0, len(dirs)-1)
+	for _, dir := range dirs {
+		if filepath.Base(dir) != "stripe" {
+			omitted = append(omitted, dir)
+		}
+	}
+	_, _, err = NewRegistryFromRequiredPlatformPackDirs("0.7.0", omitted, []string{"/external/must-not-be-read-before-platform-completeness"})
+	if err == nil {
+		t.Fatal("required platform inventory accepted omitted Stripe pack")
+	}
+	for _, want := range []string{"required provider trigger platform inventory mismatch", "missing identities", `"provider.stripe" provider="stripe"`, "provider_triggers.packs.platform_dirs"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("omitted platform identity error = %q, want containing %q", err, want)
+		}
+	}
+
+	platformPacks, err := LoadPlatformPackDirs("0.7.0", dirs...)
+	if err != nil {
+		t.Fatalf("load platform packs for hostile inventory cases: %v", err)
+	}
+	unexpected := append(append([]LoadedPack(nil), platformPacks...), LoadedPack{
+		Envelope:   packs.Envelope{ID: "provider.acme", Provenance: packs.Provenance{Source: packs.ProvenancePlatform}},
+		Manifest:   Manifest{Provider: "acme"},
+		SourcePath: "/platform/acme",
+	})
+	if err := validateRequiredPlatformPackInventory(unexpected); err == nil {
+		t.Fatal("required platform inventory accepted unexpected platform identity")
+	} else {
+		for _, want := range []string{"unexpected identities", "provider.acme", "provider=\"acme\"", "/platform/acme", "provenance=platform"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("unexpected platform identity error = %q, want containing %q", err, want)
+			}
+		}
+	}
+
+	mismatched := append([]LoadedPack(nil), platformPacks...)
+	for i := range mismatched {
+		if mismatched[i].Envelope.ID == "provider.github" {
+			mismatched[i].Manifest.Provider = "acme"
+			mismatched[i].SourcePath = "/platform/github-mismatch"
+		}
+	}
+	if err := validateRequiredPlatformPackInventory(mismatched); err == nil {
+		t.Fatal("required platform inventory accepted pack/provider identity mismatch")
+	} else {
+		for _, want := range []string{"identity/provider mismatches", "provider.github", "provider=\"acme\"", "expected provider=\"github\"", "/platform/github-mismatch"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("platform identity/provider mismatch error = %q, want containing %q", err, want)
+			}
+		}
+	}
+}
+
 func TestProviderTriggerPackSetRejectsPackIdentityCollisionsBeforeProviderRegistration(t *testing.T) {
 	base := LoadedPack{Envelope: packs.Envelope{ID: "provider.github", Version: "0.1.0", ManifestHash: "sha256:first", Provenance: packs.Provenance{Source: packs.ProvenancePlatform}}, SourcePath: "/platform/github"}
 	duplicate := LoadedPack{Envelope: packs.Envelope{ID: "provider.github", Version: "0.2.0", ManifestHash: "sha256:second", Provenance: packs.Provenance{Source: packs.ProvenanceExternal}}, SourcePath: "/external/acme"}
