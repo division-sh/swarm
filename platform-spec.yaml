@@ -9273,10 +9273,13 @@ agent_directive_operation_model:
   execution_lease: >
     Admission uses a compare-and-set transition and a bounded owner lease. The manager
     renews the lease while BoardStep is active. Each renewal has a bounded context derived
-    from the heartbeat lifecycle, and post-BoardStep result persistence does not wait
-    indefinitely for a stalled renewal to return. No database transaction, advisory lock,
-    or process-local lock is held across BoardStep. An expired executing lease becomes
-    indeterminate and is never returned to an executable state.
+    from the heartbeat lifecycle. If heartbeat shutdown does not complete within its bound,
+    the manager MUST NOT enter result or failure persistence because renewal may still own
+    the same serialized mutation boundary; it returns AGENT_DIRECTIVE_OUTCOME_INDETERMINATE
+    immediately and leaves the durable row executing for lease-expiry reconciliation. No
+    database transaction, advisory lock, or process-local lock is held across BoardStep. An
+    expired executing lease becomes indeterminate and is never returned to an executable
+    state.
   finalization: >
     After successful BoardStep, RecordDirectiveExecuted durably stores the response before
     settlement. Finalization then atomically writes the processed platform/pipeline receipt,
