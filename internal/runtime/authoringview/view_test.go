@@ -10,6 +10,7 @@ import (
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
@@ -21,15 +22,16 @@ func TestBuildShowsReplyPairedTopology(t *testing.T) {
 	source := templatereply.LoadSource(t, templatereply.Options{})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
-	if len(view.ConnectRoutePlans) != 2 {
-		t.Fatalf("reply connect route plans = %#v, want request and response", view.ConnectRoutePlans)
+	edges := interFlowRouteEdges(view.RoutingTopology)
+	if len(edges) != 2 {
+		t.Fatalf("reply route edges = %#v, want request and response", edges)
 	}
-	roles := map[string]*ConnectReplyView{}
-	for _, plan := range view.ConnectRoutePlans {
-		if plan.Reply == nil {
-			t.Fatalf("reply topology missing from plan %#v", plan)
+	roles := map[string]*routingtopology.Reply{}
+	for _, edge := range edges {
+		if edge.Resolution == nil || edge.Resolution.Reply == nil {
+			t.Fatalf("reply topology missing from edge %#v", edge)
 		}
-		roles[plan.Reply.Role] = plan.Reply
+		roles[edge.Resolution.Reply.Role] = edge.Resolution.Reply
 	}
 	for _, role := range []string{"request", "response"} {
 		reply := roles[role]
@@ -68,27 +70,28 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 		t.Fatalf("producer output key/carries = %#v, want account_id carried", output)
 	}
 
-	if len(view.ConnectRoutePlans) != 1 {
-		t.Fatalf("connect route plan count = %d, want 1: %#v", len(view.ConnectRoutePlans), view.ConnectRoutePlans)
+	edges := interFlowRouteEdges(view.RoutingTopology)
+	if len(edges) != 1 {
+		t.Fatalf("inter-flow route edge count = %d, want 1: %#v", len(edges), edges)
 	}
-	plan := view.ConnectRoutePlans[0]
-	if plan.Source.FlowID != "producer" || plan.Source.Pin != "validation_requested" || plan.Source.Key != "account_id" {
-		t.Fatalf("route source = %#v, want producer.validation_requested keyed by account_id", plan.Source)
+	edge := edges[0]
+	if edge.Producer.FlowID != "producer" || edge.Boundary == nil || edge.Boundary.OutputPin != "validation_requested" {
+		t.Fatalf("route producer/boundary = %#v, want producer.validation_requested", edge)
 	}
-	if plan.Receiver.FlowID != "scoring" || plan.Receiver.Pin != "validation_requested" {
-		t.Fatalf("route receiver = %#v, want scoring.validation_requested", plan.Receiver)
+	if edge.Consumer.FlowID != "scoring" || edge.Boundary.InputPin != "validation_requested" {
+		t.Fatalf("route consumer/boundary = %#v, want scoring.validation_requested", edge)
 	}
-	if plan.ResolutionKind != "instance_key" {
-		t.Fatalf("route resolution = %q, want instance_key", plan.ResolutionKind)
+	if edge.Resolution == nil || edge.Resolution.Mode != "instance_key" {
+		t.Fatalf("route resolution = %#v, want instance_key", edge.Resolution)
 	}
-	if plan.InstanceKey == nil {
+	if edge.Resolution.InstanceKey == nil {
 		t.Fatalf("route instance key missing")
 	}
-	if got := strings.Join(plan.InstanceKey.Fields, ","); got != "account_id" {
+	if got := strings.Join(edge.Resolution.InstanceKey.Fields, ","); got != "account_id" {
 		t.Fatalf("route instance key fields = %q, want account_id", got)
 	}
-	if len(plan.InstanceKey.Mappings) != 1 || plan.InstanceKey.Mappings[0].Source != "account_id" || plan.InstanceKey.Mappings[0].Target != "account_id" || plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route implicit mapping = %#v, want account_id -> account_id explicit=false", plan.InstanceKey.Mappings)
+	if len(edge.Resolution.InstanceKey.Mappings) != 1 || edge.Resolution.InstanceKey.Mappings[0].Source != "account_id" || edge.Resolution.InstanceKey.Mappings[0].Target != "account_id" || edge.Resolution.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("route implicit mapping = %#v, want account_id -> account_id explicit=false", edge.Resolution.InstanceKey.Mappings)
 	}
 }
 
@@ -492,12 +495,15 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
 
-	if len(view.RoutePlanIssues) != 1 {
-		t.Fatalf("route plan issue count = %d, want 1: %#v", len(view.RoutePlanIssues), view.RoutePlanIssues)
+	var issue *routingtopology.Issue
+	for i := range view.RoutingTopology.Issues {
+		if view.RoutingTopology.Issues[i].Failure == "route_plan_instance_key_adapter_invalid" {
+			issue = &view.RoutingTopology.Issues[i]
+			break
+		}
 	}
-	issue := view.RoutePlanIssues[0]
-	if issue.Failure != "route_plan_instance_key_adapter_invalid" {
-		t.Fatalf("route issue failure = %q, want route_plan_instance_key_adapter_invalid", issue.Failure)
+	if issue == nil {
+		t.Fatalf("route issues = %#v, want route_plan_instance_key_adapter_invalid", view.RoutingTopology.Issues)
 	}
 	if issue.AuthoredLocation == "" || !strings.HasSuffix(issue.AuthoredLocation, "package.yaml") {
 		t.Fatalf("route issue authored location = %q, want package.yaml", issue.AuthoredLocation)
@@ -509,6 +515,29 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	}
 	if !strings.Contains(diag.Message, "connect producer.validation_requested -> scoring.validation_requested") {
 		t.Fatalf("diagnostic message = %q, want connect context", diag.Message)
+	}
+}
+
+func TestBuildRoutingTopologyWithReportProjectsOnlyExistingDanglingDiagnostics(t *testing.T) {
+	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{})
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("fixture source has no contract bundle")
+	}
+	report := runtimebootverify.Report{Findings: []runtimebootverify.Finding{
+		{CheckID: "event_consumer_exists", Severity: "warning", Location: "orphan.done", Message: "'orphan.done' emitted but nobody subscribes", Remediation: "Declare a consumer."},
+		{CheckID: "payload_completeness", Severity: "error", Location: "node", Message: "different policy fact"},
+	}}
+	topology := BuildRoutingTopologyWithReport(source, bundle, &report)
+	if len(topology.Issues) != 1 {
+		t.Fatalf("topology issues = %#v, want only route-related dangling diagnostic", topology.Issues)
+	}
+	issue := topology.Issues[0]
+	if issue.CheckID != "event_consumer_exists" || issue.Failure != issue.CheckID || issue.Severity != "warning" || issue.Remediation != "Declare a consumer." {
+		t.Fatalf("dangling issue = %#v, want existing typed diagnostic fields", issue)
+	}
+	if len(issue.ID) != len("issue-")+16 {
+		t.Fatalf("dangling issue id = %q, want stable public issue digest", issue.ID)
 	}
 }
 
@@ -554,6 +583,9 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 	if !containsString(view.Equivalence.CanonicalOwners, "runtime/core/pinrouting.LowerCompositionConnectRoutePlans") {
 		t.Fatalf("canonical owners = %#v, want pinrouting owner", view.Equivalence.CanonicalOwners)
 	}
+	if !containsString(view.Equivalence.CanonicalOwners, "runtime/semanticview.BuildAuthoredEventEndpointCensus") || !containsString(view.Equivalence.CanonicalOwners, "runtime/routingtopology.Build") {
+		t.Fatalf("canonical owners = %#v, want endpoint census and routing topology owners", view.Equivalence.CanonicalOwners)
+	}
 
 	account := flowByID(t, view, finalflowinstanceauthoring.TemplateFlowID)
 	if account.PrimaryEntity == nil || account.PrimaryEntity.Type != finalflowinstanceauthoring.TemplateEntityType {
@@ -568,18 +600,19 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 	if output.Key != finalflowinstanceauthoring.TemplatePayloadKey || !containsString(output.Carries, finalflowinstanceauthoring.TemplatePayloadKey) {
 		t.Fatalf("producer output = %#v, want %s key/carry", output, finalflowinstanceauthoring.TemplatePayloadKey)
 	}
-	if len(view.ConnectRoutePlans) != 1 {
-		t.Fatalf("connect route plan count = %d, want 1: %#v", len(view.ConnectRoutePlans), view.ConnectRoutePlans)
+	edges := interFlowRouteEdges(view.RoutingTopology)
+	if len(edges) != 1 {
+		t.Fatalf("inter-flow route edge count = %d, want 1: %#v", len(edges), edges)
 	}
-	plan := view.ConnectRoutePlans[0]
-	if plan.Source.FlowID != finalflowinstanceauthoring.ProducerFlowID || plan.Receiver.FlowID != finalflowinstanceauthoring.TemplateFlowID {
-		t.Fatalf("route endpoints = %#v -> %#v, want final fixture producer to template", plan.Source, plan.Receiver)
+	edge := edges[0]
+	if edge.Producer.FlowID != finalflowinstanceauthoring.ProducerFlowID || edge.Consumer.FlowID != finalflowinstanceauthoring.TemplateFlowID {
+		t.Fatalf("route endpoints = %#v -> %#v, want final fixture producer to template", edge.Producer, edge.Consumer)
 	}
-	if plan.InstanceKey == nil || len(plan.InstanceKey.Mappings) != 1 ||
-		plan.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
-		plan.InstanceKey.Mappings[0].Target != finalflowinstanceauthoring.TemplateInstanceBy ||
-		!plan.InstanceKey.Mappings[0].Explicit {
-		t.Fatalf("route instance key = %#v, want explicit renamed mapping", plan.InstanceKey)
+	if edge.Resolution == nil || edge.Resolution.InstanceKey == nil || len(edge.Resolution.InstanceKey.Mappings) != 1 ||
+		edge.Resolution.InstanceKey.Mappings[0].Source != finalflowinstanceauthoring.TemplatePayloadKey ||
+		edge.Resolution.InstanceKey.Mappings[0].Target != finalflowinstanceauthoring.TemplateInstanceBy ||
+		!edge.Resolution.InstanceKey.Mappings[0].Explicit {
+		t.Fatalf("route instance key = %#v, want explicit renamed mapping", edge.Resolution)
 	}
 
 	coordinator := flowByID(t, view, finalflowinstanceauthoring.CoordinatorFlowID)
@@ -698,6 +731,16 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func interFlowRouteEdges(topology routingtopology.Topology) []routingtopology.Edge {
+	out := make([]routingtopology.Edge, 0)
+	for _, edge := range topology.Edges {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlow {
+			out = append(out, edge)
+		}
+	}
+	return out
 }
 
 func loadRootPrimaryEntitySource(t testing.TB) semanticview.Source {

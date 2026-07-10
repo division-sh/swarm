@@ -24,6 +24,7 @@ const (
 	HumanCodeProviderCapability          HumanCodeFamily = "provider_capability"
 	HumanCodeProviderGuarantee           HumanCodeFamily = "provider_guarantee"
 	HumanCodeProviderRequirementStatus   HumanCodeFamily = "provider_requirement_status"
+	HumanCodeRoutingTopology             HumanCodeFamily = "routing_topology"
 )
 
 var humanCodePhrases = map[HumanCodeFamily]map[string]string{

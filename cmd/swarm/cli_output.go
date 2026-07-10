@@ -101,6 +101,7 @@ const (
 	cliHumanCodeProviderCapability          = userfacing.HumanCodeProviderCapability
 	cliHumanCodeProviderGuarantee           = userfacing.HumanCodeProviderGuarantee
 	cliHumanCodeProviderRequirementStatus   = userfacing.HumanCodeProviderRequirementStatus
+	cliHumanCodeRoutingTopology             = userfacing.HumanCodeRoutingTopology
 )
 
 var cliHumanCodePhrases = userfacing.HumanCodePhrases()

@@ -8609,8 +8609,8 @@ flow_model:
         rule: >
           The supported expanded authoring view is a projection over existing
           semantic owners. It must expose inferred primary entity, template
-          instance declaration/policy, output pin `key`/`carries`, connect
-          route plans, explicit and implicit key mappings,
+          instance declaration/policy, output pin `key`/`carries`, versioned
+          routing topology, explicit and implicit key mappings,
           singleton/coordinator boundaries, typed contained-state operations,
           lifecycle stage graphs requested with `--graph`, and retired static
           multi-entity diagnostics without becoming a new semantic owner or
@@ -8627,6 +8627,40 @@ flow_model:
           remediation/evidence when available from the verifier finding owner,
           plus authored YAML file or other stable authored location derived from
           contract bundle source metadata.
+        routing_topology:
+          command: swarm describe routes
+          schema_version: routing-topology/v1
+          canonical_code_owner: internal/runtime/routingtopology.Build projected by internal/runtime/authoringview.BuildRoutingTopology
+          projection_only: true
+          evolution_rule: >
+            Fields may be added within routing-topology/v1. Removing, renaming, retyping, or changing the meaning of
+            a field requires a new artifact schema identity. Runtime recipients, persisted deliveries, replay facts,
+            conformance status, and historical route-decision provenance are forbidden inputs and fields.
+          delivery_scopes:
+          - intra_flow typed pub/sub between authored endpoints in one flow scope
+          - inter_flow_connect lowered from declared output pin through parent connect to declared input pin
+          endpoint_rule: >
+            Producers, consumers, input pins, and output pins come from one immutable authored endpoint census.
+            Output pins are interface exposures and become delivery only through a lowered connect edge.
+          resolution_rule: >
+            Runnable connect edges preserve complete static create, select, select-or-create, fan-in, reply,
+            static, and broadcast declarations without claiming a concrete runtime recipient. Invalid or unlowerable
+            declarations appear only as typed issues and never as executable edges.
+          identity_rule: >
+            Every endpoint and edge carries authored, local, and canonical event identity plus stable flow/package
+            scope. Declared-input and fan-in associations fail closed on zero or multiple matches.
+          legacy_qualified_subscription_rule: >
+            A concrete qualified cross-flow subscription that runtime still honors without a pin/connect route is
+            projected in `legacy_qualified_subscriptions` with disposition `legacy_qualified_subscription`, exact
+            authored file:line evidence, runtime_delivery true, canonical_edge false, migration remediation, and a
+            linked verifier finding. It MUST NOT appear as a canonical edge. Staged/new-model bundles receive a hard
+            invalidity; legacy bundles receive a semantic-drift warning until E1a retires qualified cross-flow
+            delivery. Wildcard imports and consumers reached through a declared input pin plus connect are not this
+            legacy class.
+          supported_outputs:
+          - swarm describe routes
+          - swarm describe routes --json
+          - swarm describe --json routing_topology subprojection
         non_authoritative_paths:
         - CLI-local verifier decisions
         - API-local verifier decisions
@@ -17550,6 +17584,13 @@ cli_specification:
               json_shape: describe authoring view result object
               quiet_values:
               - flow ids and summary values declared by the command implementation
+            describe_routes:
+              command: swarm describe routes
+              classification: shared_output
+              fact_owner: routing-topology/v1 projection over the authored endpoint census and lowered connect plans
+              json_shape: routing-topology/v1 object
+              quiet_values:
+              - stable route edge ids followed by stable typed route issue ids
       exception_rules:
         root_help_completion:
           commands:

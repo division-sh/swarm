@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
+	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 )
 
@@ -37,18 +40,138 @@ func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {
 	if view.Root.PrimaryEntity != nil || view.Root.PrimaryEntityError != "" {
 		t.Fatalf("root primary entity for valid no-root fixture = entity %#v error %q, want none", view.Root.PrimaryEntity, view.Root.PrimaryEntityError)
 	}
-	if len(view.ConnectRoutePlans) != 1 {
-		t.Fatalf("connect route plans = %#v, want one", view.ConnectRoutePlans)
+	if view.RoutingTopology.SchemaVersion != "routing-topology/v1" || !view.RoutingTopology.ProjectionOnly {
+		t.Fatalf("routing topology identity = %#v, want routing-topology/v1 projection", view.RoutingTopology)
 	}
-	plan := view.ConnectRoutePlans[0]
-	if plan.ResolutionKind != "instance_key" || plan.InstanceKey == nil {
-		t.Fatalf("route plan = %#v, want instance_key plan", plan)
-	}
-	if plan.Source.Key != "account_id" || len(plan.Source.Carries) == 0 {
-		t.Fatalf("route source = %#v, want output key/carries", plan.Source)
+	if len(view.RoutingTopology.Edges) == 0 {
+		t.Fatalf("routing topology edges = %#v, want routed template edge", view.RoutingTopology.Edges)
 	}
 	if len(view.Flows) != 2 {
 		t.Fatalf("flow count = %d, want 2", len(view.Flows))
+	}
+}
+
+func TestDescribeRoutesUsesVersionedTopologyAndMatchesFullDescribe(t *testing.T) {
+	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
+	var routeJSON, routeErr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe", "routes", "--contracts", contractsRoot, "--json",
+	}, &routeJSON, &routeErr, defaultRootCommandOptions())
+	if code != 0 || routeErr.Len() != 0 {
+		t.Fatalf("describe routes --json code=%d stdout=%s stderr=%s", code, routeJSON.String(), routeErr.String())
+	}
+	var topology routingtopology.Topology
+	if err := json.Unmarshal(routeJSON.Bytes(), &topology); err != nil {
+		t.Fatalf("decode routes topology: %v\n%s", err, routeJSON.String())
+	}
+	if topology.SchemaVersion != routingtopology.SchemaVersion || !topology.ProjectionOnly {
+		t.Fatalf("topology identity = %#v", topology)
+	}
+	if len(topology.Edges) == 0 {
+		t.Fatalf("topology edges = %#v, want executable routes", topology.Edges)
+	}
+
+	var fullJSON, fullErr bytes.Buffer
+	code = executeRootCommandWithOptions(context.Background(), repoRoot(), []string{
+		"describe", "--contracts", contractsRoot, "--json",
+	}, &fullJSON, &fullErr, defaultRootCommandOptions())
+	if code != 0 || fullErr.Len() != 0 {
+		t.Fatalf("describe --json code=%d stdout=%s stderr=%s", code, fullJSON.String(), fullErr.String())
+	}
+	var full describeCommandOutput
+	if err := json.Unmarshal(fullJSON.Bytes(), &full); err != nil {
+		t.Fatalf("decode full describe: %v", err)
+	}
+	if !reflect.DeepEqual(full.RoutingTopology, topology) {
+		t.Fatalf("full describe routing topology diverged from describe routes\nfull=%#v\nroutes=%#v", full.RoutingTopology, topology)
+	}
+}
+
+func TestDescribeRoutesHumanAndJSONAreDeterministic(t *testing.T) {
+	contractsRoot := templateflowpilot.Write(t, templateflowpilot.Options{})
+	var firstJSON, firstHuman string
+	for i := 0; i < 5; i++ {
+		var jsonOut, jsonErr bytes.Buffer
+		if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+			t.Fatalf("iteration %d json code=%d stderr=%s", i, code, jsonErr.String())
+		}
+		var humanOut, humanErr bytes.Buffer
+		if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+			t.Fatalf("iteration %d human code=%d stderr=%s", i, code, humanErr.String())
+		}
+		if i == 0 {
+			firstJSON, firstHuman = jsonOut.String(), humanOut.String()
+		} else if jsonOut.String() != firstJSON || humanOut.String() != firstHuman {
+			t.Fatalf("describe routes output changed on iteration %d", i)
+		}
+	}
+	for _, want := range []string{"routing topology: routing-topology/v1", "inter_flow_connect", "resolution:"} {
+		if !strings.Contains(firstHuman, want) {
+			t.Fatalf("human routes missing %q:\n%s", want, firstHuman)
+		}
+	}
+}
+
+func TestDescribeRoutesCarriesExistingDanglingEventDiagnostic(t *testing.T) {
+	contractsRoot := filepath.Join(repoRoot(), "tests", "tier8-boot-verification", "test-boot-event-no-consumer")
+	var jsonOut, jsonErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
+	}
+	var topology routingtopology.Topology
+	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
+		t.Fatalf("decode routes topology: %v", err)
+	}
+	if len(topology.Issues) != 1 || topology.Issues[0].CheckID != "event_consumer_exists" || topology.Issues[0].Severity != runtimebootverify.SeveritySemanticDriftWarn {
+		t.Fatalf("dangling route issues = %#v, want existing event_consumer_exists warning", topology.Issues)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
+	}
+	for _, want := range []string{"event_consumer_exists [semantic_drift_warning]", "orphan.unconsumed", "route issues:"} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("human dangling route output missing %q:\n%s", want, humanOut.String())
+		}
+	}
+}
+
+func TestDescribeRoutesRendersFindingLinkedLegacyQualifiedSubscriptions(t *testing.T) {
+	contractsRoot := filepath.Join(repoRoot(), "tests", "tier11-flow-composition", "test-child-flow-absolute-path")
+	var jsonOut, jsonErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot, "--json"}, &jsonOut, &jsonErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes --json code=%d stderr=%s", code, jsonErr.String())
+	}
+	var topology routingtopology.Topology
+	if err := json.Unmarshal(jsonOut.Bytes(), &topology); err != nil {
+		t.Fatalf("decode routes topology: %v", err)
+	}
+	if len(topology.LegacyQualifiedSubscriptions) != 1 {
+		t.Fatalf("legacy subscriptions = %#v, want one", topology.LegacyQualifiedSubscriptions)
+	}
+	legacy := topology.LegacyQualifiedSubscriptions[0]
+	if legacy.FindingID == "" || legacy.CanonicalEdge || !legacy.RuntimeDelivery {
+		t.Fatalf("legacy subscription = %#v, want finding-linked non-edge runtime debt", legacy)
+	}
+	linked := false
+	for _, issue := range topology.Issues {
+		if issue.ID == legacy.FindingID && issue.CheckID == "legacy_qualified_subscription" {
+			linked = true
+		}
+	}
+	if !linked {
+		t.Fatalf("legacy finding %q not present in issues: %#v", legacy.FindingID, topology.Issues)
+	}
+
+	var humanOut, humanErr bytes.Buffer
+	if code := executeRootCommandWithOptions(context.Background(), repoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
+		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
+	}
+	for _, want := range []string{"legacy qualified subscriptions:", "disposition=legacy_qualified_subscription", "runtime delivery=true canonical edge=false", "finding="} {
+		if !strings.Contains(humanOut.String(), want) {
+			t.Fatalf("human routes missing %q:\n%s", want, humanOut.String())
+		}
 	}
 }
 

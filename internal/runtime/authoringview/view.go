@@ -8,29 +8,30 @@ import (
 
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type View struct {
-	WorkflowName      string                 `json:"workflow_name,omitempty"`
-	WorkflowVersion   string                 `json:"workflow_version,omitempty"`
-	ContractsRoot     string                 `json:"contracts_root,omitempty"`
-	SourceAuthority   string                 `json:"source_authority"`
-	Root              RootView               `json:"root"`
-	Flows             []FlowView             `json:"flows"`
-	StageGraphs       []StageGraphView       `json:"stage_graphs,omitempty"`
-	ConnectRoutePlans []ConnectRoutePlanView `json:"connect_route_plans"`
-	RoutePlanIssues   []RoutePlanIssueView   `json:"route_plan_issues,omitempty"`
-	Diagnostics       []DiagnosticView       `json:"diagnostics,omitempty"`
-	Equivalence       EquivalenceView        `json:"equivalence"`
+	WorkflowName    string              `json:"workflow_name,omitempty"`
+	WorkflowVersion string              `json:"workflow_version,omitempty"`
+	ContractsRoot   string              `json:"contracts_root,omitempty"`
+	SourceAuthority string              `json:"source_authority"`
+	Root            RootView            `json:"root"`
+	Flows           []FlowView          `json:"flows"`
+	StageGraphs     []StageGraphView    `json:"stage_graphs,omitempty"`
+	RoutingTopology RoutingTopologyView `json:"routing_topology"`
+	Diagnostics     []DiagnosticView    `json:"diagnostics,omitempty"`
+	Equivalence     EquivalenceView     `json:"equivalence"`
 }
 
 type EquivalenceView struct {
 	ProjectionOnly  bool     `json:"projection_only"`
 	CanonicalOwners []string `json:"canonical_owners"`
 }
+
+type RoutingTopologyView = routingtopology.Topology
 
 type RootView struct {
 	SourceFiles        RootSourceFiles    `json:"source_files"`
@@ -199,81 +200,6 @@ type OutputPinView struct {
 	Carries       []string `json:"carries,omitempty"`
 }
 
-type ConnectRoutePlanView struct {
-	PackageKey                string                  `json:"package_key,omitempty"`
-	Source                    ConnectEndpointView     `json:"source"`
-	Receiver                  ConnectEndpointView     `json:"receiver"`
-	Adapter                   string                  `json:"adapter,omitempty"`
-	Delivery                  string                  `json:"delivery"`
-	TargetKind                string                  `json:"target_kind"`
-	ResolutionKind            string                  `json:"resolution_kind"`
-	Address                   *ConnectAddressView     `json:"address,omitempty"`
-	InstanceKey               *ConnectInstanceKeyView `json:"instance_key,omitempty"`
-	Reply                     *ConnectReplyView       `json:"reply,omitempty"`
-	Map                       []ConnectMapEntryView   `json:"map,omitempty"`
-	RequiresRuntimeResolution bool                    `json:"requires_runtime_resolution"`
-	SourceFile                string                  `json:"source_file,omitempty"`
-}
-
-type ConnectEndpointView struct {
-	Root          bool     `json:"root,omitempty"`
-	FlowID        string   `json:"flow_id,omitempty"`
-	FlowPath      string   `json:"flow_path,omitempty"`
-	Mode          string   `json:"mode,omitempty"`
-	Pin           string   `json:"pin"`
-	Event         string   `json:"event"`
-	ResolvedEvent string   `json:"resolved_event"`
-	Key           string   `json:"key,omitempty"`
-	Carries       []string `json:"carries,omitempty"`
-}
-
-type ConnectAddressView struct {
-	By          string `json:"by,omitempty"`
-	Source      string `json:"source,omitempty"`
-	Target      string `json:"target,omitempty"`
-	Cardinality string `json:"cardinality,omitempty"`
-	Mode        string `json:"mode,omitempty"`
-}
-
-type ConnectInstanceKeyView struct {
-	Fields     []string                        `json:"fields,omitempty"`
-	Mappings   []ConnectInstanceKeyMappingView `json:"mappings,omitempty"`
-	OnMissing  string                          `json:"on_missing,omitempty"`
-	OnConflict string                          `json:"on_conflict,omitempty"`
-}
-
-type ConnectReplyView struct {
-	Role              string `json:"role"`
-	RequesterFlowID   string `json:"requester_flow_id"`
-	RequestOutputPin  string `json:"request_output_pin"`
-	ReplyInputPin     string `json:"reply_input_pin"`
-	ProviderFlowID    string `json:"provider_flow_id"`
-	ProviderInputPin  string `json:"provider_input_pin"`
-	ProviderOutputPin string `json:"provider_output_pin"`
-	CorrelationKey    string `json:"correlation_key,omitempty"`
-}
-
-type ConnectInstanceKeyMappingView struct {
-	Source   string `json:"source"`
-	Target   string `json:"target"`
-	Explicit bool   `json:"explicit"`
-}
-
-type ConnectMapEntryView struct {
-	Key    string `json:"key"`
-	Source string `json:"source,omitempty"`
-	Target string `json:"target,omitempty"`
-}
-
-type RoutePlanIssueView struct {
-	PackageKey       string `json:"package_key,omitempty"`
-	From             string `json:"from,omitempty"`
-	To               string `json:"to,omitempty"`
-	Failure          string `json:"failure"`
-	Detail           string `json:"detail,omitempty"`
-	AuthoredLocation string `json:"authored_location,omitempty"`
-}
-
 type ContainedOperationView struct {
 	FlowID       string `json:"flow_id"`
 	NodeID       string `json:"node_id"`
@@ -313,24 +239,24 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	if !ok || bundle == nil {
 		return View{}, fmt.Errorf("authoring view requires a workflow contract bundle source")
 	}
-	plans, routeIssues := pinrouting.LowerCompositionConnectRoutePlans(source)
 	view := View{
-		WorkflowName:      bundle.WorkflowName(),
-		WorkflowVersion:   bundle.WorkflowVersion(),
-		ContractsRoot:     strings.TrimSpace(bundle.Paths.ContractsRoot),
-		SourceAuthority:   "projection_only_existing_contract_owners",
-		Root:              buildRoot(bundle),
-		Flows:             buildFlows(source, bundle),
-		ConnectRoutePlans: buildConnectRoutePlans(bundle, plans),
-		RoutePlanIssues:   buildRoutePlanIssues(bundle, routeIssues),
-		Diagnostics:       buildDiagnostics(bundle, opts.BootReport),
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		ContractsRoot:   strings.TrimSpace(bundle.Paths.ContractsRoot),
+		SourceAuthority: "projection_only_existing_contract_owners",
+		Root:            buildRoot(bundle),
+		Flows:           buildFlows(source, bundle),
+		RoutingTopology: BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
+		Diagnostics:     buildDiagnostics(bundle, opts.BootReport),
 		Equivalence: EquivalenceView{
 			ProjectionOnly: true,
 			CanonicalOwners: []string{
 				"runtime/contracts.WorkflowContractBundle",
 				"runtime/contracts effective required-agent facts",
 				"runtime/contracts primary entity/template/singleton accessors",
+				"runtime/semanticview.BuildAuthoredEventEndpointCensus",
 				"runtime/core/pinrouting.LowerCompositionConnectRoutePlans",
+				"runtime/routingtopology.Build",
 				"runtime/entityruntime.ResolveContainedOperationTarget",
 				"runtime/bootverify.Report",
 			},
@@ -340,6 +266,33 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		view.StageGraphs = buildStageGraphs(source, bundle)
 	}
 	return view, nil
+}
+
+func BuildRoutingTopology(source semanticview.Source) RoutingTopologyView {
+	return routingtopology.Build(source)
+}
+
+func BuildRoutingTopologyWithReport(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, report *runtimebootverify.Report) RoutingTopologyView {
+	topology := BuildRoutingTopology(source)
+	if report == nil {
+		return topology
+	}
+	issues := make([]routingtopology.Issue, 0)
+	for _, finding := range report.Findings {
+		checkID := strings.TrimSpace(finding.CheckID)
+		if checkID != "event_consumer_exists" && checkID != "event_producer_exists" && checkID != "legacy_qualified_subscription" {
+			continue
+		}
+		issues = append(issues, routingtopology.NewDiagnosticIssue(
+			checkID,
+			finding.Severity,
+			finding.Location,
+			finding.Message,
+			finding.Remediation,
+			authoredLocationForFinding(bundle, finding),
+		))
+	}
+	return routingtopology.WithIssues(topology, issues...)
 }
 
 func buildRoot(bundle *runtimecontracts.WorkflowContractBundle) RootView {
@@ -882,111 +835,6 @@ func outputPinViews(source semanticview.Source, flowID string, pins []runtimecon
 			ResolvedEvent: strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
 			Key:           strings.TrimSpace(pin.Key),
 			Carries:       normalizedStrings(pin.Carries),
-		})
-	}
-	return out
-}
-
-func buildConnectRoutePlans(bundle *runtimecontracts.WorkflowContractBundle, plans []pinrouting.ConnectRoutePlan) []ConnectRoutePlanView {
-	out := make([]ConnectRoutePlanView, 0, len(plans))
-	for _, plan := range plans {
-		item := ConnectRoutePlanView{
-			PackageKey:                strings.TrimSpace(plan.PackageKey),
-			Source:                    connectEndpointView(plan.Source),
-			Receiver:                  connectEndpointView(plan.Receiver),
-			Adapter:                   strings.TrimSpace(plan.Adapter),
-			Delivery:                  string(plan.Delivery),
-			TargetKind:                string(plan.TargetKind),
-			ResolutionKind:            string(plan.ResolutionKind),
-			Map:                       connectMapEntryViews(plan.Map),
-			RequiresRuntimeResolution: plan.RequiresRuntimeResolution,
-			SourceFile:                packageSourceFile(bundle, plan.PackageKey),
-		}
-		if plan.Address != nil {
-			item.Address = &ConnectAddressView{
-				By:          strings.TrimSpace(plan.Address.By),
-				Source:      strings.TrimSpace(plan.Address.Source),
-				Target:      strings.TrimSpace(plan.Address.Target),
-				Cardinality: strings.TrimSpace(plan.Address.Cardinality),
-				Mode:        strings.TrimSpace(plan.Address.Mode),
-			}
-		}
-		if plan.InstanceKey != nil {
-			item.InstanceKey = connectInstanceKeyView(plan.InstanceKey)
-		}
-		if plan.ReplyResolution != nil {
-			item.Reply = &ConnectReplyView{
-				Role:              strings.TrimSpace(plan.ReplyResolution.Role),
-				RequesterFlowID:   strings.TrimSpace(plan.ReplyResolution.RequesterFlowID),
-				RequestOutputPin:  strings.TrimSpace(plan.ReplyResolution.RequestOutputPin),
-				ReplyInputPin:     strings.TrimSpace(plan.ReplyResolution.ReplyInputPin),
-				ProviderFlowID:    strings.TrimSpace(plan.ReplyResolution.ProviderFlowID),
-				ProviderInputPin:  strings.TrimSpace(plan.ReplyResolution.ProviderInputPin),
-				ProviderOutputPin: strings.TrimSpace(plan.ReplyResolution.ProviderOutputPin),
-				CorrelationKey:    strings.TrimSpace(plan.ReplyResolution.CorrelationKey),
-			}
-		}
-		out = append(out, item)
-	}
-	return out
-}
-
-func connectEndpointView(endpoint pinrouting.ConnectRoutePlanEndpoint) ConnectEndpointView {
-	return ConnectEndpointView{
-		Root:          endpoint.Root,
-		FlowID:        strings.TrimSpace(endpoint.FlowID),
-		FlowPath:      strings.TrimSpace(endpoint.FlowPath),
-		Mode:          strings.TrimSpace(endpoint.Mode),
-		Pin:           strings.TrimSpace(endpoint.Pin),
-		Event:         strings.TrimSpace(endpoint.Event),
-		ResolvedEvent: strings.TrimSpace(endpoint.ResolvedEvent),
-		Key:           strings.TrimSpace(endpoint.Key),
-		Carries:       normalizedStrings(endpoint.Carries),
-	}
-}
-
-func connectInstanceKeyView(instance *pinrouting.ConnectRoutePlanInstanceKey) *ConnectInstanceKeyView {
-	if instance == nil {
-		return nil
-	}
-	mappings := make([]ConnectInstanceKeyMappingView, 0, len(instance.Mappings))
-	for _, mapping := range instance.Mappings {
-		mappings = append(mappings, ConnectInstanceKeyMappingView{
-			Source:   strings.TrimSpace(mapping.Source),
-			Target:   strings.TrimSpace(mapping.Target),
-			Explicit: mapping.Explicit,
-		})
-	}
-	return &ConnectInstanceKeyView{
-		Fields:     normalizedStrings(instance.Fields),
-		Mappings:   mappings,
-		OnMissing:  strings.TrimSpace(instance.OnMissing),
-		OnConflict: strings.TrimSpace(instance.OnConflict),
-	}
-}
-
-func connectMapEntryViews(entries []pinrouting.ConnectRoutePlanMapEntry) []ConnectMapEntryView {
-	out := make([]ConnectMapEntryView, 0, len(entries))
-	for _, entry := range entries {
-		out = append(out, ConnectMapEntryView{
-			Key:    strings.TrimSpace(entry.Key),
-			Source: strings.TrimSpace(entry.Source),
-			Target: strings.TrimSpace(entry.Target),
-		})
-	}
-	return out
-}
-
-func buildRoutePlanIssues(bundle *runtimecontracts.WorkflowContractBundle, issues []pinrouting.ConnectRoutePlanIssue) []RoutePlanIssueView {
-	out := make([]RoutePlanIssueView, 0, len(issues))
-	for _, issue := range issues {
-		out = append(out, RoutePlanIssueView{
-			PackageKey:       strings.TrimSpace(issue.Connect.PackageKey),
-			From:             strings.TrimSpace(issue.Connect.From),
-			To:               strings.TrimSpace(issue.Connect.To),
-			Failure:          string(issue.Failure),
-			Detail:           strings.TrimSpace(issue.Detail),
-			AuthoredLocation: packageSourceFile(bundle, issue.Connect.PackageKey),
 		})
 	}
 	return out

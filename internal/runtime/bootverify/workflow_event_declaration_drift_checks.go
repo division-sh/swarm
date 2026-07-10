@@ -3,6 +3,8 @@ package bootverify
 import (
 	"fmt"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func checkProducesDrift(c *checkerContext) []Finding   { return c.producesDrift() }
@@ -13,28 +15,26 @@ func (c *checkerContext) producesDrift() []Finding {
 		return c.producesDriftFindings
 	}
 	c.producesDriftLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		if node.Produces == nil {
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	for _, assertion := range census.ProducerAssertions() {
+		if !assertion.Declared {
 			continue
 		}
-		produces := stringSet(node.Produces)
-		for eventType, handler := range node.EventHandlers {
-			eventType = strings.TrimSpace(eventType)
-			for _, emitted := range handlerEmits(handler) {
-				emitted = strings.TrimSpace(emitted)
-				if emitted == "" {
-					continue
-				}
-				if _, ok := produces[emitted]; ok {
-					continue
-				}
-				c.producesDriftFindings = append(c.producesDriftFindings, Finding{
-					CheckID:  "produces_drift",
-					Severity: "warning",
-					Message:  fmt.Sprintf("node %s handler %s emits %s outside produces list", strings.TrimSpace(nodeID), eventType, emitted),
-					Location: strings.TrimSpace(nodeID),
-				})
+		declared := stringSet(assertion.EventTypes)
+		for _, endpoint := range census.Producers() {
+			if endpoint.Kind != semanticview.EventEndpointNodeHandler || endpoint.NodeID != assertion.NodeID {
+				continue
 			}
+			emitted := strings.TrimSpace(endpoint.Event.Authored)
+			if _, ok := declared[emitted]; ok {
+				continue
+			}
+			c.producesDriftFindings = append(c.producesDriftFindings, Finding{
+				CheckID:  "produces_drift",
+				Severity: "warning",
+				Message:  fmt.Sprintf("node %s handler %s emits %s outside produces list", assertion.NodeID, endpoint.HandlerEvent, emitted),
+				Location: assertion.NodeID,
+			})
 		}
 	}
 	return c.producesDriftFindings
@@ -45,20 +45,18 @@ func (c *checkerContext) phantomProduces() []Finding {
 		return c.phantomFindings
 	}
 	c.phantomLoaded = true
-	for nodeID, node := range c.source.NodeEntries() {
-		if node.Produces == nil {
+	census := semanticview.BuildAuthoredEventEndpointCensus(c.source)
+	for _, assertion := range census.ProducerAssertions() {
+		if !assertion.Declared {
 			continue
 		}
 		emitted := map[string]struct{}{}
-		for _, handler := range node.EventHandlers {
-			for _, eventType := range handlerEmits(handler) {
-				eventType = strings.TrimSpace(eventType)
-				if eventType != "" {
-					emitted[eventType] = struct{}{}
-				}
+		for _, endpoint := range census.Producers() {
+			if endpoint.Kind == semanticview.EventEndpointNodeHandler && endpoint.NodeID == assertion.NodeID {
+				emitted[strings.TrimSpace(endpoint.Event.Authored)] = struct{}{}
 			}
 		}
-		for _, eventType := range node.Produces {
+		for _, eventType := range assertion.EventTypes {
 			eventType = strings.TrimSpace(eventType)
 			if eventType == "" {
 				continue
@@ -69,8 +67,8 @@ func (c *checkerContext) phantomProduces() []Finding {
 			c.phantomFindings = append(c.phantomFindings, Finding{
 				CheckID:  "phantom_produces",
 				Severity: "warning",
-				Message:  fmt.Sprintf("node %s produces lists %s but no handler emits it", strings.TrimSpace(nodeID), eventType),
-				Location: strings.TrimSpace(nodeID),
+				Message:  fmt.Sprintf("node %s produces lists %s but no handler emits it", assertion.NodeID, eventType),
+				Location: assertion.NodeID,
 			})
 		}
 	}

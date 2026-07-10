@@ -14,6 +14,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin"
 )
 
 type persistentStateRepo struct {
@@ -498,5 +499,90 @@ func TestExecutor_AccumulationDeduplicatesRepeatedEvent(t *testing.T) {
 	}
 	if got := len(acc.Items); got != 1 {
 		t.Fatalf("item count = %d, want 1", got)
+	}
+}
+
+func TestExecutor_FanInInputOwnsWindowAndDedupAtRuntime(t *testing.T) {
+	source := templatefanin.LoadSource(t, templatefanin.Options{})
+	handler, ok := source.NodeEventHandler(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	if !ok {
+		t.Fatalf("missing fixture handler %s.%s", templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)
+	}
+	repo := &persistentStateRepo{
+		found: true,
+		snapshot: StateSnapshot{
+			EntityID:     templatefanin.ReceiverFlowInstance,
+			CurrentState: "active",
+			StateCarrier: NewStateCarrier(map[string]any{}, nil, map[string]map[string]any{}),
+		},
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:       source,
+		StateRepo:    repo,
+		TxRunner:     stubRunner{},
+		Locker:       stubLocker{},
+		Outbox:       stubOutbox{},
+		TimerApplier: stubTimerApplier{},
+		Dispatcher:   stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+
+	execute := func(eventID, reportID, periodID string) {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{
+			"portfolio_id": templatefanin.ReceiverFlowInstance,
+			"report_id":    reportID,
+			"period_id":    periodID,
+			"operating_id": "opco-a",
+			"revenue":      42,
+		})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		_, err = exec.Execute(context.Background(), ExecutionRequest{
+			EntityID:        templatefanin.ReceiverFlowInstance,
+			NodeID:          templatefanin.ReceiverNodeID,
+			FlowID:          templatefanin.ReceiverFlowID,
+			HandlerEventKey: templatefanin.ReceiverEvent,
+			Handler:         handler,
+			Event: eventtest.RootIngress(
+				eventID,
+				events.EventType(templatefanin.ReceiverEvent),
+				"operating",
+				"",
+				payload,
+				0,
+				"",
+				"",
+				events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, templatefanin.ReceiverFlowInstance), templatefanin.ReceiverFlowInstance),
+				time.Now().UTC(),
+			),
+		})
+		if err != nil {
+			t.Fatalf("Execute(%s, %s, %s): %v", eventID, reportID, periodID, err)
+		}
+	}
+
+	execute("evt-q1-a", "report-1", "2026-Q1")
+	execute("evt-q1-duplicate", "report-1", "2026-Q1")
+	execute("evt-q2-a", "report-1", "2026-Q2")
+
+	for _, periodID := range []string{"2026-Q1", "2026-Q2"} {
+		bucket := timeridentity.NewAccumulatorWindowBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent, periodID)
+		acc, ok := loadAccumulatorForBucket(repo.snapshot, bucket)
+		if !ok {
+			t.Fatalf("missing fan-in accumulator window %s in %#v", periodID, repo.snapshot.StateCarrier.StateBuckets)
+		}
+		if got := len(acc.Items); got != 1 {
+			t.Fatalf("window %s item count = %d, want 1 after pin-owned report_id dedup", periodID, got)
+		}
+		if !acc.Received["report-1"] {
+			t.Fatalf("window %s received keys = %#v, want report-1", periodID, acc.Received)
+		}
+	}
+	if _, ok := loadAccumulatorForBucket(repo.snapshot, timeridentity.NewAccumulatorBucketRef(templatefanin.ReceiverNodeID, templatefanin.ReceiverEvent)); ok {
+		t.Fatalf("unwindowed accumulator survived: %#v", repo.snapshot.StateCarrier.StateBuckets)
 	}
 }

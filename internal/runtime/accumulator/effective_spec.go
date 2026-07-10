@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -60,38 +59,26 @@ func FanInInputPinForHandler(source semanticview.Source, flowID, nodeID, handler
 	if flowID == "" || handlerEvent == "" {
 		return runtimecontracts.FlowInputEventPin{}, false, nil
 	}
-	var matched runtimecontracts.FlowInputEventPin
-	var matchedPins []string
-	for _, pin := range source.FlowInputEventPins(flowID) {
-		if pin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
-			continue
-		}
-		if fanInInputPinMatchesHandlerEvent(source, flowID, pin, handlerEvent) {
-			matched = pin
-			matchedPins = append(matchedPins, pin.PinName())
-		}
+	result := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveFanInInputForHandler(flowID, nodeID, handlerEvent)
+	if result.Status == semanticview.EndpointAssociationNotFound {
+		return runtimecontracts.FlowInputEventPin{}, false, nil
 	}
-	if len(matchedPins) > 1 {
+	if result.Status == semanticview.EndpointAssociationAmbiguous {
+		matchedPins := make([]string, 0, len(result.Candidates))
+		for _, candidate := range result.Candidates {
+			matchedPins = append(matchedPins, strings.TrimSpace(candidate.PinName))
+		}
 		return runtimecontracts.FlowInputEventPin{}, false, fmt.Errorf("receiver handler %s.%s matches multiple fan-in input pins %v; fan-in accumulator semantics require exactly one receiver input pin owner", strings.TrimSpace(nodeID), handlerEvent, matchedPins)
 	}
-	if len(matchedPins) == 1 {
-		return matched, true, nil
+	endpoint, ok := result.Endpoint()
+	if !ok {
+		return runtimecontracts.FlowInputEventPin{}, false, result.Err()
 	}
-	return runtimecontracts.FlowInputEventPin{}, false, nil
-}
-
-func fanInInputPinMatchesHandlerEvent(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, handlerEvent string) bool {
-	handlerEvent = strings.TrimSpace(handlerEvent)
-	inputEvent := strings.TrimSpace(pin.EventType())
-	if source == nil || handlerEvent == "" || inputEvent == "" {
-		return false
+	pin, ok := source.FlowInputEventPin(flowID, endpoint.PinName)
+	if !ok {
+		return runtimecontracts.FlowInputEventPin{}, false, fmt.Errorf("canonical fan-in endpoint %s references missing receiver input pin %s.%s", endpoint.ID, flowID, endpoint.PinName)
 	}
-	if source.FlowEventMatches(flowID, handlerEvent, inputEvent) {
-		return true
-	}
-	resolvedInput := runtimeeventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputEvent))
-	handler := runtimeeventidentity.Normalize(handlerEvent)
-	return handler == resolvedInput || handler == runtimeeventidentity.Normalize(inputEvent) || handler == runtimeeventidentity.Normalize(pin.PinName())
+	return pin, true, nil
 }
 
 func normalizedStrings(values []string) []string {

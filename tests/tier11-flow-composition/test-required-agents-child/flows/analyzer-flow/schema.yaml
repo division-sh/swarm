@@ -9,6 +9,11 @@ required_agents:
     description: Analyzes data
 pins:
   inputs:
-    events: [analysis.requested]
+    events:
+    - name: analysis_requested
+      event: analysis.requested
+      source: external
   outputs:
-    events: []
+    events:
+    - name: analysis_done
+      event: analysis.done

@@ -1,8 +1,8 @@
 initial_state: idle
-terminal_states: [done]
-states: [idle, done]
+terminal_states: []
+states: [idle]
 pins:
   inputs:
-    events: [request.start]
+    events: [analyzer-flow/analysis.requested]
   outputs:
-    events: [request.complete]
+    events: []

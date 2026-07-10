@@ -396,12 +396,8 @@ func timerHandlerMatchesEvent(source semanticview.Source, flowID, eventType stri
 	if eventType == "" {
 		return false
 	}
-	for _, candidate := range []string{ref.Canonical, ref.Authored, ref.Local, ref.CatalogKey} {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			continue
-		}
-		if source.FlowEventMatches(flowID, eventType, candidate) {
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(flowID, ref.EventKey()) {
+		if endpoint.Kind == semanticview.EventEndpointNodeHandler && strings.TrimSpace(endpoint.HandlerEvent) == eventType {
 			return true
 		}
 	}
@@ -430,54 +426,16 @@ func timerFireEventHasConsumer(source semanticview.Source, ref semanticview.Flow
 	if source == nil {
 		return false
 	}
-	if len(source.RuntimeEventOwners(ref.Canonical)) > 0 {
-		return true
-	}
-	if timerFireEventHasAgentConsumer(source, ref) {
-		return true
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).MatchingConsumers(ref.FlowID, ref.EventKey()) {
+		switch endpoint.Kind {
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointAgent, semanticview.EventEndpointRequiredAgentRole:
+			return true
+		}
 	}
 	if eventHasExternalConsumerLocal(ref.Entry) {
 		return true
 	}
 	return ref.CrossesDeclaredOutputBoundary(source)
-}
-
-func timerFireEventHasAgentConsumer(source semanticview.Source, ref semanticview.FlowEventProof) bool {
-	subscribedRefs := map[string]semanticview.FlowEventProof{}
-	subscriptionPatterns := map[string]eventPatternLocal{}
-	for _, required := range source.RequiredAgents() {
-		for _, eventType := range required.SubscribesTo {
-			addTimerAgentSubscriptionProof(source, subscribedRefs, subscriptionPatterns, "", "", eventType)
-		}
-	}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		for _, required := range source.FlowRequiredAgents(flowID) {
-			for _, eventType := range required.SubscribesTo {
-				addTimerAgentSubscriptionProof(source, subscribedRefs, subscriptionPatterns, scope.PackageKey, flowID, eventType)
-			}
-		}
-	}
-	for agentID, agent := range source.AgentEntries() {
-		agentSource, _ := source.AgentContractSource(agentID)
-		flowID := strings.TrimSpace(agentSource.FlowID)
-		for _, eventType := range agent.Subscriptions {
-			addTimerAgentSubscriptionProof(source, subscribedRefs, subscriptionPatterns, agentSource.PackageKey, flowID, eventType)
-		}
-	}
-	return eventRefConsumedLocal(source, ref.Canonical, subscribedRefs, subscriptionPatterns)
-}
-
-func addTimerAgentSubscriptionProof(source semanticview.Source, subscribedRefs map[string]semanticview.FlowEventProof, patterns map[string]eventPatternLocal, packageKey, flowID, eventType string) {
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		return
-	}
-	if strings.Contains(eventType, "*") {
-		addEventPatternLocal(patterns, packageKey, flowID, eventType)
-		return
-	}
-	addEventProofLocal(subscribedRefs, source, flowID, eventType)
 }
 
 func (c *checkerContext) timerTriggerEventProduced(timer runtimecontracts.WorkflowTimerContract, ref semanticview.FlowEventProof) bool {
@@ -490,8 +448,12 @@ func (c *checkerContext) timerTriggerEventProduced(timer runtimecontracts.Workfl
 	if timerEventProducedByPlatform(c.source, ref) || nonInputEventMetadataProducerSource(ref.Entry) {
 		return true
 	}
-	emittedRefs := timerLifecycleEmittedEventRefs(c.source, strings.TrimSpace(timer.ID))
-	return eventRefProducedLocal(c.source, ref, emittedRefs)
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).MatchingProducers(ref.FlowID, ref.EventKey()) {
+		if endpoint.Kind != semanticview.EventEndpointTimer || strings.TrimSpace(endpoint.TimerID) != strings.TrimSpace(timer.ID) {
+			return true
+		}
+	}
+	return false
 }
 
 func timerEventProducedByPlatform(source semanticview.Source, ref semanticview.FlowEventProof) bool {
@@ -504,59 +466,6 @@ func timerEventProducedByPlatform(source semanticview.Source, ref semanticview.F
 		}
 	}
 	return false
-}
-
-func timerLifecycleEmittedEventRefs(source semanticview.Source, excludeTimerID string) map[string]semanticview.FlowEventProof {
-	emittedRefs := map[string]semanticview.FlowEventProof{}
-	if source == nil {
-		return emittedRefs
-	}
-	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
-		addEventProofLocal(emittedRefs, source, "", bundle.RootSchema.AutoEmitOnCreate.Event)
-	}
-	for _, scope := range source.FlowScopes() {
-		if eventType := strings.TrimSpace(scope.AutoEmitEvent); eventType != "" {
-			addEventProofLocal(emittedRefs, source, scope.ID, eventType)
-		}
-		for _, required := range source.FlowRequiredAgents(scope.ID) {
-			for _, eventType := range required.Emits {
-				addEventProofLocal(emittedRefs, source, scope.ID, eventType)
-			}
-		}
-	}
-	for _, required := range source.RequiredAgents() {
-		for _, eventType := range required.Emits {
-			addEventProofLocal(emittedRefs, source, "", eventType)
-		}
-	}
-	for nodeID := range source.NodeEntries() {
-		nodeSource, _ := source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range source.NodeHandlerSubscriptions(nodeID) {
-			handler, ok := source.NodeEventHandler(nodeID, eventType)
-			if !ok {
-				continue
-			}
-			for _, emitted := range handlerEmits(handler) {
-				addEventProofLocal(emittedRefs, source, flowID, emitted)
-			}
-		}
-	}
-	for _, timer := range source.WorkflowTimers() {
-		if strings.TrimSpace(timer.ID) == excludeTimerID {
-			continue
-		}
-		addEventProofLocal(emittedRefs, source, timer.FlowID, timer.Event)
-	}
-	for agentID, agent := range source.AgentEntries() {
-		agentSource, _ := source.AgentContractSource(agentID)
-		flowID := strings.TrimSpace(agentSource.FlowID)
-		for _, eventType := range agent.EmitEvents {
-			addEventProofLocal(emittedRefs, source, flowID, eventType)
-		}
-	}
-	addCompositionConnectEventProofsLocal(source, emittedRefs, map[string]semanticview.FlowEventProof{})
-	return emittedRefs
 }
 
 func flowStatesForTimer(source semanticview.Source, flowID string) []string {

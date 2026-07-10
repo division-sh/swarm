@@ -2,12 +2,12 @@ package bootverify
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -153,84 +153,14 @@ func pinRoutingAgentEmitSites(source semanticview.Source) []pinRoutingAgentEmitS
 	if source == nil {
 		return nil
 	}
-	seen := map[string]struct{}{}
 	sites := []pinRoutingAgentEmitSite{}
-	appendAgent := func(flowID, agentID string, entry runtimecontracts.AgentRegistryEntry) {
-		flowID = strings.TrimSpace(flowID)
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			agentID = strings.TrimSpace(entry.ID)
-		}
-		if agentID == "" {
-			return
-		}
-		for _, rawEventType := range entry.EmitEvents {
-			eventType := strings.TrimSpace(rawEventType)
-			if eventType == "" {
-				continue
-			}
-			key := flowID + "\x00" + agentID + "\x00" + eventType
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			sites = append(sites, pinRoutingAgentEmitSite{
-				FlowID:    flowID,
-				AgentID:   agentID,
-				EventType: eventType,
-			})
-		}
-	}
-	projectScopes := append([]semanticview.ProjectScope{}, source.ProjectScopes()...)
-	sort.SliceStable(projectScopes, func(i, j int) bool {
-		if strings.TrimSpace(projectScopes[i].Key) != strings.TrimSpace(projectScopes[j].Key) {
-			return strings.TrimSpace(projectScopes[i].Key) < strings.TrimSpace(projectScopes[j].Key)
-		}
-		return strings.TrimSpace(projectScopes[i].OwningFlowID) < strings.TrimSpace(projectScopes[j].OwningFlowID)
-	})
-	for _, scope := range projectScopes {
-		if pinRoutingAgentSkipsProjectScope(scope) {
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).Producers() {
+		if endpoint.Kind != semanticview.EventEndpointAgent {
 			continue
 		}
-		for _, agentID := range sortedSetKeysLocal(scope.Agents) {
-			appendAgent(scope.OwningFlowID, agentID, scope.Agents[agentID])
-		}
+		sites = append(sites, pinRoutingAgentEmitSite{FlowID: endpoint.FlowID, AgentID: endpoint.AgentID, EventType: endpoint.Event.Authored})
 	}
-	flowScopes := append([]semanticview.FlowScope{}, source.FlowScopes()...)
-	sort.SliceStable(flowScopes, func(i, j int) bool {
-		if strings.TrimSpace(flowScopes[i].ID) != strings.TrimSpace(flowScopes[j].ID) {
-			return strings.TrimSpace(flowScopes[i].ID) < strings.TrimSpace(flowScopes[j].ID)
-		}
-		if strings.TrimSpace(flowScopes[i].Path) != strings.TrimSpace(flowScopes[j].Path) {
-			return strings.TrimSpace(flowScopes[i].Path) < strings.TrimSpace(flowScopes[j].Path)
-		}
-		return strings.TrimSpace(flowScopes[i].PackageKey) < strings.TrimSpace(flowScopes[j].PackageKey)
-	})
-	for _, scope := range flowScopes {
-		for _, agentID := range sortedSetKeysLocal(scope.Agents) {
-			appendAgent(scope.ID, agentID, scope.Agents[agentID])
-		}
-	}
-	if len(projectScopes) == 0 && len(flowScopes) == 0 {
-		rootAgents := source.AgentEntries()
-		for _, agentID := range sortedSetKeysLocal(rootAgents) {
-			appendAgent("", agentID, rootAgents[agentID])
-		}
-	}
-	sort.SliceStable(sites, func(i, j int) bool {
-		if sites[i].FlowID != sites[j].FlowID {
-			return sites[i].FlowID < sites[j].FlowID
-		}
-		if sites[i].AgentID != sites[j].AgentID {
-			return sites[i].AgentID < sites[j].AgentID
-		}
-		return sites[i].EventType < sites[j].EventType
-	})
 	return sites
-}
-
-func pinRoutingAgentSkipsProjectScope(scope semanticview.ProjectScope) bool {
-	return strings.TrimSpace(scope.Key) == "." && strings.TrimSpace(scope.OwningFlowID) != ""
 }
 
 func pinTargetFinding(site semanticview.AuthoredEmitSite, reason string) Finding {
@@ -290,22 +220,24 @@ func (c *checkerContext) pinRoutingEventExternalSource(flowID, eventType string)
 }
 
 func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eventType string) bool {
-	canonical := strings.TrimSpace(source.ResolveFlowEventReference(flowID, eventType))
-	if canonical == "" {
-		return false
-	}
 	producers := 0
 	targeted := 0
-	for _, site := range pinRoutingEmitSites(source) {
-		sameCanonical := pinRoutingEmitSiteMatchesReceiverCanonical(source, site, canonical)
-		connectedToReceiver := pinRoutingEmitSiteConnectsToReceiverEvent(source, site, flowID, eventType)
-		if !sameCanonical && !connectedToReceiver {
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	topology := routingtopology.Build(source)
+	sites := pinRoutingEmitSites(source)
+	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler {
+			continue
+		}
+		site, ok := pinRoutingEmitSiteForEndpoint(sites, endpoint)
+		if !ok {
 			continue
 		}
 		if !runtimepinrouting.PinDeclaredOutput(source, site.FlowID, site.Spec.EventType()) {
 			continue
 		}
 		producers++
+		connectedToReceiver := topologyConnectsProducerToReceiver(topology, endpoint.ID, flowID)
 		structuralParent := pinRoutingStructuralParentRouteEligible(source, site.FlowID)
 		if connectedToReceiver {
 			structuralParent = true
@@ -318,62 +250,18 @@ func pinRoutingAllKnownProducersTargeted(source semanticview.Source, flowID, eve
 	return producers > 0 && targeted == producers
 }
 
-func pinRoutingEmitSiteMatchesReceiverCanonical(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverCanonical string) bool {
-	if source == nil {
-		return false
+func pinRoutingEmitSiteForEndpoint(sites []semanticview.AuthoredEmitSite, endpoint semanticview.AuthoredEventEndpoint) (semanticview.AuthoredEmitSite, bool) {
+	for _, site := range sites {
+		if strings.TrimSpace(site.FlowID) == strings.TrimSpace(endpoint.FlowID) && strings.TrimSpace(site.NodeID) == strings.TrimSpace(endpoint.NodeID) && strings.TrimSpace(site.SiteKey) == strings.TrimSpace(endpoint.Site) {
+			return site, true
+		}
 	}
-	return receiverCanonical != "" && strings.TrimSpace(source.ResolveFlowEventReference(site.FlowID, site.Spec.EventType())) == receiverCanonical
+	return semanticview.AuthoredEmitSite{}, false
 }
 
-func pinRoutingEmitSiteConnectsToReceiverEvent(source semanticview.Source, site semanticview.AuthoredEmitSite, receiverFlowID, receiverEventType string) bool {
-	if source == nil {
-		return false
-	}
-	for _, inputPin := range source.FlowInputEventPins(receiverFlowID) {
-		if !pinRoutingInputPinMatchesReceiverEvent(source, receiverFlowID, inputPin, receiverEventType) {
-			continue
-		}
-		for _, connect := range source.CompositionConnectsTo(receiverFlowID, inputPin.PinName()) {
-			from, err := connect.FromRef()
-			if err != nil {
-				continue
-			}
-			if pinRoutingConnectSourceMatchesEmitSite(source, from, site) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func pinRoutingInputPinMatchesReceiverEvent(source semanticview.Source, flowID string, inputPin runtimecontracts.FlowInputEventPin, eventType string) bool {
-	eventType = eventidentity.Normalize(eventType)
-	if eventType == "" {
-		return false
-	}
-	if eventidentity.Normalize(inputPin.PinName()) == eventType || eventidentity.Normalize(inputPin.EventType()) == eventType {
-		return true
-	}
-	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
-	pinResolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
-	return resolved != "" && resolved == pinResolved
-}
-
-func pinRoutingConnectSourceMatchesEmitSite(source semanticview.Source, from runtimecontracts.FlowPackagePinRef, site semanticview.AuthoredEmitSite) bool {
-	siteFlowID := strings.TrimSpace(site.FlowID)
-	if from.Root {
-		if siteFlowID != "" {
-			return false
-		}
-	} else if strings.TrimSpace(from.FlowID) != siteFlowID {
-		return false
-	}
-	for _, outputPin := range source.FlowOutputEventPins(siteFlowID) {
-		if strings.TrimSpace(outputPin.PinName()) != strings.TrimSpace(from.Pin) {
-			continue
-		}
-		if eventidentity.Normalize(outputPin.PinName()) == eventidentity.Normalize(site.Spec.EventType()) ||
-			eventidentity.Normalize(outputPin.EventType()) == eventidentity.Normalize(site.Spec.EventType()) {
+func topologyConnectsProducerToReceiver(topology routingtopology.Topology, producerID, receiverFlowID string) bool {
+	for _, edge := range topology.Edges {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlow && edge.Producer.ID == producerID && strings.TrimSpace(edge.Consumer.FlowID) == strings.TrimSpace(receiverFlowID) {
 			return true
 		}
 	}

@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -151,77 +152,91 @@ func eventMetadataRoleNames(source semanticview.Source, decl deadEventDeclaratio
 	if source == nil {
 		return producers, consumers
 	}
-	for nodeKey, node := range source.NodeEntries() {
-		nodeSource, _ := source.NodeContractSource(nodeKey)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for handlerEvent, handler := range node.EventHandlers {
-			if deadEventRoleMatches(source, decl, flowID, handlerEvent) {
-				eventMetadataAddNodeRole(consumers, nodeKey, node, "handler subscribes")
-			}
-			for _, emitted := range runtimecontracts.HandlerEmitEvents(handler) {
-				if deadEventRoleMatches(source, decl, flowID, emitted) {
-					eventMetadataAddNodeRole(producers, nodeKey, node, "handler emits")
-				}
-			}
-		}
-		for _, eventType := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
-			if deadEventRoleMatches(source, decl, flowID, eventType) {
-				eventMetadataAddNodeRole(consumers, nodeKey, node, "effective subscription")
-			}
+	census := semanticview.BuildAuthoredEventEndpointCensus(source)
+	for _, endpoint := range census.Producers() {
+		if endpointMatchesDeadEventDeclaration(endpoint, decl) {
+			eventMetadataAddEndpointRole(source, producers, endpoint)
 		}
 	}
-	for agentKey, agent := range source.AgentEntries() {
-		agentSource, _ := source.AgentContractSource(agentKey)
-		flowID := strings.TrimSpace(agentSource.FlowID)
-		for _, eventType := range agent.EmitEvents {
-			if deadEventRoleMatches(source, decl, flowID, eventType) {
-				eventMetadataAddAgentRole(producers, agentKey, agent, "emit_events")
-			}
-		}
-		for _, eventType := range agent.Subscriptions {
-			if deadEventRoleMatches(source, decl, flowID, eventType) {
-				eventMetadataAddAgentRole(consumers, agentKey, agent, "subscriptions")
-			}
+	for _, endpoint := range census.Consumers() {
+		if endpointMatchesDeadEventDeclaration(endpoint, decl) {
+			eventMetadataAddEndpointRole(source, consumers, endpoint)
 		}
 	}
-	for _, required := range source.RequiredAgents() {
-		eventMetadataAddRequiredAgentRoles(source, decl, producers, consumers, "", required)
-	}
-	for _, scope := range source.FlowScopes() {
-		flowID := strings.TrimSpace(scope.ID)
-		eventMetadataAddFlowRoles(source, decl, producers, consumers, flowID, scope.AutoEmitEvent)
-		for _, required := range source.FlowRequiredAgents(flowID) {
-			eventMetadataAddRequiredAgentRoles(source, decl, producers, consumers, flowID, required)
+	for _, endpoint := range census.OutputPins() {
+		if endpointMatchesDeadEventDeclaration(endpoint, decl) {
+			eventMetadataAddFlowRole(producers, endpoint.FlowID, endpoint.PinName, "output pin producer")
 		}
 	}
-	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
-		eventMetadataAddFlowRoles(source, decl, producers, consumers, "", bundle.RootSchema.AutoEmitOnCreate.Event)
-	}
-	eventMetadataAddCompositionConnectRoles(source, decl, producers, consumers)
-	for _, timer := range source.WorkflowTimers() {
-		flowID := strings.TrimSpace(timer.FlowID)
-		if deadEventRoleMatches(source, decl, flowID, timer.Event) {
-			producers.add(timer.ID, fmt.Sprintf("timer %s fires event", strings.TrimSpace(timer.ID)))
-			producers.add("runtime", "runtime timer producer")
-			producers.add("sys:runtime", "runtime timer producer")
-		}
-		for _, trigger := range []string{timer.StartOn, timer.CancelOn} {
-			trigger = strings.TrimSpace(trigger)
-			if !strings.HasPrefix(trigger, "event:") {
-				continue
-			}
-			eventType := strings.TrimSpace(strings.TrimPrefix(trigger, "event:"))
-			if deadEventRoleMatches(source, decl, flowID, eventType) {
-				consumers.add(timer.ID, fmt.Sprintf("timer %s trigger", strings.TrimSpace(timer.ID)))
-				consumers.add("runtime", "runtime timer consumer")
-				consumers.add("sys:runtime", "runtime timer consumer")
-			}
+	for _, endpoint := range census.InputPins() {
+		if endpointMatchesDeadEventDeclaration(endpoint, decl) {
+			eventMetadataAddFlowRole(consumers, endpoint.FlowID, endpoint.PinName, "input pin consumer")
 		}
 	}
-	for _, owner := range source.RuntimeEventOwners(decl.Canonical) {
-		consumers.add(owner, fmt.Sprintf("runtime event owner %s", strings.TrimSpace(owner)))
+	for _, edge := range routingtopology.Build(source).Edges {
+		if edge.Scope != routingtopology.DeliveryScopeInterFlow || edge.Boundary == nil {
+			continue
+		}
+		if edge.Producer.Event.Canonical == decl.Canonical || edge.Producer.Event.Local == decl.Canonical {
+			producers.add(edge.Boundary.From, "parent connect output producer")
+		}
+		if edge.Consumer.Event.Canonical == decl.Canonical || edge.Consumer.Event.Local == decl.Canonical {
+			consumers.add(edge.Boundary.To, "parent connect input consumer")
+		}
 	}
 	return producers, consumers
+}
+
+func endpointMatchesDeadEventDeclaration(endpoint semanticview.AuthoredEventEndpoint, decl deadEventDeclaration) bool {
+	if eventidentity.Normalize(endpoint.Event.Canonical) != eventidentity.Normalize(decl.Canonical) {
+		return false
+	}
+	if strings.TrimSpace(decl.FlowID) == "" {
+		return strings.TrimSpace(endpoint.FlowID) == ""
+	}
+	return deadEventSameScope(decl.FlowID, endpoint.FlowID) || strings.Contains(eventidentity.Normalize(endpoint.Event.Authored), "/")
+}
+
+func eventMetadataAddEndpointRole(source semanticview.Source, names eventMetadataNameIndex, endpoint semanticview.AuthoredEventEndpoint) {
+	switch endpoint.Kind {
+	case semanticview.EventEndpointNodeHandler:
+		role := "handler subscribes"
+		if endpoint.Direction == semanticview.EventEndpointProducer {
+			role = "handler emits"
+		}
+		eventMetadataAddNodeRole(names, endpoint.NodeID, source.NodeEntries()[endpoint.NodeID], role)
+	case semanticview.EventEndpointNodeGenerated:
+		role := "effective subscriptions"
+		if endpoint.Direction == semanticview.EventEndpointProducer {
+			role = "effective produces"
+		}
+		eventMetadataAddNodeRole(names, endpoint.NodeID, source.NodeEntries()[endpoint.NodeID], role)
+	case semanticview.EventEndpointAgent:
+		role := "subscriptions"
+		if endpoint.Direction == semanticview.EventEndpointProducer {
+			role = "emit_events"
+		}
+		eventMetadataAddAgentRole(names, endpoint.AgentID, source.AgentEntries()[endpoint.AgentID], role)
+	case semanticview.EventEndpointRequiredAgentRole:
+		role := "subscribes_to"
+		if endpoint.Direction == semanticview.EventEndpointProducer {
+			role = "emits"
+		}
+		names.add(endpoint.Role, fmt.Sprintf("required agent role %s %s", endpoint.Role, role))
+	case semanticview.EventEndpointTimer:
+		role := "trigger"
+		if endpoint.Direction == semanticview.EventEndpointProducer {
+			role = "fires event"
+		}
+		names.add(endpoint.TimerID, fmt.Sprintf("timer %s %s", endpoint.TimerID, role))
+		names.add("runtime", "runtime timer "+role)
+		names.add("sys:runtime", "runtime timer "+role)
+	case semanticview.EventEndpointAutoEmit:
+		eventMetadataAddFlowRole(names, endpoint.FlowID, "", "auto_emit_on_create producer")
+	case semanticview.EventEndpointExternal, semanticview.EventEndpointPlatform:
+		// Authored external/platform metadata is evidence, not an internal role.
+		return
+	}
 }
 
 func eventMetadataAddNodeRole(names eventMetadataNameIndex, nodeKey string, node runtimecontracts.SystemNodeContract, role string) {
@@ -245,51 +260,6 @@ func eventMetadataAddAgentRole(names eventMetadataNameIndex, agentKey string, ag
 	names.add(agentKey, fmt.Sprintf("agent %s %s", agentKey, role))
 	names.add(agent.ID, fmt.Sprintf("agent %s %s", strings.TrimSpace(agent.ID), role))
 	names.add(agent.Role, fmt.Sprintf("agent role %s %s", strings.TrimSpace(agent.Role), role))
-}
-
-func eventMetadataAddRequiredAgentRoles(source semanticview.Source, decl deadEventDeclaration, producers, consumers eventMetadataNameIndex, flowID string, required runtimecontracts.FlowRequiredAgent) {
-	for _, eventType := range required.Emits {
-		if deadEventRoleMatches(source, decl, flowID, eventType) {
-			producers.add(required.Role, fmt.Sprintf("required agent role %s emits", strings.TrimSpace(required.Role)))
-		}
-	}
-	for _, eventType := range required.SubscribesTo {
-		if deadEventRoleMatches(source, decl, flowID, eventType) {
-			consumers.add(required.Role, fmt.Sprintf("required agent role %s subscribes", strings.TrimSpace(required.Role)))
-		}
-	}
-}
-
-func eventMetadataAddFlowRoles(source semanticview.Source, decl deadEventDeclaration, producers, consumers eventMetadataNameIndex, flowID, autoEmitEvent string) {
-	flowID = strings.TrimSpace(flowID)
-	if deadEventSameScope(decl.FlowID, flowID) && deadEventRoleMatches(source, decl, flowID, autoEmitEvent) {
-		eventMetadataAddFlowRole(producers, flowID, "", "auto_emit_on_create producer")
-	}
-	for _, pin := range source.FlowOutputEventPins(flowID) {
-		if deadEventRoleMatches(source, decl, flowID, pin.EventType()) {
-			eventMetadataAddFlowRole(producers, flowID, pin.PinName(), "output pin producer")
-		}
-	}
-	for _, pin := range source.FlowInputEventPins(flowID) {
-		if deadEventRoleMatches(source, decl, flowID, pin.EventType()) {
-			eventMetadataAddFlowRole(consumers, flowID, pin.PinName(), "input pin consumer")
-		}
-	}
-}
-
-func eventMetadataAddCompositionConnectRoles(source semanticview.Source, decl deadEventDeclaration, producers, consumers eventMetadataNameIndex) {
-	for _, connect := range source.CompositionConnects() {
-		if from, err := connect.FromRef(); err == nil {
-			if outputPin, ok := source.FlowOutputEventPin(from.FlowID, from.Pin); ok && deadEventRoleMatches(source, decl, from.FlowID, outputPin.EventType()) {
-				eventMetadataAddFlowPinRefRole(producers, from, connect.From, "parent connect output producer")
-			}
-		}
-		if to, err := connect.ToRef(); err == nil {
-			if inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin); ok && deadEventRoleMatches(source, decl, to.FlowID, inputPin.EventType()) {
-				eventMetadataAddFlowPinRefRole(consumers, to, connect.To, "parent connect input consumer")
-			}
-		}
-	}
 }
 
 func eventMetadataAddFlowRole(names eventMetadataNameIndex, flowID, pinName, role string) {

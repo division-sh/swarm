@@ -181,128 +181,76 @@ func appendExternalMetadataEvidence(source Source, flowID, eventType string, app
 }
 
 func appendInternalTopologyEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
-	localEvent := eventidentity.Normalize(eventType)
-	canonicalEvent := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
-	if canonicalEvent == "" {
-		canonicalEvent = eventType
-	}
-	if schema, ok := source.FlowSchemaByID(flowID); ok {
-		if flowInputProducerEventMatches(source, flowID, localEvent, canonicalEvent, schema.AutoEmitOnCreate.Event) {
-			detail := "root auto_emit_on_create"
-			if flowID != "" {
-				detail = fmt.Sprintf("flow %s auto_emit_on_create", flowID)
-			}
-			appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-				Kind:      runtimecontracts.FlowInputProducerInternalTopology,
-				EventType: eventType,
-				Detail:    detail,
-			})
-		}
-	}
-	for _, scope := range source.FlowScopes() {
-		producerFlowID := strings.TrimSpace(scope.ID)
-		if producerFlowID == "" || producerFlowID == flowID {
+	census := BuildAuthoredEventEndpointCensus(source)
+	for _, endpoint := range census.MatchingProducersAcrossFlows(flowID, eventType) {
+		if endpoint.Kind == EventEndpointExternal || endpoint.Kind == EventEndpointPlatform {
 			continue
 		}
-		for _, output := range scope.OutputEvents {
-			if !flowInputProducerEventMatches(source, producerFlowID, localEvent, canonicalEvent, output) {
-				continue
-			}
-			appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-				Kind:      runtimecontracts.FlowInputProducerInternalTopology,
-				EventType: eventType,
-				Detail:    fmt.Sprintf("sibling flow %s output pin", producerFlowID),
-			})
-			break
-		}
+		detail := endpointProducerEvidenceDetail(endpoint)
+		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
+			Kind:      runtimecontracts.FlowInputProducerInternalTopology,
+			FlowID:    endpoint.FlowID,
+			EventType: eventType,
+			Detail:    detail,
+		})
 	}
-	for nodeID, node := range source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		nodeSource, _ := source.NodeContractSource(nodeID)
-		nodeFlowID := strings.TrimSpace(nodeSource.FlowID)
-		for handlerEvent, handler := range node.EventHandlers {
-			for _, emitted := range runtimecontracts.HandlerEmitEvents(handler) {
-				if !flowInputProducerEventMatches(source, nodeFlowID, localEvent, canonicalEvent, emitted) {
-					continue
-				}
-				appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-					Kind:      runtimecontracts.FlowInputProducerInternalTopology,
-					EventType: eventType,
-					Detail:    fmt.Sprintf("node %s handler %s emits", nodeID, strings.TrimSpace(handlerEvent)),
-				})
-			}
-		}
-	}
-	for agentID, agent := range source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		agentSource, _ := source.AgentContractSource(agentID)
-		agentFlowID := strings.TrimSpace(agentSource.FlowID)
-		for _, emitted := range agent.EmitEvents {
-			if !flowInputProducerEventMatches(source, agentFlowID, localEvent, canonicalEvent, emitted) {
-				continue
-			}
-			appendEvidence(runtimecontracts.FlowInputProducerEvidence{
-				Kind:      runtimecontracts.FlowInputProducerInternalTopology,
-				EventType: eventType,
-				Detail:    fmt.Sprintf("agent %s emit_events", agentID),
-			})
-		}
-	}
-	for _, timer := range source.WorkflowTimers() {
-		timerFlowID := strings.TrimSpace(timer.FlowID)
-		if !flowInputProducerEventMatches(source, timerFlowID, localEvent, canonicalEvent, timer.Event) {
+	for _, endpoint := range census.MatchingOutputPinsAcrossFlows(flowID, eventType) {
+		if strings.TrimSpace(endpoint.FlowID) == strings.TrimSpace(flowID) {
 			continue
-		}
-		detail := fmt.Sprintf("timer in flow %s", timerFlowID)
-		if timerFlowID == "" {
-			detail = "root timer"
-		}
-		if timerID := strings.TrimSpace(timer.ID); timerID != "" {
-			detail += " " + timerID
 		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerInternalTopology,
+			FlowID:    endpoint.FlowID,
 			EventType: eventType,
-			Detail:    detail,
+			Pin:       endpoint.PinName,
+			Detail:    fmt.Sprintf("sibling flow %s output pin %s", endpoint.FlowID, endpoint.PinName),
 		})
 	}
 }
 
 func flowInputPinsForEvent(source Source, flowID, eventType string) []runtimecontracts.FlowInputEventPin {
-	eventType = eventidentity.Normalize(eventType)
-	if source == nil || eventType == "" {
+	if source == nil || eventidentity.Normalize(eventType) == "" {
 		return nil
 	}
-	out := make([]runtimecontracts.FlowInputEventPin, 0)
-	for _, pin := range source.FlowInputEventPins(flowID) {
-		if eventidentity.Normalize(pin.EventType()) != eventType && eventidentity.Normalize(pin.PinName()) != eventType {
-			continue
-		}
-		out = append(out, pin)
+	association := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint(flowID, eventType)
+	endpoint, ok := association.Endpoint()
+	if !ok {
+		return nil
 	}
-	return out
+	pin, ok := source.FlowInputEventPin(flowID, endpoint.PinName)
+	if !ok {
+		return nil
+	}
+	return []runtimecontracts.FlowInputEventPin{pin}
 }
 
-func flowInputProducerEventMatches(source Source, flowID, localEvent, canonicalEvent, candidate string) bool {
-	candidate = eventidentity.Normalize(candidate)
-	localEvent = eventidentity.Normalize(localEvent)
-	canonicalEvent = eventidentity.Normalize(canonicalEvent)
-	if candidate == "" || canonicalEvent == "" {
-		return false
+func endpointProducerEvidenceDetail(endpoint AuthoredEventEndpoint) string {
+	switch endpoint.Kind {
+	case EventEndpointNodeHandler:
+		return fmt.Sprintf("node %s handler %s emits", endpoint.NodeID, endpoint.HandlerEvent)
+	case EventEndpointNodeGenerated:
+		return fmt.Sprintf("node %s generated producer", endpoint.NodeID)
+	case EventEndpointAgent:
+		return fmt.Sprintf("agent %s emit_events", endpoint.AgentID)
+	case EventEndpointRequiredAgentRole:
+		return fmt.Sprintf("required agent role %s emits", endpoint.Role)
+	case EventEndpointTimer:
+		if endpoint.FlowID == "" {
+			return strings.TrimSpace("root timer " + endpoint.TimerID)
+		}
+		return strings.TrimSpace(fmt.Sprintf("timer in flow %s %s", endpoint.FlowID, endpoint.TimerID))
+	case EventEndpointAutoEmit:
+		if endpoint.FlowID == "" {
+			return "root auto_emit_on_create"
+		}
+		return fmt.Sprintf("flow %s auto_emit_on_create", endpoint.FlowID)
+	case EventEndpointPlatform:
+		return "platform event catalog"
+	case EventEndpointExternal:
+		return "external event metadata"
+	default:
+		return strings.TrimSpace(endpoint.SourceLocation)
 	}
-	if candidate == localEvent || eventidentity.MatchPattern(localEvent, candidate) || eventidentity.MatchPattern(candidate, localEvent) {
-		return true
-	}
-	if candidate == canonicalEvent {
-		return true
-	}
-	if source == nil {
-		return false
-	}
-	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, candidate))
-	return resolved == canonicalEvent ||
-		eventidentity.MatchPattern(canonicalEvent, resolved) ||
-		eventidentity.MatchPattern(resolved, canonicalEvent)
 }
 
 func uniqueFlowInputProducerEvents(values ...string) []string {

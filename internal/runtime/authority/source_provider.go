@@ -241,26 +241,20 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 		return map[string][]string{}
 	}
 	agentEvents := make(map[string][]string)
-	for key, entry := range source.AgentEntries() {
-		role := canonicalRole(firstNonEmpty(entry.Role, key))
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(source).Producers() {
+		role := ""
+		switch endpoint.Kind {
+		case semanticview.EventEndpointAgent:
+			role = canonicalRole(firstNonEmpty(endpoint.Role, endpoint.AgentID))
+		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointNodeGenerated:
+			role = canonicalRole(endpoint.NodeID)
+		default:
+			continue
+		}
 		if role == "" {
 			continue
 		}
-		for _, eventType := range entry.EmitEvents {
-			agentEvents[role] = appendUniqueSortedEvent(agentEvents[role], eventType)
-		}
-	}
-	for nodeID := range source.NodeEntries() {
-		role := canonicalRole(nodeID)
-		if role == "" {
-			continue
-		}
-		for _, eventType := range semanticview.NodeEffectiveProduces(source, nodeID) {
-			agentEvents[role] = appendUniqueSortedEvent(agentEvents[role], eventType)
-		}
-	}
-	for _, timer := range source.WorkflowTimers() {
-		_ = strings.TrimSpace(timer.Event)
+		agentEvents[role] = appendUniqueSortedEvent(agentEvents[role], endpoint.Event.Authored)
 	}
 	return agentEvents
 }

@@ -36,6 +36,7 @@ type Options struct {
 	NonSingletonReceiver     bool
 	MissingReceiverHandler   bool
 	MissingAccumulate        bool
+	AmbiguousReceiverInput   bool
 }
 
 func LoadBundle(t testing.TB, opts Options) *runtimecontracts.WorkflowContractBundle {
@@ -172,6 +173,7 @@ pins:
           period_id:
             from: payload.period_id
             type: text
+`+ambiguousReceiverInputYAML(opts)+`
   outputs:
     events: []
 `)
@@ -202,6 +204,21 @@ portfolio-collector:
   execution_type: system_node
   subscribes_to: [operating.reported]
 `+receiverHandlersYAML(opts))
+}
+
+func ambiguousReceiverInputYAML(opts Options) string {
+	if !opts.AmbiguousReceiverInput {
+		return ""
+	}
+	return `      - name: operating_reported_duplicate
+        event: operating.reported
+        resolution:
+          mode: fan-in
+          aggregation: stream
+          window: payload.period_id
+          dedup_by: payload.report_id
+          singleton: portfolio/default
+`
 }
 
 func receiverHandlersYAML(opts Options) string {

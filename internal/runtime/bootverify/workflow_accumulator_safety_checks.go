@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -47,61 +46,52 @@ func (c *checkerContext) accumulatorSafety() []Finding {
 	}
 	c.accumulatorSafetyLoaded = true
 
-	for nodeID := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		if nodeID == "" {
+	seenHandlers := map[string]struct{}{}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).Consumers() {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || strings.TrimSpace(endpoint.NodeID) == "" || strings.TrimSpace(endpoint.HandlerEvent) == "" {
 			continue
 		}
-		nodeSource, _ := c.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(nodeSource.FlowID)
-		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" {
-				continue
-			}
-			handler, ok := c.source.NodeEventHandler(nodeID, eventType)
-			if !ok || handler.Accumulate == nil {
-				continue
-			}
-			location := accumulatorHandlerLocation(flowID, nodeID, eventType)
-			spec := handler.Accumulate
-			if accumulatorCompletionAllFamily(spec) && !accumulatorHasBoundedEscape(spec) {
-				c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
-					CheckID:  checkIDAccumulateAllBoundedEscape,
-					Severity: "warning",
-					Location: location,
-					Message: fmt.Sprintf(
-						"flow %s node %s handler %s uses accumulate completion %q without a bounded timeout escape; if an expected arrival never appears this handler can wait indefinitely. Add a schedulable timeout escape such as completion: timeout with timeout_ms, or an on_timeout branch with timeout_ms.",
-						accumulatorFlowLabel(flowID),
-						nodeID,
-						eventType,
-						accumulatorCompletionLabel(spec),
-					),
-				})
-			}
-			if accumulatorTimeoutCompletionWithoutSchedulableTimeout(spec) {
-				c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
-					CheckID:  checkIDAccumulatorTimeoutRequiresTimeout,
-					Severity: SeverityHardInvalidity,
-					Location: location,
-					Message: fmt.Sprintf(
-						"flow %s node %s handler %s uses accumulate completion %q without positive timeout_ms; runtime cannot schedule the accumulate.timeout event, so the handler can wait indefinitely. Add timeout_ms > 0 or choose a completion mode with a schedulable bounded escape.",
-						accumulatorFlowLabel(flowID),
-						nodeID,
-						eventType,
-						accumulatorCompletionLabel(spec),
-					),
-				})
-			}
-			producerPaths := c.accumulatorProducerPaths(flowID, eventType)
-			if producerPaths.hasAny() {
-				continue
-			}
+		nodeID := strings.TrimSpace(endpoint.NodeID)
+		flowID := strings.TrimSpace(endpoint.FlowID)
+		eventType := strings.TrimSpace(endpoint.HandlerEvent)
+		key := flowID + "\x00" + nodeID + "\x00" + eventType
+		if _, exists := seenHandlers[key]; exists {
+			continue
+		}
+		seenHandlers[key] = struct{}{}
+		handler, ok := c.source.NodeEventHandler(nodeID, eventType)
+		if !ok || handler.Accumulate == nil {
+			continue
+		}
+		location := accumulatorHandlerLocation(flowID, nodeID, eventType)
+		spec := handler.Accumulate
+		if accumulatorCompletionAllFamily(spec) && !accumulatorHasBoundedEscape(spec) {
 			c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
-				CheckID:  checkIDAccumulatorInputProducer,
+				CheckID:  checkIDAccumulateAllBoundedEscape,
+				Severity: "warning",
+				Location: location,
+				Message: fmt.Sprintf(
+					"flow %s node %s handler %s uses accumulate completion %q without a bounded timeout escape; if an expected arrival never appears this handler can wait indefinitely. Add a schedulable timeout escape such as completion: timeout with timeout_ms, or an on_timeout branch with timeout_ms.",
+					accumulatorFlowLabel(flowID), nodeID, eventType, accumulatorCompletionLabel(spec),
+				),
+			})
+		}
+		if accumulatorTimeoutCompletionWithoutSchedulableTimeout(spec) {
+			c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
+				CheckID:  checkIDAccumulatorTimeoutRequiresTimeout,
 				Severity: SeverityHardInvalidity,
 				Location: location,
-				Message:  producerPaths.message(flowID, nodeID, eventType),
+				Message: fmt.Sprintf(
+					"flow %s node %s handler %s uses accumulate completion %q without positive timeout_ms; runtime cannot schedule the accumulate.timeout event, so the handler can wait indefinitely. Add timeout_ms > 0 or choose a completion mode with a schedulable bounded escape.",
+					accumulatorFlowLabel(flowID), nodeID, eventType, accumulatorCompletionLabel(spec),
+				),
+			})
+		}
+		producerPaths := c.accumulatorProducerPaths(flowID, eventType)
+		if !producerPaths.hasAny() {
+			c.accumulatorSafetyFindings = append(c.accumulatorSafetyFindings, Finding{
+				CheckID: checkIDAccumulatorInputProducer, Severity: SeverityHardInvalidity,
+				Location: location, Message: producerPaths.message(flowID, nodeID, eventType),
 			})
 		}
 	}
@@ -188,83 +178,4 @@ func (c *checkerContext) accumulatorProducerPaths(flowID, eventType string) accu
 			AllowNonInputEvent: true,
 		})},
 	}
-}
-
-func (c *checkerContext) accumulatorSameFlowNodeEmitPath(flowID, eventType string) string {
-	matches := map[string]struct{}{}
-	for nodeID := range c.source.NodeEntries() {
-		nodeID = strings.TrimSpace(nodeID)
-		nodeSource, _ := c.source.NodeContractSource(nodeID)
-		if strings.TrimSpace(nodeSource.FlowID) != strings.TrimSpace(flowID) {
-			continue
-		}
-		for handlerEvent, handler := range c.source.NodeEventHandlers(nodeID) {
-			for _, emitted := range handlerEmits(handler) {
-				if accumulatorEventMatches(c.source, flowID, eventType, emitted) {
-					matches[fmt.Sprintf("%s handler %s", nodeID, strings.TrimSpace(handlerEvent))] = struct{}{}
-				}
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return "not found"
-	}
-	labels := sortedSetKeysLocal(matches)
-	if len(labels) == 1 {
-		return fmt.Sprintf("found on %s", labels[0])
-	}
-	return fmt.Sprintf("found on %s", strings.Join(labels, ", "))
-}
-
-func (c *checkerContext) accumulatorSameFlowAgentEmitPath(flowID, eventType string) string {
-	matches := map[string]struct{}{}
-	for agentID, agent := range c.source.AgentEntries() {
-		agentID = strings.TrimSpace(agentID)
-		agentSource, _ := c.source.AgentContractSource(agentID)
-		if strings.TrimSpace(agentSource.FlowID) != strings.TrimSpace(flowID) {
-			continue
-		}
-		for _, emitted := range agent.EmitEvents {
-			if accumulatorEventMatches(c.source, flowID, eventType, emitted) {
-				matches[agentID] = struct{}{}
-			}
-		}
-	}
-	if len(matches) == 0 {
-		return "not found"
-	}
-	labels := sortedSetKeysLocal(matches)
-	if len(labels) == 1 {
-		return fmt.Sprintf("found on agent %s", labels[0])
-	}
-	return fmt.Sprintf("found on agents %s", strings.Join(labels, ", "))
-}
-
-func accumulatorEventMatches(source interface {
-	ResolveFlowEventReference(flowID, eventType string) string
-	FlowEventMatches(flowID, subscription, eventType string) bool
-}, flowID, eventType, candidate string) bool {
-	eventType = eventidentity.Normalize(eventType)
-	candidate = eventidentity.Normalize(candidate)
-	if eventType == "" || candidate == "" {
-		return false
-	}
-	if eventType == candidate {
-		return true
-	}
-	if source == nil {
-		return false
-	}
-	canonicalEvent := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, eventType))
-	canonicalCandidate := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, candidate))
-	if canonicalEvent != "" && canonicalCandidate == canonicalEvent {
-		return true
-	}
-	if source.FlowEventMatches(flowID, eventType, candidate) {
-		return true
-	}
-	if canonicalCandidate != "" && canonicalCandidate != candidate {
-		return source.FlowEventMatches(flowID, eventType, canonicalCandidate)
-	}
-	return false
 }

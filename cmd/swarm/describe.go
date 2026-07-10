@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoringview"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/spf13/cobra"
 )
@@ -24,6 +25,14 @@ type describeCommandOptions struct {
 type describeCommandOutput struct {
 	authoringview.View
 	WorkspaceBackend string `json:"workspace_backend"`
+}
+
+type describeRoutesCommandOptions struct {
+	contractsPath    string
+	platformSpecPath string
+	configPath       string
+	output           cliOutputOptions
+	logging          cliLoggingOptions
 }
 
 func defaultDescribeCommandOptions() describeCommandOptions {
@@ -62,7 +71,86 @@ func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOp
 	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
+	cmd.AddCommand(newDescribeRoutesCommand(ctx, repo, rootOpts))
 	return cmd
+}
+
+func newDescribeRoutesCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
+	opts := describeRoutesCommandOptions{logging: defaultCLILoggingOptions()}
+	cmd := &cobra.Command{
+		Use:   "routes",
+		Short: "Render the frozen authored routing topology.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("unexpected argument %q", args[0]))
+			}
+			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
+				opts.configPath = rootOpts.rootFlags.configPath
+			}
+			code := runDescribeRoutesCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			if code != 0 {
+				return commandExitError{code: code}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
+	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
+	bindCLIOutputFlags(cmd, &opts.output)
+	bindCLILoggingFlags(cmd, &opts.logging)
+	return cmd
+}
+
+func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts describeRoutesCommandOptions, out, errOut io.Writer) int {
+	if err := opts.logging.validate(); err != nil {
+		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
+		return 2
+	}
+	if err := opts.output.validate(); err != nil {
+		writeDescribeRoutesError(errOut, "describe routes failed: %v\n", err)
+		return 2
+	}
+	resolvedPaths, err := resolveCLIContractPlatformSpecPaths(repo, cliContractPlatformSpecPathOptions{
+		ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
+	})
+	if err != nil {
+		writeDescribeRoutesError(errOut, "describe routes failed: resolve path config: %v\n", err)
+		return cliAPIErrorExitCode(err, cliAPIErrorClassifier{})
+	}
+	contractsRoot, err := normalizeContractsRoot(resolvedPaths.ContractsPath)
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return cliExitValidation
+	}
+	_, bundle, err := newSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
+	if err != nil {
+		writeCLIAPIError(errOut, err)
+		return cliExitValidation
+	}
+	source := semanticview.Wrap(bundle)
+	report := runtimebootverify.Run(ctx, source, runtimebootverify.Options{})
+	topology := authoringview.BuildRoutingTopologyWithReport(source, bundle, &report)
+	if err := renderCLIOutput(out, errOut, opts.output, topology, func(w io.Writer) {
+		writeRoutingTopologyText(w, topology)
+	}, func() ([]string, error) {
+		values := make([]string, 0, len(topology.Edges)+len(topology.Issues))
+		for _, edge := range topology.Edges {
+			values = append(values, edge.ID)
+		}
+		for _, issue := range topology.Issues {
+			values = append(values, issue.ID)
+		}
+		return values, nil
+	}); err != nil {
+		return 2
+	}
+	return 0
+}
+
+func writeDescribeRoutesError(out io.Writer, format string, args ...any) {
+	if out != nil {
+		fmt.Fprintf(out, format, args...)
+	}
 }
 
 func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describeCommandOptions, out, errOut io.Writer) int {
@@ -165,15 +253,7 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 			}
 		}
 	}
-	if len(view.ConnectRoutePlans) > 0 {
-		fmt.Fprintln(out, "connect route plans:")
-		for _, plan := range view.ConnectRoutePlans {
-			fmt.Fprintf(out, "  - %s.%s -> %s.%s resolution=%s delivery=%s\n", plan.Source.FlowID, plan.Source.Pin, plan.Receiver.FlowID, plan.Receiver.Pin, plan.ResolutionKind, plan.Delivery)
-			if plan.Reply != nil {
-				fmt.Fprintf(out, "    reply: role=%s request=%s.%s reply=%s.%s provider=%s.%s->%s\n", plan.Reply.Role, plan.Reply.RequesterFlowID, plan.Reply.RequestOutputPin, plan.Reply.RequesterFlowID, plan.Reply.ReplyInputPin, plan.Reply.ProviderFlowID, plan.Reply.ProviderInputPin, plan.Reply.ProviderOutputPin)
-			}
-		}
-	}
+	writeRoutingTopologyText(out, view.RoutingTopology)
 	if len(view.StageGraphs) > 0 {
 		fmt.Fprintln(out, "stage graph:")
 		for _, graph := range view.StageGraphs {
@@ -306,6 +386,110 @@ func writeDescribeText(out io.Writer, view authoringview.View, workspaceBackendD
 			fmt.Fprintf(out, "  - %s\n", strings.ReplaceAll(rendered, "\n", "\n    "))
 		}
 	}
+}
+
+func writeRoutingTopologyText(out io.Writer, topology routingtopology.Topology) {
+	if out == nil {
+		return
+	}
+	fmt.Fprintf(out, "routing topology: %s\n", topology.SchemaVersion)
+	fmt.Fprintf(out, "  source authority: %s\n", topology.SourceAuthority)
+	intra, inter := 0, 0
+	for _, edge := range topology.Edges {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlow {
+			inter++
+		} else {
+			intra++
+		}
+	}
+	if len(topology.Edges) == 0 {
+		fmt.Fprintln(out, "  routes: none")
+	} else if inter == 0 {
+		fmt.Fprintf(out, "  cross-flow routes: none (%d intra-flow routes)\n", intra)
+	}
+	for _, edge := range topology.Edges {
+		fmt.Fprintf(out, "  - [%s] %s: %s -> %s\n", edge.Scope, edge.Event.Canonical, routingEndpointText(edge.Producer), routingEndpointText(edge.Consumer))
+		if edge.Boundary != nil {
+			fmt.Fprintf(out, "    connect: %s -> %s (%s)\n", edge.Boundary.From, edge.Boundary.To, edge.Boundary.AuthoredLocation)
+		}
+		if edge.Resolution != nil {
+			fmt.Fprintf(out, "    resolution: mode=%s delivery=%s target=%s%s\n", formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.Mode), formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.Delivery), formatCLIHumanCode(cliHumanCodeRoutingTopology, edge.Resolution.TargetKind), routingResolutionDetail(edge.Resolution))
+		}
+	}
+	if len(topology.BoundaryExposures) > 0 {
+		fmt.Fprintln(out, "  boundary exposures:")
+		for _, exposure := range topology.BoundaryExposures {
+			fmt.Fprintf(out, "    - %s: %s -> output %s.%s\n", exposure.Event.Canonical, routingEndpointText(exposure.Producer), routingFlowLabel(exposure.Output.FlowID), exposure.Output.PinName)
+		}
+	}
+	if len(topology.LegacyQualifiedSubscriptions) > 0 {
+		fmt.Fprintln(out, "  legacy qualified subscriptions:")
+		for _, subscription := range topology.LegacyQualifiedSubscriptions {
+			fmt.Fprintf(out, "    - disposition=%s event=%s consumer=%s at %s\n", formatCLIHumanCode(cliHumanCodeRoutingTopology, subscription.Disposition), subscription.Event.Canonical, routingEndpointText(subscription.Consumer), subscription.AuthoredLocation)
+			fmt.Fprintf(out, "      runtime delivery=%t canonical edge=%t", subscription.RuntimeDelivery, subscription.CanonicalEdge)
+			if subscription.FindingID != "" {
+				fmt.Fprintf(out, " finding=%s", subscription.FindingID)
+			}
+			fmt.Fprintln(out)
+			fmt.Fprintf(out, "      migration: %s\n", subscription.Migration)
+		}
+	}
+	if len(topology.Issues) > 0 {
+		fmt.Fprintln(out, "  route issues:")
+		for _, issue := range topology.Issues {
+			if issue.CheckID != "" {
+				fmt.Fprintf(out, "    - %s [%s] at %s: %s\n", issue.CheckID, issue.Severity, firstNonEmpty(issue.AuthoredLocation, issue.Location), issue.Message)
+				if issue.Remediation != "" {
+					fmt.Fprintf(out, "      remediation: %s\n", issue.Remediation)
+				}
+				continue
+			}
+			fmt.Fprintf(out, "    - %s: %s -> %s at %s: %s\n", issue.Failure, issue.From, issue.To, issue.AuthoredLocation, issue.Detail)
+		}
+	}
+}
+
+func routingEndpointText(endpoint routingtopology.Endpoint) string {
+	actor := endpoint.NodeID
+	if actor == "" {
+		actor = endpoint.AgentID
+	}
+	if actor == "" {
+		actor = endpoint.Role
+	}
+	if actor == "" {
+		actor = endpoint.TimerID
+	}
+	if actor == "" {
+		actor = endpoint.PinName
+	}
+	if actor == "" {
+		actor = string(endpoint.Kind)
+	}
+	return routingFlowLabel(endpoint.FlowID) + "." + actor
+}
+
+func routingFlowLabel(flowID string) string {
+	if flowID = strings.TrimSpace(flowID); flowID != "" {
+		return flowID
+	}
+	return "root"
+}
+
+func routingResolutionDetail(resolution *routingtopology.Resolution) string {
+	if resolution == nil {
+		return ""
+	}
+	if resolution.InstanceKey != nil {
+		return fmt.Sprintf(" key=%s mint=%s as=%s on_missing=%s on_conflict=%s", strings.Join(resolution.InstanceKey.Fields, ","), resolution.InstanceKey.Mint, resolution.InstanceKey.As, resolution.InstanceKey.OnMissing, resolution.InstanceKey.OnConflict)
+	}
+	if resolution.FanIn != nil {
+		return fmt.Sprintf(" singleton=%s aggregation=%s window=%s dedup_by=%s", resolution.FanIn.Singleton, resolution.FanIn.Aggregation, resolution.FanIn.Window, strings.Join(resolution.FanIn.DedupBy, ","))
+	}
+	if resolution.Reply != nil {
+		return fmt.Sprintf(" reply=%s correlation=%s", resolution.Reply.Role, resolution.Reply.CorrelationKey)
+	}
+	return ""
 }
 
 func describeQuietValues(view authoringview.View) []string {

@@ -15,46 +15,27 @@ func (c *checkerContext) singleNodePerEvent() []Finding {
 		return c.singleNodeFindings
 	}
 	c.singleNodeLoaded = true
-	eventNames := map[string]struct{}{}
-	type subscriptionOwner struct {
-		NodeID string
-		FlowID string
-		Event  string
-	}
-	subscriptions := make([]subscriptionOwner, 0)
+	owners := map[string]map[string]struct{}{}
 	for eventType := range c.source.ResolvedEventCatalog() {
 		eventType = strings.TrimSpace(eventType)
-		if eventType != "" && !strings.Contains(eventType, "*") {
-			eventNames[eventType] = struct{}{}
+		if eventType != "" {
+			owners[eventType] = map[string]struct{}{}
 		}
 	}
-	for nodeID := range c.source.NodeEntries() {
-		sourceRef, _ := c.source.NodeContractSource(nodeID)
-		flowID := strings.TrimSpace(sourceRef.FlowID)
-		for _, eventType := range c.source.NodeHandlerSubscriptions(nodeID) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" || strings.Contains(eventType, "*") {
-				continue
-			}
-			proof := semanticview.ResolveFlowEventProof(c.source, flowID, eventType)
-			eventKey := proof.EventKey()
-			if eventKey == "" {
-				continue
-			}
-			subscriptions = append(subscriptions, subscriptionOwner{
-				NodeID: strings.TrimSpace(nodeID),
-				FlowID: flowID,
-				Event:  eventKey,
-			})
-			eventNames[eventKey] = struct{}{}
+	for _, endpoint := range semanticview.BuildAuthoredEventEndpointCensus(c.source).Consumers() {
+		if endpoint.Kind != semanticview.EventEndpointNodeHandler || endpoint.Pattern || strings.TrimSpace(endpoint.NodeID) == "" {
+			continue
 		}
+		eventKey := endpoint.Event.EventKey()
+		if owners[eventKey] == nil {
+			owners[eventKey] = map[string]struct{}{}
+		}
+		owners[eventKey][strings.TrimSpace(endpoint.NodeID)] = struct{}{}
 	}
-	for _, eventType := range sortedSetKeysLocal(eventNames) {
-		nodeIDs := make([]string, 0)
-		for _, subscription := range subscriptions {
-			if subscription.Event == eventType {
-				nodeIDs = append(nodeIDs, subscription.NodeID)
-			}
+	for _, eventType := range sortedSetKeysLocal(owners) {
+		nodeIDs := make([]string, 0, len(owners[eventType]))
+		for nodeID := range owners[eventType] {
+			nodeIDs = append(nodeIDs, nodeID)
 		}
 		if len(nodeIDs) <= 1 {
 			continue
