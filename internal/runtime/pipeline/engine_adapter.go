@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventpayload "github.com/division-sh/swarm/internal/runtime/eventpayload"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -288,7 +289,12 @@ func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, entit
 	if workflowInstanceOwnedByFlow(r.coordinator.SemanticSource(), instance, flowID) {
 		return nil
 	}
-	return fmt.Errorf("cross_flow_write_forbidden: flow %s cannot write entity %s owned by workflow %s", flowID, entityID, strings.TrimSpace(instance.WorkflowName))
+	return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "cross_flow_write_forbidden", "pipeline-engine", "write_entity", map[string]any{
+		"action":         "cross_flow_entity_write",
+		"flow_id":        flowID,
+		"entity_id":      entityID,
+		"owner_workflow": strings.TrimSpace(instance.WorkflowName),
+	})
 }
 
 type pipelineEngineTimerApplier struct {

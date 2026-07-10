@@ -12,7 +12,6 @@ func TestAgentReceiptSideEffects_RoundTrip(t *testing.T) {
 		runtimemanager.ReceiptStatusDeadLetter,
 		"cancelled_by_kill_previous",
 		2,
-		"boom",
 	))
 	if err != nil {
 		t.Fatalf("marshalAgentReceiptSideEffects: %v", err)
@@ -29,9 +28,6 @@ func TestAgentReceiptSideEffects_RoundTrip(t *testing.T) {
 	}
 	if got.RetryCount != 2 {
 		t.Fatalf("RetryCount = %d, want 2", got.RetryCount)
-	}
-	if got.Error != "boom" {
-		t.Fatalf("Error = %q, want boom", got.Error)
 	}
 }
 

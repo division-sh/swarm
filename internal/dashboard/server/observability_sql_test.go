@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -36,6 +37,34 @@ func canonicalObservabilityCaps() store.StoreSchemaCapabilities {
 	}
 }
 
+func canonicalRuntimeLogTestPayload(t *testing.T, component, action, code, message, agentID string) string {
+	t.Helper()
+	class := runtimefailures.ClassInternalFailure
+	if code == "retry_exhausted" {
+		class = runtimefailures.ClassRetryExhausted
+	}
+	failure := runtimefailures.Normalize(runtimefailures.New(class, code, "test-runtime", action, nil), "test-runtime", action)
+	details := map[string]any{
+		"action":  action,
+		"failure": failure,
+	}
+	if component != "" {
+		details["component"] = component
+	}
+	if agentID != "" {
+		details["agent_id"] = agentID
+	}
+	payload, err := json.Marshal(map[string]any{
+		"log_level": "error",
+		"message":   message,
+		"details":   details,
+	})
+	if err != nil {
+		t.Fatalf("marshal canonical runtime log payload: %v", err)
+	}
+	return string(payload)
+}
+
 func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
@@ -57,15 +86,19 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 		t.Fatalf("seed event: %v", err)
 	}
 
-	seedDelivery := func(subscriberID, status string, retryCount int, errText string, createdAt time.Time) {
+	seedDelivery := func(subscriberID, status string, retryCount int, failureCode string, createdAt time.Time) {
 		t.Helper()
+		failureJSON := ""
+		if failureCode != "" {
+			failureJSON = mustMarshalFailure(t, testFailure(failureCode))
+		}
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, created_at
+				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
 			) VALUES (
-				$1::uuid, $2::uuid, 'agent', $3, $4, $5, NULLIF($6, ''), $7
+				$1::uuid, $2::uuid, 'agent', $3, $4, $5, NULLIF($6, '')::jsonb, $7
 			)
-		`, runID, eventID, subscriberID, status, retryCount, errText, createdAt); err != nil {
+		`, runID, eventID, subscriberID, status, retryCount, failureJSON, createdAt); err != nil {
 			t.Fatalf("seed delivery %s: %v", subscriberID, err)
 		}
 	}
@@ -79,11 +112,11 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, side_effects, processed_at
+			event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at
 		) VALUES
-			($1::uuid, 'agent', 'agent-pending', 'dead_letter', '{"retry_count":9,"error":"receipt-should-not-win"}'::jsonb, now()),
-			($1::uuid, 'agent', 'agent-failed', 'success', '{"retry_count":0,"error":"receipt-success"}'::jsonb, now())
-	`, eventID); err != nil {
+			($1::uuid, 'agent', 'agent-pending', 'dead_letter', '{"retry_count":9}'::jsonb, $2::jsonb, now()),
+			($1::uuid, 'agent', 'agent-failed', 'success', '{"retry_count":0}'::jsonb, NULL, now())
+	`, eventID, mustMarshalFailure(t, testFailure("receipt_should_not_win"))); err != nil {
 		t.Fatalf("seed conflicting receipts: %v", err)
 	}
 
@@ -196,11 +229,11 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', 1, 'delivery-wins', now()
+			$1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', 1, $3::jsonb, now()
 		)
-	`, runID, eventID); err != nil {
+	`, runID, eventID, mustMarshalFailure(t, testFailure("delivery_wins"))); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -226,7 +259,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	if len(got.Deliveries) != 1 {
 		t.Fatalf("deliveries len = %d, want 1", len(got.Deliveries))
 	}
-	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Error != "delivery-wins" {
+	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Failure == nil || item.Failure.Detail.Code != "delivery_wins" {
 		t.Fatalf("delivery = %#v", item)
 	}
 }
@@ -433,17 +466,7 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 
 	insertRuntimeLog := func(component, action, agentID string, createdAt time.Time) {
 		t.Helper()
-		payload := `{
-			"log_level":"error",
-			"message":"runtime incident",
-			"details":{
-				"component":"` + component + `",
-				"action":"` + action + `",
-				"agent_id":"` + agentID + `",
-				"error":"boom",
-				"error_code":"retry_exhausted"
-			}
-		}`
+		payload := canonicalRuntimeLogTestPayload(t, component, action, "retry_exhausted", "runtime incident", agentID)
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO events (
 				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
@@ -469,8 +492,8 @@ func TestSQLObservabilityReader_ListIncidents_UsesCanonicalRuntimeLogPayloads(t 
 	if rows[0].Code != "retry_exhausted" || rows[0].Count != 2 || rows[0].Component != "mcp-gateway" || rows[0].Level != "error" {
 		t.Fatalf("incident row = %#v", rows[0])
 	}
-	if rows[0].RootCause != "boom" {
-		t.Fatalf("incident root_cause = %#v, want boom", rows[0].RootCause)
+	if rows[0].RootCause != "Retry policy was exhausted (retry_exhausted)." {
+		t.Fatalf("incident root_cause = %#v, want canonical failure message", rows[0].RootCause)
 	}
 	if len(rows[0].Agents) != 2 || rows[0].Agents[0] != "agent-a" || rows[0].Agents[1] != "agent-b" {
 		t.Fatalf("incident agents = %#v", rows[0].Agents)
@@ -485,15 +508,7 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
 	ctx := context.Background()
 
-	payload := `{
-		"log_level":"error",
-		"message":"incomplete runtime incident",
-		"details":{
-			"action":"request_failed",
-			"error":"boom",
-			"error_code":"retry_exhausted"
-		}
-	}`
+	payload := canonicalRuntimeLogTestPayload(t, "", "request_failed", "retry_exhausted", "incomplete runtime incident", "")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (
 			event_id, event_name, scope, payload, produced_by, produced_by_type, created_at
@@ -510,7 +525,7 @@ func TestSQLObservabilityReader_ListIncidents_FailsClosedOnMissingCanonicalCompo
 	}
 }
 
-func TestSQLObservabilityReader_ListIncidents_UsesMessageWhenCanonicalErrorIsEmpty(t *testing.T) {
+func TestSQLObservabilityReader_ListIncidents_IgnoresErrorLogsWithoutCanonicalFailure(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	reader := NewSQLObservabilityReader(db, stubObservabilityCaps{caps: canonicalObservabilityCaps()})
 	ctx := context.Background()
@@ -520,8 +535,7 @@ func TestSQLObservabilityReader_ListIncidents_UsesMessageWhenCanonicalErrorIsEmp
 		"message":"message fallback",
 		"details":{
 			"component":"diagnostics",
-			"action":"fallback_case",
-			"error_code":"retry_exhausted"
+			"action":"fallback_case"
 		}
 	}`
 	if _, err := db.ExecContext(ctx, `
@@ -538,11 +552,8 @@ func TestSQLObservabilityReader_ListIncidents_UsesMessageWhenCanonicalErrorIsEmp
 	if err != nil {
 		t.Fatalf("ListIncidents: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("incident rows = %d, want 1: %#v", len(rows), rows)
-	}
-	if rows[0].RootCause != "message fallback" {
-		t.Fatalf("incident root_cause = %#v, want message fallback", rows[0].RootCause)
+	if len(rows) != 0 {
+		t.Fatalf("incident rows = %d, want none without canonical failure: %#v", len(rows), rows)
 	}
 }
 
@@ -554,15 +565,7 @@ func TestSQLObservabilityReader_ListIncidents_SortsByRawLastSeenBeforeLimit(t *t
 	base := time.Now().UTC().Truncate(time.Second)
 	insertRuntimeLog := func(code, message string, createdAt time.Time) {
 		t.Helper()
-		payload := `{
-			"log_level":"error",
-			"message":"` + message + `",
-			"details":{
-				"component":"diagnostics",
-				"action":"same_second_order",
-				"error_code":"` + code + `"
-			}
-		}`
+		payload := canonicalRuntimeLogTestPayload(t, "diagnostics", "same_second_order", code, message, "")
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO events (
 				event_id, event_name, scope, payload, produced_by, produced_by_type, created_at

@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -57,7 +58,7 @@ type emitRoutePlanStore struct {
 	routes      map[string][]events.DeliveryRoute
 	scopes      map[string]runtimereplayclaim.CommittedReplayScope
 	receipts    map[string]string
-	receiptErrs map[string]string
+	receiptErrs map[string]*failures.Envelope
 }
 
 func newEmitRoutePlanStore() *emitRoutePlanStore {
@@ -66,7 +67,7 @@ func newEmitRoutePlanStore() *emitRoutePlanStore {
 		routes:      map[string][]events.DeliveryRoute{},
 		scopes:      map[string]runtimereplayclaim.CommittedReplayScope{},
 		receipts:    map[string]string{},
-		receiptErrs: map[string]string{},
+		receiptErrs: map[string]*failures.Envelope{},
 	}
 }
 
@@ -98,9 +99,9 @@ func (s *emitRoutePlanStore) PersistEventWithDeliveryRouteSetAndScope(_ context.
 	return nil
 }
 
-func (s *emitRoutePlanStore) UpsertPipelineReceipt(_ context.Context, eventID, status, errText string) error {
+func (s *emitRoutePlanStore) UpsertPipelineReceipt(_ context.Context, eventID, status string, failure *failures.Envelope) error {
 	s.receipts[eventID] = status
-	s.receiptErrs[eventID] = errText
+	s.receiptErrs[eventID] = failures.CloneEnvelope(failure)
 	return nil
 }
 
@@ -178,9 +179,9 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 
 func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 	tests := []struct {
-		name      string
-		payload   map[string]any
-		wantError string
+		name       string
+		payload    map[string]any
+		wantReason string
 	}{
 		{
 			name: "valid single citation",
@@ -199,28 +200,28 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 			payload: map[string]any{
 				"cites": []any{},
 			},
-			wantError: "criteria citation list must not be empty",
+			wantReason: "criteria_citation_shape_invalid",
 		},
 		{
 			name: "unknown id",
 			payload: map[string]any{
 				"cite": "FX-MISSING",
 			},
-			wantError: `unknown criteria id "FX-MISSING"`,
+			wantReason: "criteria_id_unknown",
 		},
 		{
 			name: "class mismatch",
 			payload: map[string]any{
 				"cite": "FX-SOFT-04",
 			},
-			wantError: `has class "soft", not one of allowed classes`,
+			wantReason: "criteria_class_not_allowed",
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, bus, actor := criteriaCitationEmitTestExecutor()
 			_, err := exec.handleEmitTool(context.Background(), actor, "emit_cto_spec_vetoed", tc.payload)
-			if tc.wantError == "" {
+			if tc.wantReason == "" {
 				if err != nil {
 					t.Fatalf("handleEmitTool: %v", err)
 				}
@@ -232,18 +233,18 @@ func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
 			if err == nil {
 				t.Fatal("handleEmitTool error = nil, want criteria citation rejection")
 			}
-			runtimeErr, ok := AsRuntimeError(err)
+			runtimeErr, ok := failures.As(err)
 			if !ok || runtimeErr == nil {
-				t.Fatalf("error = %#v, want runtime error", err)
+				t.Fatalf("error = %#v, want canonical failure", err)
 			}
-			if runtimeErr.Code != "criteria_citation_validation_failed" {
-				t.Fatalf("runtime error code = %q, want criteria_citation_validation_failed", runtimeErr.Code)
+			if runtimeErr.Failure.Class != failures.ClassSchemaInvalid || runtimeErr.Failure.Detail.Code != "criteria_citation_validation_failed" {
+				t.Fatalf("failure = %#v", runtimeErr.Failure)
 			}
-			if runtimeErr.Retryable {
+			if runtimeErr.Failure.Retryable {
 				t.Fatalf("runtime error retryable = true, want false")
 			}
-			if !strings.Contains(err.Error(), tc.wantError) {
-				t.Fatalf("handleEmitTool error = %v, want %q", err, tc.wantError)
+			if got := runtimeErr.Failure.Detail.Attributes["reason"]; got != tc.wantReason {
+				t.Fatalf("failure reason = %#v, want %q", got, tc.wantReason)
 			}
 			if bus.count != 0 {
 				t.Fatalf("publish count = %d, want 0", bus.count)
@@ -350,15 +351,15 @@ func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
 	if err == nil {
 		t.Fatal("handleEmitTool error = nil, want mutable criteria grant rejection")
 	}
-	runtimeErr, ok := AsRuntimeError(err)
+	runtimeErr, ok := failures.As(err)
 	if !ok || runtimeErr == nil {
 		t.Fatalf("error = %#v, want runtime error", err)
 	}
-	if runtimeErr.Code != "criteria_citation_validation_failed" {
-		t.Fatalf("runtime error code = %q, want criteria_citation_validation_failed", runtimeErr.Code)
+	if runtimeErr.Failure.Detail.Code != "criteria_citation_validation_failed" {
+		t.Fatalf("failure detail = %q, want criteria_citation_validation_failed", runtimeErr.Failure.Detail.Code)
 	}
-	if !strings.Contains(err.Error(), `agent cto-agent does not declare criteria set "feasibility_exclusions"`) {
-		t.Fatalf("handleEmitTool error = %v, want contract-owned criteria rejection", err)
+	if got := runtimeErr.Failure.Detail.Attributes["reason"]; got != "criteria_set_not_allowed" {
+		t.Fatalf("failure reason = %#v, want criteria_set_not_allowed", got)
 	}
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
@@ -1061,12 +1062,7 @@ func TestHandleEmitTool_FailsClosedOnUndeclaredPayloadField(t *testing.T) {
 		"category":   "AP automation",
 		"unexpected": true,
 	})
-	if err == nil {
-		t.Fatal("expected undeclared payload field failure")
-	}
-	if !strings.Contains(err.Error(), "$.unexpected is not allowed") {
-		t.Fatalf("error = %v, want undeclared-field validation detail", err)
-	}
+	requireToolFailure(t, err, failures.ClassSchemaInvalid, "schema_validation_failed")
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
@@ -1348,12 +1344,7 @@ func TestHandleEmitTool_FailsClosedOnSameActorDuplicateLeafScopedSchemas(t *test
 	_, err := exec.handleEmitTool(context.Background(), actor, "emit_task_requested", map[string]any{
 		"priority": "urgent",
 	})
-	if err == nil {
-		t.Fatal("expected same-actor duplicate local tool name collision to fail closed")
-	}
-	if !strings.Contains(err.Error(), "invalid emit tool name") {
-		t.Fatalf("error = %v, want invalid emit tool name", err)
-	}
+	requireToolFailure(t, err, failures.ClassSchemaInvalid, "invalid_emit_tool_name")
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
 	}
@@ -1396,12 +1387,7 @@ func TestHandleEmitTool_FailsClosedOnNamedTypeViolation(t *testing.T) {
 	_, err := exec.handleEmitTool(context.Background(), actor, "emit_scan_completed", map[string]any{
 		"details": "not-an-object",
 	})
-	if err == nil {
-		t.Fatal("expected named-type payload violation")
-	}
-	if !strings.Contains(err.Error(), "$.details must be object") {
-		t.Fatalf("handleEmitTool error = %v, want named-type detail", err)
-	}
+	requireToolFailure(t, err, failures.ClassSchemaInvalid, "schema_validation_failed")
 	if bus.count != 0 {
 		t.Fatalf("publish count = %d, want 0", bus.count)
 	}

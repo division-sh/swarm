@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -857,8 +858,9 @@ func assertHandlerOutcome(t testing.TB, h *runtimeHarness, want, entityID string
 
 func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 	wantOutcome := strings.TrimSpace(strings.ToLower(step.ReceiptOutcome))
-	wantError := strings.TrimSpace(step.ReceiptErrorContains)
-	if wantOutcome == "" && wantError == "" {
+	wantClass := strings.TrimSpace(step.ReceiptFailureClass)
+	wantDetail := strings.TrimSpace(step.ReceiptFailureDetail)
+	if wantOutcome == "" && wantClass == "" && wantDetail == "" {
 		return
 	}
 	h.t.Helper()
@@ -868,8 +870,9 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 	eventIDs := h.publishedEventIDs(triggerPayloadEntityID(step.Payload))
 	for _, eventID := range eventIDs {
 		var subscriberID, outcome, sideEffects string
+		var rawFailure []byte
 		err := h.db.QueryRowContext(context.Background(), `
-			SELECT subscriber_id, outcome, COALESCE(side_effects::text, '')
+			SELECT subscriber_id, outcome, COALESCE(side_effects::text, ''), COALESCE(failure, 'null'::jsonb)
 			FROM event_receipts
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'platform'
@@ -879,7 +882,7 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 			  )
 			ORDER BY processed_at DESC
 			LIMIT 1
-		`, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects)
+		`, strings.TrimSpace(eventID)).Scan(&subscriberID, &outcome, &sideEffects, &rawFailure)
 		if err == sql.ErrNoRows {
 			continue
 		}
@@ -892,8 +895,19 @@ func (h *runtimeHarness) assertTriggerReceipt(step catalogTriggerStep) {
 				h.t.Fatalf("trigger receipt outcome for %s/%s = %q, want %q", eventID, subscriberID, gotOutcome, wantOutcome)
 			}
 		}
-		if wantError != "" && !strings.Contains(sideEffects, wantError) {
-			h.t.Fatalf("trigger receipt side_effects for %s/%s = %s, want error containing %q", eventID, subscriberID, sideEffects, wantError)
+		if wantClass != "" || wantDetail != "" {
+			failure, decodeErr := runtimefailures.UnmarshalEnvelope(rawFailure)
+			if decodeErr != nil {
+				h.t.Fatalf("decode trigger receipt failure for %s/%s: %v raw=%s", eventID, subscriberID, decodeErr, rawFailure)
+			}
+			if string(failure.Class) != wantClass || failure.Detail.Code != wantDetail {
+				h.t.Fatalf("trigger receipt failure for %s/%s = %#v, want %s/%s", eventID, subscriberID, failure, wantClass, wantDetail)
+			}
+			for key, want := range step.ReceiptFailureAttributes {
+				if got := failure.Detail.Attributes[key]; fmt.Sprint(got) != fmt.Sprint(want) {
+					h.t.Fatalf("trigger receipt failure attribute %s = %#v, want %#v", key, got, want)
+				}
+			}
 		}
 		return
 	}
@@ -1001,13 +1015,13 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityI
 			SELECT 1
 			FROM dead_letters dl
 			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
-			  AND dl.failure_type = 'chain_depth_exceeded'
+			  AND dl.failure->>'class' = 'platform.chain_depth_exceeded'
 			UNION ALL
 			SELECT 1
 			FROM events e
 			WHERE e.event_name = 'platform.dead_letter'
 			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
-			  AND COALESCE(e.payload->>'failure_type', '') = 'chain_depth_exceeded'
+			  AND COALESCE(e.payload->'failure'->>'class', '') = 'platform.chain_depth_exceeded'
 		) hits
 	`, entityID).Scan(&count); err != nil {
 		t.Fatalf("query chain_depth_exceeded dead_letters: %v", err)

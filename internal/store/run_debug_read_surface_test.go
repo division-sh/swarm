@@ -9,6 +9,7 @@ import (
 
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -216,18 +217,18 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	}
 	if _, err := db.ExecContext(ctx, `
 			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, delivered_at, created_at
+				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, delivered_at, created_at
 			)
-			VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'handler_error', 'boom', $3, $4)
-		`, targetRunID, targetEventID, now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
+			VALUES ($1::uuid, $2::uuid, 'agent', 'agent-1', 'dead_letter', 2, 'handler_error', $3::jsonb, $4, $5)
+		`, targetRunID, targetEventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "handler_failed", nil)), now.Add(10*time.Second), now.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	successDeliveryID := uuid.NewString()
 	if _, err := db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (
-				delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, delivered_at, created_at
-			)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'node-success', 'delivered', 0, 'node_processed', '', $4, $5)
+		INSERT INTO event_deliveries (
+			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, delivered_at, created_at
+		)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'node', 'node-success', 'delivered', 0, 'node_processed', $4, $5)
 		`, successDeliveryID, targetRunID, targetEventID, now.Add(20*time.Second), now.Add(15*time.Second)); err != nil {
 		t.Fatalf("seed successful delivery: %v", err)
 	}
@@ -235,8 +236,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 		OriginalEventID: targetEventID,
 		OriginalEvent:   "scan.requested",
 		EntityID:        targetEntityID,
-		FailureType:     "handler_error",
-		ErrorMessage:    "boom",
+		Failure:         testFailureEnvelope(runtimefailures.ClassInternalFailure, "test_handler_failure", nil),
 		HandlerNode:     "node-a",
 		Timestamp:       now.Add(4 * time.Minute).Format(time.RFC3339Nano),
 	}); err != nil {
@@ -329,10 +329,10 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 		now.Add(-50*time.Second), now.Add(-40*time.Second), now.Add(-30*time.Second), readyRunID, now.Add(-20*time.Second)); err != nil {
 		t.Fatalf("seed events: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, activeEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt active event: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, readyEventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, readyEventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt ready event: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -442,13 +442,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id, status,
-			retry_count, reason_code, last_error, active_session_id, delivery_context, started_at, created_at
+			retry_count, reason_code, failure, active_session_id, delivery_context, started_at, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3::uuid, 'agent', 'agent-source', 'failed',
-			2, 'handler_error', 'trace boom', $4::uuid, jsonb_build_object('reply', jsonb_build_object('id', $7::text)), $5, $6
+			2, 'handler_error', $4::jsonb, $5::uuid, jsonb_build_object('reply', jsonb_build_object('id', $8::text)), $6, $7
 		)
-	`, deliveryID, runID, eventID, sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID); err != nil {
+	`, deliveryID, runID, eventID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)), sessionID, now.Add(1*time.Second), now.Add(500*time.Millisecond), replyContextID); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -456,13 +456,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, error, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-source', $3::uuid, 'session', 'entity:' || $4::text, $4::uuid,
 			$5::uuid, 'scan.requested', 'task-1', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 12, 1, '', $6
+			'{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, $6
 		)
 	`, turnID, runID, sessionID, entityID, eventID, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed turn: %v", err)
@@ -482,7 +482,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if got.DeliveryID != deliveryID || got.DeliveryStatus != "failed" || got.SubscriberID != "agent-source" {
 		t.Fatalf("delivery trace = %#v", got)
 	}
-	if got.DeliveryReasonCode != "handler_error" || got.DeliveryLastError != "trace boom" || got.DeliveryRetryCount != 2 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
+	if got.DeliveryReasonCode != "handler_error" || got.DeliveryFailure == nil || got.DeliveryFailure.Detail.Code != "trace_failure" || got.DeliveryRetryCount != 2 || !got.DeliveryRetryEligible || got.DeliveryTerminal {
 		t.Fatalf("delivery failure trace evidence = %#v", got)
 	}
 	if got.ReplyContextID != replyContextID {
@@ -558,13 +558,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, error, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-late', $3::uuid, 'session', 'entity:' || $4::text, $4::uuid,
 			$5::uuid, 'scan.requested', 'task-late', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 12, 0, '', $6
+			'{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, $6
 		)
 	`, turnID, runID, sessionID, entityID, eventID, base.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed late turn: %v", err)
@@ -638,13 +638,13 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, error, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'agent-task', $3::uuid, 'task', 'entity:' || $4::text, $4::uuid,
 			$5::uuid, 'task.started', 'task-2', '[]'::jsonb, '[]'::jsonb,
 			'[]'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, true, 8, 0, '', $6
+			'{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, $6
 		)
 	`, turnID, runID, sessionID, entityID, eventID, now.Add(3*time.Second)); err != nil {
 		t.Fatalf("seed turn: %v", err)

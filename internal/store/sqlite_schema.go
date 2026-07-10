@@ -118,6 +118,11 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 	if len(plans) == 0 {
 		return nil
 	}
+	if schemaDDLIncludesPlatformTables(plans) {
+		if err := ensureSQLiteCanonicalFailureSchema(ctx, s.DB); err != nil {
+			return fmt.Errorf("migrate sqlite canonical runtime failures: %w", err)
+		}
+	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin sqlite schema ddl tx: %w", err)
@@ -152,6 +157,11 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 		return fmt.Errorf("commit sqlite schema ddl tx: %w", err)
 	}
 	committed = true
+	if schemaDDLIncludesPlatformTables(plans) {
+		if err := ensureSQLiteCanonicalFailureSchema(ctx, s.DB); err != nil {
+			return fmt.Errorf("validate sqlite canonical runtime failures: %w", err)
+		}
+	}
 	if len(agentStatements) > 0 {
 		if err := s.ensureSQLiteAgentLLMBackendProfiles(ctx, agentStatements); err != nil {
 			return err

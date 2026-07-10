@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type shutdownAdmissionManagerStore struct {
@@ -33,7 +33,7 @@ func (*shutdownAdmissionManagerStore) EnsureEntitySchema(context.Context, string
 	return nil
 }
 
-func (*shutdownAdmissionManagerStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+func (*shutdownAdmissionManagerStore) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 
@@ -238,7 +238,7 @@ func TestAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLocalShutdo
 
 	breakerDone := make(chan struct{})
 	go func() {
-		am.maybeTripAuthCircuitBreaker(context.Background(), agent.id, "evt-in-1", errors.New("claude auth required"))
+		am.maybeTripAuthCircuitBreaker(context.Background(), agent.id, "evt-in-1", testAuthFailure())
 		close(breakerDone)
 	}()
 

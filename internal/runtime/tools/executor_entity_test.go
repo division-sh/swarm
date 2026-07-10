@@ -19,6 +19,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -403,9 +404,8 @@ func TestRoleScopedEntityTools_OptedInActorReceivesGeneratedSurfaceOnly(t *testi
 		if cap, ok := caps.Capability(name); !ok || cap.Visible || cap.Callable || cap.DenialReason != "tool_not_allowed" {
 			t.Fatalf("%s capability = %#v, ok=%v; want denied for opted-in actor", name, cap, ok)
 		}
-		if _, err := exec.Execute(ctx, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
-			t.Fatalf("direct %s execution error = %v, want tool-not-allowed", name, err)
-		}
+		_, err := exec.Execute(ctx, name, map[string]any{})
+		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	}
 }
 
@@ -548,9 +548,8 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		}
 	}
 	deniedCtx := toolcapabilities.WithContext(invalidCtx, caps)
-	if _, err := exec.Execute(deniedCtx, "read_validation_case", map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
-		t.Fatalf("context-denied read_validation_case error = %v, want not allowed before execution", err)
-	}
+	_, err := exec.Execute(deniedCtx, "read_validation_case", map[string]any{})
+	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 }
 
 func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(t *testing.T) {
@@ -950,8 +949,8 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 				"field":     tc.field,
 				"value":     "x",
 			})
-			re, ok := runtimetools.AsRuntimeError(err)
-			if err == nil || !ok || re.Code != "invalid_tool_input" {
+			re, ok := runtimefailures.As(err)
+			if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 				t.Fatalf("expected invalid_tool_input, got %v", err)
 			}
 
@@ -1009,12 +1008,14 @@ accounts:
 		},
 	})
 
-	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
+	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
 		"field":     "code",
 		"value":     "acct-002",
-	}); err == nil || !strings.Contains(err.Error(), "immutable field code cannot be changed after create") {
-		t.Fatalf("save_entity_field immutable error = %v, want immutable rejection", err)
+	})
+	immutableFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "immutable_field_write_forbidden")
+	if immutableFailure.Detail.Attributes["field"] != "code" {
+		t.Fatalf("immutable failure attributes = %#v", immutableFailure.Detail.Attributes)
 	}
 
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{
@@ -1598,15 +1599,12 @@ func TestEntityTools_QueryEntitiesFilterRejectsUndeclaredFieldBeforeEvalWithNear
 		"filter": `metadata.regoin == "us"`,
 		"limit":  10,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "metadata.regoin") {
-		t.Fatalf("expected undeclared filter field in error, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "did you mean metadata.region?") {
-		t.Fatalf("expected nearest-match guidance, got %v", err)
+	if re.Failure.Detail.Attributes["expression"] != `metadata.regoin == "us"` {
+		t.Fatalf("filter failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 }
 
@@ -1617,15 +1615,12 @@ func TestEntityTools_QueryEntitiesFilterRejectsEntityScopedSelectors(t *testing.
 		"filter": `entity.metadata.region == "us"`,
 		"limit":  10,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "must not use entity.metadata.region") {
-		t.Fatalf("expected entity-scoped selector rejection, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "use metadata.region instead") {
-		t.Fatalf("expected direct selector guidance, got %v", err)
+	if re.Failure.Detail.Attributes["expression"] != `entity.metadata.region == "us"` {
+		t.Fatalf("filter failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 }
 
@@ -1636,12 +1631,12 @@ func TestEntityTools_QueryMetricsFilterRejectsUndeclaredFieldBeforeEval(t *testi
 		"metric": "count",
 		"filter": `metadata.regoin == "us"`,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "metadata.regoin") {
-		t.Fatalf("expected undeclared metric filter field in error, got %v", err)
+	if re.Failure.Detail.Attributes["expression"] != `metadata.regoin == "us"` {
+		t.Fatalf("metric filter failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 }
 
@@ -1733,12 +1728,12 @@ signal:
 		},
 	} {
 		_, err := exec.Execute(ctx, tc.tool, tc.input)
-		re, ok := runtimetools.AsRuntimeError(err)
-		if err == nil || !ok || re.Code != "invalid_tool_input" {
+		re, ok := runtimefailures.As(err)
+		if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 			t.Fatalf("%s expected invalid_tool_input, got %v", tc.name, err)
 		}
-		if !strings.Contains(err.Error(), "outside caller flow scope") && !strings.Contains(err.Error(), "invalid enum value signal-search.signal") {
-			t.Fatalf("%s expected cross-flow target rejection, got %v", tc.name, err)
+		if re.Failure.Detail.Attributes["entity_type"] != "signal-search.signal" {
+			t.Fatalf("%s target failure attributes = %#v", tc.name, re.Failure.Detail.Attributes)
 		}
 	}
 }
@@ -1996,12 +1991,12 @@ signal:
 		"entity_type": "discovery.campaign",
 		"filter":      `statu == "open"`,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected query_entities invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "statu") || !strings.Contains(err.Error(), "did you mean status?") {
-		t.Fatalf("expected nearest-match target diagnostic, got %v", err)
+	if re.Failure.Detail.Attributes["expression"] != `statu == "open"` {
+		t.Fatalf("query filter failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 
 	_, err = exec.Execute(ctx, "query_metrics", map[string]any{
@@ -2009,43 +2004,46 @@ signal:
 		"metric":      "sum",
 		"field":       "statu",
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected query_metrics invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "statu") {
-		t.Fatalf("expected target field diagnostic, got %v", err)
+	if re.Failure.Detail.Attributes["field"] != "statu" {
+		t.Fatalf("metric field failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 
 	_, err = exec.Execute(ctx, "search_entities", map[string]any{
 		"entity_type": "discovery.campaign",
 		"filter":      map[string]any{"statu": "open"},
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected search_entities invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "statu") {
-		t.Fatalf("expected target object-filter field diagnostic, got %v", err)
+	if re.Failure.Detail.Attributes["field"] != "statu" {
+		t.Fatalf("object-filter failure attributes = %#v", re.Failure.Detail.Attributes)
 	}
 
 	_, err = exec.Execute(ctx, "query_entities", map[string]any{
 		"entity_type": "signal-search.signal",
 		"filter":      `signal_strenght >= 70`,
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected foreign query_entities invalid_tool_input, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "outside caller flow scope") && !strings.Contains(err.Error(), "invalid enum value signal-search.signal") {
-		t.Fatalf("expected foreign target rejection before field validation, got %v", err)
+	if re.Failure.Detail.Attributes["entity_type"] != "signal-search.signal" {
+		t.Fatalf("foreign target failure attributes = %#v", re.Failure.Detail.Attributes)
+	}
+	if _, fieldValidated := re.Failure.Detail.Attributes["field"]; fieldValidated {
+		t.Fatalf("foreign target reached field validation: %#v", re.Failure.Detail.Attributes)
 	}
 
 	_, err = exec.Execute(ctx, "query_entities", map[string]any{
 		"filter": `signal_strength >= 70`,
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected default actor contract to reject target-only field, got %v", err)
 	}
 }
@@ -2063,8 +2061,9 @@ func TestEntityTools_InvalidField(t *testing.T) {
 		"field":     "unknown_field",
 		"value":     "x",
 	})
-	if err == nil || !strings.Contains(err.Error(), "unknown entity field") {
-		t.Fatalf("expected delivery-boundary invalid field rejection, got %v", err)
+	invalidField := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
+	if invalidField.Detail.Attributes["field"] != "unknown_field" {
+		t.Fatalf("invalid field attributes = %#v", invalidField.Detail.Attributes)
 	}
 }
 
@@ -2073,8 +2072,8 @@ func TestEntityTools_GetEntityNotFound(t *testing.T) {
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{
 		"entity_id": uuid.NewString(),
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "not_found" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "not_found" {
 		t.Fatalf("expected not found error, got %v", err)
 	}
 }
@@ -2090,8 +2089,9 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityID(t *testing.T) {
 			"active": true,
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "entity_id is platform-minted and must not be supplied") {
-		t.Fatalf("expected caller-supplied entity_id rejection, got %v", err)
+	entityIDFailure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
+	if entityIDFailure.Detail.Attributes["field"] != "entity_id" {
+		t.Fatalf("entity_id failure attributes = %#v", entityIDFailure.Detail.Attributes)
 	}
 }
 
@@ -2104,8 +2104,9 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedEntityType(t *testing.T) {
 			"status": "open",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "entity_type is inferred from flow_instance and must not be supplied") {
-		t.Fatalf("expected caller-supplied entity_type rejection, got %v", err)
+	entityTypeFailure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
+	if entityTypeFailure.Detail.Attributes["field"] != "entity_type" {
+		t.Fatalf("entity_type failure attributes = %#v", entityTypeFailure.Detail.Attributes)
 	}
 }
 
@@ -2118,8 +2119,9 @@ func TestEntityTools_CreateEntityRejectsCallerSuppliedSubjectID(t *testing.T) {
 			"status": "open",
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "subject_id is deprecated") {
-		t.Fatalf("expected caller-supplied subject_id rejection, got %v", err)
+	subjectFailure := requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
+	if subjectFailure.Detail.Attributes["field"] != "subject_id" {
+		t.Fatalf("subject_id failure attributes = %#v", subjectFailure.Detail.Attributes)
 	}
 }
 
@@ -2141,9 +2143,8 @@ func TestEntityTools_ConstrainedAllowedToolsDoNotPermitLegacyEntityTools(t *test
 	}); err == nil {
 		t.Fatalf("expected create_entity to be denied when not listed in tools")
 	}
-	if _, err := exec.Execute(ctx, "query_entities", map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
-		t.Fatalf("query_entities with constrained tools error = %v, want not allowed", err)
-	}
+	_, err := exec.Execute(ctx, "query_entities", map[string]any{})
+	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 }
 
 func TestEntityTools_CreateEntityRejectsFlowWithoutEntityContract(t *testing.T) {
@@ -2157,8 +2158,9 @@ func TestEntityTools_CreateEntityRejectsFlowWithoutEntityContract(t *testing.T) 
 	_, err := exec.Execute(ctx, "create_entity", map[string]any{
 		"flow_instance": "review/inst-1",
 	})
-	if err == nil || !strings.Contains(err.Error(), "flow_instance does not resolve to a flow-owned entity contract") {
-		t.Fatalf("expected missing contract rejection, got %v", err)
+	missingContract := requireToolFailure(t, err, runtimefailures.ClassTargetUnreachable, "not_found")
+	if missingContract.Detail.Attributes["flow_path"] != "review/inst-1" {
+		t.Fatalf("missing contract attributes = %#v", missingContract.Detail.Attributes)
 	}
 }
 
@@ -2193,8 +2195,8 @@ foreign:
 		"field":     "status",
 		"value":     "closed",
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_write_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_write_forbidden" {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
 }
@@ -2239,12 +2241,17 @@ foreign:
 		"field":     "status",
 		"value":     "closed",
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_write_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_write_forbidden" {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
-	if len(bus.logs) != 2 || bus.logs[0].Action != "entity_write_denied" || bus.logs[1].Action != "tool_execution_failed" {
-		t.Fatalf("logs = %#v, want entity_write_denied then tool_execution_failed", bus.logs)
+	if len(bus.logs) != 2 || bus.logs[0].Action != "entity_write_denied" || bus.logs[1].Action != "tool_execution_denied" {
+		t.Fatalf("logs = %#v, want entity_write_denied then tool_execution_denied", bus.logs)
+	}
+	for i, log := range bus.logs {
+		if log.Failure == nil || log.Failure.Class != runtimefailures.ClassAuthorizationDenied || log.Failure.Detail.Code != "cross_flow_write_forbidden" {
+			t.Fatalf("log[%d] failure = %#v, want canonical cross-flow authorization denial", i, log.Failure)
+		}
 	}
 	assertEntityToolDiagnosticLineage(t, bus, 0)
 	assertEntityToolDiagnosticLineage(t, bus, 1)
@@ -2339,12 +2346,12 @@ foreign:
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_read_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_read_forbidden" {
 		t.Fatalf("expected cross_flow_read_forbidden, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "owned by flow_instance other-flow/inst-1") {
-		t.Fatalf("expected foreign owner in rejection, got %v", err)
+	if re.Failure.Detail.Attributes["owner_flow_path"] != "other-flow/inst-1" {
+		t.Fatalf("foreign owner attributes = %#v", re.Failure.Detail.Attributes)
 	}
 }
 
@@ -2407,11 +2414,13 @@ operating_case:
 			t.Fatalf("get_entity %s entity_id = %q, want %s", name, got, firstID)
 		}
 	}
-	if _, err := exec.Execute(ctx, "get_entity", map[string]any{
+	_, err := exec.Execute(ctx, "get_entity", map[string]any{
 		"entity_id":     firstID,
 		"flow_instance": "operating",
-	}); err == nil || !strings.Contains(err.Error(), "flow_instance does not match entity ownership") {
-		t.Fatalf("get_entity wrong root error = %v, want flow_instance mismatch", err)
+	})
+	ownershipFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "entity_flow_ownership_mismatch")
+	if ownershipFailure.Detail.Attributes["requested_flow_path"] != "operating" {
+		t.Fatalf("ownership failure attributes = %#v", ownershipFailure.Detail.Attributes)
 	}
 	deepOut, err := exec.Execute(ctx, "get_entity", map[string]any{
 		"entity_id":     deepID,
@@ -2445,8 +2454,14 @@ operating_case:
 		"flow_instance": "operating",
 		"field":         "status",
 		"value":         "wrong-root",
-	}); err == nil || !strings.Contains(err.Error(), "flow_instance does not match entity ownership") {
-		t.Fatalf("save_entity_field wrong root error = %v, want flow_instance mismatch", err)
+	}); err == nil {
+		t.Fatal("save_entity_field wrong root unexpectedly succeeded")
+	} else if failure, ok := runtimefailures.As(err); !ok ||
+		failure.Failure.Class != runtimefailures.ClassAuthorizationDenied ||
+		failure.Failure.Detail.Code != "entity_flow_ownership_mismatch" ||
+		failure.Failure.Detail.Attributes["requested_flow_path"] != "operating" ||
+		failure.Failure.Detail.Attributes["owner_flow_path"] != "validation/case-1" {
+		t.Fatalf("save_entity_field wrong root failure = %#v, want canonical ownership mismatch", failure)
 	}
 
 	queryOut, err := exec.Execute(ctx, "query_entities", map[string]any{
@@ -2588,12 +2603,12 @@ foreign:
 	})
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": scoringID})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_read_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_read_forbidden" {
 		t.Fatalf("expected cross_flow_read_forbidden, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "owned by flow_instance other-flow/score-1") {
-		t.Fatalf("expected foreign owner in rejection, got %v", err)
+	if re.Failure.Detail.Attributes["owner_flow_path"] != "other-flow/score-1" {
+		t.Fatalf("foreign owner attributes = %#v", re.Failure.Detail.Attributes)
 	}
 
 	if _, err := exec.Execute(ctx, "save_entity_field", map[string]any{

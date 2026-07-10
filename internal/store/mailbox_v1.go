@@ -548,7 +548,7 @@ func (s *PostgresStore) appendMailboxV1DecisionEventTx(ctx context.Context, tx *
 	if err := s.UpsertCommittedReplayScopeTx(ctx, tx, evt.ID(), runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 		return err
 	}
-	if err := s.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", ""); err != nil {
+	if err := s.UpsertPipelineReceiptTx(ctx, tx, evt.ID(), "processed", nil); err != nil {
 		return err
 	}
 	return nil

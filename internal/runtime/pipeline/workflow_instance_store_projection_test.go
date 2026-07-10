@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -269,8 +270,9 @@ func TestWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjection(t 
 		"score": map[string]any{"value": float64(99)},
 	}
 	err := store.Create(ctx, duplicate)
-	if err == nil || !strings.Contains(err.Error(), "flow instance already exists: "+storageRef) {
-		t.Fatalf("duplicate create error = %v, want already-exists failure", err)
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Failure.Detail.Code != "flow_instance_already_exists" || failure.Failure.Detail.Attributes["flow_instance"] != storageRef {
+		t.Fatalf("duplicate create failure = %#v, want canonical already-exists failure", failure)
 	}
 
 	loaded, ok, err := store.Load(ctx, storageRef)

@@ -2,10 +2,10 @@ package tools_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -55,8 +55,10 @@ review_subject:
 		if !ok || cap.Visible || cap.Callable {
 			t.Fatalf("legacy entity tool %q capability = %#v ok=%v, want denied", legacy, cap, ok)
 		}
-		if _, err := exec.Execute(runtimetools.WithActor(context.Background(), actor), legacy, map[string]any{}); err == nil || !strings.Contains(err.Error(), "not allowed") {
-			t.Fatalf("direct legacy %s execution error = %v, want not allowed", legacy, err)
+		_, err := exec.Execute(runtimetools.WithActor(context.Background(), actor), legacy, map[string]any{})
+		failure, ok := runtimefailures.As(err)
+		if !ok || failure.Failure.Class != runtimefailures.ClassAuthorizationDenied || failure.Failure.Detail.Code != "tool_not_allowed" {
+			t.Fatalf("direct legacy %s execution error = %v, want typed authorization denial", legacy, err)
 		}
 	}
 

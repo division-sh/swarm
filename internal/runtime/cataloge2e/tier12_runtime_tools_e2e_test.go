@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 )
 
@@ -63,8 +64,10 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 
 	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(context.Background(), cfg), "read_flow_data", map[string]any{
 		"filename": "undeclared.yaml",
-	}); err == nil || !strings.Contains(err.Error(), "invalid enum value") {
-		t.Fatalf("undeclared read error = %v, want fail-closed schema enum rejection", err)
+	}); err == nil {
+		t.Fatal("undeclared read unexpectedly succeeded")
+	} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassSchemaInvalid || failure.Failure.Detail.Code != "invalid_tool_input" {
+		t.Fatalf("undeclared read failure = %#v, want fail-closed schema rejection", failure)
 	}
 	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(context.Background(), cfg), "read_flow_data", map[string]any{
 		"filename": "../support/data/exclusions.yaml",

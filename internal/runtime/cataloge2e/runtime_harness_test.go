@@ -36,7 +36,9 @@ type catalogTriggerStep struct {
 	AssertPersistedBeforeDelivery bool           `yaml:"assert_persisted_before_delivery"`
 	ErrorContains                 string         `yaml:"error_contains"`
 	ReceiptOutcome                string         `yaml:"receipt_outcome"`
-	ReceiptErrorContains          string         `yaml:"receipt_error_contains"`
+	ReceiptFailureClass           string         `yaml:"receipt_failure_class"`
+	ReceiptFailureDetail          string         `yaml:"receipt_failure_detail"`
+	ReceiptFailureAttributes      map[string]any `yaml:"receipt_failure_attributes"`
 }
 
 type catalogExpectedDocument struct {

@@ -36,6 +36,12 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 	mcpServersPayload := normalizeJSONObject(rec.MCPServers)
 	mcpToolsListedPayload := normalizeJSONArray(rec.MCPToolsListed)
 	mcpToolsVisiblePayload := normalizeJSONArray(rec.MCPToolsVisible)
+	failurePayload := ""
+	if encodedFailure, err := encodeStoredFailure(rec.Failure); err != nil {
+		return fmt.Errorf("encode sqlite agent turn failure: %w", err)
+	} else if encodedFailure != nil {
+		failurePayload = encodedFailure.(string)
+	}
 	rec = runtimellm.CanonicalizeTurnForPersistence(rec)
 	if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
 		return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
@@ -75,7 +81,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 				turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 				trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 				emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error, created_at
+				request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at
 			) VALUES (
 				?, ?, ?, ?, ?, ?, ?,
 				?, ?, ?, ?, ?,
@@ -87,7 +93,7 @@ func (s *SQLiteRuntimeStore) AppendAgentTurn(ctx context.Context, rec runtimellm
 			sqliteNullString(rec.TriggerEventType), sqliteNullString(rec.TaskID), availableToolsPayload, toolCallsPayload,
 			emittedEventsPayload, mcpServersPayload, mcpToolsListedPayload, mcpToolsVisiblePayload,
 			sqliteNullString(reqPayload), sqliteNullString(respPayload), turnBlocksPayload, rec.ParseOK, latencyMS,
-			rec.RetryCount, sqliteNullString(rec.Error), now)
+			rec.RetryCount, sqliteNullString(failurePayload), now)
 		if err != nil {
 			return fmt.Errorf("insert sqlite agent turn: %w", err)
 		}

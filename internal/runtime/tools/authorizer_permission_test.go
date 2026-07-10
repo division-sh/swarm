@@ -2,12 +2,12 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -27,9 +27,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-2",
 		}, "agent_fire")
-		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
-			t.Fatalf("expected denial for agent_fire without permission, got %v", err)
-		}
+		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	})
 
 	t.Run("schedule allowed with permission", func(t *testing.T) {
@@ -46,9 +44,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-4",
 		}, "schedule")
-		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
-			t.Fatalf("expected denial for schedule without permission, got %v", err)
-		}
+		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	})
 
 	t.Run("universal tool bypasses permission tier", func(t *testing.T) {
@@ -64,9 +60,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(context.Background(), models.AgentConfig{
 			ID: "ops-6",
 		}, "workflow_custom_tool")
-		if err == nil || !errors.Is(err, ErrToolNotAllowed) {
-			t.Fatalf("expected unconstrained non-gated tool to be denied, got %v", err)
-		}
+		requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
 	})
 
 	t.Run("actor config still allows explicitly listed workflow tool", func(t *testing.T) {

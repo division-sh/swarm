@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -137,7 +138,7 @@ func TestClaudeCLIRuntimeBuildCommand_UsesContainerReachableMCPGatewayURL(t *tes
 	}
 }
 
-func TestClaudeCLIRuntimeRunWithInput_MissingWorkspaceCLIUsesActionableDiagnostic(t *testing.T) {
+func TestClaudeCLIRuntimeRunWithInput_UnstructuredMissingBinaryOutputStaysGeneric(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 
 	tempDir := t.TempDir()
@@ -161,34 +162,9 @@ exit 127
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
 	_, err := runtime.runWithInput(context.Background(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
-	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {
-		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceCLIUnavailable", err)
-	}
-	for _, want := range []string{
-		"local cli_test workspace cannot execute configured Claude CLI command",
-		`"swarm-agent-market-research"`,
-		`"swarm-workspace:test"`,
-		"build or pull a workspace image",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("runWithInput error missing %q:\n%v", want, err)
-		}
-	}
-}
-
-func TestWorkspaceCLIDiagnosticError_MatchesAbsolutePathNoSuchFile(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Workspace.Image = "swarm-workspace:absolute"
-	cfg.LLM.ClaudeCLI.Command = "/usr/local/bin/claude"
-
-	err := workspaceCLIDiagnosticError(cfg, &workspace.Target{Container: "swarm-agent-market-research"}, `OCI runtime exec failed: exec failed: unable to start container process: exec: "/usr/local/bin/claude": stat /usr/local/bin/claude: no such file or directory: unknown`)
-	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {
-		t.Fatalf("workspaceCLIDiagnosticError error = %v, want ErrClaudeWorkspaceCLIUnavailable", err)
-	}
-	for _, want := range []string{`"/usr/local/bin/claude"`, `"swarm-agent-market-research"`, `"swarm-workspace:absolute"`, "set workspace.image"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("workspaceCLIDiagnosticError error missing %q:\n%v", want, err)
-		}
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
+		t.Fatalf("runWithInput failure = %#v, want generic connector failure", failure)
 	}
 }
 
@@ -238,8 +214,9 @@ func TestClaudeCLIRuntimePersistOversizedToolResultRelay_PropagatesWorkspaceWrit
 	ctx := runtimeactors.WithActor(context.Background(), runtimeactors.AgentConfig{ID: "market-research-agent"})
 
 	_, err := runtime.PersistOversizedToolResultRelay(ctx, &Session{ID: "sess-1"}, "sql_execute", []byte(`{"blob":"hello"}`))
-	if err == nil || !strings.Contains(err.Error(), "permission denied") {
-		t.Fatalf("PersistOversizedToolResultRelay err = %v, want permission denied", err)
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "workspace_tool_result_relay_write_failed" {
+		t.Fatalf("PersistOversizedToolResultRelay failure = %#v, want typed connector failure", failure)
 	}
 }
 

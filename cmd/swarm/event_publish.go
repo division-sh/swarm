@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
 
@@ -51,21 +52,21 @@ type eventPublishResult struct {
 }
 
 type eventPublishDelivery struct {
-	DeliveryID     string            `json:"delivery_id"`
-	SubscriberType string            `json:"subscriber_type"`
-	SubscriberID   string            `json:"subscriber_id"`
-	SessionID      string            `json:"session_id,omitempty"`
-	Status         string            `json:"status"`
-	ReasonCode     string            `json:"reason_code,omitempty"`
-	LastError      string            `json:"last_error,omitempty"`
-	Attempt        int               `json:"attempt"`
-	RetryCount     int               `json:"retry_count"`
-	RetryEligible  bool              `json:"retry_eligible"`
-	Terminal       bool              `json:"terminal"`
-	CreatedAt      string            `json:"created_at,omitempty"`
-	StartedAt      string            `json:"started_at,omitempty"`
-	FinishedAt     string            `json:"finished_at,omitempty"`
-	DeadLetters    []eventDeadLetter `json:"dead_letters,omitempty"`
+	DeliveryID     string                    `json:"delivery_id"`
+	SubscriberType string                    `json:"subscriber_type"`
+	SubscriberID   string                    `json:"subscriber_id"`
+	SessionID      string                    `json:"session_id,omitempty"`
+	Status         string                    `json:"status"`
+	ReasonCode     string                    `json:"reason_code,omitempty"`
+	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
+	Attempt        int                       `json:"attempt"`
+	RetryCount     int                       `json:"retry_count"`
+	RetryEligible  bool                      `json:"retry_eligible"`
+	Terminal       bool                      `json:"terminal"`
+	CreatedAt      string                    `json:"created_at,omitempty"`
+	StartedAt      string                    `json:"started_at,omitempty"`
+	FinishedAt     string                    `json:"finished_at,omitempty"`
+	DeadLetters    []eventDeadLetter         `json:"dead_letters,omitempty"`
 }
 
 func newEventPublishCommand(opts rootCommandOptions) *cobra.Command {
@@ -319,7 +320,7 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 		len(result.Deliveries),
 	)
 	for _, delivery := range result.Deliveries {
-		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s last_error=%s dead_letters=%d\n",
+		fmt.Fprintf(out, "delivery delivery_id=%s subscriber=%s/%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s failure=%s dead_letters=%d\n",
 			delivery.DeliveryID,
 			delivery.SubscriberType,
 			delivery.SubscriberID,
@@ -330,7 +331,7 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 			delivery.RetryEligible,
 			delivery.Terminal,
 			eventObservationDash(delivery.ReasonCode),
-			eventObservationDash(delivery.LastError),
+			eventObservationFailureSummary(delivery.Failure),
 			len(delivery.DeadLetters),
 		)
 	}

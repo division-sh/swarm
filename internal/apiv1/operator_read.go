@@ -13,6 +13,7 @@ import (
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
@@ -1010,8 +1011,8 @@ func validateAgentDeadLetterDeliveryResult(item store.OperatorAgentDeadLetterDel
 		if strings.TrimSpace(record.DeadLetterID) == "" {
 			return fmt.Errorf("%s.dead_letter_id is required", recordPrefix)
 		}
-		if strings.TrimSpace(record.FailureType) == "" {
-			return fmt.Errorf("%s.failure_type is required", recordPrefix)
+		if err := runtimefailures.ValidateEnvelope(record.Failure); err != nil {
+			return fmt.Errorf("%s.failure is invalid: %w", recordPrefix, err)
 		}
 		if record.RetryCount < 0 {
 			return fmt.Errorf("%s.retry_count must be non-negative", recordPrefix)

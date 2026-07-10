@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type persistentStateRepo struct {
@@ -121,8 +122,8 @@ func TestExecutor_RejectsInvalidAdvancesToTransition(t *testing.T) {
 	if result.Status != OutcomeRejected {
 		t.Fatalf("Status = %q, want %q", result.Status, OutcomeRejected)
 	}
-	if result.FailureClass != FailureLogic {
-		t.Fatalf("FailureClass = %q, want %q", result.FailureClass, FailureLogic)
+	if result.Failure == nil || result.Failure.Class != failures.ClassInternalFailure || result.FailureDisposition != FailureDispositionTerminal {
+		t.Fatalf("failure = %#v disposition=%q", result.Failure, result.FailureDisposition)
 	}
 }
 

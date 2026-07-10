@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -92,17 +93,17 @@ func TestExecutor_HTTPResponseSuccessPolicyParityCases(t *testing.T) {
 		body        string
 		policy      runtimecontracts.HTTPResponseSuccess
 		credential  bool
-		wantErr     string
+		wantFailure bool
 		forbidError string
 	}{
 		{name: "status 2xx", status: http.StatusNoContent, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}},
-		{name: "status non-2xx", status: http.StatusMultipleChoices, body: `{}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}, wantErr: "response_success failed"},
+		{name: "status non-2xx", status: http.StatusMultipleChoices, body: `{}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}, wantFailure: true},
 		{name: "boolean equality", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}},
 		{name: "string equality", status: http.StatusOK, body: `{"state":"accepted"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}},
 		{name: "numeric equality", status: http.StatusOK, body: `{"count":2}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.count", Equals: int64(2)}},
-		{name: "provider failure", status: http.StatusOK, body: `{"ok":false}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}, wantErr: "response_success failed"},
-		{name: "unresolved path", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.missing", Equals: true}, wantErr: `path "response.body.missing" did not resolve`},
-		{name: "secret redaction", status: http.StatusOK, body: `{"state":"provider-secret"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}, credential: true, wantErr: "[REDACTED]", forbidError: "provider-secret"},
+		{name: "provider failure", status: http.StatusOK, body: `{"ok":false}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}, wantFailure: true},
+		{name: "unresolved path", status: http.StatusOK, body: `{"ok":true}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.missing", Equals: true}, wantFailure: true},
+		{name: "secret redaction", status: http.StatusOK, body: `{"state":"provider-secret"}`, policy: runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}, credential: true, wantFailure: true, forbidError: "provider-secret"},
 	}
 
 	for _, tc := range tests {
@@ -136,15 +137,13 @@ func TestExecutor_HTTPResponseSuccessPolicyParityCases(t *testing.T) {
 			exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source})
 			ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "agent-1", Tools: []string{"policy_probe"}})
 			_, err := exec.Execute(ctx, "policy_probe", map[string]any{})
-			if tc.wantErr == "" {
+			if !tc.wantFailure {
 				if err != nil {
 					t.Fatalf("Execute: %v", err)
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("Execute error = %v, want containing %q", err, tc.wantErr)
-			}
+			requireToolFailure(t, err, runtimefailures.ClassConnectorFailure, "provider_response_rejected")
 			if tc.forbidError != "" && strings.Contains(err.Error(), tc.forbidError) {
 				t.Fatalf("Execute error leaked %q: %v", tc.forbidError, err)
 			}
@@ -428,9 +427,7 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialBindingMissing(t *tes
 	})
 
 	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
-		t.Fatalf("Execute(send_provider) err = %v, want missing binding fail-closed", err)
-	}
+	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "tool_credential_required")
 }
 
 func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *testing.T) {
@@ -457,9 +454,7 @@ func TestExecutor_HTTPToolFailsClosedWhenImportedCredentialRequiresMissing(t *te
 	})
 
 	_, err = exec.Execute(ctx, "send_provider", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
-		t.Fatalf("Execute(send_provider) err = %v, want undeclared credential fail-closed", err)
-	}
+	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "tool_credential_required")
 }
 
 func TestExecutor_NativeWebSearchUsesImportedPolicyAndCredentialBinding(t *testing.T) {
@@ -530,6 +525,7 @@ func TestExecutor_MCPToolExecutesDiscoveredServerTool(t *testing.T) {
 			})
 		case "tools/call":
 			writeMCPResult(t, w, req["id"], map[string]any{
+				"content":           []any{},
 				"structuredContent": map[string]any{"ok": true},
 			})
 		default:

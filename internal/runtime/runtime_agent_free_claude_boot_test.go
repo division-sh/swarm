@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -71,7 +72,8 @@ func TestNewRuntime_AgentPresentRequiresSelectedBackendCredential(t *testing.T) 
 		WorkflowModule: module,
 	}})
 
-	if err == nil || !strings.Contains(err.Error(), "ANTHROPIC_API_KEY is required") {
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("NewRuntime error = %v, want selected backend credential failure", err)
 	}
 }

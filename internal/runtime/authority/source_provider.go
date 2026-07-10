@@ -1,13 +1,13 @@
 package authority
 
 import (
-	"fmt"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -111,34 +111,34 @@ func (p *sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) b
 func (p *sourceProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
 	_ = strings.TrimSpace(strings.ToLower(status))
 	if !hasToolGrant(permissionSet(actor.Permissions), "configure_routing") {
-		return fmt.Errorf("role %s is not authorized to configure routing", actor.Role)
+		return authorizationDenied("configure_routing", actor, target)
 	}
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
 		return nil
 	}
 	if err := p.AuthorizeManagement(actor, target); err != nil {
-		return fmt.Errorf("role %s is not authorized to configure routing", actor.Role)
+		return authorizationDenied("configure_routing", actor, target)
 	}
 	return nil
 }
 
 func (p *sourceProvider) AuthorizeManagement(actor, target models.AgentConfig) error {
 	if !hasAnyToolGrant(permissionSet(actor.Permissions), "agent_hire", "agent_fire", "agent_reconfigure") {
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		return authorizationDenied("agent_manage", actor, target)
 	}
 	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		return authorizationDenied("agent_manage", actor, target)
 	}
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		return authorizationDenied("agent_manage", actor, target)
 	}
 	if !SameFlowInstance(actor, target) {
-		return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+		return authorizationDenied("agent_manage", actor, target)
 	}
 	if p.isManagedDescendant(actor, target) {
 		return nil
 	}
-	return fmt.Errorf("role %s is not authorized to manage agents", actor.Role)
+	return authorizationDenied("agent_manage", actor, target)
 }
 
 func (p *sourceProvider) UpsertManagedAgent(cfg models.AgentConfig) {
@@ -179,7 +179,21 @@ func (p *sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
 	if containsCanonical(p.mailboxSendRoles, actor.Role) {
 		return nil
 	}
-	return fmt.Errorf("role %s is not authorized to send mailbox items", actor.Role)
+	return authorizationDenied("mailbox_send", actor, models.AgentConfig{})
+}
+
+func authorizationDenied(action string, actor, target models.AgentConfig) error {
+	return failures.New(
+		failures.ClassAuthorizationDenied,
+		"runtime_authority_denied",
+		"runtime-authority",
+		"authorize",
+		map[string]any{
+			"action":          strings.TrimSpace(action),
+			"actor_id":        strings.TrimSpace(actor.ID),
+			"target_agent_id": strings.TrimSpace(target.ID),
+		},
+	)
 }
 
 func (p *sourceProvider) CanDecideHumanTasks(role string) bool {

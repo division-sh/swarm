@@ -9,12 +9,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 )
 
 const (
-	llmProviderRateLimitedCode = "rate_limited"
+	llmProviderRateLimitedCode = "llm_provider_rate_limited"
 
 	llmProviderAdmissionComponent = "llm-provider"
 	llmProviderAdmissionOperation = "provider_admission"
@@ -339,13 +339,11 @@ func (b *llmProviderRateBucket) cancelReservation(scheduled time.Time) {
 }
 
 func newLLMProviderAdmissionRateLimitedError(policy llmProviderAdmissionPolicy) error {
-	return runtimerterr.NewRuntimeError(
+	return failures.NewDetail(
 		llmProviderRateLimitedCode,
 		llmProviderAdmissionComponent,
 		llmProviderAdmissionOperation,
-		true,
-		"llm provider admission limit exceeded for %s",
-		strings.TrimSpace(policy.BucketName),
+		map[string]any{"bucket": strings.TrimSpace(policy.BucketName)},
 	)
 }
 

@@ -9,7 +9,10 @@ trigger:
         instance_id: worker-dup
         worker_id: worker-dup
       receipt_outcome: dead_letter
-      receipt_error_contains: "flow instance already exists: worker-flow/worker-dup"
+      receipt_failure_class: platform.conflicting_duplicate
+      receipt_failure_detail: flow_instance_already_exists
+      receipt_failure_attributes:
+        flow_instance: worker-flow/worker-dup
 
 expected:
 

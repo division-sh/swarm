@@ -4915,7 +4915,7 @@ func seedServedMailboxDecisionFixture(t *testing.T, db *sql.DB, backend string) 
 	`, fixture.SourceEventID, fixture.RunID, fixture.EntityID, fixture.SourceFlow, now); err != nil {
 			t.Fatalf("seed postgres mailbox proof source event: %v", err)
 		}
-		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", ""); err != nil {
+		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", nil); err != nil {
 			t.Fatalf("seed postgres mailbox proof source event pipeline receipt: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -4951,7 +4951,7 @@ func seedServedMailboxDecisionFixture(t *testing.T, db *sql.DB, backend string) 
 			t.Fatalf("seed sqlite mailbox proof source event: %v", err)
 		}
 		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", ""); err != nil {
+		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, fixture.SourceEventID, "processed", nil); err != nil {
 			t.Fatalf("seed sqlite mailbox proof source event pipeline receipt: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -4988,7 +4988,7 @@ func seedServedMailboxDecisionSourceEvent(ctx context.Context, store runtimebus.
 		if err := mutation.UpsertCommittedReplayScope(ctx, fixture.SourceEventID, runtimereplayclaim.CommittedReplayScopeSubscribed); err != nil {
 			return err
 		}
-		return mutation.UpsertPipelineReceipt(ctx, fixture.SourceEventID, "processed", "")
+		return mutation.UpsertPipelineReceipt(ctx, fixture.SourceEventID, "processed", nil)
 	})
 }
 
@@ -5832,7 +5832,7 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend
 		`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed postgres live-agent backlog delivery: %v", err)
 		}
-		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", ""); err != nil {
+		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed postgres live-agent backlog pipeline receipt: %v", err)
 		}
 	case "sqlite":
@@ -5855,7 +5855,7 @@ func seedServedLiveAgentPendingBacklogDelivery(t *testing.T, db *sql.DB, backend
 			t.Fatalf("seed sqlite live-agent backlog delivery: %v", err)
 		}
 		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", ""); err != nil {
+		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed sqlite live-agent backlog pipeline receipt: %v", err)
 		}
 	default:
@@ -5977,7 +5977,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 			`, deliveryID, runID, eventID, now); err != nil {
 			t.Fatalf("seed postgres run-control pending delivery: %v", err)
 		}
-		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", ""); err != nil {
+		if err := (&store.PostgresStore{DB: db}).UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed postgres run-control pipeline receipt: %v", err)
 		}
 	case "sqlite":
@@ -6000,7 +6000,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, db *sql.DB, b
 			t.Fatalf("seed sqlite run-control pending delivery: %v", err)
 		}
 		sqliteStore := &store.SQLiteRuntimeStore{SQLiteSchemaStore: &store.SQLiteSchemaStore{DB: db}}
-		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", ""); err != nil {
+		if err := sqliteStore.UpsertPipelineReceiptTx(ctx, tx, eventID, "processed", nil); err != nil {
 			t.Fatalf("seed sqlite run-control pipeline receipt: %v", err)
 		}
 	default:
@@ -7581,7 +7581,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure_type, COALESCE(d.error_message, '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), COALESCE(d.failure->>'class', ''), COALESCE(d.failure->'detail'->>'code', '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		}
 	case "sqlite":
 		switch scope {
@@ -7594,7 +7594,7 @@ func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runI
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
 		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure_type, COALESCE(d.error_message, '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
+			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), COALESCE(json_extract(d.failure, '$.class'), ''), COALESCE(json_extract(d.failure, '$.detail.code'), '') FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		}
 	}
 	if sqlText == "" {
@@ -9526,7 +9526,7 @@ func TestPrintRunStatusReport(t *testing.T) {
 			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Count: 3},
 		},
 		RuntimeLogs: []runStatusRuntimeLog{
-			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Error: "missing or invalid mcp context token", CreatedAt: last},
+			{Level: "warn", Component: "mcp-gateway", Action: "mcp.context.fallback_used", Failure: testRuntimeFailure("context_fallback_used"), CreatedAt: last},
 		},
 		RecentEvents: []runStatusEvent{
 			{EventName: "vertical.discovered", EntityID: "ent-1", CreatedAt: last},
@@ -9668,6 +9668,7 @@ func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutatio
 
 	insertRuntimeLog := func(runID string, payloadRunID string, component string, action string, createdAt time.Time) {
 		t.Helper()
+		failure := testRuntimeFailure(strings.ReplaceAll(action, "-", "_") + "_error")
 		payload, err := json.Marshal(map[string]any{
 			"log_level": "warn",
 			"message":   action,
@@ -9675,7 +9676,7 @@ func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutatio
 				"run_id":    payloadRunID,
 				"component": component,
 				"action":    action,
-				"error":     action + "-error",
+				"failure":   failure,
 			},
 		})
 		if err != nil {
@@ -9736,8 +9737,7 @@ func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutatio
 		OriginalEventID: targetEventID,
 		OriginalEvent:   "scan.requested",
 		EntityID:        targetEntityID,
-		FailureType:     "handler_error",
-		ErrorMessage:    "boom",
+		Failure:         *testRuntimeFailure("handler_failed"),
 		HandlerNode:     "node-a",
 		Timestamp:       now.Add(4 * time.Minute).Format(time.RFC3339Nano),
 	}); err != nil {
@@ -9763,7 +9763,7 @@ func TestLoadRunStatusReport_UsesCanonicalPersistedRunIDForRuntimeLogsAndMutatio
 	if len(report.RuntimeLogs) != 1 {
 		t.Fatalf("RuntimeLogs len = %d, want 1", len(report.RuntimeLogs))
 	}
-	if got := report.RuntimeLogs[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Error != "canonical-owner-error" {
+	if got := report.RuntimeLogs[0]; got.Component != "scheduler" || got.Action != "canonical-owner" || got.Failure == nil || got.Failure.Detail.Code != "canonical_owner_error" {
 		t.Fatalf("RuntimeLogs[0] = %#v", got)
 	}
 	if len(report.Mutations) != 1 {
@@ -13003,7 +13003,7 @@ core:
   status:
     type: text
     _unused_reason: artifact startup admission proof output field
-  failure_reason:
+  failure:
     type: text
     _unused_reason: artifact startup admission proof output field
   last_request_id:
@@ -13048,7 +13048,7 @@ artifact-writer:
             current_ref: current_ref
             file_manifest: file_manifest
             status: status
-            failure_reason: failure_reason
+            failure: failure
             last_request_id: last_request_id
             last_source_event_id: last_source_event_id
 `)

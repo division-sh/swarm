@@ -15,6 +15,7 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -38,18 +39,18 @@ func (e httpToolStatusError) Error() string {
 
 func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, tool RegisteredTool, input any) (any, error) {
 	if tool.HTTP == nil {
-		return nil, fmt.Errorf("http tool %s is missing http configuration", tool.Name)
+		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "http_tool_configuration_missing", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(tool.Name)})
 	}
 	payload := map[string]any{}
 	if err := decodeToolInput(input, &payload); err != nil {
-		return nil, err
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "http_tool_input_invalid", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(tool.Name)}, err)
 	}
 	if payload == nil {
 		payload = map[string]any{}
 	}
 	credentials, err := e.resolveToolCredentialsForActor(ctx, actor, tool.Credentials)
 	if err != nil {
-		return nil, err
+		return nil, runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "tool_credential_required", "tool-executor", "resolve_http_tool_credentials", map[string]any{"auth_kind": "tool_credential", "tool": strings.TrimSpace(tool.Name)}, err)
 	}
 	templateEnv := map[string]any{
 		"input":       payload,
@@ -58,24 +59,24 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 
 	resolvedURL, err := resolveHTTPURLTemplate(tool.HTTP.URL, templateEnv)
 	if err != nil {
-		return nil, err
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "http_tool_url_invalid", "tool-executor", "resolve_http_tool_request", map[string]any{"tool": strings.TrimSpace(tool.Name)}, err)
 	}
 	url := strings.TrimSpace(resolvedURL)
 	if url == "" {
-		return nil, fmt.Errorf("http tool %s resolved an empty url", tool.Name)
+		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "http_tool_url_empty", "tool-executor", "resolve_http_tool_request", map[string]any{"tool": strings.TrimSpace(tool.Name)})
 	}
 
 	headers := make(http.Header, len(tool.HTTP.Headers))
 	for key, value := range tool.HTTP.Headers {
 		resolved, err := resolveTemplateValue(value, templateEnv)
 		if err != nil {
-			return nil, err
+			return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "http_tool_header_invalid", "tool-executor", "resolve_http_tool_request", map[string]any{"tool": strings.TrimSpace(tool.Name), "header": strings.TrimSpace(key)}, err)
 		}
 		headers.Set(strings.TrimSpace(key), strings.TrimSpace(asString(resolved)))
 	}
 	managedAuth, err := e.resolveManagedCredentialForActor(ctx, actor, tool)
 	if err != nil {
-		return nil, err
+		return nil, httpToolAuthenticationFailure(err, tool.Name, "resolve_managed_credential")
 	}
 	authSecrets := make([]string, 0, len(credentials))
 	for _, value := range credentials {
@@ -85,7 +86,7 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 	}
 	if managedAuth != nil {
 		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), false); err != nil {
-			return nil, err
+			return nil, httpToolAuthenticationFailure(err, tool.Name, "apply_managed_credential")
 		}
 		authSecrets = append(authSecrets, managedAuth.SecretValues()...)
 	}
@@ -94,11 +95,11 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 	if tool.HTTP.Body != nil {
 		resolvedBody, err := resolveTemplateTree(tool.HTTP.Body, templateEnv)
 		if err != nil {
-			return nil, err
+			return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "http_tool_body_invalid", "tool-executor", "resolve_http_tool_request", map[string]any{"tool": strings.TrimSpace(tool.Name)}, err)
 		}
 		raw, err := json.Marshal(resolvedBody)
 		if err != nil {
-			return nil, err
+			return nil, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "http_tool_body_marshal_failed", "tool-executor", "resolve_http_tool_request", map[string]any{"tool": strings.TrimSpace(tool.Name)}, err)
 		}
 		bodyReader = bytes.NewReader(raw)
 		if strings.TrimSpace(headers.Get("Content-Type")) == "" {
@@ -133,13 +134,14 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 			refreshedAfterUnauthorized = true
 			token, record, refreshErr := e.managedTokenSource().Refresh(ctx, managedAuth.StoreKey)
 			if refreshErr != nil {
-				return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(authSecrets, record.SecretValues()...)...))
+				redacted := fmt.Errorf("%s", runtimemanagedcredentials.RedactString(refreshErr.Error(), append(authSecrets, record.SecretValues()...)...))
+				return nil, httpToolAuthenticationFailure(redacted, tool.Name, "refresh_managed_credential")
 			}
 			managedAuth.Token = token
 			managedAuth.Record = record
 			authSecrets = append(authSecrets, managedAuth.SecretValues()...)
 			if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), true); err != nil {
-				return nil, err
+				return nil, httpToolAuthenticationFailure(err, tool.Name, "apply_refreshed_managed_credential")
 			}
 			rewindBodyReader(bodyReader)
 			attempt--
@@ -158,7 +160,45 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 		time.Sleep(sleep)
 		rewindBodyReader(bodyReader)
 	}
-	return nil, lastErr
+	return nil, classifyHTTPToolFailure(lastErr, tool.Name)
+}
+
+func httpToolAuthenticationFailure(err error, toolName, operation string) error {
+	if _, ok := runtimefailures.As(err); ok {
+		return err
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "managed_credential_required", "tool-executor", operation, map[string]any{"auth_kind": "managed_credential", "tool": strings.TrimSpace(toolName)}, err)
+}
+
+func classifyHTTPToolFailure(err error, toolName string) error {
+	if err == nil {
+		return nil
+	}
+	if _, ok := runtimefailures.As(err); ok {
+		return err
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return runtimefailures.Wrap(runtimefailures.ClassTimeout, "http_tool_timeout", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(toolName)}, err)
+	}
+	var statusErr httpToolStatusError
+	if errors.As(err, &statusErr) {
+		attributes := map[string]any{"status": statusErr.StatusCode, "tool": strings.TrimSpace(toolName)}
+		switch statusErr.StatusCode {
+		case http.StatusUnauthorized:
+			attributes["auth_kind"] = "provider_credential"
+			return runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "provider_unauthorized", "tool-executor", "execute_http_tool", attributes, err)
+		case http.StatusForbidden:
+			attributes["action"] = "execute_http_tool"
+			return runtimefailures.Wrap(runtimefailures.ClassAuthorizationDenied, "provider_forbidden", "tool-executor", "execute_http_tool", attributes, err)
+		case http.StatusPaymentRequired:
+			return runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_credit_exhausted", "tool-executor", "execute_http_tool", attributes, err)
+		case http.StatusRequestTimeout:
+			return runtimefailures.Wrap(runtimefailures.ClassTimeout, "provider_request_timeout", "tool-executor", "execute_http_tool", attributes, err)
+		default:
+			return runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_http_status", "tool-executor", "execute_http_tool", attributes, err)
+		}
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "http_tool_request_failed", "tool-executor", "execute_http_tool", map[string]any{"tool": strings.TrimSpace(toolName)}, err)
 }
 
 type managedHTTPAuth struct {
@@ -219,7 +259,8 @@ func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor m
 		TokenRequest: ref.TokenRequest,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
+		redacted := fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
+		return nil, httpToolAuthenticationFailure(redacted, tool.Name, "access_managed_credential")
 	}
 	return &managedHTTPAuth{
 		StoreKey: storeKey,
@@ -280,7 +321,7 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 		},
 	}
 	if err := httpresponsesuccess.Evaluate("http tool "+strings.TrimSpace(tool.Name), tool.ResponseSuccess, responseEnv, secrets); err != nil {
-		return nil, err
+		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "provider_response_rejected", "tool-executor", "validate_http_response", map[string]any{"tool": strings.TrimSpace(tool.Name), "status": resp.StatusCode}, err)
 	}
 	if len(tool.ResponseMapping) == 0 {
 		return parsedBody, nil

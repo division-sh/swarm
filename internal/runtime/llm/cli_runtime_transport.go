@@ -31,9 +31,31 @@ type MCPHTTPBinding struct {
 	URL          string
 	Headers      map[string]string
 	ContextToken string
+	runtimeOwned *runtimeOwnedMCPHTTPBinding
 }
 
-func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnContextStore, s *Session, gatewayURL string, gatewayToken string) (binding MCPHTTPBinding, enabled bool, err error) {
+type runtimeOwnedMCPHTTPBinding struct {
+	url           string
+	authorization string
+	contextToken  string
+}
+
+type MCPGatewayEndpoint string
+
+const (
+	MCPGatewayHostEndpoint      MCPGatewayEndpoint = "host"
+	MCPGatewayWorkspaceEndpoint MCPGatewayEndpoint = "workspace"
+)
+
+func (b MCPHTTPBinding) IsRuntimeOwned() bool {
+	return b.runtimeOwned != nil &&
+		b.URL == b.runtimeOwned.url &&
+		b.Headers["Authorization"] == b.runtimeOwned.authorization &&
+		b.Headers[mcpContextTokenHeader] == b.runtimeOwned.contextToken &&
+		b.ContextToken == b.runtimeOwned.contextToken
+}
+
+func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnContextStore, s *Session, gateway toolgateway.Binding, endpoint MCPGatewayEndpoint) (binding MCPHTTPBinding, enabled bool, err error) {
 	if !shouldUseMCPBridge() || s == nil || len(s.Tools) == 0 {
 		return MCPHTTPBinding{}, false, nil
 	}
@@ -51,27 +73,45 @@ func BuildMCPHTTPBinding(ctx context.Context, cfg *config.Config, turns MCPTurnC
 	if len(allowedTools) == 0 {
 		return MCPHTTPBinding{}, false, nil
 	}
-	serverURL := toolgateway.NormalizeMCPServerURL(gatewayURL)
+	if err := gateway.Validate(); err != nil {
+		return MCPHTTPBinding{}, false, err
+	}
+	if !gateway.IsRuntimeOwned() {
+		return MCPHTTPBinding{}, false, errors.New("mcp bridge requires a runtime-owned tool gateway binding")
+	}
+	var serverURL string
+	switch endpoint {
+	case MCPGatewayHostEndpoint:
+		serverURL = gateway.HostMCPURL()
+	case MCPGatewayWorkspaceEndpoint:
+		serverURL = gateway.WorkspaceMCPURL()
+	default:
+		return MCPHTTPBinding{}, false, errors.New("mcp bridge gateway endpoint is required")
+	}
 	if serverURL == "" {
-		return MCPHTTPBinding{}, false, nil
+		return MCPHTTPBinding{}, false, errors.New("mcp bridge gateway endpoint is invalid")
 	}
-	headers := map[string]string{}
-	if token := strings.TrimSpace(gatewayToken); token != "" {
-		headers["Authorization"] = "Bearer " + token
-	}
+	headers := map[string]string{"Authorization": "Bearer " + gateway.AuthToken()}
 	contextToken := turns.RegisterTurnContextWithAllowedTools(ctx, mcpContextTokenTTLForConfig(ctx, cfg), allowedTools)
-	if contextToken != "" {
-		headers[mcpContextTokenHeader] = contextToken
+	if strings.TrimSpace(contextToken) == "" {
+		return MCPHTTPBinding{}, false, errors.New("mcp turn context registration returned an empty token")
 	}
+	headers[mcpContextTokenHeader] = contextToken
+	authorization := headers["Authorization"]
 	return MCPHTTPBinding{
 		URL:          serverURL,
 		Headers:      headers,
 		ContextToken: contextToken,
+		runtimeOwned: &runtimeOwnedMCPHTTPBinding{
+			url:           serverURL,
+			authorization: authorization,
+			contextToken:  contextToken,
+		},
 	}, true, nil
 }
 
 func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (configJSON string, contextToken string, enabled bool, err error) {
-	binding, enabled, err := BuildMCPHTTPBinding(ctx, r.cfg, r.mcpTurns, s, r.toolGateway.WorkspaceMCPURL(), r.toolGateway.AuthToken())
+	binding, enabled, err := BuildMCPHTTPBinding(ctx, r.cfg, r.mcpTurns, s, r.toolGateway, MCPGatewayWorkspaceEndpoint)
 	if err != nil || !enabled {
 		return "", "", enabled, err
 	}
@@ -132,14 +172,5 @@ func shouldUseMCPBridge() bool {
 
 func (r *ClaudeCLIRuntime) runWithPromptTransportFallback(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta) (*Response, promptTransportFallback, error) {
 	resp, err := r.runWithInput(ctx, args, target, prompt, meta)
-	if err == nil || !isPromptArgRequiredError(err) {
-		return resp, promptTransportFallback{}, err
-	}
-	used := promptTransportFallback{Attempted: true}
-	resp, err = r.runWithPromptArg(ctx, args, target, prompt, meta)
-	if err == nil {
-		used.Used = true
-		logPublisherRuntime(ctx, r.events, "warn", "prompt_transport_fallback_used", "CLI prompt transport fallback was used", "", "", "", nil, nil)
-	}
-	return resp, used, err
+	return resp, promptTransportFallback{}, err
 }

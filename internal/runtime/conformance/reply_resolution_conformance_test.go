@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -834,15 +835,19 @@ func loadReplyConformanceRunID(t *testing.T, ctx context.Context, backend durabl
 func loadReplyConformanceTargetFailure(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, eventID string) string {
 	t.Helper()
 	db := replyConformanceDB(t, backend)
-	query := `SELECT COALESCE(target_failure_reason, '') FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
+	query := `SELECT failure::text FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT COALESCE(target_failure_reason, '') FROM dead_letters WHERE original_event_id = ? ORDER BY created_at DESC LIMIT 1`
+		query = `SELECT failure FROM dead_letters WHERE original_event_id = ? ORDER BY created_at DESC LIMIT 1`
 	}
-	var reason string
-	if err := db.QueryRowContext(ctx, query, eventID).Scan(&reason); err != nil {
+	var raw string
+	if err := db.QueryRowContext(ctx, query, eventID).Scan(&raw); err != nil {
 		t.Fatalf("load reply conformance target failure: %v", err)
 	}
-	return reason
+	failure, err := runtimefailures.UnmarshalEnvelope([]byte(raw))
+	if err != nil {
+		t.Fatalf("decode reply conformance target failure: %v", err)
+	}
+	return string(failure.Class)
 }
 
 func countReplyConformanceEvents(t *testing.T, ctx context.Context, backend durableReplyConformanceStore, eventType string) int {
@@ -894,22 +899,32 @@ func replyConformanceDebugRows(ctx context.Context, db *sql.DB, backend durableR
 		fmt.Fprintf(&out, "event %s %s source=%s\n", id, name, source)
 	}
 	deliveryEventID := "event_id::text"
+	deliveryFailure := "COALESCE(failure, 'null'::jsonb)::text"
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
 		deliveryEventID = "event_id"
+		deliveryFailure = "COALESCE(failure, 'null')"
 	}
-	deliveries, err := db.QueryContext(ctx, `SELECT `+deliveryEventID+`, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(last_error, '') FROM event_deliveries ORDER BY created_at, delivery_id`)
+	deliveries, err := db.QueryContext(ctx, `SELECT `+deliveryEventID+`, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), `+deliveryFailure+` FROM event_deliveries ORDER BY created_at, delivery_id`)
 	if err != nil {
 		fmt.Fprintf(&out, "deliveries query: %v\n", err)
 		return out.String()
 	}
 	defer deliveries.Close()
 	for deliveries.Next() {
-		var id, subscriberType, subscriberID, status, reason, lastError string
-		if err := deliveries.Scan(&id, &subscriberType, &subscriberID, &status, &reason, &lastError); err != nil {
+		var id, subscriberType, subscriberID, status, reason, failureRaw string
+		if err := deliveries.Scan(&id, &subscriberType, &subscriberID, &status, &reason, &failureRaw); err != nil {
 			fmt.Fprintf(&out, "deliveries scan: %v\n", err)
 			break
 		}
-		fmt.Fprintf(&out, "delivery %s %s/%s status=%s reason=%s error=%s\n", id, subscriberType, subscriberID, status, reason, lastError)
+		failureSummary := ""
+		if strings.TrimSpace(failureRaw) != "" && strings.TrimSpace(failureRaw) != "null" {
+			if failure, err := runtimefailures.UnmarshalEnvelope([]byte(failureRaw)); err == nil {
+				failureSummary = string(failure.Class) + "/" + failure.Detail.Code
+			} else {
+				failureSummary = "invalid canonical failure: " + err.Error()
+			}
+		}
+		fmt.Fprintf(&out, "delivery %s %s/%s status=%s reason=%s failure=%s\n", id, subscriberType, subscriberID, status, reason, failureSummary)
 	}
 	receiptEventID := "event_id::text"
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {

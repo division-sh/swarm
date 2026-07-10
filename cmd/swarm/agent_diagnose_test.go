@@ -45,7 +45,7 @@ func TestAgentDiagnoseUsesAgentDiagnoseAndRendersOwnedFields(t *testing.T) {
 		"Agent agent-1",
 		"status=running",
 		"current_session_ref: session_id=session-1 started_at=2026-05-18T03:00:00Z",
-		"last_turn_ref: turn_id=turn-1 completed_at=2026-05-18T03:05:00Z parse_ok=true error=-",
+		"last_turn_ref: turn_id=turn-1 completed_at=2026-05-18T03:05:00Z parse_ok=true failure=-",
 		"queue: pending_count=2 oldest_pending_age_seconds=30 next_cursor=cursor-2",
 		"pending_delivery: event_id=event-1 event_name=platform.agent_directive enqueued_at=2026-05-18T03:01:00Z attempts=1",
 		"delivery_lifecycle: state=retrying blocking_layer=agent_delivery",

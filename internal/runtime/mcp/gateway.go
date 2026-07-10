@@ -16,16 +16,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 )
 
 type GatewayHooks struct {
 	RuntimeIngressRequestPaused    func(context.Context) (bool, error)
 	RuntimeShutdownAdmissionClosed func() bool
-	FormatError                    func(error) string
-	NewRuntimeError                func(code, operation string, retryable bool, cause error, format string, args ...any) error
-	RetryableFromError             func(error) (bool, bool)
 	WithActor                      func(context.Context, models.AgentConfig) context.Context
 	ActorFromContext               func(context.Context) (models.AgentConfig, bool)
 	ResolveActorConfig             func(string) (models.AgentConfig, bool)
@@ -37,7 +34,7 @@ type GatewayHooks struct {
 	EmitToolsForActor              func(models.AgentConfig) []llm.ToolDefinition
 	EmitTools                      func(string) []llm.ToolDefinition
 	EmitSchemaForTool              func(string) (description string, schema any, ok bool)
-	Log                            func(context.Context, string, string, string, string, map[string]any, string)
+	Log                            func(context.Context, string, string, string, string, map[string]any, *failures.Envelope)
 	AfterToolSuccess               func(context.Context, *http.Request, string)
 }
 
@@ -141,7 +138,7 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	}
 	r = r.WithContext(ctx)
 	if !toolAllowedInContext(ctx, toolName) {
-		err := g.newRuntimeError(ErrCodeToolNotAllowed, "tool.execute.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
+		err := g.newGatewayError(ErrCodeToolNotAllowed, "tool.execute.authorize_tool", nil, map[string]any{"tool": toolName})
 		g.logMCP(r, "warn", "tool.execute.denied", err, map[string]any{
 			"tool_name":    toolName,
 			"denial_layer": "gateway",
@@ -151,7 +148,8 @@ func (g *Gateway) handleTool(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := g.executor.Execute(ctx, toolName, req.Input)
 	if err != nil {
-		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, Error: err.Error()})
+		execErr := g.newGatewayError(ErrCodeToolExecFailed, "tool.execute", err, map[string]any{"tool": toolName})
+		WriteJSON(w, http.StatusBadRequest, ToolGatewayResponse{OK: false, RuntimeError: RuntimeErrorPayloadFromError(execErr)})
 		return
 	}
 	WriteJSON(w, http.StatusOK, ToolGatewayResponse{OK: true, Result: out})
@@ -184,7 +182,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			"method":       strings.TrimSpace(reqMethodForLog(r)),
 			"denial_layer": "gateway",
 		})
-		WriteRPCError(w, nil, -32001, g.formatError(err))
+		WriteRPCErrorForRuntimeError(w, nil, -32001, err)
 		return
 	}
 
@@ -215,20 +213,20 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 			g.logMCP(r, "warn", "mcp.tools.list.context_error", err, map[string]any{
 				"method": "tools/list",
 			})
-			WriteRPCError(w, req.ID, -32003, g.formatError(err))
+			WriteRPCErrorForRuntimeError(w, req.ID, -32003, err)
 			return
 		}
 		WriteRPCResult(w, req.ID, map[string]any{"tools": tools})
 		return
 	case "tools/call":
 		if g.executor == nil {
-			err := g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.execute", false, nil, "tool executor unavailable")
+			err := g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.execute", nil, map[string]any{"dependency": "tool_executor"})
 			g.writeToolCallErrorResult(w, req.ID, err)
 			return
 		}
 		toolName := strings.TrimSpace(asString(req.Params["name"]))
 		if toolName == "" {
-			err := g.newRuntimeError(ErrCodeInvalidRequest, "mcp.tools.call", false, nil, "tool name is required")
+			err := g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call", nil, map[string]any{"field": "name"})
 			g.logMCP(r, "warn", "mcp.tools.call.invalid", err, map[string]any{
 				"method": "tools/call",
 			})
@@ -237,7 +235,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		startupProbe, err := DecodeStartupProbeRequest(req.Params[startupProbeParamKey])
 		if err != nil {
-			err = g.newRuntimeError(ErrCodeInvalidRequest, "mcp.tools.call.startup_probe", false, err, "invalid startup probe request")
+			err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.startup_probe", err, map[string]any{"field": startupProbeParamKey})
 			g.logMCP(r, "warn", "mcp.tools.call.invalid_probe", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,
@@ -256,7 +254,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		r = r.WithContext(ctx)
 		if !toolAllowedInContext(ctx, toolName) {
-			err := g.newRuntimeError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", false, nil, "tool is not allowed for this agent: %s", toolName)
+			err := g.newGatewayError(ErrCodeToolNotAllowed, "mcp.tools.call.authorize_tool", nil, map[string]any{"tool": toolName})
 			g.logMCP(r, "warn", "mcp.tools.call.denied", err, map[string]any{
 				"method":       "tools/call",
 				"tool_name":    toolName,
@@ -282,17 +280,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		out, execErr := g.executor.Execute(ctx, toolName, req.Params["arguments"])
 		if execErr != nil {
-			retryable := true
-			if g.hooks.RetryableFromError != nil {
-				if rv, ok := g.hooks.RetryableFromError(execErr); ok {
-					retryable = rv
-				}
-			}
-			if runtimeErr, ok := runtimerterr.AsRuntimeError(execErr); ok && strings.TrimSpace(runtimeErr.Code) == "rate_limited" {
-				err = execErr
-			} else {
-				err = g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.execute", retryable, execErr, "tool execution failed: %s", toolName)
-			}
+			err = g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.execute", execErr, map[string]any{"tool": toolName})
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,
@@ -306,7 +294,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 				if startupProbe != nil {
 					outcome, outcomeErr := StartupProbeResultForRuntimeError(startupProbe.Contract, toolName, runtimeErr)
 					if outcomeErr != nil {
-						err = g.newRuntimeError(ErrCodeInvalidRequest, "mcp.tools.call.startup_probe", false, outcomeErr, "invalid startup probe request")
+						err = g.newGatewayError(ErrCodeInvalidRequest, "mcp.tools.call.startup_probe", outcomeErr, map[string]any{"field": startupProbeParamKey})
 						g.writeToolCallErrorResult(w, req.ID, err)
 						return
 					}
@@ -325,7 +313,7 @@ func (g *Gateway) handleMCP(w http.ResponseWriter, r *http.Request) {
 		}
 		resultText, err := projectToolCallSuccessText(ctx, g.executor, toolName, req.Params["arguments"], out)
 		if err != nil {
-			err = g.newRuntimeError(ErrCodeToolExecFailed, "mcp.tools.call.result_project", false, err, "tool result continuation failed: %s", toolName)
+			err = g.newGatewayError(ErrCodeToolExecFailed, "mcp.tools.call.result_project", err, map[string]any{"tool": toolName})
 			g.logMCP(r, "warn", "mcp.tools.call.exec_error", err, map[string]any{
 				"method":    "tools/call",
 				"tool_name": toolName,
@@ -713,19 +701,19 @@ func (g *Gateway) catalogNames(catalog map[string]llm.ToolDefinition) []string {
 
 func (g *Gateway) authorize(r *http.Request) error {
 	if strings.TrimSpace(g.authToken) == "" {
-		return g.newRuntimeError(ErrCodeAuthUnconfigured, "mcp.authorize", false, nil, "gateway authorization token is not configured")
+		return g.newGatewayError(ErrCodeAuthUnconfigured, "mcp.authorize", nil, nil)
 	}
 	authz := strings.TrimSpace(r.Header.Get("Authorization"))
 	if authz == "" {
-		return g.newRuntimeError(ErrCodeAuthMissingBearer, "mcp.authorize", false, nil, "missing authorization bearer token")
+		return g.newGatewayError(ErrCodeAuthMissingBearer, "mcp.authorize", nil, nil)
 	}
 	const prefix = "bearer "
 	if !strings.HasPrefix(strings.ToLower(authz), prefix) {
-		return g.newRuntimeError(ErrCodeAuthInvalidBearer, "mcp.authorize", false, nil, "invalid authorization header")
+		return g.newGatewayError(ErrCodeAuthInvalidBearer, "mcp.authorize", nil, map[string]any{"reason": "invalid_header"})
 	}
 	token := strings.TrimSpace(authz[len(prefix):])
 	if token != g.authToken {
-		return g.newRuntimeError(ErrCodeAuthInvalidBearer, "mcp.authorize", false, nil, "invalid token")
+		return g.newGatewayError(ErrCodeAuthInvalidBearer, "mcp.authorize", nil, map[string]any{"reason": "invalid_token"})
 	}
 	return nil
 }
@@ -746,11 +734,11 @@ func (g *Gateway) resolveRuntimeTurnContext(token string) (TurnContext, bool) {
 func (g *Gateway) runtimeTurnContextForRequest(r *http.Request, operation string) (TurnContext, error) {
 	token := ContextTokenFromRequest(r)
 	if token == "" {
-		return TurnContext{}, g.newRuntimeError(ErrCodeContextMissing, operation, false, nil, "missing or invalid mcp context token")
+		return TurnContext{}, g.newGatewayError(ErrCodeContextMissing, operation, nil, nil)
 	}
 	turn, ok := g.resolveRuntimeTurnContext(token)
 	if !ok {
-		return TurnContext{}, g.newRuntimeError(ErrCodeContextNotFound, operation, false, nil, "missing or invalid mcp context token")
+		return TurnContext{}, g.newGatewayError(ErrCodeContextNotFound, operation, nil, nil)
 	}
 	return turn, nil
 }
@@ -810,11 +798,30 @@ func (g *Gateway) logMCP(r *http.Request, level, action string, err error, detai
 			entityID = strings.TrimSpace(actor.EntityID)
 		}
 	}
-	errText := ""
+	var failure *failures.Envelope
 	if err != nil {
-		errText = g.formatError(err)
+		if payload := RuntimeErrorPayloadFromError(err); payload != nil {
+			switch {
+			case payload.Failure != nil:
+				failure = failures.CloneEnvelope(payload.Failure)
+			case payload.Protocol != nil:
+				detail = cloneLogDetail(detail)
+				detail["protocol_error"] = *payload.Protocol
+			}
+		} else {
+			normalized := failures.Normalize(err, "mcp-gateway", strings.TrimSpace(action))
+			failure = &normalized
+		}
 	}
-	g.hooks.Log(r.Context(), strings.ToLower(strings.TrimSpace(level)), strings.TrimSpace(action), agentID, entityID, detail, errText)
+	g.hooks.Log(r.Context(), strings.ToLower(strings.TrimSpace(level)), strings.TrimSpace(action), agentID, entityID, detail, failure)
+}
+
+func cloneLogDetail(detail map[string]any) map[string]any {
+	cloned := make(map[string]any, len(detail)+1)
+	for key, value := range detail {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (g *Gateway) runtimeIngressPaused(ctx context.Context) bool {
@@ -839,10 +846,13 @@ func (g *Gateway) formatError(err error) string {
 	if err == nil {
 		return ""
 	}
-	if g != nil && g.hooks.FormatError != nil {
-		return g.hooks.FormatError(err)
+	if failure, ok := failures.As(err); ok {
+		return failure.Failure.Message
 	}
-	return err.Error()
+	if payload := RuntimeErrorPayloadFromError(err); payload != nil && payload.Protocol != nil {
+		return strings.TrimSpace(payload.Protocol.Message)
+	}
+	return failures.FromError(err, "mcp-gateway", "format_error").Failure.Message
 }
 
 func (g *Gateway) writeToolCallErrorResult(w http.ResponseWriter, id any, err error) {
@@ -856,11 +866,54 @@ func (g *Gateway) writeToolCallErrorResult(w http.ResponseWriter, id any, err er
 	WriteRPCResult(w, id, payload)
 }
 
-func (g *Gateway) newRuntimeError(code, operation string, retryable bool, cause error, format string, args ...any) error {
-	if g != nil && g.hooks.NewRuntimeError != nil {
-		return g.hooks.NewRuntimeError(code, operation, retryable, cause, format, args...)
+func (g *Gateway) newGatewayError(code, operation string, cause error, detail map[string]any) error {
+	code = strings.TrimSpace(code)
+	switch code {
+	case ErrCodeToolNotAllowed:
+		attributes := map[string]any{"action": "tool_execute"}
+		for key, value := range detail {
+			attributes[key] = value
+		}
+		return failures.Wrap(failures.ClassAuthorizationDenied, "tool_not_allowed", "mcp-gateway", operation, attributes, cause)
+	case ErrCodeToolExecFailed:
+		if cause != nil {
+			return failures.FromError(cause, "mcp-gateway", operation)
+		}
+		return failures.NewDetail("dependency_unavailable", "mcp-gateway", operation, detail)
+	case ErrCodeInvalidRequest,
+		ErrCodeAuthUnconfigured,
+		ErrCodeAuthMissingBearer,
+		ErrCodeAuthInvalidBearer,
+		ErrCodeContextMissing,
+		ErrCodeContextNotFound,
+		ErrCodeContextStale,
+		ErrCodeActorMissing,
+		ErrCodeStallDetected:
+		return NewProtocolError(code, operation, protocolErrorMessage(code), detail, cause)
+	default:
+		return NewProtocolError(ErrCodeInvalidRequest, operation, protocolErrorMessage(ErrCodeInvalidRequest), map[string]any{"unknown_code": code}, cause)
 	}
-	return runtimerterr.WrapRuntimeError(code, "mcp-gateway", operation, retryable, cause, format, args...)
+}
+
+func protocolErrorMessage(code string) string {
+	switch strings.TrimSpace(code) {
+	case ErrCodeAuthUnconfigured:
+		return "Gateway authorization is not configured."
+	case ErrCodeAuthMissingBearer:
+		return "Authorization bearer token is required."
+	case ErrCodeAuthInvalidBearer:
+		return "Authorization bearer token is invalid."
+	case ErrCodeContextMissing:
+		return "MCP context token is required."
+	case ErrCodeContextNotFound, ErrCodeContextStale:
+		return "MCP context token is not active."
+	case ErrCodeActorMissing:
+		return "MCP actor context is required."
+	case ErrCodeStallDetected:
+		return "MCP request stalled."
+	default:
+		return "MCP request is invalid."
+	}
 }
 
 func asString(v any) string {

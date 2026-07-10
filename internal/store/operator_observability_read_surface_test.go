@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -33,22 +34,24 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("seed events: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, last_error, created_at)
+			INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, status, retry_count, reason_code, failure, created_at)
 			VALUES
-				($1::uuid, $2::uuid, 'agent', 'agent-a', 'dead_letter', 3, 'retry_exhausted', 'boom', $3),
-				($1::uuid, $2::uuid, 'node', 'node-a', 'failed', 1, 'handler_error', 'node boom', $4)
-		`, runID, olderEventID, base.Add(time.Second), base.Add(1500*time.Millisecond)); err != nil {
+				($1::uuid, $2::uuid, 'agent', 'agent-a', 'dead_letter', 3, 'retry_exhausted', $3::jsonb, $4),
+				($1::uuid, $2::uuid, 'node', 'node-a', 'failed', 1, 'handler_error', $5::jsonb, $6)
+		`, runID, olderEventID,
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)), base.Add(time.Second),
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)), base.Add(1500*time.Millisecond)); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
 			original_event_id, original_event, original_payload, entity_id, flow_instance,
-			failure_type, error_message, retry_count, chain_depth, handler_node, created_at
+			failure, retry_count, chain_depth, handler_node, created_at
 		) VALUES (
 			$1::uuid, 'task.failed', '{}'::jsonb, $2::uuid, 'flow-1',
-			'retry_exhausted', 'boom', 3, 1, 'handler-a', $3
+			$3::jsonb, 3, 1, 'handler-a', $4
 		)
-	`, olderEventID, entityID, base.Add(2*time.Second)); err != nil {
+	`, olderEventID, entityID, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)), base.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed dead letter: %v", err)
 	}
 
@@ -80,7 +83,7 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 		t.Fatalf("agent delivery evidence = %#v", agentDelivery)
 	}
 	nodeDelivery := got.Deliveries[1]
-	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || !nodeDelivery.RetryEligible || nodeDelivery.Terminal || nodeDelivery.LastError != "node boom" {
+	if nodeDelivery.SubscriberType != "node" || nodeDelivery.RetryCount != 1 || !nodeDelivery.RetryEligible || nodeDelivery.Terminal || nodeDelivery.Failure == nil || nodeDelivery.Failure.Detail.Code != "node_failed" {
 		t.Fatalf("node delivery evidence = %#v", nodeDelivery)
 	}
 
@@ -211,6 +214,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 	insertLog := func(code string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
+		failure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, code, nil))
 		payload := `{
 			"log_level":"error",
 			"message":"runtime failed",
@@ -219,8 +223,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 				"action":"request_failed",
 				"agent_id":"agent-1",
 				"entity_id":"` + uuid.NewString() + `",
-				"error":"runtime failed",
-				"error_code":"` + code + `"
+				"failure":` + failure + `
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `
@@ -292,6 +295,7 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 		t.Fatalf("first incident = %#v", incidents.Incidents[0])
 	}
 
+	bulkFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "bulk_code", nil))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
 		SELECT gen_random_uuid(), $1::uuid, 'platform.runtime_log', 'global',
@@ -302,13 +306,12 @@ func TestOperatorRuntimeObservabilityOwnerLogsIncidentsAndCursor(t *testing.T) {
 					'component', 'mcp-gateway',
 					'action', 'request_failed',
 					'agent_id', 'agent-1',
-					'error', 'bulk runtime failed',
-					'error_code', 'bulk_code'
+					'failure', $3::jsonb
 				)
 			),
 			'runtime', 'platform', $2::timestamptz + (g * interval '1 millisecond')
 		FROM generate_series(1, 1005) AS g
-	`, runID, base.Add(2*time.Minute)); err != nil {
+	`, runID, base.Add(2*time.Minute), bulkFailure); err != nil {
 		t.Fatalf("seed bulk runtime logs: %v", err)
 	}
 	bulkIncidents, err := pg.ListOperatorRuntimeIncidents(ctx, OperatorRuntimeIncidentListOptions{
@@ -492,8 +495,7 @@ func TestOperatorRuntimeLogsFilterBySessionAndTimeWindow(t *testing.T) {
 			"details":{
 				"component":"agent-runtime",
 				"action":"turn_progress",
-				"session_id":"` + sessionID + `",
-				"error_code":"warn_code"
+				"session_id":"` + sessionID + `"
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `
@@ -550,6 +552,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 	insertLog := func(runID, code string, createdAt time.Time) string {
 		t.Helper()
 		eventID := uuid.NewString()
+		failure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, code, nil))
 		payload := `{
 			"log_level":"error",
 			"message":"runtime failed",
@@ -557,8 +560,7 @@ func TestOperatorRuntimeObservabilityFiltersByBundleHash(t *testing.T) {
 				"component":"mcp-gateway",
 				"action":"request_failed",
 				"agent_id":"agent-1",
-				"error":"runtime failed",
-				"error_code":"` + code + `"
+				"failure":` + failure + `
 			}
 		}`
 		if _, err := db.ExecContext(ctx, `

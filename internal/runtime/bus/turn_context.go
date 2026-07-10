@@ -248,8 +248,8 @@ func runtimeLogDetails(entry diaglog.RunEntry) map[string]any {
 	if len(entry.Correlation) > 0 {
 		details["correlation"] = cloneStringMap(entry.Correlation)
 	}
-	if v := strings.TrimSpace(entry.Error); v != "" {
-		details["error"] = v
+	if entry.Failure != nil {
+		details["failure"] = *entry.Failure
 	}
 	if entry.DurationUS > 0 {
 		details["duration_us"] = entry.DurationUS

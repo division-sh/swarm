@@ -263,11 +263,15 @@ func TestHandlerLogsInternalFallbackErrors(t *testing.T) {
 		`"run_id":"run-log"`,
 		`"event_name":"scan.requested"`,
 		`"entity_id":"entity-log"`,
-		"boom-event-publish-internal",
+		"platform.internal_failure",
+		"unclassified_runtime_error",
 	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("log output = %q, want substring %q", logOutput, want)
 		}
+	}
+	if strings.Contains(logOutput, "boom-event-publish-internal") {
+		t.Fatalf("log output leaked raw error prose: %q", logOutput)
 	}
 	if strings.Contains(logOutput, "do-not-log") || strings.Contains(logOutput, "secret") {
 		t.Fatalf("log output leaked payload data: %q", logOutput)

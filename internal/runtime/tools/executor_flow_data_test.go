@@ -9,6 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -129,9 +130,8 @@ func TestExecutorReadFlowDataIgnoresMutableActorFlowDataAccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "flows", "support", "data", "escape.md"), []byte("mutable grant\n"), 0o644); err != nil {
 		t.Fatalf("write escape.md: %v", err)
 	}
-	if _, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "escape.md"}); err == nil || !strings.Contains(err.Error(), "invalid enum value") {
-		t.Fatalf("Execute(read_flow_data escape.md) error = %v, want contract enum rejection", err)
-	}
+	_, err := exec.Execute(models.WithActor(context.Background(), actor), "read_flow_data", map[string]any{"filename": "escape.md"})
+	requireToolFailure(t, err, runtimefailures.ClassSchemaInvalid, "invalid_tool_input")
 }
 
 func TestExecutorReadFlowDataUsesContractOwnedFlowRoot(t *testing.T) {

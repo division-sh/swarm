@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type EventType string
@@ -143,8 +145,8 @@ type eventJSON struct {
 }
 
 type PersistedReplayEvent struct {
-	Event       Event
-	ReplayError string
+	Event         Event
+	ReplayFailure *runtimefailures.Envelope
 }
 
 type EventLineage struct {

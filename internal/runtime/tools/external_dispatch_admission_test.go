@@ -16,6 +16,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -205,8 +206,8 @@ func TestExecutor_HTTPRateLimitTimeoutDoesNotRetry(t *testing.T) {
 		t.Fatalf("initial Execute: %v", err)
 	}
 	_, err := exec.Execute(ctx, "check_domain", map[string]any{})
-	runtimeErr, ok := AsRuntimeError(err)
-	if !ok || runtimeErr == nil || runtimeErr.Code != externalDispatchRateLimitedCode {
+	runtimeErr, ok := failures.As(err)
+	if !ok || runtimeErr == nil || runtimeErr.Failure.Detail.Code != externalDispatchRateLimitedCode {
 		t.Fatalf("second Execute err = %v, want rate_limited runtime error", err)
 	}
 	if got := len(recorder.timesSnapshot()); got != 1 {
@@ -255,8 +256,8 @@ func TestExecutor_MCPStdioRuntimeCallUsesRateLimit(t *testing.T) {
 		t.Fatalf("initial Execute(infra.ping): %v", err)
 	}
 	_, err := exec.Execute(ctx, "infra.ping", map[string]any{})
-	runtimeErr, ok := AsRuntimeError(err)
-	if !ok || runtimeErr == nil || runtimeErr.Code != externalDispatchRateLimitedCode {
+	runtimeErr, ok := failures.As(err)
+	if !ok || runtimeErr == nil || runtimeErr.Failure.Detail.Code != externalDispatchRateLimitedCode {
 		t.Fatalf("second Execute err = %v, want runtime rate_limited", err)
 	}
 }
@@ -304,7 +305,7 @@ func TestExternalDispatchMCPStdioHelperProcess(t *testing.T) {
 			_ = encoder.Encode(map[string]any{
 				"jsonrpc": "2.0",
 				"id":      id,
-				"result":  map[string]any{"structuredContent": map[string]any{"ok": true}},
+				"result":  map[string]any{"content": []any{}, "structuredContent": map[string]any{"ok": true}},
 			})
 		default:
 			_ = encoder.Encode(map[string]any{
@@ -402,10 +403,10 @@ func TestGatewayMCPToolsCallProjectsRateLimitedRuntimeError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeRuntimeErrorPayload: %v", err)
 	}
-	if runtimeErr.Code != externalDispatchRateLimitedCode {
-		t.Fatalf("runtimeError.code = %q, want %q", runtimeErr.Code, externalDispatchRateLimitedCode)
+	if runtimeErr.Failure == nil || runtimeErr.Failure.Detail.Code != externalDispatchRateLimitedCode {
+		t.Fatalf("runtimeError.failure = %#v, want detail %q", runtimeErr.Failure, externalDispatchRateLimitedCode)
 	}
-	if !runtimeErr.Retryable {
+	if !runtimeErr.Failure.Retryable {
 		t.Fatalf("runtimeError.retryable = false, want true")
 	}
 	if got := len(recorder.timesSnapshot()); got != 1 {
@@ -499,8 +500,8 @@ func TestExecutor_NativeWebSearchInheritedProviderPolicySharesBucketAcrossFlows(
 		NativeTools: models.NativeToolConfig{WebSearch: true},
 	})
 	_, err := exec.Execute(second, "web_search", map[string]any{"query": "beta"})
-	runtimeErr, ok := AsRuntimeError(err)
-	if !ok || runtimeErr == nil || runtimeErr.Code != externalDispatchRateLimitedCode {
+	runtimeErr, ok := failures.As(err)
+	if !ok || runtimeErr == nil || runtimeErr.Failure.Detail.Code != externalDispatchRateLimitedCode {
 		t.Fatalf("second sibling Execute(web_search) err = %v, want rate_limited runtime error", err)
 	}
 	if got := len(recorder.timesSnapshot()); got != 1 {
@@ -693,6 +694,7 @@ func newRateLimitedMCPTestServer(t *testing.T, recorder *dispatchTimeRecorder, t
 		case "tools/call":
 			recorder.record()
 			writeMCPResult(t, w, req["id"], map[string]any{
+				"content":           []any{},
 				"structuredContent": map[string]any{"ok": true},
 			})
 		default:

@@ -55,7 +55,8 @@ func TestAgentDeliveriesUsesAgentDeliveryLifecycleAndRendersRows(t *testing.T) {
 		"DELIVERY_ID",
 		"delivery-1   platform.agent_directive",
 		"delivery-2   platform.agent_followup",
-		"queued       waiting",
+		"failed",
+		"platform.connector_failure/waiting",
 		"next_cursor=cursor-2",
 	} {
 		if !strings.Contains(stdout.String(), want) {
@@ -364,10 +365,10 @@ func validAgentDeliveryLifecycleResult() map[string]any {
 				"delivery_id":         "delivery-2",
 				"event_id":            "event-2",
 				"event_name":          "platform.agent_followup",
-				"status":              "pending",
+				"status":              "failed",
 				"retry_count":         0,
-				"reason_code":         "queued",
-				"last_error":          "waiting",
+				"reason_code":         "handler_failure",
+				"failure":             testRuntimeFailure("waiting"),
 				"delivery_created_at": "2026-05-18T03:04:00Z",
 			},
 		},

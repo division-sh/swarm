@@ -8,11 +8,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
 type pipelineReceiptRecorder interface {
-	UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error
+	UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error
 }
 
 type EventStore interface {
@@ -87,9 +88,6 @@ func startupRecoveryPipelineReplayDetail(evt events.Event, outcome, reason strin
 		detail["persisted_recipients"] = copied
 		detail["persisted_recipient_count"] = len(copied)
 	}
-	if strings.TrimSpace(outcome) == startupRecoveryPipelineReplayOutcomeDropped {
-		detail["error_code"] = strings.TrimSpace(reason)
-	}
 	return detail
 }
 
@@ -113,7 +111,7 @@ func startupRecoveryPipelineReplayLevel(outcome string) diaglog.Level {
 	}
 }
 
-func logStartupRecoveryPipelineReplayAftermath(ctx context.Context, logger recoveryRuntimeLogger, evt events.Event, outcome, reason, errText string, recipients []string) {
+func logStartupRecoveryPipelineReplayAftermath(ctx context.Context, logger recoveryRuntimeLogger, evt events.Event, outcome, reason string, failure *runtimefailures.Envelope, recipients []string) {
 	if logger == nil {
 		return
 	}
@@ -129,7 +127,7 @@ func logStartupRecoveryPipelineReplayAftermath(ctx context.Context, logger recov
 		EventType: strings.TrimSpace(string(evt.Type())),
 		EntityID:  evt.EntityID(),
 		Detail:    startupRecoveryPipelineReplayDetail(evt, outcome, reason, recipients),
-		Error:     strings.TrimSpace(errText),
+		Failure:   runtimefailures.CloneEnvelope(failure),
 	})
 }
 
@@ -175,10 +173,11 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			continue
 		}
 		if !claimed {
-			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonClaimNotAcquired, "", nil)
+			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonClaimNotAcquired, nil, nil)
 			continue
 		}
-		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
+		if record.ReplayFailure != nil {
+			failure := *runtimefailures.CloneEnvelope(record.ReplayFailure)
 			if recorder == nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: missing pipeline receipt recorder", evt.ID())
@@ -186,12 +185,12 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 				_ = lease.Release(ctx)
 				continue
 			}
-			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "error", replayErr); err != nil {
+			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "error", &failure); err != nil {
 				if firstErr == nil {
 					firstErr = fmt.Errorf("mark replay event %s error receipt: %w", evt.ID(), err)
 				}
 			}
-			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, replayErr, nil)
+			logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeDropped, startupRecoveryPipelineReplayReasonQuarantined, &failure, nil)
 			_ = lease.Release(ctx)
 			continue
 		}
@@ -221,12 +220,12 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 						_ = lease.Release(ctx)
 						continue
 					}
-					if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", ""); err != nil {
+					if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil); err != nil {
 						if firstErr == nil {
 							firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
 						}
 					}
-					logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, "", nil)
+					logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeSkipped, startupRecoveryPipelineReplayReasonNoPersistedRecipients, nil, nil)
 					_ = lease.Release(ctx)
 					continue
 				}
@@ -240,11 +239,11 @@ func (r *RecoveryManager) Recover(ctx context.Context) error {
 			continue
 		}
 		if recorder != nil {
-			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", ""); err != nil && firstErr == nil {
+			if err := recorder.UpsertPipelineReceipt(ctx, evt.ID(), "processed", nil); err != nil && firstErr == nil {
 				firstErr = fmt.Errorf("mark replay event %s delivered receipt: %w", evt.ID(), err)
 			}
 		}
-		logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, "", persistedRecipients)
+		logStartupRecoveryPipelineReplayAftermath(ctx, logger, evt, startupRecoveryPipelineReplayOutcomeReplayed, startupRecoveryPipelineReplayReasonReplayed, nil, persistedRecipients)
 		_ = lease.Release(ctx)
 	}
 	return firstErr

@@ -24,8 +24,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
-	"github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -514,7 +514,9 @@ func (e *Executor) SupportsStep(step Step) bool {
 
 func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
 	if err := e.ValidateRequest(req); err != nil {
-		return ExecutionResult{FailureClass: ClassifyFailure(err)}, err
+		result := ExecutionResult{Status: OutcomeRejected}
+		SetExecutionFailure(&result, err, "runtime.engine", "validate_request")
+		return result, err
 	}
 	entityID := identity.NormalizeEntityID(firstNonEmpty(
 		req.EntityID.String(),
@@ -534,7 +536,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	err := e.deps.Locker.WithEntityLock(ctx, entityID, func(lockCtx context.Context) error {
 		loaded, err := e.loadState(lockCtx, req)
 		if err != nil {
-			result.FailureClass = ClassifyFailure(err)
+			SetExecutionFailure(&result, err, "runtime.engine", "load_state")
 			return err
 		}
 		req.State = loaded
@@ -546,19 +548,19 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 				result = frame.result
 				var moduleErr *computemodule.Error
 				if errors.As(err, &moduleErr) && moduleErr.Code == computemodule.CodeReplay {
-					result.FailureClass = ClassifyFailure(err)
+					SetExecutionFailure(&result, err, "runtime.engine", "compute_replay")
 					return err
 				}
 				if replayErr := verifyComputeModuleReplayTraceCount(frame); replayErr != nil {
-					result.FailureClass = ClassifyFailure(replayErr)
+					SetExecutionFailure(&result, replayErr, "runtime.engine", "compute_replay_trace")
 					return replayErr
 				}
-				result.FailureClass = ClassifyFailure(err)
+				SetExecutionFailure(&result, err, "runtime.engine", "execute_steps")
 				return err
 			}
 			if err := verifyComputeModuleReplayTraceCount(frame); err != nil {
 				result = frame.result
-				result.FailureClass = ClassifyFailure(err)
+				SetExecutionFailure(&result, err, "runtime.engine", "compute_replay_trace")
 				return err
 			}
 			if len(actionIntents) > 0 {
@@ -580,10 +582,12 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		if errors.Is(err, ErrEmitPersistencePrerequisite) || errors.Is(err, ErrEmitPayloadContractViolation) {
 			result.Status = OutcomeRejected
-			result.FailureClass = FailureLogic
 		}
 		if result.Status == OutcomeUnknown {
 			result.Status = OutcomeRejected
+		}
+		if result.Failure == nil {
+			SetExecutionFailure(&result, err, "runtime.engine", "execute")
 		}
 		return result, err
 	}
@@ -592,18 +596,18 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 	}
 	if len(intents) > 0 {
 		if err := e.deps.Dispatcher.DispatchPostCommit(ctx, intents); err != nil {
-			result.FailureClass = ClassifyFailure(err)
+			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_post_commit")
 			return result, err
 		}
 	}
 	if len(activityIntents) > 0 {
 		if e.deps.ActivityDispatcher == nil {
 			err := fmt.Errorf("%w: activity dispatcher is required when handler declares activity", ErrInvalidConfig)
-			result.FailureClass = ClassifyFailure(err)
+			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
 			return result, err
 		}
 		if err := e.deps.ActivityDispatcher.DispatchActivities(ctx, activityIntents); err != nil {
-			result.FailureClass = ClassifyFailure(err)
+			SetExecutionFailure(&result, err, "runtime.engine", "dispatch_activity")
 			return result, err
 		}
 	}
@@ -1578,17 +1582,18 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	limit := runtimecontracts.EffectiveFanOutMaxItems(*spec)
 	if len(items) > limit {
-		return false, rterrors.WrapRuntimeError(
-			runtimecontracts.FanOutBoundExceededCode,
+		return false, failures.Wrap(
+			failures.ClassFanOutBoundExceeded,
+			"fan_out_bound",
 			"runtime.engine",
 			string(StepFanOut),
-			false,
+			map[string]any{
+				"source":     strings.TrimSpace(string(active.Source)),
+				"items_from": strings.TrimSpace(spec.ItemsFrom),
+				"actual":     len(items),
+				"limit":      limit,
+			},
 			ErrFanOutBoundExceeded,
-			"%s fan_out over %s resolved %d item(s), exceeding limit %d",
-			strings.TrimSpace(string(active.Source)),
-			strings.TrimSpace(spec.ItemsFrom),
-			len(items),
-			limit,
 		)
 	}
 	if err := e.stepDataWrites(frame); err != nil {

@@ -13,11 +13,12 @@ import (
 	"unicode"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const (
-	externalDispatchRateLimitedCode = "rate_limited"
+	externalDispatchRateLimitedCode = "external_dispatch_rate_limited"
 
 	externalDispatchScopeHTTPTool        = "http_tool"
 	externalDispatchScopeMCPServer       = "mcp_server"
@@ -51,8 +52,7 @@ type externalDispatchAdmissionResult struct {
 	MaxWait    time.Duration
 	Wait       time.Duration
 	Outcome    string
-	ErrorCode  string
-	Retryable  bool
+	Failure    *failures.Envelope
 }
 
 type externalDispatchAdmissionSummary struct {
@@ -64,8 +64,7 @@ type externalDispatchAdmissionSummary struct {
 	MaxWait    time.Duration
 	Wait       time.Duration
 	Outcome    string
-	ErrorCode  string
-	Retryable  bool
+	Failure    *failures.Envelope
 	Attempts   int
 }
 
@@ -116,9 +115,8 @@ func externalDispatchAdmissionDiagnosticDetail(ctx context.Context) (map[string]
 		"rate_limit_outcome":     summary.Outcome,
 		"rate_limit_attempts":    summary.Attempts,
 	}
-	if summary.ErrorCode != "" {
-		detail["error_code"] = summary.ErrorCode
-		detail["retryable"] = summary.Retryable
+	if summary.Failure != nil {
+		detail["failure"] = *summary.Failure
 	}
 	return detail, true
 }
@@ -142,8 +140,7 @@ func (c *externalDispatchAdmissionCollector) record(result externalDispatchAdmis
 	switch result.Outcome {
 	case externalDispatchOutcomeTimedOut:
 		c.summary.Outcome = result.Outcome
-		c.summary.ErrorCode = result.ErrorCode
-		c.summary.Retryable = result.Retryable
+		c.summary.Failure = result.Failure
 	case externalDispatchOutcomeWaited:
 		if c.summary.Outcome != externalDispatchOutcomeTimedOut {
 			c.summary.Outcome = result.Outcome
@@ -188,8 +185,8 @@ func (e *Executor) admitExternalDispatch(ctx context.Context, policy externalDis
 }
 
 func isExternalDispatchRateLimited(err error) bool {
-	runtimeErr, ok := AsRuntimeError(err)
-	return ok && runtimeErr != nil && runtimeErr.Code == externalDispatchRateLimitedCode
+	failure, ok := failures.As(err)
+	return ok && failure != nil && failure.Failure.Detail.Code == externalDispatchRateLimitedCode
 }
 
 func (e *Executor) httpToolExternalDispatchPolicy(tool RegisteredTool) externalDispatchAdmissionPolicy {
@@ -300,16 +297,18 @@ func (c *externalDispatchAdmissionController) Admit(ctx context.Context, policy 
 	result.Wait = wait
 	if timedOut {
 		result.Outcome = externalDispatchOutcomeTimedOut
-		result.ErrorCode = externalDispatchRateLimitedCode
-		result.Retryable = true
-		return result, NewRuntimeError(
+		err := failures.NewDetail(
 			externalDispatchRateLimitedCode,
 			"tool-executor",
 			"external_dispatch_admission",
-			true,
-			"external dispatch rate limit exceeded for %s",
-			strings.TrimSpace(policy.BucketName),
+			map[string]any{
+				"bucket": strings.TrimSpace(policy.BucketName),
+				"scope":  strings.TrimSpace(policy.Scope),
+			},
 		)
+		failure, _ := failures.EnvelopeFromError(err)
+		result.Failure = &failure
+		return result, err
 	}
 	if wait > 0 {
 		result.Outcome = externalDispatchOutcomeWaited

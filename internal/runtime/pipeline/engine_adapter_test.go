@@ -21,6 +21,7 @@ import (
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -1450,9 +1451,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsAgentVisibleArtifac
 	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "agent-visible mount /data") {
-		t.Fatalf("failure_reason = %q, want invalid root detail", got)
-	}
+	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassDependencyUnavailable, "artifact_repo_root_unavailable")
 	if _, exists := instance.Metadata["current_ref"]; exists {
 		t.Fatalf("current_ref should not be persisted on invalid artifact root: %#v", instance.Metadata["current_ref"])
 	}
@@ -1496,7 +1495,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			defer cleanup()
 			store := NewWorkflowInstanceStore(db)
 			bus := &recordingPipelineBus{}
-			artifactRoot, wantDetail := tc.root(t)
+			artifactRoot, _ := tc.root(t)
 			pc := &PipelineCoordinator{db: db, workflowStore: store, artifactRoot: artifactRoot, bus: bus}
 			ctx := testWorkflowStoreRunContext(t, store)
 			entityID := "22222222-2222-2222-2222-222222222222"
@@ -1525,9 +1524,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitRejectsUnusableArtifactRoo
 			if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
 				t.Fatalf("status = %q, want failed", got)
 			}
-			if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, wantDetail) || !strings.Contains(got, "not writable by the runtime process") {
-				t.Fatalf("failure_reason = %q, want unusable root detail %q", got, wantDetail)
-			}
+			requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassDependencyUnavailable, "artifact_repo_root_unavailable")
 			assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 			if got := bus.publishedCount(); got != 0 {
 				t.Fatalf("fallback published event count = %d, want 0", got)
@@ -1786,9 +1783,7 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitQueuesFailureResultThroughO
 	if got := strings.TrimSpace(asString(committed.Metadata["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	if got := strings.TrimSpace(asString(committed.Metadata["failure_reason"])); !strings.Contains(got, "path traversal is not allowed") {
-		t.Fatalf("failure_reason = %q, want path traversal detail", got)
-	}
+	requireArtifactRepoFailure(t, committed.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
 	if got := strings.TrimSpace(asString(committed.Metadata["last_source_event_id"])); got != execCtx.Request.Event.ID() {
 		t.Fatalf("last_source_event_id = %q, want %q", got, execCtx.Request.Event.ID())
 	}
@@ -1863,8 +1858,8 @@ func TestExecuteNodeContractHandlerArtifactRepoCommitFailureResultOutboxFailureR
 	if _, exists := rolledBack.Metadata["status"]; exists {
 		t.Fatalf("status should roll back with failed outbox write: %#v", rolledBack.Metadata["status"])
 	}
-	if _, exists := rolledBack.Metadata["failure_reason"]; exists {
-		t.Fatalf("failure_reason should roll back with failed outbox write: %#v", rolledBack.Metadata["failure_reason"])
+	if _, exists := rolledBack.Metadata["failure"]; exists {
+		t.Fatalf("failure should roll back with failed outbox write: %#v", rolledBack.Metadata["failure"])
 	}
 }
 
@@ -1974,9 +1969,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnInvalidSucces
 	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "payload violates schema") {
-		t.Fatalf("failure_reason = %q, want schema violation detail", got)
-	}
+	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_result_schema_invalid")
 	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 	if got := bus.publishedCount(); got != 0 {
 		t.Fatalf("fallback published event count = %d, want 0", got)
@@ -2020,14 +2013,13 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnPathOutsideAl
 	if got := strings.TrimSpace(asString(instance.Metadata["status"])); got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "path traversal is not allowed") {
-		t.Fatalf("failure_reason = %q, want traversal detail", got)
-	}
+	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
 	failureEvent := assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 	var payload map[string]any
 	if err := json.Unmarshal(failureEvent.Payload(), &payload); err != nil {
 		t.Fatalf("failure event payload: %v", err)
 	}
+	requireArtifactRepoFailure(t, payload["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
 	if got := strings.TrimSpace(asString(payload["namespace"])); got != initial["namespace"].(string) {
 		t.Fatalf("failure payload namespace = %q", got)
 	}
@@ -2082,9 +2074,7 @@ func TestPipelineEngineActionRunner_ArtifactRepoCommitFailsClosedOnYAMLSchemaMis
 	if _, exists := instance.Metadata["current_ref"]; exists {
 		t.Fatalf("current_ref should not be persisted on failed commit: %#v", instance.Metadata["current_ref"])
 	}
-	if got := strings.TrimSpace(asString(instance.Metadata["failure_reason"])); !strings.Contains(got, "missing required field name") {
-		t.Fatalf("failure_reason = %q, want schema mismatch detail", got)
-	}
+	requireArtifactRepoFailure(t, instance.Metadata["failure"], runtimefailures.ClassSchemaInvalid, "artifact_repo_file_invalid")
 	assertArtifactRepoQueuedIntent(t, intents, 0, "artifact_repo.commit_failed")
 }
 
@@ -2414,10 +2404,10 @@ artifact_repo.commit_failed:
   display_slug: string
   request_id: string
   source_event_id: string
-  failure_reason: string
+  failure: platform.failure/v1 envelope
   provenance: ArtifactProvenance
   request_copy: string
-  required: [repo_id, namespace, request_id, source_event_id, failure_reason, provenance]
+  required: [repo_id, namespace, request_id, source_event_id, failure, provenance]
 `,
 	})
 }
@@ -2430,6 +2420,22 @@ func testArtifactRepoEntityFields() map[string]any {
 		"display_slug":     "Demo Artifact",
 		"source_record_id": "record-123",
 	}
+}
+
+func requireArtifactRepoFailure(t testing.TB, value any, class runtimefailures.Class, code string) runtimefailures.Envelope {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal artifact failure: %v", err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode artifact failure: %v (value=%#v)", err, value)
+	}
+	if failure.Class != class || failure.Detail.Code != code {
+		t.Fatalf("artifact failure = %s/%s, want %s/%s", failure.Class, failure.Detail.Code, class, code)
+	}
+	return failure
 }
 
 func testArtifactRepoActionAndContext(entityID string, entity map[string]any, eventID, requestID, content string) (runtimecontracts.ActionSpec, runtimeengine.ExecutionContext) {
@@ -2486,7 +2492,7 @@ func testArtifactRepoActionAndContext(entityID string, entity map[string]any, ev
 					CurrentRef:        "current_ref",
 					FileManifest:      "file_manifest",
 					Status:            "status",
-					FailureReason:     "failure_reason",
+					Failure:           "failure",
 					LastRequestID:     "last_request_id",
 					LastSourceEventID: "last_source_event_id",
 				},

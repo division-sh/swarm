@@ -44,22 +44,22 @@ func (s OutcomeStatus) String() string {
 	}
 }
 
-type FailureClass uint8
+type FailureDisposition uint8
 
 const (
-	FailureNone FailureClass = iota
-	FailureLogic
-	FailureTransient
-	FailureDeadLetter
+	FailureDispositionNone FailureDisposition = iota
+	FailureDispositionTerminal
+	FailureDispositionRetry
+	FailureDispositionDeadLetter
 )
 
-func (f FailureClass) String() string {
+func (f FailureDisposition) String() string {
 	switch f {
-	case FailureLogic:
-		return "logic"
-	case FailureTransient:
-		return "transient"
-	case FailureDeadLetter:
+	case FailureDispositionTerminal:
+		return "terminal"
+	case FailureDispositionRetry:
+		return "retry"
+	case FailureDispositionDeadLetter:
 		return "dead_letter"
 	default:
 		return ""

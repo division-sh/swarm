@@ -9,6 +9,7 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -215,11 +216,9 @@ func TestExecAgentHire_DeniesDelegatedPermissionEscalation(t *testing.T) {
 			"permissions":      []any{"agent_fire"},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected delegated permission escalation to be denied")
-	}
-	if !strings.Contains(err.Error(), `delegated permission "agent_fire"`) {
-		t.Fatalf("error = %q, want delegated permission denial", err.Error())
+	permissionFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "delegated_permission_forbidden")
+	if permissionFailure.Detail.Attributes["permission"] != "agent_fire" {
+		t.Fatalf("permission failure attributes = %#v", permissionFailure.Detail.Attributes)
 	}
 	if manager.spawnCalled {
 		t.Fatal("expected denied hire to fail closed before spawning")
@@ -258,11 +257,9 @@ func TestExecAgentHire_DeniesDelegatedToolEscalation(t *testing.T) {
 			"tools":            []any{"deploy_prod"},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected delegated tool escalation to be denied")
-	}
-	if !strings.Contains(err.Error(), `delegated tool "deploy_prod"`) {
-		t.Fatalf("error = %q, want delegated tool denial", err.Error())
+	toolFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "delegated_tool_forbidden")
+	if toolFailure.Detail.Attributes["tool"] != "deploy_prod" {
+		t.Fatalf("tool failure attributes = %#v", toolFailure.Detail.Attributes)
 	}
 	if manager.spawnCalled {
 		t.Fatal("expected denied hire to fail closed before spawning")
@@ -300,11 +297,9 @@ func TestExecAgentHire_DeniesRoleBasedEmitEscalation(t *testing.T) {
 			"flow_path":        "review/inst-1",
 		},
 	})
-	if err == nil {
-		t.Fatal("expected role-based emit authority escalation to be denied")
-	}
-	if !strings.Contains(err.Error(), `delegated emit authority "security.root"`) {
-		t.Fatalf("error = %q, want delegated emit authority denial", err.Error())
+	emitFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "delegated_emit_forbidden")
+	if emitFailure.Detail.Attributes["event"] != "security.root" {
+		t.Fatalf("emit failure attributes = %#v", emitFailure.Detail.Attributes)
 	}
 	if manager.spawnCalled {
 		t.Fatal("expected denied hire to fail closed before spawning")
@@ -597,11 +592,9 @@ func TestExecAgentReconfigure_DeniesNativeToolEscalation(t *testing.T) {
 			},
 		},
 	})
-	if err == nil {
-		t.Fatal("expected delegated native tool escalation to be denied")
-	}
-	if !strings.Contains(err.Error(), "delegated native_tools.bash") {
-		t.Fatalf("error = %q, want delegated native tool denial", err.Error())
+	nativeFailure := requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "delegated_native_tool_forbidden")
+	if nativeFailure.Detail.Attributes["capability"] != "bash" {
+		t.Fatalf("native failure attributes = %#v", nativeFailure.Detail.Attributes)
 	}
 	if manager.reconfigureCalled {
 		t.Fatal("expected denied reconfigure to fail closed before persistence")

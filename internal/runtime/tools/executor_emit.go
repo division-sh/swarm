@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -23,36 +24,32 @@ type publishRecipientPlanner interface {
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
 	eventType, eventSchema, ok := e.emitRegistry.EventSchemaForActorTool(actor, toolName)
 	if !ok {
-		err := NewRuntimeError(
+		err := failures.NewDetail(
 			"invalid_emit_tool_name",
 			"tool-executor",
 			"handle_emit_tool.resolve_event_type",
-			false,
-			"invalid emit tool name: %s",
-			toolName,
+			map[string]any{"tool": strings.TrimSpace(toolName)},
 		)
 		e.logEmitToolOutcome(ctx, actor, toolName, "", "", nil, nil, events.EmptyEvent(), "invalid_emit_tool_name", "payload_shape", "resolve_event_type", err)
 		return nil, err
 	}
 	if e.bus == nil {
-		return nil, NewRuntimeError(
+		return nil, failures.NewDetail(
 			"dependency_unavailable",
 			"tool-executor",
 			"handle_emit_tool.publish",
-			true,
-			"event bus is not configured",
+			map[string]any{"dependency": "event_bus"},
 		)
 	}
 
 	payloadMap := map[string]any{}
 	if err := decodeToolInput(input, &payloadMap); err != nil {
-		wrapped := WrapRuntimeError(
+		wrapped := failures.WrapDetail(
 			"invalid_tool_input",
 			"tool-executor",
 			"handle_emit_tool.decode_input",
-			false,
+			nil,
 			err,
-			"invalid emit tool input",
 		)
 		e.logEmitToolOutcome(ctx, actor, toolName, eventType, eventType, diagnosticPayloadMap(input), nil, events.EmptyEvent(), "payload_shape_failed", "payload_shape", "decode_input", wrapped)
 		return nil, wrapped
@@ -72,13 +69,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 	}
 	postEnrichmentPayload := diagnosticPayloadMap(payloadMap)
 	if err := ValidatePayloadAgainstSchema(eventSchema.Schema, payloadMap); err != nil {
-		wrapped := WrapRuntimeError(
+		wrapped := failures.WrapDetail(
 			"schema_validation_failed",
 			"tool-executor",
 			"handle_emit_tool.validate_schema",
-			false,
+			map[string]any{"event": schemaEventType},
 			err,
-			"emit payload schema validation failed",
 		)
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, events.EmptyEvent(), "schema_validation_failed", "validation", "validate_schema", wrapped)
 		return nil, wrapped
@@ -123,27 +119,23 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		if planner, ok := e.bus.(publishRecipientPlanner); ok && planner != nil {
 			plan, err := planner.CheckPublishRecipientPlan(ctx, emitted)
 			if err != nil {
-				wrapped := WrapRuntimeError(
+				wrapped := failures.WrapDetail(
 					"route_plan_preflight_failed",
 					"tool-executor",
 					"handle_emit_tool.route_plan_preflight",
-					true,
+					map[string]any{"event": eventType},
 					err,
-					"failed to preflight emit tool route plan",
 				)
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
 				return nil, wrapped
 			}
 			if plan.UsesCanonicalRouteAuthority() {
 				if plan.TargetFailure != "" {
-					wrapped := NewRuntimeError(
-						plan.TargetFailure,
+					wrapped := failures.NewTarget(
+						string(plan.TargetFailure),
 						"tool-executor",
 						"handle_emit_tool.route_plan_preflight",
-						false,
-						"emit tool %s attempted pin-declared output %s without supported route plan target",
-						toolName,
-						eventType,
+						map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 					)
 					e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "route_plan_preflight_failed", "publish", "route_plan_preflight", wrapped)
 					return nil, wrapped
@@ -155,13 +147,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 			spec := runtimecontracts.EmitSpec{Event: eventType}
 			parentRoute, allowEntityOnlyParentRoute, err := e.emitParentRouteForActor(ctx, actor, flowID, flowInstance, inbound)
 			if err != nil {
-				wrapped := WrapRuntimeError(
+				wrapped := failures.WrapDetail(
 					"parent_route_lookup_failed",
 					"tool-executor",
 					"handle_emit_tool.parent_route",
-					true,
+					map[string]any{"event": eventType},
 					err,
-					"failed to resolve emit tool parent route",
 				)
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "parent_route_lookup_failed", "publish", "parent_route", wrapped)
 				return nil, wrapped
@@ -177,14 +168,11 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 				AllowEntityOnlyParentRoute: allowEntityOnlyParentRoute,
 			}, envelope)
 			if resolution.Failure != "" {
-				wrapped := NewRuntimeError(
+				wrapped := failures.NewTarget(
 					string(resolution.Failure),
 					"tool-executor",
 					"handle_emit_tool.pin_target_resolution",
-					false,
-					"emit tool %s attempted pin-declared output %s without supported target mechanism",
-					toolName,
-					eventType,
+					map[string]any{"tool": strings.TrimSpace(toolName), "event": eventType},
 				)
 				e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "pin_target_resolution_failed", "publish", "pin_target_resolution", wrapped)
 				return nil, wrapped
@@ -203,15 +191,12 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		}
 	}
 	if err := e.bus.Publish(ctx, emitted); err != nil {
-		wrapped := WrapRuntimeError(
+		wrapped := failures.WrapDetail(
 			"event_publish_failed",
 			"tool-executor",
 			"handle_emit_tool.publish",
-			true,
+			map[string]any{"event": eventType, "event_id": emitted.ID()},
 			err,
-			"failed to publish emitted event type=%s event_id=%s",
-			eventType,
-			emitted.ID(),
 		)
 		e.logEmitToolOutcome(ctx, actor, toolName, schemaEventType, eventType, preValidationPayload, postEnrichmentPayload, emitted, "event_publish_failed", "publish", "publish", wrapped)
 		return nil, wrapped

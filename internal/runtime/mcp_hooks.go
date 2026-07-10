@@ -8,6 +8,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -27,10 +28,6 @@ const (
 	ErrCodeMCPInvalidRequest    = runtimemcp.ErrCodeInvalidRequest
 )
 
-func newMCPRuntimeError(code, operation string, retryable bool, cause error, format string, args ...any) error {
-	return WrapRuntimeError(code, "mcp-gateway", operation, retryable, cause, format, args...)
-}
-
 func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingress.Controller, resolveActorConfig func(string) (runtimeactors.AgentConfig, bool), runtimeShutdownAdmissionClosed func() bool, emitRegistry *runtimetools.EmitRegistry, turnContexts *runtimemcp.TurnContextRegistry) runtimemcp.GatewayHooks {
 	if emitRegistry == nil {
 		emitRegistry = runtimetools.NewEmitRegistry(nil, nil)
@@ -44,9 +41,6 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingres
 	return runtimemcp.GatewayHooks{
 		RuntimeIngressRequestPaused:    runtimeIngressRequestPaused,
 		RuntimeShutdownAdmissionClosed: runtimeShutdownAdmissionClosed,
-		FormatError:                    FormatRuntimeError,
-		NewRuntimeError:                newMCPRuntimeError,
-		RetryableFromError:             retryableFromGatewayError,
 		WithActor:                      runtimeactors.WithActor,
 		ActorFromContext:               runtimeactors.ActorFromContext,
 		ResolveActorConfig:             resolveActorConfig,
@@ -72,20 +66,13 @@ func RuntimeMCPGatewayHooks(logger *RuntimeLogger, runtimeIngress *runtimeingres
 			return emitRegistry.GenerateEmitToolsForRole(role, processWarnOnce)
 		},
 		EmitSchemaForTool: runtimeGatewayEmitSchemaForTool(emitRegistry),
-		Log: func(ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
-			runtimeMCPLog(logger, ctx, level, action, agentID, entityID, detail, errText)
+		Log: func(ctx context.Context, level, action, agentID, entityID string, detail map[string]any, failure *runtimefailures.Envelope) {
+			runtimeMCPLog(logger, ctx, level, action, agentID, entityID, detail, failure)
 		},
 		AfterToolSuccess: func(ctx context.Context, r *http.Request, toolName string) {
 			runtimeMCPAfterToolSuccess(logger, ctx, r, toolName)
 		},
 	}
-}
-
-func retryableFromGatewayError(err error) (bool, bool) {
-	if runtimeErr, ok := AsRuntimeError(err); ok {
-		return runtimeErr.Retryable, true
-	}
-	return false, false
 }
 
 func runtimeGatewayEmitSchemaForTool(emitRegistry *runtimetools.EmitRegistry) func(string) (string, any, bool) {
@@ -109,19 +96,19 @@ func runtimeGatewayEmitSchemaForTool(emitRegistry *runtimetools.EmitRegistry) fu
 	}
 }
 
-func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, agentID, entityID string, detail map[string]any, errText string) {
+func runtimeMCPLog(logger *RuntimeLogger, ctx context.Context, level, action, agentID, entityID string, detail map[string]any, failure *runtimefailures.Envelope) {
 	if logger == nil {
 		return
 	}
 	handleRuntimeLogPersistenceError("mcp-gateway", action, logger.Log(ctx, RuntimeLogEntry{
 		Level:     diaglog.NormalizeLevel(level),
-		Message:   runtimeMCPMessage(action, detail, errText),
+		Message:   runtimeMCPMessage(action, detail, failure),
 		Component: "mcp-gateway",
 		Action:    strings.TrimSpace(action),
 		AgentID:   strings.TrimSpace(agentID),
 		EntityID:  strings.TrimSpace(entityID),
 		Detail:    detail,
-		Error:     strings.TrimSpace(errText),
+		Failure:   runtimefailures.CloneEnvelope(failure),
 	}))
 }
 
@@ -129,7 +116,7 @@ func runtimeMCPAfterToolSuccess(logger *RuntimeLogger, ctx context.Context, r *h
 	_, _, _, _ = logger, ctx, r, toolName
 }
 
-func runtimeMCPMessage(action string, detail map[string]any, errText string) string {
+func runtimeMCPMessage(action string, detail map[string]any, failure *runtimefailures.Envelope) string {
 	action = strings.TrimSpace(action)
 	toolName := strings.TrimSpace(runtimeMCPDetailString(detail, "tool_name"))
 	switch action {
@@ -172,7 +159,7 @@ func runtimeMCPMessage(action string, detail map[string]any, errText string) str
 	case "tool.context.fallback_blocked":
 		return "Tool context fallback was blocked"
 	default:
-		if strings.TrimSpace(errText) != "" {
+		if failure != nil || detail["protocol_error"] != nil {
 			return "MCP gateway runtime log recorded an error"
 		}
 		return "MCP gateway runtime log recorded an event"

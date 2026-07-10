@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 )
@@ -81,30 +82,29 @@ type eventFull struct {
 }
 
 type eventDelivery struct {
-	DeliveryID     string            `json:"delivery_id"`
-	SubscriberType string            `json:"subscriber_type"`
-	SubscriberID   string            `json:"subscriber_id"`
-	Status         string            `json:"status"`
-	SessionID      string            `json:"session_id,omitempty"`
-	ReasonCode     string            `json:"reason_code,omitempty"`
-	LastError      string            `json:"last_error,omitempty"`
-	RetryCount     *int              `json:"retry_count"`
-	RetryEligible  *bool             `json:"retry_eligible"`
-	Terminal       *bool             `json:"terminal"`
-	CreatedAt      string            `json:"created_at,omitempty"`
-	StartedAt      string            `json:"started_at,omitempty"`
-	FinishedAt     string            `json:"finished_at,omitempty"`
-	DeadLetters    []eventDeadLetter `json:"dead_letters,omitempty"`
+	DeliveryID     string                    `json:"delivery_id"`
+	SubscriberType string                    `json:"subscriber_type"`
+	SubscriberID   string                    `json:"subscriber_id"`
+	Status         string                    `json:"status"`
+	SessionID      string                    `json:"session_id,omitempty"`
+	ReasonCode     string                    `json:"reason_code,omitempty"`
+	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
+	RetryCount     *int                      `json:"retry_count"`
+	RetryEligible  *bool                     `json:"retry_eligible"`
+	Terminal       *bool                     `json:"terminal"`
+	CreatedAt      string                    `json:"created_at,omitempty"`
+	StartedAt      string                    `json:"started_at,omitempty"`
+	FinishedAt     string                    `json:"finished_at,omitempty"`
+	DeadLetters    []eventDeadLetter         `json:"dead_letters,omitempty"`
 }
 
 type eventDeadLetter struct {
-	DeadLetterID string `json:"dead_letter_id"`
-	FailureType  string `json:"failure_type"`
-	RetryCount   *int   `json:"retry_count"`
-	ChainDepth   *int   `json:"chain_depth"`
-	CreatedAt    string `json:"created_at"`
-	HandlerNode  string `json:"handler_node,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	DeadLetterID string                   `json:"dead_letter_id"`
+	Failure      runtimefailures.Envelope `json:"failure"`
+	RetryCount   *int                     `json:"retry_count"`
+	ChainDepth   *int                     `json:"chain_depth"`
+	CreatedAt    string                   `json:"created_at"`
+	HandlerNode  string                   `json:"handler_node,omitempty"`
 }
 
 type eventSubscriptionResult struct {
@@ -121,21 +121,21 @@ type eventReplayResult struct {
 }
 
 type eventReplayDelivery struct {
-	DeliveryID       string            `json:"delivery_id"`
-	SubscriberID     string            `json:"subscriber_id"`
-	SessionID        string            `json:"session_id,omitempty"`
-	Status           string            `json:"status"`
-	ReasonCode       string            `json:"reason_code,omitempty"`
-	LastError        string            `json:"last_error,omitempty"`
-	Attempt          int               `json:"attempt"`
-	RetryCount       int               `json:"retry_count"`
-	RetryEligible    bool              `json:"retry_eligible"`
-	Terminal         bool              `json:"terminal"`
-	CreatedAt        string            `json:"created_at,omitempty"`
-	StartedAt        string            `json:"started_at,omitempty"`
-	FinishedAt       string            `json:"finished_at,omitempty"`
-	DeadLetters      []eventDeadLetter `json:"dead_letters,omitempty"`
-	SourceDeliveryID string            `json:"source_delivery_id,omitempty"`
+	DeliveryID       string                    `json:"delivery_id"`
+	SubscriberID     string                    `json:"subscriber_id"`
+	SessionID        string                    `json:"session_id,omitempty"`
+	Status           string                    `json:"status"`
+	ReasonCode       string                    `json:"reason_code,omitempty"`
+	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
+	Attempt          int                       `json:"attempt"`
+	RetryCount       int                       `json:"retry_count"`
+	RetryEligible    bool                      `json:"retry_eligible"`
+	Terminal         bool                      `json:"terminal"`
+	CreatedAt        string                    `json:"created_at,omitempty"`
+	StartedAt        string                    `json:"started_at,omitempty"`
+	FinishedAt       string                    `json:"finished_at,omitempty"`
+	DeadLetters      []eventDeadLetter         `json:"dead_letters,omitempty"`
+	SourceDeliveryID string                    `json:"source_delivery_id,omitempty"`
 }
 
 type eventSubscriptionNotification struct {
@@ -166,12 +166,6 @@ var eventObservationValidDeliveryStatuses = map[string]struct{}{
 var eventObservationValidSubscriberTypes = map[string]struct{}{
 	"node":  {},
 	"agent": {},
-}
-
-var eventObservationValidDeadLetterFailureTypes = map[string]struct{}{
-	"handler_error":        {},
-	"chain_depth_exceeded": {},
-	"retry_exhausted":      {},
 }
 
 func newEventsCommand(opts rootCommandOptions) *cobra.Command {
@@ -612,6 +606,9 @@ func validateEventDelivery(prefix string, delivery eventDelivery) error {
 	if delivery.Terminal == nil {
 		return fmt.Errorf("malformed %s: terminal is required", prefix)
 	}
+	if err := validateEventDeliveryFailure(prefix, delivery.Status, delivery.Failure); err != nil {
+		return err
+	}
 	for _, field := range []struct {
 		name  string
 		value string
@@ -638,15 +635,14 @@ func validateEventDeadLetter(prefix string, deadLetter eventDeadLetter) error {
 		value string
 	}{
 		{name: "dead_letter_id", value: deadLetter.DeadLetterID},
-		{name: "failure_type", value: deadLetter.FailureType},
 		{name: "created_at", value: deadLetter.CreatedAt},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			return fmt.Errorf("malformed %s: %s is required", prefix, field.name)
 		}
 	}
-	if _, ok := eventObservationValidDeadLetterFailureTypes[strings.TrimSpace(deadLetter.FailureType)]; !ok {
-		return fmt.Errorf("malformed %s: failure_type=%q is not a valid DeadLetter failure_type", prefix, deadLetter.FailureType)
+	if err := runtimefailures.ValidateEnvelope(deadLetter.Failure); err != nil {
+		return fmt.Errorf("malformed %s.failure: %w", prefix, err)
 	}
 	if deadLetter.RetryCount == nil {
 		return fmt.Errorf("malformed %s: retry_count is required", prefix)
@@ -662,6 +658,22 @@ func validateEventDeadLetter(prefix string, deadLetter eventDeadLetter) error {
 	}
 	if err := validateRequiredTimestamp(prefix+".created_at", deadLetter.CreatedAt); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateEventDeliveryFailure(prefix, status string, failure *runtimefailures.Envelope) error {
+	requiresFailure := status == "failed" || status == "dead_letter"
+	if requiresFailure && failure == nil {
+		return fmt.Errorf("malformed %s: failure is required for status %s", prefix, status)
+	}
+	if !requiresFailure && failure != nil {
+		return fmt.Errorf("malformed %s: failure is forbidden for status %s", prefix, status)
+	}
+	if failure != nil {
+		if err := runtimefailures.ValidateEnvelope(*failure); err != nil {
+			return fmt.Errorf("malformed %s.failure: %w", prefix, err)
+		}
 	}
 	return nil
 }
@@ -730,6 +742,9 @@ func validateEventReplayDelivery(field string, delivery eventReplayDelivery, req
 	}
 	if delivery.RetryCount < 0 {
 		return fmt.Errorf("malformed event.replay result: %s.retry_count must be >= 0", field)
+	}
+	if err := validateEventDeliveryFailure(field, delivery.Status, delivery.Failure); err != nil {
+		return err
 	}
 	for i, deadLetter := range delivery.DeadLetters {
 		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", field, i), deadLetter); err != nil {
@@ -909,7 +924,7 @@ func writeEventDetailResult(out io.Writer, event eventFull) {
 				cliDetailField{Key: "started_at", Value: eventObservationDash(delivery.StartedAt)},
 				cliDetailField{Key: "finished_at", Value: eventObservationDash(delivery.FinishedAt)},
 				cliDetailField{Key: "reason_code", Value: eventObservationDash(delivery.ReasonCode)},
-				cliDetailField{Key: "last_error", Value: eventObservationDash(delivery.LastError)},
+				cliDetailField{Key: "failure", Value: eventObservationFailureSummary(delivery.Failure)},
 				cliDetailField{Key: "retry_count", Value: fmt.Sprintf("%d", *delivery.RetryCount)},
 				cliDetailField{Key: "retry_eligible", Value: fmt.Sprintf("%t", *delivery.RetryEligible)},
 				cliDetailField{Key: "terminal", Value: fmt.Sprintf("%t", *delivery.Terminal)},
@@ -937,12 +952,11 @@ func writeEventDeadLetterLine(out io.Writer, prefix string, deadLetter eventDead
 	}
 	writeCLIFieldLine(out,
 		cliDetailField{Key: label + ".dead_letter_id", Value: deadLetter.DeadLetterID},
-		cliDetailField{Key: label + ".failure_type", Value: deadLetter.FailureType},
+		cliDetailField{Key: label + ".failure", Value: eventObservationFailureSummary(&deadLetter.Failure)},
 		cliDetailField{Key: label + ".retry_count", Value: fmt.Sprintf("%d", *deadLetter.RetryCount)},
 		cliDetailField{Key: label + ".chain_depth", Value: fmt.Sprintf("%d", *deadLetter.ChainDepth)},
 		cliDetailField{Key: label + ".created_at", Value: deadLetter.CreatedAt},
 		cliDetailField{Key: label + ".handler_node", Value: eventObservationDash(deadLetter.HandlerNode)},
-		cliDetailField{Key: label + ".error", Value: eventObservationDash(deadLetter.ErrorMessage)},
 	)
 }
 
@@ -985,7 +999,7 @@ func writeEventReplayResult(out io.Writer, result eventReplayResult) {
 		len(result.NewDeliveries),
 	)
 	for _, delivery := range result.OriginalDeliveries {
-		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s last_error=%s dead_letters=%d\n",
+		fmt.Fprintf(out, "original_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s failure=%s dead_letters=%d\n",
 			delivery.DeliveryID,
 			delivery.SubscriberID,
 			delivery.Status,
@@ -995,12 +1009,12 @@ func writeEventReplayResult(out io.Writer, result eventReplayResult) {
 			delivery.RetryEligible,
 			delivery.Terminal,
 			eventObservationDash(delivery.ReasonCode),
-			eventObservationDash(delivery.LastError),
+			eventObservationFailureSummary(delivery.Failure),
 			len(delivery.DeadLetters),
 		)
 	}
 	for _, delivery := range result.NewDeliveries {
-		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s last_error=%s dead_letters=%d source_delivery_id=%s\n",
+		fmt.Fprintf(out, "new_delivery delivery_id=%s subscriber_id=%s status=%s session_id=%s attempt=%d retry_count=%d retry_eligible=%t terminal=%t reason_code=%s failure=%s dead_letters=%d source_delivery_id=%s\n",
 			delivery.DeliveryID,
 			delivery.SubscriberID,
 			delivery.Status,
@@ -1010,11 +1024,18 @@ func writeEventReplayResult(out io.Writer, result eventReplayResult) {
 			delivery.RetryEligible,
 			delivery.Terminal,
 			eventObservationDash(delivery.ReasonCode),
-			eventObservationDash(delivery.LastError),
+			eventObservationFailureSummary(delivery.Failure),
 			len(delivery.DeadLetters),
 			delivery.SourceDeliveryID,
 		)
 	}
+}
+
+func eventObservationFailureSummary(failure *runtimefailures.Envelope) string {
+	if failure == nil {
+		return "-"
+	}
+	return string(failure.Class) + "/" + failure.Detail.Code
 }
 
 func eventObservationCompactJSON(value map[string]any) string {

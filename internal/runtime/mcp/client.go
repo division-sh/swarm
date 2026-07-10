@@ -17,6 +17,7 @@ import (
 	"time"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -159,18 +160,18 @@ func (c *Client) Call(ctx context.Context, prefixedName string, arguments any) (
 
 func (c *Client) CallWithCredentialKeyResolver(ctx context.Context, prefixedName string, arguments any, resolver CredentialKeyResolver) (any, error) {
 	if c == nil {
-		return nil, fmt.Errorf("mcp client is not configured")
+		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "mcp_client_unavailable", "mcp-client", "tools/call", nil)
 	}
 	prefixedName = strings.TrimSpace(prefixedName)
 	if prefixedName == "" {
-		return nil, fmt.Errorf("mcp tool name is required")
+		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mcp_tool_name_required", "mcp-client", "tools/call", nil)
 	}
 	c.mu.RLock()
 	tool, ok := c.tools[prefixedName]
 	server := c.servers[tool.ServerName]
 	c.mu.RUnlock()
 	if !ok || server == nil {
-		return nil, fmt.Errorf("mcp tool %s is unavailable", prefixedName)
+		return nil, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "mcp_tool_unavailable", "mcp-client", "tools/call", map[string]any{"tool": prefixedName})
 	}
 	req := RPCRequest{
 		JSONRPC: "2.0",
@@ -186,25 +187,13 @@ func (c *Client) CallWithCredentialKeyResolver(ctx context.Context, prefixedName
 		return nil, err
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("mcp tool %s failed: %s", prefixedName, strings.TrimSpace(resp.Error.Message))
+		return nil, externalMCPRPCExecutionFailure(resp.Error, server.cfg, req)
 	}
-	if result, ok := resp.Result.(map[string]any); ok {
-		if content, ok := result["content"].([]any); ok && len(content) == 1 {
-			if item, ok := content[0].(map[string]any); ok {
-				if text := strings.TrimSpace(anyString(item["text"])); text != "" && len(result) <= 2 {
-					return text, nil
-				}
-			}
-		}
-		if inner, ok := result["structuredContent"]; ok {
-			return inner, nil
-		}
-	}
-	return resp.Result, nil
+	return projectExternalToolCallResult(resp, server.cfg, req)
 }
 
 func (c *Client) discoverServerTools(ctx context.Context, source semanticview.Source, server *registeredServer) ([]DiscoveredTool, error) {
-	if _, err := c.callServer(ctx, server, RPCRequest{
+	initializeRequest := RPCRequest{
 		JSONRPC: "2.0",
 		Method:  "initialize",
 		Params: map[string]any{
@@ -216,33 +205,39 @@ func (c *Client) discoverServerTools(ctx context.Context, source semanticview.So
 			},
 		},
 		ID: server.cfg.Name + "-initialize",
-	}); err != nil {
+	}
+	initializeResponse, err := c.callServer(ctx, server, initializeRequest)
+	if err != nil {
 		return nil, err
+	}
+	if initializeResponse.Error != nil {
+		return nil, externalMCPRPCExecutionFailure(initializeResponse.Error, server.cfg, initializeRequest)
 	}
 	_, _ = c.callServer(ctx, server, RPCRequest{
 		JSONRPC: "2.0",
 		Method:  "notifications/initialized",
 		Params:  map[string]any{},
 	})
-	resp, err := c.callServer(ctx, server, RPCRequest{
+	toolsListRequest := RPCRequest{
 		JSONRPC: "2.0",
 		Method:  "tools/list",
 		Params:  map[string]any{},
 		ID:      server.cfg.Name + "-tools-list",
-	})
+	}
+	resp, err := c.callServer(ctx, server, toolsListRequest)
 	if err != nil {
 		return nil, err
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf(strings.TrimSpace(resp.Error.Message))
+		return nil, externalMCPRPCExecutionFailure(resp.Error, server.cfg, toolsListRequest)
 	}
 	result, ok := resp.Result.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("tools/list returned invalid result payload")
+		return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, nil, nil)
 	}
 	rawTools, ok := result["tools"].([]any)
 	if !ok {
-		return nil, fmt.Errorf("tools/list returned no tools array")
+		return nil, externalMCPFailure(runtimefailures.ClassConnectorFailure, "mcp_tool_catalog_invalid", server.cfg, toolsListRequest, nil, nil)
 	}
 	out := make([]DiscoveredTool, 0, len(rawTools))
 	for _, raw := range rawTools {
@@ -275,13 +270,13 @@ func (c *Client) callServerWithCredentialKeyResolver(ctx context.Context, server
 	switch strings.ToLower(strings.TrimSpace(server.cfg.Transport)) {
 	case "stdio":
 		if server.stdio == nil {
-			return RPCResponse{}, fmt.Errorf("stdio client is not configured")
+			return RPCResponse{}, externalMCPFailure(runtimefailures.ClassDependencyUnavailable, "mcp_stdio_client_unavailable", server.cfg, req, nil, nil)
 		}
-		return server.stdio.Call(ctx, req)
+		return server.stdio.Call(ctx, server.cfg, req)
 	case "http", "":
 		return c.callHTTPServerWithCredentialKeyResolver(ctx, server.cfg, req, resolver)
 	default:
-		return RPCResponse{}, fmt.Errorf("unsupported mcp transport %q", server.cfg.Transport)
+		return RPCResponse{}, externalMCPFailure(runtimefailures.ClassSchemaInvalid, "mcp_transport_unsupported", server.cfg, req, nil, nil)
 	}
 }
 
@@ -292,37 +287,63 @@ func (c *Client) callHTTPServer(ctx context.Context, cfg ServerConfig, req RPCRe
 func (c *Client) callHTTPServerWithCredentialKeyResolver(ctx context.Context, cfg ServerConfig, req RPCRequest, resolver CredentialKeyResolver) (RPCResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
-		return RPCResponse{}, err
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.URL, bytes.NewReader(body))
 	if err != nil {
-		return RPCResponse{}, err
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	httpReq.Header.Set("content-type", "application/json")
 	httpReq.Header.Set("mcp-protocol-version", "2025-03-26")
 	credentialKey := strings.TrimSpace(cfg.CredentialsKey)
-	if resolver != nil && credentialKey != "" {
-		resolved, err := resolver(credentialKey)
-		if err != nil {
-			return RPCResponse{}, err
+	if credentialKey != "" {
+		if resolver != nil {
+			resolved, resolveErr := resolver(credentialKey)
+			if resolveErr != nil || strings.TrimSpace(resolved) == "" {
+				return RPCResponse{}, externalMCPFailure(runtimefailures.ClassAuthenticationNeeded, "mcp_credential_required", cfg, req, map[string]any{"auth_kind": "mcp_credential"}, resolveErr)
+			}
+			credentialKey = strings.TrimSpace(resolved)
 		}
-		credentialKey = strings.TrimSpace(resolved)
-	}
-	if token, ok, err := c.credentialValue(ctx, credentialKey); err != nil {
-		return RPCResponse{}, err
-	} else if ok && strings.TrimSpace(token) != "" {
+		if c.store == nil {
+			return RPCResponse{}, externalMCPFailure(runtimefailures.ClassAuthenticationNeeded, "mcp_credential_required", cfg, req, map[string]any{"auth_kind": "mcp_credential"}, nil)
+		}
+		token, ok, getErr := c.credentialValue(ctx, credentialKey)
+		if getErr != nil {
+			return RPCResponse{}, externalMCPFailure(runtimefailures.ClassDependencyUnavailable, "mcp_credential_store_unavailable", cfg, req, nil, getErr)
+		}
+		if !ok || strings.TrimSpace(token) == "" {
+			return RPCResponse{}, externalMCPFailure(runtimefailures.ClassAuthenticationNeeded, "mcp_credential_required", cfg, req, map[string]any{"auth_kind": "mcp_credential"}, nil)
+		}
 		httpReq.Header.Set("authorization", "Bearer "+strings.TrimSpace(token))
 	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return RPCResponse{}, err
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	defer resp.Body.Close()
-	var decoded RPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return RPCResponse{}, err
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return RPCResponse{}, externalMCPHTTPStatusFailure(resp.StatusCode, cfg, req)
+	}
+	raw, actual, err := readBoundedMCPWire(resp.Body)
+	if err != nil {
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
+	}
+	if actual > MaxWireResponseBytes {
+		return RPCResponse{}, externalMCPWireLimitFailure(actual, cfg, req)
+	}
+	decoded, err := DecodeRPCResponse(raw, req.ID)
+	if err != nil {
+		return RPCResponse{}, externalMCPRPCInvalidFailure(err, cfg, req)
 	}
 	return decoded, nil
+}
+
+func readBoundedMCPWire(reader io.Reader) ([]byte, int, error) {
+	raw, err := io.ReadAll(io.LimitReader(reader, MaxWireResponseBytes+1))
+	if err != nil {
+		return nil, 0, err
+	}
+	return raw, len(raw), nil
 }
 
 func (c *Client) credentialValue(ctx context.Context, key string) (string, bool, error) {
@@ -387,7 +408,7 @@ func (c *stdioRPCClient) Close() error {
 	return c.cmd.Process.Kill()
 }
 
-func (c *stdioRPCClient) Call(ctx context.Context, req RPCRequest) (RPCResponse, error) {
+func (c *stdioRPCClient) Call(ctx context.Context, cfg ServerConfig, req RPCRequest) (RPCResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if req.ID == nil && !strings.HasPrefix(strings.TrimSpace(req.Method), "notifications/") {
@@ -395,37 +416,68 @@ func (c *stdioRPCClient) Call(ctx context.Context, req RPCRequest) (RPCResponse,
 	}
 	raw, err := json.Marshal(req)
 	if err != nil {
-		return RPCResponse{}, err
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	raw = append(raw, '\n')
 	if _, err := c.stdin.Write(raw); err != nil {
-		return RPCResponse{}, err
+		return RPCResponse{}, externalMCPTransportFailure(err, cfg, req)
 	}
 	if req.ID == nil {
 		return RPCResponse{}, nil
 	}
 	for {
+		type frameResult struct {
+			frame  []byte
+			actual int
+			err    error
+		}
+		frameCh := make(chan frameResult, 1)
+		go func() {
+			frame, actual, err := readBoundedStdioFrame(c.stdout)
+			frameCh <- frameResult{frame: frame, actual: actual, err: err}
+		}()
+		var read frameResult
 		select {
 		case <-ctx.Done():
-			return RPCResponse{}, ctx.Err()
-		default:
+			_ = c.Close()
+			return RPCResponse{}, externalMCPTransportFailure(ctx.Err(), cfg, req)
+		case read = <-frameCh:
 		}
-		line, err := c.stdout.ReadBytes('\n')
-		if err != nil {
-			return RPCResponse{}, err
+		if read.err != nil {
+			return RPCResponse{}, externalMCPTransportFailure(read.err, cfg, req)
 		}
-		line = bytes.TrimSpace(line)
+		if read.actual > MaxWireResponseBytes {
+			_ = c.Close()
+			return RPCResponse{}, externalMCPWireLimitFailure(read.actual, cfg, req)
+		}
+		line := bytes.TrimSpace(read.frame)
 		if len(line) == 0 {
 			continue
 		}
-		var resp RPCResponse
-		if err := json.Unmarshal(line, &resp); err != nil {
-			continue
-		}
-		if fmt.Sprint(resp.ID) != fmt.Sprint(req.ID) {
-			continue
+		resp, err := DecodeRPCResponse(line, req.ID)
+		if err != nil {
+			return RPCResponse{}, externalMCPRPCInvalidFailure(err, cfg, req)
 		}
 		return resp, nil
+	}
+}
+
+func readBoundedStdioFrame(reader *bufio.Reader) ([]byte, int, error) {
+	frame := make([]byte, 0, 4096)
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(frame)+len(fragment) > MaxWireResponseBytes {
+			return nil, MaxWireResponseBytes + 1, nil
+		}
+		frame = append(frame, fragment...)
+		switch err {
+		case nil:
+			return frame, len(frame), nil
+		case bufio.ErrBufferFull:
+			continue
+		default:
+			return nil, len(frame), err
+		}
 	}
 }
 

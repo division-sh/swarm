@@ -11,6 +11,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -322,7 +323,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 				}
 				eb.logRuntime(ctx, "warn", "Event delivery to a recipient timed out", "eventbus", "delivery_timeout", evt.ID(), string(evt.Type()), recipient.agentID, evt.EntityID(), "", nil, map[string]any{
 					"timeout_ms": int(deliverySendTimeout / time.Millisecond),
-				}, "", 0)
+				}, targetDeliveryTimeoutFailure(evt, recipient.agentID, deliverySendTimeout), 0)
 			}
 		}
 	}
@@ -615,11 +616,11 @@ func filterOutAgentIDs(in []string, disallow []string) []string {
 func (eb *EventBus) emitContradiction(ctx context.Context, source events.Event, reason string) error {
 	eb.logRuntime(ctx, "warn", "Event routing contradiction was detected", "eventbus", "contradiction", strings.TrimSpace(source.ID()), strings.TrimSpace(string(source.Type())), "", strings.TrimSpace(source.EntityID()), "", nil, map[string]any{
 		"reason": strings.TrimSpace(reason),
-	}, "", 0)
+	}, nil, 0)
 	return nil
 }
 
-func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
+func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
 	if eb == nil || eb.store == nil {
 		return nil
 	}
@@ -631,15 +632,17 @@ func (eb *EventBus) markPipelineReceipt(ctx context.Context, eventID, status, er
 	if !ok {
 		return errors.New("event bus store does not support pipeline receipt persistence")
 	}
-	if err := recorder.UpsertPipelineReceipt(ctx, eventID, status, errText); err != nil {
+	if err := recorder.UpsertPipelineReceipt(ctx, eventID, status, failure); err != nil {
+		canonical := eventBusDependencyFailure(err, "pipeline_receipt_persist_failed", "persist_pipeline_receipt")
 		eb.logRuntime(ctx, "error", "Persisting the pipeline receipt failed", "eventbus", "pipeline_receipt_persist_failed", eventID, "", "", "", "", nil, map[string]any{
 			"status": status,
-		}, err.Error(), 0)
-		return err
+		}, canonical, 0)
+		return runtimefailures.FromEnvelope(*canonical)
 	}
 	if err := eb.ConvergeNormalRunCompletionForEvent(ctx, eventID); err != nil {
-		eb.logRuntime(ctx, "error", "Persisting normal run completion failed", "eventbus", "normal_run_completion_failed", eventID, "", "", "", "", nil, nil, err.Error(), 0)
-		return err
+		canonical := eventBusDependencyFailure(err, "normal_run_completion_failed", "converge_run_completion")
+		eb.logRuntime(ctx, "error", "Persisting normal run completion failed", "eventbus", "normal_run_completion_failed", eventID, "", "", "", "", nil, nil, canonical, 0)
+		return runtimefailures.FromEnvelope(*canonical)
 	}
 	return nil
 }
@@ -655,12 +658,6 @@ func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt 
 	if len(timedOut) > 0 {
 		detail["timed_out_recipients"] = timedOut
 	}
-	errText := ""
-	if cause != nil {
-		errText = cause.Error()
-		detail["cause"] = errText
-	}
-	eb.logRuntime(ctx, "warn", "Authoritative delivery fan-out was incomplete", "eventbus", "delivery_incomplete", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, errText, 0)
 	parts := make([]string, 0, 3)
 	if len(missing) > 0 {
 		parts = append(parts, "missing="+strings.Join(missing, ","))
@@ -674,10 +671,21 @@ func (eb *EventBus) logAuthoritativeDeliveryIncomplete(ctx context.Context, evt 
 	if len(parts) == 0 {
 		parts = append(parts, "incomplete")
 	}
-	return fmt.Errorf("%w: %s", errAuthoritativeDeliveryIncomplete, strings.Join(parts, "; "))
+	baseErr := fmt.Errorf("%w: %s", errAuthoritativeDeliveryIncomplete, strings.Join(parts, "; "))
+	failureErr := runtimefailures.Wrap(runtimefailures.ClassTargetUnreachable, "authoritative_delivery_incomplete", "eventbus", "deliver_authoritative_recipients", detail, baseErr)
+	failure := runtimefailures.Normalize(failureErr, "eventbus", "deliver_authoritative_recipients")
+	eb.logRuntime(ctx, "warn", "Authoritative delivery fan-out was incomplete", "eventbus", "delivery_incomplete", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, detail, &failure, 0)
+	return failureErr
 }
 
-func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+func targetDeliveryTimeoutFailure(evt events.Event, recipient string, timeout time.Duration) *runtimefailures.Envelope {
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassTimeout, "delivery_timeout", "eventbus", "deliver_recipient", map[string]any{
+		"event_id": evt.ID(), "event_type": string(evt.Type()), "recipient": strings.TrimSpace(recipient), "timeout_ms": int(timeout / time.Millisecond),
+	}), "eventbus", "deliver_recipient")
+	return &failure
+}
+
+func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
 	if eb == nil {
 		return nil
 	}
@@ -689,7 +697,7 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 	}
 	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, eventID, eventType)
 	ctx = eb.withBundleFingerprint(ctx)
-	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, errText, durationUS); err != nil {
+	if err := logger.Log(ctx, level, message, component, action, eventID, eventType, agentID, entityID, sessionID, correlation, detail, runtimefailures.CloneEnvelope(failure), durationUS); err != nil {
 		diaglog.ProcessLog("error", "diagnostics", "runtime log persistence failed",
 			"component", strings.TrimSpace(component),
 			"action", strings.TrimSpace(action),
@@ -701,5 +709,16 @@ func (eb *EventBus) logRuntime(ctx context.Context, level diaglog.Level, message
 }
 
 func (eb *EventBus) LogRuntime(ctx context.Context, entry runtimepipeline.RuntimeLogEntry) error {
-	return eb.logRuntime(ctx, entry.Level, entry.Message, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, entry.Error, entry.DurationUS)
+	if eb == nil {
+		return nil
+	}
+	eb.mu.RLock()
+	logger := eb.logger
+	eb.mu.RUnlock()
+	if logger == nil {
+		return nil
+	}
+	ctx = runtimecorrelation.WithRuntimeDiagnosticLineage(ctx, entry.EventID, entry.EventType)
+	ctx = eb.withBundleFingerprint(ctx)
+	return logger.Log(ctx, entry.Level, entry.Message, entry.Component, entry.Action, entry.EventID, entry.EventType, entry.AgentID, entry.EffectiveEntityID(), entry.SessionID, entry.Correlation, entry.Detail, runtimefailures.CloneEnvelope(entry.Failure), entry.DurationUS)
 }

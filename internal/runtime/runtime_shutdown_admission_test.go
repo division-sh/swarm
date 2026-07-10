@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
@@ -50,7 +51,7 @@ func (*runtimeShutdownManagerStore) EnsureEntitySchema(context.Context, string) 
 	return nil
 }
 
-func (*runtimeShutdownManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
+func (*runtimeShutdownManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 

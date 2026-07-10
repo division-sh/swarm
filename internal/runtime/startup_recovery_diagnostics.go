@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 )
 
@@ -98,7 +99,7 @@ type startupRecoveryDecisionReport struct {
 
 	Outcome                  startupRecoveryOutcome
 	ReasonCode               startupRecoveryReasonCode
-	ErrorText                string
+	Failure                  *runtimefailures.Envelope
 	ScheduleRestoreAttempted bool
 	ScheduleReplayCount      int
 	ScheduleSkipCount        int
@@ -108,8 +109,8 @@ type startupRecoveryDecisionReport struct {
 	ManagerSkipCount         int
 	ManagerDropCount         int
 	ManagerResetAttempted    bool
-	ManagerResetError        string
-	InspectionError          string
+	ManagerResetFailure      *runtimefailures.Envelope
+	InspectionFailure        *runtimefailures.Envelope
 }
 
 func newStartupRecoveryDecisionReport(snapshot startupRecoverySnapshot) startupRecoveryDecisionReport {
@@ -183,14 +184,14 @@ func (r startupRecoveryDecisionReport) detail() map[string]any {
 	detail["manager_skipped_count"] = r.ManagerSkipCount
 	detail["manager_dropped_count"] = r.ManagerDropCount
 	detail["manager_reset_attempted"] = r.ManagerResetAttempted
-	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
-		detail["error"] = errText
+	if r.Failure != nil {
+		detail["failure"] = *r.Failure
 	}
-	if inspectErr := strings.TrimSpace(r.InspectionError); inspectErr != "" {
-		detail["recovery_inspection_error"] = inspectErr
+	if r.InspectionFailure != nil {
+		detail["recovery_inspection_failure"] = *r.InspectionFailure
 	}
-	if resetErr := strings.TrimSpace(r.ManagerResetError); resetErr != "" {
-		detail["manager_reset_error"] = resetErr
+	if r.ManagerResetFailure != nil {
+		detail["manager_reset_failure"] = *r.ManagerResetFailure
 	}
 	return detail
 }
@@ -206,7 +207,7 @@ func (r startupRecoveryDecisionReport) bootPayload() map[string]any {
 		"manager_replay_count":  r.ManagerReplayCount,
 		"manager_skip_count":    r.ManagerSkipCount,
 		"manager_drop_count":    r.ManagerDropCount,
-		"error_text":            strings.TrimSpace(r.ErrorText),
+		"failure":               runtimefailures.CloneEnvelope(r.Failure),
 	}
 }
 
@@ -246,11 +247,13 @@ func (rt *Runtime) logStartupRecoveryDecision(ctx context.Context, report startu
 		Message:   report.message(),
 		Component: "runtime",
 		Action:    "startup_recovery_decision",
-		Error:     strings.TrimSpace(report.ErrorText),
+		Failure:   runtimefailures.CloneEnvelope(report.Failure),
 		Detail:    report.detail(),
 	}
-	if strings.TrimSpace(entry.Error) != "" {
-		entry.Detail.(map[string]any)["error_code"] = string(report.ReasonCode)
-	}
 	handleRuntimeLogPersistenceError("runtime", "startup_recovery_decision", rt.Logger.Log(ctx, entry))
+}
+
+func newStartupRecoveryFailure(class runtimefailures.Class, detailCode, operation string, attributes map[string]any, cause error) *runtimefailures.Envelope {
+	failure := runtimefailures.Normalize(runtimefailures.Wrap(class, detailCode, "runtime", operation, attributes, cause), "runtime", operation)
+	return &failure
 }
