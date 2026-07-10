@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 )
@@ -185,6 +186,9 @@ func ensurePostgresCanonicalFailureSchema(ctx context.Context, db *sql.DB) error
 	}
 	if err := migratePostgresRunFailures(ctx, tx); err != nil {
 		return fmt.Errorf("migrate runs terminal evidence: %w", err)
+	}
+	if err := migratePostgresDirectiveOperationFailures(ctx, tx, counts); err != nil {
+		return fmt.Errorf("migrate agent directive operation failures: %w", err)
 	}
 	if err := migratePostgresFailureEventPayloads(ctx, tx, counts); err != nil {
 		return fmt.Errorf("migrate failure-bearing event payloads: %w", err)
@@ -937,6 +941,98 @@ func failureEnvelopesEqual(left, right runtimefailures.Envelope) bool {
 	return leftErr == nil && rightErr == nil && bytes.Equal(leftRaw, rightRaw)
 }
 
+type directiveOperationFailureMigrationRow struct {
+	operationID  string
+	state        string
+	response     []byte
+	errorCode    string
+	errorMessage string
+	errorDetails []byte
+	failure      []byte
+}
+
+func canonicalDirectiveOperationFailure(row directiveOperationFailureMigrationRow) (*runtimefailures.Envelope, string, error) {
+	row.operationID = strings.TrimSpace(row.operationID)
+	row.state = strings.TrimSpace(row.state)
+	row.errorCode = strings.TrimSpace(row.errorCode)
+	row.errorMessage = strings.TrimSpace(row.errorMessage)
+	legacyDetails := len(bytes.TrimSpace(row.errorDetails)) > 0
+	legacyPresent := row.errorCode != "" || row.errorMessage != "" || legacyDetails
+	if len(bytes.TrimSpace(row.failure)) > 0 {
+		if legacyPresent {
+			return nil, "", fmt.Errorf("conflicting canonical and legacy failure evidence")
+		}
+		failure, err := runtimefailures.UnmarshalEnvelope(row.failure)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid canonical failure: %w", err)
+		}
+		if err := validateDirectiveOperationMigrationEvidence(row.state, row.response, &failure); err != nil {
+			return nil, "", err
+		}
+		return &failure, "", nil
+	}
+
+	var failure runtimefailures.Envelope
+	var legacy string
+	switch runtimeagentcontrol.DirectiveOperationState(row.state) {
+	case runtimeagentcontrol.DirectiveOperationFailed:
+		if legacyDetails {
+			return nil, "", fmt.Errorf("legacy error_details is not migratable")
+		}
+		switch row.errorCode {
+		case "execution_not_admitted":
+			if row.errorMessage != "keyless directive operation was abandoned before execution admission" {
+				return nil, "", fmt.Errorf("execution_not_admitted message does not match the closed producer")
+			}
+			failure = runtimeagentcontrol.DirectiveExecutionNotAdmittedFailure()
+			legacy = row.errorCode
+		case "board_step_failed":
+			return nil, "", fmt.Errorf("board_step_failed cannot recover its original failure class")
+		case "":
+			return nil, "", fmt.Errorf("failed operation is missing legacy error_code")
+		default:
+			return nil, "", fmt.Errorf("unknown failed legacy error_code %q", row.errorCode)
+		}
+	case runtimeagentcontrol.DirectiveOperationIndeterminate:
+		if legacyDetails {
+			return nil, "", fmt.Errorf("legacy error_details is not migratable")
+		}
+		switch row.errorCode {
+		case "execution_lease_expired":
+			if row.errorMessage != "directive execution lease expired before a durable outcome" {
+				return nil, "", fmt.Errorf("execution_lease_expired message does not match the closed producer")
+			}
+			failure = runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+			legacy = row.errorCode
+		case "":
+			return nil, "", fmt.Errorf("indeterminate operation is missing legacy error_code")
+		default:
+			return nil, "", fmt.Errorf("unknown indeterminate legacy error_code %q", row.errorCode)
+		}
+	default:
+		if legacyPresent {
+			return nil, "", fmt.Errorf("state %s forbids legacy failure evidence", row.state)
+		}
+	}
+	var failurePtr *runtimefailures.Envelope
+	if failure.SchemaVersion != "" {
+		failurePtr = &failure
+	}
+	if err := validateDirectiveOperationMigrationEvidence(row.state, row.response, failurePtr); err != nil {
+		return nil, "", err
+	}
+	return runtimefailures.CloneEnvelope(failurePtr), legacy, nil
+}
+
+func validateDirectiveOperationMigrationEvidence(state string, response []byte, failure *runtimefailures.Envelope) error {
+	op := runtimeagentcontrol.DirectiveOperation{
+		State:    runtimeagentcontrol.DirectiveOperationState(strings.TrimSpace(state)),
+		Response: append(json.RawMessage(nil), response...),
+		Failure:  runtimefailures.CloneEnvelope(failure),
+	}
+	return runtimeagentcontrol.ValidateDirectiveOperationEvidence(op)
+}
+
 func preservationTerminalReason(reason string) bool {
 	reason = strings.TrimSpace(reason)
 	for _, candidate := range preservationcleanup.TerminalReasonCodes() {
@@ -945,6 +1041,121 @@ func preservationTerminalReason(reason string) bool {
 		}
 	}
 	return false
+}
+
+func migratePostgresDirectiveOperationFailures(ctx context.Context, tx *sql.Tx, counts map[string]*failureMigrationCount) error {
+	columns, err := postgresTableColumns(ctx, tx, "agent_directive_operations")
+	if err != nil || len(columns) == 0 {
+		return err
+	}
+	if !columns["failure"] {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_directive_operations ADD COLUMN failure JSONB`); err != nil {
+			return fmt.Errorf("add agent_directive_operations.failure: %w", err)
+		}
+		columns["failure"] = true
+	}
+	errorCodeExpr, errorMessageExpr, errorDetailsExpr := "''", "''", "NULL::jsonb"
+	if columns["error_code"] {
+		errorCodeExpr = "COALESCE(error_code, '')"
+	}
+	if columns["error_message"] {
+		errorMessageExpr = "COALESCE(error_message, '')"
+	}
+	if columns["error_details"] {
+		errorDetailsExpr = "error_details"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT operation_id::text, state, response, `+errorCodeExpr+`, `+errorMessageExpr+`, `+errorDetailsExpr+`, failure FROM agent_directive_operations ORDER BY operation_id::text FOR UPDATE`)
+	if err != nil {
+		return err
+	}
+	var pending []directiveOperationFailureMigrationRow
+	for rows.Next() {
+		var row directiveOperationFailureMigrationRow
+		if err := rows.Scan(&row.operationID, &row.state, &row.response, &row.errorCode, &row.errorMessage, &row.errorDetails, &row.failure); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		pending = append(pending, row)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	var blocked []string
+	for _, row := range pending {
+		failure, legacy, err := canonicalDirectiveOperationFailure(row)
+		if err != nil {
+			blocked = append(blocked, row.operationID+"["+row.state+"]:"+err.Error())
+			continue
+		}
+		var raw any
+		if failure != nil {
+			encoded, _ := runtimefailures.MarshalEnvelope(*failure)
+			raw = encoded
+			if legacy != "" {
+				addFailureMigrationCount(counts, "agent_directive_operations", legacy, *failure)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET failure = $2::jsonb WHERE operation_id = $1::uuid`, row.operationID, raw); err != nil {
+			return err
+		}
+	}
+	if len(blocked) > 0 {
+		return fmt.Errorf("agent_directive_operations canonical failure migration blocked by %d rows: %s", len(blocked), strings.Join(blocked, ", "))
+	}
+	if err := dropPostgresDirectiveEvidenceChecks(ctx, tx); err != nil {
+		return err
+	}
+	for _, column := range []string{"error_code", "error_message", "error_details"} {
+		if columns[column] {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_directive_operations DROP COLUMN `+column); err != nil {
+				return fmt.Errorf("drop agent_directive_operations.%s: %w", column, err)
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `
+		ALTER TABLE agent_directive_operations DROP CONSTRAINT IF EXISTS agent_directive_operations_failure_state_check;
+		ALTER TABLE agent_directive_operations ADD CONSTRAINT agent_directive_operations_failure_state_check CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL));
+		ALTER TABLE agent_directive_operations DROP CONSTRAINT IF EXISTS agent_directive_operations_response_state_check;
+		ALTER TABLE agent_directive_operations ADD CONSTRAINT agent_directive_operations_response_state_check CHECK ((state IN ('executed', 'succeeded')) = (response IS NOT NULL));
+	`); err != nil {
+		return fmt.Errorf("install agent directive operation evidence constraints: %w", err)
+	}
+	return nil
+}
+
+func dropPostgresDirectiveEvidenceChecks(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT conname
+		FROM pg_constraint
+		WHERE conrelid = 'agent_directive_operations'::regclass
+		  AND contype = 'c'
+		  AND (pg_get_constraintdef(oid) ILIKE '%error_code%'
+		    OR pg_get_constraintdef(oid) ILIKE '%error_message%'
+		    OR pg_get_constraintdef(oid) ILIKE '%error_details%'
+		    OR pg_get_constraintdef(oid) ILIKE '%response%')
+	`)
+	if err != nil {
+		return err
+	}
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, name := range names {
+		quoted := `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_directive_operations DROP CONSTRAINT `+quoted); err != nil {
+			return fmt.Errorf("drop legacy agent directive constraint %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func migratePostgresRunFailures(ctx context.Context, tx *sql.Tx) error {
@@ -1137,6 +1348,136 @@ func migrateSQLiteRunFailures(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
+func migrateSQLiteDirectiveOperationFailures(ctx context.Context, tx *sql.Tx, counts map[string]*failureMigrationCount) error {
+	columns, err := sqliteColumnsTx(ctx, tx, "agent_directive_operations")
+	if err != nil || len(columns) == 0 {
+		return err
+	}
+	needsRebuild := columns["error_code"] || columns["error_message"] || columns["error_details"]
+	if !columns["failure"] {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE agent_directive_operations ADD COLUMN failure TEXT`); err != nil {
+			return fmt.Errorf("add sqlite agent_directive_operations.failure: %w", err)
+		}
+		columns["failure"] = true
+		needsRebuild = true
+	}
+	errorCodeExpr, errorMessageExpr, errorDetailsExpr := "''", "''", "NULL"
+	if columns["error_code"] {
+		errorCodeExpr = "COALESCE(error_code, '')"
+	}
+	if columns["error_message"] {
+		errorMessageExpr = "COALESCE(error_message, '')"
+	}
+	if columns["error_details"] {
+		errorDetailsExpr = "error_details"
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT operation_id, state, response, `+errorCodeExpr+`, `+errorMessageExpr+`, `+errorDetailsExpr+`, failure FROM agent_directive_operations ORDER BY operation_id`)
+	if err != nil {
+		return err
+	}
+	var pending []directiveOperationFailureMigrationRow
+	for rows.Next() {
+		var row directiveOperationFailureMigrationRow
+		var response, details, failure sql.NullString
+		if err := rows.Scan(&row.operationID, &row.state, &response, &row.errorCode, &row.errorMessage, &details, &failure); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if response.Valid {
+			row.response = []byte(response.String)
+		}
+		if details.Valid {
+			row.errorDetails = []byte(details.String)
+		}
+		if failure.Valid {
+			row.failure = []byte(failure.String)
+		}
+		pending = append(pending, row)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	var blocked []string
+	for _, row := range pending {
+		failure, legacy, err := canonicalDirectiveOperationFailure(row)
+		if err != nil {
+			blocked = append(blocked, row.operationID+"["+row.state+"]:"+err.Error())
+			continue
+		}
+		var raw any
+		if failure != nil {
+			encoded, _ := runtimefailures.MarshalEnvelope(*failure)
+			raw = string(encoded)
+			if legacy != "" {
+				addFailureMigrationCount(counts, "agent_directive_operations", legacy, *failure)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE agent_directive_operations SET failure = ? WHERE operation_id = ?`, raw, row.operationID); err != nil {
+			return err
+		}
+	}
+	if len(blocked) > 0 {
+		return fmt.Errorf("sqlite agent_directive_operations canonical failure migration blocked by %d rows: %s", len(blocked), strings.Join(blocked, ", "))
+	}
+	if !needsRebuild {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DROP TABLE IF EXISTS agent_directive_operations__failure_new;
+		CREATE TABLE agent_directive_operations__failure_new (
+			operation_id               TEXT PRIMARY KEY,
+			method                     TEXT NOT NULL CHECK (method = 'agent.send_directive'),
+			actor_token_id             TEXT NOT NULL,
+			idempotency_key            TEXT,
+			request_hash               TEXT NOT NULL,
+			agent_id                   TEXT NOT NULL,
+			directive_text             TEXT NOT NULL,
+			requested_run_id           TEXT,
+			resolved_run_id            TEXT NOT NULL REFERENCES runs(run_id),
+			run_id_resolution          TEXT NOT NULL CHECK (run_id_resolution IN ('specified', 'inferred_from_active_session', 'new_run_allocated')),
+			source                     TEXT NOT NULL,
+			operator_id                TEXT,
+			directive_event_id         TEXT NOT NULL UNIQUE REFERENCES events(event_id),
+			state                      TEXT NOT NULL CHECK (state IN ('prepared', 'executing', 'executed', 'succeeded', 'failed', 'indeterminate')),
+			execution_owner_id         TEXT,
+			execution_lease_expires_at TIMESTAMP,
+			response                   TEXT,
+			failure                    TEXT,
+			execution_admitted_at      TIMESTAMP,
+			executed_at                TIMESTAMP,
+			completed_at               TIMESTAMP,
+			created_at                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at                 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			expires_at                 TIMESTAMP,
+			CHECK (idempotency_key IS NULL OR idempotency_key <> ''),
+			CHECK ((state IN ('executed', 'succeeded')) = (response IS NOT NULL)),
+			CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL))
+		);
+		INSERT INTO agent_directive_operations__failure_new (
+			operation_id, method, actor_token_id, idempotency_key, request_hash, agent_id,
+			directive_text, requested_run_id, resolved_run_id, run_id_resolution, source,
+			operator_id, directive_event_id, state, execution_owner_id, execution_lease_expires_at,
+			response, failure, execution_admitted_at, executed_at, completed_at, created_at,
+			updated_at, expires_at
+		)
+		SELECT operation_id, method, actor_token_id, idempotency_key, request_hash, agent_id,
+			directive_text, requested_run_id, resolved_run_id, run_id_resolution, source,
+			operator_id, directive_event_id, state, execution_owner_id, execution_lease_expires_at,
+			response, failure, execution_admitted_at, executed_at, completed_at, created_at,
+			updated_at, expires_at
+		FROM agent_directive_operations;
+		DROP TABLE agent_directive_operations;
+		ALTER TABLE agent_directive_operations__failure_new RENAME TO agent_directive_operations;
+		CREATE UNIQUE INDEX idx_agent_directive_operations_active_key ON agent_directive_operations (method, actor_token_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+		CREATE INDEX idx_agent_directive_operations_recovery ON agent_directive_operations (state, execution_lease_expires_at, updated_at);
+		CREATE INDEX idx_agent_directive_operations_expiry ON agent_directive_operations (expires_at);
+		CREATE INDEX idx_agent_directive_operations_run ON agent_directive_operations (resolved_run_id, created_at);
+	`); err != nil {
+		return fmt.Errorf("rebuild sqlite agent_directive_operations canonical failure schema: %w", err)
+	}
+	return nil
+}
+
 func sqliteColumnsTx(ctx context.Context, tx *sql.Tx, table string) (map[string]bool, error) {
 	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
@@ -1219,6 +1560,9 @@ func ensureSQLiteCanonicalFailureSchema(ctx context.Context, db *sql.DB) error {
 	}
 	if err := migrateSQLiteRunFailures(ctx, tx); err != nil {
 		return fmt.Errorf("migrate sqlite runs terminal evidence: %w", err)
+	}
+	if err := migrateSQLiteDirectiveOperationFailures(ctx, tx, counts); err != nil {
+		return fmt.Errorf("migrate sqlite agent directive operation failures: %w", err)
 	}
 	if err := migrateSQLiteFailureEventPayloads(ctx, tx, counts); err != nil {
 		return fmt.Errorf("migrate sqlite failure-bearing event payloads: %w", err)

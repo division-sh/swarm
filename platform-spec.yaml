@@ -5765,6 +5765,26 @@ engine:
                   - completed
               additional_attributes: false
               cause_policy: The original execution failure, storage error text, nested envelopes, and ad hoc persistence fields are forbidden. The persisted outcome must be reconciled before retry.
+            directive_heartbeat_shutdown_unconfirmed:
+              owner: internal/runtime/agentcontrol directive failure adapter
+              attributes: {}
+              additional_attributes: false
+              cause_policy: Response-local evidence only. Raw heartbeat or storage diagnostics are forbidden.
+            directive_failure_persistence_unconfirmed:
+              owner: internal/runtime/agentcontrol directive failure adapter
+              attributes: {}
+              additional_attributes: false
+              cause_policy: Response-local evidence only. The original execution failure and storage diagnostics are forbidden; authoritative reload decides which atomic branch committed.
+            directive_result_persistence_unconfirmed:
+              owner: internal/runtime/agentcontrol directive failure adapter
+              attributes: {}
+              additional_attributes: false
+              cause_policy: Response-local evidence only. The result and storage diagnostics are forbidden; authoritative reload decides which atomic branch committed.
+            directive_execution_lease_expired:
+              owner: internal/runtime/agentcontrol directive failure adapter
+              attributes: {}
+              additional_attributes: false
+              cause_policy: Durable recovery evidence. Raw heartbeat, execution, and storage diagnostics are forbidden.
         platform.retry_exhausted:
           family: task_execution
           task_failure: true
@@ -5896,9 +5916,21 @@ engine:
           task_failure: true
           retryable: false
           deterministic: false
-          decision_overrides: typed_read_result_marshal_failed is deterministic
+          decision_overrides: typed_read_result_marshal_failed and directive_execution_not_admitted are deterministic
           message_template: The platform encountered an internal failure (%s).
           remediation_template: Inspect the typed detail and runtime diagnostics (%s).
+          detail_contracts:
+            directive_board_step_failed:
+              owner: internal/runtime/agentcontrol directive failure adapter
+              attributes: {}
+              additional_attributes: false
+              cause_policy: Used only for an untyped BoardStep error. Raw execution prose is forbidden.
+            directive_execution_not_admitted:
+              owner: internal/runtime/agentcontrol directive failure adapter
+              attributes: {}
+              additional_attributes: false
+              deterministic: true
+              cause_policy: Durable keyless prepared-operation recovery evidence. Raw recovery prose is forbidden.
     event_validation_failure:
       behavior: Reject event. Log error. Do not deliver. No retry.
       visibility: Error logged with event name, payload, and validation error.
@@ -9529,6 +9561,16 @@ agent_directive_operation_model:
     succeeded: Receipt, keyed API completion projection, and terminal operation outcome committed atomically.
     failed: BoardStep returned an error and the stable typed failure plus error receipt are durable.
     indeterminate: Execution may have produced effects but no authoritative result was durably recorded; automatic execution is forbidden.
+  outcome_evidence:
+    persisted_invariants:
+      failure: state IN ('failed', 'indeterminate') if and only if one valid platform.failure/v1 envelope is present
+      response: state IN ('executed', 'succeeded') if and only if one durable response is present
+      legacy_flat_error_columns: forbidden; hard migration recognizes only the two closed recovery producers and removes all three columns
+    immediate_uncertainty: >
+      heartbeat shutdown and post-effect persistence errors return response-local indeterminate copies with canonical
+      uncertainty envelopes. They do not claim a durable transition. A generic persistence error preserves only the
+      last confirmed pre-call state because commit acknowledgment may be lost; authoritative reload and reconciliation
+      decide which complete atomic outcome committed.
   transitions:
     - absent -> prepared
     - prepared -> executing
@@ -9556,9 +9598,14 @@ agent_directive_operation_model:
     After successful BoardStep, RecordDirectiveExecuted durably stores the response before
     settlement. Finalization then atomically writes the processed platform/pipeline receipt,
     the keyed api_idempotency success projection with resource_id=operation_id, and succeeded
-    state with its 24-hour replay TTL. A finalization failure leaves executed durable so retry
-    and recovery perform finalization only. Failure to durably record a post-effect result
-    leaves executing and is reconciled to indeterminate after lease expiry.
+    state with its 24-hour replay TTL. Before finalization, executed is the last confirmed durable state and retry
+    or recovery performs finalization only. A returned commit error does not prove rollback. Failed-outcome
+    finalization may leave executing with no failure/receipt or may have atomically committed failed with the exact
+    failure and matching error receipt. Result recording may leave executing without a response or may have committed
+    executed with the exact response and no receipt. Success finalization may leave executed or may have atomically
+    committed succeeded with its processed nil-failure receipt and keyed API projection. Immediate uncertainty is
+    response-local; same-key retry and startup reconciliation reload the authoritative row and converge without another
+    BoardStep.
   key_behavior:
     keyed: >
       Same actor/key/hash consumes one operation. prepared may receive its sole admission;
@@ -9713,9 +9760,7 @@ platform_tables:
             execution_owner_id         TEXT,
             execution_lease_expires_at TIMESTAMPTZ,
             response                   JSONB,
-            error_code                 TEXT,
-            error_message              TEXT,
-            error_details              JSONB,
+            failure                    JSONB,
             execution_admitted_at      TIMESTAMPTZ,
             executed_at                TIMESTAMPTZ,
             completed_at               TIMESTAMPTZ,
@@ -9723,8 +9768,8 @@ platform_tables:
             updated_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             expires_at                 TIMESTAMPTZ,
             CHECK (idempotency_key IS NULL OR idempotency_key <> ''),
-            CHECK (state NOT IN ('executed', 'succeeded') OR response IS NOT NULL),
-            CHECK (state NOT IN ('failed', 'indeterminate') OR error_code IS NOT NULL),
+            CHECK ((state IN ('executed', 'succeeded')) = (response IS NOT NULL)),
+            CHECK ((state IN ('failed', 'indeterminate')) = (failure IS NOT NULL)),
             UNIQUE INDEX idx_agent_directive_operations_active_key (method, actor_token_id, idempotency_key) WHERE idempotency_key IS NOT NULL,
             INDEX idx_agent_directive_operations_recovery (state, execution_lease_expires_at, updated_at),
             INDEX idx_agent_directive_operations_expiry (expires_at),
@@ -23678,8 +23723,7 @@ api_specification:
         - directive_event_id
         - run_id
         - state
-        - failure_code
-        - failure_message
+        - failure
         properties:
           operation_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -23690,10 +23734,8 @@ api_specification:
           state:
             type: string
             const: failed
-          failure_code:
-            type: string
-          failure_message:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       AGENT_DIRECTIVE_OUTCOME_INDETERMINATE:
         description: Directive execution may have produced effects, but no authoritative result was durably recorded. Automatic re-execution is forbidden.
         type: object
@@ -23703,8 +23745,7 @@ api_specification:
         - directive_event_id
         - run_id
         - state
-        - failure_code
-        - failure_message
+        - failure
         properties:
           operation_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -23715,10 +23756,8 @@ api_specification:
           state:
             type: string
             const: indeterminate
-          failure_code:
-            type: string
-          failure_message:
-            type: string
+          failure:
+            $ref: '#/components/schemas/FailureEnvelope'
       BUNDLE_MISMATCH:
         type: object
         additionalProperties: false

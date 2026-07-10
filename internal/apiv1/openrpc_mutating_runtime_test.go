@@ -21,6 +21,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1356,9 +1357,12 @@ func directiveOperationProbeError(err error, state runtimeagentcontrol.Directive
 	if state == runtimeagentcontrol.DirectiveOperationExecuting {
 		op.ExecutionLeaseExpiresAt = time.Now().UTC().Add(time.Minute)
 	}
+	if state == runtimeagentcontrol.DirectiveOperationExecuted {
+		op.Response = json.RawMessage(`{"ok":true}`)
+	}
 	if state == runtimeagentcontrol.DirectiveOperationFailed || state == runtimeagentcontrol.DirectiveOperationIndeterminate {
-		op.ErrorCode = "probe_failure"
-		op.ErrorMessage = "probe directive failure"
+		failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "probe_failure", "openrpc-probe", "agent_directive", nil), "openrpc-probe", "agent_directive")
+		op.Failure = &failure
 	}
 	return &runtimeagentcontrol.DirectiveOperationError{Err: err, Operation: op}
 }

@@ -598,19 +598,20 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		}
 	case <-heartbeatShutdown.C:
 		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
-		admitted.ErrorCode = "heartbeat_shutdown_timeout"
-		admitted.ErrorMessage = "directive heartbeat did not release its persistence boundary after execution"
+		failure := runtimeagentcontrol.DirectiveHeartbeatShutdownUnconfirmedFailure()
+		admitted.Failure = &failure
 		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{
 			Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
 			Operation: admitted,
 		}
 	}
 	if executionErr != nil {
-		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, "board_step_failed", executionErr.Error(), nil, time.Now().UTC(), directiveOperationTTL)
+		executionFailure := runtimeagentcontrol.DirectiveBoardStepFailure(executionErr)
+		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, executionFailure, time.Now().UTC(), directiveOperationTTL)
 		if persistErr != nil {
 			admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
-			admitted.ErrorCode = "post_effect_failure_persistence_failed"
-			admitted.ErrorMessage = persistErr.Error()
+			failure := runtimeagentcontrol.DirectiveFailurePersistenceUnconfirmedFailure()
+			admitted.Failure = &failure
 			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
 		}
 		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(failed)
@@ -632,8 +633,8 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	executed, err := store.RecordDirectiveExecuted(ctx, admitted.OperationID, ownerID, encoded, time.Now().UTC())
 	if err != nil {
 		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
-		admitted.ErrorCode = "post_effect_result_persistence_failed"
-		admitted.ErrorMessage = err.Error()
+		failure := runtimeagentcontrol.DirectiveResultPersistenceUnconfirmedFailure()
+		admitted.Failure = &failure
 		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
 	}
 	finalized, err := store.FinalizeDirectiveSuccess(ctx, admitted.OperationID, time.Now().UTC(), directiveOperationTTL)

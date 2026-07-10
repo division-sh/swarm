@@ -219,7 +219,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 					t.Fatalf("FinalizeDirectiveSuccess: %v", err)
 				}
 			case runtimeagentcontrol.DirectiveOperationFailed:
-				if _, err := pg.FinalizeDirectiveFailure(ctx, reserved.Operation.OperationID, ownerID, "board_step_failed", "injected failure", nil, now.Add(3*time.Second), 24*time.Hour); err != nil {
+				failure := runtimeagentcontrol.DirectiveBoardStepFailure(errors.New("injected failure"))
+				if _, err := pg.FinalizeDirectiveFailure(ctx, reserved.Operation.OperationID, ownerID, failure, now.Add(3*time.Second), 24*time.Hour); err != nil {
 					t.Fatalf("FinalizeDirectiveFailure: %v", err)
 				}
 			}

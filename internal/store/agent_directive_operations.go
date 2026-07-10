@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
 )
@@ -161,6 +163,9 @@ func validateDirectiveReservation(req runtimeagentcontrol.ReserveDirectiveOperat
 	if op.State != runtimeagentcontrol.DirectiveOperationPrepared {
 		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("new directive operation state must be prepared")
 	}
+	if err := runtimeagentcontrol.ValidateDirectiveOperationEvidence(op); err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, err
+	}
 	return op, nil
 }
 
@@ -283,7 +288,7 @@ func (s *PostgresStore) FinalizeDirectiveSuccess(ctx context.Context, operationI
 		if op.State != runtimeagentcontrol.DirectiveOperationExecuted && op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "processed", ""); err != nil {
+		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "processed", nil); err != nil {
 			return err
 		}
 		if err := storePostgresDirectiveProjection(txctx, tx, op, now, ttl); err != nil {
@@ -317,7 +322,7 @@ func (s *SQLiteRuntimeStore) FinalizeDirectiveSuccess(ctx context.Context, opera
 		if op.State != runtimeagentcontrol.DirectiveOperationExecuted && op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "processed", ""); err != nil {
+		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "processed", nil); err != nil {
 			return err
 		}
 		if err := storeSQLiteDirectiveProjectionTx(txctx, tx, op, now, ttl); err != nil {
@@ -390,17 +395,21 @@ func requireDirectiveProjection(res sql.Result) error {
 	return nil
 }
 
-func (s *PostgresStore) FinalizeDirectiveFailure(ctx context.Context, operationID, ownerID, code, message string, details json.RawMessage, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
-	return s.finalizePostgresDirectiveFailure(ctx, operationID, ownerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, code, message, details, now, ttl)
+func (s *PostgresStore) FinalizeDirectiveFailure(ctx context.Context, operationID, ownerID string, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+	return s.finalizePostgresDirectiveFailure(ctx, operationID, ownerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, failure, now, ttl)
 }
 
-func (s *SQLiteRuntimeStore) FinalizeDirectiveFailure(ctx context.Context, operationID, ownerID, code, message string, details json.RawMessage, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
-	return s.finalizeSQLiteDirectiveFailure(ctx, operationID, ownerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, code, message, details, now, ttl)
+func (s *SQLiteRuntimeStore) FinalizeDirectiveFailure(ctx context.Context, operationID, ownerID string, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+	return s.finalizeSQLiteDirectiveFailure(ctx, operationID, ownerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, failure, now, ttl)
 }
 
-func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, operationID, ownerID string, from, to runtimeagentcontrol.DirectiveOperationState, code, message string, details json.RawMessage, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, operationID, ownerID string, from, to runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+	failureRaw, err := runtimefailures.MarshalEnvelope(failure)
+	if err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("validate directive operation failure: %w", err)
+	}
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.RunEventTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		op, ok, err := loadPostgresDirectiveOperationByID(txctx, tx, operationID, true)
 		if err != nil || !ok {
 			if err == nil {
@@ -409,20 +418,23 @@ func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, op
 			return err
 		}
 		if op.State == to {
+			if !sameDirectiveFailure(op.Failure, failureRaw) {
+				return fmt.Errorf("directive operation %s terminal failure conflicts with persisted failure", operationID)
+			}
 			out = op
 			return nil
 		}
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "error", message); err != nil {
+		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "error", &failure); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = $3, error_code = $4, error_message = $5, error_details = $6::jsonb, execution_lease_expires_at = NULL, completed_at = $7, updated_at = $7, expires_at = $8 WHERE operation_id = $1::uuid AND state = $2`, operationID, string(from), string(to), code, message, nullableJSON(details), now.UTC(), terminalDirectiveExpiry(to, now, ttl))
+		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = $3, failure = $4::jsonb, execution_lease_expires_at = NULL, completed_at = $5, updated_at = $5, expires_at = $6 WHERE operation_id = $1::uuid AND state = $2`, operationID, string(from), string(to), string(failureRaw), now.UTC(), terminalDirectiveExpiry(to, now, ttl))
 		if err := requireDirectiveTransition(res, err); err != nil {
 			return err
 		}
-		op.State, op.ErrorCode, op.ErrorMessage, op.ErrorDetails = to, code, message, append(json.RawMessage(nil), details...)
+		op.State, op.Failure = to, runtimefailures.CloneEnvelope(&failure)
 		op.ExecutionLeaseExpiresAt = time.Time{}
 		op.CompletedAt, op.UpdatedAt = now.UTC(), now.UTC()
 		if to == runtimeagentcontrol.DirectiveOperationFailed {
@@ -434,9 +446,13 @@ func (s *PostgresStore) finalizePostgresDirectiveFailure(ctx context.Context, op
 	return out, err
 }
 
-func (s *SQLiteRuntimeStore) finalizeSQLiteDirectiveFailure(ctx context.Context, operationID, ownerID string, from, to runtimeagentcontrol.DirectiveOperationState, code, message string, details json.RawMessage, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+func (s *SQLiteRuntimeStore) finalizeSQLiteDirectiveFailure(ctx context.Context, operationID, ownerID string, from, to runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+	failureRaw, err := runtimefailures.MarshalEnvelope(failure)
+	if err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, fmt.Errorf("validate directive operation failure: %w", err)
+	}
 	var out runtimeagentcontrol.DirectiveOperation
-	err := s.runRuntimeMutation(ctx, "sqlite finalize directive failure", func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runRuntimeMutation(ctx, "sqlite finalize directive failure", func(txctx context.Context, tx *sql.Tx) error {
 		op, ok, err := loadSQLiteDirectiveOperationByID(txctx, tx, operationID)
 		if err != nil || !ok {
 			if err == nil {
@@ -445,20 +461,23 @@ func (s *SQLiteRuntimeStore) finalizeSQLiteDirectiveFailure(ctx context.Context,
 			return err
 		}
 		if op.State == to {
+			if !sameDirectiveFailure(op.Failure, failureRaw) {
+				return fmt.Errorf("directive operation %s terminal failure conflicts with persisted failure", operationID)
+			}
 			out = op
 			return nil
 		}
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "error", message); err != nil {
+		if err := s.UpsertPipelineReceiptTx(txctx, tx, op.DirectiveEventID, "error", &failure); err != nil {
 			return err
 		}
-		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = ?, error_code = ?, error_message = ?, error_details = ?, execution_lease_expires_at = NULL, completed_at = ?, updated_at = ?, expires_at = ? WHERE operation_id = ? AND state = ?`, string(to), code, message, nullableJSON(details), now.UTC(), now.UTC(), terminalDirectiveExpiry(to, now, ttl), operationID, string(from))
+		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = ?, failure = ?, execution_lease_expires_at = NULL, completed_at = ?, updated_at = ?, expires_at = ? WHERE operation_id = ? AND state = ?`, string(to), string(failureRaw), now.UTC(), now.UTC(), terminalDirectiveExpiry(to, now, ttl), operationID, string(from))
 		if err := requireDirectiveTransition(res, err); err != nil {
 			return err
 		}
-		op.State, op.ErrorCode, op.ErrorMessage, op.ErrorDetails = to, code, message, append(json.RawMessage(nil), details...)
+		op.State, op.Failure = to, runtimefailures.CloneEnvelope(&failure)
 		op.ExecutionLeaseExpiresAt = time.Time{}
 		op.CompletedAt, op.UpdatedAt = now.UTC(), now.UTC()
 		if to == runtimeagentcontrol.DirectiveOperationFailed {
@@ -477,11 +496,12 @@ func terminalDirectiveExpiry(state runtimeagentcontrol.DirectiveOperationState, 
 	return now.Add(normalizeDirectiveTTL(ttl)).UTC()
 }
 
-func nullableJSON(raw json.RawMessage) any {
-	if len(raw) == 0 {
-		return nil
+func sameDirectiveFailure(existing *runtimefailures.Envelope, expected []byte) bool {
+	if existing == nil {
+		return false
 	}
-	return string(raw)
+	raw, err := runtimefailures.MarshalEnvelope(*existing)
+	return err == nil && bytes.Equal(raw, expected)
 }
 
 func (s *PostgresStore) LoadDirectiveOperation(ctx context.Context, operationID string) (runtimeagentcontrol.DirectiveOperation, bool, error) {
@@ -631,12 +651,14 @@ func (s *PostgresStore) reconcilePostgresDirectiveOperationIDs(ctx context.Conte
 				out.Repaired++
 			}
 		case op.State == runtimeagentcontrol.DirectiveOperationExecuting && !op.ExecutionLeaseExpiresAt.After(now):
-			if _, err := s.finalizePostgresDirectiveFailure(ctx, id, op.ExecutionOwnerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationIndeterminate, "execution_lease_expired", "directive execution lease expired before a durable outcome", nil, now, ttl); err != nil {
+			failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+			if _, err := s.finalizePostgresDirectiveFailure(ctx, id, op.ExecutionOwnerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, now, ttl); err != nil {
 				return out, err
 			}
 			out.Indeterminate++
 		case op.State == runtimeagentcontrol.DirectiveOperationPrepared && op.IdempotencyKey == "":
-			if _, err := s.finalizePostgresDirectiveFailure(ctx, id, "", runtimeagentcontrol.DirectiveOperationPrepared, runtimeagentcontrol.DirectiveOperationFailed, "execution_not_admitted", "keyless directive operation was abandoned before execution admission", nil, now, ttl); err != nil {
+			failure := runtimeagentcontrol.DirectiveExecutionNotAdmittedFailure()
+			if _, err := s.finalizePostgresDirectiveFailure(ctx, id, "", runtimeagentcontrol.DirectiveOperationPrepared, runtimeagentcontrol.DirectiveOperationFailed, failure, now, ttl); err != nil {
 				return out, err
 			}
 			out.Failed++
@@ -679,12 +701,14 @@ func (s *SQLiteRuntimeStore) reconcileSQLiteDirectiveOperationIDs(ctx context.Co
 				out.Repaired++
 			}
 		case op.State == runtimeagentcontrol.DirectiveOperationExecuting && !op.ExecutionLeaseExpiresAt.After(now):
-			if _, err := s.finalizeSQLiteDirectiveFailure(ctx, id, op.ExecutionOwnerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationIndeterminate, "execution_lease_expired", "directive execution lease expired before a durable outcome", nil, now, ttl); err != nil {
+			failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+			if _, err := s.finalizeSQLiteDirectiveFailure(ctx, id, op.ExecutionOwnerID, runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, now, ttl); err != nil {
 				return out, err
 			}
 			out.Indeterminate++
 		case op.State == runtimeagentcontrol.DirectiveOperationPrepared && op.IdempotencyKey == "":
-			if _, err := s.finalizeSQLiteDirectiveFailure(ctx, id, "", runtimeagentcontrol.DirectiveOperationPrepared, runtimeagentcontrol.DirectiveOperationFailed, "execution_not_admitted", "keyless directive operation was abandoned before execution admission", nil, now, ttl); err != nil {
+			failure := runtimeagentcontrol.DirectiveExecutionNotAdmittedFailure()
+			if _, err := s.finalizeSQLiteDirectiveFailure(ctx, id, "", runtimeagentcontrol.DirectiveOperationPrepared, runtimeagentcontrol.DirectiveOperationFailed, failure, now, ttl); err != nil {
 				return out, err
 			}
 			out.Failed++
@@ -723,9 +747,9 @@ func loadSQLiteDirectiveOperationByID(ctx context.Context, q rowQueryer, id stri
 	return scanDirectiveOperation(q.QueryRowContext(ctx, sqliteDirectiveOperationSelect+` WHERE operation_id = ?`, id))
 }
 
-const postgresDirectiveOperationSelect = `SELECT operation_id::text, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, directive_text, COALESCE(requested_run_id::text, ''), resolved_run_id::text, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id::text, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, COALESCE(error_code, ''), COALESCE(error_message, ''), error_details, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
+const postgresDirectiveOperationSelect = `SELECT operation_id::text, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, directive_text, COALESCE(requested_run_id::text, ''), resolved_run_id::text, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id::text, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
 
-const sqliteDirectiveOperationSelect = `SELECT operation_id, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, directive_text, COALESCE(requested_run_id, ''), resolved_run_id, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, COALESCE(error_code, ''), COALESCE(error_message, ''), error_details, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
+const sqliteDirectiveOperationSelect = `SELECT operation_id, method, actor_token_id, COALESCE(idempotency_key, ''), request_hash, agent_id, directive_text, COALESCE(requested_run_id, ''), resolved_run_id, run_id_resolution, source, COALESCE(operator_id, ''), directive_event_id, state, COALESCE(execution_owner_id, ''), execution_lease_expires_at, response, failure, execution_admitted_at, executed_at, completed_at, created_at, updated_at, expires_at FROM agent_directive_operations`
 
 type directiveOperationRow interface {
 	Scan(...any) error
@@ -734,8 +758,8 @@ type directiveOperationRow interface {
 func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.DirectiveOperation, bool, error) {
 	var op runtimeagentcontrol.DirectiveOperation
 	var state string
-	var leaseRaw, responseRaw, detailsRaw, admittedRaw, executedRaw, completedRaw, createdRaw, updatedRaw, expiresRaw any
-	err := row.Scan(&op.OperationID, &op.Method, &op.ActorTokenID, &op.IdempotencyKey, &op.RequestHash, &op.AgentID, &op.Directive, &op.RequestedRunID, &op.ResolvedRunID, &op.RunIDResolution, &op.Source, &op.OperatorID, &op.DirectiveEventID, &state, &op.ExecutionOwnerID, &leaseRaw, &responseRaw, &op.ErrorCode, &op.ErrorMessage, &detailsRaw, &admittedRaw, &executedRaw, &completedRaw, &createdRaw, &updatedRaw, &expiresRaw)
+	var leaseRaw, responseRaw, failureRaw, admittedRaw, executedRaw, completedRaw, createdRaw, updatedRaw, expiresRaw any
+	err := row.Scan(&op.OperationID, &op.Method, &op.ActorTokenID, &op.IdempotencyKey, &op.RequestHash, &op.AgentID, &op.Directive, &op.RequestedRunID, &op.ResolvedRunID, &op.RunIDResolution, &op.Source, &op.OperatorID, &op.DirectiveEventID, &state, &op.ExecutionOwnerID, &leaseRaw, &responseRaw, &failureRaw, &admittedRaw, &executedRaw, &completedRaw, &createdRaw, &updatedRaw, &expiresRaw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimeagentcontrol.DirectiveOperation{}, false, nil
 	}
@@ -744,7 +768,10 @@ func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.Dire
 	}
 	op.State = runtimeagentcontrol.DirectiveOperationState(strings.TrimSpace(state))
 	op.Response = jsonRawMessageValue(responseRaw)
-	op.ErrorDetails = jsonRawMessageValue(detailsRaw)
+	op.Failure, err = decodeStoredFailure(failureRaw)
+	if err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, false, fmt.Errorf("decode directive operation failure: %w", err)
+	}
 	timestamps := []struct {
 		raw    any
 		target *time.Time
@@ -764,7 +791,11 @@ func scanDirectiveOperation(row directiveOperationRow) (runtimeagentcontrol.Dire
 			*timestamp.target = at
 		}
 	}
-	return op.Normalized(), true, nil
+	op = op.Normalized()
+	if err := runtimeagentcontrol.ValidateDirectiveOperationEvidence(op); err != nil {
+		return runtimeagentcontrol.DirectiveOperation{}, false, err
+	}
+	return op, true, nil
 }
 
 func nullableString(value string) any {

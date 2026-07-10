@@ -139,7 +139,7 @@ func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *test
 	if err != nil {
 		t.Fatalf("load abandoned: %v", err)
 	}
-	if abandoned.State != runtimeagentcontrol.DirectiveOperationFailed || abandoned.ErrorCode != "execution_not_admitted" {
+	if abandoned.State != runtimeagentcontrol.DirectiveOperationFailed || abandoned.Failure == nil || abandoned.Failure.Detail.Code != runtimeagentcontrol.DirectiveExecutionNotAdmittedDetail {
 		t.Fatalf("abandoned operation = %#v", abandoned)
 	}
 }
@@ -442,7 +442,7 @@ func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *te
 		t.Fatalf("indeterminate readmission error = %v", err)
 	}
 	abandoned, _, err := store.LoadDirectiveOperation(ctx, prepared.Operation.OperationID)
-	if err != nil || abandoned.State != runtimeagentcontrol.DirectiveOperationFailed || abandoned.ErrorCode != "execution_not_admitted" {
+	if err != nil || abandoned.State != runtimeagentcontrol.DirectiveOperationFailed || abandoned.Failure == nil || abandoned.Failure.Detail.Code != runtimeagentcontrol.DirectiveExecutionNotAdmittedDetail {
 		t.Fatalf("abandoned operation = %#v err=%v", abandoned, err)
 	}
 	assertDirectiveOperationCompletionRows(t, db, executed.Operation.OperationID, executed.Operation.DirectiveEventID)

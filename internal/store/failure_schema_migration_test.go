@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -601,6 +602,158 @@ func seedSQLiteLegacyFailures(t testing.TB, ctx context.Context, db *sql.DB) leg
 			'input-hash', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`, ids.activity, runID, ids.activityResult)
 	return ids
+}
+
+func TestPostgresDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	createPostgresLegacyDirectiveOperationTable(t, ctx, db)
+	leaseID, notAdmittedID := uuid.NewString(), uuid.NewString()
+	mustExecTest(t, ctx, db, `INSERT INTO agent_directive_operations (operation_id, state, error_code, error_message) VALUES ($1::uuid, 'indeterminate', 'execution_lease_expired', 'directive execution lease expired before a durable outcome')`, leaseID)
+	mustExecTest(t, ctx, db, `INSERT INTO agent_directive_operations (operation_id, state, error_code, error_message) VALUES ($1::uuid, 'failed', 'execution_not_admitted', 'keyless directive operation was abandoned before execution admission')`, notAdmittedID)
+
+	if err := ensurePostgresCanonicalFailureSchema(ctx, db); err != nil {
+		t.Fatalf("ensurePostgresCanonicalFailureSchema: %v", err)
+	}
+	assertPersistedFailure(t, queryFailure(t, db, `SELECT failure FROM agent_directive_operations WHERE operation_id = $1::uuid`, leaseID), runtimefailures.ClassOutcomeUncertain, runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail)
+	notAdmitted := queryFailure(t, db, `SELECT failure FROM agent_directive_operations WHERE operation_id = $1::uuid`, notAdmittedID)
+	assertPersistedFailure(t, notAdmitted, runtimefailures.ClassInternalFailure, runtimeagentcontrol.DirectiveExecutionNotAdmittedDetail)
+	decoded, err := runtimefailures.UnmarshalEnvelope(notAdmitted)
+	if err != nil || !decoded.Deterministic {
+		t.Fatalf("not-admitted failure = %#v err=%v, want deterministic", decoded, err)
+	}
+	for _, column := range []string{"error_code", "error_message", "error_details"} {
+		if postgresColumnExists(t, ctx, db, "agent_directive_operations", column) {
+			t.Fatalf("legacy column %s survived", column)
+		}
+	}
+}
+
+func TestSQLiteDirectiveOperationFailureMigrationMapsOnlyClosedRecoveryCodes(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "directive-failure-migration.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	createSQLiteLegacyDirectiveOperationTable(t, ctx, db)
+	leaseID, notAdmittedID := uuid.NewString(), uuid.NewString()
+	insertSQLiteLegacyDirectiveOperation(t, ctx, db, leaseID, "indeterminate", "execution_lease_expired", "directive execution lease expired before a durable outcome", "")
+	insertSQLiteLegacyDirectiveOperation(t, ctx, db, notAdmittedID, "failed", "execution_not_admitted", "keyless directive operation was abandoned before execution admission", "")
+
+	if err := ensureSQLiteCanonicalFailureSchema(ctx, db); err != nil {
+		t.Fatalf("ensureSQLiteCanonicalFailureSchema: %v", err)
+	}
+	assertPersistedFailure(t, queryFailure(t, db, `SELECT failure FROM agent_directive_operations WHERE operation_id = ?`, leaseID), runtimefailures.ClassOutcomeUncertain, runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail)
+	notAdmitted := queryFailure(t, db, `SELECT failure FROM agent_directive_operations WHERE operation_id = ?`, notAdmittedID)
+	assertPersistedFailure(t, notAdmitted, runtimefailures.ClassInternalFailure, runtimeagentcontrol.DirectiveExecutionNotAdmittedDetail)
+	decoded, err := runtimefailures.UnmarshalEnvelope(notAdmitted)
+	if err != nil || !decoded.Deterministic {
+		t.Fatalf("not-admitted failure = %#v err=%v, want deterministic", decoded, err)
+	}
+	columns := sqliteColumnSet(t, ctx, db, "agent_directive_operations")
+	for _, column := range []string{"error_code", "error_message", "error_details"} {
+		if columns[column] {
+			t.Fatalf("legacy column %s survived", column)
+		}
+	}
+}
+
+func TestPostgresDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomically(t *testing.T) {
+	tests := directiveOperationBlockedMigrationRows()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			ctx := context.Background()
+			createPostgresLegacyDirectiveOperationTable(t, ctx, db)
+			id := uuid.NewString()
+			mustExecTest(t, ctx, db, `INSERT INTO agent_directive_operations (operation_id, state, error_code, error_message, error_details) VALUES ($1::uuid, $2, $3, $4, $5::jsonb)`, id, test.state, test.code, test.message, nullableMigrationTestValue(test.details))
+			err := ensurePostgresCanonicalFailureSchema(ctx, db)
+			if err == nil || !strings.Contains(err.Error(), id) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("migration error = %v, want operation id and %q", err, test.want)
+			}
+			if postgresColumnExists(t, ctx, db, "agent_directive_operations", "failure") || !postgresColumnExists(t, ctx, db, "agent_directive_operations", "error_code") {
+				t.Fatal("blocked Postgres migration did not roll back atomically")
+			}
+		})
+	}
+}
+
+func TestSQLiteDirectiveOperationFailureMigrationRejectsAmbiguousRowsAtomically(t *testing.T) {
+	for _, test := range directiveOperationBlockedMigrationRows() {
+		t.Run(test.name, func(t *testing.T) {
+			db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "directive-failure-blocked.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			ctx := context.Background()
+			createSQLiteLegacyDirectiveOperationTable(t, ctx, db)
+			id := uuid.NewString()
+			insertSQLiteLegacyDirectiveOperation(t, ctx, db, id, test.state, test.code, test.message, test.details)
+			err = ensureSQLiteCanonicalFailureSchema(ctx, db)
+			if err == nil || !strings.Contains(err.Error(), id) || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("migration error = %v, want operation id and %q", err, test.want)
+			}
+			columns := sqliteColumnSet(t, ctx, db, "agent_directive_operations")
+			if columns["failure"] || !columns["error_code"] {
+				t.Fatal("blocked SQLite migration did not roll back atomically")
+			}
+		})
+	}
+}
+
+type directiveOperationBlockedMigrationRow struct {
+	name, state, code, message, details, want string
+}
+
+func directiveOperationBlockedMigrationRows() []directiveOperationBlockedMigrationRow {
+	return []directiveOperationBlockedMigrationRow{
+		{name: "board step prose", state: "failed", code: "board_step_failed", message: "provider failed", want: "cannot recover"},
+		{name: "unknown code", state: "failed", code: "other_failure", message: "opaque", want: "unknown failed"},
+		{name: "legacy details", state: "failed", code: "execution_not_admitted", message: "keyless directive operation was abandoned before execution admission", details: `{"cause":"raw"}`, want: "error_details"},
+		{name: "forbidden state", state: "prepared", code: "execution_not_admitted", message: "keyless directive operation was abandoned before execution admission", want: "forbids legacy"},
+	}
+}
+
+func createPostgresLegacyDirectiveOperationTable(t testing.TB, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	mustExecTest(t, ctx, db, `DROP TABLE IF EXISTS agent_directive_operations; CREATE TABLE agent_directive_operations (operation_id UUID PRIMARY KEY, state TEXT NOT NULL, response JSONB, error_code TEXT, error_message TEXT, error_details JSONB)`)
+}
+
+func createSQLiteLegacyDirectiveOperationTable(t testing.TB, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	mustExecTest(t, ctx, db, `
+		CREATE TABLE agent_directive_operations (
+			operation_id TEXT PRIMARY KEY, method TEXT NOT NULL, actor_token_id TEXT NOT NULL,
+			idempotency_key TEXT, request_hash TEXT NOT NULL, agent_id TEXT NOT NULL,
+			directive_text TEXT NOT NULL, requested_run_id TEXT, resolved_run_id TEXT NOT NULL,
+			run_id_resolution TEXT NOT NULL, source TEXT NOT NULL, operator_id TEXT,
+			directive_event_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, execution_owner_id TEXT,
+			execution_lease_expires_at TIMESTAMP, response TEXT, error_code TEXT, error_message TEXT,
+			error_details TEXT, execution_admitted_at TIMESTAMP, executed_at TIMESTAMP,
+			completed_at TIMESTAMP, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+			expires_at TIMESTAMP
+		)
+	`)
+}
+
+func insertSQLiteLegacyDirectiveOperation(t testing.TB, ctx context.Context, db *sql.DB, id, state, code, message, details string) {
+	t.Helper()
+	mustExecTest(t, ctx, db, `
+		INSERT INTO agent_directive_operations (
+			operation_id, method, actor_token_id, request_hash, agent_id, directive_text,
+			resolved_run_id, run_id_resolution, source, directive_event_id, state,
+			error_code, error_message, error_details, created_at, updated_at
+		) VALUES (?, 'agent.send_directive', 'actor', 'hash', 'agent', 'do work', ?, 'specified', 'v1_rpc', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, id, uuid.NewString(), uuid.NewString(), state, code, message, nullableMigrationTestValue(details))
+}
+
+func nullableMigrationTestValue(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func mustExecTest(t testing.TB, ctx context.Context, db *sql.DB, query string, args ...any) {

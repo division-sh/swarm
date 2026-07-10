@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -150,6 +152,59 @@ func TestOperatorAgentControlHandlersTypedResourceErrors(t *testing.T) {
 		if data := asMap(t, resp.Error.Data); data["code"] != AgentNotFoundCode {
 			t.Fatalf("%s data = %#v, want %s", method, data, AgentNotFoundCode)
 		}
+	}
+}
+
+func TestOperatorAgentDirectiveFailureUsesCanonicalNestedEnvelope(t *testing.T) {
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+	failure := runtimeagentcontrol.DirectiveExecutionLeaseExpiredFailure()
+	operation := runtimeagentcontrol.DirectiveOperation{
+		OperationID:      "00000000-0000-0000-0000-000000000801",
+		DirectiveEventID: "00000000-0000-0000-0000-000000000802",
+		ResolvedRunID:    "00000000-0000-0000-0000-000000000803",
+		State:            runtimeagentcontrol.DirectiveOperationIndeterminate,
+		Failure:          &failure,
+	}
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: OperatorReadHandlers(OperatorReadOptions{
+			Idempotency: sqliteStore,
+			AgentControl: &fakeAgentControlController{errs: map[string]error{
+				"agent.send_directive": &runtimeagentcontrol.DirectiveOperationError{
+					Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
+					Operation: operation,
+				},
+			}},
+		}),
+	})
+
+	resp := rpcCall(t, handler, agentDirectiveBody("agent-1", "run corpus", ""))
+	if resp.Error == nil {
+		t.Fatal("agent.send_directive error = nil")
+	}
+	data := asMap(t, resp.Error.Data)
+	if data["code"] != AgentDirectiveOutcomeIndeterminateCode {
+		t.Fatalf("directive code = %#v", data["code"])
+	}
+	details := asMap(t, data["details"])
+	if _, ok := details["failure_code"]; ok {
+		t.Fatalf("retired failure_code survived: %#v", details)
+	}
+	if _, ok := details["failure_message"]; ok {
+		t.Fatalf("retired failure_message survived: %#v", details)
+	}
+	encoded, err := json.Marshal(details["failure"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := runtimefailures.UnmarshalEnvelope(encoded)
+	if err != nil {
+		t.Fatalf("decode nested failure: %v", err)
+	}
+	want, _ := runtimefailures.MarshalEnvelope(failure)
+	gotRaw, _ := runtimefailures.MarshalEnvelope(got)
+	if string(gotRaw) != string(want) {
+		t.Fatalf("nested failure = %s, want %s", gotRaw, want)
 	}
 }
 
