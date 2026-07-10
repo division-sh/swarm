@@ -32,6 +32,7 @@ type Options struct {
 	AmbiguousRequestEdge      bool
 	MismatchedProvider        bool
 	DefaultEventIDCorrelation bool
+	OptionalReplyCorrelation  bool
 	ProviderContinuation      string
 	ContinuationRequestKey    string
 	ContinuationAccountID     string
@@ -144,7 +145,7 @@ requester_state:
     type: text
     _unused_reason: template reply origin identity fixture field
 `)
-	writeFile(t, filepath.Join(root, "flows", "requester", "events.yaml"), eventContractsYAML())
+	writeFile(t, filepath.Join(root, "flows", "requester", "events.yaml"), eventContractsYAML(opts.OptionalReplyCorrelation))
 	writeFile(t, filepath.Join(root, "flows", "requester", "nodes.yaml"), `
 requester-node:
   id: requester-node
@@ -174,7 +175,7 @@ pins:
 `)
 	writeFlowSupportFiles(t, root, flowID)
 	writeFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "{}\n")
-	writeFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), eventContractsYAML())
+	writeFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), eventContractsYAML(opts.OptionalReplyCorrelation))
 	writeFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), providerNodesYAML(opts))
 }
 
@@ -271,7 +272,11 @@ provider-node:
 	}
 }
 
-func eventContractsYAML() string {
+func eventContractsYAML(optionalReplyCorrelation bool) string {
+	replyRequired := "[provider_request_id, account_id, result]"
+	if optionalReplyCorrelation {
+		replyRequired = "[account_id, result]"
+	}
 	return `
 provider.requested:
   provider_request_id: text
@@ -281,7 +286,7 @@ provider.replied:
   provider_request_id: text
   account_id: text
   result: text
-  required: [provider_request_id, account_id, result]
+  required: ` + replyRequired + `
 `
 }
 

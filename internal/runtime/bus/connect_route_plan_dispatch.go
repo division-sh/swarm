@@ -95,7 +95,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	}
 	for _, plan := range matched {
 		if plan.ReplyResolution != nil && plan.ReplyResolution.Role == runtimepinrouting.ConnectReplyRoleResponse {
-			routes, subscribers, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan)
+			routes, subscribers, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values)
 			if err != nil {
 				return connectRoutePlanDispatch{}, err
 			}
@@ -229,7 +229,7 @@ func (r connectRoutePlanResolver) materializeReplyRequest(ctx context.Context, e
 	return events.NormalizeDeliveryRoutes(routes), nil
 }
 
-func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan) ([]events.DeliveryRoute, []Subscriber, runtimepinrouting.TargetFailure, map[string]any, error) {
+func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string) ([]events.DeliveryRoute, []Subscriber, runtimepinrouting.TargetFailure, map[string]any, error) {
 	reply := plan.ReplyResolution
 	contextID := events.DeliveryContextFromContext(ctx).ReplyContextID()
 	detail := map[string]any{
@@ -249,9 +249,22 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 		}
 		return nil, nil, "", nil, err
 	}
-	if record.RequesterFlowID != reply.RequesterFlowID || record.RequestOutputPin != reply.RequestOutputPin || record.ReplyInputPin != reply.ReplyInputPin || record.ProviderFlowID != reply.ProviderFlowID || record.ProviderInputPin != reply.ProviderInputPin || record.ProviderOutputPin != reply.ProviderOutputPin {
+	if record.RequesterFlowID != reply.RequesterFlowID || record.RequestOutputPin != reply.RequestOutputPin || record.ReplyInputPin != reply.ReplyInputPin || record.ProviderFlowID != reply.ProviderFlowID || record.ProviderInputPin != reply.ProviderInputPin || record.ProviderOutputPin != reply.ProviderOutputPin || record.CorrelationKey != strings.TrimSpace(reply.CorrelationKey) {
 		detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
 		return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
+	}
+	if key := record.CorrelationKey; key != "" {
+		actual := strings.TrimSpace(values["payload."+key])
+		if actual == "" || actual != record.RequestCorrelationID {
+			detail["connect_route_plan_failure"] = string(runtimepinrouting.FailureStaleArrival)
+			detail["reply_context_id"] = contextID
+			detail["reply_correlation_key"] = key
+			detail["request_correlation_id"] = record.RequestCorrelationID
+			if actual != "" {
+				detail["reply_correlation_id"] = actual
+			}
+			return nil, nil, runtimepinrouting.FailureStaleArrival, detail, nil
+		}
 	}
 	target := record.Origin.Normalized()
 	subscribers := r.resolveSelectedReceiverCarriers(plan, target)

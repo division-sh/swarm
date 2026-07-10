@@ -351,6 +351,100 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 	}
 }
 
+func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothBackends(t *testing.T) {
+	for _, backendCase := range []struct {
+		name  string
+		setup func(*testing.T) durableReplyConformanceStore
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) durableReplyConformanceStore {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return &store.PostgresStore{DB: db}
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) durableReplyConformanceStore {
+				return storetest.StartSQLiteRuntimeStore(t)
+			},
+		},
+	} {
+		t.Run(backendCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			source := templatereply.LoadSource(t, templatereply.Options{OptionalReplyCorrelation: true})
+			backend := backendCase.setup(t)
+			runID := uuid.NewString()
+			seedDurableReplyConformanceRun(t, ctx, backend, runID)
+			eb := newDurableReplyConformanceBus(t, ctx, backend, source)
+
+			for _, invalid := range []struct {
+				name    string
+				value   string
+				include bool
+			}{
+				{name: "absent_value"},
+				{name: "inconsistent_value", value: "different-request", include: true},
+			} {
+				t.Run(invalid.name, func(t *testing.T) {
+					requestID := uuid.NewString()
+					requestKey := "request-" + uuid.NewString()
+					request := replyConformanceEventForRun(
+						source.ResolveFlowEventReference(templatereply.RequesterFlowID, templatereply.RequestEvent),
+						requestID,
+						runID,
+						templatereply.RequesterFlowID,
+						templatereply.RequesterFlowID+"/account-a",
+						map[string]any{"provider_request_id": requestKey, "account_id": "account-a"},
+					)
+					if err := eb.Publish(ctx, request); err != nil {
+						t.Fatalf("publish request: %v", err)
+					}
+					requestRoutes, err := backend.ListEventDeliveryRoutes(ctx, requestID)
+					if err != nil || len(requestRoutes) != 1 || requestRoutes[0].Context.Empty() {
+						t.Fatalf("request routes = %#v err=%v, want one carried reply context", requestRoutes, err)
+					}
+					deliveryContext := requestRoutes[0].Context
+					replyID := uuid.NewString()
+					replyPayload := map[string]any{"account_id": "account-a", "result": "invalid"}
+					if invalid.include {
+						replyPayload["provider_request_id"] = invalid.value
+					}
+					reply := replyConformanceEventForRun(
+						source.ResolveFlowEventReference(templatereply.ProviderFlowID, templatereply.ReplyEvent),
+						replyID,
+						runID,
+						templatereply.ProviderFlowID,
+						templatereply.ProviderFlowID,
+						replyPayload,
+					)
+					publishCtx := events.WithDeliveryContext(ctx, deliveryContext)
+					preflight, err := eb.CheckPublishRecipientPlan(publishCtx, reply)
+					if err != nil {
+						t.Fatalf("reply preflight: %v", err)
+					}
+					if preflight.TargetFailure != string(runtimepinrouting.FailureStaleArrival) || len(preflight.DeliveryRoutes) != 0 {
+						t.Fatalf("reply preflight = %#v, want stale arrival with zero routes", preflight)
+					}
+					assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
+
+					if err := eb.Publish(publishCtx, reply); err != nil {
+						t.Fatalf("publish invalid reply: %v", err)
+					}
+					if routes, err := backend.ListEventDeliveryRoutes(ctx, replyID); err != nil || len(routes) != 0 {
+						t.Fatalf("invalid reply routes = %#v err=%v, want none", routes, err)
+					}
+					if got := loadReplyConformanceTargetFailure(t, ctx, backend, replyID); got != string(runtimepinrouting.FailureStaleArrival) {
+						t.Fatalf("invalid reply target failure = %q, want %q", got, runtimepinrouting.FailureStaleArrival)
+					}
+					assertReplyContextState(t, ctx, backend, deliveryContext.ReplyContextID(), runtimereplycontext.StateOpen, "")
+				})
+			}
+		})
+	}
+}
+
 func TestReplyResolutionConformance_DurableMailboxAndHumanTaskResumeToTerminalReply(t *testing.T) {
 	for _, backendCase := range []struct {
 		name  string
