@@ -127,6 +127,7 @@
       "weight": 132.0639999999999,
       "packages": [
         "github.com/division-sh/swarm/cmd/swarm-openapi-gen",
+        "github.com/division-sh/swarm/cmd/swarm-provider-trigger-pack-gen",
         "github.com/division-sh/swarm/internal/builder",
         "github.com/division-sh/swarm/internal/config",
         "github.com/division-sh/swarm/internal/promptcontracts",
