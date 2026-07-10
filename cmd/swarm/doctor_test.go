@@ -278,6 +278,39 @@ func TestDoctorClaudeCLIPreflightReportsTelegramConnectorToolSurface(t *testing.
 	}
 }
 
+func TestDoctorProviderCapabilityReadbackFailureIsTypedBlocker(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
+	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(credentialPath, []byte("not-json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), true)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--contracts" {
+			args[i+1] = writeDoctorTelegramConnectorContractsFixture(t)
+			break
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+	}
+	finding, ok := localPreflightReportFinding(report, "provider_connector_surface_failed")
+	if !ok || finding.Severity != localPreflightSeverityBlocker || finding.Status != localPreflightStatusFailed || finding.Remediation == "" {
+		t.Fatalf("readback failure finding = %#v", finding)
+	}
+}
+
 func TestDoctorClaudeCLIPreflightReportsSlackManagedConnectorPackSurface(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
