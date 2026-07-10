@@ -1403,7 +1403,7 @@ func writeDiagnosticRunList(out io.Writer, result diagnosticRunListResult) {
 	for _, run := range result.Runs {
 		rows = append(rows, []string{
 			run.RunID,
-			run.Status,
+			formatCLIHumanCode(cliHumanCodeRunStatus, run.Status),
 			run.StartedAt,
 			fmt.Sprintf("%d", intPointerValue(run.EventCount)),
 			fmt.Sprintf("%d", intPointerValue(run.EntityCount)),
@@ -1433,77 +1433,100 @@ func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "Run: %s\n", run.RunID)
-	fmt.Fprintf(out, "status=%s started_at=%s events=%d entities=%d trigger=%s trigger_event_id=%s\n",
-		run.Status,
-		run.StartedAt,
-		intPointerValue(run.EventCount),
-		intPointerValue(run.EntityCount),
-		run.TriggerEventType,
-		run.TriggerEventID,
-	)
-	if run.EndedAt != "" {
-		fmt.Fprintf(out, "ended_at=%s\n", run.EndedAt)
-	}
-	if run.ForkedFromRunID != "" {
-		fmt.Fprintf(out, "forked_from_run_id=%s\n", run.ForkedFromRunID)
-	}
-	if run.Failure != nil {
-		fmt.Fprintf(out, "failure=%s/%s message=%s remediation=%s\n", run.Failure.Class, run.Failure.Detail.Code, run.Failure.Message, run.Failure.Remediation)
-	}
-	if run.ControlReason != "" {
-		fmt.Fprintf(out, "control_reason=%s\n", run.ControlReason)
-	}
+	writeCLILabeledDetail(out, cliLabeledDetail{
+		Title: fmt.Sprintf("Run %s  %s", run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status)),
+		Rows:  diagnosticRunHeaderRows(run),
+	})
 }
 
 func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisResult) {
 	if out == nil {
 		return
 	}
-	writeDiagnosticRunHeader(out, result.Run)
-	fmt.Fprintf(out, "operational_state=%s blocking_layer=%s blocking_reason=%s\n",
-		stringPointerValue(result.OperationalState),
-		stringPointerValue(result.BlockingLayer),
-		stringPointerValue(result.BlockingReason),
-	)
+	rows := diagnosticRunHeaderRows(result.Run)
+	state := stringPointerValue(result.OperationalState)
+	if projectedRunStatus := formatCLIHumanCode(cliHumanCodeRunStatus, result.Run.Status); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {
+		rows = append(rows, cliLabeledDetailRow{Label: "run status", Value: projectedRunStatus})
+	}
 	if result.TestQuiescence != nil {
-		fmt.Fprintf(out, "test_quiescence_ready=%t active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d\n",
-			boolPointerValue(result.TestQuiescence.Ready),
-			intPointerValue(result.TestQuiescence.ActiveDeliveries),
-			intPointerValue(result.TestQuiescence.UnsettledPipelineEvents),
-			intPointerValue(result.TestQuiescence.DueTimers),
-			intPointerValue(result.TestQuiescence.ActiveSessionLeases),
-		)
-	}
-	if len(result.Heuristics) == 0 {
-		fmt.Fprintln(out, "heuristics=none")
-	} else {
-		fmt.Fprintln(out, "heuristics:")
-		for _, item := range result.Heuristics {
-			fmt.Fprintf(out, "- %s\n", item)
+		settled := "not settled"
+		if boolPointerValue(result.TestQuiescence.Ready) {
+			settled = "settled"
 		}
+		rows = append(rows, cliLabeledDetailRow{Label: "health", Value: fmt.Sprintf("%s, %s, %s, %s, %s, %s",
+			settled,
+			formatCLIHumanCount(intPointerValue(result.TestQuiescence.ActiveDeliveries), "active delivery", "active deliveries"),
+			formatCLIHumanCount(intPointerValue(result.TestQuiescence.UnsettledPipelineEvents), "unsettled event", "unsettled events"),
+			formatCLIHumanCount(intPointerValue(result.TestQuiescence.DueTimers), "due timer", "due timers"),
+			formatCLIHumanCount(intPointerValue(result.TestQuiescence.ActiveSessionLeases), "active session lease", "active session leases"),
+			formatCLIHumanCount(len(result.FailedDeliveries), "failed delivery", "failed deliveries"),
+		)})
 	}
-	if len(result.FailedDeliveries) == 0 {
-		fmt.Fprintln(out, "failed_deliveries=none")
-		return
+	if layer := stringPointerValue(result.BlockingLayer); layer != "" {
+		value := formatCLIHumanCode(cliHumanCodeRunBlockingLayer, layer)
+		if reason := stringPointerValue(result.BlockingReason); reason != "" {
+			value += ", " + formatCLIHumanCode(cliHumanCodeRunBlockingReason, reason)
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: "blocker", Value: value})
 	}
-	fmt.Fprintln(out, "failed_deliveries:")
+	failures := make([]string, 0, len(result.FailedDeliveries))
 	for _, delivery := range result.FailedDeliveries {
-		fmt.Fprintf(out, "  event_id=%s event_name=%s delivery_id=%s subscriber=%s/%s status=%s reason_code=%s failure=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
-			delivery.EventID,
+		value := fmt.Sprintf("%s (%s), delivery %s, subscriber %s/%s, %s, %s, terminal %t, %s",
 			delivery.EventName,
+			delivery.EventID,
 			delivery.DeliveryID,
 			delivery.SubscriberType,
 			delivery.SubscriberID,
-			delivery.Status,
-			emptyDash(delivery.ReasonCode),
-			eventObservationFailureSummary(delivery.Failure),
-			delivery.RetryCount,
-			delivery.RetryEligible,
+			formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status),
+			formatCLIHumanCount(delivery.RetryCount, "retry", "retries"),
 			delivery.Terminal,
-			len(delivery.DeadLetters),
+			formatCLIHumanCount(len(delivery.DeadLetters), "dead letter", "dead letters"),
+		)
+		if strings.TrimSpace(delivery.ReasonCode) != "" {
+			value += ", reason " + delivery.ReasonCode
+		}
+		if delivery.Failure != nil {
+			value += ", failure " + eventObservationFailureSummary(delivery.Failure)
+		}
+		failures = append(failures, value)
+	}
+	writeCLILabeledDetail(out, cliLabeledDetail{
+		Title: fmt.Sprintf("Run %s  %s", result.Run.RunID, formatCLIHumanCode(cliHumanCodeOperationalState, state)),
+		Rows:  rows,
+		Sections: []cliLabeledDetailSection{
+			{Label: "notes", Items: result.Heuristics},
+			{Label: "failed deliveries", Items: failures},
+		},
+	})
+}
+
+func diagnosticRunHeaderRows(run diagnosticRunHeader) []cliLabeledDetailRow {
+	timing := "started " + run.StartedAt
+	if run.EndedAt != "" {
+		timing += ", ended " + run.EndedAt
+	}
+	rows := []cliLabeledDetailRow{
+		{Label: "trigger", Value: fmt.Sprintf("%s (%s)", run.TriggerEventType, run.TriggerEventID)},
+		{Label: "timing", Value: timing},
+		{Label: "scale", Value: fmt.Sprintf("%s, %s",
+			formatCLIHumanCount(intPointerValue(run.EventCount), "event", "events"),
+			formatCLIHumanCount(intPointerValue(run.EntityCount), "entity", "entities"),
+		)},
+	}
+	if run.ForkedFromRunID != "" {
+		rows = append(rows, cliLabeledDetailRow{Label: "forked from", Value: run.ForkedFromRunID})
+	}
+	if run.Failure != nil {
+		rows = append(rows,
+			cliLabeledDetailRow{Label: "failure", Value: eventObservationFailureSummary(run.Failure)},
+			cliLabeledDetailRow{Label: "problem", Value: run.Failure.Message},
+			cliLabeledDetailRow{Label: "remediation", Value: run.Failure.Remediation},
 		)
 	}
+	if run.ControlReason != "" {
+		rows = append(rows, cliLabeledDetailRow{Label: "control reason", Value: run.ControlReason})
+	}
+	return rows
 }
 
 func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTraceResult, deliveryDetail, verbose bool) {
@@ -1526,7 +1549,7 @@ func writeDiagnosticRunTrace(out io.Writer, runID string, result diagnosticRunTr
 				formatTraceRelativeFrom(startedAt, hasStart, row.EventCreatedAt),
 				row.EventName,
 				row.EventID,
-				emptyDash(row.DeliveryStatus),
+				emptyDash(formatCLIHumanCode(cliHumanCodeDeliveryStatus, row.DeliveryStatus)),
 				formatTraceSubscriber(row),
 			}
 			if includeSessionTurn {
@@ -1645,11 +1668,11 @@ func writeDiagnosticRunTraceDeliverySummary(out io.Writer, runID string, result 
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{
 			{Header: "SUBSCRIBER", IdentifierFamily: cliIdentifierFamilySubscriber},
-			{Header: "PENDING"},
-			{Header: "IN_PROGRESS"},
-			{Header: "DELIVERED"},
-			{Header: "FAILED"},
-			{Header: "DEAD_LETTER"},
+			{Header: strings.ToUpper(formatCLIHumanCode(cliHumanCodeDeliveryStatus, "pending"))},
+			{Header: strings.ToUpper(formatCLIHumanCode(cliHumanCodeDeliveryStatus, "in_progress"))},
+			{Header: strings.ToUpper(formatCLIHumanCode(cliHumanCodeDeliveryStatus, "delivered"))},
+			{Header: strings.ToUpper(formatCLIHumanCode(cliHumanCodeDeliveryStatus, "failed"))},
+			{Header: strings.ToUpper(formatCLIHumanCode(cliHumanCodeDeliveryStatus, "dead_letter"))},
 			{Header: "AVG_QUEUE_WAIT"},
 			{Header: "MAX_QUEUE_WAIT"},
 			{Header: "AVG_EXECUTION_TIME"},
@@ -1670,7 +1693,7 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 			row.EventID,
 			emptyDash(row.DeliveryID),
 			emptyDash(row.SubscriberType) + "/" + emptyDash(row.SubscriberID),
-			emptyDash(row.DeliveryStatus),
+			emptyDash(formatCLIHumanCode(cliHumanCodeDeliveryStatus, row.DeliveryStatus)),
 			emptyDash(row.DeliveryReasonCode),
 			emptyDash(row.ReplyContextID),
 			emptyDash(row.DeliveryCreatedAt),

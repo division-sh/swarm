@@ -124,7 +124,7 @@
     },
     {
       "id": 6,
-      "weight": 132.0639999999999,
+      "weight": 133.0639999999999,
       "packages": [
         "github.com/division-sh/swarm/cmd/swarm-openapi-gen",
         "github.com/division-sh/swarm/cmd/swarm-provider-trigger-pack-gen",
@@ -156,7 +156,8 @@
         "github.com/division-sh/swarm/internal/servedparity",
         "github.com/division-sh/swarm/internal/store/runbundle",
         "github.com/division-sh/swarm/internal/store/storetest",
-        "github.com/division-sh/swarm/internal/testutil"
+        "github.com/division-sh/swarm/internal/testutil",
+        "github.com/division-sh/swarm/internal/userfacing"
       ]
     }
   ]

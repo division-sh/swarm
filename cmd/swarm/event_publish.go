@@ -324,7 +324,7 @@ func writeEventPublishResult(out io.Writer, eventName string, result eventPublis
 			delivery.DeliveryID,
 			delivery.SubscriberType,
 			delivery.SubscriberID,
-			delivery.Status,
+			formatCLIHumanCode(cliHumanCodeDeliveryStatus, delivery.Status),
 			eventObservationDash(delivery.SessionID),
 			delivery.Attempt,
 			delivery.RetryCount,

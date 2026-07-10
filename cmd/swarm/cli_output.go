@@ -78,6 +78,153 @@ type cliDetailField struct {
 	Value string
 }
 
+type cliHumanCodeFamily string
+
+const (
+	cliHumanCodeRunStatus                   cliHumanCodeFamily = "run_status"
+	cliHumanCodeOperationalState            cliHumanCodeFamily = "operational_state"
+	cliHumanCodeRunBlockingLayer            cliHumanCodeFamily = "run_blocking_layer"
+	cliHumanCodeRunBlockingReason           cliHumanCodeFamily = "run_blocking_reason"
+	cliHumanCodeAgentStatus                 cliHumanCodeFamily = "agent_status"
+	cliHumanCodeConversationMode            cliHumanCodeFamily = "conversation_mode"
+	cliHumanCodeSessionScope                cliHumanCodeFamily = "session_scope"
+	cliHumanCodeDeliveryStatus              cliHumanCodeFamily = "delivery_status"
+	cliHumanCodeAgentLifecycleState         cliHumanCodeFamily = "agent_lifecycle_state"
+	cliHumanCodeAgentLifecycleBlockingLayer cliHumanCodeFamily = "agent_lifecycle_blocking_layer"
+	cliHumanCodeWatchdogState               cliHumanCodeFamily = "watchdog_state"
+	cliHumanCodeWatchdogBlockingLayer       cliHumanCodeFamily = "watchdog_blocking_layer"
+	cliHumanCodeWatchdogAction              cliHumanCodeFamily = "watchdog_action"
+	cliHumanCodeWatchdogOutcome             cliHumanCodeFamily = "watchdog_outcome"
+)
+
+var cliHumanCodePhrases = map[cliHumanCodeFamily]map[string]string{
+	cliHumanCodeRunStatus: {
+		"running": "running", "paused": "paused", "completed": "completed",
+		"failed": "failed", "cancelled": "cancelled", "forked": "forked",
+	},
+	cliHumanCodeOperationalState: {
+		"running": "running", "stalled": "stalled", "paused": "paused",
+		"completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked",
+	},
+	cliHumanCodeRunBlockingLayer: {
+		"scoring_terminal_outcome": "scoring outcome",
+		"delivery_lifecycle":       "delivery lifecycle",
+	},
+	cliHumanCodeRunBlockingReason: {
+		"terminal_scoring_outcome_missing": "waiting for a terminal scoring outcome",
+		"no_active_deliveries":             "no active deliveries",
+	},
+	cliHumanCodeAgentStatus: {
+		"idle": "idle", "running": "running", "paused": "paused",
+		"failed": "failed", "terminated": "terminated",
+	},
+	cliHumanCodeConversationMode: {
+		"task": "task", "session": "session", "session_per_entity": "session per entity",
+	},
+	cliHumanCodeSessionScope: {
+		"global": "global", "flow": "flow", "entity": "entity",
+	},
+	cliHumanCodeDeliveryStatus: {
+		"pending": "pending", "in_progress": "in progress", "delivered": "delivered",
+		"failed": "failed", "dead_letter": "dead letter",
+	},
+	cliHumanCodeAgentLifecycleState: {
+		"queued": "queued", "launching": "launching", "active": "active",
+		"retrying": "retrying", "exhausted": "exhausted",
+	},
+	cliHumanCodeAgentLifecycleBlockingLayer: {
+		"delivery_queue":    "delivery queue",
+		"session_launch":    "session launch",
+		"session_execution": "session execution",
+		"delivery_retry":    "delivery retry",
+		"delivery_terminal": "delivery terminal",
+	},
+	cliHumanCodeWatchdogState: {
+		"healthy_long_running": "healthy, long-running",
+		"no_output":            "no output",
+	},
+	cliHumanCodeWatchdogBlockingLayer: {
+		"session_execution": "session execution",
+	},
+	cliHumanCodeWatchdogAction: {
+		"turn_long_running": "turn running for a long time",
+		"session_no_output": "session produced no output",
+	},
+	cliHumanCodeWatchdogOutcome: {
+		"observed": "observed", "warning_emitted": "warning emitted",
+	},
+}
+
+func formatCLIHumanCode(family cliHumanCodeFamily, raw string) string {
+	if phrase, ok := cliHumanCodePhrases[family][strings.TrimSpace(raw)]; ok {
+		return phrase
+	}
+	return raw
+}
+
+func formatCLIHumanCount(count int, singular, plural string) string {
+	label := plural
+	if count == 1 {
+		label = singular
+	}
+	return fmt.Sprintf("%d %s", count, label)
+}
+
+type cliLabeledDetailRow struct {
+	Label string
+	Value string
+}
+
+type cliLabeledDetailSection struct {
+	Label string
+	Items []string
+}
+
+type cliLabeledDetail struct {
+	Title    string
+	Rows     []cliLabeledDetailRow
+	Sections []cliLabeledDetailSection
+}
+
+func writeCLILabeledDetail(out io.Writer, detail cliLabeledDetail) {
+	if out == nil {
+		return
+	}
+	writeCLITitle(out, detail.Title)
+	width := 0
+	rows := make([]cliLabeledDetailRow, 0, len(detail.Rows))
+	for _, row := range detail.Rows {
+		row.Label = strings.TrimSpace(row.Label)
+		row.Value = strings.TrimSpace(row.Value)
+		if row.Label == "" || row.Value == "" {
+			continue
+		}
+		rows = append(rows, row)
+		if candidate := cliDisplayWidth(row.Label); candidate > width {
+			width = candidate
+		}
+	}
+	for _, row := range rows {
+		fmt.Fprintf(out, "  %s%s  %s\n", row.Label, strings.Repeat(" ", width-cliDisplayWidth(row.Label)), row.Value)
+	}
+	for _, section := range detail.Sections {
+		label := strings.TrimSpace(section.Label)
+		items := make([]string, 0, len(section.Items))
+		for _, item := range section.Items {
+			if item = strings.TrimSpace(item); item != "" {
+				items = append(items, item)
+			}
+		}
+		if label == "" || len(items) == 0 {
+			continue
+		}
+		fmt.Fprintf(out, "  %s\n", label)
+		for _, item := range items {
+			fmt.Fprintf(out, "    %s\n", item)
+		}
+	}
+}
+
 func bindCLIOutputFlags(cmd *cobra.Command, opts *cliOutputOptions) {
 	cmd.Flags().BoolVar(&opts.asJSON, cliOutputJSONFlag, false, cliOutputJSONFlagHelp)
 	cmd.Flags().BoolVar(&opts.quiet, cliOutputQuietFlag, false, cliOutputQuietFlagHelp)

@@ -4,9 +4,97 @@ import (
 	"context"
 	"testing"
 
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+func TestAgentLifecycleBlockingLayerCoversEveryCurrentProducerState(t *testing.T) {
+	want := map[runtimedelivery.State]string{
+		runtimedelivery.StateQueued:    "delivery_queue",
+		runtimedelivery.StateLaunching: "session_launch",
+		runtimedelivery.StateActive:    "session_execution",
+		runtimedelivery.StateRetrying:  "delivery_retry",
+		runtimedelivery.StateExhausted: "delivery_terminal",
+	}
+	for state, layer := range want {
+		if got := agentLifecycleBlockingLayer(state); got != layer {
+			t.Errorf("agentLifecycleBlockingLayer(%q) = %q, want %q", state, got, layer)
+		}
+	}
+	if got := agentLifecycleBlockingLayer(runtimedelivery.StateDelivered); got != "" {
+		t.Fatalf("delivered blocking layer = %q, want empty because delivered is not a current diagnosis state", got)
+	}
+}
+
+func TestPostgresStore_ListAgentLifecycleFacts_CoversEveryCurrentStateLayerPair(t *testing.T) {
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+
+	ctx := context.Background()
+	runID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id, status) VALUES ($1::uuid, 'running')`, runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	type lifecycleCase struct {
+		agentID       string
+		status        string
+		activeSession string
+		wantState     string
+		wantLayer     string
+	}
+	cases := []lifecycleCase{
+		{agentID: "agent-queued", status: "pending", wantState: "queued", wantLayer: "delivery_queue"},
+		{agentID: "agent-launching", status: "in_progress", wantState: "launching", wantLayer: "session_launch"},
+		{agentID: "agent-active", status: "in_progress", activeSession: uuid.NewString(), wantState: "active", wantLayer: "session_execution"},
+		{agentID: "agent-retrying", status: "failed", wantState: "retrying", wantLayer: "delivery_retry"},
+		{agentID: "agent-exhausted", status: "dead_letter", wantState: "exhausted", wantLayer: "delivery_terminal"},
+	}
+	agentIDs := make([]string, 0, len(cases))
+	for index, tc := range cases {
+		eventID := uuid.NewString()
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO events (event_id, run_id, event_name, scope, payload, produced_by, produced_by_type)
+			VALUES ($1::uuid, $2::uuid, 'task.completed', 'global', '{}'::jsonb, 'runtime', 'agent')
+		`, eventID, runID); err != nil {
+			t.Fatalf("seed event for %s: %v", tc.agentID, err)
+		}
+		var activeSession any
+		if tc.activeSession != "" {
+			activeSession = tc.activeSession
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO event_deliveries (
+				run_id, event_id, subscriber_type, subscriber_id, status, active_session_id, created_at, delivered_at
+			) VALUES (
+				$1::uuid, $2::uuid, 'agent', $3, $4, $5::uuid,
+				now() - ($6 * interval '1 minute'),
+				CASE WHEN $4 = 'dead_letter' THEN now() ELSE NULL END
+			)
+		`, runID, eventID, tc.agentID, tc.status, activeSession, index+1); err != nil {
+			t.Fatalf("seed delivery for %s: %v", tc.agentID, err)
+		}
+		agentIDs = append(agentIDs, tc.agentID)
+	}
+
+	facts, err := pg.ListAgentLifecycleFacts(ctx, agentIDs)
+	if err != nil {
+		t.Fatalf("ListAgentLifecycleFacts: %v", err)
+	}
+	for _, tc := range cases {
+		got := facts[tc.agentID]
+		if got.CurrentState != tc.wantState || got.BlockingLayer != tc.wantLayer {
+			t.Errorf("%s lifecycle facts = %#v, want state=%q layer=%q", tc.agentID, got, tc.wantState, tc.wantLayer)
+		}
+	}
+}
 
 func TestPostgresStore_ListAgentLifecycleFacts_UsesCanonicalLiveLifecycle(t *testing.T) {
 	dsn, db, cleanup := testutil.StartPostgres(t)

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/userfacing"
 	"gopkg.in/yaml.v3"
 )
 
@@ -163,10 +164,8 @@ func TestPublicEnvTemplateIsNonAuthoritative(t *testing.T) {
 			t.Fatalf("swarm.example.yaml missing generated guidance %q:\n%s", want, exampleText)
 		}
 	}
-	for _, forbidden := range []string{"config.example.yaml", "runtime-config.example.yaml", "llm.claude_cli.retries", "\n#   password:", "Generated from cmd/swarm unified config metadata", "Elevated/local-only keys", "claude-3-5-sonnet", ".swarm/dev.db"} {
-		if strings.Contains(exampleText, forbidden) {
-			t.Fatalf("swarm.example.yaml still exposes forbidden guidance %q:\n%s", forbidden, exampleText)
-		}
+	if forbidden := userfacing.FindForbidden(userfacing.ProfileGeneratedConfig, exampleText); len(forbidden) > 0 {
+		t.Fatalf("swarm.example.yaml still exposes forbidden guidance %q:\n%s", forbidden, exampleText)
 	}
 }
 
@@ -189,25 +188,8 @@ func TestPublicConfigGuidanceUsesUnifiedSwarmYAML(t *testing.T) {
 			t.Fatalf("read %s: %v", rel, err)
 		}
 		text := string(body)
-		for _, forbidden := range []string{
-			"config.example.yaml",
-			"runtime-config.example.yaml",
-			"Optional path to Swarm runtime config",
-			"Path to Swarm runtime config",
-			"unified swarm.yaml/runtime config",
-			"the runtime config",
-			"runtime config is required",
-			"load runtime config through",
-			"workspace.docker_bin in runtime config",
-			"CLI config file",
-			"Path to unified",
-			"Optional path to unified",
-			"unified Swarm config",
-			"unified non-secret",
-		} {
-			if strings.Contains(text, forbidden) {
-				t.Fatalf("%s still teaches stale public config-source guidance %q", rel, forbidden)
-			}
+		if forbidden := userfacing.FindForbidden(userfacing.ProfilePublicConfigGuidance, text); len(forbidden) > 0 {
+			t.Fatalf("%s still teaches stale public config-source guidance %q", rel, forbidden)
 		}
 	}
 }

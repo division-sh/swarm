@@ -117,10 +117,12 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 		t.Fatalf("params = %#v, want agent id", captured.Params)
 	}
 	for _, want := range []string{
-		"Agent agent-1",
-		"role=reviewer type=worker status=running model=default mode=task session_scope=",
-		"current_session_ref: session_id=session-1 started_at=2026-05-18T03:00:00Z",
-		"last_turn_ref: turn_id=turn-1 completed_at=2026-05-18T03:05:00Z parse_ok=true failure=-",
+		"Agent agent-1  running",
+		"identity   role reviewer, type worker",
+		"model      default",
+		"mode       task",
+		"session    session-1, started 2026-05-18T03:00:00Z",
+		"last turn  turn-1, completed 2026-05-18T03:05:00Z, parsed true",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())

@@ -810,7 +810,7 @@ func writeRunCommandStarted(out io.Writer, result runStartResult) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "run started: run_id=%s status=%s\n", result.RunID, result.Status)
+	fmt.Fprintf(out, "run started: run_id=%s status=%s\n", result.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, result.Status))
 }
 
 func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {
@@ -829,7 +829,7 @@ func writeRunCommandReattached(out io.Writer, run diagnosticRunHeader) {
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "reattached: run_id=%s status=%s\n", run.RunID, run.Status)
+	fmt.Fprintf(out, "reattached: run_id=%s status=%s\n", run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status))
 }
 
 func writeRunCommandTraceRow(out io.Writer, row diagnosticRunTraceRow) {
@@ -866,7 +866,7 @@ func (w *runTraceRowLineWriter) Write(out io.Writer, row diagnosticRunTraceRow) 
 		fields = append(fields, "entity="+row.EntityID)
 	}
 	if row.DeliveryStatus != "" {
-		fields = append(fields, "delivery="+row.DeliveryStatus)
+		fields = append(fields, "delivery="+formatCLIHumanCode(cliHumanCodeDeliveryStatus, row.DeliveryStatus))
 	}
 	if subscriber := formatTraceSubscriber(row); subscriber != "-" {
 		fields = append(fields, "subscriber="+subscriber)
@@ -885,7 +885,7 @@ func writeRunCommandTerminalSummary(out io.Writer, run diagnosticRunHeader) {
 		return
 	}
 	fmt.Fprintf(out, "run terminal: run_id=%s status=%s trigger=%s event_count=%d entity_count=%d\n",
-		run.RunID, run.Status, run.TriggerEventType, intValue(run.EventCount), intValue(run.EntityCount))
+		run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status), run.TriggerEventType, intValue(run.EventCount), intValue(run.EntityCount))
 	if run.Failure != nil {
 		fmt.Fprintf(out, "failure=%s/%s message=%s remediation=%s\n", run.Failure.Class, run.Failure.Detail.Code, run.Failure.Message, run.Failure.Remediation)
 	}

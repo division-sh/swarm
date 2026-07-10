@@ -14,9 +14,10 @@ const cliIdentifierCandidateLimit = 5
 var cliBundleDigestPrefixPattern = regexp.MustCompile(`^[a-fA-F0-9]{1,64}$`)
 
 type cliIdentifierCandidate struct {
-	ID        string
-	Status    string
-	CreatedAt string
+	ID           string
+	Status       string
+	StatusFamily cliHumanCodeFamily
+	CreatedAt    string
 }
 
 type cliIdentifierResolveRequest struct {
@@ -146,7 +147,7 @@ func cliIdentifierCandidates(ctx context.Context, client *cliAPIClient, policy c
 		}
 		out := make([]cliIdentifierCandidate, 0, len(result.Agents))
 		for _, agent := range result.Agents {
-			out = append(out, cliIdentifierCandidate{ID: agent.AgentID, Status: agent.Status})
+			out = append(out, cliIdentifierCandidate{ID: agent.AgentID, Status: agent.Status, StatusFamily: cliHumanCodeAgentStatus})
 		}
 		return out, nil
 	case cliIdentifierSourceBundleList:
@@ -275,7 +276,7 @@ func newCLIIdentifierAmbiguousError(row cliIdentifierInputRegistration, value st
 	for _, candidate := range matches[:limit] {
 		parts := []string{"    " + candidate.ID}
 		if status := strings.TrimSpace(candidate.Status); status != "" {
-			parts = append(parts, "status="+status)
+			parts = append(parts, "status="+formatCLIHumanCode(candidate.StatusFamily, candidate.Status))
 		}
 		if createdAt := strings.TrimSpace(candidate.CreatedAt); createdAt != "" {
 			parts = append(parts, "created="+createdAt)

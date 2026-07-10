@@ -56,9 +56,6 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 
 	localBypassNeedles := []string{
 		"runForkRuntimeOwnerHarness",
-		"loadRunStatusReport",
-		"runStatusReportFromStore",
-		"printRunStatusReport",
 		"buildStores(",
 		"LoadRunDebugReport",
 		"MaterializeRunFork",
@@ -113,9 +110,6 @@ func TestCLILocalRuntimeHelpersRemainNonOperatorQuarantined(t *testing.T) {
 
 	wantCounts := map[string]int{
 		"runForkRuntimeOwnerHarness(": 1,
-		"loadRunStatusReport(":        1,
-		"printRunStatusReport(":       1,
-		"runStatusReportFromStore(":   2, // one private helper call plus its definition
 	}
 	for needle, want := range wantCounts {
 		if got := strings.Count(all, needle); got != want {

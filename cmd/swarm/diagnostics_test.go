@@ -133,14 +133,14 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 			name:       "diagnose default",
 			args:       []string{"run", "status", "run-1"},
 			wantMethod: "run.diagnose",
-			wantOutput: []string{"Run: run-1", "operational_state=stalled", "blocking_layer=delivery_lifecycle", "dead letters exist"},
+			wantOutput: []string{"Run run-1  stalled", "run status  running", "blocker     delivery lifecycle, no active deliveries", "dead letters exist"},
 		},
 		{
 			name:       "header only",
 			args:       []string{"run", "status", "run-1", "--no-diagnose"},
 			wantMethod: "run.get",
-			wantOutput: []string{"Run: run-1", "status=running", "trigger=scan.requested"},
-			notOutput:  "operational_state=",
+			wantOutput: []string{"Run run-1  running", "trigger  scan.requested"},
+			notOutput:  "blocker",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -182,6 +182,31 @@ func TestStatusUsesDiagnoseAndRunGet(t *testing.T) {
 	}
 }
 
+func TestStatusProjectsCanonicalScoringBlockerTuple(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+		if req.Method != "run.diagnose" {
+			t.Fatalf("method = %q, want run.diagnose", req.Method)
+		}
+		return validDiagnosticRunDiagnosis("run-1", "stalled", "scoring_terminal_outcome", "terminal_scoring_outcome_missing", []any{})
+	})
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "status", "run-1"}, &stdout, &stderr, testRootCommandOptions(server))
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "blocker     scoring outcome, waiting for a terminal scoring outcome") {
+		t.Fatalf("stdout does not project scoring blocker tuple:\n%s", stdout.String())
+	}
+	for _, machineLabel := range []string{"scoring_terminal_outcome", "terminal_scoring_outcome_missing"} {
+		if strings.Contains(stdout.String(), machineLabel) {
+			t.Fatalf("stdout leaks machine label %q:\n%s", machineLabel, stdout.String())
+		}
+	}
+}
+
 func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -197,7 +222,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 			lists:      [][]any{{validDiagnosticRunHeaderWithStatus("running-run", "running")}},
 			owner:      "run.diagnose",
 			selected:   "running-run",
-			wantOutput: "Run: running-run",
+			wantOutput: "Run running-run  running",
 		},
 		{
 			name:       "status falls back to paused",
@@ -205,7 +230,7 @@ func TestStatusAndTraceResolveOmittedRunThroughActivePreference(t *testing.T) {
 			lists:      [][]any{{}, {validDiagnosticRunHeaderWithStatus("paused-run", "paused")}},
 			owner:      "run.get",
 			selected:   "paused-run",
-			wantOutput: "Run: paused-run",
+			wantOutput: "Run paused-run  paused",
 		},
 		{
 			name:       "trace uses terminal fallback",
@@ -586,7 +611,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 	for _, want := range []string{
 		"run trace delivery summary: run_id=run-1 snapshot=point-in-time trace_rows=4 delivery_rows=3 non_delivery_rows=1",
 		"SUBSCRIBER",
-		"IN_PROGRESS",
+		"IN PROGRESS",
 		"agent/agent-1",
 		"node/node-1",
 	} {

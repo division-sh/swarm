@@ -52,12 +52,12 @@ func TestAgentDeliveriesUsesAgentDeliveryLifecycleAndRendersRows(t *testing.T) {
 	})
 	for _, want := range []string{
 		"Agent agent-1 deliveries",
-		"DELIVERY_ID",
+		"DELIVERY ID",
 		"delivery-1   platform.agent_directive",
 		"delivery-2   platform.agent_followup",
 		"failed",
 		"platform.connector_failure/waiting",
-		"next_cursor=cursor-2",
+		"Next cursor: cursor-2",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
@@ -96,7 +96,7 @@ func TestAgentDeliveriesEmptyResult(t *testing.T) {
 	if !strings.Contains(stdout.String(), "No deliveries match the current filters.") {
 		t.Fatalf("stdout = %q, want empty result message", stdout.String())
 	}
-	if strings.Contains(stdout.String(), "next_cursor=") {
+	if strings.Contains(stdout.String(), "Next cursor:") {
 		t.Fatalf("stdout rendered absent cursor:\n%s", stdout.String())
 	}
 	if strings.TrimSpace(stderr.String()) != "" {

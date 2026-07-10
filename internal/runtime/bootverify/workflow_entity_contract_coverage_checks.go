@@ -140,7 +140,7 @@ func (c *checkerContext) entityWriteTargetCompliance() []Finding {
 			c.entityWriteTargetComplianceFindings = append(c.entityWriteTargetComplianceFindings, Finding{
 				CheckID:  "entity_write_target_compliance",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from declared Wave 1 entity contract", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
+				Message:  fmt.Sprintf("flow %s node %s handler %s %s writes %q missing from the declared entity contract", defaultFlowLabel(target.FlowID), target.NodeID, target.EventType, target.Kind, target.Field),
 				Location: target.NodeID,
 			})
 			continue
