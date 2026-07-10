@@ -1,0 +1,11 @@
+provider_triggers:
+  packs:
+    platform_dirs:
+      - ../../packs/provider-triggers/github
+      - ../../packs/provider-triggers/intercom
+      - ../../packs/provider-triggers/shopify
+      - ../../packs/provider-triggers/slack
+      - ../../packs/provider-triggers/stripe
+      - ../../packs/provider-triggers/telegram
+      - ../../packs/provider-triggers/twilio
+      - ../../packs/provider-triggers/typeform
