@@ -14537,9 +14537,7 @@ func TestCreateServeToolGatewayBindingIgnoresStaleLocalURLEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create gateway binding: %v", err)
 	}
-	if strings.Contains(binding.HostEndpoint, oldUnifiedPort) || strings.Contains(binding.WorkspaceEndpoint, oldUnifiedPort) {
-		t.Fatalf("binding = %#v, stale URL env leaked into binding", binding)
-	}
+	assertToolGatewayBindingUsesMCPPort(t, binding, mcpPort, oldUnifiedPort)
 }
 
 func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testing.T) {
@@ -14719,6 +14717,9 @@ func receiveToolGatewayBinding(t *testing.T, ch <-chan toolgateway.Binding, outp
 
 func assertToolGatewayBindingUsesMCPPort(t *testing.T, binding toolgateway.Binding, mcpPort, stalePort string) {
 	t.Helper()
+	if mcpPort == stalePort {
+		t.Fatalf("invalid gateway binding test setup: listener and stale ports are both %q", mcpPort)
+	}
 	if err := binding.Validate(); err != nil {
 		t.Fatalf("runtime tool gateway binding is invalid: %v\nbinding=%#v", err, binding)
 	}
@@ -14727,9 +14728,6 @@ func assertToolGatewayBindingUsesMCPPort(t *testing.T, binding toolgateway.Bindi
 	}
 	if got, want := binding.WorkspaceEndpoint, "http://host.docker.internal:"+mcpPort; got != want {
 		t.Fatalf("binding WorkspaceEndpoint = %q, want %q", got, want)
-	}
-	if strings.Contains(binding.HostEndpoint, stalePort) || strings.Contains(binding.WorkspaceEndpoint, stalePort) {
-		t.Fatalf("runtime binding leaked stale URL env port %s: %#v", stalePort, binding)
 	}
 	if strings.TrimSpace(binding.Token) == "" {
 		t.Fatalf("runtime binding token is empty: %#v", binding)
