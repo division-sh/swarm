@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -202,15 +203,6 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	input := formatEventForAgent(a.cfg, evt, a.conversation.Tools)
 	resp, err := a.conversation.Step(ctx, input)
 	if err != nil && a.shouldRetryAfterTaskScopeReset(err) {
-		a.conversation.Reset()
-		scopeKey := strings.TrimSpace(conversationScopeKeyForEvent(a.conversation.Mode, evt))
-		if scopeKey != "" {
-			a.conversation.TaskID = scopeKey
-			a.scopeKey = scopeKey
-		}
-		resp, err = a.conversation.Step(ctx, input)
-	}
-	if err != nil && a.shouldRetryAfterTaskScopeFatalCLIError(err) {
 		a.conversation.Reset()
 		scopeKey := strings.TrimSpace(conversationScopeKeyForEvent(a.conversation.Mode, evt))
 		if scopeKey != "" {
@@ -435,15 +427,8 @@ func (a *LLMAgent) shouldRetryAfterTaskScopeReset(err error) bool {
 	if a == nil || a.conversation == nil || a.conversation.Mode != llm.TaskScoped || err == nil {
 		return false
 	}
-	msg := strings.ToLower(strings.TrimSpace(err.Error()))
-	return strings.Contains(msg, "max turns reached")
-}
-
-func (a *LLMAgent) shouldRetryAfterTaskScopeFatalCLIError(err error) bool {
-	if a == nil || a.conversation == nil || a.conversation.Mode != llm.TaskScoped || err == nil {
-		return false
-	}
-	return llm.ShouldResetTaskScopedConversationOnCLIError(err)
+	failure, ok := runtimefailures.As(err)
+	return ok && failure.Failure.Class == runtimefailures.ClassBudgetExhausted && failure.Failure.Detail.Code == "agent_turn_budget_exhausted"
 }
 
 func isHumanTaskOutcomeEvent(t events.EventType) bool {

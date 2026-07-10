@@ -1932,7 +1932,7 @@ func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminal
 		t.Fatalf("set in_progress delivery: %v", err)
 	}
 
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(runtimemanager.ReceiptStatusDeadLetter, "retry_exhausted", 2, "boom"))
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(runtimemanager.ReceiptStatusDeadLetter, "retry_exhausted", 2))
 	if err != nil {
 		t.Fatalf("marshal side effects: %v", err)
 	}
@@ -1957,8 +1957,8 @@ func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminal
 	if !ok {
 		t.Fatal("expected receipt to be found")
 	}
-	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 2 || receipt.Error != "boom" {
-		t.Fatalf("receipt = %+v, want dead_letter retry_count=2 error=boom", receipt)
+	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 2 || receipt.Failure != nil {
+		t.Fatalf("receipt = %+v, want dead_letter retry_count=2 without failure", receipt)
 	}
 }
 
@@ -2066,10 +2066,10 @@ func TestPostgresStore_EventReceiptsTypedIdentitySeparatesReceiptWriters(t *test
 		t.Fatalf("seed node delivery: %v", err)
 	}
 
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, eventID, "pipeline", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, eventID, "pipeline", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -2435,7 +2435,7 @@ func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
 			status TEXT NOT NULL DEFAULT 'pending',
 			retry_count INTEGER NOT NULL DEFAULT 0,
 			reason_code TEXT,
-			last_error TEXT,
+			failure JSONB,
 			active_session_id UUID,
 			started_at TIMESTAMPTZ,
 			delivered_at TIMESTAMPTZ,
@@ -2448,6 +2448,7 @@ func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
 			subscriber_id TEXT NOT NULL,
 			outcome TEXT NOT NULL DEFAULT 'success',
 			side_effects JSONB NOT NULL DEFAULT '{}'::jsonb,
+			failure JSONB,
 			processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 	}
@@ -2572,10 +2573,10 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if err := pg.AppendEvent(ctx, eventMissing); err != nil {
 		t.Fatalf("append missing event: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("upsert parent receipt: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, eventProcessed.ID(), "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, eventProcessed.ID(), "processed", nil); err != nil {
 		t.Fatalf("upsert processed receipt: %v", err)
 	}
 
@@ -2595,8 +2596,8 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if missing[0].Event.ParentEventID() != parentID {
 		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].Event.ParentEventID(), parentID)
 	}
-	if missing[0].ReplayError != "" {
-		t.Fatalf("missing event replay_error = %q, want empty", missing[0].ReplayError)
+	if missing[0].ReplayFailure != nil {
+		t.Fatalf("missing event replay_failure = %#v, want nil", missing[0].ReplayFailure)
 	}
 }
 
@@ -2635,8 +2636,8 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCap
 	if missing[0].Event.RunID() != "" {
 		t.Fatalf("missing event run_id = %q, want empty", missing[0].Event.RunID())
 	}
-	if missing[0].ReplayError != "missing run_id schema capability" {
-		t.Fatalf("missing event replay_error = %q, want missing run_id schema capability", missing[0].ReplayError)
+	if missing[0].ReplayFailure == nil || missing[0].ReplayFailure.Detail.Code != "persisted_replay_run_identity_invalid" || missing[0].ReplayFailure.Detail.Attributes["reason_code"] != "missing_run_id_schema_capability" {
+		t.Fatalf("missing event replay_failure = %#v, want persisted_replay_run_identity_invalid/missing_run_id_schema_capability", missing[0].ReplayFailure)
 	}
 }
 
@@ -3808,7 +3809,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	}
 
 	for i := 0; i < 4; i++ {
-		if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "error", "boom"); err != nil {
+		if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "error", testRetryableFailure()); err != nil {
 			t.Fatalf("upsert receipt: %v", err)
 		}
 	}
@@ -3828,7 +3829,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 		t.Fatalf("expected no subscribed pending events after dead_letter, got %d", len(subscribed))
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "processed", nil); err != nil {
 		t.Fatalf("upsert processed: %v", err)
 	}
 	subscribed, err = pg.ListPendingSubscribedEvents(ctx, "a1", []events.EventType{"inbound.*"}, time.Now().Add(-1*time.Hour), 10)
@@ -3963,11 +3964,11 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 		t.Fatalf("seed event: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", ""); err == nil {
+	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", nil); err == nil {
 		t.Fatal("expected UpsertEventReceipt empty event to fail")
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", ""); err == nil {
+	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", nil); err == nil {
 		t.Fatal("expected UpsertEventReceipt empty status to fail")
 	}
 	if _, ok, err := pg.GetEventReceipt(ctx, eventID, "a1"); err != nil || ok {
@@ -6607,7 +6608,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("ListPendingSubscribedEvents err=%v len=%d", err, len(subPending))
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), ceoID, "error", "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), ceoID, "error", testRetryableFailure()); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
 	if rec, ok, err := pg.GetEventReceipt(ctx, evt.ID(), ceoID); err != nil || !ok || rec.Status == "" {
@@ -6631,7 +6632,6 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		ParseOK:        true,
 		Latency:        123 * time.Millisecond,
 		RetryCount:     0,
-		Error:          "",
 	}); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}

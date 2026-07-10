@@ -13,6 +13,7 @@ import (
 	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type OperatorEventListFilter struct {
@@ -62,7 +63,7 @@ type OperatorEventDelivery struct {
 	SessionID      string                     `json:"session_id,omitempty"`
 	Status         string                     `json:"status"`
 	ReasonCode     string                     `json:"reason_code,omitempty"`
-	LastError      string                     `json:"last_error,omitempty"`
+	Failure        *runtimefailures.Envelope  `json:"failure,omitempty"`
 	RetryCount     int                        `json:"retry_count"`
 	RetryEligible  bool                       `json:"retry_eligible"`
 	Terminal       bool                       `json:"terminal"`
@@ -73,13 +74,12 @@ type OperatorEventDelivery struct {
 }
 
 type OperatorDeadLetterRecord struct {
-	DeadLetterID string    `json:"dead_letter_id"`
-	FailureType  string    `json:"failure_type"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	RetryCount   int       `json:"retry_count"`
-	ChainDepth   int       `json:"chain_depth"`
-	HandlerNode  string    `json:"handler_node,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	DeadLetterID string                   `json:"dead_letter_id"`
+	Failure      runtimefailures.Envelope `json:"failure"`
+	RetryCount   int                      `json:"retry_count"`
+	ChainDepth   int                      `json:"chain_depth"`
+	HandlerNode  string                   `json:"handler_node,omitempty"`
+	CreatedAt    time.Time                `json:"created_at"`
 }
 
 type OperatorRuntimeLogListOptions struct {
@@ -105,17 +105,18 @@ type OperatorRuntimeLogListResult struct {
 }
 
 type OperatorRuntimeLogEntry struct {
-	LogID     string         `json:"log_id"`
-	TS        time.Time      `json:"ts"`
-	Level     string         `json:"level"`
-	Component string         `json:"component"`
-	Source    string         `json:"source"`
-	RunID     string         `json:"run_id,omitempty"`
-	EntityID  string         `json:"entity_id,omitempty"`
-	SessionID string         `json:"session_id,omitempty"`
-	ErrorCode string         `json:"error_code,omitempty"`
-	Message   string         `json:"message"`
-	Details   map[string]any `json:"details,omitempty"`
+	LogID     string                    `json:"log_id"`
+	TS        time.Time                 `json:"ts"`
+	Level     string                    `json:"level"`
+	Component string                    `json:"component"`
+	Source    string                    `json:"source"`
+	RunID     string                    `json:"run_id,omitempty"`
+	EntityID  string                    `json:"entity_id,omitempty"`
+	SessionID string                    `json:"session_id,omitempty"`
+	ErrorCode string                    `json:"error_code,omitempty"`
+	Failure   *runtimefailures.Envelope `json:"failure,omitempty"`
+	Message   string                    `json:"message"`
+	Details   map[string]any            `json:"details,omitempty"`
 }
 
 type OperatorRuntimeIncidentListOptions struct {
@@ -231,10 +232,10 @@ func (r *OperatorObservabilityReadSurface) requireOperatorObservabilityCapabilit
 		},
 		"event_deliveries": {
 			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "last_error", "active_session_id", "created_at", "started_at", "delivered_at",
+			"status", "retry_count", "reason_code", "failure", "active_session_id", "created_at", "started_at", "delivered_at",
 		},
 		"dead_letters": {
-			"dead_letter_id", "original_event_id", "failure_type", "error_message",
+			"dead_letter_id", "original_event_id", "failure",
 			"retry_count", "chain_depth", "handler_node", "created_at",
 		},
 	}
@@ -297,8 +298,8 @@ func (r *OperatorObservabilityReadSurface) ListOperatorEvents(ctx context.Contex
 		n := add(opts.Filter.ReasonCode)
 		where = append(where, fmt.Sprintf(`(
 			EXISTS (SELECT 1 FROM event_deliveries d WHERE d.event_id = e.event_id AND d.reason_code = $%d)
-			OR EXISTS (SELECT 1 FROM dead_letters dl WHERE dl.original_event_id = e.event_id AND dl.failure_type = $%d)
-		)`, n, n))
+			OR EXISTS (SELECT 1 FROM dead_letters dl WHERE dl.original_event_id = e.event_id AND (dl.failure->>'class' = $%d OR dl.failure->'detail'->>'code' = $%d))
+		)`, n, n, n))
 	}
 	if opts.Filter.HasDeadLetter != nil {
 		exists := "EXISTS"
@@ -457,7 +458,7 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeliveries(ctx conte
 			COALESCE(d.active_session_id::text, ''),
 				COALESCE(d.status, ''),
 				COALESCE(d.reason_code, ''),
-				COALESCE(d.last_error, ''),
+				COALESCE(d.failure, 'null'::jsonb),
 				COALESCE(d.retry_count, 0),
 				d.created_at,
 				d.started_at,
@@ -473,9 +474,14 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeliveries(ctx conte
 	out := []OperatorEventDelivery{}
 	for rows.Next() {
 		var item OperatorEventDelivery
+		var rawFailure []byte
 		var createdAt, startedAt, finishedAt sql.NullTime
-		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.SessionID, &item.Status, &item.ReasonCode, &item.LastError, &item.RetryCount, &createdAt, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&item.DeliveryID, &item.SubscriberType, &item.SubscriberID, &item.SessionID, &item.Status, &item.ReasonCode, &rawFailure, &item.RetryCount, &createdAt, &startedAt, &finishedAt); err != nil {
 			return nil, fmt.Errorf("scan operator event delivery: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, fmt.Errorf("decode operator event delivery failure: %w", err)
 		}
 		item.CreatedAt = nullTimePtr(createdAt)
 		item.StartedAt = nullTimePtr(startedAt)
@@ -504,7 +510,6 @@ func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, d
 	for _, delivery := range deliveries {
 		delivery.Status = strings.TrimSpace(delivery.Status)
 		delivery.ReasonCode = strings.TrimSpace(delivery.ReasonCode)
-		delivery.LastError = strings.TrimSpace(delivery.LastError)
 		delivery.RetryEligible = OperatorDeliveryRetryEligible(delivery.Status)
 		delivery.Terminal = OperatorDeliveryTerminal(delivery.Status)
 		if delivery.Status == "dead_letter" && len(deadLetters) > 0 {
@@ -543,8 +548,7 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
 			dl.dead_letter_id::text,
-			COALESCE(dl.failure_type, ''),
-			COALESCE(dl.error_message, ''),
+			dl.failure,
 			COALESCE(dl.retry_count, 0),
 			COALESCE(dl.chain_depth, 0),
 			COALESCE(dl.handler_node, ''),
@@ -560,9 +564,15 @@ func (r *OperatorObservabilityReadSurface) loadOperatorEventDeadLetters(ctx cont
 	out := []OperatorDeadLetterRecord{}
 	for rows.Next() {
 		var item OperatorDeadLetterRecord
-		if err := rows.Scan(&item.DeadLetterID, &item.FailureType, &item.ErrorMessage, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &item.CreatedAt); err != nil {
+		var rawFailure []byte
+		if err := rows.Scan(&item.DeadLetterID, &rawFailure, &item.RetryCount, &item.ChainDepth, &item.HandlerNode, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan operator event dead letter: %w", err)
 		}
+		failure, err := decodeStoredFailure(rawFailure)
+		if err != nil || failure == nil {
+			return nil, fmt.Errorf("decode operator event dead letter failure: %w", err)
+		}
+		item.Failure = *failure
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -854,6 +864,7 @@ func operatorRuntimeLogEntry(eventID, runID, rowEntityID, producedBy string, cre
 		EntityID:  firstNonEmptyStore(payload.EntityID, rowEntityID),
 		SessionID: strings.TrimSpace(payload.SessionID),
 		ErrorCode: strings.TrimSpace(payload.ErrorCode),
+		Failure:   runtimefailures.CloneEnvelope(payload.Failure),
 		Message:   strings.TrimSpace(payload.Message),
 		Details:   details,
 	}, nil

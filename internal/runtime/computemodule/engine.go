@@ -72,6 +72,8 @@ type Error struct {
 	Code     Code
 	ModuleID string
 	RowID    string
+	Limit    int
+	Actual   int
 	Finding  *ReplayFinding
 	Err      error
 }
@@ -107,14 +109,6 @@ func (e *Error) Unwrap() error {
 		return nil
 	}
 	return e.Err
-}
-
-func IsDeterministicFailure(err error) bool {
-	if err == nil {
-		return false
-	}
-	var typed *Error
-	return errors.As(err, &typed)
 }
 
 func Inspect(wasm []byte) (Inspection, error) {
@@ -232,7 +226,7 @@ func Execute(req Request) (Result, error) {
 	outputPtr := uint32(uint64(packed) >> 32)
 	outputLen := uint32(uint64(packed) & 0xffffffff)
 	if req.OutputBytes > 0 && uint64(outputLen) > uint64(req.OutputBytes) {
-		return Result{}, &Error{Code: CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output %d bytes exceeds cap %d", outputLen, req.OutputBytes)}
+		return Result{}, &Error{Code: CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Limit: req.OutputBytes, Actual: int(outputLen), Err: fmt.Errorf("output %d bytes exceeds cap %d", outputLen, req.OutputBytes)}
 	}
 	output, err := readMemory(memory, store, outputPtr, outputLen)
 	if err != nil {
@@ -382,15 +376,25 @@ func withSite(err error, moduleID, rowID string) error {
 }
 
 func classifyCallError(req Request, fallback Code, err error) error {
-	code := fallback
-	message := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(message, "fuel"):
-		code = CodeFuel
-	case strings.Contains(message, "memory") || strings.Contains(message, "resource limiter"):
-		code = CodeMemory
-	}
+	code := WasmtimeFailureCode(err, fallback)
 	return &Error{Code: code, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
+}
+
+// WasmtimeFailureCode translates the engine's stable trap code once at the
+// adapter boundary. Runtime failure identity never depends on trap prose.
+func WasmtimeFailureCode(err error, fallback Code) Code {
+	var trap *wasmtime.Trap
+	if !errors.As(err, &trap) || trap == nil || trap.Code() == nil {
+		return fallback
+	}
+	switch *trap.Code() {
+	case wasmtime.OutOfFuel:
+		return CodeFuel
+	case wasmtime.MemoryOutOfBounds:
+		return CodeMemory
+	default:
+		return fallback
+	}
 }
 
 func writeMemory(memory *wasmtime.Memory, store *wasmtime.Store, ptr uint32, input []byte) error {

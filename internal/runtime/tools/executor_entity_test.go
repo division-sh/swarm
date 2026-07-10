@@ -19,6 +19,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -950,8 +951,8 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 				"field":     tc.field,
 				"value":     "x",
 			})
-			re, ok := runtimetools.AsRuntimeError(err)
-			if err == nil || !ok || re.Code != "invalid_tool_input" {
+			re, ok := runtimefailures.As(err)
+			if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 				t.Fatalf("expected invalid_tool_input, got %v", err)
 			}
 
@@ -1598,8 +1599,8 @@ func TestEntityTools_QueryEntitiesFilterRejectsUndeclaredFieldBeforeEvalWithNear
 		"filter": `metadata.regoin == "us"`,
 		"limit":  10,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "metadata.regoin") {
@@ -1617,8 +1618,8 @@ func TestEntityTools_QueryEntitiesFilterRejectsEntityScopedSelectors(t *testing.
 		"filter": `entity.metadata.region == "us"`,
 		"limit":  10,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "must not use entity.metadata.region") {
@@ -1636,8 +1637,8 @@ func TestEntityTools_QueryMetricsFilterRejectsUndeclaredFieldBeforeEval(t *testi
 		"metric": "count",
 		"filter": `metadata.regoin == "us"`,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "metadata.regoin") {
@@ -1733,8 +1734,8 @@ signal:
 		},
 	} {
 		_, err := exec.Execute(ctx, tc.tool, tc.input)
-		re, ok := runtimetools.AsRuntimeError(err)
-		if err == nil || !ok || re.Code != "invalid_tool_input" {
+		re, ok := runtimefailures.As(err)
+		if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 			t.Fatalf("%s expected invalid_tool_input, got %v", tc.name, err)
 		}
 		if !strings.Contains(err.Error(), "outside caller flow scope") && !strings.Contains(err.Error(), "invalid enum value signal-search.signal") {
@@ -1996,8 +1997,8 @@ signal:
 		"entity_type": "discovery.campaign",
 		"filter":      `statu == "open"`,
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected query_entities invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "statu") || !strings.Contains(err.Error(), "did you mean status?") {
@@ -2009,8 +2010,8 @@ signal:
 		"metric":      "sum",
 		"field":       "statu",
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected query_metrics invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "statu") {
@@ -2021,8 +2022,8 @@ signal:
 		"entity_type": "discovery.campaign",
 		"filter":      map[string]any{"statu": "open"},
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected search_entities invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "statu") {
@@ -2033,8 +2034,8 @@ signal:
 		"entity_type": "signal-search.signal",
 		"filter":      `signal_strenght >= 70`,
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected foreign query_entities invalid_tool_input, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "outside caller flow scope") && !strings.Contains(err.Error(), "invalid enum value signal-search.signal") {
@@ -2044,8 +2045,8 @@ signal:
 	_, err = exec.Execute(ctx, "query_entities", map[string]any{
 		"filter": `signal_strength >= 70`,
 	})
-	re, ok = runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "invalid_tool_input" {
+	re, ok = runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("expected default actor contract to reject target-only field, got %v", err)
 	}
 }
@@ -2073,8 +2074,8 @@ func TestEntityTools_GetEntityNotFound(t *testing.T) {
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{
 		"entity_id": uuid.NewString(),
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "not_found" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "not_found" {
 		t.Fatalf("expected not found error, got %v", err)
 	}
 }
@@ -2193,8 +2194,8 @@ foreign:
 		"field":     "status",
 		"value":     "closed",
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_write_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_write_forbidden" {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
 }
@@ -2239,8 +2240,8 @@ foreign:
 		"field":     "status",
 		"value":     "closed",
 	})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_write_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_write_forbidden" {
 		t.Fatalf("expected cross_flow_write_forbidden, got %v", err)
 	}
 	if len(bus.logs) != 2 || bus.logs[0].Action != "entity_write_denied" || bus.logs[1].Action != "tool_execution_failed" {
@@ -2339,8 +2340,8 @@ foreign:
 	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_read_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_read_forbidden" {
 		t.Fatalf("expected cross_flow_read_forbidden, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "owned by flow_instance other-flow/inst-1") {
@@ -2588,8 +2589,8 @@ foreign:
 	})
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": scoringID})
-	re, ok := runtimetools.AsRuntimeError(err)
-	if err == nil || !ok || re.Code != "cross_flow_read_forbidden" {
+	re, ok := runtimefailures.As(err)
+	if err == nil || !ok || re.Failure.Detail.Code != "cross_flow_read_forbidden" {
 		t.Fatalf("expected cross_flow_read_forbidden, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "owned by flow_instance other-flow/score-1") {

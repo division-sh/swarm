@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
 
@@ -70,18 +71,18 @@ type agentDeliveryLifecycleListResult struct {
 }
 
 type agentDeliveryLifecycleRow struct {
-	DeliveryID          string  `json:"delivery_id"`
-	EventID             string  `json:"event_id"`
-	EventName           string  `json:"event_name"`
-	RunID               *string `json:"run_id,omitempty"`
-	EntityID            *string `json:"entity_id,omitempty"`
-	Status              string  `json:"status"`
-	RetryCount          *int    `json:"retry_count"`
-	ReasonCode          string  `json:"reason_code,omitempty"`
-	LastError           string  `json:"last_error,omitempty"`
-	DeliveryCreatedAt   string  `json:"delivery_created_at"`
-	DeliveryStartedAt   *string `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt *string `json:"delivery_delivered_at,omitempty"`
+	DeliveryID          string                    `json:"delivery_id"`
+	EventID             string                    `json:"event_id"`
+	EventName           string                    `json:"event_name"`
+	RunID               *string                   `json:"run_id,omitempty"`
+	EntityID            *string                   `json:"entity_id,omitempty"`
+	Status              string                    `json:"status"`
+	RetryCount          *int                      `json:"retry_count"`
+	ReasonCode          string                    `json:"reason_code,omitempty"`
+	Failure             *runtimefailures.Envelope `json:"failure,omitempty"`
+	DeliveryCreatedAt   string                    `json:"delivery_created_at"`
+	DeliveryStartedAt   *string                   `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt *string                   `json:"delivery_delivered_at,omitempty"`
 }
 
 type agentDiagnosisQueue struct {
@@ -146,10 +147,10 @@ type agentSessionRef struct {
 }
 
 type agentTurnRef struct {
-	TurnID      string `json:"turn_id"`
-	CompletedAt string `json:"completed_at"`
-	ParseOK     *bool  `json:"parse_ok"`
-	Error       string `json:"error,omitempty"`
+	TurnID      string                    `json:"turn_id"`
+	CompletedAt string                    `json:"completed_at"`
+	ParseOK     *bool                     `json:"parse_ok"`
+	Failure     *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 var agentValidStatuses = map[string]struct{}{
@@ -675,6 +676,9 @@ func validateAgentDeliveryLifecycleRow(row agentDeliveryLifecycleRow, index int)
 	if *row.RetryCount < 0 {
 		return fmt.Errorf("malformed agent.delivery_lifecycle result: %s.retry_count must be non-negative", prefix)
 	}
+	if err := validateEventDeliveryFailure(prefix, row.Status, row.Failure); err != nil {
+		return fmt.Errorf("malformed agent.delivery_lifecycle result: %w", err)
+	}
 	if err := validateAgentDeliveryLifecycleTimestamp(prefix+".delivery_created_at", row.DeliveryCreatedAt); err != nil {
 		return err
 	}
@@ -899,7 +903,7 @@ func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLi
 			agentOptionalStringDash(delivery.DeliveryDeliveredAt),
 			fmt.Sprintf("%d", *delivery.RetryCount),
 			agentDash(delivery.ReasonCode),
-			agentDash(delivery.LastError),
+			eventObservationFailureSummary(delivery.Failure),
 		})
 	}
 	footers := []string{}
@@ -919,7 +923,7 @@ func writeAgentDeliveryLifecycleListResult(out io.Writer, result agentDeliveryLi
 			{Header: "DELIVERY_DELIVERED_AT"},
 			{Header: "RETRY_COUNT"},
 			{Header: "REASON_CODE"},
-			{Header: "LAST_ERROR", Truncatable: true},
+			{Header: "FAILURE", Truncatable: true},
 		},
 		Rows:         rows,
 		EmptyMessage: "No deliveries match the current filters.",
@@ -937,11 +941,11 @@ func writeAgentDiagnosisResult(out io.Writer, result agentDiagnosisResult) {
 		fmt.Fprintf(out, "current_session_ref: session_id=%s started_at=%s\n", ref.SessionID, ref.StartedAt)
 	}
 	if ref := result.LastTurnRef; ref != nil {
-		fmt.Fprintf(out, "last_turn_ref: turn_id=%s completed_at=%s parse_ok=%t error=%s\n",
+		fmt.Fprintf(out, "last_turn_ref: turn_id=%s completed_at=%s parse_ok=%t failure=%s\n",
 			ref.TurnID,
 			ref.CompletedAt,
 			*ref.ParseOK,
-			agentDash(ref.Error),
+			eventObservationFailureSummary(ref.Failure),
 		)
 	}
 	queue := result.Queue
@@ -1008,11 +1012,11 @@ func writeAgentDetailResult(out io.Writer, result agentDetailResult) {
 		fmt.Fprintf(out, "current_session_ref: session_id=%s started_at=%s\n", ref.SessionID, ref.StartedAt)
 	}
 	if ref := result.LastTurnRef; ref != nil {
-		fmt.Fprintf(out, "last_turn_ref: turn_id=%s completed_at=%s parse_ok=%t error=%s\n",
+		fmt.Fprintf(out, "last_turn_ref: turn_id=%s completed_at=%s parse_ok=%t failure=%s\n",
 			ref.TurnID,
 			ref.CompletedAt,
 			*ref.ParseOK,
-			agentDash(ref.Error),
+			eventObservationFailureSummary(ref.Failure),
 		)
 	}
 }

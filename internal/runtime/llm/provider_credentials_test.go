@@ -2,10 +2,10 @@ package llm
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
@@ -51,9 +51,8 @@ func TestProviderCredentialResolver_EnvOnlyFailsClosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("Resolve error = nil, want missing provider credential")
 	}
-	for _, want := range []string{"swarm secrets set ANTHROPIC_API_KEY", "deprecated", "ignored"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("Resolve error = %q, want %q", err.Error(), want)
-		}
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
+		t.Fatalf("Resolve failure = %#v, want authentication required", failure)
 	}
 }

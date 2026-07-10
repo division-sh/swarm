@@ -1,10 +1,10 @@
 package authority
 
 import (
-	"errors"
 	"strings"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type Provider interface {
@@ -44,15 +44,15 @@ func (noopProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
 }
 
 func (noopProvider) AuthorizeRouting(actor, target models.AgentConfig, status string) error {
-	return errors.New("routing authority provider is not configured")
+	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_routing", map[string]any{"dependency": "routing_authority_provider"})
 }
 
 func (noopProvider) AuthorizeManagement(actor, target models.AgentConfig) error {
-	return errors.New("management authority provider is not configured")
+	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_management", map[string]any{"dependency": "management_authority_provider"})
 }
 
 func (noopProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
-	return errors.New("mailbox authority provider is not configured")
+	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_mailbox", map[string]any{"dependency": "mailbox_authority_provider"})
 }
 
 func (noopProvider) CanDecideHumanTasks(role string) bool { return false }

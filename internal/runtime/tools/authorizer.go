@@ -3,12 +3,12 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type ToolAuthorizer struct {
@@ -51,7 +51,7 @@ func (a *ToolAuthorizer) Authorize(ctx context.Context, actor models.AgentConfig
 	if decision.allowed {
 		return nil
 	}
-	err := fmt.Errorf("%w: tool %s is not allowed for agent %s", ErrToolNotAllowed, toolName, actor.ID)
+	err := failures.New(failures.ClassAuthorizationDenied, "tool_not_allowed", "tool-executor", "authorize_tool", map[string]any{"action": "tool_execute", "tool": strings.TrimSpace(toolName), "actor_id": strings.TrimSpace(actor.ID)})
 	if a.bus != nil {
 		entityID := actor.EffectiveEntityID()
 		payload, marshalErr := json.Marshal(map[string]any{

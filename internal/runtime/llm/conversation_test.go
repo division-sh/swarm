@@ -10,11 +10,37 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type fakeRuntime struct {
 	calls    int
 	seenMsgs []Message
+}
+
+func requireConversationToolFailure(t testing.TB, raw string, class runtimefailures.Class, code string) runtimefailures.Envelope {
+	t.Helper()
+	var entries []map[string]any
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil || len(entries) != 1 {
+		t.Fatalf("decode conversation tool failure: err=%v payload=%s", err, raw)
+	}
+	return requireConversationFailureValue(t, entries[0]["failure"], class, code)
+}
+
+func requireConversationFailureValue(t testing.TB, value any, class runtimefailures.Class, code string) runtimefailures.Envelope {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal conversation failure: %v", err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode conversation failure: %v (value=%#v)", err, value)
+	}
+	if failure.Class != class || failure.Detail.Code != code {
+		t.Fatalf("conversation failure = %s/%s, want %s/%s", failure.Class, failure.Detail.Code, class, code)
+	}
+	return failure
 }
 
 func (f *fakeRuntime) StartSession(_ context.Context, agentID, _ string, _ []ToolDefinition) (*Session, error) {
@@ -259,7 +285,7 @@ func (e *emptyTurnCapabilityToolExec) Execute(ctx context.Context, name string, 
 		return map[string]any{"accepted_without_capabilities": name}, nil
 	}
 	if _, ok := set.Capability(name); !ok {
-		return nil, errors.New("tool not offered for this turn")
+		return nil, runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "tool_not_available_for_turn", "test-tool-executor", "execute", map[string]any{"action": "execute_tool", "tool": name})
 	}
 	return map[string]any{"name": name}, nil
 }
@@ -345,7 +371,7 @@ func TestConversationExecuteToolCalls_PreservesEmptyTurnDenialContext(t *testing
 		ID:   "market-research-agent",
 		Role: "market_research",
 	})
-	raw, executed := c.executeToolCalls(ctx, []ToolCall{{
+	raw, executed, _ := c.executeToolCalls(ctx, []ToolCall{{
 		Name:      "read_scan_campaign",
 		Arguments: map[string]any{},
 	}})
@@ -356,9 +382,7 @@ func TestConversationExecuteToolCalls_PreservesEmptyTurnDenialContext(t *testing
 	if len(executed) != 1 || executed[0].OK {
 		t.Fatalf("expected hallucinated tool call to fail closed, got executed=%#v raw=%s", executed, raw)
 	}
-	if !strings.Contains(raw, "tool not offered for this turn") {
-		t.Fatalf("expected explicit turn-denial error, got %s", raw)
-	}
+	requireConversationToolFailure(t, raw, runtimefailures.ClassAuthorizationDenied, "tool_not_available_for_turn")
 	if strings.Contains(raw, "accepted_without_capabilities") {
 		t.Fatalf("tool call executed without turn capability context: %s", raw)
 	}
@@ -420,7 +444,7 @@ func TestConversation_ExecuteToolCalls_RecoversPanic(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
 	c.SetToolExecutor(panicToolExec{})
 
-	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, _, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -428,9 +452,7 @@ func TestConversation_ExecuteToolCalls_RecoversPanic(t *testing.T) {
 	if len(arr) != 1 || arr[0]["ok"] != false {
 		t.Fatalf("expected panic to be captured as error payload, got %#v", arr)
 	}
-	if !strings.Contains(strings.ToLower(testAsString(arr[0]["error"])), "tool panic") {
-		t.Fatalf("expected tool panic text, got %#v", arr[0]["error"])
-	}
+	requireConversationFailureValue(t, arr[0]["failure"], runtimefailures.ClassInternalFailure, "tool_executor_panic")
 }
 
 func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
@@ -438,7 +460,7 @@ func TestConversation_ExecuteToolCalls_TruncatesLargeResult(t *testing.T) {
 	c := NewConversation("a1", "t1", "sys", nil, SessionScoped, 4, &fakeRuntime{})
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
-	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, _, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -465,7 +487,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadPreservesLargeValidati
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
 	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
 		t.Fatalf("typed read projection used lossy metadata: %s", raw)
 	}
@@ -493,7 +515,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFieldPreservesComplete
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: field})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case_mvp_spec", Arguments: map[string]any{}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case_mvp_spec", Arguments: map[string]any{}}})
 	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
 		t.Fatalf("typed field read projection used lossy metadata: %s", raw)
 	}
@@ -513,7 +535,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarg
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
 	if strings.Contains(raw, `"truncated"`) || strings.Contains(raw, `"preview"`) || strings.Contains(raw, `"follow_up"`) {
 		t.Fatalf("typed read oversize emitted lossy metadata: %s", raw)
 	}
@@ -524,9 +546,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadFailsClosedWhenTooLarg
 	if len(arr) != 1 || arr[0]["ok"] != false {
 		t.Fatalf("expected fail-closed typed read payload, got %#v", arr)
 	}
-	if !strings.Contains(asStringForConversationTest(arr[0]["error"]), toolresultpolicy.TypedReadResultTooLargeCode) {
-		t.Fatalf("error = %#v, want %s", arr[0]["error"], toolresultpolicy.TypedReadResultTooLargeCode)
-	}
+	requireConversationFailureValue(t, arr[0]["failure"], runtimefailures.ClassDataLimitExceeded, toolresultpolicy.TypedReadResultTooLargeCode)
 }
 
 func TestConversation_ExecuteToolCalls_RoleScopedTypedReadNearCapFitsEnvelope(t *testing.T) {
@@ -536,7 +556,7 @@ func TestConversation_ExecuteToolCalls_RoleScopedTypedReadNearCapFitsEnvelope(t 
 	c.SetToolExecutor(roleScopedTypedReadExec{payload: payload})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_validation_case", Arguments: map[string]any{}}})
 	if strings.Contains(raw, "__runtime_guardrail__") {
 		t.Fatalf("near-cap typed read tripped batch guardrail: %s", raw)
 	}
@@ -558,7 +578,7 @@ func TestConversation_ExecuteToolCalls_ReadPrefixedNonRoleScopedToolKeepsLegacyP
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_custom_report", Arguments: map[string]any{}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_custom_report", Arguments: map[string]any{}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -577,7 +597,7 @@ func TestConversation_ExecuteToolCalls_PreservesLargeReadFileResultOnSupportedRe
 		"size_bytes": len(huge),
 	}})
 
-	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/workspace/corpus.json"}}})
+	raw, _, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/workspace/corpus.json"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -607,7 +627,7 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedResultsForHelperRuntime(t 
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -643,7 +663,7 @@ func TestConversation_ExecuteToolCalls_SuppressesRuntimeReadFileFollowUpWithoutR
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "query_entities", Arguments: map[string]any{"entity_type": "company"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -682,7 +702,7 @@ func TestConversation_ExecuteToolCalls_RelaysOversizedReadFileResultsForHelperRu
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file"},
 	})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -732,7 +752,7 @@ func TestConversation_ExecuteToolCalls_PreservesNearLimitReadFileResultWithCompa
 		MCPServers:      map[string]string{"runtime-tools": "connected"},
 		MCPVisibleTools: []string{"mcp__runtime-tools__read_file", "mcp__runtime-tools__emit_category_assessed"},
 	})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{
 		{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}},
 		{Name: "emit_category_assessed", Arguments: map[string]any{"category": "payments"}},
 	})
@@ -771,7 +791,7 @@ func TestConversation_ExecuteToolCalls_PreservesRelayReadFileResultsForHelperRun
 		"size_bytes": len(huge),
 	}})
 
-	raw, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": rt.relayPath}}})
+	raw, _, _ := c.executeToolCalls(context.Background(), []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": rt.relayPath}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -809,7 +829,7 @@ func TestConversation_ExecuteToolCalls_SuppressesReadFileRelayWhenObservedSurfac
 	ctx = withCLIUsableToolsForTurn(ctx, tools, &Response{
 		MCPServers: map[string]string{"runtime-tools": "failed"},
 	})
-	raw, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
+	raw, _, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "read_file", Arguments: map[string]any{"path": "/data/test-signals-25.jsonl"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -838,7 +858,7 @@ func TestConversation_ExecuteToolCalls_FailsClosedWhenHelperRelayWriteFails(t *t
 	c.SetToolExecutor(largeToolExec{payload: map[string]any{"blob": huge}})
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1"})
-	raw, executed := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
+	raw, executed, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "sql_execute", Arguments: map[string]any{"query": "select 1"}}})
 	var arr []map[string]any
 	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
 		t.Fatalf("unmarshal tool payload: %v", err)
@@ -846,9 +866,7 @@ func TestConversation_ExecuteToolCalls_FailsClosedWhenHelperRelayWriteFails(t *t
 	if len(arr) != 1 || arr[0]["ok"] != false {
 		t.Fatalf("expected failed tool payload, got %#v", arr)
 	}
-	if !strings.Contains(testAsString(arr[0]["error"]), "workspace boom") {
-		t.Fatalf("tool relay error = %#v, want workspace boom", arr[0]["error"])
-	}
+	requireConversationFailureValue(t, arr[0]["failure"], runtimefailures.ClassDependencyUnavailable, "tool_result_relay_write_failed")
 	if len(executed) != 1 || executed[0].OK {
 		t.Fatalf("executed = %#v, want failed tool execution record", executed)
 	}
@@ -995,7 +1013,7 @@ func TestExecuteToolCalls_UsesCapabilityKindForTerminalBehavior(t *testing.T) {
 	c.SetToolExecutor(te)
 
 	ctx := models.WithActor(context.Background(), models.AgentConfig{ID: "a1", Role: "analysis"})
-	_, executed := c.executeToolCalls(ctx, []ToolCall{{Name: "emit_scan_requested", Arguments: map[string]any{"x": 1}}})
+	_, executed, _ := c.executeToolCalls(ctx, []ToolCall{{Name: "emit_scan_requested", Arguments: map[string]any{"x": 1}}})
 	if len(executed) != 1 {
 		t.Fatalf("executed length = %d, want 1", len(executed))
 	}

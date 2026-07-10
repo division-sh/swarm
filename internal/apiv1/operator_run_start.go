@@ -162,7 +162,7 @@ func runStartPublishError(eventName string, err error) error {
 		}
 		return NewApplicationError(BundleUnavailableCode, false, details)
 	}
-	if errors.Is(err, runtimebus.ErrPayloadValidation) || strings.Contains(err.Error(), "validate event payload") {
+	if errors.Is(err, runtimebus.ErrPayloadValidation) {
 		return NewApplicationError(PayloadValidationFailedCode, false, map[string]any{
 			"violations": []map[string]any{{
 				"field_path": "$",
@@ -171,7 +171,7 @@ func runStartPublishError(eventName string, err error) error {
 			}},
 		})
 	}
-	if strings.Contains(err.Error(), "invalid event type") {
+	if errors.Is(err, runtimebus.ErrInvalidEventType) {
 		return NewApplicationError(EventNotDeclaredCode, false, map[string]any{"event_name": eventName})
 	}
 	return err

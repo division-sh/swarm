@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 )
 
@@ -118,7 +119,7 @@ func TestEventViewUsesEventGetV1RPC(t *testing.T) {
 		"started_at=2026-05-13T10:00:03Z",
 		"finished_at=2026-05-13T10:00:05Z",
 		"reason_code=retry_exhausted",
-		"last_error=boom",
+		"failure=platform.retry_exhausted/retry_exhausted",
 		"retry_count=2",
 		"retry_eligible=false",
 		"terminal=true",
@@ -832,7 +833,7 @@ func validEventObservationEvent(eventID string) map[string]any {
 				"status":          "dead_letter",
 				"session_id":      "session-1",
 				"reason_code":     "retry_exhausted",
-				"last_error":      "boom",
+				"failure":         testRuntimeFailureClass(runtimefailures.ClassRetryExhausted, "retry_exhausted"),
 				"retry_count":     2,
 				"retry_eligible":  false,
 				"terminal":        true,
@@ -842,12 +843,11 @@ func validEventObservationEvent(eventID string) map[string]any {
 				"dead_letters": []any{
 					map[string]any{
 						"dead_letter_id": "delivery-dead-1",
-						"failure_type":   "retry_exhausted",
+						"failure":        testRuntimeFailureClass(runtimefailures.ClassRetryExhausted, "retry_exhausted"),
 						"retry_count":    2,
 						"chain_depth":    3,
 						"created_at":     "2026-05-13T10:00:05Z",
 						"handler_node":   "agent-1",
-						"error_message":  "boom",
 					},
 				},
 			},
@@ -855,12 +855,11 @@ func validEventObservationEvent(eventID string) map[string]any {
 		"dead_letters": []any{
 			map[string]any{
 				"dead_letter_id": "dead-1",
-				"failure_type":   "handler_error",
+				"failure":        testRuntimeFailure("handler_failed"),
 				"retry_count":    1,
 				"chain_depth":    2,
 				"created_at":     "2026-05-13T10:00:02Z",
 				"handler_node":   "agent-1",
-				"error_message":  "boom",
 			},
 		},
 	}
@@ -887,6 +886,9 @@ func eventReplayTestDelivery(deliveryID, subscriberID, sessionID, status string,
 	}
 	if sourceDeliveryID != "" {
 		delivery["source_delivery_id"] = sourceDeliveryID
+	}
+	if status == "failed" {
+		delivery["failure"] = testRuntimeFailure("handler_failed")
 	}
 	return delivery
 }

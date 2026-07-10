@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
@@ -83,7 +84,7 @@ func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmsele
 	envPresent := r.envPresent(key)
 	value, ok, err := r.storeValue(ctx, key)
 	if err != nil {
-		return ProviderCredential{}, err
+		return ProviderCredential{}, runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "provider_credential_store_unavailable", "llm-provider", "resolve_credential", map[string]any{"credential_key": key}, err)
 	}
 	if ok {
 		source := runtimecredentials.SourceFile
@@ -100,11 +101,16 @@ func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmsele
 			EnvShadowed: envPresent,
 		}, nil
 	}
-	return ProviderCredential{}, MissingProviderCredentialError{
+	missing := MissingProviderCredentialError{
 		Key:        key,
 		Purpose:    profile.Credential.Purpose,
 		EnvPresent: envPresent,
 	}
+	return ProviderCredential{}, runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "llm-provider", "resolve_credential", map[string]any{
+		"auth_kind":      "provider_credential",
+		"credential_key": key,
+		"provider":       strings.TrimSpace(profile.Provider),
+	}, missing)
 }
 
 func (r ProviderCredentialResolver) Inspect(ctx context.Context, profile llmselection.Profile) (ProviderCredential, error) {

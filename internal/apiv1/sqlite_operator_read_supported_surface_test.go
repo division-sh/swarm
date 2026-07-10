@@ -49,12 +49,12 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, error, created_at
+			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, created_at
 		) VALUES (
 			?, ?, ?, ?, 'session', 'global', NULL,
 			?, 'operator.read', 'task-operator-read', '[]', '[]',
 			'[]', '{}', '[]', '[]',
-			'{}', '{}', '[]', 1, 10, 0, '', ?
+			'{}', '{}', '[]', 1, 10, 0, NULL, ?
 		)
 	`, turnID, runID, agentID, sessionID, eventID, base); err != nil {
 		t.Fatalf("seed sqlite turn: %v", err)
@@ -123,12 +123,12 @@ func TestSQLiteConversationListSupportsLegacyTurnsWithoutTurnBlocks(t *testing.T
 			turn_id, run_id, agent_id, session_id, runtime_mode, scope_key, entity_id,
 			trigger_event_id, trigger_event_type, task_id, available_tools, tool_calls,
 			emitted_events, mcp_servers, mcp_tools_listed, mcp_tools_visible,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, error, created_at
+			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, created_at
 		) VALUES (
 			?, ?, ?, ?, 'session', 'global', NULL,
 			?, 'operator.read', 'task-legacy-turns', '[]', '[]',
 			'[]', '{}', '[]', '[]',
-			'{}', '{}', 1, 10, 0, '', ?
+			'{}', '{}', 1, 10, 0, NULL, ?
 		)
 	`, uuid.NewString(), runID, agentID, sessionID, uuid.NewString(), base); err != nil {
 		t.Fatalf("seed sqlite legacy turn: %v", err)

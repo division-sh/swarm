@@ -7,6 +7,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -15,13 +16,12 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 		return nil
 	}
 	if e == nil || e.workflowSource == nil {
-		return NewRuntimeError(
-			"criteria_citation_validation_failed",
+		return failures.New(
+			failures.ClassDependencyUnavailable,
+			"criteria_policy_source_unavailable",
 			"tool-executor",
 			"handle_emit_tool.validate_criteria_citations",
-			false,
-			"emit %s declares criteria citations but no workflow source is available",
-			strings.TrimSpace(eventType),
+			map[string]any{"event": strings.TrimSpace(eventType)},
 		)
 	}
 	flowID, refs := criteriaRefsForActor(e.workflowSource, actor)
@@ -35,18 +35,18 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 		}
 		setName := strings.TrimSpace(citation.Criteria)
 		if setName == "" {
-			return criteriaCitationRuntimeError(eventType, fieldName, "citation criteria set is not declared")
+			return criteriaCitationFailure(eventType, fieldName, "criteria_set_not_declared", nil)
 		}
 		if _, ok := declared[setName]; !ok {
-			return criteriaCitationRuntimeError(eventType, fieldName, "agent %s does not declare criteria set %q", actorLabel(actor), setName)
+			return criteriaCitationFailure(eventType, fieldName, "criteria_set_not_allowed", map[string]any{"actor": actorLabel(actor), "criteria_set": setName})
 		}
 		set, ok := policy.Criteria[setName]
 		if !ok {
-			return criteriaCitationRuntimeError(eventType, fieldName, "criteria set %q does not resolve for flow %s", setName, flowID)
+			return criteriaCitationFailure(eventType, fieldName, "criteria_set_unresolved", map[string]any{"criteria_set": setName, "flow": flowID})
 		}
 		ids, err := criteriaCitationIDs(value)
 		if err != nil {
-			return criteriaCitationRuntimeError(eventType, fieldName, "%v", err)
+			return criteriaCitationFailure(eventType, fieldName, "criteria_citation_shape_invalid", nil)
 		}
 		rules := criteriaRulesByID(set)
 		allowed := criteriaStringSet(citation.AllowedClasses)
@@ -54,11 +54,11 @@ func (e *Executor) validateEmitCriteriaCitations(actor models.AgentConfig, event
 		for _, id := range ids {
 			rule, ok := rules[id]
 			if !ok {
-				return criteriaCitationRuntimeError(eventType, fieldName, "unknown criteria id %q for set %q; valid ids: %s", id, setName, strings.Join(validIDs, ", "))
+				return criteriaCitationFailure(eventType, fieldName, "criteria_id_unknown", map[string]any{"criteria_set": setName, "criteria_id": id, "valid_ids": validIDs})
 			}
 			className := strings.TrimSpace(rule.Class)
 			if _, ok := allowed[className]; !ok {
-				return criteriaCitationRuntimeError(eventType, fieldName, "criteria id %q has class %q, not one of allowed classes: %s", id, className, strings.Join(sortedStringSet(allowed), ", "))
+				return criteriaCitationFailure(eventType, fieldName, "criteria_class_not_allowed", map[string]any{"criteria_id": id, "criteria_class": className, "allowed_classes": sortedStringSet(allowed)})
 			}
 		}
 	}
@@ -170,14 +170,18 @@ func criteriaRulesByID(set runtimecontracts.PolicyCriteriaSet) map[string]runtim
 	return out
 }
 
-func criteriaCitationRuntimeError(eventType, fieldName, format string, args ...any) error {
-	return NewRuntimeError(
+func criteriaCitationFailure(eventType, fieldName, reason string, attributes map[string]any) error {
+	if attributes == nil {
+		attributes = map[string]any{}
+	}
+	attributes["event"] = strings.TrimSpace(eventType)
+	attributes["field"] = strings.TrimSpace(fieldName)
+	attributes["reason"] = strings.TrimSpace(reason)
+	return failures.NewDetail(
 		"criteria_citation_validation_failed",
 		"tool-executor",
 		"handle_emit_tool.validate_criteria_citations",
-		false,
-		"emit %s field %s: "+format,
-		append([]any{strings.TrimSpace(eventType), strings.TrimSpace(fieldName)}, args...)...,
+		attributes,
 	)
 }
 

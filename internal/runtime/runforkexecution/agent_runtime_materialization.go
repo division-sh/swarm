@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -197,7 +198,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		}
 	}()
 	for _, rec := range req.AgentRuntime.Records {
-		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !strings.Contains(err.Error(), "agent already exists") {
+		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !errors.Is(err, runtimemanager.ErrAgentAlreadyExists) {
 			return nil, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
 		bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -415,7 +416,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) LoadOperatorConversationTur
 			DurationMS:  selected.LatencyMS,
 			Outcome:     selected.Outcome,
 			ParseOK:     selected.ParseOK,
-			Error:       selected.Error,
+			Failure:     runtimefailures.CloneEnvelope(selected.Failure),
 			RetryCount:  selected.RetryCount,
 			DispatchMetadata: OperatorConversationDispatchMetadata{
 				TriggerEventID:   selected.TriggerEventID,
@@ -582,7 +583,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			COALESCE(latest_turn.task_id, ''),
 			COALESCE(latest_turn.entity_id, ''),
 			COALESCE(latest_turn.parse_ok, 0),
-			COALESCE(latest_turn.error, ''),
+			COALESCE(latest_turn.failure, 'null'),
 			latest_turn.created_at,
 			%s AS turn_blocks
 		FROM agents a
@@ -625,7 +626,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			latestTaskID       string
 			latestEntityID     string
 			latestParseOK      bool
-			latestError        string
+			latestFailureRaw   []byte
 			latestCompletedRaw any
 			latestTurnRaw      []byte
 		)
@@ -644,7 +645,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			&latestTaskID,
 			&latestEntityID,
 			&latestParseOK,
-			&latestError,
+			&latestFailureRaw,
 			&latestCompletedRaw,
 			&latestTurnRaw,
 		); err != nil {
@@ -665,11 +666,15 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadAgentOperatorProjection
 			return nil, fmt.Errorf("scan sqlite latest turn created_at: %w", err)
 		}
 		if latestCompletedOK && strings.TrimSpace(latestTurnID) != "" {
+			latestFailure, err := decodeStoredFailure(latestFailureRaw)
+			if err != nil {
+				return nil, fmt.Errorf("decode sqlite latest agent turn failure: %w", err)
+			}
 			projection.LastTurnRef = &OperatorTurnRef{
 				TurnID:      strings.TrimSpace(latestTurnID),
 				CompletedAt: latestCompleted,
 				ParseOK:     latestParseOK,
-				Error:       strings.TrimSpace(latestError),
+				Failure:     latestFailure,
 			}
 		}
 		if err := enrichOperatorAgentProjectionFromLatestTurn(&projection, runtimeStateRaw, latestTurnID, latestTaskID, latestParseOK, latestTurnRaw); err != nil {
@@ -746,7 +751,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) loadConversationTurns(ctx c
 			parse_ok,
 			COALESCE(latency_ms, 0),
 			COALESCE(retry_count, 0),
-			COALESCE(error, ''),
+			COALESCE(failure, 'null'),
 			created_at
 		FROM agent_turns
 		WHERE agent_id = ?
@@ -902,7 +907,7 @@ func scanSQLiteOperatorConversationTurn(scanner operatorRowScanner) (OperatorCon
 		emittedEventsRaw, mcpServersRaw       []byte
 		mcpToolsListedRaw, mcpToolsVisibleRaw []byte
 		requestPayloadRaw, responsePayloadRaw []byte
-		turnBlocksRaw                         []byte
+		turnBlocksRaw, failureRaw             []byte
 		createdAtRaw                          any
 	)
 	if err := scanner.Scan(
@@ -927,11 +932,16 @@ func scanSQLiteOperatorConversationTurn(scanner operatorRowScanner) (OperatorCon
 		&item.ParseOK,
 		&item.LatencyMS,
 		&item.RetryCount,
-		&item.Error,
+		&failureRaw,
 		&createdAtRaw,
 	); err != nil {
 		return OperatorConversationTurn{}, err
 	}
+	decodedFailure, err := decodeStoredFailure(failureRaw)
+	if err != nil {
+		return OperatorConversationTurn{}, fmt.Errorf("decode sqlite turn failure: %w", err)
+	}
+	item.Failure = decodedFailure
 	if at, ok, err := sqliteTimeValue(createdAtRaw); err != nil {
 		return OperatorConversationTurn{}, fmt.Errorf("scan sqlite conversation turn created_at: %w", err)
 	} else if ok {
@@ -1109,8 +1119,8 @@ func (r *sqliteOperatorAgentConversationReadSurface) requireAgentDeliveryDiagnos
 	required := map[string][]string{
 		"agents":           {"agent_id", "status"},
 		"events":           {"event_id", "run_id", "event_name", "entity_id", "created_at"},
-		"event_deliveries": {"delivery_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "last_error", "delivered_at", "created_at"},
-		"dead_letters":     {"dead_letter_id", "original_event_id", "failure_type", "error_message", "retry_count", "chain_depth", "handler_node", "created_at"},
+		"event_deliveries": {"delivery_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count", "reason_code", "failure", "delivered_at", "created_at"},
+		"dead_letters":     {"dead_letter_id", "original_event_id", "failure", "retry_count", "chain_depth", "handler_node", "created_at"},
 	}
 	for table, columns := range required {
 		if !catalog.hasColumns(table, columns...) {
@@ -1168,7 +1178,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeliveryFailures(c
 			COALESCE(e.run_id, ''),
 			COALESCE(e.entity_id, ''),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'),
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.delivered_at, d.created_at) AS occurred_at
 		FROM event_deliveries d
@@ -1189,6 +1199,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeliveryFailures(c
 	for rows.Next() {
 		var (
 			item          OperatorAgentDeliveryFailure
+			rawFailure    any
 			occurredAtRaw any
 		)
 		if err := rows.Scan(
@@ -1198,11 +1209,15 @@ func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeliveryFailures(c
 			&item.RunID,
 			&item.EntityID,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.RetryCount,
 			&occurredAtRaw,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan sqlite agent delivery failure: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode sqlite agent delivery failure: %w", err)
 		}
 		if at, ok, err := sqliteTimeValue(occurredAtRaw); err != nil {
 			return nil, "", fmt.Errorf("scan sqlite agent delivery failure occurred_at: %w", err)
@@ -1262,14 +1277,13 @@ func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeadLetterDeliveri
 			COALESCE(e.run_id, ''),
 			COALESCE(e.entity_id, ''),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'),
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.delivered_at, d.created_at) AS occurred_at,
 			COALESCE((
 				SELECT json_group_array(json_object(
 					'dead_letter_id', dead_letter_id,
-					'failure_type', COALESCE(failure_type, ''),
-					'error_message', COALESCE(error_message, ''),
+					'failure', json(failure),
 					'retry_count', COALESCE(retry_count, 0),
 					'chain_depth', COALESCE(chain_depth, 0),
 					'handler_node', COALESCE(handler_node, ''),
@@ -1300,6 +1314,7 @@ func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeadLetterDeliveri
 	for rows.Next() {
 		var (
 			item          OperatorAgentDeadLetterDelivery
+			rawFailure    any
 			occurredAtRaw any
 			recordsRaw    []byte
 		)
@@ -1310,12 +1325,16 @@ func (r *sqliteOperatorAgentConversationReadSurface) listAgentDeadLetterDeliveri
 			&item.RunID,
 			&item.EntityID,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.RetryCount,
 			&occurredAtRaw,
 			&recordsRaw,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan sqlite agent dead-letter delivery: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode sqlite agent dead-letter delivery failure: %w", err)
 		}
 		if at, ok, err := sqliteTimeValue(occurredAtRaw); err != nil {
 			return nil, "", fmt.Errorf("scan sqlite agent dead-letter occurred_at: %w", err)

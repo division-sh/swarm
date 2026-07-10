@@ -57,15 +57,19 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 		t.Fatalf("seed event: %v", err)
 	}
 
-	seedDelivery := func(subscriberID, status string, retryCount int, errText string, createdAt time.Time) {
+	seedDelivery := func(subscriberID, status string, retryCount int, failureCode string, createdAt time.Time) {
 		t.Helper()
+		failureJSON := ""
+		if failureCode != "" {
+			failureJSON = mustMarshalFailure(t, testFailure(failureCode))
+		}
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO event_deliveries (
-				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, created_at
+				run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
 			) VALUES (
-				$1::uuid, $2::uuid, 'agent', $3, $4, $5, NULLIF($6, ''), $7
+				$1::uuid, $2::uuid, 'agent', $3, $4, $5, NULLIF($6, '')::jsonb, $7
 			)
-		`, runID, eventID, subscriberID, status, retryCount, errText, createdAt); err != nil {
+		`, runID, eventID, subscriberID, status, retryCount, failureJSON, createdAt); err != nil {
 			t.Fatalf("seed delivery %s: %v", subscriberID, err)
 		}
 	}
@@ -79,11 +83,11 @@ func TestSQLObservabilityReader_ListEvents_UsesCanonicalDeliveryLifecycle(t *tes
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_receipts (
-			event_id, subscriber_type, subscriber_id, outcome, side_effects, processed_at
+			event_id, subscriber_type, subscriber_id, outcome, side_effects, failure, processed_at
 		) VALUES
-			($1::uuid, 'agent', 'agent-pending', 'dead_letter', '{"retry_count":9,"error":"receipt-should-not-win"}'::jsonb, now()),
-			($1::uuid, 'agent', 'agent-failed', 'success', '{"retry_count":0,"error":"receipt-success"}'::jsonb, now())
-	`, eventID); err != nil {
+			($1::uuid, 'agent', 'agent-pending', 'dead_letter', '{"retry_count":9}'::jsonb, $2::jsonb, now()),
+			($1::uuid, 'agent', 'agent-failed', 'success', '{"retry_count":0}'::jsonb, NULL, now())
+	`, eventID, mustMarshalFailure(t, testFailure("receipt_should_not_win"))); err != nil {
 		t.Fatalf("seed conflicting receipts: %v", err)
 	}
 
@@ -196,11 +200,11 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
-			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, last_error, created_at
+			run_id, event_id, subscriber_type, subscriber_id, status, retry_count, failure, created_at
 		) VALUES (
-			$1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', 1, 'delivery-wins', now()
+			$1::uuid, $2::uuid, 'agent', 'agent-a', 'pending', 1, $3::jsonb, now()
 		)
-	`, runID, eventID); err != nil {
+	`, runID, eventID, mustMarshalFailure(t, testFailure("delivery_wins"))); err != nil {
 		t.Fatalf("seed delivery: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -226,7 +230,7 @@ func TestSQLObservabilityReader_GetEvent_UsesCanonicalDeliveryRows(t *testing.T)
 	if len(got.Deliveries) != 1 {
 		t.Fatalf("deliveries len = %d, want 1", len(got.Deliveries))
 	}
-	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Error != "delivery-wins" {
+	if item := got.Deliveries[0]; strings.TrimSpace(item.DeliveryID) == "" || item.SubscriberType != "agent" || item.SubscriberID != "agent-a" || item.Status != "pending" || item.RetryCount != 1 || item.Failure == nil || item.Failure.Detail.Code != "delivery_wins" {
 		t.Fatalf("delivery = %#v", item)
 	}
 }

@@ -104,7 +104,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_MarksCompletedWhenTerminalAnd
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	fixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
-	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `
@@ -165,7 +165,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	`, fixture.RunID, fixture.EventID, sessionID); err != nil {
 		t.Fatalf("seed active delivery: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
@@ -173,7 +173,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 	}
 	assertRunCompletionStatus(t, db, fixture.RunID, "running", false)
 
-	if err := pg.UpsertEventReceipt(ctx, fixture.EventID, "agent-1", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, fixture.EventID, "agent-1", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
@@ -196,7 +196,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedUntilNodeDeliveryS
 	`, fixture.RunID, fixture.EventID); err != nil {
 		t.Fatalf("seed active node delivery: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {
@@ -226,7 +226,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileTimerActiveTh
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
-	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	timerID := uuid.NewString()
@@ -260,7 +260,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileSessionLeaseA
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	fixture := seedNormalRunCompletionFixture(t, db, "done", "", "")
-	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	sessionID := uuid.NewString()
@@ -314,7 +314,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhenEntityNotTermi
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
 	fixture := seedNormalRunCompletionFixture(t, db, "working", "", "")
-	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if err := pg.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, normalRunCompletionRootFlowTerminals()); err != nil {

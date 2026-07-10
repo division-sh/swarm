@@ -15,6 +15,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
@@ -1550,7 +1551,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
 									CurrentRef:        "current_ref",
 									FileManifest:      "file_manifest",
 									Status:            "status",
-									FailureReason:     "failure_reason",
+									Failure:           "failure",
 									LastRequestID:     "last_request_id",
 									LastSourceEventID: "last_source_event_id",
 								},
@@ -1584,11 +1585,11 @@ func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
 					"namespace":       {Type: "string"},
 					"request_id":      {Type: "string"},
 					"source_event_id": {Type: "string"},
-					"failure_reason":  {Type: "string"},
+					"failure":         {Type: runtimefailures.EnvelopeSchemaVersion + " envelope"},
 					"provenance":      {Type: "object"},
 					"request_copy":    {Type: "string"},
 				}},
-				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure_reason", "provenance", "request_copy"},
+				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"},
 			},
 		},
 	})
@@ -1627,7 +1628,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *tes
 									CurrentRef:        "current_ref",
 									FileManifest:      "file_manifest",
 									Status:            "status",
-									FailureReason:     "failure_reason",
+									Failure:           "failure",
 									LastRequestID:     "last_request_id",
 									LastSourceEventID: "last_source_event_id",
 								},
@@ -1667,11 +1668,11 @@ func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *tes
 					"namespace":       {Type: "string"},
 					"request_id":      {Type: "string"},
 					"source_event_id": {Type: "string"},
-					"failure_reason":  {Type: "object"},
+					"failure":         {Type: "string"},
 					"provenance":      {Type: "string"},
 					"request_copy":    {Type: "string"},
 				}},
-				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure_reason", "provenance", "request_copy"},
+				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"},
 			},
 		},
 	})
@@ -1681,7 +1682,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *tes
 	for _, want := range []string{
 		"success_event artifact_repo.commit_completed runtime-owned field current_ref must be string-compatible, got object",
 		"success_event artifact_repo.commit_completed runtime-owned field file_manifest must be object-compatible, got string",
-		"failure_event artifact_repo.commit_failed runtime-owned field failure_reason must be string-compatible, got object",
+		"failure_event artifact_repo.commit_failed runtime-owned field failure must be platform.failure/v1 envelope",
 		"failure_event artifact_repo.commit_failed runtime-owned field provenance must be object-compatible, got string",
 	} {
 		if !reportContains(report.Errors(), "handler_field_compliance", want) {
@@ -1714,7 +1715,7 @@ func TestRun_ReportsArtifactRepoCommitYAMLFileMissingSchema(t *testing.T) {
 									CurrentRef:        "current_ref",
 									FileManifest:      "file_manifest",
 									Status:            "status",
-									FailureReason:     "failure_reason",
+									Failure:           "failure",
 									LastRequestID:     "last_request_id",
 									LastSourceEventID: "last_source_event_id",
 								},
@@ -6579,7 +6580,7 @@ func TestRun_AllowsTimerStartEventProducedByArtifactRepoCommitResult(t *testing.
 					CurrentRef:        "current_ref",
 					FileManifest:      "file_manifest",
 					Status:            "status",
-					FailureReason:     "failure_reason",
+					Failure:           "failure",
 					LastRequestID:     "last_request_id",
 					LastSourceEventID: "last_source_event_id",
 				},
@@ -7363,8 +7364,8 @@ func artifactRepoTimerResultEventEntry(success bool) runtimecontracts.EventCatal
 		properties["file_manifest"] = runtimecontracts.EventFieldSpec{Type: "object"}
 		required = append(required, "repo_url", "current_ref", "file_manifest")
 	} else {
-		properties["failure_reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
-		required = append(required, "failure_reason")
+		properties["failure"] = runtimecontracts.EventFieldSpec{Type: "string"}
+		required = append(required, "failure")
 	}
 	return runtimecontracts.EventCatalogEntry{
 		Payload:  runtimecontracts.EventPayloadSpec{Properties: properties},

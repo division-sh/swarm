@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
@@ -43,7 +45,7 @@ func (s startupRecoveryManagerStore) LoadAgents(context.Context) ([]runtimemanag
 
 func (startupRecoveryManagerStore) MarkAgentTerminated(context.Context, string) error { return nil }
 func (startupRecoveryManagerStore) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (startupRecoveryManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
+func (startupRecoveryManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 func (startupRecoveryManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
@@ -78,7 +80,7 @@ func (*startupRecoveryFlakyManagerStore) MarkAgentTerminated(context.Context, st
 func (*startupRecoveryFlakyManagerStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }
-func (*startupRecoveryFlakyManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
+func (*startupRecoveryFlakyManagerStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 func (*startupRecoveryFlakyManagerStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {
@@ -108,7 +110,7 @@ func (*startupManagerReplayRuntimeStore) MarkAgentTerminated(context.Context, st
 func (*startupManagerReplayRuntimeStore) EnsureEntitySchema(context.Context, string) error {
 	return nil
 }
-func (s *startupManagerReplayRuntimeStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+func (s *startupManagerReplayRuntimeStore) UpsertEventReceipt(_ context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
 	if s.receipts == nil {
 		s.receipts = map[string]runtimemanager.EventReceipt{}
 	}
@@ -116,7 +118,7 @@ func (s *startupManagerReplayRuntimeStore) UpsertEventReceipt(_ context.Context,
 		EventID: eventID,
 		AgentID: agentID,
 		Status:  status,
-		Error:   errText,
+		Failure: failure,
 	}
 	return nil
 }
@@ -227,7 +229,7 @@ func testRecoveryDiagnosticsConfig(recoveryOnStartup bool) *config.Config {
 	}
 }
 
-func latestStartupRecoveryDecisionLog(t *testing.T, db *sql.DB) (level, message, errorText string, detail map[string]any) {
+func latestStartupRecoveryDecisionLog(t *testing.T, db *sql.DB) (level, message string, failure *runtimefailures.Envelope, detail map[string]any) {
 	t.Helper()
 	var payloadRaw []byte
 	if err := db.QueryRowContext(context.Background(), `
@@ -245,15 +247,37 @@ func latestStartupRecoveryDecisionLog(t *testing.T, db *sql.DB) (level, message,
 	if err != nil {
 		t.Fatalf("DecodeCanonicalRuntimeLogPayload: %v", err)
 	}
-	return payload.LogLevel, payload.Message, payload.Error, payload.Detail
+	return payload.LogLevel, payload.Message, payload.Failure, payload.Detail
 }
 
 type runtimeAftermathLog struct {
 	level     string
 	action    string
-	errorText string
+	failure   *runtimefailures.Envelope
 	eventType string
 	detail    map[string]any
+}
+
+func requireFailureCode(t testing.TB, failure *runtimefailures.Envelope, code string) {
+	t.Helper()
+	if failure == nil || failure.Detail.Code != code {
+		t.Fatalf("failure = %#v, want detail code %q", failure, code)
+	}
+}
+
+func requireNestedFailureCode(t testing.TB, detail map[string]any, key, code string) {
+	t.Helper()
+	raw, err := json.Marshal(detail[key])
+	if err != nil {
+		t.Fatalf("marshal %s: %v", key, err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode %s: %v (value=%#v)", key, err, detail[key])
+	}
+	if failure.Detail.Code != code {
+		t.Fatalf("%s failure = %#v, want detail code %q", key, failure, code)
+	}
 }
 
 func listRuntimeLogsByAction(t *testing.T, db *sql.DB, action string) []runtimeAftermathLog {
@@ -283,7 +307,7 @@ func listRuntimeLogsByAction(t *testing.T, db *sql.DB, action string) []runtimeA
 		out = append(out, runtimeAftermathLog{
 			level:     payload.LogLevel,
 			action:    payload.Action,
-			errorText: payload.Error,
+			failure:   payload.Failure,
 			eventType: payload.EventType,
 			detail:    payload.Detail,
 		})
@@ -387,13 +411,11 @@ func TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules(t *t
 		t.Fatalf("Start error = %v, want explicit startup denial", err)
 	}
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "warn" {
 		t.Fatalf("log level = %q, want warn", level)
 	}
-	if errorText != err.Error() {
-		t.Fatalf("log error = %q, want %q", errorText, err.Error())
-	}
+	requireFailureCode(t, failure, "startup_recovery_disabled_with_work")
 	if got := detailString(detail["decision_outcome"]); got != "denied" {
 		t.Fatalf("decision_outcome = %q, want denied", got)
 	}
@@ -450,15 +472,15 @@ func TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork(t *testin
 		}
 	}()
 
-	level, message, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, message, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "warn" {
 		t.Fatalf("log level = %q, want warn", level)
 	}
 	if message != "Runtime startup allowed with manager recovery skipped" {
 		t.Fatalf("log message = %q, want manager recovery skipped", message)
 	}
-	if errorText != "" {
-		t.Fatalf("log error = %q, want empty", errorText)
+	if failure != nil {
+		t.Fatalf("log failure = %#v, want nil", failure)
 	}
 	if got := detailString(detail["decision_outcome"]); got != "allowed" {
 		t.Fatalf("decision_outcome = %q, want allowed", got)
@@ -527,12 +549,12 @@ func TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary(t *testing.T) {
 		}
 	}()
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "info" {
 		t.Fatalf("log level = %q, want info", level)
 	}
-	if errorText != "" {
-		t.Fatalf("log error = %q, want empty", errorText)
+	if failure != nil {
+		t.Fatalf("log failure = %#v, want nil", failure)
 	}
 	if got := detailString(detail["decision_outcome"]); got != "allowed" {
 		t.Fatalf("decision_outcome = %q, want allowed", got)
@@ -616,13 +638,11 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 		}
 	}()
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "error" {
 		t.Fatalf("log level = %q, want error", level)
 	}
-	if !strings.Contains(errorText, "claim failed") {
-		t.Fatalf("log error = %q, want claim failed", errorText)
-	}
+	requireFailureCode(t, failure, "schedule_restore_failed")
 	if got := detailString(detail["decision_outcome"]); got != "degraded" {
 		t.Fatalf("decision_outcome = %q, want degraded", got)
 	}
@@ -686,9 +706,7 @@ func TestRuntimeStart_RecoveryEnabledEmitsTimerRecoveryAftermathAndSummary(t *te
 	if got := detailString(dropped.detail["decision_reason_code"]); got != string(startupTimerRecoveryReasonRestoreFailed) {
 		t.Fatalf("dropped decision_reason_code = %q, want %q", got, startupTimerRecoveryReasonRestoreFailed)
 	}
-	if !strings.Contains(dropped.errorText, "claim failed") {
-		t.Fatalf("dropped error = %q, want claim failed", dropped.errorText)
-	}
+	requireFailureCode(t, dropped.failure, "schedule_restore_failed")
 }
 
 func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *testing.T) {
@@ -749,13 +767,11 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 		}
 	}()
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "error" {
 		t.Fatalf("log level = %q, want error", level)
 	}
-	if !strings.Contains(errorText, "boom") {
-		t.Fatalf("log error = %q, want boom", errorText)
-	}
+	requireFailureCode(t, failure, "unclassified_runtime_error")
 	if got := detailString(detail["decision_outcome"]); got != "degraded" {
 		t.Fatalf("decision_outcome = %q, want degraded", got)
 	}
@@ -765,11 +781,11 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	if got := detailInt(detail["manager_replayed_count"]); got != 1 {
 		t.Fatalf("manager_replayed_count = %d, want 1", got)
 	}
-	if got := detailInt(detail["manager_skipped_count"]); got != 2 {
-		t.Fatalf("manager_skipped_count = %d, want 2", got)
+	if got := detailInt(detail["manager_skipped_count"]); got != 1 {
+		t.Fatalf("manager_skipped_count = %d, want 1", got)
 	}
-	if got := detailInt(detail["manager_dropped_count"]); got != 1 {
-		t.Fatalf("manager_dropped_count = %d, want 1", got)
+	if got := detailInt(detail["manager_dropped_count"]); got != 2 {
+		t.Fatalf("manager_dropped_count = %d, want 2", got)
 	}
 
 	logs := listRuntimeLogsByAction(t, db, "startup_recovery_manager_replay_aftermath")
@@ -794,17 +810,19 @@ func TestRuntimeStart_RecoveryEnabledEmitsManagerReplayAftermathAndSummary(t *te
 	if got := detailString(skippedReceipt.detail["decision_reason_code"]); got != "event_receipt_already_processed" {
 		t.Fatalf("receipt skip decision_reason_code = %q, want event_receipt_already_processed", got)
 	}
-	skippedLeased := findByEventType("support.replay.leased")
-	if got := detailString(skippedLeased.detail["decision_reason_code"]); got != "session_currently_leased" {
-		t.Fatalf("leased skip decision_reason_code = %q, want session_currently_leased", got)
+	droppedLeased := findByEventType("support.replay.leased")
+	if got := detailString(droppedLeased.detail["decision_outcome"]); got != "dropped" {
+		t.Fatalf("leased decision_outcome = %q, want dropped without prose classification", got)
 	}
+	if got := detailString(droppedLeased.detail["decision_reason_code"]); got != "event_processing_failed" {
+		t.Fatalf("leased decision_reason_code = %q, want event_processing_failed", got)
+	}
+	requireFailureCode(t, droppedLeased.failure, "unclassified_runtime_error")
 	dropped := findByEventType("support.replay.drop")
 	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
 		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
 	}
-	if !strings.Contains(dropped.errorText, "boom") {
-		t.Fatalf("dropped error = %q, want boom", dropped.errorText)
-	}
+	requireFailureCode(t, dropped.failure, "unclassified_runtime_error")
 }
 
 func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) {
@@ -843,13 +861,11 @@ func TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary(t *testing.T) 
 		}
 	}()
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "error" {
 		t.Fatalf("log level = %q, want error", level)
 	}
-	if !strings.Contains(errorText, "claim replay event evt-1: claim failed") {
-		t.Fatalf("log error = %q, want degraded recovery error", errorText)
-	}
+	requireFailureCode(t, failure, "startup_manager_recovery_failed")
 	if got := detailString(detail["decision_outcome"]); got != "degraded" {
 		t.Fatalf("decision_outcome = %q, want degraded", got)
 	}
@@ -895,13 +911,11 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 		}
 	}()
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "error" {
 		t.Fatalf("log level = %q, want error", level)
 	}
-	if !strings.Contains(errorText, "load agents: load agents failed") {
-		t.Fatalf("log error = %q, want manager recovery failure detail", errorText)
-	}
+	requireFailureCode(t, failure, "startup_manager_recovery_failed")
 	if got := detailString(detail["decision_outcome"]); got != "degraded" {
 		t.Fatalf("decision_outcome = %q, want degraded", got)
 	}
@@ -911,9 +925,7 @@ func TestRuntimeStart_RecoveryInspectionFailureDoesNotBlockRecoveryEnabledStartu
 	if got := detailBool(detail["recovery_inspection_complete"]); got {
 		t.Fatalf("recovery_inspection_complete = %#v, want false", detail["recovery_inspection_complete"])
 	}
-	if got := detailString(detail["recovery_inspection_error"]); !strings.Contains(got, "inspect recoverable manager state: load persisted agents: load agents failed") {
-		t.Fatalf("recovery_inspection_error = %q, want startup inspection failure detail", got)
-	}
+	requireNestedFailureCode(t, detail, "recovery_inspection_failure", "startup_recovery_inspection_failed")
 	if !detailBool(detail["manager_recovery_attempted"]) {
 		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
 	}
@@ -976,16 +988,11 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 		}
 	}()
 
-	level, _, errorText, detail := latestStartupRecoveryDecisionLog(t, db)
+	level, _, failure, detail := latestStartupRecoveryDecisionLog(t, db)
 	if level != "error" {
 		t.Fatalf("log level = %q, want error", level)
 	}
-	if !strings.Contains(errorText, "inspect recoverable manager state: load persisted agents: load agents failed") {
-		t.Fatalf("log error = %q, want preserved inspection failure detail", errorText)
-	}
-	if strings.Contains(errorText, "claim failed") {
-		t.Fatalf("log error = %q, want timer restore failure kept out of decision error", errorText)
-	}
+	requireFailureCode(t, failure, "startup_recovery_inspection_failed")
 	if got := detailString(detail["decision_outcome"]); got != "degraded" {
 		t.Fatalf("decision_outcome = %q, want degraded", got)
 	}
@@ -995,9 +1002,7 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 	if got := detailBool(detail["recovery_inspection_complete"]); got {
 		t.Fatalf("recovery_inspection_complete = %#v, want false", detail["recovery_inspection_complete"])
 	}
-	if got := detailString(detail["recovery_inspection_error"]); !strings.Contains(got, "inspect recoverable manager state: load persisted agents: load agents failed") {
-		t.Fatalf("recovery_inspection_error = %q, want preserved inspection failure detail", got)
-	}
+	requireNestedFailureCode(t, detail, "recovery_inspection_failure", "startup_recovery_inspection_failed")
 	if !detailBool(detail["manager_recovery_attempted"]) {
 		t.Fatalf("manager_recovery_attempted = %#v, want true", detail["manager_recovery_attempted"])
 	}
@@ -1034,7 +1039,5 @@ func TestRuntimeStart_InspectionFailurePreservesDecisionErrorAcrossTimerSkipAndD
 	if got := detailString(dropped.detail["decision_outcome"]); got != "dropped" {
 		t.Fatalf("dropped decision_outcome = %q, want dropped", got)
 	}
-	if !strings.Contains(dropped.errorText, "claim failed") {
-		t.Fatalf("dropped error = %q, want claim failed", dropped.errorText)
-	}
+	requireFailureCode(t, dropped.failure, "schedule_restore_failed")
 }

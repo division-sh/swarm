@@ -11,6 +11,7 @@ import (
 	"time"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -26,11 +27,11 @@ type readFileRelayPayload struct {
 func (e *Executor) PersistOversizedToolResultRelay(ctx context.Context, toolName string, rawJSON []byte) (runtimemcp.ToolResultRelayRef, error) {
 	actor, ok := models.ActorFromContext(ctx)
 	if !ok || strings.TrimSpace(actor.ID) == "" {
-		return runtimemcp.ToolResultRelayRef{}, fmt.Errorf("actor context required for tool result relay")
+		return runtimemcp.ToolResultRelayRef{}, runtimefailures.New(runtimefailures.ClassInternalFailure, "tool_result_relay_actor_missing", "tool-executor", "persist_tool_result_relay", nil)
 	}
 	target, err := e.resolveNativeWorkspace(ctx, actor)
 	if err != nil {
-		return runtimemcp.ToolResultRelayRef{}, err
+		return runtimemcp.ToolResultRelayRef{}, toolResultRelayFailure(err, "tool_result_relay_workspace_unavailable", "resolve_workspace", nil)
 	}
 	if relay, ok, err := e.persistChunkedReadFileRelay(ctx, target, actor, toolName, rawJSON); ok {
 		return relay, err
@@ -97,29 +98,33 @@ func (e *Executor) writeToolResultRelayFile(ctx context.Context, target *workspa
 	case workspace.ExecutionModeHostLocal:
 		resolved, err := execTarget.ResolveHostPath(relayPath, workspace.PathAccessWrite)
 		if err != nil {
-			return fmt.Errorf("write tool result relay %s: %s", relayPath, err.Error())
+			return toolResultRelayFailure(err, "tool_result_relay_path_unavailable", "resolve_path", map[string]any{"relay_path": relayPath})
 		}
 		if err := os.MkdirAll(filepath.Dir(resolved.HostPath), 0o700); err != nil {
-			return fmt.Errorf("write tool result relay %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
+			return toolResultRelayFailure(err, "tool_result_relay_write_failed", "create_parent", map[string]any{"relay_path": resolved.LogicalPath})
 		}
 		if err := os.WriteFile(resolved.HostPath, payload, 0o644); err != nil {
-			return fmt.Errorf("write tool result relay %s: %s", resolved.LogicalPath, hostFileErrorMessage(err))
+			return toolResultRelayFailure(err, "tool_result_relay_write_failed", "write_file", map[string]any{"relay_path": resolved.LogicalPath})
 		}
 		return nil
 	default:
-		_, stderr, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, string(payload), "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
+		_, _, exitCode, execErr := e.runWorkspaceCommand(ctx, target, 30*time.Second, string(payload), "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
 		if execErr != nil || exitCode != 0 {
-			msg := strings.TrimSpace(string(stderr))
-			if msg == "" && execErr != nil {
-				msg = execErr.Error()
+			cause := execErr
+			if cause == nil {
+				cause = fmt.Errorf("workspace command exited with code %d", exitCode)
 			}
-			if msg == "" {
-				msg = "workspace relay write failed"
-			}
-			return fmt.Errorf("write tool result relay %s: %s", relayPath, msg)
+			return toolResultRelayFailure(cause, "tool_result_relay_write_failed", "write_workspace_file", map[string]any{"exit_code": exitCode, "relay_path": relayPath})
 		}
 		return nil
 	}
+}
+
+func toolResultRelayFailure(err error, code, operation string, attributes map[string]any) error {
+	if _, ok := runtimefailures.As(err); ok {
+		return err
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, code, "tool-executor", operation, attributes, err)
 }
 
 func toolResultRelayPath(target workspace.ExecutionTarget, actor models.AgentConfig, toolName string) (string, error) {

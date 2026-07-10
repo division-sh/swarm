@@ -548,6 +548,7 @@ func TestTraceDeliverySummaryExhaustsRunTracePages(t *testing.T) {
 						"event_created_at":    "2026-05-13T10:00:06Z",
 						"delivery_id":         "delivery-3",
 						"delivery_status":     "failed",
+						"delivery_failure":    testRuntimeFailure("handler_failed"),
 						"delivery_created_at": "2026-05-13T10:00:06Z",
 						"subscriber_type":     "node",
 						"subscriber_id":       "node-1",

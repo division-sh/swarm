@@ -210,7 +210,7 @@ func assertDynamicFlowInstanceFlowMatchTargetedNodeDelivery(t testing.TB, h *run
 		SELECT COUNT(*)
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-		  AND failure_type = 'target_resolution_failed'
+		  AND failure->>'class' IN ('platform.target_unreachable', 'platform.target_ambiguous')
 	`, eventID).Scan(&deadLetterCount); err != nil {
 		t.Fatalf("query targeted event dead letters: %v", err)
 	}

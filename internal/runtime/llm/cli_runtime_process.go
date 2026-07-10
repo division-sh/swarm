@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -53,7 +54,7 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 	cmd, err := r.buildCommand(runCtx, args, target)
 	if err != nil {
 		if IsMissingProviderCredential(err) {
-			return nil, fmt.Errorf("%w: %w", ErrClaudeAuthRequired, err)
+			return nil, runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "claude-cli-adapter", "build_command", map[string]any{"auth_kind": "provider_credential"}, err)
 		}
 		return nil, err
 	}
@@ -78,31 +79,18 @@ func (r *ClaudeCLIRuntime) runWithInput(ctx context.Context, args []string, targ
 				errOut = summarizeCLIErrorOutput(stdoutText)
 			}
 			if errOut == "" {
-				return nil, fmt.Errorf("claude cli timeout after %s", timeout)
+				return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 			}
-			return nil, fmt.Errorf("claude cli timeout after %s: %s", timeout, errOut)
-		}
-		if isClaudeAuthOutput(stderrText) || isClaudeAuthOutput(stdoutText) {
-			msg := summarizeCLIErrorOutput(stderrText)
-			if msg == "" {
-				msg = summarizeCLIErrorOutput(stdoutText)
-			}
-			if msg == "" {
-				msg = "not logged in"
-			}
-			return nil, fmt.Errorf("%w: %s", ErrClaudeAuthRequired, msg)
+			return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run", map[string]any{"timeout": timeout.String()}, err)
 		}
 		errOut := summarizeCLIErrorOutput(stderrText)
 		if errOut == "" {
 			errOut = summarizeCLIErrorOutput(stdoutText)
 		}
-		if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText, stdoutText)); diag != nil {
-			return nil, diag
-		}
 		if errOut == "" {
-			return nil, fmt.Errorf("claude cli run failed: %w", err)
+			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run", nil, err)
 		}
-		return nil, fmt.Errorf("claude cli run failed: %w, stderr=%s", err, errOut)
+		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run", nil, err)
 	}
 
 	raw := bytes.TrimSpace(stdout.Bytes())
@@ -156,31 +144,18 @@ func (r *ClaudeCLIRuntime) runStreaming(ctx context.Context, cmd *exec.Cmd, targ
 				errOut = summarizeCLIErrorOutput(stdoutText)
 			}
 			if errOut == "" {
-				return nil, fmt.Errorf("claude cli timeout after %s", timeout)
+				return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 			}
-			return nil, fmt.Errorf("claude cli timeout after %s: %s", timeout, errOut)
-		}
-		if isClaudeAuthOutput(stderrText) || isClaudeAuthOutput(stdoutText) {
-			msg := summarizeCLIErrorOutput(stderrText)
-			if msg == "" {
-				msg = summarizeCLIErrorOutput(stdoutText)
-			}
-			if msg == "" {
-				msg = "not logged in"
-			}
-			return nil, fmt.Errorf("%w: %s", ErrClaudeAuthRequired, msg)
+			return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "claude_cli_timeout", "claude-cli-adapter", "run_streaming", map[string]any{"timeout": timeout.String()}, waitErr)
 		}
 		errOut := summarizeCLIErrorOutput(stderrText)
 		if errOut == "" {
 			errOut = summarizeCLIErrorOutput(stdoutText)
 		}
-		if diag := workspaceCLIDiagnosticError(r.cfg, target, coalesce(errOut, stderrText, stdoutText)); diag != nil {
-			return nil, diag
-		}
 		if errOut == "" {
-			return nil, fmt.Errorf("claude cli run failed: %w", waitErr)
+			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run_streaming", nil, waitErr)
 		}
-		return nil, fmt.Errorf("claude cli run failed: %w, stderr=%s", waitErr, errOut)
+		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_process_failed", "claude-cli-adapter", "run_streaming", nil, waitErr)
 	}
 
 	acc := newCLIStreamAccumulator()
@@ -250,17 +225,6 @@ func effectiveCLITimeoutForConfig(ctx context.Context, cfg *config.Config) time.
 		}
 	}
 	return timeout
-}
-
-func isClaudeAuthOutput(raw string) bool {
-	msg := strings.ToLower(strings.TrimSpace(raw))
-	if msg == "" {
-		return false
-	}
-	return strings.Contains(msg, "not logged in") ||
-		strings.Contains(msg, "please run /login") ||
-		strings.Contains(msg, "authentication required") ||
-		strings.Contains(msg, "oauth token")
 }
 
 func summarizeCLIErrorOutput(raw string) string {

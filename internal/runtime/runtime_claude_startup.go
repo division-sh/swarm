@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -555,18 +556,20 @@ func startupProbeMCPToolsCall(ctx context.Context, client *http.Client, binding 
 		if !isError {
 			return fmt.Errorf("tools/call returned inconsistent startup probe execution-failure result")
 		}
-		if message := strings.TrimSpace(startupMCPErrorText(result)); message != "" {
-			return fmt.Errorf(message)
-		}
 		runtimeErr, err := runtimemcp.DecodeRuntimeErrorPayload(result["runtimeError"])
 		if err == nil && runtimeErr != nil {
-			if strings.TrimSpace(runtimeErr.Message) != "" {
-				return fmt.Errorf("%s", strings.TrimSpace(runtimeErr.Message))
+			if runtimeErr.Failure != nil {
+				return failures.FromEnvelope(*runtimeErr.Failure)
 			}
-			return fmt.Errorf("tools/call returned runtime error code=%s", strings.TrimSpace(runtimeErr.Code))
+			if runtimeErr.Protocol != nil {
+				return runtimemcp.NewProtocolError(runtimeErr.Protocol.Code, runtimeErr.Protocol.Operation, runtimeErr.Protocol.Message, runtimeErr.Protocol.Detail, nil)
+			}
 		}
-		if code := strings.TrimSpace(probeResult.RuntimeErrorCode); code != "" {
-			return fmt.Errorf("tools/call returned runtime error code=%s", code)
+		if message := strings.TrimSpace(startupMCPErrorText(result)); message != "" {
+			return runtimemcp.NewProtocolError("mcp_startup_probe_untyped_error", "tools/call", message, map[string]any{"tool": strings.TrimSpace(name)}, nil)
+		}
+		if class := strings.TrimSpace(probeResult.FailureClass); class != "" {
+			return fmt.Errorf("tools/call omitted canonical failure envelope for %s/%s", class, strings.TrimSpace(probeResult.FailureDetail))
 		}
 		return fmt.Errorf("tools/call returned startup probe execution failure")
 	default:
@@ -625,7 +628,18 @@ func startupCallMCP(ctx context.Context, client *http.Client, binding llm.MCPHTT
 		return runtimemcp.RPCResponse{}, err
 	}
 	if decoded.Error != nil {
-		return runtimemcp.RPCResponse{}, fmt.Errorf(strings.TrimSpace(decoded.Error.Message))
+		if data, ok := decoded.Error.Data.(map[string]any); ok {
+			runtimeErr, decodeErr := runtimemcp.DecodeRuntimeErrorPayload(data["runtimeError"])
+			if decodeErr == nil && runtimeErr != nil {
+				if runtimeErr.Failure != nil {
+					return runtimemcp.RPCResponse{}, failures.FromEnvelope(*runtimeErr.Failure)
+				}
+				if runtimeErr.Protocol != nil {
+					return runtimemcp.RPCResponse{}, runtimemcp.NewProtocolError(runtimeErr.Protocol.Code, runtimeErr.Protocol.Operation, runtimeErr.Protocol.Message, runtimeErr.Protocol.Detail, nil)
+				}
+			}
+		}
+		return runtimemcp.RPCResponse{}, runtimemcp.NewProtocolError("mcp_rpc_error", strings.TrimSpace(req.Method), strings.TrimSpace(decoded.Error.Message), map[string]any{"jsonrpc_code": decoded.Error.Code}, nil)
 	}
 	return decoded, nil
 }

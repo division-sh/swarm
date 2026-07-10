@@ -14,8 +14,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
-	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -426,7 +426,7 @@ printf '%s\n' '{"result":"done"}'
 	}
 }
 
-func TestClaudeCLIPromptFallbackConsumesAdmissionPerSubprocessAttempt(t *testing.T) {
+func TestClaudeCLIUnstructuredPromptTransportFailureDoesNotRetry(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
 	cfg := &config.Config{
 		LLM: config.LLMConfig{
@@ -456,12 +456,15 @@ printf '%s\n' '{"result":"done"}'
 	target := &workspace.Target{Container: "swarm-agent", Workdir: "/workspace"}
 
 	_, fallback, err := runtime.runWithPromptTransportFallback(ctx, []string{"--print"}, target, "hello", MonitorTurnMeta{})
-	requireProviderAdmissionRateLimited(t, err)
-	if !fallback.Attempted {
-		t.Fatalf("fallback = %#v, want prompt-argument fallback attempted", fallback)
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
+		t.Fatalf("failure = %#v, want generic connector failure", failure)
+	}
+	if fallback.Attempted || fallback.Used {
+		t.Fatalf("fallback = %#v, want no prose-triggered retry", fallback)
 	}
 	if got := readProviderAdmissionFakeDockerInvocations(t, countFile); got != 1 {
-		t.Fatalf("fake docker invocations = %d, want second fallback subprocess rejected before dispatch", got)
+		t.Fatalf("fake docker invocations = %d, want one subprocess attempt", got)
 	}
 }
 
@@ -488,11 +491,11 @@ func requireProviderAdmissionRateLimited(t *testing.T, err error) {
 	if err == nil {
 		t.Fatal("error = nil, want provider admission rate_limited runtime error")
 	}
-	runtimeErr, ok := runtimerterr.AsRuntimeError(err)
+	runtimeErr, ok := runtimefailures.As(err)
 	if !ok {
 		t.Fatalf("error = %T %v, want runtime error", err, err)
 	}
-	if runtimeErr.Code != llmProviderRateLimitedCode || runtimeErr.Component != llmProviderAdmissionComponent || runtimeErr.Operation != llmProviderAdmissionOperation || !runtimeErr.Retryable {
+	if runtimeErr.Failure.Class != runtimefailures.ClassConnectorFailure || runtimeErr.Failure.Detail.Code != llmProviderRateLimitedCode || runtimeErr.Failure.Component != llmProviderAdmissionComponent || runtimeErr.Failure.Operation != llmProviderAdmissionOperation || !runtimeErr.Failure.Retryable {
 		t.Fatalf("runtime error = %#v, want provider admission rate_limited retryable error", runtimeErr)
 	}
 }

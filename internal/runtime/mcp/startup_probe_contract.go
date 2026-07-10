@@ -25,12 +25,12 @@ const (
 )
 
 type StartupProbeResult struct {
-	Contract         string              `json:"contract"`
-	Outcome          StartupProbeOutcome `json:"outcome"`
-	ToolName         string              `json:"tool_name,omitempty"`
-	RuntimeErrorCode string              `json:"runtime_error_code,omitempty"`
-	CauseCode        string              `json:"cause_code,omitempty"`
-	Message          string              `json:"message,omitempty"`
+	Contract      string              `json:"contract"`
+	Outcome       StartupProbeOutcome `json:"outcome"`
+	ToolName      string              `json:"tool_name,omitempty"`
+	FailureClass  string              `json:"failure_class,omitempty"`
+	FailureDetail string              `json:"failure_detail,omitempty"`
+	Message       string              `json:"message,omitempty"`
 }
 
 func DecodeStartupProbeRequest(raw any) (*StartupProbeRequest, error) {
@@ -69,8 +69,8 @@ func DecodeStartupProbeResult(raw any) (*StartupProbeResult, error) {
 	}
 	result.Contract = strings.TrimSpace(result.Contract)
 	result.ToolName = strings.TrimSpace(result.ToolName)
-	result.RuntimeErrorCode = strings.TrimSpace(result.RuntimeErrorCode)
-	result.CauseCode = strings.TrimSpace(result.CauseCode)
+	result.FailureClass = strings.TrimSpace(result.FailureClass)
+	result.FailureDetail = strings.TrimSpace(result.FailureDetail)
 	result.Message = strings.TrimSpace(result.Message)
 	if result.Contract != StartupProbeContractManagedAgentCallable {
 		return nil, fmt.Errorf("unsupported startup probe result contract %q", result.Contract)
@@ -99,17 +99,18 @@ func StartupProbeResultForRuntimeError(contract, toolName string, runtimeErr *Ru
 	if runtimeErr == nil {
 		return nil, fmt.Errorf("runtime error payload is required")
 	}
+	if runtimeErr.Failure == nil {
+		return nil, fmt.Errorf("startup probe execution failure requires canonical failure envelope")
+	}
 	result := &StartupProbeResult{
-		Contract:         contract,
-		Outcome:          StartupProbeOutcomeExecutionFailure,
-		ToolName:         strings.TrimSpace(toolName),
-		RuntimeErrorCode: strings.TrimSpace(runtimeErr.Code),
-		Message:          strings.TrimSpace(runtimeErr.Message),
+		Contract:      contract,
+		Outcome:       StartupProbeOutcomeExecutionFailure,
+		ToolName:      strings.TrimSpace(toolName),
+		FailureClass:  string(runtimeErr.Failure.Class),
+		FailureDetail: strings.TrimSpace(runtimeErr.Failure.Detail.Code),
+		Message:       strings.TrimSpace(runtimeErr.Failure.Message),
 	}
-	if runtimeErr.Cause != nil {
-		result.CauseCode = strings.TrimSpace(runtimeErr.Cause.Code)
-	}
-	if result.CauseCode == "invalid_tool_input" {
+	if result.FailureClass == "platform.schema_invalid" {
 		result.Outcome = StartupProbeOutcomeValidationOnly
 	}
 	return result, nil

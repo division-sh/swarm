@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
@@ -105,11 +106,11 @@ func (m *sqlEventMutation) UpsertCommittedReplayScope(ctx context.Context, event
 	return runtimereplayclaim.ErrMissingCommittedReplayScope
 }
 
-func (m *sqlEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
+func (m *sqlEventMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
 	if m == nil || m.txStore == nil {
 		return fmt.Errorf("event mutation store is required")
 	}
-	return m.txStore.UpsertPipelineReceiptTx(m.operationContext(ctx), m.tx, eventID, status, errText)
+	return m.txStore.UpsertPipelineReceiptTx(m.operationContext(ctx), m.tx, eventID, status, failure)
 }
 
 func (m *sqlEventMutation) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {

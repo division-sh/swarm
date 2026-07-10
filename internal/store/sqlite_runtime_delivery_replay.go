@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/google/uuid"
@@ -22,35 +23,39 @@ type sqliteReplayLease struct {
 	eventID string
 }
 
-func (s *SQLiteRuntimeStore) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+func (s *SQLiteRuntimeStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
-func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
 		return nil
 	}
 	if tx == nil {
 		return s.runRuntimeMutation(ctx, "sqlite pipeline receipt", func(txctx context.Context, tx *sql.Tx) error {
-			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, errText)
+			return s.UpsertPipelineReceiptTx(txctx, tx, eventID, status, failure)
 		})
 	}
 	status = strings.TrimSpace(strings.ToLower(status))
 	if status == "" {
 		status = "processed"
 	}
-	if strings.TrimSpace(errText) != "" && status == "processed" {
+	if failure != nil && status == "processed" {
 		status = "error"
 	}
-	reasonCode := pipelineReceiptReasonCode(status, errText)
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects(status, reasonCode, errText))
+	reasonCode := pipelineReceiptReasonCode(status, failure)
+	failureJSON, err := encodeStoredFailure(failure)
+	if err != nil {
+		return err
+	}
+	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects(status, reasonCode))
 	if err != nil {
 		return fmt.Errorf("marshal sqlite pipeline receipt side effects: %w", err)
 	}
 	outcome := mapPipelineStatusToOutcome(status)
 	terminalReasons := activeRunQuiescenceTerminalReasonCodes()
-	args := []any{uuid.NewString(), outcome, sqliteNullString(reasonCode), string(sideEffects), s.now(), eventID}
+	args := []any{uuid.NewString(), outcome, sqliteNullString(reasonCode), failureJSON, string(sideEffects), s.now(), eventID}
 	for _, reason := range terminalReasons {
 		args = append(args, reason)
 	}
@@ -60,11 +65,11 @@ func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sq
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
+			outcome, reason_code, failure, side_effects, processed_at
 		)
 		SELECT
 			?, e.event_id, 'platform', 'pipeline', e.entity_id, e.flow_instance,
-			?, ?, ?, ?
+			?, ?, ?, ?, ?
 		FROM events e
 		WHERE e.event_id = ?
 		  AND NOT EXISTS (
@@ -77,6 +82,7 @@ func (s *SQLiteRuntimeStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sq
 		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
 			outcome = excluded.outcome,
 			reason_code = excluded.reason_code,
+			failure = excluded.failure,
 			side_effects = excluded.side_effects,
 			processed_at = excluded.processed_at
 		WHERE COALESCE(event_receipts.reason_code, '') NOT IN (`+sqlitePlaceholders(len(terminalReasons))+`)
@@ -461,7 +467,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsMissingPipelineReceipt(ctx context.
 		)
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayError = "missing canonical run_id"
+			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
 		}
 		out = append(out, record)
 	}
@@ -553,7 +559,7 @@ func (s *SQLiteRuntimeStore) listSQLiteEventsWithPendingDeliveriesForRun(ctx con
 		)
 		record := events.PersistedReplayEvent{Event: evt}
 		if strings.TrimSpace(evt.RunID()) == "" {
-			record.ReplayError = "missing canonical run_id"
+			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
 		}
 		out = append(out, record)
 	}
@@ -652,7 +658,7 @@ func (s *SQLiteRuntimeStore) MarkEventDeliveryInProgress(ctx context.Context, ev
 	return nil
 }
 
-func (s *SQLiteRuntimeStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+func (s *SQLiteRuntimeStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
 	eventID = strings.TrimSpace(eventID)
 	agentID = strings.TrimSpace(agentID)
 	if eventID == "" || agentID == "" {
@@ -672,38 +678,46 @@ func (s *SQLiteRuntimeStore) UpsertEventReceipt(ctx context.Context, eventID, ag
 		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
 			return nil
 		}
-		state := buildAgentReceiptWriteState(delivery.retryCount, status, errText)
+		state, err := buildAgentReceiptWriteState(delivery.retryCount, status, failure)
+		if err != nil {
+			return err
+		}
+		failureJSON, err := nullableFailureJSON(state.failure)
+		if err != nil {
+			return err
+		}
 		now := s.now()
 		if _, err := tx.ExecContext(txctx, `
 			UPDATE event_deliveries
 			SET status = ?,
 			    retry_count = ?,
 			    reason_code = ?,
-			    last_error = ?,
+			    failure = NULLIF(?, ''),
 			    delivered_at = ?
 			WHERE event_id = ?
 			  AND subscriber_type = 'agent'
 			  AND subscriber_id = ?
-		`, state.deliveryCode, state.retryCount, sqliteNullString(state.reasonCode), sqliteNullString(state.errorText), now, eventID, agentID); err != nil {
+		`, state.deliveryCode, state.retryCount, sqliteNullString(state.reasonCode), failureJSON, now, eventID, agentID); err != nil {
 			return fmt.Errorf("update sqlite event delivery receipt state: %w", err)
 		}
-		sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount, state.errorText))
+		sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount))
 		if err != nil {
 			return fmt.Errorf("marshal sqlite agent receipt side effects: %w", err)
 		}
 		if _, err := tx.ExecContext(txctx, `
 			INSERT INTO event_receipts (
 				receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-				outcome, reason_code, side_effects, processed_at
+				outcome, reason_code, failure, side_effects, processed_at
 			)
-			VALUES (?, ?, 'agent', ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, 'agent', ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
 				outcome = excluded.outcome,
 				reason_code = excluded.reason_code,
+				failure = excluded.failure,
 				side_effects = excluded.side_effects,
 				processed_at = excluded.processed_at
 		`, uuid.NewString(), eventID, agentID, sqliteNullUUID(delivery.entityID), sqliteNullString(delivery.flowInstance),
-			mapManagerReceiptStatusToOutcome(state.finalStatus), sqliteNullString(state.reasonCode), string(sideEffects), now); err != nil {
+			mapManagerReceiptStatusToOutcome(state.finalStatus), sqliteNullString(state.reasonCode), sqliteNullString(failureJSON), string(sideEffects), now); err != nil {
 			return fmt.Errorf("upsert sqlite event receipt row: %w", err)
 		}
 		return nil
@@ -731,36 +745,40 @@ func (s *SQLiteRuntimeStore) applySQLiteDeliveryBackedTerminalTransitionTx(
 		finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
 		retryCount:   delivery.retryCount + req.retryAdvance,
 		reasonCode:   reasonCode,
-		errorText:    strings.TrimSpace(req.errorText),
+		failure:      runtimefailures.CloneEnvelope(req.failure),
 		deliveryCode: "dead_letter",
 	}
 	now := s.now()
+	failureJSON, err := nullableFailureJSON(state.failure)
+	if err != nil {
+		return runtimemanager.EventReceipt{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE event_deliveries
 		SET status = ?,
 		    retry_count = ?,
 		    reason_code = ?,
-		    last_error = ?,
+		    failure = NULLIF(?, ''),
 		    active_session_id = NULL,
 		    delivered_at = ?
 		WHERE event_id = ?
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = ?
-	`, state.deliveryCode, state.retryCount, sqliteNullString(state.reasonCode), sqliteNullString(state.errorText), now, eventID, agentID); err != nil {
+	`, state.deliveryCode, state.retryCount, sqliteNullString(state.reasonCode), failureJSON, now, eventID, agentID); err != nil {
 		return runtimemanager.EventReceipt{}, fmt.Errorf("sync sqlite event delivery terminal state: %w", err)
 	}
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount, state.errorText))
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount))
 	if err != nil {
 		return runtimemanager.EventReceipt{}, fmt.Errorf("marshal sqlite terminal agent receipt side effects: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO event_receipts (
 			receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
+			outcome, reason_code, failure, side_effects, processed_at
 		)
 		SELECT
 			?, e.event_id, 'agent', ?, e.entity_id, e.flow_instance,
-			?, ?, ?, ?
+			?, ?, ?, ?, ?
 		FROM events e
 		WHERE e.event_id = ?
 		ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
@@ -768,9 +786,10 @@ func (s *SQLiteRuntimeStore) applySQLiteDeliveryBackedTerminalTransitionTx(
 			flow_instance = excluded.flow_instance,
 			outcome = excluded.outcome,
 			reason_code = excluded.reason_code,
+			failure = excluded.failure,
 			side_effects = excluded.side_effects,
 			processed_at = excluded.processed_at
-	`, uuid.NewString(), agentID, mapManagerReceiptStatusToOutcome(state.finalStatus), sqliteNullString(state.reasonCode), string(sideEffects), now, eventID); err != nil {
+	`, uuid.NewString(), agentID, mapManagerReceiptStatusToOutcome(state.finalStatus), sqliteNullString(state.reasonCode), sqliteNullString(failureJSON), string(sideEffects), now, eventID); err != nil {
 		return runtimemanager.EventReceipt{}, fmt.Errorf("upsert sqlite terminal event receipt row: %w", err)
 	}
 	return runtimemanager.EventReceipt{
@@ -778,7 +797,7 @@ func (s *SQLiteRuntimeStore) applySQLiteDeliveryBackedTerminalTransitionTx(
 		AgentID:    strings.TrimSpace(agentID),
 		Status:     runtimemanager.ReceiptStatusDeadLetter,
 		RetryCount: state.retryCount,
-		Error:      state.errorText,
+		Failure:    runtimefailures.CloneEnvelope(state.failure),
 	}, nil
 }
 
@@ -792,8 +811,9 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 		rec          runtimemanager.EventReceipt
 		outcome      string
 		sideEffects  any
+		receiptRaw   any
 		delivery     string
-		deliveryErr  string
+		deliveryRaw  any
 		deliverySeen int
 		retryCount   sql.NullInt64
 	)
@@ -804,8 +824,9 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 			r.outcome,
 			COALESCE(r.reason_code, ''),
 			COALESCE(r.side_effects, '{}'),
+			COALESCE(r.failure, 'null'),
 			COALESCE(d.status, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'),
 			d.retry_count,
 			CASE WHEN d.delivery_id IS NULL THEN 0 ELSE 1 END
 		FROM event_receipts r
@@ -816,7 +837,7 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 		WHERE r.event_id = ?
 		  AND r.subscriber_type = 'agent'
 		  AND r.subscriber_id = ?
-	`, eventID, agentID).Scan(&rec.EventID, &rec.AgentID, &outcome, &rec.Error, &sideEffects, &delivery, &deliveryErr, &retryCount, &deliverySeen)
+	`, eventID, agentID).Scan(&rec.EventID, &rec.AgentID, &outcome, new(string), &sideEffects, &receiptRaw, &delivery, &deliveryRaw, &retryCount, &deliverySeen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimemanager.EventReceipt{}, false, nil
 	}
@@ -831,7 +852,13 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 		}
 		rec.Status = payload.ManagerStatus
 		rec.RetryCount = payload.RetryCount
-		rec.Error = payload.Error
+	}
+	if raw := sqliteJSONRawMessage(receiptRaw); len(raw) > 0 && string(raw) != "null" {
+		failure, err := runtimefailures.UnmarshalEnvelope(raw)
+		if err != nil {
+			return runtimemanager.EventReceipt{}, false, fmt.Errorf("decode sqlite event receipt failure: %w", err)
+		}
+		rec.Failure = &failure
 	}
 	if deliverySeen != 0 {
 		mappedStatus, override, err := terminalManagerReceiptStatusFromDelivery(delivery)
@@ -843,8 +870,12 @@ func (s *SQLiteRuntimeStore) GetEventReceipt(ctx context.Context, eventID, agent
 			if retryCount.Valid {
 				rec.RetryCount = int(retryCount.Int64)
 			}
-			if strings.TrimSpace(deliveryErr) != "" {
-				rec.Error = strings.TrimSpace(deliveryErr)
+			if raw := sqliteJSONRawMessage(deliveryRaw); len(raw) > 0 && string(raw) != "null" {
+				failure, err := runtimefailures.UnmarshalEnvelope(raw)
+				if err != nil {
+					return runtimemanager.EventReceipt{}, false, fmt.Errorf("decode sqlite event delivery failure: %w", err)
+				}
+				rec.Failure = &failure
 			}
 		}
 	}

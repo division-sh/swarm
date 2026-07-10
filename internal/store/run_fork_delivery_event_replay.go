@@ -208,7 +208,7 @@ func insertRunForkReplayScopeMarker(ctx context.Context, tx *sql.Tx, forkRunID, 
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id,
-			status, retry_count, reason_code, last_error, active_session_id,
+			status, retry_count, reason_code, failure, active_session_id,
 			started_at, delivered_at, created_at
 		)
 		VALUES (
@@ -228,7 +228,7 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO event_deliveries (
 			delivery_id, run_id, event_id, subscriber_type, subscriber_id,
-			status, retry_count, reason_code, last_error, active_session_id,
+			status, retry_count, reason_code, failure, active_session_id,
 			started_at, delivered_at, created_at
 		)
 		VALUES (

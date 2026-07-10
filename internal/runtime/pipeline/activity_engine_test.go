@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -340,8 +341,10 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	if got, _ := payload["error"].(string); !strings.Contains(got, "not executable in Stage 1") {
-		t.Fatalf("error = %q, want fail-closed unsupported write effect", got)
+	failure, _ := payload["failure"].(map[string]any)
+	detail, _ := failure["detail"].(map[string]any)
+	if failure["class"] != string(runtimefailures.ClassSchemaInvalid) || detail["code"] != "activity_effect_class_unsupported" {
+		t.Fatalf("failure = %#v, want fail-closed unsupported write effect", failure)
 	}
 }
 
@@ -761,9 +764,10 @@ func TestPipelineActivityRequestNonIdempotentTransportErrorMarksUncertain(t *tes
 	if err := json.Unmarshal(bus.publishes[0].Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	errText := strings.TrimSpace(asString(payload["error"]))
-	if !strings.Contains(errText, "outcome is uncertain") || !strings.Contains(errText, "connection reset after dispatch") {
-		t.Fatalf("failure error = %q, want uncertain transport outcome", errText)
+	failure, _ := payload["failure"].(map[string]any)
+	detail, _ := failure["detail"].(map[string]any)
+	if failure["class"] != string(runtimefailures.ClassOutcomeUncertain) || detail["code"] != "activity_provider_outcome_uncertain" {
+		t.Fatalf("failure = %#v, want uncertain transport outcome", failure)
 	}
 	rec, ok, err := store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
 	if err != nil {
@@ -975,6 +979,10 @@ func TestPipelineActivityRequestMissingCredentialFailsBeforeJournalAndDispatch(t
 	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
+	failure := requireActivityEventFailure(t, bus.publishes[0])
+	if failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Detail.Code != "activity_credential_required" {
+		t.Fatalf("failure = %s/%s, want authentication_required/activity_credential_required", failure.Class, failure.Detail.Code)
+	}
 }
 
 func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalAndDispatch(t *testing.T) {
@@ -1027,9 +1035,28 @@ func TestPipelineActivityRequestTelegramConnectorMissingTokenFailsBeforeJournalA
 	if len(bus.publishes) != 1 || bus.publishes[0].Type() != events.EventType(intent.FailureEvent) {
 		t.Fatalf("publishes = %#v, want one failure event", bus.publishes)
 	}
+	failure := requireActivityEventFailure(t, bus.publishes[0])
+	if failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Detail.Code != "activity_credential_required" {
+		t.Fatalf("failure = %s/%s, want authentication_required/activity_credential_required", failure.Class, failure.Detail.Code)
+	}
 	if strings.Contains(string(bus.publishes[0].Payload()), "provider-secret") {
 		t.Fatalf("failure payload leaked credential: %s", bus.publishes[0].Payload())
 	}
+}
+
+func requireActivityEventFailure(t testing.TB, evt events.Event) runtimefailures.Envelope {
+	t.Helper()
+	var payload struct {
+		Failure json.RawMessage `json:"failure"`
+	}
+	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal activity event payload: %v", err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(payload.Failure)
+	if err != nil {
+		t.Fatalf("decode activity failure envelope: %v", err)
+	}
+	return failure
 }
 
 func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
@@ -1237,7 +1264,7 @@ func createActivityJournalSQLiteSchema(t *testing.T, ctx context.Context, db *sq
 			result_event_id TEXT,
 			result_event_type TEXT,
 			result_payload TEXT,
-			error TEXT,
+			failure TEXT,
 			input_hash TEXT NOT NULL,
 			reply_context_id TEXT,
 			started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

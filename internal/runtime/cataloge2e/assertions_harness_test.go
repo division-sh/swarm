@@ -1001,13 +1001,13 @@ func assertChainDepthExceeded(t testing.TB, db *sql.DB, since time.Time, entityI
 			SELECT 1
 			FROM dead_letters dl
 			WHERE COALESCE(NULLIF(dl.original_payload->>'entity_id', ''), COALESCE(dl.entity_id::text, '')) = $1
-			  AND dl.failure_type = 'chain_depth_exceeded'
+			  AND dl.failure->>'class' = 'platform.chain_depth_exceeded'
 			UNION ALL
 			SELECT 1
 			FROM events e
 			WHERE e.event_name = 'platform.dead_letter'
 			  AND COALESCE(NULLIF(e.payload->>'entity_id', ''), COALESCE(e.entity_id::text, '')) = $1
-			  AND COALESCE(e.payload->>'failure_type', '') = 'chain_depth_exceeded'
+			  AND COALESCE(e.payload->'failure'->>'class', '') = 'platform.chain_depth_exceeded'
 		) hits
 	`, entityID).Scan(&count); err != nil {
 		t.Fatalf("query chain_depth_exceeded dead_letters: %v", err)

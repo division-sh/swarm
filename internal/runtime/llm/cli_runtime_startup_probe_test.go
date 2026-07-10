@@ -2,17 +2,16 @@ package llm
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
@@ -221,19 +220,8 @@ exit 127
 
 	actor := runtimeactors.AgentConfig{ID: "market-research-agent"}
 	_, err := runtime.ProbeStartupVisibleToolSurface(runtimeactors.WithActor(context.Background(), actor), actor, "system prompt", []ToolDefinition{{Name: "emit_event"}})
-	if !errors.Is(err, ErrClaudeWorkspaceCLIUnavailable) {
-		t.Fatalf("ProbeStartupVisibleToolSurface error = %v, want ErrClaudeWorkspaceCLIUnavailable", err)
-	}
-	for _, want := range []string{
-		"local cli_test workspace cannot execute configured Claude CLI command",
-		`"claude"`,
-		`"swarm-agent-market-research"`,
-		`"swarm-workspace:test"`,
-		"remove stale workspace containers",
-		"set workspace.image",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("ProbeStartupVisibleToolSurface error missing %q:\n%v", want, err)
-		}
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_startup_probe_failed" {
+		t.Fatalf("ProbeStartupVisibleToolSurface failure = %#v, want generic connector failure", failure)
 	}
 }
