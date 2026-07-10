@@ -34,6 +34,7 @@ const (
 	RunForkReplayResumeFactForkReplayState           = "fork_replay_state"
 	RunForkReplayResumeFactContractSwap              = "contract_swap"
 	RunForkReplayResumeFactHistoricalReplayExecution = "historical_replay_execution"
+	RunForkReplayResumeFactOpenReplyContext          = "open_reply_context"
 )
 
 const (
@@ -46,6 +47,7 @@ const (
 	RunForkBlockerConversationAuditUnproven             = "conversation_audit_history_unproven"
 	RunForkBlockerActiveTurnHistoryUnproven             = "active_turn_history_unproven"
 	RunForkBlockerEntitySnapshotMetadataUnproven        = "entity_snapshot_metadata_unproven"
+	RunForkBlockerOpenReplyContextUnsupported           = "open_reply_context_unsupported"
 )
 
 type RunForkReplayResumeAdmission struct {
@@ -163,6 +165,17 @@ func runForkReplayResumeAdmission(evidence runForkAdmissionEvidence) RunForkRepl
 		blockers = appendRunForkBlocker(blockers, blocker)
 		dispositions = append(dispositions, RunForkReplayResumeDisposition{
 			Fact:        RunForkReplayResumeFactActiveTurnHistory,
+			Disposition: RunForkReplayResumeDispositionFailClosedBlocker,
+			BlockerCode: blocker.Code,
+			Message:     blocker.Message,
+		})
+		hasHistoricalReplayRequirement = true
+	}
+	if evidence.OpenReplyContext {
+		blocker := runForkReplayResumeBlocker(RunForkBlockerOpenReplyContextUnsupported)
+		blockers = appendRunForkBlocker(blockers, blocker)
+		dispositions = append(dispositions, RunForkReplayResumeDisposition{
+			Fact:        RunForkReplayResumeFactOpenReplyContext,
 			Disposition: RunForkReplayResumeDispositionFailClosedBlocker,
 			BlockerCode: blocker.Code,
 			Message:     blocker.Message,
@@ -401,6 +414,11 @@ func runForkReplayResumeBlocker(code string) RunForkUnsupportedBlocker {
 		return RunForkUnsupportedBlocker{
 			Code:    RunForkBlockerEntitySnapshotMetadataUnproven,
 			Message: "fork materialization requires owner-authorized source-at-T entity snapshot metadata for every reconstructed entity",
+		}
+	case RunForkBlockerOpenReplyContextUnsupported:
+		return RunForkUnsupportedBlocker{
+			Code:    RunForkBlockerOpenReplyContextUnsupported,
+			Message: "timestamp fork is blocked because the source run has an open reply context at the fork point; complete or cancel the request before forking",
 		}
 	default:
 		code = strings.TrimSpace(code)

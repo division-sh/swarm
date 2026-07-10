@@ -317,8 +317,9 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 		return validateCarriedKeyInputPinResolution(source, flowID, pin, resolution.Mode)
 	case runtimecontracts.FlowInputResolutionModeFanIn:
 		return validateFanInInputPinResolution(source, flowID, pin)
-	case runtimecontracts.FlowInputResolutionModeFanOut,
-		runtimecontracts.FlowInputResolutionModeReply:
+	case runtimecontracts.FlowInputResolutionModeReply:
+		return validateReplyInputPinResolution(source, flowID, pin)
+	case runtimecontracts.FlowInputResolutionModeFanOut:
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_unimplemented", fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode), location))
 	case "":
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution.mode is required", location))
@@ -326,6 +327,53 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %q is not supported", resolution.Mode), location))
 	}
 	return findings
+}
+
+func validateReplyInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+	resolution := pin.Resolution
+	location := flowID
+	var findings []Finding
+	if !resolution.InstanceKey.Empty() || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode reply may only declare replies_to and correlation_key", location))
+	}
+	requestPinName := strings.TrimSpace(resolution.RepliesTo)
+	if requestPinName == "" {
+		return append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply requires replies_to", location))
+	}
+	requestPin, ok := source.FlowOutputEventPin(flowID, requestPinName)
+	if !ok {
+		return append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply replies_to %q must name a same-flow output pin", requestPinName), location))
+	}
+	correlationKey := strings.TrimSpace(resolution.CorrelationKey)
+	if correlationKey != "" && !containsTrimmedString(requestPin.Carries, correlationKey) {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestPinName), location))
+	}
+	requestConnects := source.CompositionConnectsFrom(flowID, requestPinName)
+	if len(requestConnects) != 1 {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", flowID, requestPinName, len(requestConnects)), location))
+		return findings
+	}
+	replyConnects := source.CompositionConnectsTo(flowID, pin.PinName())
+	if len(replyConnects) != 1 {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.PinName(), len(replyConnects)), location))
+		return findings
+	}
+	requestTarget, requestErr := requestConnects[0].ToRef()
+	replySource, replyErr := replyConnects[0].FromRef()
+	if requestErr != nil || replyErr != nil || requestTarget.Root || replySource.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(replySource.FlowID) {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply request and reply edges must connect the same provider flow", location))
+	}
+	return findings
+}
+
+func containsTrimmedString(values []string, want string) bool {
+	want = strings.TrimSpace(want)
+	for _, value := range values {
+		if strings.TrimSpace(value) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func validateFanInInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {

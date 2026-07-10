@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -37,6 +38,9 @@ func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtime
 	if len(item.Context) == 0 {
 		item.Context = []byte("{}")
 	}
+	if strings.TrimSpace(item.ReplyContextID) == "" {
+		item.ReplyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
+	}
 	scope := "global"
 	if entityID := coalesceMailboxEntityID(item); entityID != "" {
 		scope = "entity"
@@ -47,12 +51,12 @@ func (s *SQLiteRuntimeStore) InsertMailboxItem(ctx context.Context, item runtime
 			INSERT INTO mailbox (
 				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
 				from_agent, severity, summary, payload, status, decision, decision_notes,
-				notified, expires_at, created_at
+				notified, expires_at, reply_context_id, created_at
 			)
-			VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, item.ID, sqliteNullUUID(coalesceMailboxEntityID(item)), scope, item.Type, sqliteNullUUID(item.EventID),
+			VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)
+		`, item.ID, sqliteNullUUID(coalesceMailboxEntityID(item)), strings.Trim(strings.TrimSpace(item.FlowInstance), "/"), scope, item.Type, sqliteNullUUID(item.EventID),
 			sqliteNullString(item.FromAgent), normalizeMailboxSeverity(item.Priority), sqliteNullString(item.Summary), string(item.Context),
-			status, sqliteNullString(decision), sqliteNullString(item.DecisionNotes), item.Notified, sqliteNullTime(item.TimeoutAt), time.Now().UTC())
+			status, sqliteNullString(decision), sqliteNullString(item.DecisionNotes), item.Notified, sqliteNullTime(item.TimeoutAt), strings.TrimSpace(item.ReplyContextID), time.Now().UTC())
 		return err
 	}); err != nil {
 		return "", fmt.Errorf("insert sqlite mailbox item: %w", err)
@@ -215,10 +219,10 @@ func (s *SQLiteRuntimeStore) MarkMailboxItemNotified(ctx context.Context, id str
 
 func sqliteMailboxSelectSQL(where string) string {
 	return `
-		SELECT item_id, COALESCE(source_event_id, ''), COALESCE(entity_id, ''), COALESCE(from_agent, ''),
+		SELECT item_id, COALESCE(source_event_id, ''), COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(from_agent, ''),
 		       item_type, COALESCE(severity, 'normal'), status, COALESCE(notified, false),
 		       COALESCE(payload, '{}'), COALESCE(summary, ''), expires_at,
-		       COALESCE(decision, ''), COALESCE(decision_notes, '')
+		       COALESCE(decision, ''), COALESCE(decision_notes, ''), COALESCE(reply_context_id, '')
 		FROM mailbox
 		WHERE ` + where
 }
@@ -231,6 +235,13 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 		sc.Mode = "once"
 	}
 	sc = scheduleWithContextRunID(ctx, sc)
+	if sc.Context.Empty() {
+		sc.Context = events.DeliveryContextFromContext(ctx)
+	}
+	sc.NormalizeDeliveryContext()
+	if !sc.Context.Empty() && strings.EqualFold(strings.TrimSpace(sc.Mode), "cron") {
+		return fmt.Errorf("recurring schedules cannot carry an open reply context")
+	}
 	sc.NormalizeRunID()
 	sc.NormalizeEntityID()
 	sc.NormalizeFlowInstance()
@@ -257,11 +268,11 @@ func (s *SQLiteRuntimeStore) UpsertSchedule(ctx context.Context, sc runtimepipel
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO timers (
 				timer_id, run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
-				fire_at, recurring, recurrence_cron, owner_agent, task_type, status, created_at
+				fire_at, recurring, recurrence_cron, owner_agent, reply_context_id, task_type, status, created_at
 			)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 'active', ?)
 		`, uuid.NewString(), sqliteNullUUID(sc.RunID), timerName, sqliteNullUUID(sc.EntityID), sqliteNullString(sc.FlowInstance),
-			sc.EventType, string(persistedSchedulePayload(sc)), fireAt.UTC(), recurring, sqliteNullString(sc.Cron), sc.AgentID, taskType, time.Now().UTC())
+			sc.EventType, string(persistedSchedulePayload(sc)), fireAt.UTC(), recurring, sqliteNullString(sc.Cron), sc.AgentID, sc.Context.ReplyContextID(), taskType, time.Now().UTC())
 		return err
 	}); err != nil {
 		return fmt.Errorf("insert sqlite timer: %w", err)
@@ -301,7 +312,7 @@ func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtime
 	exec := sqliteScheduleDBExecutor(ctx, s.DB)
 	rows, err := exec.QueryContext(ctx, `
 		SELECT COALESCE(run_id, ''), COALESCE(owner_agent, ''), fire_event, COALESCE(recurrence_cron, ''),
-		       fire_at, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(fire_payload, '{}')
+		       fire_at, COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(fire_payload, '{}'), COALESCE(reply_context_id, '')
 		FROM timers
 		WHERE status = 'active'
 		ORDER BY fire_at ASC
@@ -315,7 +326,8 @@ func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtime
 		var sc runtimepipeline.Schedule
 		var fireAt any
 		var payload any
-		if err := rows.Scan(&sc.RunID, &sc.AgentID, &sc.EventType, &sc.Cron, &fireAt, &sc.EntityID, &sc.FlowInstance, &payload); err != nil {
+		var replyContextID string
+		if err := rows.Scan(&sc.RunID, &sc.AgentID, &sc.EventType, &sc.Cron, &fireAt, &sc.EntityID, &sc.FlowInstance, &payload, &replyContextID); err != nil {
 			return nil, fmt.Errorf("scan sqlite schedule: %w", err)
 		}
 		if at, ok, err := sqliteTimeValue(fireAt); err != nil {
@@ -330,6 +342,9 @@ func (s *SQLiteRuntimeStore) LoadActiveSchedules(ctx context.Context) ([]runtime
 			sc.Mode = "once"
 		}
 		sc.TaskID = scheduleTaskIDFromPayload(sc.Payload)
+		if replyContextID != "" {
+			sc.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}
+		}
 		out = append(out, sc)
 	}
 	return out, rows.Err()

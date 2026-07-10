@@ -50,17 +50,18 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 		if strings.TrimSpace(string(intent.Event.Type())) == "" {
 			continue
 		}
+		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
 		var err error
-		intent.Event, err = normalizeOutboxEvent(ctx, intent.Event)
-		if err != nil {
-			return err
-		}
-		plan, err := o.deliveryPlanForIntent(ctx, *intent)
+		intent.Event, err = normalizeOutboxEvent(intentCtx, intent.Event)
 		if err != nil {
 			return err
 		}
 		if err := mutation.AppendEvent(ctx, intent.Event); err != nil {
 			return fmt.Errorf("persist event: %w", err)
+		}
+		plan, err := o.deliveryPlanForIntent(intentCtx, *intent)
+		if err != nil {
+			return err
 		}
 		if err := o.bus.insertEventDeliveriesMutation(ctx, mutation, intent.Event.ID(), plan.PersistedRecipientIDs(), plan.DeliveryTargets(), plan.DeliveryRoutes()); err != nil {
 			return fmt.Errorf("persist event deliveries: %w", err)
@@ -185,6 +186,7 @@ func clonePostCommitEvent(evt events.Event) events.Event {
 }
 
 func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengine.EmitIntent) (bool, error) {
+	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	if reason, err := d.bus.dispatchQueueReason(ctx, intent.Event); err != nil {
 		return false, err
 	} else if reason != "" {
@@ -265,6 +267,7 @@ func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, event
 }
 
 func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, intent runtimeengine.EmitIntent) error {
+	ctx = events.WithDeliveryContext(ctx, intent.Context)
 	plan, err := d.bus.planDirectRoutePlan(ctx, intent.Event, intent.Recipients)
 	if err != nil {
 		return err

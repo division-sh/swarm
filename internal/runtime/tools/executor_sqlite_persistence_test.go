@@ -17,6 +17,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
@@ -28,6 +29,7 @@ import (
 type humanTaskToolStore interface {
 	runtimetools.HumanTaskPersistence
 	runtimetools.MailboxPersistence
+	runtimereplycontext.Store
 	GetV1MailboxItem(ctx context.Context, id string) (store.MailboxV1ItemDetail, error)
 }
 
@@ -256,11 +258,50 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 			}}
 			exec := runtimetools.NewExecutorWithOptions(nil, nil, runtimetools.ExecutorOptions{
 				Config:            cfg,
+				MailboxStore:      tc.store,
 				HumanTaskStore:    tc.store,
 				AuthorityProvider: allowHumanTaskAuthority{},
 			})
-			requester := models.AgentConfig{ID: "requester", Role: "worker", EntityID: uuid.NewString()}
+			requester := models.AgentConfig{
+				ID:          "requester",
+				Role:        "worker",
+				FlowPath:    "provider",
+				EntityID:    uuid.NewString(),
+				Tools:       []string{"human_task_request", "mailbox_send"},
+				Permissions: []string{"human_task_request"},
+			}
 			decider := models.AgentConfig{ID: "decider", Role: "operator"}
+
+			replyCtx, replyContextID, requestEventID := seedReplyToolContext(t, tc.store)
+			replyTaskOut, err := exec.ExecHumanTaskRequestDirect(replyCtx, requester, map[string]any{
+				"category":       "review",
+				"description":    "Needs reply-scoped human review",
+				"expected_value": "approval",
+				"priority":       "high",
+			})
+			if err != nil {
+				t.Fatalf("reply-scoped human_task_request: %v", err)
+			}
+			replyTaskID := strings.TrimSpace(asString(replyTaskOut.(map[string]any)["task_id"]))
+			replyTask, err := tc.store.GetMailboxItem(context.Background(), replyTaskID)
+			if err != nil || replyTask.ReplyContextID != replyContextID || replyTask.FlowInstance != "provider" {
+				t.Fatalf("reply-scoped human task = %#v err=%v", replyTask, err)
+			}
+			mailboxOut, err := exec.ExecMailboxSendDirectContext(replyCtx, requester, map[string]any{
+				"event_id": requestEventID,
+				"type":     "approval",
+				"priority": "normal",
+				"summary":  "Needs reply-scoped mailbox review",
+				"context":  map[string]any{"kind": "reply"},
+			})
+			if err != nil {
+				t.Fatalf("reply-scoped mailbox_send: %v", err)
+			}
+			mailboxID := strings.TrimSpace(asString(mailboxOut.(map[string]any)["mailbox_id"]))
+			mailboxItem, err := tc.store.GetMailboxItem(context.Background(), mailboxID)
+			if err != nil || mailboxItem.ReplyContextID != replyContextID {
+				t.Fatalf("reply-scoped mailbox item = %#v err=%v", mailboxItem, err)
+			}
 
 			firstID := createHumanTaskWithExecutor(t, exec, requester)
 			firstItem, err := tc.store.GetMailboxItem(context.Background(), firstID)
@@ -331,6 +372,71 @@ func TestHumanTaskTools_BackendNeutralPersistence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context.Context, string, string) {
+	t.Helper()
+	runID := uuid.NewString()
+	requestEventID := uuid.NewString()
+	now := time.Now().UTC()
+	switch typed := persistence.(type) {
+	case *store.PostgresStore:
+		if _, err := typed.DB.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES ($1::uuid, 'running', $2)`, runID, now); err != nil {
+			t.Fatalf("seed postgres reply tool run: %v", err)
+		}
+		if _, err := typed.DB.ExecContext(context.Background(), `
+			INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES ($1::uuid, $2::uuid, 'provider.requested', 'global', '{}'::jsonb, 'requester', 'node', $3)
+		`, runID, requestEventID, now); err != nil {
+			t.Fatalf("seed postgres reply tool event: %v", err)
+		}
+	case *store.SQLiteRuntimeStore:
+		if _, err := typed.DB.ExecContext(context.Background(), `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, now); err != nil {
+			t.Fatalf("seed sqlite reply tool run: %v", err)
+		}
+		if _, err := typed.DB.ExecContext(context.Background(), `
+			INSERT INTO events (run_id, event_id, event_name, scope, payload, produced_by, produced_by_type, created_at)
+			VALUES (?, ?, 'provider.requested', 'global', '{}', 'requester', 'node', ?)
+		`, runID, requestEventID, now); err != nil {
+			t.Fatalf("seed sqlite reply tool event: %v", err)
+		}
+	default:
+		t.Fatalf("unsupported reply tool store %T", persistence)
+	}
+	record := runtimereplycontext.Record{
+		RunID:                runID,
+		RequestEventID:       requestEventID,
+		RequesterFlowID:      "requester",
+		RequestOutputPin:     "provider_requested",
+		ReplyInputPin:        "provider_replied",
+		ProviderFlowID:       "provider",
+		ProviderInputPin:     "provider_requested",
+		ProviderOutputPin:    "provider_replied",
+		Origin:               events.RouteIdentity{FlowID: "requester", FlowInstance: "requester/account-a", EntityID: uuid.NewString()},
+		RequestCorrelationID: requestEventID,
+		State:                runtimereplycontext.StateOpen,
+		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	record.ID = runtimereplycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
+	if err := persistence.CreateReplyContext(context.Background(), record); err != nil {
+		t.Fatalf("seed reply tool context: %v", err)
+	}
+	inbound := eventtest.RootIngress(
+		requestEventID,
+		events.EventType("provider.requested"),
+		"",
+		"",
+		nil,
+		0,
+		runID,
+		"",
+		events.EnvelopeForSourceRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "provider", FlowInstance: "provider"}),
+		now,
+	)
+	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(context.Background(), runID), inbound)
+	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})
+	return ctx, record.ID, requestEventID
 }
 
 func assertHumanTaskDeferredProjection(t *testing.T, store humanTaskToolStore, taskID string) {

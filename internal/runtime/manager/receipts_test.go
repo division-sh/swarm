@@ -136,7 +136,10 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *te
 	}
 }
 
-type traceRecordingAgent struct{ parent string }
+type traceRecordingAgent struct {
+	parent         string
+	replyContextID string
+}
 
 func (a *traceRecordingAgent) ID() string                        { return "trace-agent" }
 func (a *traceRecordingAgent) Type() string                      { return "llm" }
@@ -145,6 +148,7 @@ func (a *traceRecordingAgent) OnEvent(ctx context.Context, evt events.Event) ([]
 	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
 		a.parent = inbound.ID()
 	}
+	a.replyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
 	return nil, nil
 }
 
@@ -436,12 +440,16 @@ func TestProcessEvent_PropagatesInboundParentWithoutTraceSeeding(t *testing.T) {
 	am := NewAgentManager(nil, nil)
 	evt := eventtest.RootIngress("evt-123",
 		events.EventType("discovery/market_research.scan_assigned"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{})
+	evt = evt.WithDeliveryContext(events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:agent-delivery"}})
 
 	if err := am.processEvent(context.Background(), agent, evt); err != nil {
 		t.Fatalf("processEvent: %v", err)
 	}
 	if agent.parent != "evt-123" {
 		t.Fatalf("parent event = %q, want evt-123", agent.parent)
+	}
+	if agent.replyContextID != "reply-v1:agent-delivery" {
+		t.Fatalf("agent reply context = %q", agent.replyContextID)
 	}
 }
 

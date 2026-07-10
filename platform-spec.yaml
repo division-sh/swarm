@@ -3423,6 +3423,67 @@ engine:
         key/carries plus receiver instance.by for normal same-name instance-key routing, explicit addressed input-pin
         descriptor routing for approved addressed surfaces, or an explicit dynamic target escape hatch at emit/publish
         time. Structural ParentRoute binding is only a child-to-parent fallback when no lowered connect target applies.
+    reply_resolution:
+      status: runnable_v1
+      description: Receiver-declared request/reply routing returns one terminal provider result to the exact route that
+        emitted the paired request. The runtime carries this authority as opaque route-scoped delivery context; business
+        payload, event envelope, source lineage, flow-instance metadata, requesting_agent, and task_id are never routing owners.
+      authoring:
+        request_output:
+          shape: 'pins.outputs.events[] {name: provider_requested, event: provider.requested, carries: [provider_request_id]}'
+          correlation: The optional correlation_key must name one declared scalar carried key on this output pin.
+        reply_input:
+          shape: 'pins.inputs.events[] {name: provider_replied, event: provider.replied, resolution: {mode: reply, replies_to: provider_requested, correlation_key: provider_request_id}}'
+          replies_to: Required. Names exactly one output pin on the same requester flow.
+        topology: Parent connect must contain exactly one request edge from the paired requester output to one provider
+          counterpart and exactly one response edge from that same counterpart to the reply input.
+        default_correlation: Stable request event id when correlation_key is absent.
+      lowering:
+        owner: runtime/core/pinrouting.ConnectRoutePlan.ReplyResolution
+        result: One typed request role and one typed response role share requester pins, provider pins, and optional correlation key.
+        ambiguity: Missing pins, undeclared carried keys, multiple request counterparts, multiple response counterparts,
+          or different provider counterparts are hard boot invalidities.
+      delivery_context:
+        type: 'events.DeliveryContext{Reply: *ReplyContextRef{ID string}}'
+        scope: One delivery route. It is installed independently for each node/agent route and is omitted from EventEnvelope JSON.
+        creation: Request publication creates the full reply_contexts row in the same typed event mutation after the request
+          event exists and before provider delivery commits. Recipient preflight computes the deterministic id but performs no write.
+        identity: Deterministic from request event, paired topology, and normalized origin route. Logical resolution identity
+          is (origin_instance_id, request_correlation_id) within the paired topology.
+        consumption: Only publication through the declared provider reply output consumes the ref and terminally claims it.
+      continuation_carriers:
+        ordinary_emit: EmitIntent.Context and route-aware EventBus publish preserve the ref.
+        activity: ActivityIntent.Context and activity_attempts.reply_context_id preserve the ref across request, provider call,
+          journal readback, and result publication.
+        timer: TimerIntent.Context and timers.reply_context_id preserve the ref for one-shot schedules; recurring schedules
+          carrying an open reply context fail closed.
+        child: FlowInstanceActivationRequest.Context preserves the ref through activation, child input/auto-emit, and completion;
+          no instance-global metadata copy is permitted.
+        mailbox: mailbox.reply_context_id is populated by system mailbox_write and agent mailbox_send. Defer and terminal
+          decision updates restore it into the transactional decision-event publication context and do not claim the reply.
+        human_task: human_task_request stores source_event_id, flow_instance, and mailbox.reply_context_id. Defer and final decision outcomes
+          are produced from the locked durable row in the same mutation, restore the ref independently of requesting_agent/task_id,
+          and do not claim the reply.
+      persistence:
+        owner: store.ReplyContextStore
+        backends: [postgres, sqlite]
+        full_record: reply_contexts owns request/topology/origin/correlation/lifecycle/accepted-event facts.
+        durable_refs: [event_deliveries.delivery_context, activity_attempts.reply_context_id, timers.reply_context_id, mailbox.reply_context_id]
+        rule: Durable consumers store only the opaque reply_context_id.
+      terminal_claim:
+        first_reply: Atomically changes open to terminal and records accepted_reply_event_id.
+        accepted_replay: The same reply event id is idempotent and reuses its persisted delivery.
+        distinct_second_reply: Fails closed as platform.reply_already_terminal and names the accepted/rejected event ids.
+        missing_or_closed_origin: Fails closed as platform.stale_arrival; no create, broadcast, source, or payload fallback is allowed.
+        mailbox_and_human_decisions: Non-terminal provider continuation events; they preserve but never consume the claim.
+      replay_and_fork:
+        restart: Event deliveries and continuation rows restore refs only from their typed columns.
+        same_run_replay: Uses the persisted delivery route context; it does not reconstruct reply identity.
+        timestamp_fork: A source run with an open reply context at the selected frontier fails closed with
+          open_reply_context_unsupported. The context is never copied or reopened in the fork.
+      observability:
+        graph: Generated connect route plans expose both request and response roles and name the paired request/reply/provider pins.
+        trace: run.trace exposes reply_context_id from event_deliveries.delivery_context for platform debugging; business payload remains unchanged.
     target_resolution:
       precedence:
       - lowered parent connect route plan
@@ -3536,6 +3597,10 @@ engine:
         parent_route_incomplete: Structural child-to-parent routing needs ParentRoute but instance metadata only has incomplete legacy parent data.
         target_ambiguous: flow/match resolution finds more than one target without allow_fanout:true.
         target_not_subscribed: Target instance exists but does not subscribe to the emitted event type.
+        platform.reply_already_terminal: A distinct reply event attempted to consume a context already terminally claimed by
+          another reply. Diagnostics name reply_context_id, request event, accepted reply event, and rejected reply event.
+        platform.stale_arrival: Reply context is missing, malformed, topology-mismatched, or resolves to no live origin carrier.
+          Diagnostics name the paired request/reply pins and available context identity; no fallback delivery is attempted.
       emit_time_tool_error:
         target_sender_no_inbound_runtime: target:sender reached a mixed path with no inbound event source.
         target_sender_empty_source_runtime: target:sender reached an inbound event whose source is empty.
@@ -9134,7 +9199,7 @@ platform_tables:
       - No production cleanup owner may use all-table truncate, cascading bulk truncation, table name heuristics, entity_id-only predicates, or flow_instance-only predicates.
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
       - Apply and dry-run must consume the plan cleanup_runs snapshot only; runs created after the plan/quiescence envelope are out of scope for that cleanup call.
-      - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, and timers.source_timer_id.
+      - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, timers.source_timer_id, and mailbox.reply_context_id.
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
       - Generated node-state tables and legacy/future product optimization tables remain split-preserved until a separate
@@ -9154,6 +9219,7 @@ platform_tables:
         - run_fork_selected_contract_bindings
       delete_by_run_id:
         - activity_attempts
+        - reply_contexts
         - agent_turns
         - agent_sessions
         - entity_mutations
@@ -9210,6 +9276,39 @@ platform_tables:
         \ idx_events_flow (flow_instance, event_name) WHERE flow_instance IS NOT NULL,\n    INDEX idx_events_source_route ((source_route->>'flow_instance'), (source_route->>'entity_id')) WHERE source_route <> '{}'::jsonb,\n    INDEX idx_events_target_route ((target_route->>'flow_instance'), (target_route->>'entity_id')) WHERE target_route <> '{}'::jsonb,\n    INDEX idx_events_global (event_name,\
         \ created_at) WHERE scope = 'global',\n    INDEX idx_events_idempotency (idempotency_key) WHERE idempotency_key\
         \ IS NOT NULL,\n    INDEX idx_events_source (source_event_id) WHERE source_event_id IS NOT NULL\n);"
+    reply_contexts:
+      description: >-
+        Canonical mutable owner for one request/reply loop. A request delivery route carries only
+        reply_context_id in its typed delivery_context; business payloads, EventEnvelope, lineage,
+        and generic flow metadata never own or reconstruct reply routing. The record binds the
+        request event, paired request/reply topology, concrete origin route, and request correlation.
+        Terminal claim is atomic: the first reply event wins, replay of that same event is idempotent,
+        and a distinct later reply fails closed as platform.reply_already_terminal.
+      ddl: |
+        CREATE TABLE reply_contexts (
+            reply_context_id        TEXT PRIMARY KEY,
+            run_id                  UUID REFERENCES runs(run_id),
+            request_event_id        UUID NOT NULL REFERENCES events(event_id),
+            requester_flow_id       TEXT NOT NULL,
+            request_output_pin      TEXT NOT NULL,
+            reply_input_pin         TEXT NOT NULL,
+            provider_flow_id        TEXT NOT NULL,
+            provider_input_pin      TEXT NOT NULL,
+            provider_output_pin     TEXT NOT NULL,
+            origin_route            JSONB NOT NULL,
+            request_correlation_id  TEXT NOT NULL,
+            correlation_key         TEXT,
+            state                   TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'terminal')),
+            accepted_reply_event_id UUID REFERENCES events(event_id),
+            created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            terminal_at             TIMESTAMPTZ,
+            CHECK ((state = 'open' AND accepted_reply_event_id IS NULL AND terminal_at IS NULL) OR (state = 'terminal' AND accepted_reply_event_id IS NOT NULL AND terminal_at IS NOT NULL)),
+            UNIQUE (requester_flow_id, request_output_pin, reply_input_pin, provider_flow_id, request_correlation_id, origin_route),
+            INDEX idx_reply_contexts_run_state (run_id, state),
+            INDEX idx_reply_contexts_request (request_event_id),
+            INDEX idx_reply_contexts_correlation (request_correlation_id, state)
+        );
     activity_attempts:
       description: 'Durable attempt/result journal for executable non-idempotent activity calls. A platform.activity_requested
         event is the request owner; this table is the provider-attempt truth owner after the request is admitted. The
@@ -9223,7 +9322,7 @@ platform_tables:
         request events, the existing row is consumed before static or managed credential resolution, token refresh, or outbound
         preparation. response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and long_running remain
         split/fail-closed.'
-      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    error             TEXT,\n    input_hash        TEXT NOT NULL,\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND error IS NULL AND completed_at IS NULL) OR (status IN ('succeeded', 'failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
+      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    error             TEXT,\n    input_hash        TEXT NOT NULL,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND error IS NULL AND completed_at IS NULL) OR (status IN ('succeeded', 'failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for timestamp forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
@@ -9259,7 +9358,8 @@ platform_tables:
       description: >-
         Tracks delivery of events to subscribers (nodes and agents). One row per event x subscriber. run_id inherited
         from the parent event for run-scoped queries. delivery_target_route stores the concrete target_set member assigned
-        to this subscriber when fan-out routing materializes multiple target identities. status is the canonical lifecycle
+        to this subscriber when fan-out routing materializes multiple target identities. delivery_context stores opaque
+        platform-only route-scoped continuation references and is never part of the business event envelope. status is the canonical lifecycle
         owner for both agent and node deliveries: pending means queued/not started; in_progress means the delivery has been
         claimed or handler execution has started; delivered means successfully settled; failed means a retry-visible
         handler/dispatch failure; dead_letter means terminal failure. Agent and system-node execution paths must mark
@@ -9268,7 +9368,7 @@ platform_tables:
       ddl: "CREATE TABLE event_deliveries (\n    delivery_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    run_id\
         \            UUID REFERENCES runs(run_id),\n    event_id          UUID NOT NULL REFERENCES events(event_id),\n\
         \    subscriber_type   TEXT NOT NULL CHECK (subscriber_type IN ('node', 'agent')),\n    subscriber_id     TEXT NOT\
-        \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
+        \ NULL,\n    delivery_target_route JSONB NOT NULL DEFAULT '{}',\n    delivery_context JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'delivered',\
         \ 'failed', 'dead_letter')),\n    retry_count       INTEGER NOT NULL DEFAULT 0,\n    reason_code       TEXT,\n\
         \    last_error        TEXT,\n    active_session_id UUID,\n    started_at        TIMESTAMPTZ,\n    delivered_at\
         \      TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_deliveries_run (run_id,\
@@ -9466,7 +9566,8 @@ platform_tables:
         distinguishes task kinds: human_task, review_request, approval, alert, operational_decision. human_tasks are represented
         as mailbox items with item_type = "human_task". from_agent identifies the requesting agent. summary provides a human-readable
         description. decision_notes captures the human rationale. notified tracks whether the human was alerted. source_event_id
-        links back to the triggering event for traceability.'
+        links back to the triggering event for traceability. reply_context_id is platform-only route-scoped continuation
+        authority and must never be copied into payload.'
       ddl: "CREATE TABLE mailbox (\n    item_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),\n    entity_id     \
         \    UUID,\n    flow_instance     TEXT,\n    scope             TEXT NOT NULL DEFAULT 'entity' CHECK (scope IN ('entity',\
         \ 'flow', 'global')),\n    item_type         TEXT NOT NULL,\n    source_event_id   UUID,\n    from_agent        TEXT,\n\
@@ -9474,7 +9575,7 @@ platform_tables:
         \           TEXT,\n    payload           JSONB NOT NULL DEFAULT '{}',\n    status            TEXT NOT NULL DEFAULT\
         \ 'pending' CHECK (status IN ('pending', 'decided', 'expired', 'cancelled')),\n    decision          TEXT,\n    decision_notes\
         \    TEXT,\n    decided_by        TEXT,\n    decided_at        TIMESTAMPTZ,\n    notified          BOOLEAN NOT NULL\
-        \ DEFAULT FALSE,\n    expires_at        TIMESTAMPTZ,\n    deferred_until    TIMESTAMPTZ,\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
+        \ DEFAULT FALSE,\n    expires_at        TIMESTAMPTZ,\n    deferred_until    TIMESTAMPTZ,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n\
         \    INDEX idx_mailbox_status (status, severity, created_at),\n    INDEX idx_mailbox_entity (entity_id) WHERE entity_id\
         \ IS NOT NULL,\n    INDEX idx_mailbox_type (item_type, status),\n    INDEX idx_mailbox_global (scope, status) WHERE\
         \ scope = 'global'\n);"
@@ -9589,7 +9690,8 @@ platform_tables:
         flow_instance set, tied to a specific entity lifecycle inside run_id. Global timers: entity_id, flow_instance,
         and run_id NULL, used for boot-start workflow timers and platform-level work (periodic scans, health checks,
         digest compilation).
-        fire_payload carries context when the timer fires. owner_node OR owner_agent identifies who declared the timer
+        fire_payload carries business input when the timer fires; reply_context_id separately carries opaque route-scoped
+        continuation authority for one-shot timers. owner_node OR owner_agent identifies who declared the timer
         (mutually exclusive). source_timer_id, forked_from_run_id, forked_from_event_id, and reconstruction_owner are
         lineage-only fields for fork-local reconstructed timers and must not make the source timer executable fork truth.
         recurrence_cron supports cron expressions for global recurring schedules. recurrence_interval supports duration
@@ -9602,7 +9704,7 @@ platform_tables:
         \    reconstruction_owner TEXT,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    fire_event        TEXT NOT NULL,\n\
         \    fire_payload      JSONB NOT NULL DEFAULT '{}',\n    fire_at           TIMESTAMPTZ NOT NULL,\n    recurring  \
         \       BOOLEAN NOT NULL DEFAULT FALSE,\n    recurrence_cron   TEXT,\n    recurrence_interval TEXT,\n    owner_node\
-        \        TEXT,\n    owner_agent       TEXT,\n    task_type         TEXT NOT NULL DEFAULT 'timer' CHECK (task_type\
+        \        TEXT,\n    owner_agent       TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    task_type         TEXT NOT NULL DEFAULT 'timer' CHECK (task_type\
         \ IN ('timer', 'scheduled_task', 'deadline', 'global_recurring')),\n    status            TEXT NOT NULL DEFAULT 'active'\
         \ CHECK (status IN ('active', 'fired', 'cancelled', 'expired')),\n    fired_at          TIMESTAMPTZ,\n    created_at\
         \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    INDEX idx_timers_run (run_id, status, fire_at) WHERE run_id IS NOT NULL,\n\
@@ -11952,13 +12054,162 @@ platform_events:
       forbidden_fields:
       - payload
       produced_by_type: platform
+    human_task.approved:
+      description: Product-facing platform event emitted after an operator approves a persisted human task.
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["human_task.approved"].payload'
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        task_id: uuid
+        requesting_agent: text
+        status: text
+        decided_by: text
+        decided_at: timestamp
+        category: text
+        description: text
+        expected_value: text
+        priority: text
+        requeue_count: integer
+        talking_points: array
+        reason: text
+        rejection_reason: text
+        expiry_reason: text
+        requeue_date: timestamp
+      required:
+      - task_id
+      - requesting_agent
+      - status
+      - decided_by
+      - decided_at
+      - category
+      - description
+      - expected_value
+      - priority
+      - requeue_count
+      produced_by_type: platform
+    human_task.rejected:
+      description: Product-facing platform event emitted after an operator rejects a persisted human task.
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["human_task.rejected"].payload'
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        task_id: uuid
+        requesting_agent: text
+        status: text
+        decided_by: text
+        decided_at: timestamp
+        category: text
+        description: text
+        expected_value: text
+        priority: text
+        requeue_count: integer
+        talking_points: array
+        reason: text
+        rejection_reason: text
+        expiry_reason: text
+        requeue_date: timestamp
+      required:
+      - task_id
+      - requesting_agent
+      - status
+      - decided_by
+      - decided_at
+      - category
+      - description
+      - expected_value
+      - priority
+      - requeue_count
+      produced_by_type: platform
+    human_task.deferred:
+      description: Product-facing platform event emitted when a persisted human task is deferred without terminally deciding it.
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["human_task.deferred"].payload'
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        task_id: uuid
+        requesting_agent: text
+        status: text
+        decided_by: text
+        decided_at: timestamp
+        category: text
+        description: text
+        expected_value: text
+        priority: text
+        requeue_count: integer
+        talking_points: array
+        reason: text
+        rejection_reason: text
+        expiry_reason: text
+        requeue_date: timestamp
+      required:
+      - task_id
+      - requesting_agent
+      - status
+      - decided_by
+      - decided_at
+      - category
+      - description
+      - expected_value
+      - priority
+      - requeue_count
+      produced_by_type: platform
+    human_task.expired:
+      description: Product-facing platform event emitted when a persisted human task reaches its terminal timeout decision.
+      schema_authority: 'platform-spec.yaml#platform_events.catalog["human_task.expired"].payload'
+      producer_evidence:
+        produced_by_type: platform
+        locations:
+        - internal/store/tool_persistence.go#publishHumanTaskOutcome
+      routing_class: event_loop_routable
+      scope: entity or flow
+      payload:
+        task_id: uuid
+        requesting_agent: text
+        status: text
+        decided_by: text
+        decided_at: timestamp
+        category: text
+        description: text
+        expected_value: text
+        priority: text
+        requeue_count: integer
+        talking_points: array
+        reason: text
+        rejection_reason: text
+        expiry_reason: text
+        requeue_date: timestamp
+      required:
+      - task_id
+      - requesting_agent
+      - status
+      - decided_by
+      - decided_at
+      - category
+      - description
+      - expected_value
+      - priority
+      - requeue_count
+      produced_by_type: platform
   routing_rules:
     description: Most platform events enter the normal event loop. Products can subscribe agents to them. System nodes can handle
       them. They follow standard routing, delivery, and persistence rules.
     routable_events: 'Platform events that enter the normal event loop: platform.dead_letter, platform.agent_failed,
       platform.agent_panic, platform.event_quarantined, platform.dead_letter_escalation, platform.run_stalled, platform.reset, platform.auth_required,
       platform.paused, platform.resumed, platform.boot, platform.recovery_failed, platform.agent_started, platform.budget_threshold_crossed,
-      mailbox.item_decided, mailbox.item_deferred. Products can subscribe to these.'
+      mailbox.item_decided, mailbox.item_deferred, human_task.approved, human_task.rejected, human_task.deferred,
+      human_task.expired. Products can subscribe to these.'
     internal_routable_events: 'platform.activity_requested enters the normal event loop as a platform-internal durable activity
       request and is consumed by workflow-runtime; products MUST NOT author, emit, or claim ownership of it.'
     diagnostic_events: 'Platform events that bypass the event loop and are persisted directly to the events table:

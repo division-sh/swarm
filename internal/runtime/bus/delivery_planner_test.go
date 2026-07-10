@@ -1271,3 +1271,29 @@ func TestDeliveryPlanner_FailsClosedOnPolicyError(t *testing.T) {
 		t.Fatalf("Plan err = %v, want descriptor store unavailable", err)
 	}
 }
+
+func TestRoutedEventKeysForPlan_LocalizesStaticAndMaterializedFlowInstances(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		flowInstance string
+		want         string
+	}{
+		{name: "static", flowInstance: "provider", want: "provider/mailbox.item_decided"},
+		{name: "materialized template", flowInstance: "requester/account-a", want: "requester/account-a/mailbox.item_decided"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			evt := eventtest.RootIngress("", "mailbox.item_decided", "", "", nil, 0, "", "", events.EnvelopeForFlowInstance(events.EventEnvelope{}, tc.flowInstance), time.Time{})
+			keys := routedEventKeysForPlan(evt)
+			found := false
+			for _, key := range keys {
+				if key == tc.want {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("routed keys = %#v, want %q", keys, tc.want)
+			}
+		})
+	}
+}

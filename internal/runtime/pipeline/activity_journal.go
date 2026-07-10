@@ -39,6 +39,7 @@ type ActivityAttemptRecord struct {
 	ResultPayload   map[string]any
 	Error           string
 	InputHash       string
+	ReplyContextID  string
 	StartedAt       time.Time
 	CompletedAt     *time.Time
 	UpdatedAt       time.Time
@@ -57,9 +58,9 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 			INSERT INTO activity_attempts (
 				request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 				node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-				success_event, failure_event, input_hash
+				success_event, failure_event, input_hash, reply_context_id
 			) VALUES (
-				?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+				?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, '')
 			)
 			ON CONFLICT (request_event_id) DO NOTHING
 		`
@@ -68,17 +69,17 @@ func (s *WorkflowInstanceStore) StartActivityAttempt(ctx context.Context, rec Ac
 				INSERT INTO activity_attempts (
 					request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 					node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-					success_event, failure_event, input_hash
+					success_event, failure_event, input_hash, reply_context_id
 				) VALUES (
 					$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, ''),
-					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+					$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, '')
 				)
 				ON CONFLICT (request_event_id) DO NOTHING
 			`
 		}
 		res, err := dbExecContext(txctx, s.db, query, rec.RequestEventID, rec.RunID, nullableUUID(rec.SourceEventID), nullableUUID(rec.ParentEventID), nullableUUID(rec.EntityID), nullableString(rec.FlowInstance),
 			rec.NodeID, rec.HandlerEventKey, rec.ActivityID, rec.Tool, rec.EffectClass, rec.Attempt, rec.Status,
-			rec.SuccessEvent, rec.FailureEvent, rec.InputHash)
+			rec.SuccessEvent, rec.FailureEvent, rec.InputHash, rec.ReplyContextID)
 		if err != nil {
 			return fmt.Errorf("start activity attempt %s: %w", rec.RequestEventID, err)
 		}
@@ -230,7 +231,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 		SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 		       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 		       success_event, failure_event, result_event_id, result_event_type, result_payload,
-		       error, input_hash, started_at, completed_at, updated_at
+		       error, input_hash, reply_context_id, started_at, completed_at, updated_at
 		FROM activity_attempts
 		WHERE request_event_id = ?
 	`
@@ -239,7 +240,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 			SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 			       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 			       success_event, failure_event, result_event_id, result_event_type, result_payload,
-			       error, input_hash, started_at, completed_at, updated_at
+			       error, input_hash, reply_context_id, started_at, completed_at, updated_at
 			FROM activity_attempts
 			WHERE request_event_id = $1::uuid
 		`
@@ -258,14 +259,14 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 	var rec ActivityAttemptRecord
 	var sourceEventID, parentEventID, entityID, flowInstance sql.NullString
-	var resultEventID, resultEventType, errorText sql.NullString
+	var resultEventID, resultEventType, errorText, replyContextID sql.NullString
 	var rawPayload any
 	var startedAtRaw, completedAtRaw, updatedAtRaw any
 	if err := row.Scan(
 		&rec.RequestEventID, &rec.RunID, &sourceEventID, &parentEventID, &entityID, &flowInstance,
 		&rec.NodeID, &rec.HandlerEventKey, &rec.ActivityID, &rec.Tool, &rec.EffectClass, &rec.Attempt, &rec.Status,
 		&rec.SuccessEvent, &rec.FailureEvent, &resultEventID, &resultEventType, &rawPayload,
-		&errorText, &rec.InputHash, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
+		&errorText, &rec.InputHash, &replyContextID, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
 	); err != nil {
 		return ActivityAttemptRecord{}, err
 	}
@@ -297,6 +298,7 @@ func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 	rec.ResultEventID = resultEventID.String
 	rec.ResultEventType = resultEventType.String
 	rec.Error = errorText.String
+	rec.ReplyContextID = replyContextID.String
 	if rawPayload != nil {
 		decoded, err := decodeActivityAttemptPayload(rawPayload)
 		if err != nil {
@@ -386,6 +388,7 @@ func (rec ActivityAttemptRecord) normalized() ActivityAttemptRecord {
 	rec.ResultEventType = strings.TrimSpace(rec.ResultEventType)
 	rec.Error = strings.TrimSpace(rec.Error)
 	rec.InputHash = strings.TrimSpace(rec.InputHash)
+	rec.ReplyContextID = strings.TrimSpace(rec.ReplyContextID)
 	if rec.Attempt <= 0 {
 		rec.Attempt = 1
 	}

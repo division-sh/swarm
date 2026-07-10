@@ -14,6 +14,7 @@ import (
 )
 
 type FlowInstanceActivationRequest struct {
+	Context        events.DeliveryContext
 	ContractBundle semanticview.Source
 	Instance       runtimeflowidentity.Instance
 	InitialState   string
@@ -77,6 +78,7 @@ func (pc *PipelineCoordinator) createFlowInstance(ctx context.Context, triggerCt
 		EntityID:     sourceEntityID,
 	}
 	req := FlowInstanceActivationRequest{
+		Context:        events.DeliveryContextFromContext(ctx),
 		ContractBundle: pc.SemanticSource(),
 		Instance:       instance,
 		InitialState:   strings.TrimSpace(plan.AdvancesTo),

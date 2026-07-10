@@ -35,14 +35,14 @@ func (s *PostgresStore) MaterializeMailboxWrite(ctx context.Context, item runtim
 	_, err = exec.ExecContext(ctx, `
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-			from_agent, severity, summary, payload, status, notified, created_at
+			from_agent, severity, summary, payload, status, notified, reply_context_id, created_at
 		)
 		VALUES (
 			$1::uuid, NULLIF($2,'')::uuid, NULLIF($3,''), $4, $5, $6::uuid,
-			$7, $8, NULLIF($9,''), $10::jsonb, 'pending', false, now()
+			$7, $8, NULLIF($9,''), $10::jsonb, 'pending', false, NULLIF($11,''), now()
 		)
 		ON CONFLICT (item_id) DO NOTHING
-	`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload))
+	`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), item.ReplyContextID)
 	if err != nil {
 		return fmt.Errorf("materialize postgres mailbox_write: %w", err)
 	}
@@ -69,11 +69,11 @@ func (s *SQLiteRuntimeStore) MaterializeMailboxWrite(ctx context.Context, item r
 		_, err := tx.ExecContext(txctx, `
 			INSERT INTO mailbox (
 				item_id, entity_id, flow_instance, scope, item_type, source_event_id,
-				from_agent, severity, summary, payload, status, notified, created_at
+				from_agent, severity, summary, payload, status, notified, reply_context_id, created_at
 			)
-			VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 'pending', 0, ?)
+			VALUES (?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, ''), ?, 'pending', 0, NULLIF(?, ''), ?)
 			ON CONFLICT(item_id) DO NOTHING
-		`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), now)
+		`, item.ItemID, item.EntityID, item.FlowInstance, item.Scope, item.ItemType, item.SourceEventID, item.FromAgent, item.Severity, item.Summary, string(item.Payload), item.ReplyContextID, now)
 		if err != nil {
 			return fmt.Errorf("materialize sqlite mailbox_write: %w", err)
 		}
@@ -98,6 +98,7 @@ func normalizeMailboxWriteMaterialization(item runtimepipeline.MailboxWriteMater
 	item.FromAgent = strings.TrimSpace(item.FromAgent)
 	item.Severity = normalizeMailboxSeverity(item.Severity)
 	item.Summary = strings.TrimSpace(item.Summary)
+	item.ReplyContextID = strings.TrimSpace(item.ReplyContextID)
 	if item.ItemID == "" {
 		return item, fmt.Errorf("mailbox_write item_id is required")
 	}

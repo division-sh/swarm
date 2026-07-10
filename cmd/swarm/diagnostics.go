@@ -158,6 +158,7 @@ type diagnosticRunTraceRow struct {
 	DeliveryID            string `json:"delivery_id,omitempty"`
 	DeliveryStatus        string `json:"delivery_status,omitempty"`
 	DeliveryReasonCode    string `json:"delivery_reason_code,omitempty"`
+	ReplyContextID        string `json:"reply_context_id,omitempty"`
 	DeliveryLastError     string `json:"delivery_last_error,omitempty"`
 	DeliveryRetryCount    int    `json:"delivery_retry_count,omitempty"`
 	DeliveryRetryEligible bool   `json:"delivery_retry_eligible,omitempty"`
@@ -1645,6 +1646,7 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 			emptyDash(row.SubscriberType) + "/" + emptyDash(row.SubscriberID),
 			emptyDash(row.DeliveryStatus),
 			emptyDash(row.DeliveryReasonCode),
+			emptyDash(row.ReplyContextID),
 			emptyDash(row.DeliveryCreatedAt),
 			emptyDash(row.DeliveryStartedAt),
 			emptyDash(row.DeliveryDeliveredAt),
@@ -1663,6 +1665,7 @@ func writeDiagnosticRunTraceDeliveryDetail(out io.Writer, rows []diagnosticRunTr
 			{Header: "SUBSCRIBER", IdentifierFamily: cliIdentifierFamilySubscriber},
 			{Header: "STATUS"},
 			{Header: "REASON"},
+			{Header: "REPLY CONTEXT", KeyColumn: true},
 			{Header: "DELIVERY CREATED"},
 			{Header: "DELIVERY STARTED"},
 			{Header: "DELIVERY DELIVERED"},

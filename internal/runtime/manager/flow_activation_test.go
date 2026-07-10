@@ -34,6 +34,7 @@ type flowActivationTestBus struct {
 	addedRouteRequests []runtimebus.FlowInstanceRouteMaterializationRequest
 	removedPairs       []string
 	published          []events.Event
+	publishedContexts  []events.DeliveryContext
 	runtimeLogs        []runtimepipeline.RuntimeLogEntry
 	unsubscribed       []string
 	removeErr          error
@@ -156,8 +157,9 @@ func (*flowActivationTestStore) ListPendingSubscribedEvents(context.Context, str
 	return nil, nil
 }
 
-func (b *flowActivationTestBus) Publish(_ context.Context, evt events.Event) error {
+func (b *flowActivationTestBus) Publish(ctx context.Context, evt events.Event) error {
 	b.published = append(b.published, evt)
+	b.publishedContexts = append(b.publishedContexts, events.DeliveryContextFromContext(ctx))
 	return nil
 }
 
@@ -564,6 +566,23 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	}
 	if got, _ := autoEmit.ContextMap("")["source_event_id"].(string); got != triggerEventID {
 		t.Fatalf("event context source_event_id = %q, want trigger event %q", got, triggerEventID)
+	}
+}
+
+func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
+	bundle := testFlowBundle("review.created")
+	bus := &flowActivationTestBus{}
+	am := newFlowActivationManager(bus, &flowActivationTestInstanceStore{})
+	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+	req.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:child-activation"}}
+	if err := am.ActivateFlowInstance(context.Background(), req); err != nil {
+		t.Fatalf("ActivateFlowInstance: %v", err)
+	}
+	if len(bus.publishedContexts) != 1 || bus.publishedContexts[0].ReplyContextID() != req.Context.ReplyContextID() {
+		t.Fatalf("child auto-emit contexts = %#v, want %q", bus.publishedContexts, req.Context.ReplyContextID())
+	}
+	if !bus.published[0].DeliveryContext().Empty() {
+		t.Fatalf("child auto-emit exposed reply context on business event: %#v", bus.published[0].DeliveryContext())
 	}
 }
 

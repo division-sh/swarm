@@ -79,6 +79,24 @@ func TestSemanticScope_DistinguishesStaticAndInstancedPaths(t *testing.T) {
 	}
 }
 
+func TestSemanticScopeFromFlowInstanceRef_DistinguishesStaticScopeFromRootID(t *testing.T) {
+	cases := []struct {
+		ref  string
+		want string
+	}{
+		{ref: "", want: ""},
+		{ref: "provider", want: "provider"},
+		{ref: "provider/inst-1", want: "provider"},
+		{ref: "parent/provider/inst-1", want: "parent/provider"},
+		{ref: "11111111-1111-4111-8111-111111111111", want: ""},
+	}
+	for _, tc := range cases {
+		if got := SemanticScopeFromFlowInstanceRef(tc.ref); got != tc.want {
+			t.Fatalf("SemanticScopeFromFlowInstanceRef(%q) = %q, want %q", tc.ref, got, tc.want)
+		}
+	}
+}
+
 func TestStoredCoordinates_SeparateScopeFromConcretePath(t *testing.T) {
 	cases := []struct {
 		name         string

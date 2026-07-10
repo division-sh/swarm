@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	corestate "github.com/division-sh/swarm/internal/runtime/core/state"
 )
 
@@ -94,20 +95,24 @@ type HumanTaskPersistence interface {
 type HumanTaskCreateRecord struct {
 	ActorID       string
 	EntityID      string
+	FlowInstance  string
 	Category      string
 	Description   string
 	TalkingPoints json.RawMessage
 	ExpectedValue string
 	Priority      string
 	Deadline      time.Time
+	SourceEventID string
+	Context       events.DeliveryContext
 }
 
 type HumanTaskDecisionRecord struct {
-	TaskID       string
-	Status       string
-	ActorID      string
-	Reason       string
-	PriorityRank int
-	RequeueDate  string
-	DecidedAt    time.Time
+	TaskID               string
+	Status               string
+	ActorID              string
+	Reason               string
+	PriorityRank         int
+	RequeueDate          string
+	DecidedAt            time.Time
+	DecisionEventPublish func(context.Context, events.Event) error
 }

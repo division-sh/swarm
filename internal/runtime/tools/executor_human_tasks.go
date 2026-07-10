@@ -8,7 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 )
 
@@ -84,15 +86,28 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		}
 	}
 
+	flowInstance := actor.CanonicalFlowPath()
+	var sourceEventID string
+	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
+		sourceEventID = inbound.ID()
+		if target := inbound.TargetRoute().Normalized(); target.FlowInstance != "" {
+			flowInstance = target.FlowInstance
+		} else if inbound.FlowInstance() != "" {
+			flowInstance = inbound.FlowInstance()
+		}
+	}
 	taskID, err := store.CreateHumanTask(ctx, HumanTaskCreateRecord{
 		ActorID:       actor.ID,
 		EntityID:      in.EntityID,
+		FlowInstance:  flowInstance,
 		Category:      in.Category,
 		Description:   in.Description,
 		TalkingPoints: talkingJSON,
 		ExpectedValue: in.ExpectedValue,
 		Priority:      in.Priority,
 		Deadline:      deadline,
+		SourceEventID: sourceEventID,
+		Context:       events.DeliveryContextFromContext(ctx),
 	})
 	if err != nil {
 		return nil, err
@@ -174,15 +189,20 @@ func (e *Executor) execHumanTaskDecide(ctx context.Context, actor models.AgentCo
 		}
 	}
 skipBudget:
+	var decisionEventPublish func(context.Context, events.Event) error
+	if publisher, ok := e.bus.(MutationEventPublisher); ok && publisher != nil {
+		decisionEventPublish = publisher.PublishInMutation
+	}
 
 	if err := store.DecideHumanTask(ctx, HumanTaskDecisionRecord{
-		TaskID:       in.TaskID,
-		Status:       newStatus,
-		ActorID:      actor.ID,
-		Reason:       in.Reason,
-		PriorityRank: in.PriorityRank,
-		RequeueDate:  in.RequeueDate,
-		DecidedAt:    time.Now().UTC(),
+		TaskID:               in.TaskID,
+		Status:               newStatus,
+		ActorID:              actor.ID,
+		Reason:               in.Reason,
+		PriorityRank:         in.PriorityRank,
+		RequeueDate:          in.RequeueDate,
+		DecidedAt:            time.Now().UTC(),
+		DecisionEventPublish: decisionEventPublish,
 	}); err != nil {
 		return nil, err
 	}

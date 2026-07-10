@@ -284,6 +284,7 @@ func (s *ExecutionState) SetFanOut(key string, value any) {
 
 type EmitIntent struct {
 	Event          events.Event
+	Context        events.DeliveryContext
 	Recipients     []string
 	ChainDepth     int
 	ParentEventID  string
@@ -291,6 +292,7 @@ type EmitIntent struct {
 }
 
 type TimerIntent struct {
+	Context      events.DeliveryContext
 	Operation    TimerOperation
 	TimerID      string
 	Owner        identity.NodeID
@@ -303,6 +305,7 @@ type TimerIntent struct {
 }
 
 type ActivityIntent struct {
+	Context          events.DeliveryContext
 	ActivityID       string
 	Tool             string
 	Input            map[string]any
@@ -325,6 +328,7 @@ type ActivityIntent struct {
 }
 
 func (i ActivityIntent) Normalized() ActivityIntent {
+	i.Context = i.Context.Normalized()
 	i.ActivityID = strings.TrimSpace(i.ActivityID)
 	i.Tool = strings.TrimSpace(i.Tool)
 	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)

@@ -163,8 +163,46 @@ func (s *SQLiteSchemaStore) EnsureSchemaTables(ctx context.Context, plans []Sche
 	if err := s.ensureSQLiteMailboxDeferredUntil(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureSQLiteReplyContextColumns(ctx); err != nil {
+		return err
+	}
 	_, err = s.BindSchemaCapabilities(ctx)
 	return err
+}
+
+func (s *SQLiteSchemaStore) ensureSQLiteReplyContextColumns(ctx context.Context) error {
+	columns := []struct {
+		table      string
+		name       string
+		definition string
+	}{
+		{table: "event_deliveries", name: "delivery_context", definition: "TEXT NOT NULL DEFAULT '{}'"},
+		{table: "activity_attempts", name: "reply_context_id", definition: "TEXT REFERENCES reply_contexts(reply_context_id)"},
+		{table: "timers", name: "reply_context_id", definition: "TEXT REFERENCES reply_contexts(reply_context_id)"},
+		{table: "mailbox", name: "reply_context_id", definition: "TEXT REFERENCES reply_contexts(reply_context_id)"},
+	}
+	for _, column := range columns {
+		existing, err := sqliteTableColumnList(ctx, s.DB, column.table)
+		if err != nil {
+			return err
+		}
+		if len(existing) == 0 || stringSliceContainsFold(existing, column.name) {
+			continue
+		}
+		if _, err := s.DB.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, column.table, column.name, column.definition)); err != nil {
+			return fmt.Errorf("add sqlite %s.%s: %w", column.table, column.name, err)
+		}
+	}
+	return nil
+}
+
+func stringSliceContainsFold(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(want)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SQLiteSchemaStore) ensureSQLiteMailboxDeferredUntil(ctx context.Context) error {

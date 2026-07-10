@@ -39,8 +39,9 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "entity_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "entity_state.run_id", DeleteOrderGroup: 3},
 		{Table: "timers", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "timers.run_id|forked_from_run_id|forked_from_event_id -> events.run_id", DeleteOrderGroup: 3},
 		{Table: "run_control_state", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "run_control_state.run_id", DeleteOrderGroup: 3},
-		{Table: "events", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "events.run_id", DeleteOrderGroup: 4},
-		{Table: "runs", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "runs.run_id cleanup set", DeleteOrderGroup: 5},
+		{Table: "reply_contexts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "reply_contexts.run_id", DeleteOrderGroup: 4},
+		{Table: "events", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "events.run_id", DeleteOrderGroup: 5},
+		{Table: "runs", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteAll, PredicateOwner: "runs.run_id cleanup set", DeleteOrderGroup: 6},
 		{Table: "schema_version", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "schema/migration state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "api_idempotency", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "API idempotency/auth-like state", PreservationProof: "must survive destructive runtime cleanup"},
 		{Table: "runtime_ingress_state", TableKind: CleanupTableKindPlatform, Classification: CleanupPreserve, PredicateOwner: "singleton runtime ingress owner", PreservationProof: "must survive destructive runtime cleanup"},
@@ -104,7 +105,7 @@ func CleanupEntryForPolicy(entry CleanupCatalogEntry, policy CleanupPolicy) Clea
 	if policy.IncludeBundles {
 		entry.Classification = CleanupDeleteAll
 		entry.PredicateOwner = "runtime.nuke include_bundles=true server-wide bundle catalog deletion"
-		entry.DeleteOrderGroup = 6
+		entry.DeleteOrderGroup = 7
 		entry.PreservationProof = ""
 		return entry
 	}

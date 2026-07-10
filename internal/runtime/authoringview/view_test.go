@@ -14,7 +14,30 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 )
+
+func TestBuildShowsReplyPairedTopology(t *testing.T) {
+	source := templatereply.LoadSource(t, templatereply.Options{})
+	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
+	view := mustBuild(t, source, &report)
+	if len(view.ConnectRoutePlans) != 2 {
+		t.Fatalf("reply connect route plans = %#v, want request and response", view.ConnectRoutePlans)
+	}
+	roles := map[string]*ConnectReplyView{}
+	for _, plan := range view.ConnectRoutePlans {
+		if plan.Reply == nil {
+			t.Fatalf("reply topology missing from plan %#v", plan)
+		}
+		roles[plan.Reply.Role] = plan.Reply
+	}
+	for _, role := range []string{"request", "response"} {
+		reply := roles[role]
+		if reply == nil || reply.RequestOutputPin != templatereply.RequesterRequestPin || reply.ReplyInputPin != templatereply.RequesterReplyPin || reply.ProviderInputPin != templatereply.ProviderRequestPin || reply.ProviderOutputPin != templatereply.ProviderReplyPin {
+			t.Fatalf("reply role %s = %#v", role, reply)
+		}
+	}
+}
 
 func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{})

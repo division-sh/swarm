@@ -58,6 +58,7 @@ func withWorkflowNodeDeliveryRoute(ctx context.Context, route events.DeliveryRou
 		return nil
 	}
 	route = route.Normalized()
+	ctx = events.WithDeliveryContext(ctx, route.Context)
 	return context.WithValue(ctx, workflowNodeDeliveryRouteKey{}, route)
 }
 

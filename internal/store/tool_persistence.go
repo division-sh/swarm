@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -396,31 +399,31 @@ func (s *PostgresStore) DecideHumanTask(ctx context.Context, rec runtimetools.Hu
 	if err != nil {
 		return fmt.Errorf("begin postgres human task decision: %w", err)
 	}
+	postCommitActions := make([]func(), 0, 4)
+	txctx := runtimepipeline.WithPipelineSQLTxContext(ctx, tx)
+	txctx = runtimepipeline.WithPipelinePostCommitActions(txctx, &postCommitActions)
 	committed := false
 	defer func() {
 		if !committed {
 			_ = tx.Rollback()
 		}
 	}()
-	var expiresAt sql.NullTime
-	if err := tx.QueryRowContext(ctx, `
-		SELECT expires_at
-		FROM mailbox
-		WHERE item_id = $1::uuid
-		  AND item_type = 'human_task'
-		FOR UPDATE
-	`, rec.TaskID).Scan(&expiresAt); err != nil {
-		if err == sql.ErrNoRows {
+	row, err := s.loadMailboxV1RowTx(txctx, tx, rec.TaskID, true)
+	if err != nil {
+		if errors.Is(err, ErrMailboxV1NotFound) {
 			return fmt.Errorf("human task not found: %s", rec.TaskID)
 		}
 		return fmt.Errorf("load postgres human task: %w", err)
 	}
-	if err := validateHumanTaskDeferUntil(rec, deferUntil, expiresAt); err != nil {
+	if row.Type != "human_task" {
+		return fmt.Errorf("human task not found: %s", rec.TaskID)
+	}
+	if err := validateHumanTaskDeferUntil(rec, deferUntil, row.ExpiresAt); err != nil {
 		return err
 	}
 	var res sql.Result
 	if rec.Status == "deferred" {
-		res, err = tx.ExecContext(ctx, `
+		res, err = tx.ExecContext(txctx, `
 			UPDATE mailbox
 			SET status = 'pending',
 			    decision = NULL,
@@ -438,7 +441,7 @@ func (s *PostgresStore) DecideHumanTask(ctx context.Context, rec runtimetools.Hu
 			  AND item_type = 'human_task'
 		`, rec.TaskID, rec.Reason, rec.ActorID, rec.DecidedAt, deferUntil)
 	} else {
-		res, err = tx.ExecContext(ctx, `
+		res, err = tx.ExecContext(txctx, `
 			UPDATE mailbox
 			SET status = CASE WHEN $2 = 'timed_out' THEN 'expired' ELSE 'decided' END,
 			    decision = $2,
@@ -456,10 +459,14 @@ func (s *PostgresStore) DecideHumanTask(ctx context.Context, rec runtimetools.Hu
 	if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 		return fmt.Errorf("human task not found: %s", rec.TaskID)
 	}
+	if err := publishHumanTaskOutcome(txctx, row, rec); err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit postgres human task decision: %w", err)
 	}
 	committed = true
+	runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 	return nil
 }
 
@@ -473,25 +480,17 @@ func (s *SQLiteRuntimeStore) DecideHumanTask(ctx context.Context, rec runtimetoo
 		return err
 	}
 	return s.runRuntimeMutation(ctx, "sqlite human task decision", func(txctx context.Context, tx *sql.Tx) error {
-		var payloadRaw any
-		var expiresAtRaw any
-		if err := tx.QueryRowContext(txctx, `
-			SELECT COALESCE(payload, '{}'), expires_at
-			FROM mailbox
-			WHERE item_id = ? AND item_type = 'human_task'
-		`, rec.TaskID).Scan(&payloadRaw, &expiresAtRaw); err != nil {
-			return fmt.Errorf("load sqlite human task payload: %w", err)
+		row, err := s.loadSQLiteMailboxV1RowTx(txctx, tx, rec.TaskID)
+		if err != nil {
+			return fmt.Errorf("load sqlite human task: %w", err)
 		}
-		expiresAt := sql.NullTime{}
-		if parsed, ok, err := sqliteTimeValue(expiresAtRaw); err != nil {
-			return fmt.Errorf("decode sqlite human task expiry: %w", err)
-		} else if ok {
-			expiresAt = sql.NullTime{Time: parsed, Valid: true}
+		if row.Type != "human_task" {
+			return fmt.Errorf("human task not found: %s", rec.TaskID)
 		}
-		if err := validateHumanTaskDeferUntil(rec, deferUntil, expiresAt); err != nil {
+		if err := validateHumanTaskDeferUntil(rec, deferUntil, row.ExpiresAt); err != nil {
 			return err
 		}
-		payload, err := toolDecodeJSONMap(payloadRaw)
+		payload, err := toolDecodeJSONMap(row.RawPayload)
 		if err != nil {
 			return fmt.Errorf("decode sqlite human task payload: %w", err)
 		}
@@ -538,6 +537,9 @@ func (s *SQLiteRuntimeStore) DecideHumanTask(ctx context.Context, rec runtimetoo
 		if affected, err := res.RowsAffected(); err == nil && affected == 0 {
 			return fmt.Errorf("human task not found: %s", rec.TaskID)
 		}
+		if err := publishHumanTaskOutcome(txctx, row, rec); err != nil {
+			return err
+		}
 		return nil
 	})
 }
@@ -551,12 +553,15 @@ func createHumanTask(ctx context.Context, store mailboxPersistence, rec runtimet
 		return "", fmt.Errorf("human-task persistence store is required")
 	}
 	rec = normalizeHumanTaskCreateRecord(rec)
+	taskID := uuid.NewString()
 	payload := map[string]any{
-		"category":       rec.Category,
-		"description":    rec.Description,
-		"expected_value": rec.ExpectedValue,
-		"priority":       rec.Priority,
-		"requeue_count":  0,
+		"category":         rec.Category,
+		"description":      rec.Description,
+		"expected_value":   rec.ExpectedValue,
+		"priority":         rec.Priority,
+		"requeue_count":    0,
+		"requesting_agent": rec.ActorID,
+		"task_id":          taskID,
 	}
 	if len(rec.TalkingPoints) > 0 && strings.TrimSpace(string(rec.TalkingPoints)) != "null" {
 		var talking any
@@ -569,15 +574,84 @@ func createHumanTask(ctx context.Context, store mailboxPersistence, rec runtimet
 		return "", fmt.Errorf("create human task: marshal payload: %w", err)
 	}
 	return store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
-		EntityID:  rec.EntityID,
-		FromAgent: rec.ActorID,
-		Type:      "human_task",
-		Priority:  rec.Priority,
-		Status:    "pending",
-		Summary:   rec.Description,
-		Context:   json.RawMessage(payloadJSON),
-		TimeoutAt: rec.Deadline,
+		ID:             taskID,
+		EventID:        rec.SourceEventID,
+		EntityID:       rec.EntityID,
+		FlowInstance:   rec.FlowInstance,
+		FromAgent:      rec.ActorID,
+		Type:           "human_task",
+		Priority:       rec.Priority,
+		Status:         "pending",
+		Summary:        rec.Description,
+		Context:        json.RawMessage(payloadJSON),
+		TimeoutAt:      rec.Deadline,
+		ReplyContextID: rec.Context.ReplyContextID(),
 	})
+}
+
+func publishHumanTaskOutcome(ctx context.Context, row mailboxV1Row, rec runtimetools.HumanTaskDecisionRecord) error {
+	deliveryContext := replyDeliveryContext(row.ReplyContextID)
+	if rec.DecisionEventPublish == nil {
+		if !deliveryContext.Empty() {
+			return fmt.Errorf("human task %s has reply context but no transactional outcome publisher", row.ID)
+		}
+		return nil
+	}
+	eventType := ""
+	switch rec.Status {
+	case "approved":
+		eventType = "human_task.approved"
+	case "rejected":
+		eventType = "human_task.rejected"
+	case "deferred":
+		eventType = "human_task.deferred"
+	case "timed_out":
+		eventType = "human_task.expired"
+	default:
+		return fmt.Errorf("human task %s has unsupported outcome %q", row.ID, rec.Status)
+	}
+	payload := cloneMailboxV1Payload(row.Payload)
+	payload["task_id"] = row.ID
+	payload["requesting_agent"] = strings.TrimSpace(row.FromAgent)
+	payload["status"] = rec.Status
+	payload["decided_by"] = rec.ActorID
+	payload["decided_at"] = rec.DecidedAt.UTC().Format(time.RFC3339Nano)
+	if rec.Reason != "" {
+		payload["reason"] = rec.Reason
+	}
+	if rec.Status == "rejected" {
+		payload["rejection_reason"] = rec.Reason
+	}
+	if rec.Status == "deferred" {
+		payload["requeue_date"] = rec.RequeueDate
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal human task outcome: %w", err)
+	}
+	evt := events.NewRuntimeControlEvent(
+		uuid.NewString(),
+		events.EventType(eventType),
+		"runtime",
+		"",
+		raw,
+		0,
+		strings.TrimSpace(row.RunID),
+		strings.TrimSpace(row.SourceEventID),
+		events.EventEnvelope{
+			EntityID:     strings.TrimSpace(row.EntityID),
+			FlowInstance: strings.TrimSpace(row.FlowInstance),
+		},
+		rec.DecidedAt.UTC(),
+	)
+	if !deliveryContext.Empty() {
+		evt = evt.WithDeliveryContext(deliveryContext)
+		ctx = events.WithDeliveryContext(ctx, deliveryContext)
+	}
+	if err := rec.DecisionEventPublish(ctx, evt); err != nil {
+		return fmt.Errorf("publish human task outcome: %w", err)
+	}
+	return nil
 }
 
 func toolEntitySelectSQL(where string) string {
@@ -1039,10 +1113,13 @@ func toolJSONSQLArg(value any) (any, error) {
 func normalizeHumanTaskCreateRecord(rec runtimetools.HumanTaskCreateRecord) runtimetools.HumanTaskCreateRecord {
 	rec.ActorID = strings.TrimSpace(rec.ActorID)
 	rec.EntityID = strings.TrimSpace(rec.EntityID)
+	rec.FlowInstance = strings.Trim(strings.TrimSpace(rec.FlowInstance), "/")
 	rec.Category = strings.TrimSpace(rec.Category)
 	rec.Description = strings.TrimSpace(rec.Description)
 	rec.ExpectedValue = strings.TrimSpace(rec.ExpectedValue)
 	rec.Priority = strings.TrimSpace(rec.Priority)
+	rec.SourceEventID = strings.TrimSpace(rec.SourceEventID)
+	rec.Context = rec.Context.Normalized()
 	if rec.Priority == "" {
 		rec.Priority = "medium"
 	}

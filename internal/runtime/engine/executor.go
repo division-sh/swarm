@@ -2342,6 +2342,24 @@ func (e *Executor) buildTimerIntents(frame *executionFrame) []TimerIntent {
 }
 
 func (e *Executor) persist(ctx context.Context, frame executionFrame) error {
+	deliveryContext := events.DeliveryContextFromContext(ctx)
+	if !deliveryContext.Empty() {
+		for i := range frame.result.EmitIntents {
+			if frame.result.EmitIntents[i].Context.Empty() {
+				frame.result.EmitIntents[i].Context = deliveryContext
+			}
+		}
+		for i := range frame.result.TimerIntents {
+			if frame.result.TimerIntents[i].Context.Empty() {
+				frame.result.TimerIntents[i].Context = deliveryContext
+			}
+		}
+		for i := range frame.result.ActivityIntents {
+			if frame.result.ActivityIntents[i].Context.Empty() {
+				frame.result.ActivityIntents[i].Context = deliveryContext
+			}
+		}
+	}
 	if frame.result.StateMutation.StateCarrier.Metadata == nil {
 		frame.result.StateMutation.StateCarrier.Metadata = cloneStringAnyMap(frame.state.State.StateCarrier.Metadata)
 	}

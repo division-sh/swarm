@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -23,6 +24,13 @@ func (s *PostgresStore) UpsertSchedule(ctx context.Context, sc runtimepipeline.S
 		sc.Mode = "once"
 	}
 	sc = scheduleWithContextRunID(ctx, sc)
+	if sc.Context.Empty() {
+		sc.Context = events.DeliveryContextFromContext(ctx)
+	}
+	sc.NormalizeDeliveryContext()
+	if !sc.Context.Empty() && strings.EqualFold(strings.TrimSpace(sc.Mode), "cron") {
+		return fmt.Errorf("recurring schedules cannot carry an open reply context")
+	}
 	entityID := sc.EffectiveEntityID()
 	sc.EntityID = entityID
 	sc.NormalizeRunID()
@@ -202,14 +210,14 @@ func (s *PostgresStore) upsertScheduleSpec(ctx context.Context, sc runtimepipeli
 		INSERT INTO timers (
 			run_id, timer_name, entity_id, flow_instance, fire_event, fire_payload,
 			fire_at, recurring, recurrence_cron, recurrence_interval,
-			owner_node, owner_agent, task_type, status
+			owner_node, owner_agent, reply_context_id, task_type, status
 		)
 		VALUES (
 			NULLIF($1,'')::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,''), $5, $6::jsonb,
 			$7, $8, NULLIF($9,''), NULL,
-			NULL, $10, $11, 'active'
+			NULL, $10, NULLIF($11, ''), $12, 'active'
 		)
-	`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID, taskType)
+	`, sc.RunID, timerName, sc.EntityID, sc.FlowInstance, sc.EventType, string(payload), fireAt, recurring, sc.Cron, sc.AgentID, sc.Context.ReplyContextID(), taskType)
 	if err != nil {
 		return fmt.Errorf("insert timer: %w", err)
 	}
@@ -263,7 +271,8 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			fire_at,
 			COALESCE(entity_id::text, ''),
 			COALESCE(flow_instance, ''),
-			fire_payload
+			fire_payload,
+			COALESCE(reply_context_id, '')
 		FROM timers
 		WHERE status = 'active'
 		  AND owner_agent IS NOT NULL
@@ -277,9 +286,10 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 	out := make([]runtimepipeline.Schedule, 0)
 	for rows.Next() {
 		var (
-			sc      runtimepipeline.Schedule
-			fireAt  time.Time
-			payload []byte
+			sc             runtimepipeline.Schedule
+			fireAt         time.Time
+			payload        []byte
+			replyContextID string
 		)
 		if err := rows.Scan(
 			&sc.RunID,
@@ -291,11 +301,15 @@ func (s *PostgresStore) loadActiveSchedulesSpec(ctx context.Context) ([]runtimep
 			&sc.EntityID,
 			&sc.FlowInstance,
 			&payload,
+			&replyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan active timer: %w", err)
 		}
 		sc.At = fireAt
 		sc.TaskID, sc.Payload = extractPersistedScheduleTaskID(payload)
+		if replyContextID != "" {
+			sc.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}
+		}
 		out = append(out, sc)
 	}
 	if err := rows.Err(); err != nil {

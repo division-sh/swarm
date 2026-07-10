@@ -474,6 +474,7 @@ func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	rt.Scheduler = runtimepipeline.NewScheduler(func(sc runtimepipeline.Schedule) {
 		callbackCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
+		callbackCtx = events.WithDeliveryContext(callbackCtx, sc.Context)
 		if err := rt.Bus.Publish(callbackCtx, scheduledEvent(sc)); err != nil {
 			if rt.Logger != nil {
 				handleRuntimeLogPersistenceError("scheduler", "publish_failed", rt.Logger.Error(callbackCtx, "scheduler", "publish_failed", map[string]any{

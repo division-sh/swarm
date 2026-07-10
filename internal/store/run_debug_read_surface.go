@@ -187,6 +187,7 @@ type RunDebugTraceRow struct {
 	SubscriberID          string     `json:"subscriber_id,omitempty"`
 	DeliveryStatus        string     `json:"delivery_status,omitempty"`
 	DeliveryReasonCode    string     `json:"delivery_reason_code,omitempty"`
+	ReplyContextID        string     `json:"reply_context_id,omitempty"`
 	DeliveryLastError     string     `json:"delivery_last_error,omitempty"`
 	DeliveryRetryCount    int        `json:"delivery_retry_count,omitempty"`
 	DeliveryRetryEligible bool       `json:"delivery_retry_eligible,omitempty"`
@@ -871,6 +872,10 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 		return nil, "", err
 	}
 	sessionSources := runDebugTraceSessionSources(caps)
+	replyContextSelect := "''"
+	if caps.Events.DeliveryContext {
+		replyContextSelect = "COALESCE(d.delivery_context->'reply'->>'id', '')"
+	}
 	args := []any{runID}
 	cursorWhere := ""
 	if opts.Cursor != "" {
@@ -949,6 +954,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 				COALESCE(d.subscriber_id, ''),
 				COALESCE(d.status, ''),
 				COALESCE(d.reason_code, ''),
+				%s,
 				COALESCE(d.last_error, ''),
 				COALESCE(d.retry_count, 0),
 				COALESCE(d.active_session_id::text, ''),
@@ -1004,7 +1010,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			t.created_at ASC NULLS FIRST,
 			t.turn_id ASC NULLS FIRST
 		LIMIT $%d
-		`, sessionSources, cursorWhere, sinceWhere, untilWhere, filterWhere, limitArg), args...)
+		`, sessionSources, replyContextSelect, cursorWhere, sinceWhere, untilWhere, filterWhere, limitArg), args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("load run debug trace: %w", err)
 	}
@@ -1033,6 +1039,7 @@ func (s *PostgresStore) LoadRunDebugTracePage(ctx context.Context, runID string,
 			&item.SubscriberID,
 			&item.DeliveryStatus,
 			&item.DeliveryReasonCode,
+			&item.ReplyContextID,
 			&item.DeliveryLastError,
 			&item.DeliveryRetryCount,
 			&item.ActiveSessionID,

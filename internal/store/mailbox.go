@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 )
@@ -38,6 +39,9 @@ func (s *PostgresStore) InsertMailboxItem(ctx context.Context, item runtimetools
 	}
 	if len(item.Context) == 0 {
 		item.Context = []byte("{}")
+	}
+	if strings.TrimSpace(item.ReplyContextID) == "" {
+		item.ReplyContextID = events.DeliveryContextFromContext(ctx).ReplyContextID()
 	}
 	if caps.Mailbox == SchemaFlavorCanonical {
 		if err := s.insertMailboxItemSpec(ctx, item); err != nil {
@@ -207,14 +211,14 @@ func (s *PostgresStore) insertMailboxItemSpec(ctx context.Context, item runtimet
 		INSERT INTO mailbox (
 			item_id, entity_id, flow_instance, scope, item_type, source_event_id,
 			from_agent, severity, summary, payload, status, decision, decision_notes,
-			notified, expires_at, created_at
+			notified, expires_at, reply_context_id, created_at
 		)
 		VALUES (
-			$1::uuid, NULLIF($2,'')::uuid, NULL, $3, $4, NULLIF($5,'')::uuid,
-			NULLIF($6,''), $7, NULLIF($8,''), $9::jsonb, $10, NULLIF($11,''),
-			NULLIF($12,''), $13, $14, now()
+			$1::uuid, NULLIF($2,'')::uuid, NULLIF($3,''), $4, $5, NULLIF($6,'')::uuid,
+			NULLIF($7,''), $8, NULLIF($9,''), $10::jsonb, $11, NULLIF($12,''),
+			NULLIF($13,''), $14, $15, NULLIF($16,''), now()
 		)
-	`, item.ID, coalesceMailboxEntityID(item), scope, item.Type, item.EventID, item.FromAgent, normalizeMailboxSeverity(item.Priority), item.Summary, string(item.Context), status, decision, item.DecisionNotes, item.Notified, expiresAt)
+	`, item.ID, coalesceMailboxEntityID(item), strings.Trim(strings.TrimSpace(item.FlowInstance), "/"), scope, item.Type, item.EventID, item.FromAgent, normalizeMailboxSeverity(item.Priority), item.Summary, string(item.Context), status, decision, item.DecisionNotes, item.Notified, expiresAt, strings.TrimSpace(item.ReplyContextID))
 	if err != nil {
 		return fmt.Errorf("insert mailbox item: %w", err)
 	}
@@ -228,6 +232,7 @@ func (s *PostgresStore) listMailboxItemsSpec(ctx context.Context, status string,
 			item_id::text,
 			COALESCE(source_event_id::text, ''),
 			COALESCE(entity_id::text, ''),
+			COALESCE(flow_instance, ''),
 			COALESCE(from_agent, ''),
 			item_type,
 			COALESCE(severity, 'normal'),
@@ -237,7 +242,8 @@ func (s *PostgresStore) listMailboxItemsSpec(ctx context.Context, status string,
 			COALESCE(summary, ''),
 			expires_at,
 			COALESCE(decision, ''),
-			COALESCE(decision_notes, '')
+			COALESCE(decision_notes, ''),
+			COALESCE(reply_context_id, '')
 		FROM mailbox
 		WHERE `+where+`
 		ORDER BY created_at ASC
@@ -264,6 +270,7 @@ func (s *PostgresStore) getMailboxItemSpec(ctx context.Context, id string) (runt
 			item_id::text,
 			COALESCE(source_event_id::text, ''),
 			COALESCE(entity_id::text, ''),
+			COALESCE(flow_instance, ''),
 			COALESCE(from_agent, ''),
 			item_type,
 			COALESCE(severity, 'normal'),
@@ -273,7 +280,8 @@ func (s *PostgresStore) getMailboxItemSpec(ctx context.Context, id string) (runt
 			COALESCE(summary, ''),
 			expires_at,
 			COALESCE(decision, ''),
-			COALESCE(decision_notes, '')
+			COALESCE(decision_notes, ''),
+			COALESCE(reply_context_id, '')
 		FROM mailbox
 		WHERE item_id = $1::uuid
 	`, id)
@@ -333,6 +341,7 @@ func (s *PostgresStore) expireMailboxItemsSpec(ctx context.Context, limit int) (
 			m.item_id::text,
 			COALESCE(m.source_event_id::text, ''),
 			COALESCE(m.entity_id::text, ''),
+			COALESCE(m.flow_instance, ''),
 			COALESCE(m.from_agent, ''),
 			m.item_type,
 			COALESCE(m.severity, 'normal'),
@@ -342,7 +351,8 @@ func (s *PostgresStore) expireMailboxItemsSpec(ctx context.Context, limit int) (
 			COALESCE(m.summary, ''),
 			m.expires_at,
 			COALESCE(m.decision, ''),
-			COALESCE(m.decision_notes, '')
+			COALESCE(m.decision_notes, ''),
+			COALESCE(m.reply_context_id, '')
 	`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("expire mailbox items: %w", err)
@@ -357,6 +367,7 @@ func (s *PostgresStore) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Conte
 			item_id::text,
 			COALESCE(source_event_id::text, ''),
 			COALESCE(entity_id::text, ''),
+			COALESCE(flow_instance, ''),
 			COALESCE(from_agent, ''),
 			item_type,
 			COALESCE(severity, 'normal'),
@@ -366,7 +377,8 @@ func (s *PostgresStore) listUnnotifiedCriticalMailboxItemsSpec(ctx context.Conte
 			COALESCE(summary, ''),
 			expires_at,
 			COALESCE(decision, ''),
-			COALESCE(decision_notes, '')
+			COALESCE(decision_notes, ''),
+			COALESCE(reply_context_id, '')
 		FROM mailbox
 		WHERE status = 'pending'
 		  AND severity = 'critical'
@@ -402,6 +414,7 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 			&it.ID,
 			&it.EventID,
 			&it.EntityID,
+			&it.FlowInstance,
 			&it.FromAgent,
 			&it.Type,
 			&it.Priority,
@@ -412,6 +425,7 @@ func scanSpecMailboxItems(rows *sql.Rows) ([]runtimetools.MailboxItem, error) {
 			&timeoutRaw,
 			&it.Decision,
 			&it.DecisionNotes,
+			&it.ReplyContextID,
 		); err != nil {
 			return nil, fmt.Errorf("scan mailbox item: %w", err)
 		}

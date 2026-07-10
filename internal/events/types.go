@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -45,24 +46,91 @@ type RouteIdentity struct {
 	FlowID       string `json:"flow_id,omitempty"`
 }
 
+// ReplyContextRef is an opaque reference to platform-owned reply routing
+// state. The full mutable record is never carried through event payloads or
+// envelopes.
+type ReplyContextRef struct {
+	ID string `json:"id"`
+}
+
+func (r ReplyContextRef) Normalized() ReplyContextRef {
+	return ReplyContextRef{ID: strings.TrimSpace(r.ID)}
+}
+
+func (r ReplyContextRef) Empty() bool {
+	return r.Normalized().ID == ""
+}
+
+// DeliveryContext contains route-scoped platform metadata. It is persisted
+// with one delivery route and installed only while that route executes.
+type DeliveryContext struct {
+	Reply *ReplyContextRef `json:"reply,omitempty"`
+}
+
+func (c DeliveryContext) Normalized() DeliveryContext {
+	if c.Reply == nil {
+		return DeliveryContext{}
+	}
+	reply := c.Reply.Normalized()
+	if reply.Empty() {
+		return DeliveryContext{}
+	}
+	return DeliveryContext{Reply: &reply}
+}
+
+func (c DeliveryContext) Empty() bool {
+	return c.Normalized().Reply == nil
+}
+
+func (c DeliveryContext) ReplyContextID() string {
+	c = c.Normalized()
+	if c.Reply == nil {
+		return ""
+	}
+	return c.Reply.ID
+}
+
 type DeliveryRoute struct {
-	SubscriberType string        `json:"subscriber_type"`
-	SubscriberID   string        `json:"subscriber_id"`
-	Target         RouteIdentity `json:"delivery_target_route,omitempty"`
+	SubscriberType string          `json:"subscriber_type"`
+	SubscriberID   string          `json:"subscriber_id"`
+	Target         RouteIdentity   `json:"delivery_target_route,omitempty"`
+	Context        DeliveryContext `json:"delivery_context,omitempty"`
 }
 
 type Event struct {
-	admissionClass EventAdmissionClass
-	id             string
-	eventType      EventType
-	sourceAgent    string
-	taskID         string
-	payload        json.RawMessage
-	chainDepth     int
-	runID          string
-	parentEventID  string
-	envelope       EventEnvelope
-	createdAt      time.Time
+	admissionClass  EventAdmissionClass
+	id              string
+	eventType       EventType
+	sourceAgent     string
+	taskID          string
+	payload         json.RawMessage
+	chainDepth      int
+	runID           string
+	parentEventID   string
+	envelope        EventEnvelope
+	deliveryContext DeliveryContext
+	createdAt       time.Time
+}
+
+type deliveryContextKey struct{}
+
+func WithDeliveryContext(ctx context.Context, deliveryContext DeliveryContext) context.Context {
+	deliveryContext = deliveryContext.Normalized()
+	if deliveryContext.Empty() {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, deliveryContextKey{}, deliveryContext)
+}
+
+func DeliveryContextFromContext(ctx context.Context) DeliveryContext {
+	if ctx == nil {
+		return DeliveryContext{}
+	}
+	deliveryContext, _ := ctx.Value(deliveryContextKey{}).(DeliveryContext)
+	return deliveryContext.Normalized()
 }
 
 type eventJSON struct {
@@ -291,6 +359,17 @@ func (e Event) WithLineage(lineage EventLineage) Event {
 func (e Event) WithEnvelope(envelope EventEnvelope) Event {
 	e.envelope = envelope.Normalized()
 	return e
+}
+
+// WithDeliveryContext creates a route-scoped event projection. The context is
+// intentionally omitted from Event JSON and EventEnvelope.
+func (e Event) WithDeliveryContext(deliveryContext DeliveryContext) Event {
+	e.deliveryContext = deliveryContext.Normalized()
+	return e
+}
+
+func (e Event) DeliveryContext() DeliveryContext {
+	return e.deliveryContext.Normalized()
 }
 
 func (e Event) WithEntityID(entityID string) Event {
@@ -523,6 +602,7 @@ func (r DeliveryRoute) Normalized() DeliveryRoute {
 		SubscriberType: strings.TrimSpace(r.SubscriberType),
 		SubscriberID:   strings.TrimSpace(r.SubscriberID),
 		Target:         r.Target.Normalized(),
+		Context:        r.Context.Normalized(),
 	}
 }
 
@@ -544,6 +624,7 @@ func NormalizeDeliveryRoutes(in []DeliveryRoute) []DeliveryRoute {
 			target.FlowID,
 			target.FlowInstance,
 			target.EntityID,
+			route.Context.ReplyContextID(),
 		}, "\x00")
 		if _, ok := seen[key]; ok {
 			continue

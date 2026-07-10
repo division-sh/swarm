@@ -427,6 +427,7 @@ func (eb *EventBus) dispatchCommittedPublishAsync(ctx context.Context, evt event
 }
 
 func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan) {
+	ctx = WithoutEventMutationContext(ctx)
 	eb.notifyTestPostCommitDispatchStarted(ctx, evt)
 	defer eb.notifyTestPostCommitDispatchCompleted(ctx, evt)
 
@@ -965,76 +966,18 @@ func publishSelectedForkLineageOwner(ctx context.Context) string {
 }
 
 func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err error) {
-	ctx = WithCurrentRuntimeEpoch(ctx)
-	if err := ensurePublishEpoch(ctx); err != nil {
-		return err
-	}
-	receiptOverride := &runtimepipeline.PipelineReceiptOverride{}
-	ctx = runtimepipeline.WithPipelineReceiptOverride(ctx, receiptOverride)
-	eb.inFlightPublishes.Add(1)
-	defer eb.inFlightPublishes.Add(-1)
 	if evt.Type() == "" {
 		return errors.New("deferred event type is required")
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
 		return fmt.Errorf("invalid deferred event type: %s", strings.TrimSpace(string(evt.Type())))
 	}
+	ctx = WithoutEventMutationContext(runtimepipeline.WithoutPipelineSQLTxContext(ctx))
 	ctx, evt, err = admitEventForPublish(ctx, evt, time.Now(), "runtime")
 	if err != nil {
 		return err
 	}
-	persisted := false
-	queued := false
-	defer func() {
-		if queued {
-			return
-		}
-		if !shouldPersistPipelineReceipt(persisted, err) {
-			return
-		}
-		status, errText := pipelineReceiptStatus(ctx, err)
-		eb.markPipelineReceipt(ctx, evt.ID(), status, errText)
-	}()
-	plan, err := eb.planSubscribedPublish(ctx, evt)
-	if err != nil {
-		return err
-	}
-	if err := eb.persistSubscribedPublishPlan(ctx, evt, plan); err != nil {
-		return err
-	}
-	persisted = true
-	if plan.TargetFailure != "" {
-		applyTargetDeliveryFailureReceipt(receiptOverride, plan.TargetFailure)
-		eb.recordTargetDeliveryFailure(ctx, evt, plan)
-		eb.logPublished(ctx, evt, 0)
-		return nil
-	}
-	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
-		return err
-	} else if reason != "" {
-		queued = true
-		eb.logDispatchQueued(ctx, reason, evt, len(plan.RecipientIDs()), false, false)
-		eb.logPublished(ctx, evt, 0)
-		return nil
-	}
-	passthrough, deferred, err := eb.runInterceptorsForDeliveryRoutes(ctx, evt, plan.DeliveryRoutes())
-	if err != nil {
-		return err
-	}
-	if passthrough {
-		var deliverQueued bool
-		if deliverQueued, err = eb.deliverSubscribedPublishPlan(ctx, evt, plan); err != nil {
-			return err
-		}
-		queued = deliverQueued
-	}
-	eb.logPublished(ctx, evt, 0)
-	for _, d := range deferred {
-		if err := eb.publishDeferred(ctx, d); err != nil {
-			return err
-		}
-	}
-	return nil
+	return eb.Publish(ctx, evt)
 }
 
 func (eb *EventBus) logPublished(ctx context.Context, evt events.Event, durationUS int) {
@@ -1076,6 +1019,7 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 		return RoutePlan{}, err
 	}
 	routePlan := plan.Normalized()
+	routePlan = routePlan.WithDefaultDeliveryContext(events.DeliveryContextFromContext(ctx))
 	if recordDiagnostic {
 		eb.recordPublishDiagnostic(ctx, evt, routePlan)
 	}

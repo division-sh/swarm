@@ -161,6 +161,40 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 				"timestamp":         "2026-06-02T03:00:00Z",
 			},
 		},
+		{
+			eventType: "human_task.approved",
+			payload: map[string]any{
+				"task_id":          "00000000-0000-0000-0000-000000000130",
+				"requesting_agent": "provider-agent",
+				"status":           "approved",
+				"decided_by":       "operator",
+				"decided_at":       "2026-07-09T12:00:00Z",
+				"category":         "approval",
+				"description":      "Approve provider reply",
+				"expected_value":   "approved",
+				"priority":         "normal",
+				"requeue_count":    0,
+				"talking_points":   []any{"confirm account"},
+				"reason":           "approved",
+			},
+		},
+		{
+			eventType: "human_task.deferred",
+			payload: map[string]any{
+				"task_id":          "00000000-0000-0000-0000-000000000131",
+				"requesting_agent": "provider-agent",
+				"status":           "deferred",
+				"decided_by":       "operator",
+				"decided_at":       "2026-07-09T12:00:00Z",
+				"category":         "approval",
+				"description":      "Approve provider reply",
+				"expected_value":   "approved",
+				"priority":         "normal",
+				"requeue_count":    1,
+				"reason":           "review later",
+				"requeue_date":     "2026-07-09T13:00:00Z",
+			},
+		},
 	} {
 		t.Run(tc.eventType, func(t *testing.T) {
 			schema, ok := registry[tc.eventType]

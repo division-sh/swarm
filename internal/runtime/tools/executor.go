@@ -760,6 +760,10 @@ func (e *Executor) ExecMailboxSendDirect(actor models.AgentConfig, input any) (a
 	return e.execMailboxSend(context.Background(), actor, input)
 }
 
+func (e *Executor) ExecMailboxSendDirectContext(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	return e.execMailboxSend(ctx, actor, input)
+}
+
 func (e *Executor) ExecHumanTaskRequestDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	return e.execHumanTaskRequest(ctx, actor, input)
 }

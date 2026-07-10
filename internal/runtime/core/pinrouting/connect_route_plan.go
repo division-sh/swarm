@@ -39,6 +39,7 @@ const (
 	ConnectResolutionAddress     ConnectRoutePlanResolutionKind = "address"
 	ConnectResolutionInstanceKey ConnectRoutePlanResolutionKind = "instance_key"
 	ConnectResolutionBroadcast   ConnectRoutePlanResolutionKind = "broadcast"
+	ConnectResolutionReply       ConnectRoutePlanResolutionKind = "reply"
 )
 
 type ConnectRoutePlanFailure string
@@ -113,6 +114,22 @@ type ConnectRoutePlanFanIn struct {
 	Singleton   string
 }
 
+type ConnectRoutePlanReplyResolution struct {
+	Role              string
+	RequesterFlowID   string
+	RequestOutputPin  string
+	ReplyInputPin     string
+	ProviderFlowID    string
+	ProviderInputPin  string
+	ProviderOutputPin string
+	CorrelationKey    string
+}
+
+const (
+	ConnectReplyRoleRequest  = "request"
+	ConnectReplyRoleResponse = "response"
+)
+
 type ConnectRoutePlan struct {
 	PackageKey                string
 	Source                    ConnectRoutePlanEndpoint
@@ -124,6 +141,7 @@ type ConnectRoutePlan struct {
 	Address                   *ConnectRoutePlanAddress
 	InstanceKey               *ConnectRoutePlanInstanceKey
 	FanIn                     *ConnectRoutePlanFanIn
+	ReplyResolution           *ConnectRoutePlanReplyResolution
 	Map                       []ConnectRoutePlanMapEntry
 	Reply                     map[string]string
 	Target                    events.RouteIdentity
@@ -223,7 +241,11 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	if fanInIssue.Failure != "" {
 		return ConnectRoutePlan{}, fanInIssue
 	}
-	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && delivery != ConnectDeliveryBroadcast {
+	replyResolution, replyIssue := connectReplyResolution(source, connect, sourceEndpoint, to, inputPin)
+	if replyIssue.Failure != "" {
+		return ConnectRoutePlan{}, replyIssue
+	}
+	if receiverRequiresRuntimeResolution(receiverScope) && address == nil && instanceKey == nil && delivery != ConnectDeliveryBroadcast && (replyResolution == nil || replyResolution.Role != ConnectReplyRoleResponse) {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverAddressRuleMissing, Detail: to.FlowID}
 	}
 	targetKind := connectTargetKind(delivery)
@@ -247,11 +269,17 @@ func LowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 			address,
 			instanceKey,
 		),
-		Address:     address,
-		InstanceKey: instanceKey,
-		FanIn:       fanIn,
-		Map:         connectMapEntries(connect.Map),
-		Reply:       cloneStringMap(connect.Reply),
+		Address:         address,
+		InstanceKey:     instanceKey,
+		FanIn:           fanIn,
+		ReplyResolution: replyResolution,
+		Map:             connectMapEntries(connect.Map),
+		Reply:           cloneStringMap(connect.Reply),
+	}
+	if replyResolution != nil && replyResolution.Role == ConnectReplyRoleResponse {
+		plan.ResolutionKind = ConnectResolutionReply
+		plan.RequiresRuntimeResolution = true
+		return plan, ConnectRoutePlanIssue{}
 	}
 	if !receiverRequiresRuntimeResolution(receiverScope) {
 		route := staticConnectRoute(source, to.FlowID)
@@ -663,9 +691,80 @@ func connectResolutionInstanceKey(source semanticview.Source, connect runtimecon
 		return connectCarriedKeyResolutionInstanceKey(source, connect, inputPin, resolution, delivery, receiverFlowID)
 	case runtimecontracts.FlowInputResolutionModeFanIn:
 		return nil, ConnectRoutePlanIssue{}
+	case runtimecontracts.FlowInputResolutionModeReply:
+		return nil, ConnectRoutePlanIssue{}
 	default:
 		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: fmt.Sprintf("resolution mode %q is design-locked but not runnable in this slice", resolution.Mode)}
 	}
+}
+
+func connectReplyResolution(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, sourceEndpoint ConnectRoutePlanEndpoint, receiverRef runtimecontracts.FlowPackagePinRef, inputPin runtimecontracts.FlowInputEventPin) (*ConnectRoutePlanReplyResolution, ConnectRoutePlanIssue) {
+	if inputPin.Resolution.Mode == runtimecontracts.FlowInputResolutionModeReply {
+		resolution := inputPin.Resolution
+		if inputPin.Address != nil || !resolution.InstanceKey.Empty() || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureInstanceResolutionInvalid, Detail: "resolution mode reply may only declare replies_to and correlation_key"}
+		}
+		requestOutputPin := strings.TrimSpace(resolution.RepliesTo)
+		if requestOutputPin == "" {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: "resolution mode reply requires replies_to"}
+		}
+		requestOutput, ok := source.FlowOutputEventPin(receiverRef.FlowID, requestOutputPin)
+		if !ok {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("resolution mode reply replies_to %q must name a same-flow output pin", requestOutputPin)}
+		}
+		correlationKey := strings.TrimSpace(resolution.CorrelationKey)
+		if correlationKey != "" && !stringListContains(normalizedPinCarries(requestOutput.Carries), correlationKey) {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestOutputPin)}
+		}
+		requestConnects := source.CompositionConnectsFrom(receiverRef.FlowID, requestOutputPin)
+		if len(requestConnects) != 1 {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("resolution mode reply request pin %s.%s must have exactly one connected counterpart, got %d", receiverRef.FlowID, requestOutputPin, len(requestConnects))}
+		}
+		requestTarget, err := requestConnects[0].ToRef()
+		if err != nil || requestTarget.Root || strings.TrimSpace(requestTarget.FlowID) != strings.TrimSpace(sourceEndpoint.FlowID) {
+			return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: "resolution mode reply request and reply edges must connect the same provider flow"}
+		}
+		return &ConnectRoutePlanReplyResolution{
+			Role:              ConnectReplyRoleResponse,
+			RequesterFlowID:   strings.TrimSpace(receiverRef.FlowID),
+			RequestOutputPin:  requestOutputPin,
+			ReplyInputPin:     strings.TrimSpace(receiverRef.Pin),
+			ProviderFlowID:    strings.TrimSpace(sourceEndpoint.FlowID),
+			ProviderInputPin:  strings.TrimSpace(requestTarget.Pin),
+			ProviderOutputPin: strings.TrimSpace(sourceEndpoint.Pin),
+			CorrelationKey:    correlationKey,
+		}, ConnectRoutePlanIssue{}
+	}
+
+	var matches []ConnectRoutePlanReplyResolution
+	for _, replyInput := range source.FlowInputEventPins(sourceEndpoint.FlowID) {
+		if replyInput.Resolution.Mode != runtimecontracts.FlowInputResolutionModeReply || strings.TrimSpace(replyInput.Resolution.RepliesTo) != strings.TrimSpace(sourceEndpoint.Pin) {
+			continue
+		}
+		for _, replyConnect := range source.CompositionConnectsTo(sourceEndpoint.FlowID, replyInput.PinName()) {
+			from, err := replyConnect.FromRef()
+			if err != nil || from.Root || strings.TrimSpace(from.FlowID) != strings.TrimSpace(receiverRef.FlowID) {
+				continue
+			}
+			matches = append(matches, ConnectRoutePlanReplyResolution{
+				Role:              ConnectReplyRoleRequest,
+				RequesterFlowID:   strings.TrimSpace(sourceEndpoint.FlowID),
+				RequestOutputPin:  strings.TrimSpace(sourceEndpoint.Pin),
+				ReplyInputPin:     strings.TrimSpace(replyInput.PinName()),
+				ProviderFlowID:    strings.TrimSpace(receiverRef.FlowID),
+				ProviderInputPin:  strings.TrimSpace(receiverRef.Pin),
+				ProviderOutputPin: strings.TrimSpace(from.Pin),
+				CorrelationKey:    strings.TrimSpace(replyInput.Resolution.CorrelationKey),
+			})
+		}
+	}
+	if len(matches) > 1 {
+		return nil, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReplyLineageMissing, Detail: fmt.Sprintf("request pin %s.%s participates in multiple reply loops", sourceEndpoint.FlowID, sourceEndpoint.Pin)}
+	}
+	if len(matches) == 1 {
+		return &matches[0], ConnectRoutePlanIssue{}
+	}
+	return nil, ConnectRoutePlanIssue{}
 }
 
 func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, delivery ConnectRoutePlanDelivery, receiverFlowID string) (*ConnectRoutePlanFanIn, ConnectRoutePlanIssue) {

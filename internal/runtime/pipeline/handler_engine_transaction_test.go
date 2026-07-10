@@ -28,13 +28,14 @@ import (
 )
 
 type recordingPipelineBus struct {
-	mu            sync.Mutex
-	publishes     []events.Event
-	runtimeLogs   []RuntimeLogEntry
-	outboxIntents []runtimeengine.EmitIntent
-	publishErr    error
-	outboxErr     error
-	runtimeLogErr error
+	mu              sync.Mutex
+	publishes       []events.Event
+	publishContexts []events.DeliveryContext
+	runtimeLogs     []RuntimeLogEntry
+	outboxIntents   []runtimeengine.EmitIntent
+	publishErr      error
+	outboxErr       error
+	runtimeLogErr   error
 }
 
 type recordingPipelineDispatcher struct {
@@ -45,13 +46,14 @@ type recordingPipelineOutbox struct {
 	bus *recordingPipelineBus
 }
 
-func (b *recordingPipelineBus) Publish(_ context.Context, evt events.Event) error {
+func (b *recordingPipelineBus) Publish(ctx context.Context, evt events.Event) error {
 	if b.publishErr != nil {
 		return b.publishErr
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.publishes = append(b.publishes, evt)
+	b.publishContexts = append(b.publishContexts, events.DeliveryContextFromContext(ctx))
 	return nil
 }
 

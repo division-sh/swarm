@@ -249,7 +249,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	for _, recipient := range expected {
 		expectedSet[recipient] = struct{}{}
 	}
-	targetsByRecipient := deliveryRouteTargetsBySubscriber(deliveryRoutes)
+	routesByRecipient := deliveryRoutesBySubscriber(deliveryRoutes)
 	recipients := eb.snapshotRecipientChans(dispatchRecipients)
 	delivered := make([]string, 0, len(recipients))
 	seen := make(map[string]struct{}, len(recipients))
@@ -264,15 +264,21 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 	}
 	timedOut := make([]string, 0, len(recipients))
 	for _, recipient := range recipients {
-		targets := targetsByRecipient[recipient.deliveryRouteTargetKey()]
-		if len(targets) == 0 && recipient.isWorkflowRuntimeInternalCarrier() {
-			targets = workflowRuntimeInternalCarrierTargets(deliveryRoutes)
+		routes := routesByRecipient[recipient.deliveryRouteTargetKey()]
+		if recipient.isWorkflowRuntimeInternalCarrier() {
+			// The workflow-runtime subscription is an in-memory carrier for the
+			// concrete node delivery routes. Its placeholder route must never
+			// hide the target or route-scoped context owned by those routes.
+			if nodeRoutes := workflowRuntimeInternalCarrierRoutes(deliveryRoutes); len(nodeRoutes) > 0 {
+				routes = nodeRoutes
+			}
 		}
-		if len(targets) == 0 {
-			targets = []events.RouteIdentity{{}}
+		if len(routes) == 0 {
+			routes = []events.DeliveryRoute{{}}
 		}
-		for _, target := range targets {
-			deliverEvent := evt
+		for _, route := range routes {
+			target := route.Target.Normalized()
+			deliverEvent := evt.WithDeliveryContext(route.Context)
 			if !target.Empty() {
 				deliverEvent = events.NewProjectionEvent(
 					evt.ID(),
@@ -285,7 +291,7 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 					evt.ParentEventID(),
 					events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), target),
 					evt.CreatedAt(),
-				)
+				).WithDeliveryContext(route.Context)
 			}
 			select {
 			case recipient.ch <- deliverEvent:
@@ -324,6 +330,23 @@ func (eb *EventBus) deliverToRecipientsWithRoutes(ctx context.Context, evt event
 		return eb.logAuthoritativeDeliveryIncomplete(ctx, evt, expected, delivered, missing, timedOut, nil)
 	}
 	return nil
+}
+
+func deliveryRoutesBySubscriber(deliveryRoutes []events.DeliveryRoute) map[deliveryRouteTargetKey][]events.DeliveryRoute {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return nil
+	}
+	out := make(map[deliveryRouteTargetKey][]events.DeliveryRoute, len(deliveryRoutes))
+	for _, route := range deliveryRoutes {
+		route = route.Normalized()
+		if route.SubscriberType == "" || route.SubscriberID == "" {
+			continue
+		}
+		key := deliveryRouteTargetKey{subscriberType: route.SubscriberType, subscriberID: route.SubscriberID}
+		out[key] = append(out[key], route)
+	}
+	return out
 }
 
 func agentChannelDeliveryRecipients(recipientIDs []string, deliveryRoutes []events.DeliveryRoute) []string {
@@ -428,6 +451,24 @@ func workflowRuntimeInternalCarrierTargets(deliveryRoutes []events.DeliveryRoute
 		out = append(out, target)
 	}
 	return out
+}
+
+func workflowRuntimeInternalCarrierRoutes(deliveryRoutes []events.DeliveryRoute) []events.DeliveryRoute {
+	deliveryRoutes = events.NormalizeDeliveryRoutes(deliveryRoutes)
+	if len(deliveryRoutes) == 0 {
+		return nil
+	}
+	out := make([]events.DeliveryRoute, 0, len(deliveryRoutes))
+	for _, route := range deliveryRoutes {
+		if strings.TrimSpace(route.SubscriberType) != "node" {
+			continue
+		}
+		if strings.TrimSpace(route.SubscriberID) == workflowRuntimeInternalCarrierID {
+			continue
+		}
+		out = append(out, route)
+	}
+	return events.NormalizeDeliveryRoutes(out)
 }
 
 func (eb *EventBus) snapshotRecipientChans(agentIDs []string) []agentRecipient {

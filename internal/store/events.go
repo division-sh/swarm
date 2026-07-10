@@ -600,13 +600,17 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	if caps.Events.DeliveryTargetRoute {
 		routeSelect = `COALESCE(delivery_target_route, '{}'::jsonb)`
 	}
+	contextSelect := `'{}'::jsonb`
+	if caps.Events.DeliveryContext {
+		contextSelect = `COALESCE(delivery_context, '{}'::jsonb)`
+	}
 	rows, err := s.DB.QueryContext(ctx, fmt.Sprintf(`
-		SELECT subscriber_type, subscriber_id, %s
+		SELECT subscriber_type, subscriber_id, %s, %s
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND NOT (subscriber_type = $2 AND subscriber_id = $3)
 		ORDER BY created_at ASC, delivery_id ASC
-	`, routeSelect), eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
+	`, routeSelect, contextSelect), eventID, replayScopeMarkerSubscriberType, replayScopeMarkerSubscriberID)
 	if err != nil {
 		return nil, fmt.Errorf("list event delivery routes: %w", err)
 	}
@@ -614,14 +618,15 @@ func (s *PostgresStore) ListEventDeliveryRoutes(ctx context.Context, eventID str
 	out := make([]events.DeliveryRoute, 0, 8)
 	for rows.Next() {
 		var subscriberType, subscriberID string
-		var raw json.RawMessage
-		if err := rows.Scan(&subscriberType, &subscriberID, &raw); err != nil {
+		var raw, contextRaw json.RawMessage
+		if err := rows.Scan(&subscriberType, &subscriberID, &raw, &contextRaw); err != nil {
 			return nil, fmt.Errorf("scan event delivery route: %w", err)
 		}
 		out = append(out, events.DeliveryRoute{
 			SubscriberType: subscriberType,
 			SubscriberID:   subscriberID,
 			Target:         decodeRouteIdentityJSON(raw),
+			Context:        decodeDeliveryContextJSON(contextRaw),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -967,6 +972,7 @@ func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps 
 		execFn = tx.ExecContext
 	}
 	withTarget := caps.Events.DeliveryTargetRoute
+	withContext := caps.Events.DeliveryContext
 	q := `
 		INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, created_at)
 		VALUES ($1::uuid, $2, $3, $4, now())
@@ -997,6 +1003,25 @@ func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps 
 			`
 		}
 	}
+	if withContext {
+		if !withTarget {
+			return fmt.Errorf("event_deliveries.delivery_target_route required with delivery_context")
+		}
+		q = `
+			INSERT INTO event_deliveries (event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, delivery_context, created_at)
+			VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6::jsonb, now())
+			ON CONFLICT DO NOTHING
+		`
+		if caps.Events.DeliveryRunID {
+			q = `
+				INSERT INTO event_deliveries (run_id, event_id, subscriber_type, subscriber_id, reason_code, delivery_target_route, delivery_context, created_at)
+				SELECT e.run_id, e.event_id, $2, $3, $4, $5::jsonb, $6::jsonb, now()
+				FROM events e
+				WHERE e.event_id = $1::uuid
+				ON CONFLICT DO NOTHING
+			`
+		}
+	}
 	for _, route := range deliveryRoutes {
 		route = route.Normalized()
 		if route.SubscriberType == "" || route.SubscriberID == "" {
@@ -1008,11 +1033,39 @@ func (s *PostgresStore) insertEventDeliveryRoutesSpec(ctx context.Context, caps 
 		} else if !route.Target.Empty() {
 			return fmt.Errorf("event_deliveries.delivery_target_route required for target-routed delivery")
 		}
+		if withContext {
+			args = append(args, string(deliveryContextJSON(route.Context)))
+		} else if !route.Context.Empty() {
+			return fmt.Errorf("event_deliveries.delivery_context required for route-scoped reply context")
+		}
 		if _, err := execFn(ctx, q, args...); err != nil {
 			return fmt.Errorf("insert event delivery (%s=%s): %w", route.SubscriberType, route.SubscriberID, err)
 		}
 	}
 	return nil
+}
+
+func deliveryContextJSON(deliveryContext events.DeliveryContext) json.RawMessage {
+	deliveryContext = deliveryContext.Normalized()
+	if deliveryContext.Empty() {
+		return json.RawMessage(`{}`)
+	}
+	raw, err := json.Marshal(deliveryContext)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return raw
+}
+
+func decodeDeliveryContextJSON(raw []byte) events.DeliveryContext {
+	if len(raw) == 0 {
+		return events.DeliveryContext{}
+	}
+	var deliveryContext events.DeliveryContext
+	if err := json.Unmarshal(raw, &deliveryContext); err != nil {
+		return events.DeliveryContext{}
+	}
+	return deliveryContext.Normalized()
 }
 
 func deliveryRouteReasonCode(route events.DeliveryRoute) string {

@@ -166,8 +166,10 @@ func platformTableOrder(name string) int {
 		return 5
 	case "events":
 		return 10
-	case "activity_attempts":
+	case "reply_contexts":
 		return 11
+	case "activity_attempts":
+		return 12
 	case "run_fork_selected_contract_bindings":
 		return 15
 	case "run_fork_selected_contract_executions":

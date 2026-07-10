@@ -238,6 +238,20 @@ func SemanticScope(instancePath string) string {
 	return instancePath
 }
 
+func SemanticScopeFromFlowInstanceRef(flowInstance string) string {
+	flowInstance = normalizeRef(flowInstance)
+	if flowInstance == "" {
+		return ""
+	}
+	if scopeKey := SemanticScopeFromInstancePath(flowInstance); scopeKey != "" {
+		return scopeKey
+	}
+	if _, err := uuid.Parse(flowInstance); err == nil {
+		return ""
+	}
+	return flowInstance
+}
+
 func Stored(
 	source semanticview.Source,
 	workflowName,
