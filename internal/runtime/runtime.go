@@ -824,6 +824,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.cleanupStartFailure()
 	}()
 
+	if rt.Manager != nil {
+		if err := rt.Manager.ReconcileDirectiveOperations(ctx); err != nil {
+			return fmt.Errorf("required directive operation reconciliation failed: %w", err)
+		}
+	}
+
 	skipPersistentStartupRecovery := rt.Options.DisablePersistentStartupRecovery
 	startupRecoverySnapshot := startupRecoverySnapshot{
 		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery,

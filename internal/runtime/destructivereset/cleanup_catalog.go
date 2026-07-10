@@ -4,14 +4,15 @@ const (
 	CleanupTableKindPlatform  = "platform_table"
 	CleanupTableKindGenerated = "generated_table_class"
 
-	CleanupDeleteAll            = "delete_all"
-	CleanupDeleteByRunID        = "delete_by_run_id"
-	CleanupDeleteByEventJoin    = "delete_by_event_join"
-	CleanupDeleteByRunLineage   = "delete_by_run_lineage"
-	CleanupDeleteMixedRowPolicy = "delete_mixed_row_policy"
-	CleanupPreserve             = "preserve"
-	CleanupSplitPreserve        = "split_preserve"
-	CleanupRequestScopedBundles = "request_scoped_bundle_catalog"
+	CleanupDeleteAll                = "delete_all"
+	CleanupDeleteByRunID            = "delete_by_run_id"
+	CleanupDeleteByEventJoin        = "delete_by_event_join"
+	CleanupDeleteByRunLineage       = "delete_by_run_lineage"
+	CleanupDeleteMixedRowPolicy     = "delete_mixed_row_policy"
+	CleanupRetainDirectiveAuthority = "retain_directive_authority"
+	CleanupPreserve                 = "preserve"
+	CleanupSplitPreserve            = "split_preserve"
+	CleanupRequestScopedBundles     = "request_scoped_bundle_catalog"
 )
 
 type CleanupPolicy struct {
@@ -29,7 +30,7 @@ func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 		{Table: "run_fork_selected_contract_route_recoveries", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id|fork_event_id -> events.run_id", DeleteOrderGroup: 2},
 		{Table: "run_fork_selected_contract_bindings", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunLineage, PredicateOwner: "fork_run_id|source_run_id|fork_event_id -> events.run_id", DeleteOrderGroup: 2},
 		{Table: "activity_attempts", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "activity_attempts.run_id", DeleteOrderGroup: 3},
-		{Table: "agent_directive_operations", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "agent_directive_operations.resolved_run_id", DeleteOrderGroup: 3},
+		{Table: "agent_directive_operations", TableKind: CleanupTableKindPlatform, Classification: CleanupRetainDirectiveAuthority, PredicateOwner: "agent_directive_operations.resolved_run_id plus operation state/expires_at", PreservationProof: "runtime.nuke fails closed while nonterminal, indeterminate, or unexpired terminal directive authority exists"},
 		{Table: "agent_turns", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "agent_turns.run_id", DeleteOrderGroup: 3},
 		{Table: "agent_conversation_audits", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteMixedRowPolicy, PredicateOwner: "agent_conversation_audits.run_id", DeleteOrderGroup: 3},
 		{Table: "agent_sessions", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "agent_sessions.run_id", DeleteOrderGroup: 3},

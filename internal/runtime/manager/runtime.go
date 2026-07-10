@@ -36,10 +36,40 @@ type bundleFingerprintContextOwner interface {
 const DefaultShutdownGrace = 30 * time.Second
 
 const (
-	directiveExecutionLease     = 2 * time.Minute
-	directiveExecutionHeartbeat = 30 * time.Second
-	directiveOperationTTL       = 24 * time.Hour
+	directiveExecutionLease           = 2 * time.Minute
+	directiveExecutionHeartbeat       = 30 * time.Second
+	directiveOperationTTL             = 24 * time.Hour
+	directiveHeartbeatRenewalTimeout  = 5 * time.Second
+	directiveHeartbeatShutdownTimeout = 5 * time.Second
 )
+
+type directiveHeartbeatConfig struct {
+	interval        time.Duration
+	renewalTimeout  time.Duration
+	shutdownTimeout time.Duration
+}
+
+func defaultDirectiveHeartbeatConfig() directiveHeartbeatConfig {
+	return directiveHeartbeatConfig{
+		interval:        directiveExecutionHeartbeat,
+		renewalTimeout:  directiveHeartbeatRenewalTimeout,
+		shutdownTimeout: directiveHeartbeatShutdownTimeout,
+	}
+}
+
+func (c directiveHeartbeatConfig) normalized() directiveHeartbeatConfig {
+	defaults := defaultDirectiveHeartbeatConfig()
+	if c.interval <= 0 {
+		c.interval = defaults.interval
+	}
+	if c.renewalTimeout <= 0 {
+		c.renewalTimeout = defaults.renewalTimeout
+	}
+	if c.shutdownTimeout <= 0 {
+		c.shutdownTimeout = defaults.shutdownTimeout
+	}
+	return c
+}
 
 var errRuntimeShuttingDown = errors.New("runtime shutting down")
 
@@ -544,9 +574,10 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	}
 	directiveCtx := runtimecorrelation.WithRunID(ctx, strings.TrimSpace(directiveEvent.RunID()))
 	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
+	heartbeatConfig := am.directiveHeartbeat.normalized()
 	heartbeatCtx, stopHeartbeat := context.WithCancel(context.Background())
 	heartbeatDone := make(chan struct{})
-	go runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID)
+	go runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID, heartbeatConfig)
 	response, executionErr := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
 		Directive:       admitted.Directive,
 		Event:           directiveEvent,
@@ -555,7 +586,17 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 		Source:          admitted.Source,
 	})
 	stopHeartbeat()
-	<-heartbeatDone
+	heartbeatShutdown := time.NewTimer(heartbeatConfig.shutdownTimeout)
+	select {
+	case <-heartbeatDone:
+		if !heartbeatShutdown.Stop() {
+			select {
+			case <-heartbeatShutdown.C:
+			default:
+			}
+		}
+	case <-heartbeatShutdown.C:
+	}
 	if executionErr != nil {
 		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, "board_step_failed", executionErr.Error(), nil, time.Now().UTC(), directiveOperationTTL)
 		if persistErr != nil {
@@ -594,16 +635,19 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 	return directiveResultFromOperation(finalized)
 }
 
-func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, store runtimeagentcontrol.DirectiveOperationStore, operationID, ownerID string) {
+func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, store runtimeagentcontrol.DirectiveOperationStore, operationID, ownerID string, config directiveHeartbeatConfig) {
 	defer close(done)
-	ticker := time.NewTicker(directiveExecutionHeartbeat)
+	config = config.normalized()
+	ticker := time.NewTicker(config.interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			_ = store.RenewDirectiveExecutionLease(context.Background(), operationID, ownerID, now.UTC(), directiveExecutionLease)
+			renewCtx, cancel := context.WithTimeout(ctx, config.renewalTimeout)
+			_ = store.RenewDirectiveExecutionLease(renewCtx, operationID, ownerID, now.UTC(), directiveExecutionLease)
+			cancel()
 		}
 	}
 }
@@ -758,6 +802,20 @@ func (am *AgentManager) RecoverWithStartupReplayDiagnostics(ctx context.Context)
 	return am.recover(ctx, true)
 }
 
+func (am *AgentManager) ReconcileDirectiveOperations(ctx context.Context) error {
+	if am == nil || am.bus == nil || am.bus.Store() == nil {
+		return nil
+	}
+	operationStore, ok := am.bus.Store().(runtimeagentcontrol.DirectiveOperationStore)
+	if !ok || operationStore == nil {
+		return nil
+	}
+	if _, err := operationStore.ReconcileDirectiveOperations(ctx, time.Now().UTC(), directiveOperationTTL); err != nil {
+		return fmt.Errorf("reconcile directive operations: %w", err)
+	}
+	return nil
+}
+
 func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bool) (StartupReplaySummary, error) {
 	summary := StartupReplaySummary{}
 	if am.store == nil {
@@ -785,12 +843,6 @@ func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bo
 	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
 		return summary, err
 	}
-	if operationStore, ok := am.bus.Store().(runtimeagentcontrol.DirectiveOperationStore); ok && operationStore != nil {
-		if _, err := operationStore.ReconcileDirectiveOperations(ctx, time.Now().UTC(), directiveOperationTTL); err != nil {
-			return summary, fmt.Errorf("reconcile directive operations: %w", err)
-		}
-	}
-
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {
 		return summary, fmt.Errorf("recover pipeline receipts: %w", err)
 	}

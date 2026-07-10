@@ -9272,7 +9272,9 @@ agent_directive_operation_model:
     - inference of success from event, session, provider, tool, or log evidence
   execution_lease: >
     Admission uses a compare-and-set transition and a bounded owner lease. The manager
-    renews the lease while BoardStep is active. No database transaction, advisory lock,
+    renews the lease while BoardStep is active. Each renewal has a bounded context derived
+    from the heartbeat lifecycle, and post-BoardStep result persistence does not wait
+    indefinitely for a stalled renewal to return. No database transaction, advisory lock,
     or process-local lock is held across BoardStep. An expired executing lease becomes
     indeterminate and is never returned to an executable state.
   finalization: >
@@ -9293,16 +9295,20 @@ agent_directive_operation_model:
       that operation only; no cross-call exactly-once claim is made and no internal retry
       may execute BoardStep again after an uncertain outcome.
   recovery_order: >
-    Reconcile directive operations before public directive admission and before generic
-    missing-pipeline-receipt replay. Finalize executed rows without BoardStep, repair missing
-    keyed success projections, terminalize expired executing rows as indeterminate, and
-    terminalize abandoned keyless prepared rows as failed/not-admitted. Keyed prepared rows
-    wait for a same-key caller and are not executed by startup recovery. Generic pipeline
-    recovery excludes operation-owned directive events.
+    Every selected runtime context reconciles directive operations before public directive
+    admission, regardless of runtime.recovery_on_startup or unscoped persistent-recovery
+    policy, and before generic missing-pipeline-receipt replay. Failure blocks that context
+    from starting. Finalize executed rows without BoardStep, repair missing keyed success
+    projections, terminalize expired executing rows as indeterminate, and terminalize
+    abandoned keyless prepared rows as failed/not-admitted. Keyed prepared rows wait for a
+    same-key caller and are not executed by startup recovery. Generic pipeline recovery
+    excludes operation-owned directive events.
   terminal_retention: >
     succeeded and failed rows may be deleted only after their replay TTL. Indeterminate and
-    nonterminal rows are never silently TTL-deleted. Expired terminal deletion releases the
-    keyed identity for a future request.
+    nonterminal rows are never silently TTL-deleted. Destructive reset is not an exception:
+    it fails closed while retained directive authority exists for a planned run and may
+    remove terminal rows only after expiry. Expired terminal deletion releases the keyed
+    identity for a future request.
   backend_parity: >
     Postgres and SQLite expose identical transitions, compare-and-set admission, errors,
     response projection, TTL, receipt behavior, and recovery. SQLite uses the canonical
@@ -9320,6 +9326,7 @@ platform_tables:
     prerequisites:
       - destructive reset coordinator plan/result/lock/idempotency owner has accepted the operation
       - destructive reset quiescence has terminalized active runs and retryable deliveries for the same operation envelope
+      - expired succeeded/failed agent directive operations for the cleanup run set have been removed; any remaining directive operation authority blocks cleanup
     invariants:
       - No production cleanup owner may use all-table truncate, cascading bulk truncation, table name heuristics, entity_id-only predicates, or flow_instance-only predicates.
       - Every platform_tables.tables entry must have exactly one destructive-reset cleanup classification in the typed cleanup catalog.
@@ -9327,6 +9334,7 @@ platform_tables:
       - Before deleting planned run-scoped rows, apply must sever nullable preserved/out-of-scope references into the cleanup set; current severed references are agent_sessions.successor_session_id, runs.forked_from_run_id/forked_from_event_id, runtime_ingress_state.transition_event_id, entity_mutations.caused_by_event, timers.source_timer_id, and mailbox.reply_context_id.
       - Fork-lineage cleanup must delete fork replay and selected-contract rows by fork/source run_id and by linked cleanup-owned event/delivery references before deleting event_deliveries or events; preserved fork/source run IDs are not sufficient proof that the row is out of scope.
       - Runtime-owned persisted facts that describe running or historical execution must carry an exact run_id, event lineage, or fork/source run lineage before destructive reset may delete them.
+      - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
       - Generated node-state tables and legacy/future product optimization tables remain split-preserved until a separate
         owner gives them exact run-scoped identity. Normal runtime boot does not create generated typed entity tables.
       - Schema, auth/idempotency-like, operator/system, product config, topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
@@ -9344,7 +9352,6 @@ platform_tables:
         - run_fork_selected_contract_bindings
       delete_by_run_id:
         - activity_attempts
-        - agent_directive_operations
         - reply_contexts
         - agent_turns
         - agent_sessions
@@ -9352,6 +9359,8 @@ platform_tables:
         - entity_state
         - run_control_state
         - events
+      retain_directive_authority:
+        - agent_directive_operations
       delete_mixed_row_policy:
         - event_deliveries
         - agent_conversation_audits

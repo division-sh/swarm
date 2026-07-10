@@ -91,6 +91,16 @@ func TestCleanupCatalogPolicyMapsRequestScopedBundles(t *testing.T) {
 	}
 }
 
+func TestCleanupCatalogRetainsDirectiveOperationAuthority(t *testing.T) {
+	entry, ok := CleanupCatalogByTable()["agent_directive_operations"]
+	if !ok {
+		t.Fatal("cleanup catalog missing agent_directive_operations")
+	}
+	if entry.Classification != CleanupRetainDirectiveAuthority || entry.DeleteOrderGroup != 0 || entry.PreservationProof == "" {
+		t.Fatalf("agent_directive_operations entry = %#v, want retained authority with proof", entry)
+	}
+}
+
 func loadPlatformTableNamesForCleanupCatalogTest(t *testing.T) map[string]struct{} {
 	t.Helper()
 	repo := cleanupCatalogTestRepoRoot(t)

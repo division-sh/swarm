@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -141,6 +143,114 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	if got := countRows(t, ctx, pg, "mailbox"); got != 1 {
 		t.Fatalf("mailbox after dry-run = %d, want preserved", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAuthority(t *testing.T) {
+	dsn, _, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	pg, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("NewPostgresStore: %v", err)
+	}
+	t.Cleanup(func() { _ = pg.DB.Close() })
+	ctx := context.Background()
+	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
+	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
+	request := destructiveResetDirectiveReservation(t, seed.RunA, "reset-active", "reset-active-hash", now.Add(-2*time.Minute))
+	reserved, err := pg.ReserveDirectiveOperation(ctx, request)
+	if err != nil {
+		t.Fatalf("ReserveDirectiveOperation: %v", err)
+	}
+	if _, err := pg.AdmitDirectiveExecution(ctx, reserved.Operation.OperationID, "reset-active-owner", now.Add(-time.Minute), time.Hour); err != nil {
+		t.Fatalf("AdmitDirectiveExecution: %v", err)
+	}
+
+	_, err = pg.ApplyDestructiveResetCleanup(ctx, destructiveResetCleanupRequest(seed.RunA, seed.RunB, now))
+	if !errors.Is(err, destructivereset.ErrInvalidRequest) || !strings.Contains(err.Error(), "retained agent directive authority") || !strings.Contains(err.Error(), "state=executing") {
+		t.Fatalf("ApplyDestructiveResetCleanup error = %v, want executing directive authority refusal", err)
+	}
+	persisted, ok, err := pg.LoadDirectiveOperation(ctx, reserved.Operation.OperationID)
+	if err != nil || !ok || persisted.State != runtimeagentcontrol.DirectiveOperationExecuting {
+		t.Fatalf("operation after refused cleanup = %#v ok=%v err=%v", persisted, ok, err)
+	}
+	replayRequest := destructiveResetDirectiveReservation(t, seed.RunA, "reset-active", "reset-active-hash", now)
+	replay, err := pg.ReserveDirectiveOperation(ctx, replayRequest)
+	if err != nil || replay.Created || replay.Operation.OperationID != reserved.Operation.OperationID {
+		t.Fatalf("same-key reservation after refused cleanup = %#v err=%v", replay, err)
+	}
+	if got := countRows(t, ctx, pg, "runs"); got != 2 {
+		t.Fatalf("runs after refused cleanup = %d, want 2", got)
+	}
+}
+
+func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuthorityUntilExpiry(t *testing.T) {
+	for _, terminalState := range []runtimeagentcontrol.DirectiveOperationState{
+		runtimeagentcontrol.DirectiveOperationSucceeded,
+		runtimeagentcontrol.DirectiveOperationFailed,
+	} {
+		t.Run(string(terminalState), func(t *testing.T) {
+			dsn, _, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			pg, err := NewPostgresStore(dsn)
+			if err != nil {
+				t.Fatalf("NewPostgresStore: %v", err)
+			}
+			t.Cleanup(func() { _ = pg.DB.Close() })
+			ctx := context.Background()
+			seed := seedDestructiveResetCleanupRows(t, ctx, pg)
+			now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
+			request := destructiveResetDirectiveReservation(t, seed.RunA, "reset-terminal", "reset-terminal-hash", now)
+			reserved, err := pg.ReserveDirectiveOperation(ctx, request)
+			if err != nil {
+				t.Fatalf("ReserveDirectiveOperation: %v", err)
+			}
+			const ownerID = "reset-terminal-owner"
+			if _, err := pg.AdmitDirectiveExecution(ctx, reserved.Operation.OperationID, ownerID, now.Add(time.Second), time.Minute); err != nil {
+				t.Fatalf("AdmitDirectiveExecution: %v", err)
+			}
+			switch terminalState {
+			case runtimeagentcontrol.DirectiveOperationSucceeded:
+				if _, err := pg.RecordDirectiveExecuted(ctx, reserved.Operation.OperationID, ownerID, directiveOperationResponseForTest(reserved.Operation), now.Add(2*time.Second)); err != nil {
+					t.Fatalf("RecordDirectiveExecuted: %v", err)
+				}
+				if _, err := pg.FinalizeDirectiveSuccess(ctx, reserved.Operation.OperationID, now.Add(3*time.Second), 24*time.Hour); err != nil {
+					t.Fatalf("FinalizeDirectiveSuccess: %v", err)
+				}
+			case runtimeagentcontrol.DirectiveOperationFailed:
+				if _, err := pg.FinalizeDirectiveFailure(ctx, reserved.Operation.OperationID, ownerID, "board_step_failed", "injected failure", nil, now.Add(3*time.Second), 24*time.Hour); err != nil {
+					t.Fatalf("FinalizeDirectiveFailure: %v", err)
+				}
+			}
+
+			_, err = pg.ApplyDestructiveResetCleanup(ctx, destructiveResetCleanupRequest(seed.RunA, seed.RunB, now.Add(time.Hour)))
+			if !errors.Is(err, destructivereset.ErrInvalidRequest) || !strings.Contains(err.Error(), "state="+string(terminalState)) {
+				t.Fatalf("ApplyDestructiveResetCleanup before expiry error = %v", err)
+			}
+			replayRequest := destructiveResetDirectiveReservation(t, seed.RunA, "reset-terminal", "reset-terminal-hash", now.Add(time.Hour))
+			replay, err := pg.ReserveDirectiveOperation(ctx, replayRequest)
+			if err != nil || replay.Created || replay.Operation.OperationID != reserved.Operation.OperationID {
+				t.Fatalf("same-key replay before expiry = %#v err=%v", replay, err)
+			}
+			conflictRequest := destructiveResetDirectiveReservation(t, seed.RunA, "reset-terminal", "changed-hash", now.Add(time.Hour))
+			if _, err := pg.ReserveDirectiveOperation(ctx, conflictRequest); !errors.Is(err, runtimeagentcontrol.ErrDirectiveIdempotencyConflict) {
+				t.Fatalf("changed-hash replay before expiry error = %v, want conflict", err)
+			}
+
+			result, err := pg.ApplyDestructiveResetCleanup(ctx, destructiveResetCleanupRequest(seed.RunA, seed.RunB, now.Add(25*time.Hour)))
+			if err != nil {
+				t.Fatalf("ApplyDestructiveResetCleanup after expiry: %v", err)
+			}
+			if len(result.RunIDs) != 2 {
+				t.Fatalf("cleanup run IDs = %#v", result.RunIDs)
+			}
+			if _, ok, err := pg.LoadDirectiveOperation(ctx, reserved.Operation.OperationID); err != nil || ok {
+				t.Fatalf("expired operation after cleanup ok=%v err=%v", ok, err)
+			}
+			if got := countRows(t, ctx, pg, "runs"); got != 0 {
+				t.Fatalf("runs after post-expiry cleanup = %d, want 0", got)
+			}
+		})
 	}
 }
 
@@ -925,6 +1035,63 @@ func cleanupPlanForRunIDsIncludingBundles(runIDs ...string) destructivereset.Pla
 	plan := cleanupPlanForRunIDs(runIDs...)
 	plan.IncludeBundles = true
 	return plan
+}
+
+func destructiveResetCleanupRequest(runA, runB string, requestedAt time.Time) destructivereset.CleanupRequest {
+	return destructivereset.CleanupRequest{
+		ActorTokenID: "operator-token",
+		RequestedAt:  requestedAt,
+		Result: destructivereset.Result{
+			OperationName: destructivereset.DefaultOperationName,
+			PlannedAt:     requestedAt.Add(-time.Minute),
+			Plan:          cleanupPlanForRunIDs(runA, runB),
+		},
+		Quiescence: destructivereset.QuiescenceResult{
+			OperationName: destructivereset.DefaultOperationName,
+			AppliedAt:     requestedAt.Add(-30 * time.Second),
+		},
+	}
+}
+
+func destructiveResetDirectiveReservation(t *testing.T, runID, key, requestHash string, now time.Time) runtimeagentcontrol.ReserveDirectiveOperationRequest {
+	t.Helper()
+	operationID := uuid.NewString()
+	eventID := uuid.NewString()
+	request := runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:      "agent-a",
+		Directive:    "continue",
+		RunID:        runID,
+		Source:       runtimeagentcontrol.DirectiveSourceV1RPC,
+		OperatorID:   "operator-token",
+		ActorTokenID: "operator-token",
+	}
+	event, err := runtimeagentcontrol.NewDirectiveEvent(request, runtimeagentcontrol.RunTargetResolution{
+		RunID: runID,
+		Mode:  runtimeagentcontrol.RunResolutionSpecified,
+	}, operationID, eventID, now)
+	if err != nil {
+		t.Fatalf("NewDirectiveEvent: %v", err)
+	}
+	return runtimeagentcontrol.ReserveDirectiveOperationRequest{
+		Operation: runtimeagentcontrol.DirectiveOperation{
+			OperationID:      operationID,
+			Method:           runtimeagentcontrol.DirectiveOperationMethod,
+			ActorTokenID:     request.ActorTokenID,
+			IdempotencyKey:   key,
+			RequestHash:      requestHash,
+			AgentID:          request.AgentID,
+			Directive:        request.Directive,
+			RequestedRunID:   runID,
+			ResolvedRunID:    runID,
+			RunIDResolution:  runtimeagentcontrol.RunResolutionSpecified,
+			Source:           request.Source,
+			OperatorID:       request.OperatorID,
+			DirectiveEventID: eventID,
+			State:            runtimeagentcontrol.DirectiveOperationPrepared,
+		},
+		Event: event,
+		Now:   now,
+	}
 }
 
 func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *PostgresStore) destructiveResetCleanupSeed {
