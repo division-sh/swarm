@@ -464,13 +464,12 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 		Version:         strings.TrimSpace(profile.Pack.Version),
 		PlatformVersion: strings.TrimSpace(profile.Pack.PlatformVersion),
 		Type:            packs.TypeConnector,
-		ManifestHash:    sha256String(connectorBody),
 		Provenance:      packs.Provenance{Source: strings.TrimSpace(profile.Pack.Provenance)},
 		Capabilities:    DerivedCapabilities(manifest),
 		Requires:        DerivedRequires(manifest),
 		Tests:           append([]string(nil), profile.Pack.Tests...),
 	}
-	packBody, err := yaml.Marshal(envelope)
+	envelope, packBody, err := packs.StampEnvelope(envelope, connectorBody)
 	if err != nil {
 		return GeneratedCatalogArtifact{}, err
 	}

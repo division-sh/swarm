@@ -119,7 +119,7 @@ func runGitHubAppIssueCommentSurface(t *testing.T, backend slackManagedConnector
 	})
 	source := githubAppIssueCommentSource(t, fake.server.URL)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 
 	publishGitHubIssueComment(t, backend, bus, gateway, webhookPath, "gh-delivery-1", "1001", "please respond")
@@ -454,7 +454,7 @@ func assertGitHubAppIssueCommentManagedCredentialFailureBeforeDispatch(t *testin
 	beforeComments := fake.commentRequestCount()
 	source := githubAppIssueCommentSource(t, fake.server.URL)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 	publishGitHubIssueComment(t, backend, bus, gateway, webhookPath, deliveryID, installationID, label)
 	inboundEventID := loadGitHubAppIssueCommentInboundEventID(t, backend, deliveryID)

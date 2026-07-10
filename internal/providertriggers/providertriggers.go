@@ -5,18 +5,16 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
-	"embed"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,16 +22,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed packs/*/pack.yaml packs/*/trigger.yaml
-var builtinManifestFS embed.FS
-
 const (
-	triggerPackRoot = "packs"
-
 	cannotRunCodeBeforeAdmission = "run_code_before_admission"
 	cannotEmitUndeclaredEvents   = "emit_undeclared_events"
 	cannotTouchUnboundResources  = "touch_unbound_resources"
@@ -110,42 +102,8 @@ type LoadedPack struct {
 	Manifest     Manifest
 	ManifestBody []byte
 	Directory    string
+	SourcePath   string
 	Source       string
-}
-
-func DefaultRegistry() *Registry {
-	return defaultRegistry
-}
-
-var defaultRegistry = mustDefaultRegistry()
-
-func mustDefaultRegistry() *Registry {
-	sources, err := defaultManifestSources()
-	if err != nil {
-		panic(err)
-	}
-	registry, err := NewRegistryFromSources(sources...)
-	if err != nil {
-		panic(err)
-	}
-	return registry
-}
-
-func defaultManifestSources() ([]ManifestSource, error) {
-	runningVersion, err := platform.PlatformVersion()
-	if err != nil {
-		return nil, err
-	}
-	sources, _, err := defaultManifestSourcesAndPacks(runningVersion)
-	return sources, err
-}
-
-func defaultManifestSourcesAndPacks(runningVersion string) ([]ManifestSource, []LoadedPack, error) {
-	packSources, loadedPacks, err := loadPackSourcesFS(builtinManifestFS, triggerPackRoot, runningVersion, packs.ProvenancePlatform)
-	if err != nil {
-		return nil, nil, err
-	}
-	return packSources, loadedPacks, nil
 }
 
 func NewRegistry(manifests ...Manifest) (*Registry, error) {
@@ -177,40 +135,119 @@ func NewRegistryFromSources(sources ...ManifestSource) (*Registry, error) {
 	return r, nil
 }
 
+func LoadPlatformPackDirs(runningPlatformVersion string, dirs ...string) ([]LoadedPack, error) {
+	return loadPackDirs(runningPlatformVersion, packs.ProvenancePlatform, dirs...)
+}
+
 func LoadExternalPackDirs(runningPlatformVersion string, dirs ...string) ([]LoadedPack, error) {
+	return loadPackDirs(runningPlatformVersion, packs.ProvenanceExternal, dirs...)
+}
+
+func loadPackDirs(runningPlatformVersion, expectedProvenance string, dirs ...string) ([]LoadedPack, error) {
 	loaded := make([]LoadedPack, 0, len(dirs))
 	for _, dir := range dirs {
+		dir = filepath.Clean(strings.TrimSpace(dir))
+		if dir == "" || dir == "." {
+			return nil, fmt.Errorf("%s provider trigger pack directory is required", expectedProvenance)
+		}
 		pack, err := LoadPackFS(os.DirFS(dir), ".", runningPlatformVersion)
 		if err != nil {
-			return nil, fmt.Errorf("load external provider trigger pack %q: %w", dir, err)
+			return nil, fmt.Errorf("load %s provider trigger pack %q: %w", expectedProvenance, dir, err)
 		}
-		if pack.Envelope.Provenance.Source != packs.ProvenanceExternal {
-			return nil, fmt.Errorf("external provider trigger pack %q must use provenance source %q", dir, packs.ProvenanceExternal)
+		if pack.Envelope.Provenance.Source != expectedProvenance {
+			return nil, fmt.Errorf("%s provider trigger pack %q at %q declares provenance %q; expected %q", expectedProvenance, pack.Envelope.ID, dir, pack.Envelope.Provenance.Source, expectedProvenance)
 		}
-		pack.Source = "external:" + strings.TrimSpace(dir)
+		pack.Directory = dir
+		pack.SourcePath = dir
+		pack.Source = loadedPackSource(pack)
 		loaded = append(loaded, pack)
 	}
 	return loaded, nil
 }
 
-func NewRegistryWithExternalPackDirs(runningPlatformVersion string, dirs ...string) (*Registry, []LoadedPack, error) {
-	sources, platformPacks, err := defaultManifestSourcesAndPacks(runningPlatformVersion)
+func NewRegistryFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*Registry, []LoadedPack, error) {
+	if err := rejectDuplicatePackDirectories(platformDirs, externalDirs); err != nil {
+		return nil, nil, err
+	}
+	platformPacks, err := LoadPlatformPackDirs(runningPlatformVersion, platformDirs...)
 	if err != nil {
 		return nil, nil, err
 	}
-	externalPacks, err := LoadExternalPackDirs(runningPlatformVersion, dirs...)
-	if err != nil {
-		return nil, nil, err
-	}
-	sources = append(sources, SourcesFromLoadedPacks(externalPacks...)...)
-	registry, err := NewRegistryFromSources(sources...)
+	externalPacks, err := LoadExternalPackDirs(runningPlatformVersion, externalDirs...)
 	if err != nil {
 		return nil, nil, err
 	}
 	loaded := make([]LoadedPack, 0, len(platformPacks)+len(externalPacks))
 	loaded = append(loaded, platformPacks...)
 	loaded = append(loaded, externalPacks...)
+	if err := validateLoadedPackIdentities(loaded); err != nil {
+		return nil, nil, err
+	}
+	registry, err := NewRegistryFromSources(SourcesFromLoadedPacks(loaded...)...)
+	if err != nil {
+		return nil, nil, err
+	}
 	return registry, loaded, nil
+}
+
+func rejectDuplicatePackDirectories(platformDirs, externalDirs []string) error {
+	type source struct {
+		provenance string
+	}
+	seen := map[string]source{}
+	for _, group := range []struct {
+		provenance string
+		dirs       []string
+	}{
+		{provenance: packs.ProvenancePlatform, dirs: platformDirs},
+		{provenance: packs.ProvenanceExternal, dirs: externalDirs},
+	} {
+		for _, dir := range group.dirs {
+			cleaned := filepath.Clean(strings.TrimSpace(dir))
+			canonical, err := filepath.Abs(cleaned)
+			if err != nil {
+				canonical = cleaned
+			}
+			if resolved, err := filepath.EvalSymlinks(canonical); err == nil {
+				canonical = resolved
+			}
+			if previous, ok := seen[canonical]; ok {
+				return fmt.Errorf("duplicate provider trigger pack directory %q declared as provenance %q and %q", cleaned, previous.provenance, group.provenance)
+			}
+			seen[canonical] = source{provenance: group.provenance}
+		}
+	}
+	return nil
+}
+
+func validateLoadedPackIdentities(loaded []LoadedPack) error {
+	seen := map[string]LoadedPack{}
+	for _, pack := range loaded {
+		id := strings.TrimSpace(pack.Envelope.ID)
+		if previous, ok := seen[id]; ok {
+			if strings.TrimSpace(previous.Envelope.Version) == strings.TrimSpace(pack.Envelope.Version) && strings.TrimSpace(previous.Envelope.ManifestHash) != strings.TrimSpace(pack.Envelope.ManifestHash) {
+				return fmt.Errorf("competing immutable provider trigger pack identity (%q, %q) from %s and %s has manifest hashes %q and %q", id, pack.Envelope.Version, loadedPackSource(previous), loadedPackSource(pack), previous.Envelope.ManifestHash, pack.Envelope.ManifestHash)
+			}
+			return fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", id, loadedPackSource(previous), loadedPackSource(pack))
+		}
+		seen[id] = pack
+	}
+	return nil
+}
+
+func loadedPackSource(pack LoadedPack) string {
+	provenance := strings.TrimSpace(pack.Envelope.Provenance.Source)
+	if provenance == "" {
+		provenance = "unknown"
+	}
+	sourcePath := strings.TrimSpace(pack.SourcePath)
+	if sourcePath == "" {
+		sourcePath = strings.TrimSpace(pack.Directory)
+	}
+	if sourcePath == "" {
+		sourcePath = "unknown"
+	}
+	return fmt.Sprintf("provenance=%s path=%q pack=%q", provenance, sourcePath, strings.TrimSpace(pack.Envelope.ID))
 }
 
 func SourcesFromLoadedPacks(loaded ...LoadedPack) []ManifestSource {
@@ -218,7 +255,7 @@ func SourcesFromLoadedPacks(loaded ...LoadedPack) []ManifestSource {
 	for _, pack := range loaded {
 		sources = append(sources, ManifestSource{
 			Manifest: pack.Manifest,
-			Source:   firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source+":"+pack.Envelope.ID),
+			Source:   firstNonEmpty(pack.Source, loadedPackSource(pack)),
 		})
 	}
 	return sources
@@ -249,7 +286,8 @@ func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, err
 		Manifest:     manifest,
 		ManifestBody: loaded.ManifestBody,
 		Directory:    loaded.Directory,
-		Source:       loaded.Envelope.Provenance.Source + ":" + loaded.Envelope.ID,
+		SourcePath:   loaded.Directory,
+		Source:       fmt.Sprintf("provenance=%s path=%q pack=%q", loaded.Envelope.Provenance.Source, loaded.Directory, loaded.Envelope.ID),
 	}, nil
 }
 
@@ -288,38 +326,6 @@ func DerivedRequires(manifest Manifest) packs.Requires {
 
 func (p LoadedPack) CapabilitySurface(boundSecrets map[string]bool) packs.CapabilitySurface {
 	return p.Envelope.Surface(boundSecrets)
-}
-
-func loadPackSourcesFS(fsys fs.FS, root, runningPlatformVersion, requiredProvenance string) ([]ManifestSource, []LoadedPack, error) {
-	entries, err := fs.ReadDir(fsys, root)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, nil
-		}
-		return nil, nil, err
-	}
-	sources := make([]ManifestSource, 0, len(entries))
-	loaded := make([]LoadedPack, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := path.Join(root, entry.Name())
-		pack, err := LoadPackFS(fsys, dir, runningPlatformVersion)
-		if err != nil {
-			return nil, nil, fmt.Errorf("load provider trigger pack %q: %w", dir, err)
-		}
-		if requiredProvenance != "" && pack.Envelope.Provenance.Source != requiredProvenance {
-			return nil, nil, fmt.Errorf("provider trigger pack %q must use provenance source %q", pack.Envelope.ID, requiredProvenance)
-		}
-		pack.Source = pack.Envelope.Provenance.Source + ":" + pack.Envelope.ID
-		loaded = append(loaded, pack)
-		sources = append(sources, ManifestSource{
-			Manifest: pack.Manifest,
-			Source:   pack.Source,
-		})
-	}
-	return sources, loaded, nil
 }
 
 func (r *Registry) Accept(req Request) (Delivery, error) {

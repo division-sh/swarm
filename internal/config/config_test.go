@@ -89,7 +89,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	}
 }
 
-func TestValidateProviderTriggerExternalPackDirs(t *testing.T) {
+func TestValidateProviderTriggerPackDirs(t *testing.T) {
 	base := strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
@@ -103,11 +103,13 @@ func TestValidateProviderTriggerExternalPackDirs(t *testing.T) {
 		"    rotate_on_parse_failures: 3",
 	}, "\n")
 
-	t.Run("accepts declared external dirs", func(t *testing.T) {
+	t.Run("accepts declared platform and external dirs", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "swarm.yaml")
 		body := base + "\n" + strings.Join([]string{
 			"provider_triggers:",
 			"  packs:",
+			"    platform_dirs:",
+			"      - /opt/swarm/packs/github",
 			"    external_dirs:",
 			"      - ./packs/linear",
 		}, "\n") + "\n"
@@ -120,6 +122,9 @@ func TestValidateProviderTriggerExternalPackDirs(t *testing.T) {
 		}
 		if got := cfg.ProviderTriggers.Packs.ExternalDirs; len(got) != 1 || got[0] != "./packs/linear" {
 			t.Fatalf("external dirs = %#v, want declared relative path", got)
+		}
+		if got := cfg.ProviderTriggers.Packs.PlatformDirs; len(got) != 1 || got[0] != "/opt/swarm/packs/github" {
+			t.Fatalf("platform dirs = %#v, want declared platform path", got)
 		}
 	})
 
@@ -140,6 +145,23 @@ func TestValidateProviderTriggerExternalPackDirs(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects empty platform entries", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "swarm.yaml")
+		body := base + "\n" + strings.Join([]string{
+			"provider_triggers:",
+			"  packs:",
+			"    platform_dirs:",
+			"      - ''",
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), "provider_triggers.packs.platform_dirs[0] must be non-empty") {
+			t.Fatalf("Load error = %v, want empty platform dir rejection", err)
+		}
+	})
+
 	t.Run("rejects duplicates", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "swarm.yaml")
 		body := base + "\n" + strings.Join([]string{
@@ -155,6 +177,24 @@ func TestValidateProviderTriggerExternalPackDirs(t *testing.T) {
 		_, err := Load(path)
 		if err == nil || !strings.Contains(err.Error(), `provider_triggers.packs.external_dirs contains duplicate "./packs/linear"`) {
 			t.Fatalf("Load error = %v, want duplicate external dir rejection", err)
+		}
+	})
+
+	t.Run("rejects duplicate platform entries", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "swarm.yaml")
+		body := base + "\n" + strings.Join([]string{
+			"provider_triggers:",
+			"  packs:",
+			"    platform_dirs:",
+			"      - /opt/swarm/packs/github",
+			"      - /opt/swarm/packs/github",
+		}, "\n") + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(path)
+		if err == nil || !strings.Contains(err.Error(), `provider_triggers.packs.platform_dirs contains duplicate "/opt/swarm/packs/github"`) {
+			t.Fatalf("Load error = %v, want duplicate platform dir rejection", err)
 		}
 	})
 }

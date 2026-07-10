@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,9 +23,31 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 )
+
+func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
+	t.Helper()
+	root := filepath.Join("..", "..", "packs", "provider-triggers")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatalf("read provider trigger pack root: %v", err)
+	}
+	dirs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			dirs = append(dirs, filepath.Join(root, entry.Name()))
+		}
+	}
+	sort.Strings(dirs)
+	registry, _, err := providertriggers.NewRegistryFromPackDirs("0.7.0", dirs, nil)
+	if err != nil {
+		t.Fatalf("load provider trigger registry: %v", err)
+	}
+	return NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, registry, stores...)
+}
 
 type failingInboundEventStore struct{}
 
@@ -110,7 +134,7 @@ func TestInboundGateway_Returns503AndRollsBackMarkerWhenPublishFails(t *testing.
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &rollbackTrackingInboundStore{}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
@@ -133,7 +157,7 @@ func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &rollbackTrackingInboundStore{}
-	g := NewInboundGateway(bus, nil, func() bool { return true }, store)
+	g := newTestInboundGateway(t, bus, nil, func() bool { return true }, store)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
@@ -165,7 +189,7 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	}
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	store := &rollbackTrackingInboundStore{}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 	g.SetRuntimeIngress(controller)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
@@ -205,7 +229,7 @@ func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWe
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 	g.SetRuntimeIngress(controller)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
@@ -241,7 +265,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
@@ -293,7 +317,7 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
@@ -328,7 +352,7 @@ func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *tes
 		},
 		inserted: false,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
@@ -363,7 +387,7 @@ func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPubli
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"url_verification","challenge":"challenge-value","token":"deprecated-token"}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -401,7 +425,7 @@ func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPubl
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"url_verification","token":"deprecated-token"}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -432,7 +456,7 @@ func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testi
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -484,7 +508,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 				},
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 
 			body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/slack", strings.NewReader(string(body)))
@@ -519,7 +543,7 @@ func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *test
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, "1")
@@ -551,7 +575,7 @@ func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *tes
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"event_callback","token":"deprecated-token","event_id":"Ev123ABC456","event":{"type":"message.channels","text":"hello"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -620,7 +644,7 @@ func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCo
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message","text":"hello"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -673,7 +697,7 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"event_callback","event":{"type":"message"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -705,7 +729,7 @@ func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
 		},
 		inserted: false,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -750,7 +774,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"id":"evt_123","type":"invoice.paid","data":{"object":{"id":"in_123"}}}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
@@ -917,7 +941,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 				},
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(tc.body)))
 			tc.configure(req, tc.body)
@@ -951,7 +975,7 @@ func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
 		},
 		inserted: false,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"id":"evt_123","type":"invoice.paid"}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
@@ -985,7 +1009,7 @@ func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *tes
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
 	form := url.Values{
@@ -1112,7 +1136,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 				},
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 			req := newSignedTwilioRequest(tc.requestURL, "twilio-secret", tc.form)
 			tc.configure(req, tc.form, tc.requestURL)
 			rec := httptest.NewRecorder()
@@ -1145,7 +1169,7 @@ func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T)
 		},
 		inserted: false,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
 	form := url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}}
@@ -1178,7 +1202,7 @@ func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t 
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", "shopify-secret", body)
@@ -1291,7 +1315,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 				},
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/shopify", strings.NewReader(string(tc.body)))
 			req.Header.Set("X-Shopify-Webhook-Id", "webhook-123")
 			req.Header.Set("X-Shopify-Topic", "orders/create")
@@ -1326,7 +1350,7 @@ func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T
 		},
 		inserted: false,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", "shopify-secret", body)
@@ -1398,7 +1422,7 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 				},
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.secret, tc.body)
 			rec := httptest.NewRecorder()
@@ -1582,7 +1606,7 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 					},
 					inserted: true,
 				}
-				g := NewInboundGateway(bus, nil, nil, store)
+				g := newTestInboundGateway(t, bus, nil, nil, store)
 				body := tc.body
 				if len(body) == 0 {
 					body = providerCase.validBody
@@ -1640,7 +1664,7 @@ func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(
 				},
 				inserted: false,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.secret, tc.body)
 			rec := httptest.NewRecorder()
@@ -1686,7 +1710,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
@@ -1824,7 +1848,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 				target:   target,
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 
 			req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", tc.body)
 			tc.configure(req, tc.body)
@@ -1858,7 +1882,7 @@ func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.
 		},
 		inserted: false,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
@@ -1911,7 +1935,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTypeformOrIntercomSignatures(
 				},
 				inserted: true,
 			}
-			g := NewInboundGateway(bus, nil, nil, store)
+			g := newTestInboundGateway(t, bus, nil, nil, store)
 
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(tc.body)))
 			tc.configure(req, tc.body)
@@ -1945,7 +1969,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretTelegramSecretToken(t *testin
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"update_id":123456789}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
@@ -1978,7 +2002,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretShopifySignature(t *testing.T
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
@@ -2011,7 +2035,7 @@ func TestInboundGateway_RawFallbackDoesNotInterpretStripeSignature(t *testing.T)
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	body := []byte(`{"id":"evt_123","type":"invoice.paid"}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
@@ -2045,7 +2069,7 @@ func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T)
 		},
 		inserted: true,
 	}
-	g := NewInboundGateway(bus, nil, nil, store)
+	g := newTestInboundGateway(t, bus, nil, nil, store)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(strings.Repeat("a", inboundWebhookMaxBodyBytes+1)))
 	rec := httptest.NewRecorder()

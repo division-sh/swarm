@@ -119,7 +119,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	rt.Manager = am
 
 	inboundStore := &runtimeShutdownInboundStore{}
-	rt.InboundGateway = NewInboundGateway(bus, nil, rt.shutdownAdmissionClosed, inboundStore)
+	rt.InboundGateway = newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
 
 	if err := am.SpawnAgent(runtimeactors.AgentConfig{ID: agent.id}); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)

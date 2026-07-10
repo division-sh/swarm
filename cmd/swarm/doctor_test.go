@@ -152,6 +152,11 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 		if !localPreflightReportHasCode(report, want) {
 			t.Fatalf("report missing provider pack finding %q: %#v", want, report.Findings)
 		}
+		provider := strings.TrimPrefix(want, "provider_trigger_pack_")
+		if !localPreflightReportFindingContains(report, want, "provenance=platform") ||
+			!localPreflightReportFindingContains(report, want, filepath.Join("packs", "provider-triggers", provider)) {
+			t.Fatalf("provider pack %s missing filesystem source/provenance readback: %#v", provider, report.Findings)
+		}
 	}
 	if !localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CAN receive HTTPS route /webhooks/{entity}/github") ||
 		!localPreflightReportFindingContains(report, "provider_trigger_pack_github", "CANNOT emit_undeclared_events") ||
@@ -802,7 +807,7 @@ func TestRunServeRuntimeRejectsDeclaredProviderTriggerPackBeforeStoreSelection(t
 		"    rotate_on_parse_failures: 3",
 		"provider_triggers:",
 		"  packs:",
-		"    external_dirs:",
+		"    platform_dirs:",
 		"      - packs/missing-provider",
 	}, "\n")+"\n")
 
@@ -1033,6 +1038,10 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	if strings.TrimSpace(dockerBin) != "" {
 		workspace = append(workspace, fmt.Sprintf("  docker_bin: %q", dockerBin))
 	}
+	providerPacks := []string{"provider_triggers:", "  packs:", "    platform_dirs:"}
+	for _, dir := range testProviderTriggerPackDirs(t) {
+		providerPacks = append(providerPacks, fmt.Sprintf("      - %q", dir))
+	}
 	writeRuntimeConfigText(t, path, strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
@@ -1047,6 +1056,7 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 		"    command: claude",
 		"    timeout: 2s",
 		"    output_format: json",
+		strings.Join(providerPacks, "\n"),
 	}, "\n")+"\n")
 	return path
 }

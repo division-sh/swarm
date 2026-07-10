@@ -63,17 +63,13 @@ type InboundGateway struct {
 	providers               *providertriggers.Registry
 }
 
-func NewInboundGateway(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, stores ...InboundPersistence) *InboundGateway {
-	return NewInboundGatewayWithProviderRegistry(bus, logger, shutdownAdmissionClosed, nil, stores...)
-}
-
 func NewInboundGatewayWithProviderRegistry(bus *runtimebus.EventBus, logger *RuntimeLogger, shutdownAdmissionClosed func() bool, providers *providertriggers.Registry, stores ...InboundPersistence) *InboundGateway {
 	var store InboundPersistence
 	if len(stores) > 0 {
 		store = stores[0]
 	}
 	if providers == nil {
-		providers = providertriggers.DefaultRegistry()
+		panic("provider trigger registry is required")
 	}
 	g := &InboundGateway{
 		mux:                     http.NewServeMux(),

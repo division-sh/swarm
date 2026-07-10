@@ -114,7 +114,7 @@ func runGitHubAppIssueWorkflowSurface(t *testing.T, backend slackManagedConnecto
 	})
 	source := githubAppIssueWorkflowSource(t, fake.server.URL)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 
 	publishGitHubIssueOpenedWithSignature(t, backend, bus, gateway, webhookPath, "gh-issue-bad-signature", "1001", 42, "Bad signature issue", "sha256=bad", http.StatusUnauthorized)
@@ -636,7 +636,7 @@ func assertGitHubAppIssueWorkflowManagedCredentialFailureBeforeDispatch(t *testi
 	beforeLabels := fake.labelRequestCount()
 	source := githubAppIssueWorkflowSource(t, fake.server.URL)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/github", backend.entityID)
 	publishGitHubIssueComment(t, backend, bus, gateway, webhookPath, deliveryID, installationID, label)
 	inboundEventID := loadGitHubInboundEventID(t, backend, "inbound.github.issue_comment", deliveryID)

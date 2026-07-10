@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -97,7 +96,7 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	managedStore := runtimemanagedcredentials.NewMemoryStore(microsoftGraphClientCredentialsRecord(fake.server.URL, "expired-token", time.Now().Add(-time.Hour)))
 	source := microsoftGraphConnectorSource(t, fake.server.URL)
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, "323456789", "send first mail")
@@ -450,7 +449,7 @@ func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, ba
 	graphRequestsBefore := fake.providerHTTPRequestCount()
 	source := microsoftGraphConnectorSource(t, fake.server.URL)
 	bus, _ := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
-	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, backend.inboundStore)
+	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
 	webhookPath := fmt.Sprintf("/webhooks/%s/telegram", backend.entityID)
 	publishTelegramMessageToSlack(t, backend, bus, gateway, webhookPath, updateID, label)
 	inboundEventID := loadSlackManagedConnectorInboundEventID(t, backend, updateID)

@@ -704,6 +704,15 @@ func TestRuntimeDepsValidateOwnsRequiredBootInputs(t *testing.T) {
 			},
 			errContains: "runtime store boundary is not construction-ready: sqlite selected runtime persistence remains blocked",
 		},
+		{
+			name: "inbound store without admitted provider registry",
+			deps: RuntimeDeps{
+				Config:  &config.Config{},
+				Stores:  Stores{InboundStore: &recordingInboundStore{}},
+				Options: RuntimeOptions{WorkflowModule: validModule},
+			},
+			errContains: "provider trigger registry is required when inbound store is configured",
+		},
 	}
 
 	for _, tc := range cases {

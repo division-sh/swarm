@@ -124,10 +124,13 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 
 	providerTriggers := mustMappingValue(t, sections, "provider_triggers")
 	providerTriggerKeys := mustMappingValue(t, providerTriggers, "keys")
+	if got := scalarValue(mustMappingValue(t, providerTriggerKeys, "packs.platform_dirs")); got != "elevated" {
+		t.Fatalf("provider_triggers.packs.platform_dirs classification = %q", got)
+	}
 	if got := scalarValue(mustMappingValue(t, providerTriggerKeys, "packs.external_dirs")); got != "project_contained_path_or_elevated" {
 		t.Fatalf("provider_triggers.packs.external_dirs classification = %q", got)
 	}
-	for _, want := range []string{"Project config", "project-contained relative directories", "Absolute paths"} {
+	for _, want := range []string{"Project config cannot declare", "project-contained relative directories", "declared that key"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, providerTriggers, "path_rule")), want) {
 			t.Fatalf("provider trigger path rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, providerTriggers, "path_rule")))
 		}
@@ -150,6 +153,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"runtime_config_loader":                 "consumed_by_unified_owner_first_slice_implemented",
 		"executable_adjacent_config_yaml":       "invalid_ambient_reader_removed_by_1858",
 		"env_guard_delegated_env_sources":       "consumed_by_unified_owner_first_slice_implemented",
+		"provider_triggers_packs_platform_dirs": "consumed_by_unified_owner",
 		"provider_triggers_packs_external_dirs": "consumed_by_unified_owner",
 		"sharding_inline_extension":             "split_unsupported_retired",
 		"llm_retired_model_selection_keys":      "split_unsupported_retired_use_llm.models",

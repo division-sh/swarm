@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -68,7 +67,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("Pause: %v", err)
 	}
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g := newTestInboundGateway(t, bus, nil, nil, pg)
 	g.SetRuntimeIngress(controller)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
@@ -172,7 +171,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		t.Fatalf("Pause: %v", err)
 	}
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g := newTestInboundGateway(t, bus, nil, nil, pg)
 	g.SetRuntimeIngress(controller)
 
 	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message","text":"hello"}}`)
@@ -276,7 +275,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		t.Fatalf("Pause: %v", err)
 	}
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g := newTestInboundGateway(t, bus, nil, nil, pg)
 	g.SetRuntimeIngress(controller)
 
 	body := []byte(`{"id":"evt_123","type":"invoice.paid","data":{"object":{"id":"in_123"}}}`)
@@ -367,7 +366,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
 	body := []byte(`{"id":"evt_456","type":"customer.created","data":{"object":{"id":"cus_123"}}}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
@@ -431,7 +430,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
 	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
 	form := url.Values{
@@ -496,7 +495,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
 	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
 	form := url.Values{
@@ -564,7 +563,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
 	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", webhookSecret, body)
@@ -625,7 +624,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
 	body := []byte(`{"id":456,"line_items":[{"sku":"xyz"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", webhookSecret, body)
@@ -689,7 +688,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+	g := newTestInboundGateway(t, bus, nil, nil, pg)
 
 	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
@@ -751,7 +750,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	ch := bus.Subscribe(agentID, events.EventType(providerEventName))
 	defer bus.Unsubscribe(agentID)
 
-	g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+	g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
 	body := []byte(`{"update_id":987654321,"message":{"message_id":8,"chat":{"id":42},"text":"hello sqlite"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
@@ -849,7 +848,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 			ch := bus.Subscribe(tc.agentID, events.EventType(tc.providerEventName))
 			defer bus.Unsubscribe(tc.agentID)
 
-			g := runtimepkg.NewInboundGateway(bus, nil, nil, pg)
+			g := newTestInboundGateway(t, bus, nil, nil, pg)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
 			req = req.WithContext(ctx)
@@ -942,7 +941,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 			ch := bus.Subscribe(tc.agentID, events.EventType(tc.providerEventName))
 			defer bus.Unsubscribe(tc.agentID)
 
-			g := runtimepkg.NewInboundGateway(bus, nil, nil, sqliteStore)
+			g := newTestInboundGateway(t, bus, nil, nil, sqliteStore)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
 			req = req.WithContext(ctx)
