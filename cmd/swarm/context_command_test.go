@@ -12,7 +12,9 @@ import (
 func TestContextListCommandUsesSwarmDirRegistry(t *testing.T) {
 	swarmDir := t.TempDir()
 	registry := newLocalContextRegistry(swarmDir)
-	if err := registry.WriteDescriptor(testLocalContextDescriptor("local", "runtime-a")); err != nil {
+	desc := testLocalContextDescriptor("local", "runtime-a")
+	desc.APIServer = "http://127.0.0.1:0/local"
+	if err := registry.WriteDescriptor(desc); err != nil {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer

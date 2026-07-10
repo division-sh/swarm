@@ -7001,7 +7001,7 @@ tool_model:
           execution_proof: internal/runtime/pipeline TestPipelineActivityRequestNonIdempotentFailureDoesNotRetry
         expose_credential_values:
           enforced_by: internal/runtime/pipeline.executePreparedActivityHTTPTool
-          execution_proof: internal/runtime/pipeline TestActivityHTTPResponseSuccessPolicyParityCases/secret_redaction
+          execution_proof: internal/runtime/pipeline TestActivityCredentialRedactionGuarantee
       rule: >
         A known guarantee without exactly one registry enforcement owner fails closed. Human output renders guarantees as
         `cannot <verb> - enforced by <id>`; it does not present CANNOT as a product limitation.

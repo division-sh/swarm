@@ -113,7 +113,10 @@ func TestProviderGuaranteeRegistryMatchesSpecAndNamesLiveProofs(t *testing.T) {
 		if len(proof) != 2 {
 			t.Fatalf("guarantee %s execution_proof = %q, want '<package> <test>'", code, row.ExecutionProof)
 		}
-		assertGoTestFunctionExists(t, proof[0], strings.Split(proof[1], "/")[0])
+		if strings.Contains(proof[1], "/") {
+			t.Fatalf("guarantee %s execution_proof = %q, want a dedicated top-level Go test", code, row.ExecutionProof)
+		}
+		assertGoTestFunctionExists(t, proof[0], proof[1])
 	}
 	if got := packs.GuaranteeEnforcementOwners(); !reflect.DeepEqual(got, owners) {
 		t.Fatalf("guarantee registry differs from authoritative platform spec:\ngot:  %#v\nwant: %#v", got, owners)

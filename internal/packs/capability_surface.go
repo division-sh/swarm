@@ -31,6 +31,17 @@ const (
 )
 
 const (
+	RequirementStatusBound             = "BOUND"
+	RequirementStatusUnbound           = "UNBOUND"
+	RequirementStatusConnected         = "CONNECTED"
+	RequirementStatusUnconnected       = "UNCONNECTED"
+	RequirementStatusPendingConsent    = "PENDING_CONSENT"
+	RequirementStatusRefreshFailed     = "REFRESH_FAILED"
+	RequirementStatusScopeInsufficient = "SCOPE_INSUFFICIENT"
+	RequirementStatusNotImported       = "NOT_IMPORTED"
+)
+
+const (
 	CapabilityReceiveHTTPSRoute    = "receive_https_route"
 	CapabilityVerifySecret         = "verify_secret"
 	CapabilityEmitEvent            = "emit_event"
@@ -110,6 +121,49 @@ var guaranteeRegistry = map[string]struct {
 	GuaranteeActivityJournal:        {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
 	GuaranteeNoAutomaticWriteRetry:  {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
 	GuaranteeCredentialRedaction:    {"internal/runtime/pipeline.executePreparedActivityHTTPTool"},
+}
+
+var connectorRequirementStatuses = map[string]map[string]bool{
+	RequirementSecret: {
+		RequirementStatusBound: true, RequirementStatusUnbound: true,
+	},
+	RequirementManagedCredential: {
+		RequirementStatusConnected: true, RequirementStatusUnconnected: true,
+		RequirementStatusPendingConsent: true, RequirementStatusRefreshFailed: true,
+		RequirementStatusScopeInsufficient: true,
+	},
+	RequirementImport: {
+		RequirementStatusNotImported: true,
+	},
+}
+
+func ProviderHumanCodeValues() map[userfacing.HumanCodeFamily][]string {
+	out := map[userfacing.HumanCodeFamily][]string{
+		userfacing.HumanCodeProviderSubjectKind: {
+			string(SubjectProviderTrigger), string(SubjectProviderConnector),
+		},
+		userfacing.HumanCodeProviderSubjectStatus: {
+			string(StatusReady), string(StatusNotReady), string(StatusAvailable),
+		},
+		userfacing.HumanCodeProviderCapability: {
+			CapabilityReceiveHTTPSRoute, CapabilityVerifySecret, CapabilityEmitEvent,
+			CapabilityPersistDedupeMarkers, CapabilityCallProviderAction,
+			CapabilityLowerThroughActivity, CapabilityJournalAttempts,
+		},
+	}
+	for code := range guaranteeRegistry {
+		out[userfacing.HumanCodeProviderGuarantee] = append(out[userfacing.HumanCodeProviderGuarantee], code)
+	}
+	for _, statuses := range connectorRequirementStatuses {
+		for status := range statuses {
+			out[userfacing.HumanCodeProviderRequirementStatus] = append(out[userfacing.HumanCodeProviderRequirementStatus], status)
+		}
+	}
+	out[userfacing.HumanCodeProviderRequirementStatus] = append(out[userfacing.HumanCodeProviderRequirementStatus], "UNKNOWN")
+	for family := range out {
+		sort.Strings(out[family])
+	}
+	return out
 }
 
 func GuaranteeEnforcementOwners() map[string]string {
@@ -319,16 +373,8 @@ func validateConnectorRequirement(subjectID string, requirement Requirement) err
 		return fmt.Errorf("provider connector subject %q requirement %q must be evaluated", subjectID, requirement.Name)
 	}
 	allowed := false
-	switch requirement.Kind {
-	case RequirementSecret:
-		allowed = requirement.Status == "BOUND" || requirement.Status == "UNBOUND"
-	case RequirementManagedCredential:
-		switch requirement.Status {
-		case "CONNECTED", "UNCONNECTED", "PENDING_CONSENT", "REFRESH_FAILED", "SCOPE_INSUFFICIENT":
-			allowed = true
-		}
-	case RequirementImport:
-		allowed = requirement.Status == "NOT_IMPORTED"
+	if statuses, ok := connectorRequirementStatuses[requirement.Kind]; ok {
+		allowed = statuses[requirement.Status]
 	}
 	if !allowed {
 		return fmt.Errorf("provider connector subject %q requirement %q has invalid %s status %q", subjectID, requirement.Name, requirement.Kind, requirement.Status)

@@ -131,6 +131,37 @@ func TestActivityHTTPResponseSuccessPolicyParityCases(t *testing.T) {
 	}
 }
 
+func TestActivityCredentialRedactionGuarantee(t *testing.T) {
+	const secret = "provider-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"state":"provider-secret"}`)
+	}))
+	defer server.Close()
+
+	policy := runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.state", Equals: "accepted"}
+	_, err := executePreparedActivityHTTPTool(context.Background(), preparedActivityHTTPTool{
+		toolName: "redaction_guarantee_probe",
+		method:   http.MethodPost,
+		url:      server.URL,
+		timeout:  time.Second,
+		client:   server.Client(),
+		secrets:  []string{secret},
+		success:  &policy,
+	})
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok || failure.Failure.Detail.Code != "provider_response_rejected" {
+		t.Fatalf("failure = %#v, want redacted provider_response_rejected", failure)
+	}
+	raw, marshalErr := runtimefailures.MarshalEnvelope(failure.Failure)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if strings.Contains(string(raw), secret) || strings.Contains(err.Error(), secret) {
+		t.Fatalf("credential value leaked through failure: envelope=%s error=%v", raw, err)
+	}
+}
+
 func TestPipelineActivityDispatcherDispatchesDurableActivityRequestEvent(t *testing.T) {
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 	bus := &recordingPipelineBus{}
