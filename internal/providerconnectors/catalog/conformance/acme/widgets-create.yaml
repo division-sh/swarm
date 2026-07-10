@@ -12,6 +12,7 @@ input:
   name: Catalog widget
 credentials:
   acme_api_key: fixture-acme-api-key
+managed_credentials: {}
 expected:
   method: POST
   url: https://api.acme.test/accounts/acct-42/widgets
