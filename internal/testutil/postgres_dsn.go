@@ -55,7 +55,7 @@ func newOwnedDockerPostgresDSN(port uint16) (testPostgresDSN, error) {
 	if port == 0 {
 		return testPostgresDSN{}, fmt.Errorf("owned Docker postgres port is required")
 	}
-	return newTestPostgresDSN(pq.Config{
+	owned, err := newTestPostgresDSN(pq.Config{
 		Host:           "127.0.0.1",
 		Hostaddr:       netip.MustParseAddr("127.0.0.1"),
 		Port:           port,
@@ -67,6 +67,18 @@ func newOwnedDockerPostgresDSN(port uint16) (testPostgresDSN, error) {
 		ClientEncoding: "UTF8",
 		Datestyle:      "ISO, MDY",
 	})
+	if err != nil {
+		return testPostgresDSN{}, err
+	}
+	canonical, err := owned.string()
+	if err != nil {
+		return testPostgresDSN{}, err
+	}
+	// pq keeps password presence in private parser state and otherwise replaces
+	// a directly assigned password with pgpass lookup during connection. Reparse
+	// the fully explicit canonical form so pq records that state without giving
+	// any supported PG environment field authority over the owned source.
+	return parseTestPostgresDSN(canonical)
 }
 
 func validateTestPostgresConfig(cfg pq.Config) error {

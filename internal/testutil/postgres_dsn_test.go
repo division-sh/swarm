@@ -103,6 +103,8 @@ func TestTestPostgresDSNPreservesExplicitEmptyApplicationName(t *testing.T) {
 }
 
 func TestOwnedDockerPostgresDSNIgnoresAmbientPGEnv(t *testing.T) {
+	pq.RegisterGSSProvider(func() (pq.GSS, error) { return nil, nil })
+	t.Cleanup(func() { pq.RegisterGSSProvider(nil) })
 	for key, value := range map[string]string{
 		"PGHOST":               "hostile.example",
 		"PGHOSTADDR":           "192.0.2.1",
@@ -119,6 +121,7 @@ func TestOwnedDockerPostgresDSNIgnoresAmbientPGEnv(t *testing.T) {
 		"PGSSLKEY":             "/tmp/hostile-key",
 		"PGSSLROOTCERT":        "/tmp/hostile-root",
 		"PGSSLSNI":             "0",
+		"PGKRBSRVNAME":         "hostile",
 		"PGCONNECT_TIMEOUT":    "19",
 		"PGCLIENTENCODING":     "LATIN1",
 		"PGDATESTYLE":          "SQL, DMY",
