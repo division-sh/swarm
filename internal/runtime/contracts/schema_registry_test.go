@@ -152,6 +152,7 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 		{
 			eventType: "platform.agent_directive",
 			payload: map[string]any{
+				"operation_id":      "00000000-0000-0000-0000-000000000132",
 				"agent_id":          "agent-1",
 				"directive_text":    "run corpus",
 				"mode":              "directive",
