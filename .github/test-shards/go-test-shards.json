@@ -46,6 +46,7 @@
         "github.com/division-sh/swarm/internal/runtime/startupownership",
         "github.com/division-sh/swarm/internal/runtime/testfixtures/sealedpackage",
         "github.com/division-sh/swarm/internal/runtime/testfixtures/templatefanin",
+        "github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply",
         "github.com/division-sh/swarm/internal/runtime/testfixtures/templateselectorcreate",
         "github.com/division-sh/swarm/internal/store/backendselection",
         "github.com/division-sh/swarm/internal/testtiming"
@@ -144,6 +145,7 @@
         "github.com/division-sh/swarm/internal/runtime/managedcredentials/model",
         "github.com/division-sh/swarm/internal/runtime/pythonmodule",
         "github.com/division-sh/swarm/internal/runtime/replayclaim",
+        "github.com/division-sh/swarm/internal/runtime/replycontext",
         "github.com/division-sh/swarm/internal/runtime/runquiescence",
         "github.com/division-sh/swarm/internal/runtime/semanticview",
         "github.com/division-sh/swarm/internal/runtime/sharedjson",
