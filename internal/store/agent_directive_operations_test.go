@@ -76,6 +76,13 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 		t.Fatalf("finalized state = %s", finalized.State)
 	}
 	assertDirectiveOperationCompletionRows(t, store.DB, reserved.Operation.OperationID, reserved.Operation.DirectiveEventID)
+	if _, ok, err := store.ReconcileDirectiveOperation(ctx, reserved.Operation.OperationID, now.Add(25*time.Hour), 24*time.Hour); err != nil || ok {
+		t.Fatalf("expired terminal reconciliation ok=%v err=%v, want deleted", ok, err)
+	}
+	replacement, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001008", "00000000-0000-0000-0000-000000001009", "idem-1", "hash-after-expiry", now.Add(25*time.Hour)))
+	if err != nil || !replacement.Created || replacement.Operation.OperationID == reserved.Operation.OperationID {
+		t.Fatalf("replacement reservation = %#v err=%v", replacement, err)
+	}
 }
 
 func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *testing.T) {
@@ -328,6 +335,13 @@ func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *test
 		t.Fatalf("finalized state = %s", finalized.State)
 	}
 	assertDirectiveOperationCompletionRows(t, db, reserved.Operation.OperationID, reserved.Operation.DirectiveEventID)
+	if _, ok, err := store.ReconcileDirectiveOperation(ctx, reserved.Operation.OperationID, now.Add(25*time.Hour), 24*time.Hour); err != nil || ok {
+		t.Fatalf("expired terminal reconciliation ok=%v err=%v, want deleted", ok, err)
+	}
+	replacement, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001304", "00000000-0000-0000-0000-000000001305", "pg-idem", "pg-hash-after-expiry", now.Add(25*time.Hour)))
+	if err != nil || !replacement.Created || replacement.Operation.OperationID == reserved.Operation.OperationID {
+		t.Fatalf("replacement reservation = %#v err=%v", replacement, err)
+	}
 }
 
 func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmission(t *testing.T) {

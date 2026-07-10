@@ -244,6 +244,10 @@ func (s *directiveEventStore) ReconcileDirectiveOperation(_ context.Context, ope
 	if !ok {
 		return runtimeagentcontrol.DirectiveOperation{}, false, nil
 	}
+	if (op.State == runtimeagentcontrol.DirectiveOperationSucceeded || op.State == runtimeagentcontrol.DirectiveOperationFailed) && !op.ExpiresAt.IsZero() && !op.ExpiresAt.After(now) {
+		delete(s.operations, operationID)
+		return runtimeagentcontrol.DirectiveOperation{}, false, nil
+	}
 	if op.State == runtimeagentcontrol.DirectiveOperationExecuting && !op.ExecutionLeaseExpiresAt.After(now) {
 		op.State = runtimeagentcontrol.DirectiveOperationIndeterminate
 		op.ErrorCode = "execution_lease_expired"
@@ -490,6 +494,51 @@ func TestAgentManager_SendDirectiveExecutionFailureIsDurableAndReplaySafe(t *tes
 	}
 	if agent.calls != 1 || len(directiveStore.events) != 1 {
 		t.Fatalf("failed replay effects board=%d events=%d, want 1/1", agent.calls, len(directiveStore.events))
+	}
+}
+
+func TestAgentManager_SendDirectiveExpiredTerminalKeyStartsFreshOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		firstErr error
+	}{
+		{name: "succeeded"},
+		{name: "failed", firstErr: errors.New("provider failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			directiveStore := &directiveEventStore{}
+			bus := &directiveTestBus{store: directiveStore}
+			store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000715", Mode: runtimeagentcontrol.RunResolutionSpecified}}
+			agent := &chatTestAgent{id: "campaign-coordinator", err: tc.firstErr}
+			am := NewAgentManager(bus, nil, store)
+			am.agents[agent.id] = agent
+			firstReq := runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "old directive", ActorTokenID: "operator-token", IdempotencyKey: "expired-key", RequestHash: "old-hash"}
+
+			firstResult, err := am.SendDirective(context.Background(), firstReq)
+			if tc.firstErr == nil && err != nil {
+				t.Fatalf("first SendDirective: %v", err)
+			}
+			if tc.firstErr != nil && !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
+				t.Fatalf("first SendDirective error = %v, want execution failed", err)
+			}
+			operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, firstReq.ActorTokenID, firstReq.IdempotencyKey)
+			if err != nil || !ok {
+				t.Fatalf("load first operation ok=%v err=%v", ok, err)
+			}
+			directiveStore.mu.Lock()
+			operation.ExpiresAt = time.Now().UTC().Add(-time.Second)
+			directiveStore.operations[operation.OperationID] = operation
+			directiveStore.mu.Unlock()
+			agent.err = nil
+
+			secondResult, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{AgentID: agent.id, Directive: "new directive", ActorTokenID: firstReq.ActorTokenID, IdempotencyKey: firstReq.IdempotencyKey, RequestHash: "new-hash"})
+			if err != nil {
+				t.Fatalf("fresh SendDirective after expiry: %v", err)
+			}
+			if !secondResult.OK || secondResult.OperationID == "" || secondResult.OperationID == firstResult.OperationID || agent.calls != 2 || len(directiveStore.events) != 2 {
+				t.Fatalf("fresh result=%#v first=%#v calls=%d events=%d", secondResult, firstResult, agent.calls, len(directiveStore.events))
+			}
+		})
 	}
 }
 
