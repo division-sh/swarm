@@ -44,6 +44,7 @@ type AgentManager struct {
 	inFlight                        map[string]struct{}
 	workflowInstances               flowInstancePersistence
 	selectedContractRouteRecoveries map[string]SelectedContractRouteRecoveryTruth
+	directiveHeartbeat              directiveHeartbeatConfig
 
 	runMu              sync.Mutex
 	running            bool
@@ -119,6 +120,7 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		promptResolver:                  opts.PromptResolver,
 		workflowInstances:               opts.WorkflowInstances,
 		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryTruth{},
+		directiveHeartbeat:              defaultDirectiveHeartbeatConfig(),
 		runtimeMode:                     strings.TrimSpace(opts.RuntimeMode),
 		budget:                          opts.Budget,
 		resetRuntimeOwnedState:          opts.ResetRuntimeOwnedState,

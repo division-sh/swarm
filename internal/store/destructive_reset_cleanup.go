@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -59,6 +60,9 @@ func (s *PostgresStore) ApplyDestructiveResetCleanup(ctx context.Context, req de
 	defer func() { _ = tx.Rollback() }()
 
 	if err := lockDestructiveResetCleanupRuns(ctx, tx, runIDs); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
+	if err := guardDestructiveResetDirectiveAuthority(ctx, tx, runIDs, now); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
 	if req.Result.IncludeBundles {
@@ -200,6 +204,40 @@ func lockDestructiveResetCleanupRuns(ctx context.Context, exec destructiveResetC
 		return fmt.Errorf("lock destructive reset cleanup run ids: %w", err)
 	}
 	return nil
+}
+
+func guardDestructiveResetDirectiveAuthority(ctx context.Context, exec destructiveResetCleanupExecutor, runIDs []string, now time.Time) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `
+		DELETE FROM agent_directive_operations
+		WHERE resolved_run_id = ANY($1::uuid[])
+		  AND state IN ('succeeded', 'failed')
+		  AND expires_at <= $2
+	`, pq.Array(runIDs), now.UTC()); err != nil {
+		return fmt.Errorf("expire terminal directive authority before destructive reset: %w", err)
+	}
+	var operationID, state string
+	var expiresAt sql.NullTime
+	err := exec.QueryRowContext(ctx, `
+		SELECT operation_id::text, state, expires_at
+		FROM agent_directive_operations
+		WHERE resolved_run_id = ANY($1::uuid[])
+		ORDER BY created_at, operation_id
+		LIMIT 1
+	`, pq.Array(runIDs)).Scan(&operationID, &state, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect directive authority before destructive reset: %w", err)
+	}
+	detail := fmt.Sprintf("operation_id=%s state=%s", operationID, state)
+	if expiresAt.Valid {
+		detail += " expires_at=" + expiresAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return fmt.Errorf("%w: runtime.nuke cannot delete retained agent directive authority (%s)", destructivereset.ErrInvalidRequest, detail)
 }
 
 func prepareDestructiveResetBundleCatalogDelete(ctx context.Context, tx *sql.Tx, runIDs []string) error {
@@ -360,7 +398,7 @@ func destructiveResetCleanupTableResults(ctx context.Context, exec destructiveRe
 			return nil, err
 		}
 		switch entry.Classification {
-		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve:
+		case destructivereset.CleanupPreserve, destructivereset.CleanupSplitPreserve, destructivereset.CleanupRetainDirectiveAuthority:
 			result.PreservedRows = count
 		default:
 			result.MatchedRows = count
@@ -451,7 +489,7 @@ func destructiveResetCleanupQuery(table, mode string, runIDs []string, includeBu
 		if mode == "count" {
 			return `SELECT COUNT(*) FROM agent_directive_operations WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
 		}
-		return `DELETE FROM agent_directive_operations WHERE resolved_run_id = ANY($1::uuid[])`, args, nil
+		return "", nil, nil
 	case "conversation_forks":
 		if mode == "count" {
 			return `SELECT COUNT(*) FROM conversation_forks WHERE source_run_id = ANY($1::uuid[])`, args, nil

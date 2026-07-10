@@ -206,13 +206,16 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	}
 }
 
-func TestRecoverReconcilesDirectiveOperationsBeforeGenericPipelineRecovery(t *testing.T) {
+func TestDirectiveReconciliationPrecedesGenericPipelineRecovery(t *testing.T) {
 	bus := &directiveRecoveryTestBus{
 		recoveryTestBus:         &recoveryTestBus{},
 		DirectiveOperationStore: &directiveEventStore{},
 	}
 	am := NewAgentManager(bus, nil, &recoveryTestStore{})
 
+	if err := am.ReconcileDirectiveOperations(context.Background()); err != nil {
+		t.Fatalf("ReconcileDirectiveOperations: %v", err)
+	}
 	if err := am.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}

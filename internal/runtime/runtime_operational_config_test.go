@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -45,8 +47,11 @@ func (*recoveryGuardManagerStore) ListPendingSubscribedEvents(context.Context, s
 }
 
 type recoveryGuardEventStore struct {
-	missing []events.PersistedReplayEvent
-	routes  []runtimeflowidentity.Route
+	runtimeagentcontrol.DirectiveOperationStore
+	missing                 []events.PersistedReplayEvent
+	routes                  []runtimeflowidentity.Route
+	directiveReconcileCalls atomic.Int32
+	directiveReconcileErr   error
 }
 
 func (*recoveryGuardEventStore) AppendEvent(context.Context, events.Event) error { return nil }
@@ -75,6 +80,11 @@ func (*recoveryGuardEventStore) ClaimPipelineReplay(context.Context, string) (ru
 	return nil, true, nil
 }
 func (*recoveryGuardEventStore) SupportsPersistedReplay() bool { return false }
+
+func (s *recoveryGuardEventStore) ReconcileDirectiveOperations(context.Context, time.Time, time.Duration) (runtimeagentcontrol.DirectiveOperationReconcileResult, error) {
+	s.directiveReconcileCalls.Add(1)
+	return runtimeagentcontrol.DirectiveOperationReconcileResult{}, s.directiveReconcileErr
+}
 
 type minimalRuntimeEventStore struct{}
 
@@ -194,6 +204,9 @@ func TestRuntimeStart_AllowsRecoveryDisabledWithManagerSnapshotWork(t *testing.T
 	if err := rt.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
+		t.Fatalf("directive reconcile calls = %d, want 1 with runtime.recovery_on_startup=false", got)
+	}
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -267,8 +280,9 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 			}},
 		},
 	}
+	eventStore := &recoveryGuardEventStore{}
 	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: cfg, Stores: Stores{
-		EventStore:    &recoveryGuardEventStore{},
+		EventStore:    eventStore,
 		ManagerStore:  managerStore,
 		ScheduleStore: scheduleStore,
 	}, Options: RuntimeOptions{
@@ -290,8 +304,65 @@ func TestRuntimeStart_DisablePersistentStartupRecoverySkipsUnscopedStoreReads(t 
 	if got := managerStore.loadCalls.Load(); got != 0 {
 		t.Fatalf("LoadAgents calls = %d, want 0", got)
 	}
+	if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
+		t.Fatalf("directive reconcile calls = %d, want 1 with persistent startup recovery disabled", got)
+	}
 	if err := rt.Shutdown(); err != nil {
 		t.Fatalf("Shutdown: %v", err)
+	}
+}
+
+func TestRuntimeStart_FailsClosedWhenRequiredDirectiveReconciliationFails(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	eventStore := &recoveryGuardEventStore{directiveReconcileErr: errors.New("injected directive reconciliation failure")}
+	rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+		EventStore: eventStore,
+	}, Options: RuntimeOptions{
+		SelfCheck:      false,
+		WorkflowModule: module,
+		LLMRuntime:     noopLLMRuntime{},
+	}})
+	if err != nil {
+		t.Fatalf("NewRuntime: %v", err)
+	}
+	err = rt.Start(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "required directive operation reconciliation failed") || !strings.Contains(err.Error(), "injected directive reconciliation failure") {
+		t.Fatalf("Start error = %v, want required reconciliation failure", err)
+	}
+	if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
+		t.Fatalf("directive reconcile calls = %d, want 1", got)
+	}
+}
+
+func TestRuntimeStart_ReconcilesEverySelectedRuntimeContext(t *testing.T) {
+	module := loadRuntimeOwnershipWorkflowModule(t)
+	stores := []*recoveryGuardEventStore{{}, {}}
+	runtimes := make([]*Runtime, 0, len(stores))
+	for _, eventStore := range stores {
+		rt, err := NewRuntime(context.Background(), RuntimeDeps{Config: testOperationalRuntimeConfig(), Stores: Stores{
+			EventStore: eventStore,
+		}, Options: RuntimeOptions{
+			SelfCheck:      false,
+			WorkflowModule: module,
+			LLMRuntime:     noopLLMRuntime{},
+		}})
+		if err != nil {
+			t.Fatalf("NewRuntime: %v", err)
+		}
+		if err := rt.Start(context.Background()); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		runtimes = append(runtimes, rt)
+	}
+	for i, eventStore := range stores {
+		if got := eventStore.directiveReconcileCalls.Load(); got != 1 {
+			t.Fatalf("context %d directive reconcile calls = %d, want 1", i, got)
+		}
+	}
+	for _, rt := range runtimes {
+		if err := rt.Shutdown(); err != nil {
+			t.Fatalf("Shutdown: %v", err)
+		}
 	}
 }
 
