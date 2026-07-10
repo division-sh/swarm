@@ -208,6 +208,29 @@ func TestBuildProjectsLegacyQualifiedSubscriptionAsNonCanonicalDebt(t *testing.T
 	}
 }
 
+func TestBuildProjectsImportedWildcardConsumerAsTypedPubSub(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		filepath.Join(repoRoot, "tests", "tier11-flow-composition", "test-wildcard-deep-subscription"),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load wildcard fixture: %v", err)
+	}
+
+	topology := Build(semanticview.Wrap(bundle))
+	for _, edge := range topology.Edges {
+		if edge.Event.Canonical == "child/grandchild/task.done" && edge.Consumer.NodeID == "collector" && edge.Consumer.Pattern {
+			if edge.Scope != DeliveryScopeIntraFlow {
+				t.Fatalf("wildcard edge scope = %q, want typed pub/sub", edge.Scope)
+			}
+			return
+		}
+	}
+	t.Fatalf("topology edges = %#v, want imported wildcard consumer", topology.Edges)
+}
+
 func TestBuildIsDeterministic(t *testing.T) {
 	source := templatefanin.LoadSource(t, templatefanin.Options{})
 	first, err := json.Marshal(Build(source))
