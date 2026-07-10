@@ -112,14 +112,18 @@ func (b *directiveTestBus) LogRuntime(context.Context, runtimepipeline.RuntimeLo
 }
 
 type directiveEventStore struct {
-	mu                 sync.Mutex
-	events             []events.Event
-	operations         map[string]runtimeagentcontrol.DirectiveOperation
-	recordExecutedErr  error
-	finalizeSuccessErr error
-	renewStarted       chan struct{}
-	renewRelease       <-chan struct{}
-	ignoreRenewContext bool
+	mu                   sync.Mutex
+	events               []events.Event
+	operations           map[string]runtimeagentcontrol.DirectiveOperation
+	recordExecutedErr    error
+	finalizeSuccessErr   error
+	renewStarted         chan struct{}
+	renewFinished        chan struct{}
+	renewRelease         <-chan struct{}
+	ignoreRenewContext   bool
+	mutationGate         *sync.Mutex
+	recordExecutedCalls  int
+	finalizeFailureCalls int
 }
 
 func (s *directiveEventStore) AppendEvent(_ context.Context, evt events.Event) error {
@@ -168,6 +172,16 @@ func (s *directiveEventStore) AdmitDirectiveExecution(_ context.Context, operati
 }
 
 func (s *directiveEventStore) RenewDirectiveExecutionLease(ctx context.Context, _ string, _ string, _ time.Time, _ time.Duration) error {
+	unlock := s.lockMutationGate()
+	defer unlock()
+	defer func() {
+		if s.renewFinished != nil {
+			select {
+			case s.renewFinished <- struct{}{}:
+			default:
+			}
+		}
+	}()
 	if s.renewStarted != nil {
 		select {
 		case s.renewStarted <- struct{}{}:
@@ -190,8 +204,11 @@ func (s *directiveEventStore) RenewDirectiveExecutionLease(ctx context.Context, 
 }
 
 func (s *directiveEventStore) RecordDirectiveExecuted(_ context.Context, operationID, ownerID string, response json.RawMessage, now time.Time) (runtimeagentcontrol.DirectiveOperation, error) {
+	unlock := s.lockMutationGate()
+	defer unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.recordExecutedCalls++
 	op := s.operations[operationID]
 	if s.recordExecutedErr != nil {
 		return op, s.recordExecutedErr
@@ -207,6 +224,8 @@ func (s *directiveEventStore) RecordDirectiveExecuted(_ context.Context, operati
 }
 
 func (s *directiveEventStore) FinalizeDirectiveSuccess(_ context.Context, operationID string, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+	unlock := s.lockMutationGate()
+	defer unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	op := s.operations[operationID]
@@ -223,8 +242,11 @@ func (s *directiveEventStore) FinalizeDirectiveSuccess(_ context.Context, operat
 }
 
 func (s *directiveEventStore) FinalizeDirectiveFailure(_ context.Context, operationID, ownerID, code, message string, details json.RawMessage, now time.Time, ttl time.Duration) (runtimeagentcontrol.DirectiveOperation, error) {
+	unlock := s.lockMutationGate()
+	defer unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.finalizeFailureCalls++
 	op := s.operations[operationID]
 	if op.State != runtimeagentcontrol.DirectiveOperationExecuting || op.ExecutionOwnerID != ownerID {
 		return op, runtimeagentcontrol.ErrorForDirectiveOperation(op)
@@ -259,6 +281,8 @@ func (*directiveEventStore) ReconcileDirectiveOperations(context.Context, time.T
 }
 
 func (s *directiveEventStore) ReconcileDirectiveOperation(_ context.Context, operationID string, now time.Time, _ time.Duration) (runtimeagentcontrol.DirectiveOperation, bool, error) {
+	unlock := s.lockMutationGate()
+	defer unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	op, ok := s.operations[operationID]
@@ -278,6 +302,26 @@ func (s *directiveEventStore) ReconcileDirectiveOperation(_ context.Context, ope
 		s.operations[operationID] = op
 	}
 	return op, true, nil
+}
+
+func (s *directiveEventStore) lockMutationGate() func() {
+	if s.mutationGate == nil {
+		return func() {}
+	}
+	s.mutationGate.Lock()
+	return s.mutationGate.Unlock
+}
+
+func (s *directiveEventStore) recordExecutedCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recordExecutedCalls
+}
+
+func (s *directiveEventStore) finalizeFailureCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.finalizeFailureCalls
 }
 
 var _ runtimeagentcontrol.DirectiveOperationStore = (*directiveEventStore)(nil)
@@ -438,16 +482,20 @@ func TestAgentManager_SendDirectiveConcurrentSameKeyExecutesBoardStepOnce(t *tes
 	}
 }
 
-func TestAgentManager_SendDirectiveDoesNotWaitIndefinitelyForStalledHeartbeatRenewal(t *testing.T) {
+func TestAgentManager_SendDirectiveHeartbeatTimeoutAvoidsSerializedOutcomeBoundary(t *testing.T) {
 	runID := "00000000-0000-0000-0000-000000000716"
 	boardStarted := make(chan struct{}, 1)
 	releaseBoard := make(chan struct{})
 	renewStarted := make(chan struct{}, 1)
+	renewFinished := make(chan struct{}, 1)
 	releaseRenew := make(chan struct{})
+	mutationGate := &sync.Mutex{}
 	directiveStore := &directiveEventStore{
 		renewStarted:       renewStarted,
+		renewFinished:      renewFinished,
 		renewRelease:       releaseRenew,
 		ignoreRenewContext: true,
+		mutationGate:       mutationGate,
 	}
 	bus := &directiveTestBus{store: directiveStore}
 	store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: runID, Mode: runtimeagentcontrol.RunResolutionSpecified}}
@@ -460,16 +508,17 @@ func TestAgentManager_SendDirectiveDoesNotWaitIndefinitelyForStalledHeartbeatRen
 	}
 	am.agents[agent.id] = agent
 
+	req := runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:        agent.id,
+		Directive:      "run corpus",
+		ActorTokenID:   "operator-token",
+		IdempotencyKey: "stalled-heartbeat",
+		RequestHash:    "stalled-heartbeat-hash",
+	}
 	resultCh := make(chan runtimeagentcontrol.SendDirectiveResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		result, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
-			AgentID:        agent.id,
-			Directive:      "run corpus",
-			ActorTokenID:   "operator-token",
-			IdempotencyKey: "stalled-heartbeat",
-			RequestHash:    "stalled-heartbeat-hash",
-		})
+		result, err := am.SendDirective(context.Background(), req)
 		resultCh <- result
 		errCh <- err
 	}()
@@ -488,21 +537,195 @@ func TestAgentManager_SendDirectiveDoesNotWaitIndefinitelyForStalledHeartbeatRen
 
 	select {
 	case err := <-errCh:
-		if err != nil {
-			t.Fatalf("SendDirective: %v", err)
+		if !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+			t.Fatalf("SendDirective error = %v, want indeterminate", err)
 		}
 	case <-time.After(250 * time.Millisecond):
-		t.Fatal("SendDirective waited indefinitely for stalled heartbeat renewal")
+		t.Fatal("SendDirective entered the serialized outcome boundary behind stalled renewal")
 	}
-	result := <-resultCh
-	if !result.OK || result.OperationID == "" || agent.calls != 1 {
-		t.Fatalf("result=%#v BoardStep calls=%d", result, agent.calls)
+	if result := <-resultCh; result.OK {
+		t.Fatalf("result=%#v, want no success after heartbeat shutdown timeout", result)
 	}
-	operation, ok, err := directiveStore.LoadDirectiveOperation(context.Background(), result.OperationID)
-	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationSucceeded {
+	operation, ok, err := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	if err != nil || !ok || operation.State != runtimeagentcontrol.DirectiveOperationExecuting {
 		t.Fatalf("durable operation=%#v ok=%v err=%v", operation, ok, err)
 	}
+	if directiveStore.recordExecutedCallCount() != 0 || directiveStore.finalizeFailureCallCount() != 0 || agent.calls != 1 {
+		t.Fatalf("post-timeout result/failure persistence calls=%d/%d BoardStep calls=%d, want 0/0/1", directiveStore.recordExecutedCallCount(), directiveStore.finalizeFailureCallCount(), agent.calls)
+	}
+	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveInProgress) {
+		t.Fatalf("same-key retry before lease expiry error = %v, want in progress", err)
+	}
+	if agent.calls != 1 {
+		t.Fatalf("same-key retry BoardStep calls = %d, want 1", agent.calls)
+	}
+
 	close(releaseRenew)
+	select {
+	case <-renewFinished:
+	case <-time.After(time.Second):
+		t.Fatal("stalled renewal did not finish after release")
+	}
+	directiveStore.mu.Lock()
+	operation = directiveStore.operations[operation.OperationID]
+	operation.ExecutionLeaseExpiresAt = time.Now().UTC().Add(-time.Second)
+	directiveStore.operations[operation.OperationID] = operation
+	directiveStore.mu.Unlock()
+	reconciled, ok, err := directiveStore.ReconcileDirectiveOperation(context.Background(), operation.OperationID, time.Now().UTC(), directiveOperationTTL)
+	if err != nil || !ok || reconciled.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
+		t.Fatalf("reconciled operation=%#v ok=%v err=%v", reconciled, ok, err)
+	}
+	if _, err := am.SendDirective(context.Background(), req); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+		t.Fatalf("same-key retry after lease reconciliation error = %v, want indeterminate", err)
+	}
+	if agent.calls != 1 || directiveStore.recordExecutedCallCount() != 0 || directiveStore.finalizeFailureCallCount() != 0 {
+		t.Fatalf("final BoardStep/result/failure persistence calls = %d/%d/%d, want 1/0/0", agent.calls, directiveStore.recordExecutedCallCount(), directiveStore.finalizeFailureCallCount())
+	}
+}
+
+func TestAgentManager_SendDirectiveHeartbeatTimeoutSkipsSerializedFailurePersistence(t *testing.T) {
+	boardStarted := make(chan struct{}, 1)
+	releaseBoard := make(chan struct{})
+	renewStarted := make(chan struct{}, 1)
+	renewFinished := make(chan struct{}, 1)
+	releaseRenew := make(chan struct{})
+	directiveStore := &directiveEventStore{
+		renewStarted:       renewStarted,
+		renewFinished:      renewFinished,
+		renewRelease:       releaseRenew,
+		ignoreRenewContext: true,
+		mutationGate:       &sync.Mutex{},
+	}
+	bus := &directiveTestBus{store: directiveStore}
+	store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000718", Mode: runtimeagentcontrol.RunResolutionSpecified}}
+	agent := &chatTestAgent{id: "campaign-coordinator", started: boardStarted, release: releaseBoard, err: errors.New("provider failed")}
+	am := NewAgentManager(bus, nil, store)
+	am.directiveHeartbeat = directiveHeartbeatConfig{
+		interval:        time.Millisecond,
+		renewalTimeout:  2 * time.Millisecond,
+		shutdownTimeout: 5 * time.Millisecond,
+	}
+	am.agents[agent.id] = agent
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := am.SendDirective(context.Background(), runtimeagentcontrol.SendDirectiveRequest{
+			AgentID:        agent.id,
+			Directive:      "run corpus",
+			ActorTokenID:   "operator-token",
+			IdempotencyKey: "stalled-failure-heartbeat",
+			RequestHash:    "stalled-failure-heartbeat-hash",
+		})
+		errCh <- err
+	}()
+	select {
+	case <-boardStarted:
+	case <-time.After(time.Second):
+		t.Fatal("BoardStep did not start")
+	}
+	select {
+	case <-renewStarted:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat renewal did not start")
+	}
+	close(releaseBoard)
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
+			t.Fatalf("SendDirective error = %v, want indeterminate", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("SendDirective entered serialized failure persistence behind stalled renewal")
+	}
+	if directiveStore.finalizeFailureCallCount() != 0 || directiveStore.recordExecutedCallCount() != 0 || agent.calls != 1 {
+		t.Fatalf("post-timeout failure/result persistence calls=%d/%d BoardStep calls=%d, want 0/0/1", directiveStore.finalizeFailureCallCount(), directiveStore.recordExecutedCallCount(), agent.calls)
+	}
+	close(releaseRenew)
+	select {
+	case <-renewFinished:
+	case <-time.After(time.Second):
+		t.Fatal("stalled renewal did not finish after release")
+	}
+}
+
+func TestAgentManager_SendDirectiveCompliantHeartbeatReleasesSerializedOutcomeBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		boardErr  error
+		wantState runtimeagentcontrol.DirectiveOperationState
+		wantErr   error
+	}{
+		{name: "success", wantState: runtimeagentcontrol.DirectiveOperationSucceeded},
+		{name: "failure", boardErr: errors.New("provider failed"), wantState: runtimeagentcontrol.DirectiveOperationFailed, wantErr: runtimeagentcontrol.ErrDirectiveExecutionFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			boardStarted := make(chan struct{}, 1)
+			releaseBoard := make(chan struct{})
+			renewStarted := make(chan struct{}, 1)
+			renewFinished := make(chan struct{}, 1)
+			directiveStore := &directiveEventStore{
+				renewStarted:  renewStarted,
+				renewFinished: renewFinished,
+				renewRelease:  make(chan struct{}),
+				mutationGate:  &sync.Mutex{},
+			}
+			bus := &directiveTestBus{store: directiveStore}
+			store := &directiveTargetStore{target: runtimeagentcontrol.RunTargetResolution{RunID: "00000000-0000-0000-0000-000000000717", Mode: runtimeagentcontrol.RunResolutionSpecified}}
+			agent := &chatTestAgent{id: "campaign-coordinator", started: boardStarted, release: releaseBoard, err: tc.boardErr}
+			am := NewAgentManager(bus, nil, store)
+			am.directiveHeartbeat = directiveHeartbeatConfig{
+				interval:        time.Millisecond,
+				renewalTimeout:  100 * time.Millisecond,
+				shutdownTimeout: 100 * time.Millisecond,
+			}
+			am.agents[agent.id] = agent
+			req := runtimeagentcontrol.SendDirectiveRequest{
+				AgentID:        agent.id,
+				Directive:      "run corpus",
+				ActorTokenID:   "operator-token",
+				IdempotencyKey: "compliant-heartbeat-" + tc.name,
+				RequestHash:    "compliant-heartbeat-hash-" + tc.name,
+			}
+			resultCh := make(chan runtimeagentcontrol.SendDirectiveResult, 1)
+			errCh := make(chan error, 1)
+			go func() {
+				result, err := am.SendDirective(context.Background(), req)
+				resultCh <- result
+				errCh <- err
+			}()
+			select {
+			case <-boardStarted:
+			case <-time.After(time.Second):
+				t.Fatal("BoardStep did not start")
+			}
+			select {
+			case <-renewStarted:
+			case <-time.After(time.Second):
+				t.Fatal("heartbeat renewal did not start")
+			}
+			close(releaseBoard)
+			err := <-errCh
+			result := <-resultCh
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("SendDirective error = %v, want %v", err, tc.wantErr)
+			}
+			if tc.wantErr == nil && (!result.OK || result.OperationID == "") {
+				t.Fatalf("success result = %#v", result)
+			}
+			select {
+			case <-renewFinished:
+			default:
+				t.Fatal("context-compliant renewal did not release before outcome persistence")
+			}
+			operation, ok, loadErr := directiveStore.LoadDirectiveOperationByKey(context.Background(), runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+			if loadErr != nil || !ok || operation.State != tc.wantState {
+				t.Fatalf("durable operation=%#v ok=%v err=%v", operation, ok, loadErr)
+			}
+			if agent.calls != 1 {
+				t.Fatalf("BoardStep calls = %d, want 1", agent.calls)
+			}
+		})
+	}
 }
 
 func TestAgentManager_SendDirectiveCompletionRepairDoesNotRepeatBoardStep(t *testing.T) {

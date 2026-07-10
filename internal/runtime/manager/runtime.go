@@ -596,6 +596,13 @@ func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, s
 			}
 		}
 	case <-heartbeatShutdown.C:
+		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
+		admitted.ErrorCode = "heartbeat_shutdown_timeout"
+		admitted.ErrorMessage = "directive heartbeat did not release its persistence boundary after execution"
+		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{
+			Err:       runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate,
+			Operation: admitted,
+		}
 	}
 	if executionErr != nil {
 		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, "board_step_failed", executionErr.Error(), nil, time.Now().UTC(), directiveOperationTTL)
