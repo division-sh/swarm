@@ -403,7 +403,7 @@ func TestDirectiveFailureFinalizationRollsBackReceiptAndOperationTogether(t *tes
 	})
 }
 
-func TestDirectiveMalformedTypedBoardStepFailureCannotBecomeDurable(t *testing.T) {
+func TestDirectiveMalformedTypedBoardStepFailureCanonicalizesBeforePersistence(t *testing.T) {
 	forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
 		malformed := &runtimefailures.Error{Failure: runtimefailures.Envelope{
 			Class:  runtimefailures.ClassAuthenticationNeeded,
@@ -412,10 +412,10 @@ func TestDirectiveMalformedTypedBoardStepFailureCannotBecomeDurable(t *testing.T
 		h := newDirectiveAmbiguityHarness(t, backend, &directiveAmbiguityAgent{id: "malformed-agent", err: malformed})
 
 		_, err := h.manager.SendDirective(context.Background(), h.request)
-		assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveFailurePersistenceUnconfirmedDetail)
+		assertImmediateDirectiveFailure(t, err, runtimeagentcontrol.ErrDirectiveExecutionFailed, "invalid_failure_construction")
 		op := h.loadOperation(t)
-		assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationExecuting, false, false)
-		assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "", nil)
+		assertDirectiveOperationFailure(t, op, runtimeagentcontrol.DirectiveOperationFailed, "invalid_failure_construction")
+		assertDirectiveReceipt(t, backend.db, op.DirectiveEventID, "error", op.Failure)
 		if got := h.agent.calls.Load(); got != 1 {
 			t.Fatalf("BoardStep calls = %d, want 1", got)
 		}

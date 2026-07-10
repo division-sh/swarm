@@ -1,12 +1,36 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
+
+func TestEventBusRejectsMalformedFailureBeforeRuntimeLog(t *testing.T) {
+	logger := NewRuntimeLogger(nil)
+	eventBus, err := newRuntimeEventBus(nil, logger, nil, "", runtimecorrelation.BundleSourceFact{}, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("newRuntimeEventBus: %v", err)
+	}
+
+	err = eventBus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
+		Component: "test",
+		Action:    "malformed_failure",
+		Failure: &runtimefailures.Envelope{
+			SchemaVersion: "forged",
+			Class:         runtimefailures.ClassConnectorFailure,
+		},
+	})
+	if err == nil {
+		t.Fatal("LogRuntime() accepted malformed failure evidence")
+	}
+}
 
 func TestRuntimePayloadValidator_AllowsValidSchemaPayload(t *testing.T) {
 	t.Parallel()

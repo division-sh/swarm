@@ -18,6 +18,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/gorilla/websocket"
 )
@@ -276,6 +277,38 @@ func TestHandlerLogsInternalFallbackErrors(t *testing.T) {
 	if strings.Contains(logOutput, "do-not-log") || strings.Contains(logOutput, "secret") {
 		t.Fatalf("log output leaked payload data: %q", logOutput)
 	}
+}
+
+func TestHandlerCanonicalizesMalformedTypedFallbackFailure(t *testing.T) {
+	handler := testHandler(t, Options{
+		AuthTokens: []string{testToken},
+		Handlers: map[string]MethodHandler{
+			"health.ping": func(context.Context, Request) (any, error) {
+				return nil, &runtimefailures.Error{Failure: runtimefailures.Envelope{
+					SchemaVersion: runtimefailures.EnvelopeSchemaVersion,
+					Class:         runtimefailures.ClassConnectorFailure,
+					Detail:        runtimefailures.Detail{Code: "provider_rate_limited"},
+					Retryable:     true,
+					Message:       "forged presentation",
+					Remediation:   "forged remediation",
+				}}
+			},
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":"malformed","method":"health.ping","params":{}}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	handler.ServeHTTP(rec, req)
+
+	var resp rpcResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode RPC response: %v body=%s", err, rec.Body.String())
+	}
+	if resp.Error == nil || resp.Error.Code != codeInternalError {
+		t.Fatalf("RPC error = %#v, want internal fallback", resp.Error)
+	}
+	requireRPCFailure(t, resp.Error, runtimefailures.ClassInternalFailure, "invalid_failure_construction")
 }
 
 func TestHandlerWebSocketAuthAndFrameValidation(t *testing.T) {
