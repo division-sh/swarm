@@ -182,6 +182,7 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 }
 
 func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightRequest, report *localPreflightReport) (semanticview.Source, string, bool) {
+	appendProviderTriggerCapabilitySubjects(report, req.ProviderTriggerPacks)
 	source, contractsRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths)
 	if err != nil {
 		message := err.Error()
@@ -196,7 +197,6 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 		return nil, "", false
 	}
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
-	appendProviderTriggerCapabilitySubjects(report, req.ProviderTriggerPacks)
 	return source, contractsRoot, true
 }
 

@@ -200,6 +200,44 @@ func TestDoctorClaudeCLIPreflightJSONReportsOKWithoutDB(t *testing.T) {
 	}
 }
 
+func TestDoctorContractSourceFailurePreservesProviderTriggerSubjects(t *testing.T) {
+	setDoctorEmptyProviderSecrets(t)
+	args := doctorClaudeArgs(t, writeDoctorClaudeConfig(t, ""), true)
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "--contracts" {
+			args[i+1] = t.TempDir()
+			break
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), repoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+	if code != cliExitRuntime {
+		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, cliExitRuntime, stdout.String(), stderr.String())
+	}
+	if stderr.String() != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var report localPreflightReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("parse doctor json: %v\n%s", err, stdout.String())
+	}
+	if report.OK || !localPreflightReportHasCode(report, "contract_source_load_failed") {
+		t.Fatalf("report = %#v, want blocking contract source failure", report)
+	}
+	if len(report.CapabilitySubjects) != 8 {
+		t.Fatalf("capability subjects = %#v, want eight admitted provider triggers", report.CapabilitySubjects)
+	}
+	for _, subject := range report.CapabilitySubjects {
+		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable {
+			t.Fatalf("subject = %#v, want AVAILABLE provider trigger", subject)
+		}
+		if !localPreflightReportHasCode(report, "provider_trigger_pack_"+findingCode(subject.Provider)) {
+			t.Fatalf("report missing finding for trigger subject %#v: %#v", subject, report.Findings)
+		}
+	}
+}
+
 func TestDoctorClaudeCLIPreflightSkipsCredentialForAgentFreeContracts(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
