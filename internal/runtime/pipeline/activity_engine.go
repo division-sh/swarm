@@ -623,7 +623,7 @@ func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context,
 		return preparedActivityHTTPTool{}, redactActivityError(err, secrets)
 	}
 	if managedAuth != nil {
-		if err := applyActivityManagedCredentialHeader(headers, managedAuth, false); err != nil {
+		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), false); err != nil {
 			return preparedActivityHTTPTool{}, redactActivityError(err, append(secrets, managedAuth.SecretValues()...))
 		}
 		secrets = append(secrets, managedAuth.SecretValues()...)
@@ -681,7 +681,7 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 			prepared.managedAuth.Token = token
 			prepared.managedAuth.Record = record
 			prepared.secrets = append(prepared.secrets, prepared.managedAuth.SecretValues()...)
-			if err := applyActivityManagedCredentialHeader(prepared.headers, prepared.managedAuth, true); err != nil {
+			if err := runtimemanagedcredentials.ApplyHTTPAuthorization(prepared.headers, prepared.managedAuth.HTTPAuthorization(), true); err != nil {
 				return nil, redactActivityError(err, prepared.secrets)
 			}
 			continue
@@ -752,6 +752,18 @@ func (a *activityManagedHTTPAuth) SecretValues() []string {
 	return secrets
 }
 
+func (a *activityManagedHTTPAuth) HTTPAuthorization() runtimemanagedcredentials.HTTPAuthorization {
+	if a == nil {
+		return runtimemanagedcredentials.HTTPAuthorization{}
+	}
+	return runtimemanagedcredentials.HTTPAuthorization{
+		CredentialKey: a.StoreKey,
+		AccessToken:   a.Token,
+		Header:        a.Header,
+		Prefix:        a.Prefix,
+	}
+}
+
 func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (*activityManagedHTTPAuth, error) {
 	if tool.ManagedCredential == nil {
 		return nil, nil
@@ -791,20 +803,12 @@ func (d pipelineActivityDispatcher) resolveActivityManagedCredential(ctx context
 	if err != nil {
 		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
 	}
-	header := strings.TrimSpace(ref.Header)
-	if header == "" {
-		header = "Authorization"
-	}
-	prefix := strings.TrimSpace(ref.Prefix)
-	if prefix == "" && strings.EqualFold(header, "Authorization") {
-		prefix = "Bearer"
-	}
 	return &activityManagedHTTPAuth{
 		StoreKey:    storeKey,
 		Token:       token,
 		Record:      record,
-		Header:      header,
-		Prefix:      prefix,
+		Header:      ref.Header,
+		Prefix:      ref.Prefix,
 		TokenSource: tokenSource,
 	}, nil
 }
@@ -836,28 +840,6 @@ func activityManagedCredentialInputValue(input map[string]any, key string) strin
 	default:
 		return strings.TrimSpace(fmt.Sprint(typed))
 	}
-}
-
-func applyActivityManagedCredentialHeader(headers http.Header, auth *activityManagedHTTPAuth, replace bool) error {
-	if auth == nil {
-		return nil
-	}
-	header := strings.TrimSpace(auth.Header)
-	if header == "" {
-		header = "Authorization"
-	}
-	if existing := strings.TrimSpace(headers.Get(header)); existing != "" && !replace {
-		return fmt.Errorf("managed credential cannot set %s because the header is already configured", header)
-	}
-	value := strings.TrimSpace(auth.Token)
-	if value == "" {
-		return fmt.Errorf("managed credential %q did not provide an access token", auth.StoreKey)
-	}
-	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
-		value = prefix + " " + value
-	}
-	headers.Set(header, value)
-	return nil
 }
 
 type activityHTTPUncertainError struct {

@@ -290,6 +290,13 @@ func TestGeneratedConformanceRejectsStaleOrIncompleteEvidence(t *testing.T) {
 			want: `credential "acme_api_key" is unavailable`,
 		},
 		{
+			name: "missing fixture managed credential context",
+			mutate: func(t *testing.T, files fstest.MapFS) {
+				replaceMapFile(t, files, "catalog/conformance/github/issues-add-labels.yaml", "managed_credentials:\n  github_app: fixture-github-installation-token", "managed_credentials: {}")
+			},
+			want: `managed credential "github_app" is unavailable`,
+		},
+		{
 			name: "missing fixture",
 			mutate: func(t *testing.T, files fstest.MapFS) {
 				delete(files, "catalog/conformance/acme/widgets-create.yaml")
@@ -315,6 +322,87 @@ func TestGeneratedConformanceRejectsStaleOrIncompleteEvidence(t *testing.T) {
 			err = ValidateCatalogConformance(files, artifacts)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("ValidateCatalogConformance error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestGeneratedConformanceRejectsManagedCredentialHeaderDriftAfterFreshnessRepair(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*runtimecontracts.ManagedCredentialRef)
+	}{
+		{
+			name: "managed header drift",
+			mutate: func(ref *runtimecontracts.ManagedCredentialRef) {
+				ref.Header = "X-GitHub-Token"
+			},
+		},
+		{
+			name: "managed prefix drift",
+			mutate: func(ref *runtimecontracts.ManagedCredentialRef) {
+				ref.Header = "Authorization"
+				ref.Prefix = "Token"
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			files := catalogWorkingTreeFS(t)
+			var profile GeneratorProfile
+			mustYAMLUnmarshal(t, files["catalog/generator-profiles/github.yaml"].Data, &profile)
+			if profile.Auth.ManagedCredential == nil {
+				t.Fatal("GitHub generator profile lacks managed credential")
+			}
+			tc.mutate(profile.Auth.ManagedCredential)
+			files["catalog/generator-profiles/github.yaml"].Data = mustYAMLMarshal(t, profile)
+
+			artifacts, err := GenerateCatalog(files)
+			if err != nil {
+				t.Fatalf("GenerateCatalog: %v", err)
+			}
+			github := generatedArtifactsByProvider(artifacts)["github"]
+			if github.Manifest.Generation == nil {
+				t.Fatal("generated GitHub artifact lacks generation evidence")
+			}
+			if len(github.Manifest.Generation.Operations) != 3 {
+				t.Fatalf("generated GitHub operations = %d, want 3", len(github.Manifest.Generation.Operations))
+			}
+
+			for _, operation := range github.Manifest.Generation.Operations {
+				fixturePath, err := catalogFixturePath(operation.FixtureID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fixture, err := ParseCatalogConformanceFixture(files[fixturePath].Data)
+				if err != nil {
+					t.Fatalf("ParseCatalogConformanceFixture: %v", err)
+				}
+				fixture.ProfileSHA256 = github.ProfileHash
+				fixture.ManifestSHA256 = github.PackEnvelope.ManifestHash
+				files[fixturePath].Data = mustYAMLMarshal(t, fixture)
+			}
+			if err := ValidateCatalogConformance(files, artifacts); err == nil || !strings.Contains(err.Error(), "expected resolved headers") {
+				t.Fatalf("ValidateCatalogConformance error = %v, want managed header drift rejection after freshness repair", err)
+			}
+
+			for _, operation := range github.Manifest.Generation.Operations {
+				operation := operation
+				t.Run(operation.ToolID, func(t *testing.T) {
+					fixturePath, err := catalogFixturePath(operation.FixtureID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					fixture, err := ParseCatalogConformanceFixture(files[fixturePath].Data)
+					if err != nil {
+						t.Fatalf("ParseCatalogConformanceFixture: %v", err)
+					}
+					err = validateCatalogFixtureBinding(github, operation, fixture)
+					if err == nil || !strings.Contains(err.Error(), "expected resolved headers") {
+						t.Fatalf("validateCatalogFixtureBinding error = %v, want managed header drift rejection after freshness repair", err)
+					}
+				})
 			}
 		})
 	}
@@ -384,6 +472,8 @@ func TestResponseSuccessAndGeneratorOwnersHaveNoRetiredOrProviderSpecificInterpr
 		"responseSuccessValuesEqual",
 		"activityResponseSuccessValuesEqual",
 		"requiredResponseSuccessForProviderAction",
+		"applyManagedCredentialHeader",
+		"applyActivityManagedCredentialHeader",
 		`provider == "github"`,
 		`provider == "acme"`,
 		`provider == "slack"`,

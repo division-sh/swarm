@@ -14,11 +14,14 @@ input:
   title: Generated issue
   body: Generated from the catalog fixture.
 credentials: {}
+managed_credentials:
+  github_app: fixture-github-installation-token
 expected:
   method: POST
   url: https://api.github.com/repos/octocat/hello-world/issues
   headers:
     Accept: application/vnd.github+json
+    Authorization: Bearer fixture-github-installation-token
     X-GitHub-Api-Version: "2022-11-28"
   body:
     title: Generated issue

@@ -3,6 +3,7 @@ package providerconnectors
 import (
 	"fmt"
 	"io/fs"
+	"net/http"
 	"net/url"
 	"path"
 	"reflect"
@@ -12,24 +13,26 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/httpresponsesuccess"
+	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 )
 
 const catalogConformanceRoot = "catalog/conformance"
 
 type CatalogConformanceFixture struct {
-	SchemaVersion   string                               `yaml:"schema_version"`
-	Provider        string                               `yaml:"provider"`
-	OperationID     string                               `yaml:"operation_id"`
-	ToolID          string                               `yaml:"tool_id"`
-	SourceSHA256    string                               `yaml:"source_sha256"`
-	ProfileSHA256   string                               `yaml:"profile_sha256"`
-	ManifestSHA256  string                               `yaml:"manifest_sha256"`
-	FixtureStatus   string                               `yaml:"fixture_status"`
-	ReviewStatus    string                               `yaml:"review_status"`
-	Input           map[string]any                       `yaml:"input"`
-	Credentials     map[string]string                    `yaml:"credentials"`
-	Expected        CatalogConformanceExpectedRequest    `yaml:"expected"`
-	ResponseSuccess runtimecontracts.HTTPResponseSuccess `yaml:"response_success"`
+	SchemaVersion      string                               `yaml:"schema_version"`
+	Provider           string                               `yaml:"provider"`
+	OperationID        string                               `yaml:"operation_id"`
+	ToolID             string                               `yaml:"tool_id"`
+	SourceSHA256       string                               `yaml:"source_sha256"`
+	ProfileSHA256      string                               `yaml:"profile_sha256"`
+	ManifestSHA256     string                               `yaml:"manifest_sha256"`
+	FixtureStatus      string                               `yaml:"fixture_status"`
+	ReviewStatus       string                               `yaml:"review_status"`
+	Input              map[string]any                       `yaml:"input"`
+	Credentials        map[string]string                    `yaml:"credentials"`
+	ManagedCredentials map[string]string                    `yaml:"managed_credentials"`
+	Expected           CatalogConformanceExpectedRequest    `yaml:"expected"`
+	ResponseSuccess    runtimecontracts.HTTPResponseSuccess `yaml:"response_success"`
 }
 
 type CatalogConformanceExpectedRequest struct {
@@ -69,18 +72,29 @@ func (f CatalogConformanceFixture) Validate() error {
 	if strings.TrimSpace(f.FixtureStatus) != GenerationFixturePassing || strings.TrimSpace(f.ReviewStatus) != GenerationReviewApproved {
 		return fmt.Errorf("catalog conformance fixture_status/review_status must be passing/approved")
 	}
-	if f.Input == nil || f.Credentials == nil || strings.TrimSpace(f.Expected.Method) == "" || strings.TrimSpace(f.Expected.URL) == "" || f.Expected.Headers == nil || f.Expected.Body == nil {
-		return fmt.Errorf("catalog conformance input, credentials, and expected method/url/headers/body are required, including declared-empty maps")
+	if f.Input == nil || f.Credentials == nil || f.ManagedCredentials == nil || strings.TrimSpace(f.Expected.Method) == "" || strings.TrimSpace(f.Expected.URL) == "" || f.Expected.Headers == nil || f.Expected.Body == nil {
+		return fmt.Errorf("catalog conformance input, credentials, managed_credentials, and expected method/url/headers/body are required, including declared-empty maps")
 	}
 	for key, value := range f.Credentials {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
 			return fmt.Errorf("catalog conformance credential names and fixture values must be non-empty")
 		}
 	}
+	for key, value := range f.ManagedCredentials {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			return fmt.Errorf("catalog conformance managed credential names and fixture tokens must be non-empty")
+		}
+	}
+	seenHeaders := map[string]string{}
 	for key, value := range f.Expected.Headers {
 		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" || strings.Contains(value, "{{") {
 			return fmt.Errorf("catalog conformance expected headers must be non-empty resolved values")
 		}
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if prior, exists := seenHeaders[normalized]; exists {
+			return fmt.Errorf("catalog conformance expected headers %q and %q are ambiguous", prior, key)
+		}
+		seenHeaders[normalized] = key
 	}
 	if err := validateURLNoCredentials(f.Expected.URL); err != nil {
 		return err
@@ -176,7 +190,7 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if strings.ToUpper(strings.TrimSpace(fixture.Expected.Method)) != strings.ToUpper(strings.TrimSpace(tool.HTTP.Method)) {
 		return fmt.Errorf("expected method does not match generated tool")
 	}
-	if err := validateCatalogFixtureCredentials(tool, fixture.Credentials); err != nil {
+	if err := validateCatalogFixtureCredentials(tool, fixture.Credentials, fixture.ManagedCredentials); err != nil {
 		return err
 	}
 	resolvedURL, err := resolveCatalogTemplateString(tool.HTTP.URL, fixture.Input, fixture.Credentials, true)
@@ -186,16 +200,41 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if strings.TrimSpace(resolvedURL) != strings.TrimSpace(fixture.Expected.URL) {
 		return fmt.Errorf("expected URL %q does not match generated %q", fixture.Expected.URL, resolvedURL)
 	}
-	resolvedHeaders := make(map[string]string, len(tool.HTTP.Headers))
+	resolvedHeaders := make(http.Header, len(tool.HTTP.Headers)+1)
+	seenHeaders := map[string]string{}
 	for key, value := range tool.HTTP.Headers {
 		resolved, err := resolveCatalogTemplateString(value, fixture.Input, fixture.Credentials, false)
 		if err != nil {
 			return fmt.Errorf("resolve catalog conformance header %q: %w", key, err)
 		}
-		resolvedHeaders[key] = resolved
+		normalized := strings.ToLower(strings.TrimSpace(key))
+		if prior, exists := seenHeaders[normalized]; exists {
+			return fmt.Errorf("generated headers %q and %q are ambiguous", prior, key)
+		}
+		seenHeaders[normalized] = key
+		resolvedHeaders.Set(key, resolved)
 	}
-	if !reflect.DeepEqual(resolvedHeaders, fixture.Expected.Headers) {
-		return fmt.Errorf("expected resolved headers %#v do not match generated %#v", fixture.Expected.Headers, resolvedHeaders)
+	if tool.ManagedCredential != nil {
+		key := strings.TrimSpace(tool.ManagedCredential.Key)
+		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(resolvedHeaders, runtimemanagedcredentials.HTTPAuthorization{
+			CredentialKey: key,
+			AccessToken:   fixture.ManagedCredentials[key],
+			Header:        tool.ManagedCredential.Header,
+			Prefix:        tool.ManagedCredential.Prefix,
+		}, false); err != nil {
+			return fmt.Errorf("apply catalog conformance managed credential: %w", err)
+		}
+	}
+	generatedHeaderSet, err := catalogHeaderSet(resolvedHeaders)
+	if err != nil {
+		return err
+	}
+	expectedHeaderSet := make(map[string]string, len(fixture.Expected.Headers))
+	for key, value := range fixture.Expected.Headers {
+		expectedHeaderSet[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(value)
+	}
+	if !reflect.DeepEqual(generatedHeaderSet, expectedHeaderSet) {
+		return fmt.Errorf("expected resolved headers %#v do not match generated %#v", expectedHeaderSet, generatedHeaderSet)
 	}
 	resolvedBody, err := resolveCatalogTemplateValue(tool.HTTP.Body, fixture.Input, fixture.Credentials)
 	if err != nil {
@@ -207,7 +246,7 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	return nil
 }
 
-func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, credentials map[string]string) error {
+func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, credentials, managedCredentials map[string]string) error {
 	expected := make(map[string]struct{}, len(tool.Credentials))
 	for _, key := range tool.Credentials {
 		key = strings.TrimSpace(key)
@@ -225,7 +264,30 @@ func validateCatalogFixtureCredentials(tool runtimecontracts.ToolSchemaEntry, cr
 			return fmt.Errorf("catalog conformance credential %q is not declared by the generated tool", key)
 		}
 	}
+	expectedManaged := ""
+	if tool.ManagedCredential != nil {
+		expectedManaged = strings.TrimSpace(tool.ManagedCredential.Key)
+		if _, exists := managedCredentials[expectedManaged]; !exists {
+			return fmt.Errorf("catalog conformance managed credential %q is unavailable", expectedManaged)
+		}
+	}
+	for key := range managedCredentials {
+		if strings.TrimSpace(key) != expectedManaged || expectedManaged == "" {
+			return fmt.Errorf("catalog conformance managed credential %q is not declared by the generated tool", key)
+		}
+	}
 	return nil
+}
+
+func catalogHeaderSet(headers http.Header) (map[string]string, error) {
+	out := make(map[string]string, len(headers))
+	for key, values := range headers {
+		if len(values) != 1 {
+			return nil, fmt.Errorf("generated header %q has %d values; exactly one is required", key, len(values))
+		}
+		out[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(values[0])
+	}
+	return out, nil
 }
 
 func catalogFixturePath(id string) (string, error) {

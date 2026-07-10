@@ -6661,11 +6661,13 @@ tool_model:
       conformance_owner: >
         Strict fixtures under `internal/providerconnectors/catalog/conformance` are keyed by provider + operation id + tool
         id and bind source/profile/manifest hashes, fixture/review status, exact resolved request method/URL/headers/body,
-        and type-preserving response-success policy. Static credential values in this corpus are explicit fake fixture
-        context only; generated credential templates are resolved against that context before expected headers are compared.
-        Missing, extra, duplicate, stale, malformed, unresolved, or unreferenced fixtures fail the generator check. The
-        synthetic write additionally executes through the normal HTTP activity path and proves replay reuses the canonical
-        activity_attempt result without a second provider dispatch.
+        and type-preserving response-success policy. Static credential values and managed access tokens in this corpus are
+        explicit fake fixture context only. Generated static credential templates are resolved against that context, and
+        managed header/default-prefix semantics are applied through the same pure `internal/runtime/managedcredentials`
+        owner consumed by direct and activity HTTP execution, before the exact final header set is compared. Missing, extra,
+        duplicate, stale, malformed, unresolved, or unreferenced fixtures fail the generator check. The synthetic write
+        additionally executes through the normal HTTP activity path and proves replay reuses the canonical activity_attempt
+        result without a second provider dispatch.
       non_goals:
       - read-only provider connector admission
       - external connector-pack directories or marketplace publication

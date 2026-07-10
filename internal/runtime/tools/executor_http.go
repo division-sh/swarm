@@ -84,7 +84,7 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 		}
 	}
 	if managedAuth != nil {
-		if err := applyManagedCredentialHeader(headers, managedAuth, false); err != nil {
+		if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), false); err != nil {
 			return nil, err
 		}
 		authSecrets = append(authSecrets, managedAuth.SecretValues()...)
@@ -138,7 +138,7 @@ func (e *Executor) execHTTPTool(ctx context.Context, actor models.AgentConfig, t
 			managedAuth.Token = token
 			managedAuth.Record = record
 			authSecrets = append(authSecrets, managedAuth.SecretValues()...)
-			if err := applyManagedCredentialHeader(headers, managedAuth, true); err != nil {
+			if err := runtimemanagedcredentials.ApplyHTTPAuthorization(headers, managedAuth.HTTPAuthorization(), true); err != nil {
 				return nil, err
 			}
 			rewindBodyReader(bodyReader)
@@ -178,6 +178,15 @@ func (a managedHTTPAuth) SecretValues() []string {
 	return secrets
 }
 
+func (a managedHTTPAuth) HTTPAuthorization() runtimemanagedcredentials.HTTPAuthorization {
+	return runtimemanagedcredentials.HTTPAuthorization{
+		CredentialKey: a.StoreKey,
+		AccessToken:   a.Token,
+		Header:        a.Header,
+		Prefix:        a.Prefix,
+	}
+}
+
 func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor models.AgentConfig, tool RegisteredTool) (*managedHTTPAuth, error) {
 	if tool.ManagedCredential == nil {
 		return nil, nil
@@ -212,20 +221,12 @@ func (e *Executor) resolveManagedCredentialForActor(ctx context.Context, actor m
 	if err != nil {
 		return nil, fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), record.SecretValues()...))
 	}
-	header := strings.TrimSpace(ref.Header)
-	if header == "" {
-		header = "Authorization"
-	}
-	prefix := strings.TrimSpace(ref.Prefix)
-	if prefix == "" && strings.EqualFold(header, "Authorization") {
-		prefix = "Bearer"
-	}
 	return &managedHTTPAuth{
 		StoreKey: storeKey,
 		Token:    token,
 		Record:   record,
-		Header:   header,
-		Prefix:   prefix,
+		Header:   ref.Header,
+		Prefix:   ref.Prefix,
 	}, nil
 }
 
@@ -234,28 +235,6 @@ func (e *Executor) managedTokenSource() *runtimemanagedcredentials.TokenSource {
 		Store:      e.managedCredentials,
 		HTTPClient: e.httpClient,
 	}
-}
-
-func applyManagedCredentialHeader(headers http.Header, auth *managedHTTPAuth, replace bool) error {
-	if auth == nil {
-		return nil
-	}
-	header := strings.TrimSpace(auth.Header)
-	if header == "" {
-		header = "Authorization"
-	}
-	if existing := strings.TrimSpace(headers.Get(header)); existing != "" && !replace {
-		return fmt.Errorf("managed credential cannot set %s because the header is already configured", header)
-	}
-	value := strings.TrimSpace(auth.Token)
-	if value == "" {
-		return fmt.Errorf("managed credential %q did not provide an access token", auth.StoreKey)
-	}
-	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
-		value = prefix + " " + value
-	}
-	headers.Set(header, value)
-	return nil
 }
 
 func rewindBodyReader(body io.Reader) {
