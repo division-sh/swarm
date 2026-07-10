@@ -61,7 +61,7 @@ func TestProviderTriggerReleaseLayoutLoadsCompleteFilesystemInventory(t *testing
 			"--json",
 		)
 		cmd.Dir = releaseRoot
-		cmd.Env = append(os.Environ(), "SWARM_CONFIG=", "SWARM_CREDENTIALS_FILE=", "SWARM_MANAGED_CREDENTIALS_FILE=", "SWARM_TEST_POSTGRES_DSN=", "PGPASSWORD=", "CLAUDE_CODE_OAUTH_TOKEN=")
+		cmd.Env = releaseProviderTriggerProcessEnv()
 		output, err := cmd.CombinedOutput()
 		return string(output), err
 	}
@@ -249,7 +249,7 @@ func serveReleaseProviderTriggerRequests(t *testing.T, binaryPath, releaseRoot, 
 		"--shutdown-grace", "1s",
 	)
 	cmd.Dir = releaseRoot
-	cmd.Env = append(os.Environ(), "SWARM_CONFIG=", "SWARM_CREDENTIALS_FILE=", "SWARM_MANAGED_CREDENTIALS_FILE=", "SWARM_TEST_POSTGRES_DSN=", "PGPASSWORD=", "CLAUDE_CODE_OAUTH_TOKEN=")
+	cmd.Env = releaseProviderTriggerProcessEnv()
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
@@ -328,6 +328,23 @@ func serveReleaseProviderTriggerRequests(t *testing.T, binaryPath, releaseRoot, 
 	challengeRequest.Header.Set("X-Slack-Request-Timestamp", slackTimestamp)
 	challengeRequest.Header.Set("X-Slack-Signature", "v0="+releaseHMACSHA256Hex("slack-release-secret", []byte("v0:"+slackTimestamp+":"+string(challengeBody))))
 	assertReleaseProviderResponse(t, challengeRequest, http.StatusOK, "release-challenge")
+}
+
+func releaseProviderTriggerProcessEnv() []string {
+	env := make([]string, 0, len(os.Environ())+5)
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "SWARM_TEST_") {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env,
+		"SWARM_CONFIG=",
+		"SWARM_CREDENTIALS_FILE=",
+		"SWARM_MANAGED_CREDENTIALS_FILE=",
+		"PGPASSWORD=",
+		"CLAUDE_CODE_OAUTH_TOKEN=",
+	)
 }
 
 func reserveReleaseTestAddress(t *testing.T) string {
