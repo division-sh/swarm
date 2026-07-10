@@ -39,9 +39,6 @@ active_trackers:
   - kind: github_issue
     issue: 1927
     watchlist: runtime_operations.shutdown_and_runtime_lifecycle
-  - kind: github_issue
-    issue: 1932
-    watchlist: runtime_operations.atomic_runtime_state_mutation
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
@@ -191,15 +188,17 @@ mutating_api_parity_ledger:
       payload/lineage/metadata, idempotency replay without duplicate events, and
       generic settlement.
   - method: agent.send_directive
-    classification: split_with_issue_ref
-    split_issue: 1932
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: agent_directive_outcome_lifecycle
     proof_refs:
-      - {kind: tracker, issue: 1932, watchlist: runtime_operations.atomic_runtime_state_mutation}
+      - {kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle}
     notes: >
-      Split to #1932 because honest served proof requires one durable directive
-      operation/outcome owner spanning event identity, synchronous BoardStep
-      execution admission, external effects, pipeline settlement, indeterminate
-      outcomes, API completion repair, and same-key retry on both backends.
+      Shared served harness proves real /v1/rpc agent.send_directive on default
+      SQLite and explicit Postgres through one durable directive operation/outcome
+      owner. It proves stable operation/event identity, one keyed execution,
+      conflict before effects, terminal settlement/API projection, keyless fresh
+      operations, and standard quiescence postconditions.
   - method: agent.restart
     classification: split_with_issue_ref
     split_issue: 1927

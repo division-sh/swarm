@@ -73,8 +73,8 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 			if got := state.effectCount(); got != fixture.SuccessEffects {
 				t.Fatalf("%s side effects after success = %d, want %d", methodName, got, fixture.SuccessEffects)
 			}
-			if got := state.idempotency.calls; got != 1 {
-				t.Fatalf("%s idempotency calls after success = %d, want 1", methodName, got)
+			if got, want := state.idempotency.calls, mutatingProbeGenericIdempotencyCalls(methodName, 1); got != want {
+				t.Fatalf("%s idempotency calls after success = %d, want %d", methodName, got, want)
 			}
 
 			replayStatus, replayResp, replayBody := callMutatingProbeRPC(t, handler, methodName, params, "Bearer "+testToken)
@@ -88,8 +88,8 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 			if got := state.effectCount(); got != fixture.SuccessEffects {
 				t.Fatalf("%s side effects after replay = %d, want %d", methodName, got, fixture.SuccessEffects)
 			}
-			if got := state.idempotency.calls; got != 2 {
-				t.Fatalf("%s idempotency calls after replay = %d, want 2", methodName, got)
+			if got, want := state.idempotency.calls, mutatingProbeGenericIdempotencyCalls(methodName, 2); got != want {
+				t.Fatalf("%s idempotency calls after replay = %d, want %d", methodName, got, want)
 			}
 
 			conflictParams := mutatingProbeConflictParams(fixture, key)
@@ -104,8 +104,8 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 			if got := state.effectCount(); got != fixture.SuccessEffects {
 				t.Fatalf("%s side effects after conflict = %d, want %d", methodName, got, fixture.SuccessEffects)
 			}
-			if got := state.idempotency.calls; got != 3 {
-				t.Fatalf("%s idempotency calls after conflict = %d, want 3", methodName, got)
+			if got, want := state.idempotency.calls, mutatingProbeGenericIdempotencyCalls(methodName, 3); got != want {
+				t.Fatalf("%s idempotency calls after conflict = %d, want %d", methodName, got, want)
 			}
 		})
 
@@ -176,6 +176,13 @@ func TestOpenRPCMutatingHTTPRuntimeProbes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mutatingProbeGenericIdempotencyCalls(methodName string, normal int) int {
+	if methodName == runtimeagentcontrol.DirectiveOperationMethod {
+		return 0
+	}
+	return normal
 }
 
 func mutatingHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, openRPC apispec.OpenRPCDocument, matrix openRPCComplianceMatrix) []string {
@@ -281,7 +288,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 		"agent.send_directive": {
 			Params:         map[string]any{"agent_id": "agent-a", "directive": "continue", "run_id": runID},
 			ConflictParams: map[string]any{"agent_id": "agent-a", "directive": "pause", "run_id": runID},
-			ResultKeys:     []string{"ok", "run_id", "run_id_resolution", "directive_event_id", "directive_event_type"},
+			ResultKeys:     []string{"ok", "operation_id", "run_id", "run_id_resolution", "directive_event_id", "directive_event_type"},
 			SuccessEffects: 1,
 		},
 		"bundle.delete": {
@@ -607,6 +614,18 @@ func mutatingHTTPRuntimeErrorProbes() []mutatingHTTPRuntimeErrorProbe {
 		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AmbiguousRunTargetCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.send_directive"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAmbiguousRunTarget, AgentID: "agent-a", ActiveSessions: []runtimeagentcontrol.ActiveSessionTarget{{SessionID: "sess-1", RunID: runID}}}
 		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveInProgressCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveInProgress, runtimeagentcontrol.DirectiveOperationExecuting, runID)
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveCompletionPendingCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveCompletionPending, runtimeagentcontrol.DirectiveOperationExecuted, runID)
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveExecutionFailedCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveExecutionFailed, runtimeagentcontrol.DirectiveOperationFailed, runID)
+		}}},
+		{Method: "agent.send_directive", Params: map[string]any{"agent_id": "agent-a", "directive": "continue", "idempotency_key": "idem-error"}, Code: AgentDirectiveOutcomeIndeterminateCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.agentControl.errs["agent.send_directive"] = directiveOperationProbeError(runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, runtimeagentcontrol.DirectiveOperationIndeterminate, runID)
+		}}},
 		{Method: "agent.restart", Params: map[string]any{"agent_id": "missing", "idempotency_key": "idem-error"}, Code: AgentNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.agentControl.errs["agent.restart"] = &runtimeagentcontrol.StateError{Err: runtimeagentcontrol.ErrAgentNotFound, AgentID: "missing"}
 		}}},
@@ -771,7 +790,7 @@ func newMutatingRuntimeProbeState(t *testing.T, methodName string) *mutatingRunt
 		},
 		observability: &fakeObservabilityReadStore{events: map[string]store.OperatorEventFull{}},
 		runControl:    &mutatingProbeRunControl{errs: map[string]error{}},
-		agentControl:  &mutatingProbeAgentControl{errs: map[string]error{}},
+		agentControl:  &mutatingProbeAgentControl{errs: map[string]error{}, results: map[string]mutatingProbeDirectiveResult{}},
 		runtimeIngress: &mutatingProbeRuntimeIngress{
 			errs: map[string]error{},
 		},
@@ -1281,27 +1300,67 @@ func (c *mutatingProbeRunControl) transition(action string, req runtimeruncontro
 }
 
 type mutatingProbeAgentControl struct {
-	state *mutatingRuntimeProbeState
-	errs  map[string]error
+	state   *mutatingRuntimeProbeState
+	errs    map[string]error
+	results map[string]mutatingProbeDirectiveResult
+}
+
+type mutatingProbeDirectiveResult struct {
+	requestHash string
+	result      runtimeagentcontrol.SendDirectiveResult
 }
 
 func (c *mutatingProbeAgentControl) SendDirective(_ context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
 	if err := c.errs["agent.send_directive"]; err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	c.state.recordEffect()
+	key := strings.TrimSpace(req.IdempotencyKey)
+	if existing, ok := c.results[key]; key != "" && ok {
+		if existing.requestHash != req.RequestHash {
+			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveIdempotencyConflictError{
+				OriginalRequestHash:    existing.requestHash,
+				ConflictingRequestHash: req.RequestHash,
+				OperationID:            existing.result.OperationID,
+			}
+		}
+		return existing.result, nil
+	}
 	runID := strings.TrimSpace(req.RunID)
 	if runID == "" {
 		runID = "00000000-0000-0000-0000-000000000201"
 	}
-	return runtimeagentcontrol.SendDirectiveResult{
+	c.state.recordEffect()
+	result := runtimeagentcontrol.SendDirectiveResult{
+		OK:                 true,
 		AgentID:            req.AgentID,
+		OperationID:        "00000000-0000-0000-0000-000000000203",
 		Response:           "accepted",
 		RunID:              runID,
 		RunIDResolution:    runtimeagentcontrol.RunResolutionSpecified,
 		DirectiveEventID:   "00000000-0000-0000-0000-000000000202",
 		DirectiveEventType: runtimeagentcontrol.DirectiveEventType,
-	}, nil
+	}
+	if key != "" {
+		c.results[key] = mutatingProbeDirectiveResult{requestHash: req.RequestHash, result: result}
+	}
+	return result, nil
+}
+
+func directiveOperationProbeError(err error, state runtimeagentcontrol.DirectiveOperationState, runID string) error {
+	op := runtimeagentcontrol.DirectiveOperation{
+		OperationID:      "00000000-0000-0000-0000-000000000203",
+		DirectiveEventID: "00000000-0000-0000-0000-000000000202",
+		ResolvedRunID:    runID,
+		State:            state,
+	}
+	if state == runtimeagentcontrol.DirectiveOperationExecuting {
+		op.ExecutionLeaseExpiresAt = time.Now().UTC().Add(time.Minute)
+	}
+	if state == runtimeagentcontrol.DirectiveOperationFailed || state == runtimeagentcontrol.DirectiveOperationIndeterminate {
+		op.ErrorCode = "probe_failure"
+		op.ErrorMessage = "probe directive failure"
+	}
+	return &runtimeagentcontrol.DirectiveOperationError{Err: err, Operation: op}
 }
 
 func (c *mutatingProbeAgentControl) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {

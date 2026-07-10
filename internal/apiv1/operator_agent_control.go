@@ -20,6 +20,7 @@ type AgentControlController interface {
 
 type agentDirectiveResult struct {
 	OK                 bool   `json:"ok"`
+	OperationID        string `json:"operation_id"`
 	Response           string `json:"response,omitempty"`
 	RunID              string `json:"run_id"`
 	RunIDResolution    string `json:"run_id_resolution"`
@@ -54,6 +55,7 @@ func OperatorAgentControlHandlers(opts OperatorReadOptions) map[string]MethodHan
 }
 
 func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
+	_ = now
 	agentID, err := requiredStringParam(req.Params, "agent_id")
 	if err != nil {
 		return nil, err
@@ -70,62 +72,41 @@ func executeAgentSendDirective(ctx context.Context, req Request, opts OperatorRe
 	if err != nil {
 		return nil, err
 	}
-	completion, replay, err := opts.Idempotency.WithAPIIdempotency(ctx, store.APIIdempotencyRequest{
-		Method:         req.Method,
+	selectedOpts := opts
+	if runtimeContextManager(opts) != nil {
+		if strings.TrimSpace(runID) == "" && multiRuntimeContextMode(opts) {
+			return nil, runtimeContextRequiredError(req.Method, "run_id is required to select a runtime context in multi-context DB-loaded mode")
+		}
+		if strings.TrimSpace(runID) != "" {
+			var err error
+			ctx, selectedOpts, _, err = runtimeBundleContextByRun(ctx, opts, runID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	result, err := selectedOpts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:        agentID,
+		Directive:      directive,
+		RunID:          runID,
+		Source:         runtimeagentcontrol.DirectiveSourceV1RPC,
+		OperatorID:     req.ActorTokenID,
 		ActorTokenID:   req.ActorTokenID,
 		IdempotencyKey: idempotencyKey,
 		RequestHash:    req.RequestHash,
-		ResourceID:     agentID,
-		TTL:            agentControlIdempotencyTTL,
-		Now:            now,
-	}, func(ctx context.Context) (store.APIIdempotencyCompletion, error) {
-		selectedOpts := opts
-		if runtimeContextManager(opts) != nil {
-			if strings.TrimSpace(runID) == "" && multiRuntimeContextMode(opts) {
-				return store.APIIdempotencyCompletion{}, runtimeContextRequiredError(req.Method, "run_id is required to select a runtime context in multi-context DB-loaded mode")
-			}
-			if strings.TrimSpace(runID) != "" {
-				var err error
-				ctx, selectedOpts, _, err = runtimeBundleContextByRun(ctx, opts, runID)
-				if err != nil {
-					return store.APIIdempotencyCompletion{}, err
-				}
-			}
-		}
-		result, err := selectedOpts.AgentControl.SendDirective(ctx, runtimeagentcontrol.SendDirectiveRequest{
-			AgentID:    agentID,
-			Directive:  directive,
-			RunID:      runID,
-			Source:     runtimeagentcontrol.DirectiveSourceV1RPC,
-			OperatorID: req.ActorTokenID,
-		})
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, agentControlError(req.Method, agentID, err)
-		}
-		response, err := json.Marshal(agentDirectiveResult{
-			OK:                 true,
-			Response:           result.Response,
-			RunID:              result.RunID,
-			RunIDResolution:    result.RunIDResolution,
-			DirectiveEventID:   result.DirectiveEventID,
-			DirectiveEventType: result.DirectiveEventType,
-		})
-		if err != nil {
-			return store.APIIdempotencyCompletion{}, err
-		}
-		return store.APIIdempotencyCompletion{ResourceID: result.AgentID, Response: response}, nil
 	})
 	if err != nil {
 		return nil, agentControlError(req.Method, agentID, err)
 	}
-	var stored agentDirectiveResult
-	if err := json.Unmarshal(completion.Response, &stored); err != nil {
-		if replay {
-			return nil, fmt.Errorf("decode %s idempotency response: %w", req.Method, err)
-		}
-		return nil, fmt.Errorf("decode %s response: %w", req.Method, err)
-	}
-	return stored, nil
+	return agentDirectiveResult{
+		OK:                 true,
+		OperationID:        result.OperationID,
+		Response:           result.Response,
+		RunID:              result.RunID,
+		RunIDResolution:    result.RunIDResolution,
+		DirectiveEventID:   result.DirectiveEventID,
+		DirectiveEventType: result.DirectiveEventType,
+	}, nil
 }
 
 func executeAgentRestart(ctx context.Context, req Request, opts OperatorReadOptions, now time.Time) (any, error) {
@@ -217,6 +198,31 @@ func executeAgentReplayBacklog(ctx context.Context, req Request, opts OperatorRe
 }
 
 func agentControlError(method, agentID string, err error) error {
+	var directiveConflict *runtimeagentcontrol.DirectiveIdempotencyConflictError
+	if errors.As(err, &directiveConflict) {
+		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
+			"original_request_hash":    directiveConflict.OriginalRequestHash,
+			"conflicting_request_hash": directiveConflict.ConflictingRequestHash,
+			"original_response_ref": map[string]any{
+				"method":      runtimeagentcontrol.DirectiveOperationMethod,
+				"resource_id": directiveConflict.OperationID,
+			},
+		})
+	}
+	var operationErr *runtimeagentcontrol.DirectiveOperationError
+	if errors.As(err, &operationErr) && operationErr != nil {
+		details := directiveOperationErrorDetails(operationErr.Operation)
+		switch {
+		case errors.Is(operationErr.Err, runtimeagentcontrol.ErrDirectiveInProgress):
+			return NewApplicationError(AgentDirectiveInProgressCode, true, details)
+		case errors.Is(operationErr.Err, runtimeagentcontrol.ErrDirectiveCompletionPending):
+			return NewApplicationError(AgentDirectiveCompletionPendingCode, true, details)
+		case errors.Is(operationErr.Err, runtimeagentcontrol.ErrDirectiveExecutionFailed):
+			return NewApplicationError(AgentDirectiveExecutionFailedCode, false, details)
+		case errors.Is(operationErr.Err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate):
+			return NewApplicationError(AgentDirectiveOutcomeIndeterminateCode, false, details)
+		}
+	}
 	var conflict *store.APIIdempotencyConflictError
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{
@@ -276,6 +282,26 @@ func agentControlError(method, agentID string, err error) error {
 	default:
 		return err
 	}
+}
+
+func directiveOperationErrorDetails(op runtimeagentcontrol.DirectiveOperation) map[string]any {
+	op = op.Normalized()
+	details := map[string]any{
+		"operation_id":       op.OperationID,
+		"directive_event_id": op.DirectiveEventID,
+		"run_id":             op.ResolvedRunID,
+		"state":              string(op.State),
+	}
+	if !op.ExecutionLeaseExpiresAt.IsZero() {
+		details["lease_expires_at"] = op.ExecutionLeaseExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	if op.ErrorCode != "" {
+		details["failure_code"] = op.ErrorCode
+	}
+	if op.ErrorMessage != "" {
+		details["failure_message"] = op.ErrorMessage
+	}
+	return details
 }
 
 func activeSessionDetails(sessions []runtimeagentcontrol.ActiveSessionTarget) []map[string]any {

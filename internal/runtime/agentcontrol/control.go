@@ -113,20 +113,25 @@ func (r RunTargetResolution) Normalized() RunTargetResolution {
 }
 
 type SendDirectiveRequest struct {
-	AgentID    string
-	Directive  string
-	RunID      string
-	Source     string
-	OperatorID string
+	AgentID        string
+	Directive      string
+	RunID          string
+	Source         string
+	OperatorID     string
+	ActorTokenID   string
+	IdempotencyKey string
+	RequestHash    string
 }
 
 type SendDirectiveResult struct {
-	AgentID            string
-	Response           string
-	RunID              string
-	RunIDResolution    string
-	DirectiveEventID   string
-	DirectiveEventType string
+	OK                 bool   `json:"ok"`
+	AgentID            string `json:"-"`
+	OperationID        string `json:"operation_id"`
+	Response           string `json:"response,omitempty"`
+	RunID              string `json:"run_id"`
+	RunIDResolution    string `json:"run_id_resolution"`
+	DirectiveEventID   string `json:"directive_event_id"`
+	DirectiveEventType string `json:"directive_event_type"`
 }
 
 type BoardDirective struct {
@@ -137,7 +142,7 @@ type BoardDirective struct {
 	Source          string
 }
 
-func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now time.Time) (events.Event, error) {
+func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, operationID, eventID string, now time.Time) (events.Event, error) {
 	agentID := strings.TrimSpace(req.AgentID)
 	directive := strings.TrimSpace(req.Directive)
 	target = target.Normalized()
@@ -149,6 +154,14 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 	}
 	if target.RunID == "" {
 		return events.EmptyEvent(), errors.New("run_id is required")
+	}
+	operationID = strings.TrimSpace(operationID)
+	if _, err := uuid.Parse(operationID); err != nil {
+		return events.EmptyEvent(), fmt.Errorf("operation_id must be a UUID: %w", err)
+	}
+	eventID = strings.TrimSpace(eventID)
+	if _, err := uuid.Parse(eventID); err != nil {
+		return events.EmptyEvent(), fmt.Errorf("directive_event_id must be a UUID: %w", err)
 	}
 	if _, err := uuid.Parse(target.RunID); err != nil {
 		return events.EmptyEvent(), fmt.Errorf("run_id must be a UUID: %w", err)
@@ -164,6 +177,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 		now = now.UTC()
 	}
 	payload := map[string]any{
+		"operation_id":      operationID,
 		"agent_id":          agentID,
 		"directive_text":    directive,
 		"mode":              DirectiveEventMode,
@@ -179,7 +193,7 @@ func NewDirectiveEvent(req SendDirectiveRequest, target RunTargetResolution, now
 	if err != nil {
 		return events.EmptyEvent(), err
 	}
-	return events.NewRuntimeControlEvent(uuid.NewString(), events.EventType(DirectiveEventType), "runtime", "", raw, 0, target.RunID, "", events.EventEnvelope{}, now), nil
+	return events.NewRuntimeControlEvent(eventID, events.EventType(DirectiveEventType), "runtime", "", raw, 0, target.RunID, "", events.EventEnvelope{}, now), nil
 }
 
 func ValidateBoardDirective(d BoardDirective) error {

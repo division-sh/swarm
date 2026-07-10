@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,12 @@ type bundleFingerprintContextOwner interface {
 }
 
 const DefaultShutdownGrace = 30 * time.Second
+
+const (
+	directiveExecutionLease     = 2 * time.Minute
+	directiveExecutionHeartbeat = 30 * time.Second
+	directiveOperationTTL       = 24 * time.Hour
+)
 
 var errRuntimeShuttingDown = errors.New("runtime shutting down")
 
@@ -371,53 +378,263 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	req.AgentID = agentID
 	req.Directive = strings.TrimSpace(req.Directive)
 	req.RunID = strings.TrimSpace(req.RunID)
+	req.Source = strings.TrimSpace(req.Source)
+	if req.Source == "" {
+		req.Source = runtimeagentcontrol.DirectiveSourceBuilderRuntime
+	}
+	req.OperatorID = strings.TrimSpace(req.OperatorID)
+	req.ActorTokenID = strings.TrimSpace(req.ActorTokenID)
+	if req.ActorTokenID == "" {
+		req.ActorTokenID = req.OperatorID
+	}
+	if req.ActorTokenID == "" {
+		req.ActorTokenID = "internal:" + req.Source
+	}
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	req.RequestHash = strings.TrimSpace(req.RequestHash)
+	if req.RequestHash == "" {
+		var err error
+		req.RequestHash, err = directiveRequestHash(req)
+		if err != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, err
+		}
+	}
 	if agentID == "" {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("agent id is required")
 	}
 	if req.Directive == "" {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive is required")
 	}
-	am.mu.RLock()
-	agent, ok := am.agents[agentID]
-	am.mu.RUnlock()
-	if !ok {
-		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotFound(agentID)
+	operationStore, err := am.directiveOperationStore()
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	chatAgent, ok := agent.(BoardInteractiveAgent)
-	if !ok {
-		return runtimeagentcontrol.SendDirectiveResult{}, agentControlNotRunning(agentID, runtimeagentcontrol.StatusIdle)
+	if req.IdempotencyKey != "" {
+		existing, ok, err := operationStore.LoadDirectiveOperationByKey(ctx, runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+		if err != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, err
+		}
+		if ok {
+			if existing.RequestHash != req.RequestHash {
+				return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, OperationID: existing.OperationID}
+			}
+			if existing.State == runtimeagentcontrol.DirectiveOperationExecuting && !existing.ExecutionLeaseExpiresAt.IsZero() && !existing.ExecutionLeaseExpiresAt.After(time.Now().UTC()) {
+				existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, time.Now().UTC(), directiveOperationTTL)
+				if err != nil {
+					return runtimeagentcontrol.SendDirectiveResult{}, err
+				}
+				if !ok {
+					return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive operation disappeared during reconciliation")
+				}
+			}
+			return am.continueDirectiveOperation(ctx, operationStore, existing)
+		}
+	}
+	if _, err := am.directiveBoardAgent(agentID); err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	target, err := am.resolveAgentDirectiveRunTarget(ctx, agentID, req.RunID)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	directiveEvent, err := runtimeagentcontrol.NewDirectiveEvent(req, target, time.Now().UTC())
+	now := time.Now().UTC()
+	operationID := uuid.NewString()
+	eventID := uuid.NewString()
+	directiveEvent, err := runtimeagentcontrol.NewDirectiveEvent(req, target, operationID, eventID, now)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	if err := am.publishAgentDirectiveEvent(ctx, directiveEvent); err != nil {
-		return runtimeagentcontrol.SendDirectiveResult{}, err
+	reservationCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), target.RunID)
+	if owner, ok := am.bus.(bundleFingerprintContextOwner); ok && owner != nil {
+		reservationCtx = owner.WithBundleFingerprint(reservationCtx)
 	}
-	directiveCtx := runtimecorrelation.WithRunID(ctx, strings.TrimSpace(directiveEvent.RunID()))
-	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
-	response, err := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
-		Directive:       req.Directive,
-		Event:           directiveEvent,
-		RunIDResolution: target.Mode,
-		OperatorID:      strings.TrimSpace(req.OperatorID),
-		Source:          strings.TrimSpace(req.Source),
+	reservation, err := operationStore.ReserveDirectiveOperation(reservationCtx, runtimeagentcontrol.ReserveDirectiveOperationRequest{
+		Operation: runtimeagentcontrol.DirectiveOperation{
+			OperationID:      operationID,
+			Method:           runtimeagentcontrol.DirectiveOperationMethod,
+			ActorTokenID:     req.ActorTokenID,
+			IdempotencyKey:   req.IdempotencyKey,
+			RequestHash:      req.RequestHash,
+			AgentID:          agentID,
+			Directive:        req.Directive,
+			RequestedRunID:   req.RunID,
+			ResolvedRunID:    target.RunID,
+			RunIDResolution:  target.Mode,
+			Source:           req.Source,
+			OperatorID:       req.OperatorID,
+			DirectiveEventID: eventID,
+			State:            runtimeagentcontrol.DirectiveOperationPrepared,
+		},
+		Event: directiveEvent,
+		Now:   now,
 	})
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	return runtimeagentcontrol.SendDirectiveResult{
-		AgentID:            agentID,
+	return am.continueDirectiveOperation(ctx, operationStore, reservation.Operation)
+}
+
+func (am *AgentManager) directiveOperationStore() (runtimeagentcontrol.DirectiveOperationStore, error) {
+	if am == nil || am.bus == nil || am.bus.Store() == nil {
+		return nil, errors.New("directive operation store is required")
+	}
+	store, ok := am.bus.Store().(runtimeagentcontrol.DirectiveOperationStore)
+	if !ok || store == nil {
+		return nil, errors.New("selected store does not support directive operations")
+	}
+	return store, nil
+}
+
+func (am *AgentManager) directiveBoardAgent(agentID string) (BoardInteractiveAgent, error) {
+	am.mu.RLock()
+	agent, ok := am.agents[strings.TrimSpace(agentID)]
+	am.mu.RUnlock()
+	if !ok {
+		return nil, agentControlNotFound(agentID)
+	}
+	chatAgent, ok := agent.(BoardInteractiveAgent)
+	if !ok {
+		return nil, agentControlNotRunning(agentID, runtimeagentcontrol.StatusIdle)
+	}
+	return chatAgent, nil
+}
+
+func (am *AgentManager) continueDirectiveOperation(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
+	op = op.Normalized()
+	switch op.State {
+	case runtimeagentcontrol.DirectiveOperationSucceeded:
+		return directiveResultFromOperation(op)
+	case runtimeagentcontrol.DirectiveOperationExecuted:
+		finalized, err := store.FinalizeDirectiveSuccess(ctx, op.OperationID, time.Now().UTC(), directiveOperationTTL)
+		if err != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveCompletionPending, Operation: op}
+		}
+		return directiveResultFromOperation(finalized)
+	case runtimeagentcontrol.DirectiveOperationExecuting, runtimeagentcontrol.DirectiveOperationFailed, runtimeagentcontrol.DirectiveOperationIndeterminate:
+		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(op)
+	case runtimeagentcontrol.DirectiveOperationPrepared:
+		return am.executePreparedDirectiveOperation(ctx, store, op)
+	default:
+		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(op)
+	}
+}
+
+func (am *AgentManager) executePreparedDirectiveOperation(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
+	chatAgent, err := am.directiveBoardAgent(op.AgentID)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	ownerID := uuid.NewString()
+	admitted, err := store.AdmitDirectiveExecution(ctx, op.OperationID, ownerID, time.Now().UTC(), directiveExecutionLease)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	directiveEvent, err := directiveEventFromOperation(admitted)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	directiveCtx := runtimecorrelation.WithRunID(ctx, strings.TrimSpace(directiveEvent.RunID()))
+	directiveCtx = runtimebus.WithInboundEvent(directiveCtx, directiveEvent)
+	heartbeatCtx, stopHeartbeat := context.WithCancel(context.Background())
+	heartbeatDone := make(chan struct{})
+	go runDirectiveExecutionHeartbeat(heartbeatCtx, heartbeatDone, store, admitted.OperationID, ownerID)
+	response, executionErr := chatAgent.BoardStep(directiveCtx, runtimeagentcontrol.BoardDirective{
+		Directive:       admitted.Directive,
+		Event:           directiveEvent,
+		RunIDResolution: admitted.RunIDResolution,
+		OperatorID:      admitted.OperatorID,
+		Source:          admitted.Source,
+	})
+	stopHeartbeat()
+	<-heartbeatDone
+	if executionErr != nil {
+		failed, persistErr := store.FinalizeDirectiveFailure(ctx, admitted.OperationID, ownerID, "board_step_failed", executionErr.Error(), nil, time.Now().UTC(), directiveOperationTTL)
+		if persistErr != nil {
+			admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
+			admitted.ErrorCode = "post_effect_failure_persistence_failed"
+			admitted.ErrorMessage = persistErr.Error()
+			return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
+		}
+		return runtimeagentcontrol.SendDirectiveResult{}, runtimeagentcontrol.ErrorForDirectiveOperation(failed)
+	}
+	result := runtimeagentcontrol.SendDirectiveResult{
+		OK:                 true,
+		AgentID:            admitted.AgentID,
+		OperationID:        admitted.OperationID,
 		Response:           response,
-		RunID:              strings.TrimSpace(directiveEvent.RunID()),
-		RunIDResolution:    target.Mode,
-		DirectiveEventID:   strings.TrimSpace(directiveEvent.ID()),
+		RunID:              admitted.ResolvedRunID,
+		RunIDResolution:    admitted.RunIDResolution,
+		DirectiveEventID:   admitted.DirectiveEventID,
 		DirectiveEventType: string(directiveEvent.Type()),
-	}, nil
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, err
+	}
+	executed, err := store.RecordDirectiveExecuted(ctx, admitted.OperationID, ownerID, encoded, time.Now().UTC())
+	if err != nil {
+		admitted.State = runtimeagentcontrol.DirectiveOperationIndeterminate
+		admitted.ErrorCode = "post_effect_result_persistence_failed"
+		admitted.ErrorMessage = err.Error()
+		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate, Operation: admitted}
+	}
+	finalized, err := store.FinalizeDirectiveSuccess(ctx, admitted.OperationID, time.Now().UTC(), directiveOperationTTL)
+	if err != nil {
+		return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveOperationError{Err: runtimeagentcontrol.ErrDirectiveCompletionPending, Operation: executed}
+	}
+	return directiveResultFromOperation(finalized)
+}
+
+func runDirectiveExecutionHeartbeat(ctx context.Context, done chan<- struct{}, store runtimeagentcontrol.DirectiveOperationStore, operationID, ownerID string) {
+	defer close(done)
+	ticker := time.NewTicker(directiveExecutionHeartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			_ = store.RenewDirectiveExecutionLease(context.Background(), operationID, ownerID, now.UTC(), directiveExecutionLease)
+		}
+	}
+}
+
+func directiveEventFromOperation(op runtimeagentcontrol.DirectiveOperation) (events.Event, error) {
+	return runtimeagentcontrol.NewDirectiveEvent(runtimeagentcontrol.SendDirectiveRequest{
+		AgentID:    op.AgentID,
+		Directive:  op.Directive,
+		RunID:      op.RequestedRunID,
+		Source:     op.Source,
+		OperatorID: op.OperatorID,
+	}, runtimeagentcontrol.RunTargetResolution{RunID: op.ResolvedRunID, Mode: op.RunIDResolution}, op.OperationID, op.DirectiveEventID, op.CreatedAt)
+}
+
+func directiveResultFromOperation(op runtimeagentcontrol.DirectiveOperation) (runtimeagentcontrol.SendDirectiveResult, error) {
+	var result runtimeagentcontrol.SendDirectiveResult
+	if len(op.Response) == 0 {
+		return result, fmt.Errorf("directive operation %s has no durable response", op.OperationID)
+	}
+	if err := json.Unmarshal(op.Response, &result); err != nil {
+		return result, fmt.Errorf("decode directive operation response: %w", err)
+	}
+	if !result.OK || strings.TrimSpace(result.OperationID) != op.OperationID {
+		return runtimeagentcontrol.SendDirectiveResult{}, fmt.Errorf("directive operation response identity mismatch")
+	}
+	result.AgentID = op.AgentID
+	return result, nil
+}
+
+func directiveRequestHash(req runtimeagentcontrol.SendDirectiveRequest) (string, error) {
+	raw, err := json.Marshal(struct {
+		AgentID   string `json:"agent_id"`
+		Directive string `json:"directive"`
+		RunID     string `json:"run_id,omitempty"`
+	}{AgentID: req.AgentID, Directive: req.Directive, RunID: req.RunID})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("%x", sum[:]), nil
 }
 
 func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agentID, explicitRunID string) (runtimeagentcontrol.RunTargetResolution, error) {
@@ -441,45 +658,6 @@ func (am *AgentManager) resolveAgentDirectiveRunTarget(ctx context.Context, agen
 		RunID: uuid.NewString(),
 		Mode:  runtimeagentcontrol.RunResolutionNewRunAllocated,
 	}, nil
-}
-
-func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt events.Event) error {
-	if strings.TrimSpace(evt.RunID()) == "" {
-		return errors.New("directive event run_id is required")
-	}
-	if am.bus == nil {
-		if am.store != nil {
-			return errors.New("event bus is required for agent directive persistence")
-		}
-		return nil
-	}
-	eventCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), strings.TrimSpace(evt.RunID()))
-	if owner, ok := am.bus.(bundleFingerprintContextOwner); ok && owner != nil {
-		eventCtx = owner.WithBundleFingerprint(eventCtx)
-	}
-	eventStore := am.bus.Store()
-	if eventStore == nil {
-		return errors.New("event store is required for agent directive persistence")
-	}
-	if atomicStore, ok := eventStore.(runtimebus.AtomicEventReplayScopePersistence); ok && atomicStore != nil {
-		return atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect)
-	}
-	if atomicStore, ok := eventStore.(runtimebus.AtomicEventPersistence); ok && atomicStore != nil {
-		if err := atomicStore.PersistEventWithDeliveries(eventCtx, evt, nil); err != nil {
-			return err
-		}
-		if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
-			return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect)
-		}
-		return nil
-	}
-	if err := eventStore.AppendEvent(eventCtx, evt); err != nil {
-		return err
-	}
-	if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
-		return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect)
-	}
-	return nil
 }
 
 func (am *AgentManager) Run(ctx context.Context) {
@@ -597,6 +775,11 @@ func (am *AgentManager) recover(ctx context.Context, startupReplayDiagnostics bo
 	}
 	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
 		return summary, err
+	}
+	if operationStore, ok := am.bus.Store().(runtimeagentcontrol.DirectiveOperationStore); ok && operationStore != nil {
+		if _, err := operationStore.ReconcileDirectiveOperations(ctx, time.Now().UTC(), directiveOperationTTL); err != nil {
+			return summary, fmt.Errorf("reconcile directive operations: %w", err)
+		}
 	}
 
 	if err := runtimepipeline.NewRecoveryManagerWith(am.bus.Store(), am.bus).Recover(ctx); err != nil {

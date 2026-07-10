@@ -156,7 +156,7 @@ methods:
   - method: agent.send_directive
     transport: http
     required_params: [agent_id, directive]
-    declared_errors: [AGENT_NOT_FOUND, AGENT_NOT_RUNNING, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT]
+    declared_errors: [AGENT_NOT_FOUND, AGENT_NOT_RUNNING, RUN_NOT_FOUND, RUN_ALREADY_TERMINAL, AMBIGUOUS_RUN_TARGET, IDEMPOTENCY_CONFLICT, AGENT_DIRECTIVE_IN_PROGRESS, AGENT_DIRECTIVE_COMPLETION_PENDING, AGENT_DIRECTIVE_EXECUTION_FAILED, AGENT_DIRECTIVE_OUTCOME_INDETERMINATE]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

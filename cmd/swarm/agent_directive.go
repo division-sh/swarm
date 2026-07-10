@@ -28,6 +28,7 @@ type agentDirectiveCommandOptions struct {
 
 type agentDirectiveResult struct {
 	OK                 bool   `json:"ok"`
+	OperationID        string `json:"operation_id"`
 	Response           string `json:"response,omitempty"`
 	RunID              string `json:"run_id"`
 	RunIDResolution    string `json:"run_id_resolution"`
@@ -121,6 +122,7 @@ func validateAgentDirectiveResult(result agentDirectiveResult) error {
 		name  string
 		value string
 	}{
+		{name: "operation_id", value: result.OperationID},
 		{name: "run_id", value: result.RunID},
 		{name: "run_id_resolution", value: result.RunIDResolution},
 		{name: "directive_event_id", value: result.DirectiveEventID},
@@ -143,8 +145,9 @@ func writeAgentDirectiveResult(out io.Writer, agentID string, result agentDirect
 	if out == nil {
 		return
 	}
-	fmt.Fprintf(out, "agent directive ok: agent_id=%s run_id=%s run_id_resolution=%s directive_event_id=%s directive_event_type=%s\n",
+	fmt.Fprintf(out, "agent directive ok: agent_id=%s operation_id=%s run_id=%s run_id_resolution=%s directive_event_id=%s directive_event_type=%s\n",
 		agentID,
+		result.OperationID,
 		result.RunID,
 		result.RunIDResolution,
 		result.DirectiveEventID,
@@ -167,6 +170,10 @@ func agentDirectiveErrorExitCode(err error) int {
 			"RUN_ALREADY_TERMINAL",
 			"AMBIGUOUS_RUN_TARGET",
 			"IDEMPOTENCY_CONFLICT",
+			"AGENT_DIRECTIVE_IN_PROGRESS",
+			"AGENT_DIRECTIVE_COMPLETION_PENDING",
+			"AGENT_DIRECTIVE_EXECUTION_FAILED",
+			"AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
 		},
 	})
 }

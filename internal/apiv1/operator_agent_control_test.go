@@ -39,7 +39,7 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	if directive.Error != nil {
 		t.Fatalf("agent.send_directive error = %#v", directive.Error)
 	}
-	if result := asMap(t, directive.Result); result["ok"] != true || result["response"] != "accepted" || result["run_id"] != directiveRunID || result["run_id_resolution"] != runtimeagentcontrol.RunResolutionSpecified {
+	if result := asMap(t, directive.Result); result["ok"] != true || result["operation_id"] != "00000000-0000-0000-0000-000000000904" || result["response"] != "accepted" || result["run_id"] != directiveRunID || result["run_id_resolution"] != runtimeagentcontrol.RunResolutionSpecified {
 		t.Fatalf("agent.send_directive result = %#v", result)
 	}
 	if controller.directiveCalls != 1 || controller.lastDirective.Directive != "run corpus" || controller.lastDirective.RunID != directiveRunID || controller.lastDirective.Source != runtimeagentcontrol.DirectiveSourceV1RPC {
@@ -101,8 +101,8 @@ func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.
 	if controller.replayCalls != 1 {
 		t.Fatalf("replay calls after idempotent replay = %d, want 1", controller.replayCalls)
 	}
-	if count := countAPIIdempotencyRows(t, db); count != 3 {
-		t.Fatalf("api_idempotency rows = %d, want 3", count)
+	if count := countAPIIdempotencyRows(t, db); count != 2 {
+		t.Fatalf("api_idempotency rows = %d, want 2 (directive projection belongs to its operation owner)", count)
 	}
 }
 
@@ -372,6 +372,12 @@ type fakeAgentControlController struct {
 	restartCalls      int
 	replayCalls       int
 	lastDirective     runtimeagentcontrol.SendDirectiveRequest
+	directiveResults  map[string]fakeDirectiveResult
+}
+
+type fakeDirectiveResult struct {
+	requestHash string
+	result      runtimeagentcontrol.SendDirectiveResult
 }
 
 type directiveIntegrationAgent struct {
@@ -394,7 +400,6 @@ func (a *directiveIntegrationAgent) BoardStep(_ context.Context, directive runti
 }
 
 func (c *fakeAgentControlController) SendDirective(_ context.Context, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.SendDirectiveResult, error) {
-	c.directiveCalls++
 	c.lastDirective = req
 	if err := c.errs[req.Directive]; err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
@@ -402,6 +407,19 @@ func (c *fakeAgentControlController) SendDirective(_ context.Context, req runtim
 	if err := c.errs["agent.send_directive"]; err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
+	if req.IdempotencyKey != "" {
+		if existing, ok := c.directiveResults[req.IdempotencyKey]; ok {
+			if existing.requestHash != req.RequestHash {
+				return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveIdempotencyConflictError{
+					OriginalRequestHash:    existing.requestHash,
+					ConflictingRequestHash: req.RequestHash,
+					OperationID:            existing.result.OperationID,
+				}
+			}
+			return existing.result, nil
+		}
+	}
+	c.directiveCalls++
 	runID := req.RunID
 	if runID == "" {
 		runID = "00000000-0000-0000-0000-000000000902"
@@ -410,14 +428,23 @@ func (c *fakeAgentControlController) SendDirective(_ context.Context, req runtim
 	if req.RunID == "" {
 		mode = runtimeagentcontrol.RunResolutionNewRunAllocated
 	}
-	return runtimeagentcontrol.SendDirectiveResult{
+	result := runtimeagentcontrol.SendDirectiveResult{
+		OK:                 true,
 		AgentID:            req.AgentID,
+		OperationID:        "00000000-0000-0000-0000-000000000904",
 		Response:           c.directiveResponse,
 		RunID:              runID,
 		RunIDResolution:    mode,
 		DirectiveEventID:   "00000000-0000-0000-0000-000000000903",
 		DirectiveEventType: runtimeagentcontrol.DirectiveEventType,
-	}, nil
+	}
+	if req.IdempotencyKey != "" {
+		if c.directiveResults == nil {
+			c.directiveResults = map[string]fakeDirectiveResult{}
+		}
+		c.directiveResults[req.IdempotencyKey] = fakeDirectiveResult{requestHash: req.RequestHash, result: result}
+	}
+	return result, nil
 }
 
 func (c *fakeAgentControlController) Restart(_ context.Context, req runtimeagentcontrol.RestartRequest) (runtimeagentcontrol.RestartResult, error) {

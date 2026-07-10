@@ -71,7 +71,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -169,7 +169,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -248,7 +248,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -308,7 +308,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -421,7 +421,7 @@
       },
       "errors": [
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -459,7 +459,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32020,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -497,7 +497,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32021,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -552,7 +552,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -612,7 +612,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32019,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -666,7 +666,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32030,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -724,7 +724,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -827,7 +827,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -865,7 +865,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -953,7 +953,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -991,7 +991,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1053,7 +1053,7 @@
     },
     {
       "name": "agent.send_directive",
-      "description": "Send a directive (free-form instruction) to a running agent. The runtime resolves the target run before execution: explicit run_id targets an existing nonterminal run; with no run_id, zero active sessions allocate a new run_id, one active session uses that session's run_id, and multiple active sessions fail closed with AMBIGUOUS_RUN_TARGET. The runtime persists platform.agent_directive before BoardStep and all child emissions inherit the resolved run_id.",
+      "description": "Send a directive (free-form instruction) to a running agent. The runtime resolves the target run before reservation: explicit run_id targets an existing nonterminal run; with no run_id, zero active sessions allocate a new run_id, one active session uses that session's run_id, and multiple active sessions fail closed with AMBIGUOUS_RUN_TARGET. One agent_directive_operations row and one platform.agent_directive event are persisted atomically before the operation receives its sole BoardStep admission. Successful BoardStep response is made durable before pipeline settlement and API completion are finalized. Same-key retries consume the same operation and never re-execute an admitted, executed, failed, or indeterminate operation. Keyless calls create fresh operations and make no cross-call exactly-once claim.",
       "params": [
         {
           "name": "agent_id",
@@ -1103,6 +1103,9 @@
               "const": true,
               "type": "boolean"
             },
+            "operation_id": {
+              "$ref": "#/components/schemas/OpaqueId"
+            },
             "response": {
               "description": "Optional acknowledgement or error from the agent.",
               "type": "string"
@@ -1121,6 +1124,7 @@
           },
           "required": [
             "ok",
+            "operation_id",
             "run_id",
             "run_id_resolution",
             "directive_event_id",
@@ -1131,7 +1135,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1169,7 +1173,7 @@
           }
         },
         {
-          "code": -32001,
+          "code": -32005,
           "message": "Application error: AGENT_NOT_RUNNING",
           "data": {
             "additionalProperties": false,
@@ -1211,7 +1215,7 @@
           }
         },
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1249,7 +1253,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32035,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1291,7 +1295,7 @@
           }
         },
         {
-          "code": -32002,
+          "code": -32006,
           "message": "Application error: AMBIGUOUS_RUN_TARGET",
           "data": {
             "additionalProperties": false,
@@ -1352,7 +1356,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1409,6 +1413,234 @@
             ],
             "type": "object"
           }
+        },
+        {
+          "code": -32002,
+          "message": "Application error: AGENT_DIRECTIVE_IN_PROGRESS",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_DIRECTIVE_IN_PROGRESS",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "A matching directive operation owns a live execution lease. Retry may observe its durable outcome but must not execute it again.",
+                "properties": {
+                  "directive_event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "lease_expires_at": {
+                    "$ref": "#/components/schemas/Timestamp"
+                  },
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "state": {
+                    "const": "executing",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "directive_event_id",
+                  "run_id",
+                  "state",
+                  "lease_expires_at"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32000,
+          "message": "Application error: AGENT_DIRECTIVE_COMPLETION_PENDING",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_DIRECTIVE_COMPLETION_PENDING",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Directive execution succeeded and is durable, but settlement/API completion still requires repair. Retry performs finalization only.",
+                "properties": {
+                  "directive_event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "state": {
+                    "const": "executed",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "directive_event_id",
+                  "run_id",
+                  "state"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32001,
+          "message": "Application error: AGENT_DIRECTIVE_EXECUTION_FAILED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_DIRECTIVE_EXECUTION_FAILED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "The admitted directive execution returned a durable terminal failure. Retrying the operation never executes BoardStep again.",
+                "properties": {
+                  "directive_event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "failure_code": {
+                    "type": "string"
+                  },
+                  "failure_message": {
+                    "type": "string"
+                  },
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "state": {
+                    "const": "failed",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "directive_event_id",
+                  "run_id",
+                  "state",
+                  "failure_code",
+                  "failure_message"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32003,
+          "message": "Application error: AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Directive execution may have produced effects, but no authoritative result was durably recorded. Automatic re-execution is forbidden.",
+                "properties": {
+                  "directive_event_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "failure_code": {
+                    "type": "string"
+                  },
+                  "failure_message": {
+                    "type": "string"
+                  },
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "run_id": {
+                    "$ref": "#/components/schemas/OpaqueId"
+                  },
+                  "state": {
+                    "const": "indeterminate",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation_id",
+                  "directive_event_id",
+                  "run_id",
+                  "state",
+                  "failure_code",
+                  "failure_message"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
         }
       ]
     },
@@ -1449,7 +1681,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1509,7 +1741,7 @@
       },
       "errors": [
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: BUNDLE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1592,7 +1824,7 @@
       },
       "errors": [
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: BUNDLE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1630,7 +1862,7 @@
           }
         },
         {
-          "code": -32005,
+          "code": -32009,
           "message": "Application error: BUNDLE_HAS_ACTIVE_RUNS",
           "data": {
             "additionalProperties": false,
@@ -1682,7 +1914,7 @@
           }
         },
         {
-          "code": -32004,
+          "code": -32008,
           "message": "Application error: BUNDLE_DELETE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -1721,7 +1953,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1802,7 +2034,7 @@
       },
       "errors": [
         {
-          "code": -32007,
+          "code": -32011,
           "message": "Application error: BUNDLE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1907,7 +2139,7 @@
       },
       "errors": [
         {
-          "code": -32008,
+          "code": -32012,
           "message": "Application error: BUNDLE_REGISTER_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1945,7 +2177,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2034,7 +2266,7 @@
       },
       "errors": [
         {
-          "code": -32000,
+          "code": -32004,
           "message": "Application error: AGENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2108,7 +2340,7 @@
       },
       "errors": [
         {
-          "code": -32034,
+          "code": -32038,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2146,7 +2378,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32039,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2189,7 +2421,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2227,7 +2459,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2323,7 +2555,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32023,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2361,7 +2593,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2449,7 +2681,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32023,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2487,7 +2719,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2620,7 +2852,7 @@
       },
       "errors": [
         {
-          "code": -32019,
+          "code": -32023,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2680,7 +2912,7 @@
       },
       "errors": [
         {
-          "code": -32034,
+          "code": -32038,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2757,7 +2989,7 @@
       },
       "errors": [
         {
-          "code": -32034,
+          "code": -32038,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2795,7 +3027,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32039,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -2963,7 +3195,7 @@
       },
       "errors": [
         {
-          "code": -32011,
+          "code": -32015,
           "message": "Application error: ENTITY_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3096,7 +3328,7 @@
       },
       "errors": [
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3287,7 +3519,7 @@
       },
       "errors": [
         {
-          "code": -32006,
+          "code": -32010,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -3337,7 +3569,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32013,
           "message": "Application error: BUNDLE_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -3382,7 +3614,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32014,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -3435,7 +3667,7 @@
           }
         },
         {
-          "code": -32003,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -3485,7 +3717,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32040,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -3520,7 +3752,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32042,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -3555,7 +3787,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32016,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -3608,7 +3840,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32018,
           "message": "Application error: EVENT_PUBLISH_FAILED",
           "data": {
             "additionalProperties": false,
@@ -3665,7 +3897,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32030,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -3723,7 +3955,7 @@
           }
         },
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3761,7 +3993,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3799,7 +4031,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32035,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -3841,7 +4073,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3940,7 +4172,7 @@
       },
       "errors": [
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -3978,7 +4210,7 @@
           }
         },
         {
-          "code": -32016,
+          "code": -32020,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -4016,7 +4248,7 @@
           }
         },
         {
-          "code": -32017,
+          "code": -32021,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -4071,7 +4303,7 @@
           }
         },
         {
-          "code": -32018,
+          "code": -32022,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -4131,7 +4363,7 @@
           }
         },
         {
-          "code": -32015,
+          "code": -32019,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -4185,7 +4417,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32030,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -4243,7 +4475,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4424,7 +4656,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32028,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4462,7 +4694,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32026,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -4513,7 +4745,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32027,
           "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -4555,7 +4787,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4650,7 +4882,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32028,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4688,7 +4920,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32026,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -4739,7 +4971,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32027,
           "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -4781,7 +5013,7 @@
           }
         },
         {
-          "code": -32021,
+          "code": -32025,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -4827,7 +5059,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4908,7 +5140,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32028,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5063,7 +5295,7 @@
       },
       "errors": [
         {
-          "code": -32024,
+          "code": -32028,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5101,7 +5333,7 @@
           }
         },
         {
-          "code": -32022,
+          "code": -32026,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -5152,7 +5384,7 @@
           }
         },
         {
-          "code": -32023,
+          "code": -32027,
           "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
           "data": {
             "additionalProperties": false,
@@ -5194,7 +5426,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5302,7 +5534,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5340,7 +5572,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32037,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -5382,7 +5614,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5463,7 +5695,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5547,7 +5779,7 @@
       },
       "errors": [
         {
-          "code": -32010,
+          "code": -32014,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -5600,7 +5832,7 @@
           }
         },
         {
-          "code": -32003,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -5650,7 +5882,7 @@
           }
         },
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5688,7 +5920,7 @@
           }
         },
         {
-          "code": -32013,
+          "code": -32017,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5726,7 +5958,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5816,7 +6048,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5957,7 +6189,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5995,7 +6227,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32035,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -6037,7 +6269,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32034,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -6075,7 +6307,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6209,7 +6441,7 @@
       },
       "errors": [
         {
-          "code": -32006,
+          "code": -32010,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -6259,7 +6491,7 @@
           }
         },
         {
-          "code": -32009,
+          "code": -32013,
           "message": "Application error: BUNDLE_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -6304,7 +6536,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32014,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -6357,7 +6589,7 @@
           }
         },
         {
-          "code": -32003,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -6407,7 +6639,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32040,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -6442,7 +6674,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32042,
           "message": "Application error: UNSUPPORTED_BUNDLE_REF",
           "data": {
             "additionalProperties": false,
@@ -6477,7 +6709,7 @@
           }
         },
         {
-          "code": -32012,
+          "code": -32016,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -6530,7 +6762,7 @@
           }
         },
         {
-          "code": -32014,
+          "code": -32018,
           "message": "Application error: EVENT_PUBLISH_FAILED",
           "data": {
             "additionalProperties": false,
@@ -6587,7 +6819,7 @@
           }
         },
         {
-          "code": -32026,
+          "code": -32030,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -6645,7 +6877,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6733,7 +6965,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6771,7 +7003,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32035,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -6813,7 +7045,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6922,7 +7154,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7032,7 +7264,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32036,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7332,7 +7564,7 @@
       },
       "errors": [
         {
-          "code": -32029,
+          "code": -32033,
           "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -7370,7 +7602,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7451,7 +7683,7 @@
       },
       "errors": [
         {
-          "code": -32027,
+          "code": -32031,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -7482,7 +7714,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7563,7 +7795,7 @@
       },
       "errors": [
         {
-          "code": -32028,
+          "code": -32032,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -7594,7 +7826,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7822,7 +8054,7 @@
       },
       "errors": [
         {
-          "code": -32006,
+          "code": -32010,
           "message": "Application error: BUNDLE_MISMATCH",
           "data": {
             "additionalProperties": false,
@@ -7872,7 +8104,7 @@
           }
         },
         {
-          "code": -32010,
+          "code": -32014,
           "message": "Application error: BUNDLE_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -7925,7 +8157,7 @@
           }
         },
         {
-          "code": -32003,
+          "code": -32007,
           "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
           "data": {
             "additionalProperties": false,
@@ -7975,7 +8207,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32040,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -8010,7 +8242,7 @@
           }
         },
         {
-          "code": -32020,
+          "code": -32024,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -11751,8 +11983,236 @@
       }
     },
     "errors": {
-      "AGENT_NOT_FOUND": {
+      "AGENT_DIRECTIVE_COMPLETION_PENDING": {
         "code": -32000,
+        "message": "Application error: AGENT_DIRECTIVE_COMPLETION_PENDING",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AGENT_DIRECTIVE_COMPLETION_PENDING",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "Directive execution succeeded and is durable, but settlement/API completion still requires repair. Retry performs finalization only.",
+              "properties": {
+                "directive_event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "operation_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "state": {
+                  "const": "executed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation_id",
+                "directive_event_id",
+                "run_id",
+                "state"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "AGENT_DIRECTIVE_EXECUTION_FAILED": {
+        "code": -32001,
+        "message": "Application error: AGENT_DIRECTIVE_EXECUTION_FAILED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AGENT_DIRECTIVE_EXECUTION_FAILED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "The admitted directive execution returned a durable terminal failure. Retrying the operation never executes BoardStep again.",
+              "properties": {
+                "directive_event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "failure_code": {
+                  "type": "string"
+                },
+                "failure_message": {
+                  "type": "string"
+                },
+                "operation_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "state": {
+                  "const": "failed",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation_id",
+                "directive_event_id",
+                "run_id",
+                "state",
+                "failure_code",
+                "failure_message"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "AGENT_DIRECTIVE_IN_PROGRESS": {
+        "code": -32002,
+        "message": "Application error: AGENT_DIRECTIVE_IN_PROGRESS",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AGENT_DIRECTIVE_IN_PROGRESS",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "A matching directive operation owns a live execution lease. Retry may observe its durable outcome but must not execute it again.",
+              "properties": {
+                "directive_event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "lease_expires_at": {
+                  "$ref": "#/components/schemas/Timestamp"
+                },
+                "operation_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "state": {
+                  "const": "executing",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation_id",
+                "directive_event_id",
+                "run_id",
+                "state",
+                "lease_expires_at"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "AGENT_DIRECTIVE_OUTCOME_INDETERMINATE": {
+        "code": -32003,
+        "message": "Application error: AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "Directive execution may have produced effects, but no authoritative result was durably recorded. Automatic re-execution is forbidden.",
+              "properties": {
+                "directive_event_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "failure_code": {
+                  "type": "string"
+                },
+                "failure_message": {
+                  "type": "string"
+                },
+                "operation_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "run_id": {
+                  "$ref": "#/components/schemas/OpaqueId"
+                },
+                "state": {
+                  "const": "indeterminate",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "operation_id",
+                "directive_event_id",
+                "run_id",
+                "state",
+                "failure_code",
+                "failure_message"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "AGENT_NOT_FOUND": {
+        "code": -32004,
         "message": "Application error: AGENT_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -11790,7 +12250,7 @@
         }
       },
       "AGENT_NOT_RUNNING": {
-        "code": -32001,
+        "code": -32005,
         "message": "Application error: AGENT_NOT_RUNNING",
         "data": {
           "additionalProperties": false,
@@ -11832,7 +12292,7 @@
         }
       },
       "AMBIGUOUS_RUN_TARGET": {
-        "code": -32002,
+        "code": -32006,
         "message": "Application error: AMBIGUOUS_RUN_TARGET",
         "data": {
           "additionalProperties": false,
@@ -11893,7 +12353,7 @@
         }
       },
       "BUNDLE_DATA_INTEGRITY_ERROR": {
-        "code": -32003,
+        "code": -32007,
         "message": "Application error: BUNDLE_DATA_INTEGRITY_ERROR",
         "data": {
           "additionalProperties": false,
@@ -11943,7 +12403,7 @@
         }
       },
       "BUNDLE_DELETE_IN_PROGRESS": {
-        "code": -32004,
+        "code": -32008,
         "message": "Application error: BUNDLE_DELETE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -11982,7 +12442,7 @@
         }
       },
       "BUNDLE_HAS_ACTIVE_RUNS": {
-        "code": -32005,
+        "code": -32009,
         "message": "Application error: BUNDLE_HAS_ACTIVE_RUNS",
         "data": {
           "additionalProperties": false,
@@ -12034,7 +12494,7 @@
         }
       },
       "BUNDLE_MISMATCH": {
-        "code": -32006,
+        "code": -32010,
         "message": "Application error: BUNDLE_MISMATCH",
         "data": {
           "additionalProperties": false,
@@ -12084,7 +12544,7 @@
         }
       },
       "BUNDLE_NOT_FOUND": {
-        "code": -32007,
+        "code": -32011,
         "message": "Application error: BUNDLE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -12122,7 +12582,7 @@
         }
       },
       "BUNDLE_REGISTER_CONFLICT": {
-        "code": -32008,
+        "code": -32012,
         "message": "Application error: BUNDLE_REGISTER_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -12160,7 +12620,7 @@
         }
       },
       "BUNDLE_SCOPE_REQUIRED": {
-        "code": -32009,
+        "code": -32013,
         "message": "Application error: BUNDLE_SCOPE_REQUIRED",
         "data": {
           "additionalProperties": false,
@@ -12205,7 +12665,7 @@
         }
       },
       "BUNDLE_UNAVAILABLE": {
-        "code": -32010,
+        "code": -32014,
         "message": "Application error: BUNDLE_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -12258,7 +12718,7 @@
         }
       },
       "ENTITY_NOT_FOUND": {
-        "code": -32011,
+        "code": -32015,
         "message": "Application error: ENTITY_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -12296,7 +12756,7 @@
         }
       },
       "EVENT_NOT_DECLARED": {
-        "code": -32012,
+        "code": -32016,
         "message": "Application error: EVENT_NOT_DECLARED",
         "data": {
           "additionalProperties": false,
@@ -12349,7 +12809,7 @@
         }
       },
       "EVENT_NOT_FOUND": {
-        "code": -32013,
+        "code": -32017,
         "message": "Application error: EVENT_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -12387,7 +12847,7 @@
         }
       },
       "EVENT_PUBLISH_FAILED": {
-        "code": -32014,
+        "code": -32018,
         "message": "Application error: EVENT_PUBLISH_FAILED",
         "data": {
           "additionalProperties": false,
@@ -12444,7 +12904,7 @@
         }
       },
       "EVENT_REPLAY_NOT_ELIGIBLE": {
-        "code": -32015,
+        "code": -32019,
         "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
         "data": {
           "additionalProperties": false,
@@ -12498,7 +12958,7 @@
         }
       },
       "EVENT_REPLAY_NO_DELIVERY_HISTORY": {
-        "code": -32016,
+        "code": -32020,
         "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
         "data": {
           "additionalProperties": false,
@@ -12536,7 +12996,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL": {
-        "code": -32017,
+        "code": -32021,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
         "data": {
           "additionalProperties": false,
@@ -12591,7 +13051,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE": {
-        "code": -32018,
+        "code": -32022,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -12651,7 +13111,7 @@
         }
       },
       "FORK_NOT_FOUND": {
-        "code": -32019,
+        "code": -32023,
         "message": "Application error: FORK_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -12689,7 +13149,7 @@
         }
       },
       "IDEMPOTENCY_CONFLICT": {
-        "code": -32020,
+        "code": -32024,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -12748,7 +13208,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32021,
+        "code": -32025,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -12794,7 +13254,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32022,
+        "code": -32026,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -12845,7 +13305,7 @@
         }
       },
       "MAILBOX_DECISION_EVENT_UNCONFIGURED": {
-        "code": -32023,
+        "code": -32027,
         "message": "Application error: MAILBOX_DECISION_EVENT_UNCONFIGURED",
         "data": {
           "additionalProperties": false,
@@ -12887,7 +13347,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32024,
+        "code": -32028,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -12925,7 +13385,7 @@
         }
       },
       "METHOD_UNAVAILABLE": {
-        "code": -32025,
+        "code": -32029,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -12963,7 +13423,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32026,
+        "code": -32030,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -13021,7 +13481,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32027,
+        "code": -32031,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13052,7 +13512,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32028,
+        "code": -32032,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13083,7 +13543,7 @@
         }
       },
       "RUNTIME_NUKE_IN_PROGRESS": {
-        "code": -32029,
+        "code": -32033,
         "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -13121,7 +13581,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32030,
+        "code": -32034,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13159,7 +13619,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32031,
+        "code": -32035,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -13201,7 +13661,7 @@
         }
       },
       "RUN_NOT_FOUND": {
-        "code": -32032,
+        "code": -32036,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13239,7 +13699,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32033,
+        "code": -32037,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -13281,7 +13741,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32034,
+        "code": -32038,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13319,7 +13779,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32035,
+        "code": -32039,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -13362,7 +13822,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32036,
+        "code": -32040,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -13397,7 +13857,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32037,
+        "code": -32041,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,
@@ -13447,7 +13907,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_REF": {
-        "code": -32038,
+        "code": -32042,
         "message": "Application error: UNSUPPORTED_BUNDLE_REF",
         "data": {
           "additionalProperties": false,

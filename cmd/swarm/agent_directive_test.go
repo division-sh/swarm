@@ -53,6 +53,7 @@ func TestAgentDirectiveUsesV1RPCWithRunIDAndIdempotencyKey(t *testing.T) {
 	for _, want := range []string{
 		"agent directive ok:",
 		"agent_id=agent-1",
+		"operation_id=operation-directive-1",
 		"run_id=run-1",
 		"run_id_resolution=specified",
 		"directive_event_id=event-directive-1",
@@ -258,6 +259,58 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 			wantStderr: "IDEMPOTENCY_CONFLICT",
 		},
 		{
+			name: "directive in progress exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeAgentDirectiveJSONRPCError(t, w, req.ID, "AGENT_DIRECTIVE_IN_PROGRESS")
+			},
+			wantCode:   6,
+			wantStderr: "AGENT_DIRECTIVE_IN_PROGRESS",
+		},
+		{
+			name: "directive completion pending exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeAgentDirectiveJSONRPCError(t, w, req.ID, "AGENT_DIRECTIVE_COMPLETION_PENDING")
+			},
+			wantCode:   6,
+			wantStderr: "AGENT_DIRECTIVE_COMPLETION_PENDING",
+		},
+		{
+			name: "directive execution failed exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeAgentDirectiveJSONRPCError(t, w, req.ID, "AGENT_DIRECTIVE_EXECUTION_FAILED")
+			},
+			wantCode:   6,
+			wantStderr: "AGENT_DIRECTIVE_EXECUTION_FAILED",
+		},
+		{
+			name: "directive outcome indeterminate exits six",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				writeAgentDirectiveJSONRPCError(t, w, req.ID, "AGENT_DIRECTIVE_OUTCOME_INDETERMINATE")
+			},
+			wantCode:   6,
+			wantStderr: "AGENT_DIRECTIVE_OUTCOME_INDETERMINATE",
+		},
+		{
+			name: "missing operation identity exits three",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := agentDirectiveTestResult("specified")
+				delete(result, "operation_id")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "operation_id is required",
+		},
+		{
 			name: "malformed result exits three",
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
@@ -300,6 +353,7 @@ func TestAgentDirectiveMapsFailureExitCodes(t *testing.T) {
 func agentDirectiveTestResult(resolution string) map[string]any {
 	return map[string]any{
 		"ok":                   true,
+		"operation_id":         "operation-directive-1",
 		"response":             "accepted",
 		"run_id":               "run-1",
 		"run_id_resolution":    resolution,

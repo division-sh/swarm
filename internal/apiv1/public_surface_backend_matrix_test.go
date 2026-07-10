@@ -779,8 +779,8 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(1927, "runtime_operations.shutdown_and_runtime_lifecycle")]; !ok {
 		problems = append(problems, "active_trackers missing #1927 shutdown_and_runtime_lifecycle")
 	}
-	if _, ok := activeTrackers[trackerKey(1932, "runtime_operations.atomic_runtime_state_mutation")]; !ok {
-		problems = append(problems, "active_trackers missing #1932 atomic_runtime_state_mutation")
+	if _, ok := activeTrackers[trackerKey(1932, "runtime_operations.atomic_runtime_state_mutation")]; ok {
+		problems = append(problems, "active_trackers must not include closure-bearing #1932 atomic_runtime_state_mutation")
 	}
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")

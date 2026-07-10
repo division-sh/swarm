@@ -20,7 +20,7 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	}, RunTargetResolution{
 		RunID: "00000000-0000-0000-0000-000000000701",
 		Mode:  RunResolutionSpecified,
-	}, time.Date(2026, 5, 14, 3, 10, 0, 0, time.UTC))
+	}, "00000000-0000-0000-0000-000000000702", "00000000-0000-0000-0000-000000000703", time.Date(2026, 5, 14, 3, 10, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("NewDirectiveEvent: %v", err)
 	}
@@ -33,6 +33,9 @@ func TestNewDirectiveEventPayloadPreservesDirectiveMode(t *testing.T) {
 	}
 	if payload["directive_text"] != "run corpus" || payload["run_id"] != evt.RunID() {
 		t.Fatalf("payload = %#v", payload)
+	}
+	if payload["operation_id"] != "00000000-0000-0000-0000-000000000702" {
+		t.Fatalf("operation_id = %#v", payload["operation_id"])
 	}
 	if _, ok := payload["kill_previous"]; ok {
 		t.Fatalf("payload = %#v, want no kill_previous field", payload)
