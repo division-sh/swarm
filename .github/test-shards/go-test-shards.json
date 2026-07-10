@@ -76,7 +76,7 @@
         "github.com/division-sh/swarm/internal/runtime/llm/selection",
         "github.com/division-sh/swarm/internal/runtime/pipeline",
         "github.com/division-sh/swarm/internal/runtime/platformcontext",
-        "github.com/division-sh/swarm/internal/runtime/rterrors",
+        "github.com/division-sh/swarm/internal/runtime/failures",
         "github.com/division-sh/swarm/internal/runtime/runforkadmission",
         "github.com/division-sh/swarm/internal/runtime/runforkexecution",
         "github.com/division-sh/swarm/internal/runtime/runstart",
