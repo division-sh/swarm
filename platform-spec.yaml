@@ -6927,6 +6927,120 @@ tool_model:
       \ Domain to check (e.g., example.com)\n  http:\n    method: GET\n    url: \"https://api.domainr.com/v2/status?domain={{input.domain}}\"\
       \n    headers:\n      Authorization: \"Bearer {{credentials.domainr_api_key}}\"\n  response_mapping:\n    available:\
       \ \"{{response.body.status[0].summary}}\"\n  credentials:\n    - domainr_api_key"
+  provider_capability_surface:
+    promoted_by: '#1929'
+    owner: internal/packs typed capability-surface model and deterministic renderer
+    description: >
+      Provider trigger packs and provider connector declarations expose one typed proof-ready model to local preflight and
+      doctor. Body-specific owners derive capability and guarantee facts from accepted manifests or ToolSchemaEntry values;
+      credential owners derive connector requirement state. The common owner normalizes subject identity, applicability,
+      status, requirements, enforcement evidence, ordering, and text/JSON projections. Pack envelope capabilities and
+      requires remain import-time derive-and-compare integrity assertions and MUST NOT be read as runtime surface truth.
+    subject:
+      required_fields:
+      - id
+      - kind
+      - provider
+      - source
+      - applicability
+      - status
+      kinds:
+        provider_trigger: accepted provider-trigger manifest packaged by the verified trigger pack
+        provider_connector: effective ToolSchemaEntry or installed connector-pack action
+      source_values:
+        trigger_pack: verified platform or external trigger pack
+        connector_pack_import: explicitly imported connector action
+        connector_pack: installed but not imported connector action
+        flow_local: flow-local ToolSchemaEntry with category provider_connector
+      applicability_values:
+        effective: callable connector declaration selected by the contract
+        installed: verified pack inventory that is not an effective callable connector
+    status:
+      READY: effective connector whose every static or managed credential requirement is satisfied
+      NOT_READY: effective connector with at least one unsatisfied static or managed credential requirement
+      AVAILABLE: >
+        Installed capability that is not effective in the current contract. All provider-trigger pack subjects are
+        AVAILABLE until #1944 contributes a selected-target readiness subject. Unimported connector actions are AVAILABLE
+        and carry import remediation but MUST remain absent from ToolEntries, agent surfaces, validation, and execution.
+    facts:
+      capability_shape: {code: stable_machine_code, target: optional_body_derived_target}
+      guarantee_shape: {code: stable_machine_code, enforced_by: registry_pinned_enforcement_id}
+      truth_rule: >
+        Trigger facts derive from the accepted Manifest. Connector facts derive from the effective ToolSchemaEntry or the
+        verified installed connector body. Envelope narrative is never a renderer source.
+      known_capability_codes:
+      - receive_https_route
+      - verify_secret
+      - emit_event
+      - persist_dedupe_markers
+      - call_provider_action
+      - lower_through_activity
+      - journal_activity_attempts
+      unknown_projection: Unknown capability codes remain verbatim in human output and structured JSON.
+    guarantee_enforcement_registry:
+      emit_undeclared_events: provider_trigger_event_name_policy
+      run_code_before_admission: provider_trigger_admission_sequence
+      touch_unbound_resources: provider_trigger_resource_binding_gate
+      bypass_activity_attempts: activity_attempts
+      retry_non_idempotent_write_automatically: activity_effect_retry_policy
+      expose_credential_values: credential_redaction_boundary
+      rule: >
+        A known guarantee without exactly one registry enforcement owner fails closed. Human output renders guarantees as
+        `cannot <verb> - enforced by <id>`; it does not present CANNOT as a product limitation.
+    requirements:
+      shape: >
+        kind, name, scope, optional status, optional satisfied, optional remediation, optional non-secret source and
+        managed-credential grant/profile detail. Secret values, tokens, private keys, and provider client secrets are
+        forbidden in every field.
+      static_connector_owner: internal/runtime/credentials Describe/ListDescriptors after import-boundary key resolution
+      managed_connector_owner: >
+        internal/runtime/managedcredentials ListRequirementDescriptors plus EvaluateRequirement for lifecycle,
+        grant_type, grant_model, token_request, scope, and installation-input coverage
+      connector_statuses:
+      - BOUND
+      - UNBOUND
+      - CONNECTED
+      - UNCONNECTED
+      - PENDING_CONSENT
+      - REFRESH_FAILED
+      - SCOPE_INSUFFICIENT
+      remediations:
+        UNBOUND: swarm secrets set <resolved-deployment-key>
+        UNCONNECTED: swarm connections connect <resolved-deployment-key>
+        PENDING_CONSENT: swarm connections connect <resolved-deployment-key>
+        REFRESH_FAILED: swarm connections disconnect <resolved-deployment-key> && swarm connections connect <resolved-deployment-key>
+        SCOPE_INSUFFICIENT: swarm connections connect <resolved-deployment-key>
+      trigger_rule: >
+        Trigger signing requirements render with `scope: target` and no status, satisfied value, binding remediation,
+        READY/NOT_READY claim, selected-store query, or inferred global binding. #1944 owns target selection, enablement,
+        redacted SQLite/Postgres signing-binding readback, ambiguity, and mutation/remediation.
+    projection:
+      structured_owner: local preflight report capability_subjects
+      text_rule: Human text is a deterministic projection of the same typed records emitted in JSON.
+      ordering:
+      - unsatisfied requirements with inline remediation
+      - CAN facts grouped by target
+      - guarantees with enforced_by
+      - optional evidence in verbose rendering
+      subject_order: kind then stable subject id
+      consumers:
+      - swarm doctor
+      - swarm serve
+      - local preflight mode serve_dev
+      - local preflight mode run_local
+      future_consumer: '#1769 describe --prove consumes this model and MUST NOT reconstruct a second surface.'
+    current_inventory:
+      trigger_packs: [github, intercom, shopify, slack, stripe, telegram, twilio, typeform]
+      connector_packs: [github, microsoft_graph, notion, slack, telegram]
+      connector_action_count: 7
+      inventory_rule: >
+        The verified connector PackRegistry enumerates installed actions deterministically. An effective connector identity
+        replaces the same installed teaching row so readback cannot suggest importing an already effective flow-local or
+        imported tool.
+    failure_policy: >
+      Capability derivation, descriptor readback, registry lookup, duplicate subject identity, or projection validation
+      failure emits a typed blocking diagnostic. Consumers MUST NOT silently omit a subject, parse prose back into fields,
+      fall back to envelope narrative, or preserve a legacy surface alongside this owner.
   provider_connector_tools:
     description: >
       Outbound provider connectors are authored HTTP tools represented by the existing `ToolSchemaEntry` model with
@@ -6941,7 +7055,7 @@ tool_model:
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
       credentials: "static credential store keys listed under tool `credentials`, or managed credential handles listed under tool `managed_credential`; exactly one credential mode owns connector auth."
-      readback: "local preflight/doctor provider connector CAN/CANNOT plus typed requirement status findings."
+      readback: "tool_model.provider_capability_surface, consuming canonical static and managed credential descriptors."
       display: "first CAN action label is derived from the authored tool `description`; if absent, it falls back to normalized `<action> via <Provider>`."
     stage_1_profile:
       required:
@@ -6976,14 +7090,10 @@ tool_model:
         later gated surface, so first-party connector packs are migrated aggressively before any external connector-pack
         compatibility promise exists.
       capability_surface: >
-        Connector pack CAN/CANNOT/readback is kind-specific. Connector CAN rows include calling the declared provider
-        action or actions, lowering through `platform.activity_requested`, and journaling non-idempotent attempts in
-        `activity_attempts`. Connector CANNOT rows include bypassing `activity_attempts`, automatically retrying
-        non-idempotent writes, or exposing credential values. Requirement rows are typed: static secret requirements render
-        BOUND/UNBOUND from the static credential store, while managed credential requirements render managed credential
-        lifecycle status such as CONNECTED, UNCONNECTED, PENDING_CONSENT, REFRESH_FAILED, or SCOPE_INSUFFICIENT plus the
-        required grant_type, scopes, grant_model, token_request profile, and installation_id_input when present without
-        exposing token values.
+        Connector body facts and deployment readiness consume `tool_model.provider_capability_surface`. Effective imported
+        and flow-local connectors use the same typed model; installed unimported actions render AVAILABLE without becoming
+        effective tools. Static and managed requirement states consume their canonical descriptor owners rather than a
+        connector-local store or coverage interpreter.
       collision_policy: >
         No packed-vs-packed or packed-vs-flow-local connector shadowing is allowed in this slice. Any duplicate tool id
         fails closed before runtime construction and names both sources with remediation to remove one source or rename the
@@ -7390,15 +7500,11 @@ tool_model:
         paths and provenance values. The tuple `(id, version, manifest_hash)` is immutable within boot admission; competing
         instances fail before registration. Explicit override or replacement semantics require a later gated affordance.
       capability_surface: >
-        Provider-trigger pack readback renders CAN/CANNOT truth from the verified envelope after derivation/equality checks.
-        The first trigger surface includes CAN receive HTTPS at `/webhooks/{entity}/{provider}`, CAN verify the named signing
-        secret, CAN emit the declared event name, CAN persist dedupe markers, and CANNOT run code before admission, emit
-        undeclared events, or touch unbound resources. Requirement readback marks each declared secret as BOUND or UNBOUND
-        without exposing secret values. `swarm doctor` is the first operator surface for this readback and renders the same
-        verified first-party and declared external provider-trigger pack capability surface that serve admits at boot.
-        Connector-pack readback uses connector-specific CAN/CANNOT rows defined by `tool_model.provider_connector_tools`;
-        trigger rows MUST NOT be reused to describe connector proof. Connector requirement readback is typed and may include
-        static secrets or managed credentials with their own lifecycle statuses.
+        Readback consumes `tool_model.provider_capability_surface`. Trigger facts derive from the accepted body manifest,
+        while envelope capabilities/requires remain integrity assertions only. Trigger pack subjects render AVAILABLE with
+        target-scoped unevaluated signing requirements; global BOUND/UNBOUND and READY/NOT_READY claims are forbidden until
+        #1944 supplies a selected-target owner. Connector facts and readiness remain kind-specific inputs to the common
+        model and consume canonical credential descriptor owners.
       unbound_requirement_policy: >
         A missing deployment binding for a declared signing secret, static connector secret, or managed connector credential
         does not reject pack import. Runtime webhook admission still fails closed before signature verification, dedupe

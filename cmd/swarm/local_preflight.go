@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -63,11 +65,12 @@ type localPreflightFinding struct {
 }
 
 type localPreflightReport struct {
-	OK       bool                    `json:"ok"`
-	Owner    string                  `json:"owner"`
-	Mode     string                  `json:"mode"`
-	Backend  string                  `json:"backend"`
-	Findings []localPreflightFinding `json:"findings"`
+	OK                 bool                    `json:"ok"`
+	Owner              string                  `json:"owner"`
+	Mode               string                  `json:"mode"`
+	Backend            string                  `json:"backend"`
+	CapabilitySubjects []packs.Subject         `json:"capability_subjects,omitempty"`
+	Findings           []localPreflightFinding `json:"findings"`
 }
 
 type localPreflightRequest struct {
@@ -84,6 +87,7 @@ type localPreflightRequest struct {
 	CheckGatewayEnv        bool
 	CheckContractSecrets   bool
 	ContractSecretSeverity localPreflightSeverity
+	ProviderTriggerPacks   []providertriggers.LoadedPack
 }
 
 func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) localPreflightReport {
@@ -106,10 +110,12 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	}
 	report.Backend = strings.TrimSpace(profile.ID)
 	if profile.ID != llmselection.BackendClaudeCLI && report.Mode != "doctor" {
+		if _, _, ok := loadLocalPreflightCapabilitySource(ctx, req, &report); !ok {
+			return report.finalize()
+		}
 		report.add(localPreflightBackendPrerequisite, "backend_not_claude_cli", localPreflightSeverityInfo, localPreflightStatusSkipped, fmt.Sprintf("backend %q does not require claude_cli local proof prerequisites", profile.ID), "")
 		return report.finalize()
 	}
-
 	if req.CheckListeners {
 		report.checkListener("api_listener", "api", req.APIListenAddr)
 		report.checkListener("mcp_listener", "mcp", req.MCPListenAddr)
@@ -118,20 +124,10 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.checkGatewayEnv()
 	}
 
-	source, contractsRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths)
-	if err != nil {
-		message := err.Error()
-		remediation := "fix the selected --contracts and --platform-spec paths"
-		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
-			message = diagnostic.Problem
-			if strings.TrimSpace(diagnostic.Remediation) != "" {
-				remediation = diagnostic.Remediation
-			}
-		}
-		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
+	source, contractsRoot, ok := loadLocalPreflightCapabilitySource(ctx, req, &report)
+	if !ok {
 		return report.finalize()
 	}
-	appendProviderConnectorToolSurfaceFindings(ctx, &report, source)
 	workspaceBackend, err := decideWorkspaceBackend(req.WorkspaceBackend, req.Config, source)
 	if err != nil {
 		report.add(localPreflightWorkspacePrerequisite, "workspace_backend_decision_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix workspace.backend, workspace.allow_exec_on_host, or the selected contract capabilities")
@@ -185,6 +181,25 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 	return report.finalize()
 }
 
+func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightRequest, report *localPreflightReport) (semanticview.Source, string, bool) {
+	source, contractsRoot, err := loadLocalPreflightSource(req.RepoRoot, req.ResolvedPaths)
+	if err != nil {
+		message := err.Error()
+		remediation := "fix the selected --contracts and --platform-spec paths"
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+			message = diagnostic.Problem
+			if strings.TrimSpace(diagnostic.Remediation) != "" {
+				remediation = diagnostic.Remediation
+			}
+		}
+		report.add(localPreflightWorkspacePrerequisite, "contract_source_load_failed", localPreflightSeverityBlocker, localPreflightStatusFailed, message, remediation)
+		return nil, "", false
+	}
+	appendProviderConnectorCapabilitySubjects(ctx, report, source)
+	appendProviderTriggerCapabilitySubjects(report, req.ProviderTriggerPacks)
+	return source, contractsRoot, true
+}
+
 func (r *localPreflightReport) add(category localPreflightCategory, code string, severity localPreflightSeverity, status localPreflightFindingStatus, message, remediation string) {
 	r.addWithOwner(category, code, severity, status, message, remediation, localPreflightOwner)
 }
@@ -214,6 +229,41 @@ func (r *localPreflightReport) addWithOwner(category localPreflightCategory, cod
 		Remediation: strings.TrimSpace(remediation),
 		Owner:       owner,
 	})
+}
+
+func (r *localPreflightReport) addCapabilitySubjects(subjects []packs.Subject) {
+	if r == nil || len(subjects) == 0 {
+		return
+	}
+	combined := append(append([]packs.Subject(nil), r.CapabilitySubjects...), subjects...)
+	normalized, err := packs.NormalizeSubjects(combined)
+	if err != nil {
+		r.add(localPreflightProviderPackPrerequisite, "provider_capability_model_invalid", localPreflightSeverityBlocker, localPreflightStatusFailed, err.Error(), "fix provider pack or connector capability declarations")
+		return
+	}
+	r.CapabilitySubjects = normalized
+	for _, subject := range subjects {
+		prefix := "provider_connector_"
+		identity := subject.ID
+		if subject.Kind == packs.SubjectProviderTrigger {
+			prefix = "provider_trigger_pack_"
+			identity = subject.Provider
+		}
+		remediation := ""
+		for _, requirement := range subject.Requirements {
+			if requirement.Satisfied != nil && !*requirement.Satisfied && requirement.Remediation != "" {
+				remediation = requirement.Remediation
+				break
+			}
+		}
+		r.add(localPreflightProviderPackPrerequisite, prefix+findingCode(identity), localPreflightSeverityInfo, localPreflightStatusOK, packs.RenderSubject(subject, false), remediation)
+	}
+}
+
+func findingCode(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	value = strings.NewReplacer(".", "_", "-", "_", " ", "_").Replace(value)
+	return strings.Trim(value, "_")
 }
 
 func (r localPreflightReport) finalize() localPreflightReport {
@@ -468,7 +518,7 @@ func serveLocalPreflightMode(opts serveOptions) string {
 	return "serve"
 }
 
-func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serveOptions, cfg *config.Config, resolvedPaths cliContractPlatformSpecPaths, workspaceBackend workspaceBackendSelection, mountSources workspaceMountSources) localPreflightReport {
+func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serveOptions, cfg *config.Config, resolvedPaths cliContractPlatformSpecPaths, workspaceBackend workspaceBackendSelection, mountSources workspaceMountSources, providerTriggerPacks []providertriggers.LoadedPack) localPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	return runLocalClaudeCLIPreflight(ctx, localPreflightRequest{
 		Mode:                   mode,
@@ -484,5 +534,6 @@ func runServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts serv
 		CheckGatewayEnv:        true,
 		CheckContractSecrets:   true,
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets(mode),
+		ProviderTriggerPacks:   providerTriggerPacks,
 	})
 }

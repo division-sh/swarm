@@ -59,6 +59,16 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 		if err != nil {
 			t.Fatalf("load %s: %v", dir, err)
 		}
+		subject, err := pack.CapabilitySubject()
+		if err != nil {
+			t.Fatalf("capability subject %s: %v", dir, err)
+		}
+		if subject.Kind != packs.SubjectProviderTrigger || subject.Status != packs.StatusAvailable || subject.Provider != pack.Manifest.Provider || len(subject.Capabilities) != 4 || len(subject.Guarantees) != 3 {
+			t.Fatalf("capability subject %s = %#v", dir, subject)
+		}
+		if len(subject.Requirements) != 1 || subject.Requirements[0].Scope != packs.RequirementScopeTarget || subject.Requirements[0].Satisfied != nil || subject.Requirements[0].Status != "" {
+			t.Fatalf("capability subject %s requirements = %#v, want target-scoped unevaluated", dir, subject.Requirements)
+		}
 		providers = append(providers, pack.Manifest.Provider)
 	}
 	sort.Strings(providers)
@@ -314,11 +324,18 @@ func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *t
 	if err != nil {
 		t.Fatalf("LoadPackFS: %v", err)
 	}
-	surface := pack.CapabilitySurface(nil)
-	if len(surface.Requires) != 1 || surface.Requires[0].Name != "webhook_signing.stripe" || surface.Requires[0].Bound {
-		t.Fatalf("surface requires = %+v, want unbound stripe signing secret", surface.Requires)
+	pack.Envelope.Capabilities.Can.ReceiveHTTPSRoute = "/envelope-must-not-render"
+	surface, err := pack.CapabilitySubject()
+	if err != nil {
+		t.Fatalf("CapabilitySubject: %v", err)
 	}
-	renderedCan := strings.Join(surface.Can, "\n")
+	if surface.Status != packs.StatusAvailable || len(surface.Requirements) != 1 || surface.Requirements[0].Name != "webhook_signing.stripe" || surface.Requirements[0].Scope != packs.RequirementScopeTarget || surface.Requirements[0].Satisfied != nil {
+		t.Fatalf("surface requirements = %+v status=%s, want AVAILABLE target-scoped unevaluated stripe signing secret", surface.Requirements, surface.Status)
+	}
+	renderedCan := packs.RenderSubject(surface, false)
+	if strings.Contains(renderedCan, "/envelope-must-not-render") || !strings.Contains(renderedCan, "/webhooks/{entity}/stripe") {
+		t.Fatalf("capability surface did not derive accepted body truth: %s", renderedCan)
+	}
 	if strings.Contains(renderedCan, "stripe-secret") {
 		t.Fatal("capability surface leaked a concrete secret value")
 	}
@@ -345,6 +362,13 @@ func TestExternalProviderTriggerPackUsesSameVerifier(t *testing.T) {
 	}
 	if len(loaded) != 1 || loaded[0].Manifest.Provider != "stripe" {
 		t.Fatalf("loaded external packs = %+v, want stripe", loaded)
+	}
+	subject, err := loaded[0].CapabilitySubject()
+	if err != nil {
+		t.Fatalf("CapabilitySubject: %v", err)
+	}
+	if subject.Provenance != packs.ProvenanceExternal || subject.SourcePath != dir || subject.Status != packs.StatusAvailable {
+		t.Fatalf("external capability subject = %#v", subject)
 	}
 }
 

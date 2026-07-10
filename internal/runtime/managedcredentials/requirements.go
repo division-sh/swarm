@@ -26,6 +26,11 @@ type RequirementDescriptor struct {
 	RequiredBy []Requirement `json:"required_by,omitempty"`
 }
 
+type RequirementEvaluation struct {
+	Descriptor RequirementDescriptor
+	Satisfied  bool
+}
+
 func BuildRequirementIndex(source semanticview.Source) map[string][]Requirement {
 	index := map[string][]Requirement{}
 	if source == nil {
@@ -125,42 +130,43 @@ func MissingOrUnusableRequired(ctx context.Context, store Store, source semantic
 		if len(desc.RequiredBy) == 0 {
 			continue
 		}
-		if !desc.Present || desc.Status != StatusConnected {
-			out = append(out, desc)
-			continue
-		}
 		for _, req := range desc.RequiredBy {
-			if err := GrantTypeCovers(desc.GrantType, req.GrantType); err != nil {
-				scoped := desc
-				scoped.Status = StatusScopeInsufficient
-				scoped.Failure = "grant-type-insufficient: " + err.Error()
-				out = append(out, scoped)
-				break
-			}
-			if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, req.GrantModel); err != nil {
-				scoped := desc
-				scoped.Status = StatusScopeInsufficient
-				scoped.Failure = "grant-model-insufficient: " + err.Error()
-				out = append(out, scoped)
-				break
-			}
-			if err := managedcredentialmodel.TokenRequestProfileCovers(desc.TokenRequest, req.TokenRequest); err != nil {
-				scoped := desc
-				scoped.Status = StatusScopeInsufficient
-				scoped.Failure = "token-request-insufficient: " + err.Error()
-				out = append(out, scoped)
-				break
-			}
-			if err := ensureScopes(desc.Scopes, req.Scopes); err != nil {
-				scoped := desc
-				scoped.Status = StatusScopeInsufficient
-				scoped.Failure = "scope-insufficient: " + err.Error()
-				out = append(out, scoped)
+			evaluation := EvaluateRequirement(desc, req)
+			if !evaluation.Satisfied {
+				out = append(out, evaluation.Descriptor)
 				break
 			}
 		}
 	}
 	return out, nil
+}
+
+func EvaluateRequirement(desc RequirementDescriptor, req Requirement) RequirementEvaluation {
+	if !desc.Present || desc.Status != StatusConnected {
+		return RequirementEvaluation{Descriptor: desc}
+	}
+	scoped := desc
+	if err := GrantTypeCovers(desc.GrantType, req.GrantType); err != nil {
+		scoped.Status = StatusScopeInsufficient
+		scoped.Failure = "grant-type-insufficient: " + err.Error()
+		return RequirementEvaluation{Descriptor: scoped}
+	}
+	if err := managedcredentialmodel.GrantModelCovers(desc.GrantModel, req.GrantModel); err != nil {
+		scoped.Status = StatusScopeInsufficient
+		scoped.Failure = "grant-model-insufficient: " + err.Error()
+		return RequirementEvaluation{Descriptor: scoped}
+	}
+	if err := managedcredentialmodel.TokenRequestProfileCovers(desc.TokenRequest, req.TokenRequest); err != nil {
+		scoped.Status = StatusScopeInsufficient
+		scoped.Failure = "token-request-insufficient: " + err.Error()
+		return RequirementEvaluation{Descriptor: scoped}
+	}
+	if err := ensureScopes(desc.Scopes, req.Scopes); err != nil {
+		scoped.Status = StatusScopeInsufficient
+		scoped.Failure = "scope-insufficient: " + err.Error()
+		return RequirementEvaluation{Descriptor: scoped}
+	}
+	return RequirementEvaluation{Descriptor: scoped, Satisfied: true}
 }
 
 func describe(ctx context.Context, store Store, key string) (Descriptor, bool, error) {

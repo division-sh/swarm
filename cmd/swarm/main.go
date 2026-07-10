@@ -943,7 +943,7 @@ func runServeRuntime(ctx context.Context, repo string, opts serveOptions) int {
 	}
 	logWorkspaceBackendDecision(opts.Output, primaryWorkspaceBackend)
 	if shouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources)
+		preflight := runServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			reporter.emit(5, "local_preflight", "FAILED", detail)

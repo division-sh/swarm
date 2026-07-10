@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
-	"sort"
 	"strings"
 
 	semver "github.com/Masterminds/semver/v3"
@@ -71,19 +70,6 @@ type Loaded struct {
 	Envelope     Envelope
 	ManifestBody []byte
 	Directory    string
-}
-
-type RequirementStatus struct {
-	Kind   string
-	Name   string
-	Status string
-	Bound  bool
-}
-
-type CapabilitySurface struct {
-	Can      []string
-	Cannot   []string
-	Requires []RequirementStatus
 }
 
 func Load(fsys fs.FS, dir, runningPlatformVersion string) (Loaded, error) {
@@ -329,67 +315,6 @@ func CapabilitiesEqual(a, b Capabilities) bool {
 
 func RequiresEqual(a, b Requires) bool {
 	return canonicalJSON(a) == canonicalJSON(b)
-}
-
-func (e Envelope) Surface(boundSecrets map[string]bool) CapabilitySurface {
-	return e.SurfaceWithRequirements(boundSecrets, nil)
-}
-
-func (e Envelope) SurfaceWithRequirements(boundSecrets, boundManagedCredentials map[string]bool) CapabilitySurface {
-	can := []string{}
-	switch strings.TrimSpace(e.Type) {
-	case TypeConnector:
-		actions := append([]string(nil), e.Capabilities.Can.CallProviderActions...)
-		sort.Strings(actions)
-		for _, action := range actions {
-			can = append(can, "call provider action "+strings.TrimSpace(action))
-		}
-		if e.Capabilities.Can.LowerThroughActivity {
-			can = append(can, "lower through platform.activity_requested")
-		}
-		if e.Capabilities.Can.JournalActivityAttempts {
-			can = append(can, "journal non-idempotent attempts in activity_attempts")
-		}
-	default:
-		can = append(can, "receive HTTPS route "+strings.TrimSpace(e.Capabilities.Can.ReceiveHTTPSRoute))
-		if secret := strings.TrimSpace(e.Capabilities.Can.VerifySecret); secret != "" {
-			can = append(can, "verify named secret "+secret)
-		}
-		for _, event := range e.Capabilities.Can.EmitEvents {
-			can = append(can, "emit named event "+strings.TrimSpace(event))
-		}
-		if e.Capabilities.Can.PersistDedupeMarkers {
-			can = append(can, "persist dedupe markers")
-		}
-	}
-	cannot := append([]string(nil), e.Capabilities.Cannot...)
-	sort.Strings(cannot)
-	requirements := make([]RequirementStatus, 0, len(e.Requires.Secrets)+len(e.Requires.ManagedCredentials))
-	for _, secret := range e.Requires.Secrets {
-		secret = strings.TrimSpace(secret)
-		bound := boundSecrets[secret]
-		status := "UNBOUND"
-		if bound {
-			status = "BOUND"
-		}
-		requirements = append(requirements, RequirementStatus{Kind: "secret", Name: secret, Status: status, Bound: bound})
-	}
-	for _, credential := range e.Requires.ManagedCredentials {
-		credential = strings.TrimSpace(credential)
-		bound := boundManagedCredentials[credential]
-		status := "UNBOUND"
-		if bound {
-			status = "CONNECTED"
-		}
-		requirements = append(requirements, RequirementStatus{Kind: "managed_credential", Name: credential, Status: status, Bound: bound})
-	}
-	sort.Slice(requirements, func(i, j int) bool {
-		if requirements[i].Kind != requirements[j].Kind {
-			return requirements[i].Kind < requirements[j].Kind
-		}
-		return requirements[i].Name < requirements[j].Name
-	})
-	return CapabilitySurface{Can: can, Cannot: cannot, Requires: requirements}
 }
 
 func canonicalJSON(v any) string {

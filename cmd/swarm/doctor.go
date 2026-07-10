@@ -195,8 +195,8 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		CheckGatewayEnv:        true,
 		CheckContractSecrets:   cmd.Flags().Changed("contracts"),
 		ContractSecretSeverity: localPreflightCommandSeverityForContractSecrets("doctor"),
+		ProviderTriggerPacks:   providerPackLoad.Loaded,
 	})
-	appendProviderTriggerPackSurfaceFindings(&report, providerPackLoad.Loaded)
 	addUnifiedConfigDiagnosticsToReport(&report, cfgResult.Diagnostics)
 	addSwarmEnvFindingsToLocalPreflightReport(&report, envFindings)
 	return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
