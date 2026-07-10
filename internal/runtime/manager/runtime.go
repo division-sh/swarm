@@ -410,9 +410,6 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
-	if err := am.markAgentDirectivePipelineReceipt(ctx, directiveEvent); err != nil {
-		return runtimeagentcontrol.SendDirectiveResult{}, err
-	}
 	return runtimeagentcontrol.SendDirectiveResult{
 		AgentID:            agentID,
 		Response:           response,
@@ -464,18 +461,6 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 	if eventStore == nil {
 		return errors.New("event store is required for agent directive persistence")
 	}
-	if mutationRunner, ok := eventStore.(runtimebus.EventMutationRunner); ok && mutationRunner != nil {
-		return mutationRunner.RunEventMutation(eventCtx, func(mutation runtimebus.EventMutation) error {
-			mutationCtx := mutation.Context()
-			if err := mutation.AppendEvent(mutationCtx, evt); err != nil {
-				return err
-			}
-			if err := mutation.UpsertCommittedReplayScope(mutationCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-				return err
-			}
-			return nil
-		})
-	}
 	if atomicStore, ok := eventStore.(runtimebus.AtomicEventReplayScopePersistence); ok && atomicStore != nil {
 		return atomicStore.PersistEventWithDeliveriesAndScope(eventCtx, evt, nil, runtimereplayclaim.CommittedReplayScopeDirect)
 	}
@@ -484,9 +469,7 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 			return err
 		}
 		if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
-			if err := scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-				return err
-			}
+			return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect)
 		}
 		return nil
 	}
@@ -494,34 +477,9 @@ func (am *AgentManager) publishAgentDirectiveEvent(ctx context.Context, evt even
 		return err
 	}
 	if scopeWriter, ok := eventStore.(runtimebus.EventReplayScopePersistence); ok && scopeWriter != nil {
-		if err := scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect); err != nil {
-			return err
-		}
+		return scopeWriter.UpsertCommittedReplayScope(eventCtx, evt.ID(), runtimereplayclaim.CommittedReplayScopeDirect)
 	}
 	return nil
-}
-
-func (am *AgentManager) markAgentDirectivePipelineReceipt(ctx context.Context, evt events.Event) error {
-	if am.bus == nil {
-		return nil
-	}
-	eventStore := am.bus.Store()
-	if eventStore == nil {
-		return errors.New("event store is required for agent directive receipt persistence")
-	}
-	eventCtx := runtimecorrelation.WithRunID(am.runtimePlatformControlEventContext(ctx), strings.TrimSpace(evt.RunID()))
-	if owner, ok := am.bus.(bundleFingerprintContextOwner); ok && owner != nil {
-		eventCtx = owner.WithBundleFingerprint(eventCtx)
-	}
-	return markAgentDirectivePipelineReceipt(eventCtx, eventStore, evt.ID())
-}
-
-func markAgentDirectivePipelineReceipt(ctx context.Context, eventStore runtimebus.EventStore, eventID string) error {
-	receiptWriter, ok := eventStore.(runtimebus.PipelineReceiptPersistence)
-	if !ok || receiptWriter == nil {
-		return nil
-	}
-	return receiptWriter.UpsertPipelineReceipt(ctx, eventID, "processed", "")
 }
 
 func (am *AgentManager) Run(ctx context.Context) {
