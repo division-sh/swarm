@@ -154,6 +154,20 @@ func TestCLIHumanCodeProjectionOwnsCurrentProducerTuples(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, projection, "unknown_value_rule"), "exact original machine shape")
 
 	families := mustMappingValue(t, projection, "families")
+	providerFamilies := map[string]string{
+		"provider_subject_kind":       "internal/packs",
+		"provider_subject_status":     "internal/packs",
+		"provider_capability":         "internal/packs",
+		"provider_guarantee":          "tool_model.provider_capability_surface",
+		"provider_requirement_status": "internal/packs",
+	}
+	for family, owner := range providerFamilies {
+		row := mustMappingValue(t, families, family)
+		assertScalarContains(t, mustMappingValue(t, row, "machine_owner"), owner)
+		if phrases := mustMappingValue(t, row, "phrases"); len(phrases.Content) == 0 {
+			t.Fatalf("human_code_projection family %s has no reviewed phrases", family)
+		}
+	}
 	lifecycle := mustMappingValue(t, families, "agent_lifecycle_tuples")
 	assertScalarContains(t, mustMappingValue(t, lifecycle, "machine_owner"), "agentLifecycleBlockingLayer")
 	assertScalarContains(t, mustMappingValue(t, lifecycle, "machine_owner"), "StateFromDelivery")

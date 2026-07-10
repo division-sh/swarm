@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/userfacing"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -78,88 +79,34 @@ type cliDetailField struct {
 	Value string
 }
 
-type cliHumanCodeFamily string
+type cliHumanCodeFamily = userfacing.HumanCodeFamily
 
 const (
-	cliHumanCodeRunStatus                   cliHumanCodeFamily = "run_status"
-	cliHumanCodeOperationalState            cliHumanCodeFamily = "operational_state"
-	cliHumanCodeRunBlockingLayer            cliHumanCodeFamily = "run_blocking_layer"
-	cliHumanCodeRunBlockingReason           cliHumanCodeFamily = "run_blocking_reason"
-	cliHumanCodeAgentStatus                 cliHumanCodeFamily = "agent_status"
-	cliHumanCodeConversationMode            cliHumanCodeFamily = "conversation_mode"
-	cliHumanCodeSessionScope                cliHumanCodeFamily = "session_scope"
-	cliHumanCodeDeliveryStatus              cliHumanCodeFamily = "delivery_status"
-	cliHumanCodeAgentLifecycleState         cliHumanCodeFamily = "agent_lifecycle_state"
-	cliHumanCodeAgentLifecycleBlockingLayer cliHumanCodeFamily = "agent_lifecycle_blocking_layer"
-	cliHumanCodeWatchdogState               cliHumanCodeFamily = "watchdog_state"
-	cliHumanCodeWatchdogBlockingLayer       cliHumanCodeFamily = "watchdog_blocking_layer"
-	cliHumanCodeWatchdogAction              cliHumanCodeFamily = "watchdog_action"
-	cliHumanCodeWatchdogOutcome             cliHumanCodeFamily = "watchdog_outcome"
+	cliHumanCodeRunStatus                   = userfacing.HumanCodeRunStatus
+	cliHumanCodeOperationalState            = userfacing.HumanCodeOperationalState
+	cliHumanCodeRunBlockingLayer            = userfacing.HumanCodeRunBlockingLayer
+	cliHumanCodeRunBlockingReason           = userfacing.HumanCodeRunBlockingReason
+	cliHumanCodeAgentStatus                 = userfacing.HumanCodeAgentStatus
+	cliHumanCodeConversationMode            = userfacing.HumanCodeConversationMode
+	cliHumanCodeSessionScope                = userfacing.HumanCodeSessionScope
+	cliHumanCodeDeliveryStatus              = userfacing.HumanCodeDeliveryStatus
+	cliHumanCodeAgentLifecycleState         = userfacing.HumanCodeAgentLifecycleState
+	cliHumanCodeAgentLifecycleBlockingLayer = userfacing.HumanCodeAgentLifecycleBlockingLayer
+	cliHumanCodeWatchdogState               = userfacing.HumanCodeWatchdogState
+	cliHumanCodeWatchdogBlockingLayer       = userfacing.HumanCodeWatchdogBlockingLayer
+	cliHumanCodeWatchdogAction              = userfacing.HumanCodeWatchdogAction
+	cliHumanCodeWatchdogOutcome             = userfacing.HumanCodeWatchdogOutcome
+	cliHumanCodeProviderSubjectKind         = userfacing.HumanCodeProviderSubjectKind
+	cliHumanCodeProviderSubjectStatus       = userfacing.HumanCodeProviderSubjectStatus
+	cliHumanCodeProviderCapability          = userfacing.HumanCodeProviderCapability
+	cliHumanCodeProviderGuarantee           = userfacing.HumanCodeProviderGuarantee
+	cliHumanCodeProviderRequirementStatus   = userfacing.HumanCodeProviderRequirementStatus
 )
 
-var cliHumanCodePhrases = map[cliHumanCodeFamily]map[string]string{
-	cliHumanCodeRunStatus: {
-		"running": "running", "paused": "paused", "completed": "completed",
-		"failed": "failed", "cancelled": "cancelled", "forked": "forked",
-	},
-	cliHumanCodeOperationalState: {
-		"running": "running", "stalled": "stalled", "paused": "paused",
-		"completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked",
-	},
-	cliHumanCodeRunBlockingLayer: {
-		"scoring_terminal_outcome": "scoring outcome",
-		"delivery_lifecycle":       "delivery lifecycle",
-	},
-	cliHumanCodeRunBlockingReason: {
-		"terminal_scoring_outcome_missing": "waiting for a terminal scoring outcome",
-		"no_active_deliveries":             "no active deliveries",
-	},
-	cliHumanCodeAgentStatus: {
-		"idle": "idle", "running": "running", "paused": "paused",
-		"failed": "failed", "terminated": "terminated",
-	},
-	cliHumanCodeConversationMode: {
-		"task": "task", "session": "session", "session_per_entity": "session per entity",
-	},
-	cliHumanCodeSessionScope: {
-		"global": "global", "flow": "flow", "entity": "entity",
-	},
-	cliHumanCodeDeliveryStatus: {
-		"pending": "pending", "in_progress": "in progress", "delivered": "delivered",
-		"failed": "failed", "dead_letter": "dead letter",
-	},
-	cliHumanCodeAgentLifecycleState: {
-		"queued": "queued", "launching": "launching", "active": "active",
-		"retrying": "retrying", "exhausted": "exhausted",
-	},
-	cliHumanCodeAgentLifecycleBlockingLayer: {
-		"delivery_queue":    "delivery queue",
-		"session_launch":    "session launch",
-		"session_execution": "session execution",
-		"delivery_retry":    "delivery retry",
-		"delivery_terminal": "delivery terminal",
-	},
-	cliHumanCodeWatchdogState: {
-		"healthy_long_running": "healthy, long-running",
-		"no_output":            "no output",
-	},
-	cliHumanCodeWatchdogBlockingLayer: {
-		"session_execution": "session execution",
-	},
-	cliHumanCodeWatchdogAction: {
-		"turn_long_running": "turn running for a long time",
-		"session_no_output": "session produced no output",
-	},
-	cliHumanCodeWatchdogOutcome: {
-		"observed": "observed", "warning_emitted": "warning emitted",
-	},
-}
+var cliHumanCodePhrases = userfacing.HumanCodePhrases()
 
 func formatCLIHumanCode(family cliHumanCodeFamily, raw string) string {
-	if phrase, ok := cliHumanCodePhrases[family][strings.TrimSpace(raw)]; ok {
-		return phrase
-	}
-	return raw
+	return userfacing.ProjectHumanCode(family, raw)
 }
 
 func formatCLIHumanCount(count int, singular, plural string) string {

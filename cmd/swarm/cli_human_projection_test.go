@@ -62,6 +62,8 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[cliHum
 	knownSpecFamilies := map[string]bool{
 		"run_status": true, "operational_state": true, "agent_status": true,
 		"conversation_mode": true, "session_scope": true, "delivery_status": true,
+		"provider_subject_kind": true, "provider_subject_status": true, "provider_capability": true,
+		"provider_guarantee": true, "provider_requirement_status": true,
 		"run_blocking_tuples": true, "agent_lifecycle_tuples": true, "watchdog_tuples": true,
 	}
 	forEachYAMLMappingNode(t, families, func(name string, _ *yaml.Node) {
@@ -71,12 +73,17 @@ func cliHumanCodePhrasesFromSpec(t *testing.T, projection *yaml.Node) map[cliHum
 	})
 
 	for specName, family := range map[string]cliHumanCodeFamily{
-		"run_status":        cliHumanCodeRunStatus,
-		"operational_state": cliHumanCodeOperationalState,
-		"agent_status":      cliHumanCodeAgentStatus,
-		"conversation_mode": cliHumanCodeConversationMode,
-		"session_scope":     cliHumanCodeSessionScope,
-		"delivery_status":   cliHumanCodeDeliveryStatus,
+		"run_status":                  cliHumanCodeRunStatus,
+		"operational_state":           cliHumanCodeOperationalState,
+		"agent_status":                cliHumanCodeAgentStatus,
+		"conversation_mode":           cliHumanCodeConversationMode,
+		"session_scope":               cliHumanCodeSessionScope,
+		"delivery_status":             cliHumanCodeDeliveryStatus,
+		"provider_subject_kind":       cliHumanCodeProviderSubjectKind,
+		"provider_subject_status":     cliHumanCodeProviderSubjectStatus,
+		"provider_capability":         cliHumanCodeProviderCapability,
+		"provider_guarantee":          cliHumanCodeProviderGuarantee,
+		"provider_requirement_status": cliHumanCodeProviderRequirementStatus,
 	} {
 		phrases := driftMappingValue(driftMappingValue(families, specName), "phrases")
 		forEachYAMLMapping(t, phrases, func(code, phrase string) {
@@ -214,6 +221,11 @@ func TestCLIHumanCodePublicConsumersUseSharedProjector(t *testing.T) {
 		"cliHumanCodeWatchdogBlockingLayer":       string(cliHumanCodeWatchdogBlockingLayer),
 		"cliHumanCodeWatchdogAction":              string(cliHumanCodeWatchdogAction),
 		"cliHumanCodeWatchdogOutcome":             string(cliHumanCodeWatchdogOutcome),
+		"cliHumanCodeProviderSubjectKind":         string(cliHumanCodeProviderSubjectKind),
+		"cliHumanCodeProviderSubjectStatus":       string(cliHumanCodeProviderSubjectStatus),
+		"cliHumanCodeProviderCapability":          string(cliHumanCodeProviderCapability),
+		"cliHumanCodeProviderGuarantee":           string(cliHumanCodeProviderGuarantee),
+		"cliHumanCodeProviderRequirementStatus":   string(cliHumanCodeProviderRequirementStatus),
 	}
 	actual := map[string][]string{}
 	rawOutput := map[string][]string{}

@@ -105,6 +105,7 @@ func (s *rollbackTrackingInboundStore) DeleteInboundEvent(context.Context, strin
 
 type recordingInboundStore struct {
 	target          InboundTarget
+	resolveErr      error
 	inserted        bool
 	recorded        bool
 	providerEventID string
@@ -121,7 +122,7 @@ func (s *recordingInboundStore) RecordInboundEvent(_ context.Context, providerEv
 }
 
 func (s *recordingInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
-	return s.target, nil
+	return s.target, s.resolveErr
 }
 
 func (*recordingInboundStore) PurgeInboundEventsBefore(context.Context, time.Time, int) (int, error) {
@@ -171,6 +172,28 @@ func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.
 	}
 	if store.recorded {
 		t.Fatal("did not expect inbound event recording after shutdown admission closed")
+	}
+}
+
+func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) {
+	bus, err := runtimebus.NewEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	store := &recordingInboundStore{resolveErr: errors.New("target not found")}
+	g := newTestInboundGateway(t, bus, nil, nil, store)
+
+	// A GitHub request without a signature would fail provider admission with 401
+	// if target resolution did not gate the provider interpreter first.
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/unknown/github", strings.NewReader(`{"id":"evt-1"}`))
+	rec := httptest.NewRecorder()
+	g.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "unknown entity") {
+		t.Fatalf("response = %d %q, want target-gate 404", rec.Code, rec.Body.String())
+	}
+	if store.recorded {
+		t.Fatal("unknown target reached provider marker persistence")
 	}
 }
 

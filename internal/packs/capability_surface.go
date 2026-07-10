@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/userfacing"
 )
 
 type SubjectKind string
@@ -99,26 +101,23 @@ type Evidence struct {
 	Fields map[string]string `json:"fields"`
 }
 
-var capabilityPhrases = map[string]string{
-	CapabilityReceiveHTTPSRoute:    "receive HTTPS route",
-	CapabilityVerifySecret:         "verify named secret",
-	CapabilityEmitEvent:            "emit named event",
-	CapabilityPersistDedupeMarkers: "persist dedupe markers",
-	CapabilityCallProviderAction:   "call provider action",
-	CapabilityLowerThroughActivity: "lower through platform.activity_requested",
-	CapabilityJournalAttempts:      "journal non-idempotent attempts in activity_attempts",
-}
-
 var guaranteeRegistry = map[string]struct {
-	phrase     string
 	enforcedBy string
 }{
-	GuaranteeEmitDeclaredEventsOnly: {"emit undeclared events", "provider_trigger_event_name_policy"},
-	GuaranteeAdmissionBeforeCode:    {"run code before admission", "provider_trigger_admission_sequence"},
-	GuaranteeBoundResourcesOnly:     {"touch unbound resources", "provider_trigger_resource_binding_gate"},
-	GuaranteeActivityJournal:        {"bypass activity_attempts", "activity_attempts"},
-	GuaranteeNoAutomaticWriteRetry:  {"retry non_idempotent_write automatically", "activity_effect_retry_policy"},
-	GuaranteeCredentialRedaction:    {"expose credential values", "credential_redaction_boundary"},
+	GuaranteeEmitDeclaredEventsOnly: {"internal/providertriggers.Manifest.resolveEventName"},
+	GuaranteeAdmissionBeforeCode:    {"internal/providertriggers.Manifest.Accept"},
+	GuaranteeBoundResourcesOnly:     {"internal/runtime.InboundGateway.handleWebhook"},
+	GuaranteeActivityJournal:        {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
+	GuaranteeNoAutomaticWriteRetry:  {"internal/runtime/pipeline.pipelineActivityDispatcher.executeNonIdempotentActivityIntent"},
+	GuaranteeCredentialRedaction:    {"internal/runtime/pipeline.executePreparedActivityHTTPTool"},
+}
+
+func GuaranteeEnforcementOwners() map[string]string {
+	out := make(map[string]string, len(guaranteeRegistry))
+	for code, entry := range guaranteeRegistry {
+		out[code] = entry.enforcedBy
+	}
+	return out
 }
 
 func NewGuarantee(code string) (Guarantee, error) {
@@ -215,28 +214,71 @@ func normalizeSubject(subject *Subject) error {
 	if subject.ID == "" || subject.Provider == "" || subject.Source == "" || subject.Applicability == "" {
 		return fmt.Errorf("capability subject id, provider, source, and applicability are required")
 	}
+	providedStatus := subject.Status
+	for i := range subject.Requirements {
+		requirement := &subject.Requirements[i]
+		requirement.Kind = strings.TrimSpace(requirement.Kind)
+		requirement.Name = strings.TrimSpace(requirement.Name)
+		requirement.Scope = strings.TrimSpace(requirement.Scope)
+		requirement.Status = strings.ToUpper(strings.TrimSpace(requirement.Status))
+		requirement.Remediation = strings.TrimSpace(requirement.Remediation)
+		requirement.Source = strings.TrimSpace(requirement.Source)
+		if requirement.Kind == "" || requirement.Name == "" || requirement.Scope == "" {
+			return fmt.Errorf("capability subject %q requirement kind, name, and scope are required", subject.ID)
+		}
+	}
+	var derivedStatus SubjectStatus
 	switch subject.Kind {
 	case SubjectProviderTrigger:
-		if subject.Status != StatusAvailable {
-			return fmt.Errorf("provider trigger subject %q must be AVAILABLE without a selected target", subject.ID)
+		if subject.Source != "trigger_pack" || subject.Applicability != "installed" {
+			return fmt.Errorf("provider trigger subject %q must use trigger_pack/installed applicability", subject.ID)
 		}
+		derivedStatus = StatusAvailable
 		for _, requirement := range subject.Requirements {
 			if requirement.Scope != RequirementScopeTarget || requirement.Satisfied != nil || requirement.Status != "" || requirement.Remediation != "" {
 				return fmt.Errorf("provider trigger subject %q requirement %q must remain target-scoped and unevaluated", subject.ID, requirement.Name)
 			}
 		}
 	case SubjectProviderConnector:
-		if subject.Status != StatusReady && subject.Status != StatusNotReady && subject.Status != StatusAvailable {
-			return fmt.Errorf("provider connector subject %q has invalid status %q", subject.ID, subject.Status)
+		switch subject.Applicability {
+		case "installed":
+			if subject.Source != "connector_pack" {
+				return fmt.Errorf("installed provider connector subject %q must use connector_pack source", subject.ID)
+			}
+			derivedStatus = StatusAvailable
+		case "effective":
+			if subject.Source != "flow_local" && subject.Source != "connector_pack_import" {
+				return fmt.Errorf("effective provider connector subject %q has invalid source %q", subject.ID, subject.Source)
+			}
+			derivedStatus = StatusReady
+		default:
+			return fmt.Errorf("provider connector subject %q has invalid applicability %q", subject.ID, subject.Applicability)
+		}
+		hasImport := false
+		for _, requirement := range subject.Requirements {
+			if err := validateConnectorRequirement(subject.ID, requirement); err != nil {
+				return err
+			}
+			if requirement.Kind == RequirementImport {
+				hasImport = true
+				if subject.Applicability != "installed" {
+					return fmt.Errorf("effective provider connector subject %q must not carry import requirement %q", subject.ID, requirement.Name)
+				}
+			}
+			if subject.Applicability == "effective" && requirement.Satisfied != nil && !*requirement.Satisfied {
+				derivedStatus = StatusNotReady
+			}
+		}
+		if subject.Applicability == "installed" && !hasImport {
+			return fmt.Errorf("installed provider connector subject %q must carry an import requirement", subject.ID)
 		}
 	default:
 		return fmt.Errorf("capability subject %q has unsupported kind %q", subject.ID, subject.Kind)
 	}
-	for _, requirement := range subject.Requirements {
-		if requirement.Satisfied != nil && !*requirement.Satisfied && strings.TrimSpace(requirement.Remediation) == "" {
-			return fmt.Errorf("capability subject %q unsatisfied requirement %q has no registered remediation", subject.ID, requirement.Name)
-		}
+	if providedStatus != "" && providedStatus != derivedStatus {
+		return fmt.Errorf("capability subject %q status %q contradicts derived status %q", subject.ID, providedStatus, derivedStatus)
 	}
+	subject.Status = derivedStatus
 	for i := range subject.Capabilities {
 		subject.Capabilities[i].Code = strings.TrimSpace(subject.Capabilities[i].Code)
 		subject.Capabilities[i].Target = strings.TrimSpace(subject.Capabilities[i].Target)
@@ -272,13 +314,47 @@ func normalizeSubject(subject *Subject) error {
 	return nil
 }
 
+func validateConnectorRequirement(subjectID string, requirement Requirement) error {
+	if requirement.Satisfied == nil || requirement.Status == "" {
+		return fmt.Errorf("provider connector subject %q requirement %q must be evaluated", subjectID, requirement.Name)
+	}
+	allowed := false
+	switch requirement.Kind {
+	case RequirementSecret:
+		allowed = requirement.Status == "BOUND" || requirement.Status == "UNBOUND"
+	case RequirementManagedCredential:
+		switch requirement.Status {
+		case "CONNECTED", "UNCONNECTED", "PENDING_CONSENT", "REFRESH_FAILED", "SCOPE_INSUFFICIENT":
+			allowed = true
+		}
+	case RequirementImport:
+		allowed = requirement.Status == "NOT_IMPORTED"
+	}
+	if !allowed {
+		return fmt.Errorf("provider connector subject %q requirement %q has invalid %s status %q", subjectID, requirement.Name, requirement.Kind, requirement.Status)
+	}
+	wantSatisfied := requirementSatisfied(requirement.Kind, requirement.Status)
+	if *requirement.Satisfied != wantSatisfied {
+		return fmt.Errorf("provider connector subject %q requirement %q status %q contradicts satisfied=%t", subjectID, requirement.Name, requirement.Status, *requirement.Satisfied)
+	}
+	wantRemediation := requirementRemediation(requirement.Kind, requirement.Name, requirement.Status)
+	if requirement.Remediation != wantRemediation {
+		return fmt.Errorf("provider connector subject %q requirement %q remediation does not match canonical %s/%s remediation", subjectID, requirement.Name, requirement.Kind, requirement.Status)
+	}
+	return nil
+}
+
 func RenderSubject(subject Subject, verbose bool) string {
 	normalized, err := NormalizeSubjects([]Subject{subject})
 	if err != nil {
 		return "invalid capability subject: " + err.Error()
 	}
 	subject = normalized[0]
-	parts := []string{fmt.Sprintf("%s %s %s", humanSubjectKind(subject.Kind), subject.ID, humanSubjectStatus(subject.Status))}
+	parts := []string{fmt.Sprintf("%s %s %s",
+		userfacing.ProjectHumanCode(userfacing.HumanCodeProviderSubjectKind, string(subject.Kind)),
+		subject.ID,
+		userfacing.ProjectHumanCode(userfacing.HumanCodeProviderSubjectStatus, string(subject.Status)),
+	)}
 	if subject.Provenance != "" {
 		parts = append(parts, "provenance="+subject.Provenance)
 	}
@@ -289,20 +365,14 @@ func RenderSubject(subject Subject, verbose bool) string {
 		parts = append(parts, renderRequirement(requirement))
 	}
 	for _, capability := range subject.Capabilities {
-		phrase := capabilityPhrases[capability.Code]
-		if phrase == "" {
-			phrase = capability.Code
-		}
+		phrase := userfacing.ProjectHumanCode(userfacing.HumanCodeProviderCapability, capability.Code)
 		if capability.Target != "" {
 			phrase += " " + capability.Target
 		}
 		parts = append(parts, "CAN "+phrase)
 	}
 	for _, guarantee := range subject.Guarantees {
-		phrase := guarantee.Code
-		if entry, ok := guaranteeRegistry[guarantee.Code]; ok {
-			phrase = entry.phrase
-		}
+		phrase := userfacing.ProjectHumanCode(userfacing.HumanCodeProviderGuarantee, guarantee.Code)
 		parts = append(parts, "guarantee: cannot "+phrase+" - enforced by "+guarantee.EnforcedBy)
 	}
 	if verbose {
@@ -322,24 +392,6 @@ func RenderSubject(subject Subject, verbose bool) string {
 	return strings.Join(parts, "; ")
 }
 
-func humanSubjectKind(kind SubjectKind) string {
-	switch kind {
-	case SubjectProviderTrigger:
-		return "provider trigger pack"
-	case SubjectProviderConnector:
-		return "provider connector"
-	default:
-		return string(kind)
-	}
-}
-
-func humanSubjectStatus(status SubjectStatus) string {
-	if status == StatusNotReady {
-		return "NOT READY"
-	}
-	return string(status)
-}
-
 func renderRequirement(requirement Requirement) string {
 	name := requirement.Name
 	if requirement.Kind == RequirementManagedCredential {
@@ -352,6 +404,7 @@ func renderRequirement(requirement Requirement) string {
 	if status == "" {
 		status = "UNKNOWN"
 	}
+	status = userfacing.ProjectHumanCode(userfacing.HumanCodeProviderRequirementStatus, status)
 	text := "requires " + name + "=" + status
 	if requirement.Remediation != "" && requirement.Satisfied != nil && !*requirement.Satisfied {
 		text += " (fix: " + requirement.Remediation + ")"
