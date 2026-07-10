@@ -855,6 +855,25 @@ func TestRunServeRuntimeRejectsMissingProviderTriggerPlatformInventoryBeforeStor
 	}
 }
 
+func TestRunServeRuntimeRejectsEmptyProviderTriggerPlatformInventoryBeforeStoreSelection(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	configText := providerTriggerBootAdmissionConfig(t, nil, false) + "provider_triggers:\n  packs:\n    platform_dirs: []\n"
+	writeRuntimeConfigText(t, configPath, configText)
+
+	code, output := runProviderTriggerBootAdmissionProbe(t, configPath)
+	if code != 1 {
+		t.Fatalf("runServeRuntime code = %d, want config load failure\noutput:\n%s", code, output)
+	}
+	for _, want := range []string{"config_load", "provider_triggers.packs.platform_dirs is required", "complete first-party platform pack inventory", "elevated operator configuration"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("empty-inventory failure lacks %q:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "not-a-store") || strings.Contains(output, "db_connection") {
+		t.Fatalf("serve reached store selection instead of rejecting empty platform inventory:\n%s", output)
+	}
+}
+
 func TestRunServeRuntimeRejectsOmittedProviderTriggerIdentityBeforeStoreSelection(t *testing.T) {
 	dirs := testProviderTriggerPackDirs(t)
 	partial := make([]string, 0, len(dirs)-1)
