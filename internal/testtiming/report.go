@@ -11,39 +11,41 @@ import (
 
 const defaultTopN = 20
 
-type Options struct {
+type MarkdownOptions struct {
 	TopN int
 }
 
 type Summary struct {
-	Events            int
-	MalformedLines    int
-	Packages          int
-	FailedPackages    int
-	SkippedPackages   int
-	Tests             int
-	FailedTests       int
-	SkippedTests      int
-	PackageElapsedSec float64
+	Events                 int     `json:"events"`
+	MalformedLines         int     `json:"malformed_lines"`
+	DuplicatePackageEvents int     `json:"duplicate_package_events"`
+	DuplicateTestEvents    int     `json:"duplicate_test_events"`
+	Packages               int     `json:"packages"`
+	FailedPackages         int     `json:"failed_packages"`
+	SkippedPackages        int     `json:"skipped_packages"`
+	Tests                  int     `json:"tests"`
+	FailedTests            int     `json:"failed_tests"`
+	SkippedTests           int     `json:"skipped_tests"`
+	PackageElapsedSec      float64 `json:"package_elapsed_seconds"`
 }
 
 type PackageTiming struct {
-	Package string
-	Result  string
-	Elapsed float64
+	Package string  `json:"package"`
+	Result  string  `json:"result"`
+	Elapsed float64 `json:"elapsed_seconds"`
 }
 
 type TestTiming struct {
-	Package string
-	Test    string
-	Result  string
-	Elapsed float64
+	Package string  `json:"package"`
+	Test    string  `json:"test"`
+	Result  string  `json:"result"`
+	Elapsed float64 `json:"elapsed_seconds"`
 }
 
 type Report struct {
-	Summary      Summary
-	SlowPackages []PackageTiming
-	SlowTests    []TestTiming
+	Summary  Summary         `json:"summary"`
+	Packages []PackageTiming `json:"packages"`
+	Tests    []TestTiming    `json:"tests"`
 }
 
 type event struct {
@@ -53,13 +55,9 @@ type event struct {
 	Elapsed float64 `json:"Elapsed"`
 }
 
-func ParseReport(r io.Reader, opts Options) (Report, error) {
+func ParseReport(r io.Reader) (Report, error) {
 	if r == nil {
 		return Report{}, fmt.Errorf("input reader is nil")
-	}
-	topN := opts.TopN
-	if topN <= 0 {
-		topN = defaultTopN
 	}
 	report := Report{}
 	packages := map[string]PackageTiming{}
@@ -84,20 +82,26 @@ func ParseReport(r io.Reader, opts Options) (Report, error) {
 			continue
 		}
 		if test == "" {
+			if _, exists := packages[pkg]; exists {
+				report.Summary.DuplicatePackageEvents++
+			}
 			packages[pkg] = PackageTiming{Package: pkg, Result: action, Elapsed: evt.Elapsed}
 			continue
 		}
 		key := pkg + "\x00" + test
+		if _, exists := tests[key]; exists {
+			report.Summary.DuplicateTestEvents++
+		}
 		tests[key] = TestTiming{Package: pkg, Test: test, Result: action, Elapsed: evt.Elapsed}
 	}
 	if err := scanner.Err(); err != nil {
 		return Report{}, fmt.Errorf("read test JSON: %w", err)
 	}
-	report.SlowPackages = packageTimings(packages)
-	report.SlowTests = testTimings(tests)
-	report.Summary.Packages = len(report.SlowPackages)
-	report.Summary.Tests = len(report.SlowTests)
-	for _, pkg := range report.SlowPackages {
+	report.Packages = packageTimings(packages)
+	report.Tests = testTimings(tests)
+	report.Summary.Packages = len(report.Packages)
+	report.Summary.Tests = len(report.Tests)
+	for _, pkg := range report.Packages {
 		report.Summary.PackageElapsedSec += pkg.Elapsed
 		switch pkg.Result {
 		case "fail":
@@ -106,7 +110,7 @@ func ParseReport(r io.Reader, opts Options) (Report, error) {
 			report.Summary.SkippedPackages++
 		}
 	}
-	for _, test := range report.SlowTests {
+	for _, test := range report.Tests {
 		switch test.Result {
 		case "fail":
 			report.Summary.FailedTests++
@@ -114,12 +118,10 @@ func ParseReport(r io.Reader, opts Options) (Report, error) {
 			report.Summary.SkippedTests++
 		}
 	}
-	report.SlowPackages = trimPackageTimings(report.SlowPackages, topN)
-	report.SlowTests = trimTestTimings(report.SlowTests, topN)
 	return report, nil
 }
 
-func WriteMarkdown(w io.Writer, report Report) error {
+func WriteMarkdown(w io.Writer, report Report, opts MarkdownOptions) error {
 	if w == nil {
 		return fmt.Errorf("output writer is nil")
 	}
@@ -166,10 +168,14 @@ func WriteMarkdown(w io.Writer, report Report) error {
 			return err
 		}
 	}
-	if err := writePackages(w, report.SlowPackages); err != nil {
+	topN := opts.TopN
+	if topN <= 0 {
+		topN = defaultTopN
+	}
+	if err := writePackages(w, trimPackageTimings(report.Packages, topN)); err != nil {
 		return err
 	}
-	return writeTests(w, report.SlowTests)
+	return writeTests(w, trimTestTimings(report.Tests, topN))
 }
 
 func isTerminalAction(action string) bool {

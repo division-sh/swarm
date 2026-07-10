@@ -18,7 +18,7 @@ func TestParseReportSummarizesPackageAndTestTimings(t *testing.T) {
 		`not-json`,
 	}, "\n"))
 
-	report, err := ParseReport(input, Options{TopN: 10})
+	report, err := ParseReport(input)
 	if err != nil {
 		t.Fatalf("ParseReport: %v", err)
 	}
@@ -37,15 +37,15 @@ func TestParseReportSummarizesPackageAndTestTimings(t *testing.T) {
 	if got, want := report.Summary.PackageElapsedSec, 15.25; got != want {
 		t.Fatalf("package elapsed sum = %v, want %v", got, want)
 	}
-	if got := report.SlowPackages[0]; got.Package != "github.com/division-sh/swarm/slow" || got.Result != "fail" || got.Elapsed != 14 {
+	if got := report.Packages[0]; got.Package != "github.com/division-sh/swarm/slow" || got.Result != "fail" || got.Elapsed != 14 {
 		t.Fatalf("slowest package = %+v, want swarm/slow fail 14s", got)
 	}
-	if got := report.SlowTests[0]; got.Package != "github.com/division-sh/swarm/slow" || got.Test != "TestSlow" || got.Result != "fail" || got.Elapsed != 12.5 {
+	if got := report.Tests[0]; got.Package != "github.com/division-sh/swarm/slow" || got.Test != "TestSlow" || got.Result != "fail" || got.Elapsed != 12.5 {
 		t.Fatalf("slowest test = %+v, want swarm/slow TestSlow fail 12.5s", got)
 	}
 }
 
-func TestParseReportAppliesTopLimit(t *testing.T) {
+func TestParseReportKeepsCompleteTruthAndMarkdownAppliesTopLimit(t *testing.T) {
 	input := strings.NewReader(strings.Join([]string{
 		`{"Action":"pass","Package":"github.com/division-sh/swarm/a","Test":"TestA","Elapsed":1}`,
 		`{"Action":"pass","Package":"github.com/division-sh/swarm/a","Elapsed":1}`,
@@ -53,18 +53,25 @@ func TestParseReportAppliesTopLimit(t *testing.T) {
 		`{"Action":"pass","Package":"github.com/division-sh/swarm/b","Elapsed":2}`,
 	}, "\n"))
 
-	report, err := ParseReport(input, Options{TopN: 1})
+	report, err := ParseReport(input)
 	if err != nil {
 		t.Fatalf("ParseReport: %v", err)
 	}
-	if len(report.SlowPackages) != 1 || report.SlowPackages[0].Package != "github.com/division-sh/swarm/b" {
-		t.Fatalf("slow packages = %+v, want only swarm/b", report.SlowPackages)
+	if len(report.Packages) != 2 || report.Packages[0].Package != "github.com/division-sh/swarm/b" {
+		t.Fatalf("packages = %+v, want complete truth ordered with swarm/b first", report.Packages)
 	}
-	if len(report.SlowTests) != 1 || report.SlowTests[0].Test != "TestB" {
-		t.Fatalf("slow tests = %+v, want only TestB", report.SlowTests)
+	if len(report.Tests) != 2 || report.Tests[0].Test != "TestB" {
+		t.Fatalf("tests = %+v, want complete truth ordered with TestB first", report.Tests)
 	}
 	if report.Summary.Packages != 2 || report.Summary.Tests != 2 {
-		t.Fatalf("summary after trim = %+v, want untrimmed counts", report.Summary)
+		t.Fatalf("summary = %+v, want complete counts", report.Summary)
+	}
+	var out strings.Builder
+	if err := WriteMarkdown(&out, report, MarkdownOptions{TopN: 1}); err != nil {
+		t.Fatalf("WriteMarkdown: %v", err)
+	}
+	if strings.Contains(out.String(), "github.com/division-sh/swarm/a") {
+		t.Fatalf("markdown includes package/test outside top N:\n%s", out.String())
 	}
 }
 
@@ -76,11 +83,11 @@ func TestWriteMarkdownIncludesSummaryAndTables(t *testing.T) {
 			Tests:             1,
 			PackageElapsedSec: 3.5,
 		},
-		SlowPackages: []PackageTiming{{Package: "github.com/division-sh/swarm/pkg", Result: "pass", Elapsed: 3.5}},
-		SlowTests:    []TestTiming{{Package: "github.com/division-sh/swarm/pkg", Test: "TestThing", Result: "pass", Elapsed: 2.25}},
+		Packages: []PackageTiming{{Package: "github.com/division-sh/swarm/pkg", Result: "pass", Elapsed: 3.5}},
+		Tests:    []TestTiming{{Package: "github.com/division-sh/swarm/pkg", Test: "TestThing", Result: "pass", Elapsed: 2.25}},
 	}
 	var out strings.Builder
-	if err := WriteMarkdown(&out, report); err != nil {
+	if err := WriteMarkdown(&out, report, MarkdownOptions{TopN: 20}); err != nil {
 		t.Fatalf("WriteMarkdown: %v", err)
 	}
 	text := out.String()
