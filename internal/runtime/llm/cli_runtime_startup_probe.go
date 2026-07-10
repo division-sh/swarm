@@ -137,20 +137,29 @@ func (r *ClaudeCLIRuntime) runUntilCLIStartupInit(ctx context.Context, args []st
 		cancel()
 	}
 	waitErr := cmd.Wait()
-	<-stderrCh
+	stderrLines := <-stderrCh
 
 	if result.err != nil {
 		return nil, result.err
 	}
 	if result.found {
 		if waitErr != nil && !errors.Is(runCtx.Err(), context.Canceled) {
-			return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_startup_probe_failed", "claude-cli-adapter", "startup_probe", nil, waitErr)
+			stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+			stdoutText := ""
+			if result.resp != nil {
+				stdoutText = strings.TrimSpace(string(result.resp.Raw))
+			}
+			return nil, claudeCLIProcessFailure(stderrText, stdoutText, "claude_cli_startup_probe_failed", "startup_probe", waitErr)
 		}
 		return result.resp, nil
 	}
 
+	stderrText := strings.TrimSpace(string(joinRawLines(stderrLines)))
+	if isClaudeAuthOutput(stderrText) {
+		return nil, claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
+	}
 	if waitErr != nil {
-		return nil, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "claude_cli_startup_probe_failed", "claude-cli-adapter", "startup_probe", nil, waitErr)
+		return nil, claudeCLIProcessFailure(stderrText, "", "claude_cli_startup_probe_failed", "startup_probe", waitErr)
 	}
 	return nil, runtimefailures.New(runtimefailures.ClassConnectorFailure, "claude_cli_startup_surface_missing", "claude-cli-adapter", "startup_probe", nil)
 }

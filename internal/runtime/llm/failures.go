@@ -27,6 +27,16 @@ func providerStatusFailure(provider string, status int) error {
 	}
 }
 
+func claudeCLIProcessFailure(stderrText, stdoutText, detailCode, operation string, cause error) error {
+	if isClaudeAuthOutput(stderrText) || isClaudeAuthOutput(stdoutText) {
+		return runtimefailures.Wrap(runtimefailures.ClassAuthenticationNeeded, "provider_unauthorized", "claude-cli-adapter", operation, map[string]any{
+			"auth_kind": "provider_credential",
+			"provider":  "claude",
+		}, cause)
+	}
+	return runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, detailCode, "claude-cli-adapter", operation, nil, cause)
+}
+
 func budgetEmergencyFailure(entityID string) error {
 	return runtimefailures.New(runtimefailures.ClassBudgetExhausted, "spend_budget_emergency", "llm-runtime", "budget_admission", map[string]any{
 		"budget_kind": "spend",

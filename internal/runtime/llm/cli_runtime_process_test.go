@@ -168,6 +168,77 @@ exit 127
 	}
 }
 
+func TestClaudeCLIRuntimeRunWithInput_AuthenticationFailureIsCanonical(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "stale-oauth-token")
+
+	tests := []struct {
+		name         string
+		outputFormat string
+		script       string
+	}{
+		{
+			name:         "buffered stderr",
+			outputFormat: "json",
+			script: `#!/bin/sh
+set -eu
+cat >/dev/null
+printf '%s\n' 'Not logged in. Please run /login.' >&2
+exit 1
+`,
+		},
+		{
+			name:         "streaming stdout",
+			outputFormat: "stream-json",
+			script: `#!/bin/sh
+set -eu
+cat >/dev/null
+printf '%s\n' 'OAuth token expired'
+exit 1
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			scriptPath := filepath.Join(tempDir, "fake-docker.sh")
+			if err := os.WriteFile(scriptPath, []byte(tt.script), 0o755); err != nil {
+				t.Fatalf("write fake docker script: %v", err)
+			}
+
+			cfg := &config.Config{}
+			cfg.Workspace.DockerBin = scriptPath
+			cfg.LLM.ClaudeCLI.Command = "claude"
+			cfg.LLM.ClaudeCLI.OutputFormat = tt.outputFormat
+			runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil, nil, nil)
+			runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+
+			_, err := runtime.runWithInput(context.Background(), nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{})
+			assertClaudeAuthenticationFailure(t, err)
+		})
+	}
+}
+
+func assertClaudeAuthenticationFailure(t *testing.T, err error) {
+	t.Helper()
+	failure, ok := runtimefailures.As(err)
+	if !ok {
+		t.Fatalf("failure = %v, want canonical failure envelope", err)
+	}
+	if failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_unauthorized" {
+		t.Fatalf("failure = %#v, want authentication_required/provider_unauthorized", failure.Failure)
+	}
+	if got := failure.Failure.Detail.Attributes["auth_kind"]; got != "provider_credential" {
+		t.Fatalf("auth_kind = %#v, want provider_credential", got)
+	}
+	if got := failure.Failure.Detail.Attributes["provider"]; got != "claude" {
+		t.Fatalf("provider = %#v, want claude", got)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "not logged in") || strings.Contains(strings.ToLower(err.Error()), "oauth token") {
+		t.Fatalf("failure presentation leaks raw provider output: %v", err)
+	}
+}
+
 func TestClaudeCLIRuntimePersistOversizedToolResultRelay_WritesWorkspaceVisibleFile(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, workspaceResolverStub{
 		target: &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"},

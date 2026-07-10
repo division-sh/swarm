@@ -35,7 +35,6 @@ type ClaudeCLIRuntime struct {
 	providerAdmission   *ProviderAdmissionRegistry
 }
 
-var ErrClaudeAuthRequired = errors.New("claude auth required")
 var ErrClaudeWorkspaceRequired = errors.New("claude workspace target required")
 var ErrClaudeWorkspaceCLIUnavailable = errors.New("claude workspace cli unavailable")
 
