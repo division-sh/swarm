@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -75,15 +76,16 @@ func sanitizeRelayPathComponent(raw string) string {
 func (r *ClaudeCLIRuntime) writeWorkspaceRelayFile(ctx context.Context, target *workspace.Target, relayPath string, rawJSON []byte) error {
 	_, stderr, exitCode, err := r.runWorkspaceCommand(ctx, target, string(rawJSON), "sh", "-lc", `mkdir -p -- "$(dirname -- "$1")" && cat > "$1"`, "swarm-tool-result-relay", relayPath)
 	if err != nil || exitCode != 0 {
-		msg := strings.TrimSpace(string(stderr))
-		if msg == "" && err != nil {
-			msg = err.Error()
+		cause := err
+		if cause == nil {
+			cause = fmt.Errorf("workspace command exited with code %d", exitCode)
 		}
-		if msg == "" {
-			msg = "workspace relay write failed"
-		}
-		return fmt.Errorf("write tool result relay %s: %s", relayPath, msg)
+		return runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "workspace_tool_result_relay_write_failed", "claude-cli-adapter", "write_tool_result_relay", map[string]any{
+			"exit_code":  exitCode,
+			"relay_path": relayPath,
+		}, cause)
 	}
+	_ = stderr
 	return nil
 }
 

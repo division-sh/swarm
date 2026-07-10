@@ -790,7 +790,7 @@ opco_budget:
     type: text
   status:
     type: text
-  failure_reason:
+  failure:
     type: text
   last_request_id:
     type: text
@@ -913,7 +913,7 @@ func selectOrCreateArtifactRepoCommitHandler() runtimecontracts.SystemNodeEventH
 					CurrentRef:        "current_ref",
 					FileManifest:      "file_manifest",
 					Status:            "status",
-					FailureReason:     "failure_reason",
+					Failure:           "failure",
 					LastRequestID:     "last_request_id",
 					LastSourceEventID: "last_source_event_id",
 				},

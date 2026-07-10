@@ -12,13 +12,14 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
 )
 
 func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if e.bus == nil {
-		return nil, errors.New("event bus is not configured")
+		return nil, failures.NewDetail("dependency_unavailable", "tool-executor", "agent_message.publish", map[string]any{"dependency": "event_bus"})
 	}
 	var in struct {
 		TargetAgentID  string   `json:"target_agent_id"`
@@ -112,7 +113,7 @@ func (e *Executor) execAgentMessage(ctx context.Context, actor models.AgentConfi
 
 func authorizeAgentMessage(provider runtimeauthority.Provider, actor, target models.AgentConfig, manager Manager) error {
 	if strings.TrimSpace(actor.ID) == "" || strings.TrimSpace(target.ID) == "" {
-		return errors.New("agent ids are required for message authorization")
+		return failures.NewDetail("invalid_tool_input", "tool-executor", "agent_message.authorize", map[string]any{"field": "agent_id"})
 	}
 	if strings.TrimSpace(actor.ID) == strings.TrimSpace(target.ID) {
 		return nil
@@ -120,7 +121,7 @@ func authorizeAgentMessage(provider runtimeauthority.Provider, actor, target mod
 	if hasRoleMessageAuthority(provider, actor, target) {
 		return nil
 	}
-	return fmt.Errorf("role %s cannot message role %s", actor.Role, target.Role)
+	return failures.New(failures.ClassAuthorizationDenied, "agent_message_forbidden", "tool-executor", "agent_message.authorize", map[string]any{"action": "agent_message", "actor_id": actor.ID, "target_agent_id": target.ID})
 }
 
 func hasRoleMessageAuthority(provider runtimeauthority.Provider, actor, target models.AgentConfig) bool {
@@ -149,7 +150,7 @@ func uniqueNonEmptyStrings(in []string) []string {
 
 func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	if e.scheduler == nil {
-		return nil, errors.New("scheduler is not configured")
+		return nil, failures.NewDetail("dependency_unavailable", "tool-executor", "schedule.create", map[string]any{"dependency": "scheduler"})
 	}
 	var in struct {
 		AgentID   string `json:"agent_id"`
@@ -171,7 +172,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 		in.AgentID = actor.ID
 	}
 	if in.AgentID != actor.ID {
-		return nil, errors.New("agents can only schedule for themselves")
+		return nil, failures.New(failures.ClassAuthorizationDenied, "agent_schedule_forbidden", "tool-executor", "schedule.authorize", map[string]any{"action": "schedule_create", "actor_id": actor.ID, "target_agent_id": in.AgentID})
 	}
 	entityID := strings.TrimSpace(in.EntityID)
 	in.EntityID = entityID
@@ -180,7 +181,7 @@ func (e *Executor) execSchedule(ctx context.Context, actor models.AgentConfig, i
 	}
 	actorEntityID := actor.EffectiveEntityID()
 	if entityID != "" && actorEntityID != "" && entityID != actorEntityID {
-		return nil, errors.New("cross-entity schedule is not allowed")
+		return nil, failures.New(failures.ClassAuthorizationDenied, "cross_entity_schedule_forbidden", "tool-executor", "schedule.authorize", map[string]any{"action": "schedule_create", "actor_id": actor.ID, "entity_id": entityID})
 	}
 
 	var at time.Time

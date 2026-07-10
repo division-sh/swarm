@@ -141,7 +141,7 @@ func Execute(req Request) (Result, error) {
 		return Result{}, &computemodule.Error{Code: computemodule.CodeABI, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output cannot be encoded as JSON object: %w", err)}
 	}
 	if req.OutputBytes > 0 && len(output) > req.OutputBytes {
-		return Result{}, &computemodule.Error{Code: computemodule.CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output %d bytes exceeds cap %d", len(output), req.OutputBytes)}
+		return Result{}, &computemodule.Error{Code: computemodule.CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Limit: req.OutputBytes, Actual: len(output), Err: fmt.Errorf("output %d bytes exceeds cap %d", len(output), req.OutputBytes)}
 	}
 	identity := RuntimeIdentity()
 	return Result{
@@ -342,14 +342,7 @@ func harnessError(req Request, wire harnessWireResult) error {
 }
 
 func classifyPythonCallError(req Request, fallback computemodule.Code, err error) error {
-	code := fallback
-	message := strings.ToLower(err.Error())
-	switch {
-	case strings.Contains(message, "fuel"):
-		code = computemodule.CodeFuel
-	case strings.Contains(message, "memory") || strings.Contains(message, "resource limiter"):
-		code = computemodule.CodeMemory
-	}
+	code := computemodule.WasmtimeFailureCode(err, fallback)
 	return &computemodule.Error{Code: code, ModuleID: req.ModuleID, RowID: req.RowID, Err: err}
 }
 
@@ -364,7 +357,7 @@ func validateRequestShape(req Request) error {
 		return &computemodule.Error{Code: computemodule.CodeMemory, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("memory page limit is required")}
 	}
 	if req.OutputBytes <= 0 {
-		return &computemodule.Error{Code: computemodule.CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Err: fmt.Errorf("output byte limit is required")}
+		return &computemodule.Error{Code: computemodule.CodeOutputSize, ModuleID: req.ModuleID, RowID: req.RowID, Limit: req.OutputBytes, Actual: 0, Err: fmt.Errorf("output byte limit is required")}
 	}
 	return nil
 }

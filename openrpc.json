@@ -112,7 +112,7 @@
     },
     {
       "name": "agent.delivery_lifecycle",
-      "description": "Read the owner-backed per-agent delivery lifecycle rows across the\ncanonical event_deliveries lifecycle states. This method is the\ncanonical agent-scoped lifecycle read owner for pending, in_progress,\ndelivered, failed, and dead_letter delivery rows. It is a separate\nowner from agent.diagnose and agent.delivery_diagnostics: AgentDiagnosis\nremains lean, and rich failed/dead-letter evidence remains owned by\nagent.delivery_diagnostics.\n\nThe API handler validates agent_id, optional run_id, optional\ndelivery_status filters, list bounds, cursor, and unknown params, then\nconsumes one named persisted delivery lifecycle read owner. The owner\nreads only canonical event_deliveries rows for subscriber_type agent\njoined to the minimum canonical event identity fields needed for\ndisplay: event_id, event_name, run_id, and entity_id. It must not\nreconstruct lifecycle rows from run.trace, event.get, event.list,\nagent.diagnose, agent.delivery_diagnostics, event_receipts,\ndead_letters, logs, dashboard/Builder helpers, CLI state, EventBus\nmemory, runtime memory, or direct DB/store readers outside this owner.\n\nRows are ordered by event_deliveries.created_at DESC, then delivery_id\nDESC. cursor is an opaque cursor over that ordering. run_id filters use\nthe canonical delivery/event run identity, currently\nCOALESCE(event_deliveries.run_id, events.run_id), and return only rows\nmatching the supplied run. delivery_status filters are exact\nevent_deliveries.status values. Empty lists are represented as empty\narrays. The method reports only lifecycle summaries\n(status/timestamps/retry_count/reason_code/last_error); it does not\ninclude dead-letter records, route target details, retry-policy\nrecommendations, status hints, trace reconstruction, event rendering,\nor CLI/dashboard presentation semantics.\n",
+      "description": "Read the owner-backed per-agent delivery lifecycle rows across the\ncanonical event_deliveries lifecycle states. This method is the\ncanonical agent-scoped lifecycle read owner for pending, in_progress,\ndelivered, failed, and dead_letter delivery rows. It is a separate\nowner from agent.diagnose and agent.delivery_diagnostics: AgentDiagnosis\nremains lean, and rich failed/dead-letter evidence remains owned by\nagent.delivery_diagnostics.\n\nThe API handler validates agent_id, optional run_id, optional\ndelivery_status filters, list bounds, cursor, and unknown params, then\nconsumes one named persisted delivery lifecycle read owner. The owner\nreads only canonical event_deliveries rows for subscriber_type agent\njoined to the minimum canonical event identity fields needed for\ndisplay: event_id, event_name, run_id, and entity_id. It must not\nreconstruct lifecycle rows from run.trace, event.get, event.list,\nagent.diagnose, agent.delivery_diagnostics, event_receipts,\ndead_letters, logs, dashboard/Builder helpers, CLI state, EventBus\nmemory, runtime memory, or direct DB/store readers outside this owner.\n\nRows are ordered by event_deliveries.created_at DESC, then delivery_id\nDESC. cursor is an opaque cursor over that ordering. run_id filters use\nthe canonical delivery/event run identity, currently\nCOALESCE(event_deliveries.run_id, events.run_id), and return only rows\nmatching the supplied run. delivery_status filters are exact\nevent_deliveries.status values. Empty lists are represented as empty\narrays. The method reports only lifecycle summaries\n(status/timestamps/retry_count/reason_code/failure); it does not\ninclude dead-letter records, route target details, retry-policy\nrecommendations, status hints, trace reconstruction, event rendering,\nor CLI/dashboard presentation semantics.\n",
       "params": [
         {
           "name": "agent_id",
@@ -8328,8 +8328,8 @@
             "minLength": 1,
             "type": "string"
           },
-          "last_error": {
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "occurred_at": {
             "$ref": "#/components/schemas/Timestamp",
@@ -8436,8 +8436,8 @@
             "minLength": 1,
             "type": "string"
           },
-          "last_error": {
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "occurred_at": {
             "$ref": "#/components/schemas/Timestamp",
@@ -8538,9 +8538,9 @@
             "minLength": 1,
             "type": "string"
           },
-          "last_error": {
-            "description": "Canonical event_deliveries.last_error summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.",
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope",
+            "description": "Canonical event_deliveries.failure envelope. No read surface may reconstruct it from reason_code or prose."
           },
           "reason_code": {
             "description": "Canonical event_deliveries.reason_code summary. Rich terminal evidence remains owned by agent.delivery_diagnostics.",
@@ -9485,8 +9485,8 @@
             },
             "type": "array"
           },
-          "error": {
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "full_prompt_context": {
             "oneOf": [
@@ -9950,8 +9950,8 @@
         "additionalProperties": false,
         "description": "Fork-local transcript turn. It intentionally is not an agent_turns row and may not have a live trigger event.",
         "properties": {
-          "error": {
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "latency_ms": {
             "minimum": 0,
@@ -10131,16 +10131,8 @@
           "dead_letter_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
-          "error_message": {
-            "type": "string"
-          },
-          "failure_type": {
-            "enum": [
-              "handler_error",
-              "chain_depth_exceeded",
-              "retry_exhausted"
-            ],
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "handler_node": {
             "type": "string"
@@ -10152,7 +10144,7 @@
         },
         "required": [
           "dead_letter_id",
-          "failure_type",
+          "failure",
           "retry_count",
           "chain_depth",
           "created_at"
@@ -10305,11 +10297,11 @@
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
           "finished_at": {
             "$ref": "#/components/schemas/Timestamp"
-          },
-          "last_error": {
-            "type": "string"
           },
           "reason_code": {
             "type": "string"
@@ -10457,11 +10449,11 @@
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
           "finished_at": {
             "$ref": "#/components/schemas/Timestamp"
-          },
-          "last_error": {
-            "type": "string"
           },
           "reason_code": {
             "type": "string"
@@ -10575,11 +10567,11 @@
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
           "finished_at": {
             "$ref": "#/components/schemas/Timestamp"
-          },
-          "last_error": {
-            "type": "string"
           },
           "reason_code": {
             "type": "string"
@@ -10664,6 +10656,92 @@
           "subscribers_replayed",
           "original_deliveries",
           "new_deliveries"
+        ],
+        "type": "object"
+      },
+      "FailureClass": {
+        "enum": [
+          "platform.timeout",
+          "platform.connector_failure",
+          "platform.compute_failure",
+          "platform.outcome_uncertain",
+          "platform.retry_exhausted",
+          "platform.budget_exhausted",
+          "platform.data_limit_exceeded",
+          "platform.authentication_required",
+          "platform.authorization_denied",
+          "platform.target_unreachable",
+          "platform.target_ambiguous",
+          "platform.fan_out_bound_exceeded",
+          "platform.chain_depth_exceeded",
+          "platform.early_arrival",
+          "platform.stale_arrival",
+          "platform.unexpected_arrival",
+          "platform.conflicting_duplicate",
+          "platform.reply_already_terminal",
+          "platform.schema_invalid",
+          "platform.dependency_unavailable",
+          "platform.internal_failure"
+        ],
+        "type": "string"
+      },
+      "FailureDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "code": {
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "type": "object"
+      },
+      "FailureEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "class": {
+            "$ref": "#/components/schemas/FailureClass"
+          },
+          "component": {
+            "type": "string"
+          },
+          "detail": {
+            "$ref": "#/components/schemas/FailureDetail"
+          },
+          "deterministic": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "schema_version": {
+            "const": "platform.failure/v1",
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "class",
+          "detail",
+          "retryable",
+          "deterministic",
+          "message",
+          "remediation"
         ],
         "type": "object"
       },
@@ -10757,6 +10835,9 @@
           },
           "error_code": {
             "type": "string"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "level": {
             "$ref": "#/components/schemas/LogLevel"
@@ -11161,11 +11242,11 @@
           "event_name": {
             "type": "string"
           },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
           "finished_at": {
             "$ref": "#/components/schemas/Timestamp"
-          },
-          "last_error": {
-            "type": "string"
           },
           "reason_code": {
             "type": "string"
@@ -11306,8 +11387,12 @@
             "minimum": 0,
             "type": "integer"
           },
-          "error_summary": {
-            "description": "Present only if a top-level error terminated the run.",
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope",
+            "description": "Required exactly when status is failed; forbidden for every other status."
+          },
+          "control_reason": {
+            "description": "Separate lifecycle-control reason from run_control_state; for cancelled runs this is the terminal reason and never a failure class.",
             "type": "string"
           },
           "event_count": {
@@ -11474,11 +11559,11 @@
           "delivery_delivered_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
+          "delivery_failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
           "delivery_id": {
             "$ref": "#/components/schemas/OpaqueId"
-          },
-          "delivery_last_error": {
-            "type": "string"
           },
           "delivery_reason_code": {
             "type": "string"
@@ -11547,8 +11632,8 @@
           "turn_entity_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
-          "turn_error": {
-            "type": "string"
+          "turn_failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "turn_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -11828,8 +11913,8 @@
       "Turn": {
         "additionalProperties": false,
         "properties": {
-          "error": {
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "latency_ms": {
             "minimum": 0,
@@ -11891,8 +11976,8 @@
           "completed_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
-          "error": {
-            "type": "string"
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
           },
           "parse_ok": {
             "type": "boolean"

@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
-	runtimerterr "github.com/division-sh/swarm/internal/runtime/rterrors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -54,12 +54,12 @@ func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryInProgress(context.C
 	return nil
 }
 
-func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryFailed(context.Context, string, string, string, string, int, int) error {
+func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryFailed(context.Context, string, string, string, *runtimefailures.Envelope, int, int) error {
 	s.failed++
 	return nil
 }
 
-func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryDeadLetter(context.Context, string, string, string, string, int, string) error {
+func (s *typedSystemNodeReceiptStore) MarkSystemNodeDeliveryDeadLetter(context.Context, string, string, string, *runtimefailures.Envelope, int, string) error {
 	s.processed = true
 	s.deadLettered++
 	return nil
@@ -75,7 +75,7 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testPipelineRunContext(t, db)
 	runner := newSystemNodeRunner("node-a", deadLetterTestBus{}, db, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
-		return errors.New("boom")
+		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "test_connector_failure", "pipeline-test", "handle", nil)
 	}, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration { return 0 })
 
@@ -99,32 +99,32 @@ func TestSystemNodeRunner_RecordsDeadLetterRow(t *testing.T) {
 		handlerNode string
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT failure_type, retry_count, COALESCE(handler_node, '')
+		SELECT failure->>'class', retry_count, COALESCE(handler_node, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
 	`, evt.ID()).Scan(&failureType, &retryCount, &handlerNode); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
-	if failureType != "retry_exhausted" || retryCount != 2 || handlerNode != "node-a" {
+	if failureType != string(runtimefailures.ClassRetryExhausted) || retryCount != 2 || handlerNode != "node-a" {
 		t.Fatalf("dead_letter row = type=%q retry=%d handler=%q", failureType, retryCount, handlerNode)
 	}
 	var (
-		deliveryStatus string
-		deliveryReason string
-		deliveryError  string
-		receiptOutcome string
+		deliveryStatus  string
+		deliveryReason  string
+		deliveryFailure []byte
+		receiptOutcome  string
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(last_error, '')
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), failure
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = 'node-a'
-	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason, &deliveryError); err != nil {
+	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason, &deliveryFailure); err != nil {
 		t.Fatalf("query node delivery: %v", err)
 	}
-	if deliveryStatus != "dead_letter" || deliveryReason != "retry_exhausted" || !strings.Contains(deliveryError, "boom") {
-		t.Fatalf("node delivery = %s/%s err=%q, want dead_letter/retry_exhausted with error", deliveryStatus, deliveryReason, deliveryError)
+	if deliveryStatus != "dead_letter" || deliveryReason != "handler_terminal_failure" || len(deliveryFailure) == 0 {
+		t.Fatalf("node delivery = %s/%s failure=%s, want dead_letter/handler_terminal_failure with failure", deliveryStatus, deliveryReason, deliveryFailure)
 	}
 	if err := db.QueryRowContext(ctx, `
 		SELECT COALESCE(outcome, '')
@@ -199,13 +199,13 @@ func TestCoordinator_RecordsChainDepthDeadLetterRow(t *testing.T) {
 		handlerNode string
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT failure_type, chain_depth, COALESCE(handler_node, '')
+		SELECT failure->>'class', chain_depth, COALESCE(handler_node, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
 	`, evt.ID()).Scan(&failureType, &chainDepth, &handlerNode); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
-	if failureType != "chain_depth_exceeded" || chainDepth != 6 || !strings.HasPrefix(handlerNode, "node-1") {
+	if failureType != string(runtimefailures.ClassChainDepthExceeded) || chainDepth != 6 || !strings.HasPrefix(handlerNode, "node-1") {
 		t.Fatalf("dead_letter row = type=%q chain_depth=%d handler=%q", failureType, chainDepth, handlerNode)
 	}
 }
@@ -262,7 +262,7 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	receipts := &typedSystemNodeReceiptStore{deliveryAuthorized: true}
 	runner := newSystemNodeRunnerWithReceiptStoreAndRetryBase("node-a", bus, nil, receipts, func() []events.EventType { return []events.EventType{"source.evt"} }, func(context.Context, events.Event) error {
 		attempts++
-		return runtimerterr.NewRuntimeError("invalid_contract", "pipeline", "node.handle", false, "bad handler config")
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "invalid_contract", "pipeline", "node_handle", nil)
 	}, 0, eventReceiptsCapabilityStub{enabled: true}.resolve)
 	runner.SetRetryPolicyForTest(5, func(int) time.Duration { return 0 })
 
@@ -286,8 +286,9 @@ func TestSystemNodeRunner_NonRetryableRuntimeErrorDeadLettersImmediately(t *test
 	if err := json.Unmarshal(published[0].Payload(), &payload); err != nil {
 		t.Fatalf("unmarshal payload: %v", err)
 	}
-	if got := strings.TrimSpace(asString(payload["failure_type"])); got != "handler_error" {
-		t.Fatalf("failure_type = %q, want handler_error", got)
+	failurePayload, _ := payload["failure"].(map[string]any)
+	if got := strings.TrimSpace(asString(failurePayload["class"])); got != string(runtimefailures.ClassSchemaInvalid) {
+		t.Fatalf("failure.class = %q, want %s", got, runtimefailures.ClassSchemaInvalid)
 	}
 	if got := asInt(payload["retry_count"]); got != 0 {
 		t.Fatalf("retry_count = %d, want 0", got)
@@ -527,26 +528,25 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	if passthrough {
 		t.Fatal("Intercept passthrough = true, want false for consumed handler error")
 	}
-	status, errText, ok := PipelineReceiptOverrideFromContext(ctx)
-	if !ok || status != "dead_letter" || strings.TrimSpace(errText) == "" {
-		t.Fatalf("receipt override = (%q, %q, %v), want dead_letter with error", status, errText, ok)
+	status, failure, ok := PipelineReceiptOverrideFromContext(ctx)
+	if !ok || status != "dead_letter" || failure == nil {
+		t.Fatalf("receipt override = (%q, %#v, %v), want dead_letter with failure", status, failure, ok)
 	}
 	flushPipelinePostCommitActions(postCommit)
 
 	var (
-		failureType string
-		handlerNode string
-		errorText   string
+		failureClass string
+		handlerNode  string
 	)
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT failure_type, COALESCE(handler_node, ''), COALESCE(error_message, '')
+		SELECT failure->>'class', COALESCE(handler_node, '')
 		FROM dead_letters
 		WHERE original_event_id = $1::uuid
-	`, evt.ID()).Scan(&failureType, &handlerNode, &errorText); err != nil {
+	`, evt.ID()).Scan(&failureClass, &handlerNode); err != nil {
 		t.Fatalf("query dead_letters: %v", err)
 	}
-	if failureType != "handler_error" || handlerNode != "node-a" || strings.TrimSpace(errorText) == "" {
-		t.Fatalf("dead_letter row = type=%q handler=%q error=%q", failureType, handlerNode, errorText)
+	if failureClass != string(runtimefailures.ClassInternalFailure) || handlerNode != "node-a" {
+		t.Fatalf("dead_letter row = class=%q handler=%q", failureClass, handlerNode)
 	}
 	var (
 		deliveryStatus string
@@ -562,8 +562,8 @@ func TestCoordinator_InterceptHandlerErrorDoesNotSilentlyFallback(t *testing.T) 
 	`, evt.ID()).Scan(&deliveryStatus, &deliveryReason); err != nil {
 		t.Fatalf("query workflow node delivery: %v", err)
 	}
-	if deliveryStatus != "dead_letter" || deliveryReason != "handler_error" {
-		t.Fatalf("workflow node delivery = %s/%s, want dead_letter/handler_error", deliveryStatus, deliveryReason)
+	if deliveryStatus != "dead_letter" || deliveryReason != "handler_terminal_failure" {
+		t.Fatalf("workflow node delivery = %s/%s, want dead_letter/handler_terminal_failure", deliveryStatus, deliveryReason)
 	}
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COALESCE(outcome, '')

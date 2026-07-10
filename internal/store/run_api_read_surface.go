@@ -10,20 +10,23 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/google/uuid"
 )
 
 type RunHeader struct {
-	RunID            string     `json:"run_id"`
-	Status           string     `json:"status"`
-	TriggerEventType string     `json:"trigger_event_type"`
-	TriggerEventID   string     `json:"trigger_event_id"`
-	EntityCount      int        `json:"entity_count"`
-	EventCount       int        `json:"event_count"`
-	StartedAt        time.Time  `json:"started_at"`
-	EndedAt          *time.Time `json:"ended_at,omitempty"`
-	ForkedFromRunID  string     `json:"forked_from_run_id,omitempty"`
-	ErrorSummary     string     `json:"error_summary,omitempty"`
+	RunID            string                    `json:"run_id"`
+	Status           string                    `json:"status"`
+	TriggerEventType string                    `json:"trigger_event_type"`
+	TriggerEventID   string                    `json:"trigger_event_id"`
+	EntityCount      int                       `json:"entity_count"`
+	EventCount       int                       `json:"event_count"`
+	StartedAt        time.Time                 `json:"started_at"`
+	EndedAt          *time.Time                `json:"ended_at,omitempty"`
+	ForkedFromRunID  string                    `json:"forked_from_run_id,omitempty"`
+	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
+	ControlReason    string                    `json:"control_reason,omitempty"`
 }
 
 type RunHeaderListOptions struct {
@@ -78,9 +81,10 @@ func (s *PostgresStore) requireRunHeaderCapabilities(ctx context.Context) error 
 		return err
 	}
 	required := map[string][]string{
-		"runs":         {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "error_summary", "started_at", "ended_at"},
-		"events":       {"run_id", "event_id", "event_name", "created_at"},
-		"entity_state": {"run_id", "entity_id"},
+		"runs":              {"run_id", "status", "bundle_hash", "trigger_event_id", "trigger_event_type", "forked_from_run_id", "entity_count", "event_count", "failure", "started_at", "ended_at"},
+		"run_control_state": {"run_id", "reason"},
+		"events":            {"run_id", "event_id", "event_name", "created_at"},
+		"entity_state":      {"run_id", "entity_id"},
 	}
 	for tableName, columns := range required {
 		if catalog.hasColumns(tableName, columns...) {
@@ -199,8 +203,10 @@ SELECT
 	r.started_at,
 	r.ended_at,
 	COALESCE(r.forked_from_run_id::text, ''),
-	COALESCE(r.error_summary, '')
+	r.failure,
+	COALESCE(rc.reason, '')
 FROM runs r
+	LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
 LEFT JOIN LATERAL (
 	SELECT e.event_id, e.event_name
 	FROM events e
@@ -228,6 +234,7 @@ type runHeaderScanner interface {
 func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 	var header RunHeader
 	var endedAt sql.NullTime
+	var failureRaw []byte
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
@@ -238,7 +245,8 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 		&header.StartedAt,
 		&endedAt,
 		&header.ForkedFromRunID,
-		&header.ErrorSummary,
+		&failureRaw,
+		&header.ControlReason,
 	); err != nil {
 		return RunHeader{}, err
 	}
@@ -246,7 +254,15 @@ func scanRunHeader(row runHeaderScanner) (RunHeader, error) {
 	header.TriggerEventType = strings.TrimSpace(header.TriggerEventType)
 	header.TriggerEventID = strings.TrimSpace(header.TriggerEventID)
 	header.ForkedFromRunID = strings.TrimSpace(header.ForkedFromRunID)
-	header.ErrorSummary = strings.TrimSpace(header.ErrorSummary)
+	header.ControlReason = strings.TrimSpace(header.ControlReason)
+	failure, err := decodeStoredFailure(failureRaw)
+	if err != nil {
+		return RunHeader{}, err
+	}
+	header.Failure = failure
+	if err := storerunlifecycle.ValidateStatusFailure(header.Status, header.Failure); err != nil {
+		return RunHeader{}, fmt.Errorf("run %s terminal evidence: %w", header.RunID, err)
+	}
 	if endedAt.Valid {
 		value := endedAt.Time.UTC()
 		header.EndedAt = &value

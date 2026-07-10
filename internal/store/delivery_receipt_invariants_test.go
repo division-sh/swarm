@@ -36,7 +36,7 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 			name: "retryable aged failure remains pending everywhere",
 			setup: func(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID, agentID string) {
 				t.Helper()
-				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 					t.Fatalf("UpsertEventReceipt(error): %v", err)
 				}
 				rewindCanonicalDeliveryAttempt(t, ctx, pg, eventID, agentID, time.Now().Add(-2*time.Minute))
@@ -47,7 +47,7 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 			name: "retryable fresh failure stays out of pending surfaces until backoff elapses",
 			setup: func(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID, agentID string) {
 				t.Helper()
-				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 					t.Fatalf("UpsertEventReceipt(error): %v", err)
 				}
 			},
@@ -57,7 +57,7 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 			name: "processed delivery leaves all pending surfaces",
 			setup: func(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID, agentID string) {
 				t.Helper()
-				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 					t.Fatalf("UpsertEventReceipt(processed): %v", err)
 				}
 			},
@@ -67,10 +67,10 @@ func TestCanonicalDeliveryOwnerInvariant_PendingSurfacesAgree_V2(t *testing.T) {
 			name: "dead letter leaves all pending surfaces",
 			setup: func(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventID, agentID string) {
 				t.Helper()
-				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 					t.Fatalf("UpsertEventReceipt(first error): %v", err)
 				}
-				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := pg.UpsertEventReceipt(ctx, eventID, agentID, runtimemanager.ReceiptStatusError, testRetryableFailure()); err != nil {
 					t.Fatalf("UpsertEventReceipt(second error): %v", err)
 				}
 			},
@@ -107,7 +107,7 @@ func TestCanonicalDeliveryOwnerInvariant_ReceiptRowsRemainOutcomeOnly_V2(t *test
 
 	assertCanonicalPendingTruthAcrossSurfaces(t, ctx, pg, agentID, evt, false)
 
-	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, "boom")
+	err := pg.UpsertEventReceipt(ctx, evt.ID(), agentID, runtimemanager.ReceiptStatusError, testRetryableFailure())
 	if err == nil {
 		t.Fatal("expected receipt-only state to fail closed without a canonical delivery row")
 	}

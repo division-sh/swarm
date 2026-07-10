@@ -3523,7 +3523,7 @@ action:
       current_ref: current_ref
       file_manifest: file_manifest
       status: status
-      failure_reason: failure_reason
+      failure: failure
       last_request_id: last_request_id
       last_source_event_id: last_source_event_id
     limits:

@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -16,6 +15,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -64,6 +64,8 @@ type receiptReaderStub struct {
 	found       bool
 	upsertErrs  []error
 	upsertCalls int
+	lastStatus  ReceiptStatus
+	lastFailure *runtimefailures.Envelope
 }
 
 func (*receiptReaderStub) UpsertAgent(context.Context, PersistedAgent) error { return nil }
@@ -72,8 +74,10 @@ func (*receiptReaderStub) LoadAgents(context.Context) ([]PersistedAgent, error) 
 }
 func (*receiptReaderStub) MarkAgentTerminated(context.Context, string) error { return nil }
 func (*receiptReaderStub) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (s *receiptReaderStub) UpsertEventReceipt(context.Context, string, string, ReceiptStatus, string) error {
+func (s *receiptReaderStub) UpsertEventReceipt(_ context.Context, _, _ string, status ReceiptStatus, failure *runtimefailures.Envelope) error {
 	s.upsertCalls++
+	s.lastStatus = status
+	s.lastFailure = runtimefailures.CloneEnvelope(failure)
 	if len(s.upsertErrs) == 0 {
 		return nil
 	}
@@ -103,7 +107,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptPersists(t *testing
 	}
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
 
-	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, "")
+	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, nil)
 
 	if store.upsertCalls != 1 {
 		t.Fatalf("receipt upsert calls = %d, want 1", store.upsertCalls)
@@ -126,7 +130,7 @@ func TestWriteReceiptConvergesNormalRunCompletionAfterReceiptRetryPersists(t *te
 	}
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{}, store)
 
-	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, "")
+	am.writeReceipt(context.Background(), "event-1", "agent-1", ReceiptStatusProcessed, nil)
 
 	if store.upsertCalls != 2 {
 		t.Fatalf("receipt upsert calls = %d, want 2", store.upsertCalls)
@@ -179,13 +183,14 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 	bus := &recordingReceiptBus{}
 	pauseCalls := 0
 	am := NewAgentManagerWithOptions(bus, nil, AgentManagerOptions{
-		RuntimeIngressSafetyPause: func(ctx context.Context, reason string) error {
+		RuntimeIngressSafetyPause: func(ctx context.Context, reason string, failure *runtimefailures.Envelope) error {
 			pauseCalls++
 			return bus.Publish(ctx, eventtest.RootIngress("", events.EventType("platform.paused"),
 				"runtime", "", mustJSON(map[string]any{
 					"reason":    reason,
 					"paused_by": "runtime",
 					"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+					"failure":   failure,
 				}), 0, "", "", events.EventEnvelope{}, time.Now().UTC()))
 		},
 	})
@@ -200,7 +205,7 @@ func TestMaybeTripAuthCircuitBreaker_PublishesFlowScopedAuthRequired(t *testing.
 
 	ctx := runtimecorrelation.WithInboundEvent(context.Background(), inbound)
 	ctx = runtimecorrelation.WithRunID(ctx, inbound.RunID())
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), errors.New("claude auth required"))
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), testAuthFailure())
 
 	if len(bus.published) != 2 {
 		t.Fatalf("published events = %d, want 2", len(bus.published))
@@ -259,7 +264,7 @@ func TestMaybeTripAuthCircuitBreaker_PreservesCanceledEventLineage(t *testing.T)
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
 
-	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), errors.New("claude auth required"))
+	am.maybeTripAuthCircuitBreaker(ctx, "agent-a", inbound.ID(), testAuthFailure())
 
 	var authEvt events.Event
 	for _, evt := range bus.published {
@@ -354,7 +359,7 @@ func TestMaybeEscalateDeadLetter_PublishesTypedFlowInstanceEnvelope(t *testing.T
 			AgentID:    "agent-a",
 			Status:     ReceiptStatusDeadLetter,
 			RetryCount: 2,
-			Error:      "boom",
+			Failure:    testFailure("handler_failed"),
 		},
 	}
 	am := NewAgentManager(bus, nil)
@@ -412,6 +417,18 @@ func TestHandleAgentLoopPanic_PublishesTypedFlowInstanceEnvelope(t *testing.T) {
 		if got := evt.Scope(); got != events.EventScopeEntity {
 			t.Fatalf("event %d scope = %q, want %q", i, got, events.EventScopeEntity)
 		}
+	}
+	if len(bus.runtimeLogs) != 1 || bus.runtimeLogs[0].Failure == nil {
+		t.Fatalf("runtime logs = %#v, want one typed panic log", bus.runtimeLogs)
+	}
+	for _, evt := range bus.published {
+		var payload struct {
+			Failure runtimefailures.Envelope `json:"failure"`
+		}
+		if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+			t.Fatalf("unmarshal %s payload: %v", evt.Type(), err)
+		}
+		assertManagerFailureEqual(t, payload.Failure, *bus.runtimeLogs[0].Failure)
 	}
 }
 
@@ -535,19 +552,19 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 	}{
 		{
 			name:          "retrying",
-			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusError, RetryCount: 1, Error: "boom"},
+			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusError, RetryCount: 1, Failure: testFailure("handler_failed")},
 			wantState:     "retrying",
 			wantTerminal:  "",
 			wantRetry:     1,
-			wantReasonRaw: "boom",
+			wantReasonRaw: "handler_failure",
 		},
 		{
 			name:          "exhausted",
-			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusDeadLetter, RetryCount: 2, Error: "boom"},
+			receipt:       EventReceipt{EventID: "evt-1", AgentID: "agent-a", Status: ReceiptStatusDeadLetter, RetryCount: 2, Failure: testFailure("handler_failed")},
 			wantState:     "exhausted",
 			wantTerminal:  "retry_exhausted",
 			wantRetry:     2,
-			wantReasonRaw: "boom",
+			wantReasonRaw: "retry_exhausted",
 		},
 	}
 
@@ -559,7 +576,7 @@ func TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions(t *te
 			store.found = true
 			am := NewAgentManager(bus, nil, store)
 
-			am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, "boom")
+			am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 			if len(bus.runtimeLogs) != 1 {
 				t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
@@ -593,13 +610,13 @@ func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(
 		AgentID:    "agent-a",
 		Status:     ReceiptStatusError,
 		RetryCount: 1,
-		Error:      "boom",
+		Failure:    testFailure("handler_failed"),
 	}
 	store.found = true
 	store.upsertErrs = []error{context.Canceled, nil}
 	am := NewAgentManager(bus, nil, store)
 
-	am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, "boom")
+	am.writeReceipt(context.Background(), "evt-1", "agent-a", ReceiptStatusError, testFailure("handler_failed"))
 
 	if store.upsertCalls != 2 {
 		t.Fatalf("upsert calls = %d, want 2", store.upsertCalls)
@@ -608,7 +625,7 @@ func TestWriteReceipt_RetryAfterContextCancellationStillLogsLifecycleTransition(
 		t.Fatalf("runtime logs = %d, want 1", len(bus.runtimeLogs))
 	}
 	detail := bus.runtimeLogs[0].Detail.(map[string]any)
-	if detail["delivery_state"] != "retrying" || detail["delivery_reason"] != "boom" {
+	if detail["delivery_state"] != "retrying" || detail["delivery_reason"] != "handler_failure" {
 		t.Fatalf("retry lifecycle detail = %#v", detail)
 	}
 }

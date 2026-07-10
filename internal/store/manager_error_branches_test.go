@@ -86,7 +86,7 @@ func TestPostgresStore_Manager_ErrorBranches(t *testing.T) {
 	if err := pg.InsertEventDeliveries(ctx, evtID, []string{aid}); err != nil {
 		t.Fatalf("InsertEventDeliveries: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evtID, aid, "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evtID, aid, "processed", nil); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
 }

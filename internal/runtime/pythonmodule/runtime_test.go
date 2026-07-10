@@ -292,9 +292,6 @@ func assertComputeModuleCode(t *testing.T, err error, code computemodule.Code) {
 	if err == nil {
 		t.Fatalf("error = nil, want %s", code)
 	}
-	if !computemodule.IsDeterministicFailure(err) {
-		t.Fatalf("IsDeterministicFailure(%v) = false", err)
-	}
 	var typed *computemodule.Error
 	if !errors.As(err, &typed) || typed.Code != code {
 		t.Fatalf("error = %#v, want code %s", err, code)

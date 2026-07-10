@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -222,7 +223,7 @@ func selectedContractRuntimeContainerLogger(pg *store.PostgresStore) runtimebus.
 	return selectedContractRuntimeContainerLoggerHook{logger: runtimepkg.NewRuntimeLogger(pg)}
 }
 
-func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, errText string, durationUS int) error {
+func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, level diaglog.Level, message, component, action, eventID, eventType, agentID, entityID, sessionID string, correlation map[string]string, detail any, failure *runtimefailures.Envelope, durationUS int) error {
 	if h.logger == nil {
 		return nil
 	}
@@ -238,7 +239,7 @@ func (h selectedContractRuntimeContainerLoggerHook) Log(ctx context.Context, lev
 		SessionID:   sessionID,
 		Correlation: correlation,
 		Detail:      detail,
-		Error:       errText,
+		Failure:     runtimefailures.CloneEnvelope(failure),
 		DurationUS:  durationUS,
 	})
 }

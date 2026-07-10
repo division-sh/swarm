@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ const (
 	maxToolResultBytes        = 16 * 1024
 	maxReadFileResultBytes    = 256 * 1024
 	maxToolResultPreviewRunes = 1200
+	MaxWireResponseBytes      = maxReadFileResultBytes
 )
 
 type ToolGatewayRequest struct {
@@ -23,9 +25,10 @@ type ToolGatewayRequest struct {
 }
 
 type ToolGatewayResponse struct {
-	OK     bool `json:"ok"`
-	Result any  `json:"result,omitempty"`
-	Error  any  `json:"error,omitempty"`
+	OK           bool                 `json:"ok"`
+	Result       any                  `json:"result,omitempty"`
+	Error        any                  `json:"error,omitempty"`
+	RuntimeError *RuntimeErrorPayload `json:"runtimeError,omitempty"`
 }
 
 type RPCRequest struct {
@@ -45,6 +48,65 @@ type RPCResponse struct {
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+func DecodeRPCResponse(raw []byte, expectedID any) (RPCResponse, error) {
+	var wire struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result"`
+		Error   json.RawMessage `json:"error"`
+	}
+	if err := decodeStrictJSON(raw, &wire); err != nil {
+		return RPCResponse{}, fmt.Errorf("decode JSON-RPC response: %w", err)
+	}
+	if wire.JSONRPC != "2.0" {
+		return RPCResponse{}, fmt.Errorf("JSON-RPC response version must be 2.0")
+	}
+	if len(wire.ID) == 0 || !rpcResponseIDEqual(wire.ID, expectedID) {
+		return RPCResponse{}, fmt.Errorf("JSON-RPC response id does not match request")
+	}
+	if (len(wire.Result) == 0) == (len(wire.Error) == 0) {
+		return RPCResponse{}, fmt.Errorf("JSON-RPC response must contain exactly one of result or error")
+	}
+	response := RPCResponse{JSONRPC: wire.JSONRPC, ID: expectedID}
+	if len(wire.Result) != 0 {
+		if err := json.Unmarshal(wire.Result, &response.Result); err != nil {
+			return RPCResponse{}, fmt.Errorf("decode JSON-RPC result: %w", err)
+		}
+		return response, nil
+	}
+	var errorWire struct {
+		Code    *int    `json:"code"`
+		Message *string `json:"message"`
+		Data    any     `json:"data,omitempty"`
+	}
+	if err := decodeStrictJSON(wire.Error, &errorWire); err != nil {
+		return RPCResponse{}, fmt.Errorf("decode JSON-RPC error: %w", err)
+	}
+	if errorWire.Code == nil || errorWire.Message == nil {
+		return RPCResponse{}, fmt.Errorf("JSON-RPC error requires numeric code and string message")
+	}
+	rpcErr := RPCError{Code: *errorWire.Code, Message: *errorWire.Message, Data: errorWire.Data}
+	response.Error = &rpcErr
+	return response, nil
+}
+
+func rpcResponseIDEqual(raw json.RawMessage, expected any) bool {
+	expectedRaw, err := json.Marshal(expected)
+	if err != nil {
+		return false
+	}
+	var actualCompact bytes.Buffer
+	if err := json.Compact(&actualCompact, raw); err != nil {
+		return false
+	}
+	var expectedCompact bytes.Buffer
+	if err := json.Compact(&expectedCompact, expectedRaw); err != nil {
+		return false
+	}
+	return bytes.Equal(actualCompact.Bytes(), expectedCompact.Bytes())
 }
 
 type ToolDef struct {
@@ -130,12 +192,31 @@ func WriteRPCResult(w http.ResponseWriter, id any, result any) {
 }
 
 func WriteRPCError(w http.ResponseWriter, id any, code int, message string) {
+	writeRPCError(w, id, code, message, nil)
+}
+
+func WriteRPCErrorForRuntimeError(w http.ResponseWriter, id any, code int, err error) {
+	message := "mcp error"
+	var data any
+	if runtimeErr := RuntimeErrorPayloadFromError(err); runtimeErr != nil {
+		data = map[string]any{"runtimeError": runtimeErr}
+		if runtimeErr.Failure != nil {
+			message = runtimeErr.Failure.Message
+		} else if runtimeErr.Protocol != nil {
+			message = runtimeErr.Protocol.Message
+		}
+	}
+	writeRPCError(w, id, code, message, data)
+}
+
+func writeRPCError(w http.ResponseWriter, id any, code int, message string, data any) {
 	resp := RPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
 		Error: &RPCError{
 			Code:    code,
 			Message: strings.TrimSpace(message),
+			Data:    data,
 		},
 	}
 	if strings.TrimSpace(resp.Error.Message) == "" {

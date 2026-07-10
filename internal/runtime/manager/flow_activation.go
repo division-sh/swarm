@@ -139,7 +139,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 			HiredBy:         "flow-instance-activator",
 			TemplateVersion: strings.TrimSpace(req.ContractBundle.WorkflowVersion()),
 		}
-		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
+		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !errors.Is(err, ErrAgentAlreadyExists) {
 			return err
 		}
 	}
@@ -174,7 +174,7 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 					Detail: map[string]any{
 						"flow_path": flowPath,
 					},
-					Error: err.Error(),
+					Failure: failureEnvelope(err, "flow_activation", "auto_emit"),
 				})
 			}
 		}
@@ -282,7 +282,7 @@ func (am *AgentManager) EnsureStaticAgents(ctx context.Context, source semanticv
 
 func (am *AgentManager) spawnStaticAgentRecords(ctx context.Context, records []PersistedAgent) error {
 	for _, rec := range records {
-		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !strings.Contains(err.Error(), "already exists") {
+		if err := am.spawnAgentInternal(ctx, rec, true); err != nil && !errors.Is(err, ErrAgentAlreadyExists) {
 			return err
 		}
 	}
@@ -503,7 +503,7 @@ func (am *AgentManager) DeactivateFlowInstanceModel(ctx context.Context, req run
 func (am *AgentManager) applyTerminalFlowInstanceSideEffects(plan terminalFlowInstanceSideEffectPlan) error {
 	var agentErrs []error
 	for _, agentID := range plan.AgentIDs {
-		if err := am.TeardownAgent(agentID); err != nil && !strings.Contains(err.Error(), "not found") {
+		if err := am.TeardownAgent(agentID); err != nil && !errors.Is(err, ErrAgentNotFound) {
 			agentErrs = append(agentErrs, fmt.Errorf("teardown flow instance agent %s: %w", agentID, err))
 		}
 	}
@@ -534,7 +534,7 @@ func (am *AgentManager) logTerminalFlowInstanceSideEffectFailure(plan terminalFl
 			"route":       plan.Route.InstancePath,
 			"final_state": plan.FinalState,
 		},
-		Error: err.Error(),
+		Failure: failureEnvelope(err, "flow_activation", "terminal_side_effects"),
 	})
 }
 

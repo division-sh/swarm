@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +38,7 @@ type ActivityAttemptRecord struct {
 	ResultEventID   string
 	ResultEventType string
 	ResultPayload   map[string]any
-	Error           string
+	Failure         *runtimefailures.Envelope
 	InputHash       string
 	ReplyContextID  string
 	StartedAt       time.Time
@@ -118,7 +119,7 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 			    result_event_id = ?,
 			    result_event_type = ?,
 			    result_payload = ?,
-			    error = ?,
+			    failure = NULLIF(?, ''),
 			    completed_at = CURRENT_TIMESTAMP,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE request_event_id = ?
@@ -131,14 +132,21 @@ func (s *WorkflowInstanceStore) CompleteActivityAttempt(ctx context.Context, rec
 				    result_event_id = $2::uuid,
 				    result_event_type = $3,
 				    result_payload = $4::jsonb,
-				    error = NULLIF($5, ''),
+				    failure = NULLIF($5, '')::jsonb,
 				    completed_at = NOW(),
 				    updated_at = NOW()
 				WHERE request_event_id = $6::uuid
 				  AND status = 'started'
 			`
 		}
-		res, err := dbExecContext(txctx, s.db, query, rec.Status, rec.ResultEventID, rec.ResultEventType, string(rawPayload), nullableString(rec.Error), rec.RequestEventID)
+		failureJSON, err := pipelineFailureJSON(rec.Failure)
+		if rec.Status == ActivityAttemptStatusSucceeded {
+			failureJSON, err = "", nil
+		}
+		if err != nil {
+			return err
+		}
+		res, err := dbExecContext(txctx, s.db, query, rec.Status, rec.ResultEventID, rec.ResultEventType, string(rawPayload), nullableString(failureJSON), rec.RequestEventID)
 		if err != nil {
 			return fmt.Errorf("complete activity attempt %s: %w", rec.RequestEventID, err)
 		}
@@ -180,7 +188,7 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 			    result_event_id = ?,
 			    result_event_type = ?,
 			    result_payload = ?,
-			    error = ?,
+			    failure = ?,
 			    completed_at = CURRENT_TIMESTAMP,
 			    updated_at = CURRENT_TIMESTAMP
 			WHERE request_event_id = ?
@@ -193,14 +201,18 @@ func (s *WorkflowInstanceStore) MarkActivityAttemptUncertain(ctx context.Context
 				    result_event_id = $1::uuid,
 				    result_event_type = $2,
 				    result_payload = $3::jsonb,
-				    error = NULLIF($4, ''),
+				    failure = $4::jsonb,
 				    completed_at = NOW(),
 				    updated_at = NOW()
 				WHERE request_event_id = $5::uuid
 				  AND status = 'started'
 			`
 		}
-		if _, err := dbExecContext(txctx, s.db, query, rec.ResultEventID, rec.ResultEventType, string(rawPayload), nullableString(rec.Error), rec.RequestEventID); err != nil {
+		failureJSON, err := pipelineFailureJSON(rec.Failure)
+		if err != nil {
+			return err
+		}
+		if _, err := dbExecContext(txctx, s.db, query, rec.ResultEventID, rec.ResultEventType, string(rawPayload), failureJSON, rec.RequestEventID); err != nil {
 			return fmt.Errorf("mark activity attempt %s uncertain: %w", rec.RequestEventID, err)
 		}
 		loaded, ok, err := s.LoadActivityAttempt(txctx, rec.RequestEventID)
@@ -231,7 +243,7 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 		SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 		       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 		       success_event, failure_event, result_event_id, result_event_type, result_payload,
-		       error, input_hash, reply_context_id, started_at, completed_at, updated_at
+		       failure, input_hash, reply_context_id, started_at, completed_at, updated_at
 		FROM activity_attempts
 		WHERE request_event_id = ?
 	`
@@ -239,8 +251,8 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 		query = `
 			SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
 			       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-			       success_event, failure_event, result_event_id, result_event_type, result_payload,
-			       error, input_hash, reply_context_id, started_at, completed_at, updated_at
+			success_event, failure_event, result_event_id, result_event_type, result_payload,
+			       failure, input_hash, reply_context_id, started_at, completed_at, updated_at
 			FROM activity_attempts
 			WHERE request_event_id = $1::uuid
 		`
@@ -259,14 +271,14 @@ func (s *WorkflowInstanceStore) LoadActivityAttempt(ctx context.Context, request
 func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 	var rec ActivityAttemptRecord
 	var sourceEventID, parentEventID, entityID, flowInstance sql.NullString
-	var resultEventID, resultEventType, errorText, replyContextID sql.NullString
-	var rawPayload any
+	var resultEventID, resultEventType, replyContextID sql.NullString
+	var rawPayload, rawFailure any
 	var startedAtRaw, completedAtRaw, updatedAtRaw any
 	if err := row.Scan(
 		&rec.RequestEventID, &rec.RunID, &sourceEventID, &parentEventID, &entityID, &flowInstance,
 		&rec.NodeID, &rec.HandlerEventKey, &rec.ActivityID, &rec.Tool, &rec.EffectClass, &rec.Attempt, &rec.Status,
 		&rec.SuccessEvent, &rec.FailureEvent, &resultEventID, &resultEventType, &rawPayload,
-		&errorText, &rec.InputHash, &replyContextID, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
+		&rawFailure, &rec.InputHash, &replyContextID, &startedAtRaw, &completedAtRaw, &updatedAtRaw,
 	); err != nil {
 		return ActivityAttemptRecord{}, err
 	}
@@ -297,8 +309,14 @@ func scanActivityAttempt(row *sql.Row) (ActivityAttemptRecord, error) {
 	rec.FlowInstance = flowInstance.String
 	rec.ResultEventID = resultEventID.String
 	rec.ResultEventType = resultEventType.String
-	rec.Error = errorText.String
 	rec.ReplyContextID = replyContextID.String
+	if raw := activityAttemptJSONRaw(rawFailure); len(raw) > 0 && string(raw) != "null" {
+		failure, err := runtimefailures.UnmarshalEnvelope(raw)
+		if err != nil {
+			return ActivityAttemptRecord{}, fmt.Errorf("decode activity attempt failure: %w", err)
+		}
+		rec.Failure = &failure
+	}
 	if rawPayload != nil {
 		decoded, err := decodeActivityAttemptPayload(rawPayload)
 		if err != nil {
@@ -347,6 +365,20 @@ func parseActivityAttemptTimeString(raw string) (time.Time, bool, error) {
 	return time.Time{}, false, fmt.Errorf("unsupported timestamp %q", raw)
 }
 
+func activityAttemptJSONRaw(raw any) []byte {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []byte:
+		return typed
+	case string:
+		return []byte(typed)
+	default:
+		encoded, _ := json.Marshal(typed)
+		return encoded
+	}
+}
+
 func decodeActivityAttemptPayload(raw any) (map[string]any, error) {
 	var bytes []byte
 	switch typed := raw.(type) {
@@ -386,7 +418,7 @@ func (rec ActivityAttemptRecord) normalized() ActivityAttemptRecord {
 	rec.FailureEvent = strings.TrimSpace(rec.FailureEvent)
 	rec.ResultEventID = strings.TrimSpace(rec.ResultEventID)
 	rec.ResultEventType = strings.TrimSpace(rec.ResultEventType)
-	rec.Error = strings.TrimSpace(rec.Error)
+	rec.Failure = runtimefailures.CloneEnvelope(rec.Failure)
 	rec.InputHash = strings.TrimSpace(rec.InputHash)
 	rec.ReplyContextID = strings.TrimSpace(rec.ReplyContextID)
 	if rec.Attempt <= 0 {
@@ -441,6 +473,12 @@ func (rec ActivityAttemptRecord) validateTerminal() error {
 	}
 	if rec.ResultPayload == nil {
 		return fmt.Errorf("activity attempt terminal result_payload is required")
+	}
+	if rec.Status == ActivityAttemptStatusSucceeded && rec.Failure != nil {
+		return fmt.Errorf("successful activity attempt must not carry failure")
+	}
+	if (rec.Status == ActivityAttemptStatusFailed || rec.Status == ActivityAttemptStatusUncertain) && rec.Failure == nil {
+		return fmt.Errorf("failed or uncertain activity attempt requires canonical failure")
 	}
 	return nil
 }

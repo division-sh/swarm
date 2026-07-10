@@ -153,7 +153,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if gotActiveSession != activeSessionID {
 		t.Fatalf("active_session_id = %q, want %q", gotActiveSession, activeSessionID)
 	}
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), "control-plane", "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), "control-plane", "processed", nil); err != nil {
 		t.Fatalf("upsert receipt: %v", err)
 	}
 	var deliveryStatus, deliveryReason, receiptReason, clearedActiveSession string

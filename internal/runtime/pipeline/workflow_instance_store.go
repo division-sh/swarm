@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -979,7 +980,7 @@ func (s *WorkflowInstanceStore) createSpec(ctx context.Context, rowID, storageRe
 		return err
 	}
 	if exists {
-		return fmt.Errorf("flow instance already exists: %s", storageRef)
+		return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
 	}
 	projection, err := workflowInstancePersistedProjectionFromInstance(instance, storageRef)
 	if err != nil {

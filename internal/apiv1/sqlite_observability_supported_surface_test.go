@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -308,17 +309,14 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 		t.Fatalf("RuntimeLogger.Log warning runtime log: %v", err)
 	}
 	incidentCode := "supported_surface_failed"
+	incidentFailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, incidentCode, "scheduler", "supported_surface_failed", nil), "scheduler", "supported_surface_failed")
 	if err := logger.Log(logCtx, runtimepkg.RuntimeLogEntry{
 		Level:     "error",
 		Message:   "runtime failed",
 		Component: "scheduler",
 		Action:    "supported_surface_failed",
 		SessionID: "session-1",
-		Error:     "boom",
-		Detail: map[string]any{
-			"error":      "boom",
-			"error_code": incidentCode,
-		},
+		Failure:   &incidentFailure,
 	}); err != nil {
 		t.Fatalf("RuntimeLogger.Log error runtime log: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/lib/pq"
 )
 
@@ -63,18 +64,18 @@ type OperatorAgentDeliveryLifecycleList struct {
 }
 
 type OperatorAgentDeliveryLifecycleRow struct {
-	DeliveryID          string     `json:"delivery_id"`
-	EventID             string     `json:"event_id"`
-	EventName           string     `json:"event_name"`
-	RunID               string     `json:"run_id,omitempty"`
-	EntityID            string     `json:"entity_id,omitempty"`
-	Status              string     `json:"status"`
-	RetryCount          int        `json:"retry_count"`
-	ReasonCode          string     `json:"reason_code,omitempty"`
-	LastError           string     `json:"last_error,omitempty"`
-	DeliveryCreatedAt   time.Time  `json:"delivery_created_at"`
-	DeliveryStartedAt   *time.Time `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt *time.Time `json:"delivery_delivered_at,omitempty"`
+	DeliveryID          string                    `json:"delivery_id"`
+	EventID             string                    `json:"event_id"`
+	EventName           string                    `json:"event_name"`
+	RunID               string                    `json:"run_id,omitempty"`
+	EntityID            string                    `json:"entity_id,omitempty"`
+	Status              string                    `json:"status"`
+	RetryCount          int                       `json:"retry_count"`
+	ReasonCode          string                    `json:"reason_code,omitempty"`
+	Failure             *runtimefailures.Envelope `json:"failure,omitempty"`
+	DeliveryCreatedAt   time.Time                 `json:"delivery_created_at"`
+	DeliveryStartedAt   *time.Time                `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt *time.Time                `json:"delivery_delivered_at,omitempty"`
 }
 
 type agentDeliveryLifecycleCursor struct {
@@ -248,7 +249,7 @@ func requireAgentDeliveryLifecycleColumnCatalog(catalog schemaColumnCatalog) err
 		},
 		"event_deliveries": {
 			"delivery_id", "run_id", "event_id", "subscriber_type", "subscriber_id",
-			"status", "retry_count", "reason_code", "last_error", "started_at", "delivered_at", "created_at",
+			"status", "retry_count", "reason_code", "failure", "started_at", "delivered_at", "created_at",
 		},
 	}
 	for table, columns := range required {
@@ -325,7 +326,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ct
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'::jsonb),
 			d.created_at,
 			d.started_at,
 			d.delivered_at
@@ -344,6 +345,7 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ct
 	for rows.Next() {
 		var (
 			item        OperatorAgentDeliveryLifecycleRow
+			rawFailure  []byte
 			startedAt   sql.NullTime
 			deliveredAt sql.NullTime
 		)
@@ -356,12 +358,16 @@ func (r *OperatorAgentConversationReadSurface) listAgentDeliveryLifecycleRows(ct
 			&item.Status,
 			&item.RetryCount,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&item.DeliveryCreatedAt,
 			&startedAt,
 			&deliveredAt,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan agent delivery lifecycle row: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode agent delivery lifecycle failure: %w", err)
 		}
 		item.DeliveryStartedAt = nullableTimePtr(startedAt)
 		item.DeliveryDeliveredAt = nullableTimePtr(deliveredAt)
@@ -405,7 +411,7 @@ func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Co
 			COALESCE(d.status, ''),
 			COALESCE(d.retry_count, 0),
 			COALESCE(d.reason_code, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'),
 			d.created_at,
 			d.started_at,
 			d.delivered_at
@@ -424,6 +430,7 @@ func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Co
 	for rows.Next() {
 		var (
 			item                                 OperatorAgentDeliveryLifecycleRow
+			rawFailure                           any
 			createdRaw, startedRaw, deliveredRaw any
 		)
 		if err := rows.Scan(
@@ -435,12 +442,16 @@ func (s *SQLiteRuntimeStore) listSQLiteAgentDeliveryLifecycleRows(ctx context.Co
 			&item.Status,
 			&item.RetryCount,
 			&item.ReasonCode,
-			&item.LastError,
+			&rawFailure,
 			&createdRaw,
 			&startedRaw,
 			&deliveredRaw,
 		); err != nil {
 			return nil, "", fmt.Errorf("scan sqlite agent delivery lifecycle row: %w", err)
+		}
+		item.Failure, err = decodeStoredFailure(rawFailure)
+		if err != nil {
+			return nil, "", fmt.Errorf("decode sqlite agent delivery lifecycle failure: %w", err)
 		}
 		createdAt, ok, err := sqliteTimeValue(createdRaw)
 		if err != nil {

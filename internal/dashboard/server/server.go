@@ -13,6 +13,7 @@ import (
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
@@ -79,35 +80,35 @@ type ConversationDetail struct {
 }
 
 type ConversationTurn struct {
-	TurnIndex              int                      `json:"turn_index,omitempty"`
-	TurnID                 string                   `json:"turn_id"`
-	AgentID                string                   `json:"agent_id,omitempty"`
-	SessionID              string                   `json:"session_id,omitempty"`
-	RuntimeMode            string                   `json:"runtime_mode,omitempty"`
-	ScopeKey               string                   `json:"scope_key,omitempty"`
-	EntityID               string                   `json:"entity_id,omitempty"`
-	TriggerEventID         string                   `json:"trigger_event_id,omitempty"`
-	TriggerEventType       string                   `json:"trigger_event_type,omitempty"`
-	TaskID                 string                   `json:"task_id,omitempty"`
-	AvailableTools         []string                 `json:"available_tools,omitempty"`
-	ToolCalls              []ConversationToolCall   `json:"tool_calls,omitempty"`
-	ToolResults            []ConversationToolResult `json:"tool_results,omitempty"`
-	TurnBlocks             []ConversationTurnBlock  `json:"turn_blocks,omitempty"`
-	EmittedEvents          []string                 `json:"emitted_events,omitempty"`
-	MCPServers             map[string]string        `json:"mcp_servers,omitempty"`
-	MCPToolsListed         []string                 `json:"mcp_tools_listed,omitempty"`
-	MCPToolsVisible        []string                 `json:"mcp_tools_visible,omitempty"`
-	RequestPayload         json.RawMessage          `json:"request_payload,omitempty"`
-	ResponsePayload        json.RawMessage          `json:"response_payload,omitempty"`
-	AssistantVisibleOutput string                   `json:"assistant_visible_output,omitempty"`
-	ReasoningBlocks        []string                 `json:"reasoning_blocks,omitempty"`
-	ProgressUpdates        []string                 `json:"progress_updates,omitempty"`
-	Outcome                string                   `json:"outcome,omitempty"`
-	ParseOK                bool                     `json:"parse_ok"`
-	LatencyMS              int                      `json:"latency_ms,omitempty"`
-	RetryCount             int                      `json:"retry_count,omitempty"`
-	Error                  string                   `json:"error,omitempty"`
-	CreatedAt              string                   `json:"created_at,omitempty"`
+	TurnIndex              int                       `json:"turn_index,omitempty"`
+	TurnID                 string                    `json:"turn_id"`
+	AgentID                string                    `json:"agent_id,omitempty"`
+	SessionID              string                    `json:"session_id,omitempty"`
+	RuntimeMode            string                    `json:"runtime_mode,omitempty"`
+	ScopeKey               string                    `json:"scope_key,omitempty"`
+	EntityID               string                    `json:"entity_id,omitempty"`
+	TriggerEventID         string                    `json:"trigger_event_id,omitempty"`
+	TriggerEventType       string                    `json:"trigger_event_type,omitempty"`
+	TaskID                 string                    `json:"task_id,omitempty"`
+	AvailableTools         []string                  `json:"available_tools,omitempty"`
+	ToolCalls              []ConversationToolCall    `json:"tool_calls,omitempty"`
+	ToolResults            []ConversationToolResult  `json:"tool_results,omitempty"`
+	TurnBlocks             []ConversationTurnBlock   `json:"turn_blocks,omitempty"`
+	EmittedEvents          []string                  `json:"emitted_events,omitempty"`
+	MCPServers             map[string]string         `json:"mcp_servers,omitempty"`
+	MCPToolsListed         []string                  `json:"mcp_tools_listed,omitempty"`
+	MCPToolsVisible        []string                  `json:"mcp_tools_visible,omitempty"`
+	RequestPayload         json.RawMessage           `json:"request_payload,omitempty"`
+	ResponsePayload        json.RawMessage           `json:"response_payload,omitempty"`
+	AssistantVisibleOutput string                    `json:"assistant_visible_output,omitempty"`
+	ReasoningBlocks        []string                  `json:"reasoning_blocks,omitempty"`
+	ProgressUpdates        []string                  `json:"progress_updates,omitempty"`
+	Outcome                string                    `json:"outcome,omitempty"`
+	ParseOK                bool                      `json:"parse_ok"`
+	LatencyMS              int                       `json:"latency_ms,omitempty"`
+	RetryCount             int                       `json:"retry_count,omitempty"`
+	Failure                *runtimefailures.Envelope `json:"failure,omitempty"`
+	CreatedAt              string                    `json:"created_at,omitempty"`
 }
 
 type ConversationRuntimeState struct {

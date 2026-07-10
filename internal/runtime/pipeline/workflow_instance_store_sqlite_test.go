@@ -368,6 +368,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			outcome TEXT,
 			reason_code TEXT,
 			side_effects TEXT,
+			failure TEXT,
 			idempotency_key TEXT,
 			processed_at TIMESTAMP,
 			UNIQUE(event_id, subscriber_type, subscriber_id)
@@ -382,7 +383,7 @@ func createSQLiteWorkflowInstanceStoreTestSchema(t *testing.T, db *sql.DB) {
 			status TEXT,
 			retry_count INTEGER,
 			reason_code TEXT,
-			last_error TEXT,
+			failure TEXT,
 			active_session_id TEXT,
 			started_at TIMESTAMP,
 			delivered_at TIMESTAMP,

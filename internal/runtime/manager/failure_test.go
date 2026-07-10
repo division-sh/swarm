@@ -1,0 +1,130 @@
+package manager
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+)
+
+func testFailure(detailCode string) *runtimefailures.Envelope {
+	failure := runtimefailures.Normalize(
+		runtimefailures.New(runtimefailures.ClassConnectorFailure, detailCode, "manager-test", "delivery", nil),
+		"manager-test",
+		"delivery",
+	)
+	return &failure
+}
+
+func testAuthFailure() runtimefailures.Envelope {
+	return runtimefailures.Normalize(
+		runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "credential_required", "manager-test", "authenticate", map[string]any{"auth_kind": "provider"}),
+		"manager-test",
+		"authenticate",
+	)
+}
+
+type failureReturningAgent struct {
+	id  string
+	err error
+}
+
+func (a failureReturningAgent) ID() string                      { return a.id }
+func (failureReturningAgent) Type() string                      { return "test" }
+func (failureReturningAgent) Subscriptions() []events.EventType { return nil }
+func (a failureReturningAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
+	return nil, a.err
+}
+
+func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t *testing.T) {
+	tests := []struct {
+		name       string
+		newFailure func() error
+	}{
+		{name: "authentication", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassAuthenticationNeeded, "provider_credential_missing", "test-agent", "call_provider", map[string]any{"auth_kind": "provider_credential"})
+		}},
+		{name: "credit", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "provider_credit_exhausted", "test-agent", "call_provider", map[string]any{"status": 402})
+		}},
+		{name: "timeout", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassTimeout, "provider_request_timeout", "test-agent", "call_provider", nil)
+		}},
+		{name: "budget", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_limit_reached", "test-agent", "run_turn", map[string]any{"budget_kind": "agent_turns", "limit": 12, "actual": 13})
+		}},
+		{name: "internal", newFailure: func() error {
+			return runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_runtime_defect", "test-agent", "run_turn", nil)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &receiptReaderStub{}
+			bus := &recordingReceiptBus{}
+			am := NewAgentManager(bus, nil, store)
+			err := tt.newFailure()
+			expected, ok := runtimefailures.EnvelopeFromError(err)
+			if !ok {
+				t.Fatalf("fixture error = %v, want canonical failure", err)
+			}
+			evt := eventtest.RootIngress("evt-"+tt.name, events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{}, time.Time{})
+			result := am.processEventDetailed(context.Background(), failureReturningAgent{id: "agent-a", err: err}, evt)
+
+			if result.err == nil {
+				t.Fatal("processEventDetailed error = nil")
+			}
+			if result.record.Failure == nil {
+				t.Fatal("startup replay record failure = nil")
+			}
+			if store.lastStatus != ReceiptStatusError || store.lastFailure == nil {
+				t.Fatalf("receipt = status:%q failure:%#v, want typed error receipt", store.lastStatus, store.lastFailure)
+			}
+			assertManagerFailureEqual(t, *result.record.Failure, expected)
+			assertManagerFailureEqual(t, *store.lastFailure, expected)
+			returned, ok := runtimefailures.EnvelopeFromError(result.err)
+			if !ok {
+				t.Fatalf("returned error = %v, want canonical failure", result.err)
+			}
+			assertManagerFailureEqual(t, returned, expected)
+		})
+	}
+}
+
+func TestQuarantineCarriesTriggeringPanicFailureWithoutReclassification(t *testing.T) {
+	bus := &recordingReceiptBus{}
+	am := NewAgentManager(bus, nil)
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassInternalFailure, "agent_event_panic", "agent-manager", "process_event", map[string]any{"agent_id": "agent-a"}), "agent-manager", "process_event")
+	for i := 0; i < poisonEventEntityThreshold; i++ {
+		evt := eventtest.RootIngress("evt-quarantine", events.EventType("work.requested"), "", "", nil, 0, "run-1", "", events.EventEnvelope{EntityID: "entity-" + string(rune('a'+i))}, time.Time{})
+		am.quarantinePoisonEvent(context.Background(), "agent-a", evt, poisonPanicQuarantineAt, failure)
+	}
+	if len(bus.published) != 1 || bus.published[0].Type() != events.EventType("platform.event_quarantined") {
+		t.Fatalf("published = %#v, want one quarantine event", bus.published)
+	}
+	var payload struct {
+		LastFailure runtimefailures.Envelope `json:"last_failure"`
+	}
+	if err := json.Unmarshal(bus.published[0].Payload(), &payload); err != nil {
+		t.Fatalf("unmarshal quarantine payload: %v", err)
+	}
+	assertManagerFailureEqual(t, payload.LastFailure, failure)
+}
+
+func assertManagerFailureEqual(t testing.TB, got, want runtimefailures.Envelope) {
+	t.Helper()
+	gotRaw, err := runtimefailures.MarshalEnvelope(got)
+	if err != nil {
+		t.Fatalf("marshal got failure: %v", err)
+	}
+	wantRaw, err := runtimefailures.MarshalEnvelope(want)
+	if err != nil {
+		t.Fatalf("marshal want failure: %v", err)
+	}
+	if string(gotRaw) != string(wantRaw) {
+		t.Fatalf("failure = %s, want %s", gotRaw, wantRaw)
+	}
+}

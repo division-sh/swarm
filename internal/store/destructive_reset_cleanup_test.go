@@ -10,6 +10,7 @@ import (
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -1148,10 +1149,10 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed receipts: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `
-		INSERT INTO dead_letters (original_event_id, original_event, original_payload, flow_instance, failure_type) VALUES
-			($1::uuid, 'source.event', '{}'::jsonb, 'flow/a', 'handler_error'),
-			(NULL, 'global.failure', '{}'::jsonb, 'flow/a', 'handler_error')
-	`, sourceEvent); err != nil {
+		INSERT INTO dead_letters (original_event_id, original_event, original_payload, flow_instance, failure) VALUES
+			($1::uuid, 'source.event', '{}'::jsonb, 'flow/a', $2::jsonb),
+			(NULL, 'global.failure', '{}'::jsonb, 'flow/a', $2::jsonb)
+	`, sourceEvent, mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "handler_failed", nil))); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
 	if _, err := pg.DB.ExecContext(ctx, `

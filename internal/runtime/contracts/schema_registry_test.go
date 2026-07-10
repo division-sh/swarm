@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"gopkg.in/yaml.v3"
 )
 
@@ -145,8 +146,21 @@ func TestPlatformEventCatalogSchemasValidateCurrentProducerPayloadShapes(t *test
 				"flow_instance": "review/inst-1",
 				"tool_name":     nil,
 				"action":        "llm_call",
-				"reason":        "claude_auth_required",
-				"timestamp":     "2026-06-02T03:00:00Z",
+				"failure": map[string]any{
+					"schema_version": runtimefailures.EnvelopeSchemaVersion,
+					"class":          string(runtimefailures.ClassAuthenticationNeeded),
+					"detail": map[string]any{
+						"code":       "credential_required",
+						"attributes": map[string]any{"auth_kind": "provider"},
+					},
+					"retryable":     false,
+					"deterministic": true,
+					"message":       "Authentication is required (credential_required).",
+					"remediation":   "Provide or refresh the required credential (credential_required).",
+					"component":     "manager-test",
+					"operation":     "authenticate",
+				},
+				"timestamp": "2026-06-02T03:00:00Z",
 			},
 		},
 		{

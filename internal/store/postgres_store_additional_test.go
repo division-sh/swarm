@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -188,7 +189,12 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 	}
 
 	for _, status := range []string{"completed", "failed"} {
-		err := pg.MarkRunTerminal(ctx, runID, status, "quiescence timeout", time.Now().UTC())
+		var failure *runtimefailures.Envelope
+		if status == "failed" {
+			value := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
+			failure = &value
+		}
+		_, err := pg.MarkRunTerminal(ctx, runID, status, failure, time.Now().UTC())
 		if err == nil || !strings.Contains(err.Error(), "active deliveries") {
 			t.Fatalf("MarkRunTerminal(%s active delivery) error = %v, want active delivery rejection", status, err)
 		}
@@ -202,7 +208,7 @@ func TestPostgresStore_MarkRunTerminal_UsesCanonicalCountersAndRejectsActiveDeli
 		t.Fatalf("deliver completion: %v", err)
 	}
 
-	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err != nil {
+	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err != nil {
 		t.Fatalf("MarkRunTerminal(completed): %v", err)
 	}
 
@@ -323,7 +329,7 @@ func TestPostgresRunLifecycleFailsClosedWhenEntityStateCountSourceUnavailable(t 
 		t.Fatalf("LoadRunLifecycleSnapshot = (%+v, %v), want canonical entity_state failure", snap, err)
 	}
 
-	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "canonical run-scoped entity_state") {
+	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "canonical run-scoped entity_state") {
 		t.Fatalf("MarkRunTerminal error = %v, want canonical entity_state failure", err)
 	}
 
@@ -531,7 +537,7 @@ func TestPostgresStore_AppendEvent_AllowsRunsWithoutTriggerColumns(t *testing.T)
 	}
 }
 
-func TestPostgresStore_MarkRunTerminal_AllowsRunsWithoutCounterOrTerminalColumns(t *testing.T) {
+func TestPostgresStore_MarkRunTerminal_RejectsRunsWithoutCanonicalTerminalEvidenceColumns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &PostgresStore{DB: db}
 	ctx := context.Background()
@@ -568,36 +574,8 @@ func TestPostgresStore_MarkRunTerminal_AllowsRunsWithoutCounterOrTerminalColumns
 		t.Fatalf("seed run: %v", err)
 	}
 
-	if err := pg.MarkRunTerminal(ctx, runID, "completed", "", time.Now().UTC()); err != nil {
-		t.Fatalf("MarkRunTerminal: %v", err)
-	}
-
-	var status string
-	if err := db.QueryRowContext(ctx, `SELECT COALESCE(status, '') FROM runs WHERE run_id = $1::uuid`, runID).Scan(&status); err != nil {
-		t.Fatalf("load run status: %v", err)
-	}
-	if status != "completed" {
-		t.Fatalf("run status = %q, want completed", status)
-	}
-
-	snap, err := pg.LoadRunLifecycleSnapshot(ctx, runID)
-	if err != nil {
-		t.Fatalf("LoadRunLifecycleSnapshot: %v", err)
-	}
-	if snap.Status != "completed" {
-		t.Fatalf("snapshot status = %q, want completed", snap.Status)
-	}
-	if snap.EventCount != 0 {
-		t.Fatalf("snapshot event_count = %d, want 0", snap.EventCount)
-	}
-	if snap.EntityCount != 0 {
-		t.Fatalf("snapshot entity_count = %d, want 0", snap.EntityCount)
-	}
-	if snap.ErrorSummary != "" {
-		t.Fatalf("snapshot error_summary = %q, want empty", snap.ErrorSummary)
-	}
-	if snap.EndedAt != nil {
-		t.Fatalf("snapshot ended_at = %#v, want nil without terminal columns", snap.EndedAt)
+	if _, err := pg.MarkRunTerminal(ctx, runID, "completed", nil, time.Now().UTC()); err == nil || !strings.Contains(err.Error(), "canonical runs.failure") {
+		t.Fatalf("MarkRunTerminal error = %v, want canonical terminal evidence rejection", err)
 	}
 }
 
@@ -1932,7 +1910,7 @@ func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminal
 		t.Fatalf("set in_progress delivery: %v", err)
 	}
 
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(runtimemanager.ReceiptStatusDeadLetter, "retry_exhausted", 2, "boom"))
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(runtimemanager.ReceiptStatusDeadLetter, "retry_exhausted", 2))
 	if err != nil {
 		t.Fatalf("marshal side effects: %v", err)
 	}
@@ -1957,8 +1935,8 @@ func TestPostgresStore_GetEventReceipt_FallsBackToPersistedReceiptForNonTerminal
 	if !ok {
 		t.Fatal("expected receipt to be found")
 	}
-	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 2 || receipt.Error != "boom" {
-		t.Fatalf("receipt = %+v, want dead_letter retry_count=2 error=boom", receipt)
+	if receipt.Status != runtimemanager.ReceiptStatusDeadLetter || receipt.RetryCount != 2 || receipt.Failure != nil {
+		t.Fatalf("receipt = %+v, want dead_letter retry_count=2 without failure", receipt)
 	}
 }
 
@@ -2066,10 +2044,10 @@ func TestPostgresStore_EventReceiptsTypedIdentitySeparatesReceiptWriters(t *test
 		t.Fatalf("seed node delivery: %v", err)
 	}
 
-	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, eventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, eventID, "pipeline", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, eventID, "pipeline", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -2336,27 +2314,27 @@ func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) 
 		t.Fatalf("seed completed run: %v", err)
 	}
 	completedAt := time.Now().UTC().Round(time.Second)
-	if err := pg.MarkRunTerminal(ctx, completedRunID, "completed", "", completedAt); err != nil {
+	if _, err := pg.MarkRunTerminal(ctx, completedRunID, "completed", nil, completedAt); err != nil {
 		t.Fatalf("MarkRunTerminal(completed): %v", err)
 	}
 
 	var (
-		completedStatus string
-		completedErr    string
-		completedEnded  time.Time
+		completedStatus  string
+		completedFailure []byte
+		completedEnded   time.Time
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(error_summary, ''), ended_at
+		SELECT COALESCE(status, ''), failure, ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, completedRunID).Scan(&completedStatus, &completedErr, &completedEnded); err != nil {
+	`, completedRunID).Scan(&completedStatus, &completedFailure, &completedEnded); err != nil {
 		t.Fatalf("load completed run: %v", err)
 	}
 	if completedStatus != "completed" {
 		t.Fatalf("completed run status = %q, want completed", completedStatus)
 	}
-	if completedErr != "" {
-		t.Fatalf("completed run error_summary = %q, want empty", completedErr)
+	if len(completedFailure) != 0 {
+		t.Fatalf("completed run failure = %s, want absent", completedFailure)
 	}
 	if completedEnded.IsZero() {
 		t.Fatal("completed run ended_at not persisted")
@@ -2367,30 +2345,42 @@ func TestPostgresStore_MarkRunTerminal_PersistsCanonicalLifecycle(t *testing.T) 
 		t.Fatalf("seed failed run: %v", err)
 	}
 	failedAt := time.Now().UTC().Round(time.Second)
-	if err := pg.MarkRunTerminal(ctx, failedRunID, "failed", "quiescence timeout", failedAt); err != nil {
+	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
+	if _, err := pg.MarkRunTerminal(ctx, failedRunID, "failed", &failure, failedAt); err != nil {
 		t.Fatalf("MarkRunTerminal(failed): %v", err)
 	}
 
 	var (
 		failedStatus string
-		failedErr    string
+		failedRaw    []byte
 		failedEnded  time.Time
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(status, ''), COALESCE(error_summary, ''), ended_at
+		SELECT COALESCE(status, ''), failure, ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, failedRunID).Scan(&failedStatus, &failedErr, &failedEnded); err != nil {
+	`, failedRunID).Scan(&failedStatus, &failedRaw, &failedEnded); err != nil {
 		t.Fatalf("load failed run: %v", err)
 	}
 	if failedStatus != "failed" {
 		t.Fatalf("failed run status = %q, want failed", failedStatus)
 	}
-	if failedErr != "quiescence timeout" {
-		t.Fatalf("failed run error_summary = %q, want quiescence timeout", failedErr)
+	persisted, err := runtimefailures.UnmarshalEnvelope(failedRaw)
+	if err != nil || !failureEnvelopesEqual(persisted, failure) {
+		t.Fatalf("failed run failure = (%+v, %v), want %+v", persisted, err, failure)
 	}
 	if failedEnded.IsZero() {
 		t.Fatal("failed run ended_at not persisted")
+	}
+	if _, err := pg.MarkRunTerminal(ctx, failedRunID, "failed", &failure, failedAt.Add(time.Minute)); err != nil {
+		t.Fatalf("idempotent failed terminal write: %v", err)
+	}
+	conflicting := testFailureEnvelope(runtimefailures.ClassInternalFailure, "different_run_failure", nil)
+	if _, err := pg.MarkRunTerminal(ctx, failedRunID, "failed", &conflicting, failedAt.Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "conflicting failure") {
+		t.Fatalf("conflicting terminal write error = %v, want rejection", err)
+	}
+	if _, err := pg.MarkRunTerminal(ctx, uuid.NewString(), "failed", nil, failedAt); err == nil || !strings.Contains(err.Error(), "requires canonical failure") {
+		t.Fatalf("missing failed evidence error = %v", err)
 	}
 }
 
@@ -2435,7 +2425,7 @@ func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
 			status TEXT NOT NULL DEFAULT 'pending',
 			retry_count INTEGER NOT NULL DEFAULT 0,
 			reason_code TEXT,
-			last_error TEXT,
+			failure JSONB,
 			active_session_id UUID,
 			started_at TIMESTAMPTZ,
 			delivered_at TIMESTAMPTZ,
@@ -2448,6 +2438,7 @@ func TestPostgresStore_ListPendingEventsForAgent_PreservesRunID(t *testing.T) {
 			subscriber_id TEXT NOT NULL,
 			outcome TEXT NOT NULL DEFAULT 'success',
 			side_effects JSONB NOT NULL DEFAULT '{}'::jsonb,
+			failure JSONB,
 			processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)`,
 	}
@@ -2572,10 +2563,10 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if err := pg.AppendEvent(ctx, eventMissing); err != nil {
 		t.Fatalf("append missing event: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, parentID, "processed", nil); err != nil {
 		t.Fatalf("upsert parent receipt: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, eventProcessed.ID(), "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, eventProcessed.ID(), "processed", nil); err != nil {
 		t.Fatalf("upsert processed receipt: %v", err)
 	}
 
@@ -2595,8 +2586,8 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	if missing[0].Event.ParentEventID() != parentID {
 		t.Fatalf("missing event parent_event_id = %q, want %q", missing[0].Event.ParentEventID(), parentID)
 	}
-	if missing[0].ReplayError != "" {
-		t.Fatalf("missing event replay_error = %q, want empty", missing[0].ReplayError)
+	if missing[0].ReplayFailure != nil {
+		t.Fatalf("missing event replay_failure = %#v, want nil", missing[0].ReplayFailure)
 	}
 }
 
@@ -2635,8 +2626,8 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery_QuarantinesNoRunIDCap
 	if missing[0].Event.RunID() != "" {
 		t.Fatalf("missing event run_id = %q, want empty", missing[0].Event.RunID())
 	}
-	if missing[0].ReplayError != "missing run_id schema capability" {
-		t.Fatalf("missing event replay_error = %q, want missing run_id schema capability", missing[0].ReplayError)
+	if missing[0].ReplayFailure == nil || missing[0].ReplayFailure.Detail.Code != "persisted_replay_run_identity_invalid" || missing[0].ReplayFailure.Detail.Attributes["reason_code"] != "missing_run_id_schema_capability" {
+		t.Fatalf("missing event replay_failure = %#v, want persisted_replay_run_identity_invalid/missing_run_id_schema_capability", missing[0].ReplayFailure)
 	}
 }
 
@@ -3808,7 +3799,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 	}
 
 	for i := 0; i < 4; i++ {
-		if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "error", "boom"); err != nil {
+		if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "error", testRetryableFailure()); err != nil {
 			t.Fatalf("upsert receipt: %v", err)
 		}
 	}
@@ -3828,7 +3819,7 @@ func TestEventReceipts_RetryToDeadLetter_AndPendingQueries(t *testing.T) {
 		t.Fatalf("expected no subscribed pending events after dead_letter, got %d", len(subscribed))
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "processed", ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "processed", nil); err != nil {
 		t.Fatalf("upsert processed: %v", err)
 	}
 	subscribed, err = pg.ListPendingSubscribedEvents(ctx, "a1", []events.EventType{"inbound.*"}, time.Now().Add(-1*time.Hour), 10)
@@ -3963,11 +3954,11 @@ func TestManagerStore_EventReceiptBranches(t *testing.T) {
 		t.Fatalf("seed event: %v", err)
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", ""); err == nil {
+	if err := pg.UpsertEventReceipt(ctx, "", "a1", "processed", nil); err == nil {
 		t.Fatal("expected UpsertEventReceipt empty event to fail")
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", ""); err == nil {
+	if err := pg.UpsertEventReceipt(ctx, eventID, "a1", "", nil); err == nil {
 		t.Fatal("expected UpsertEventReceipt empty status to fail")
 	}
 	if _, ok, err := pg.GetEventReceipt(ctx, eventID, "a1"); err != nil || ok {
@@ -6607,7 +6598,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		t.Fatalf("ListPendingSubscribedEvents err=%v len=%d", err, len(subPending))
 	}
 
-	if err := pg.UpsertEventReceipt(ctx, evt.ID(), ceoID, "error", "boom"); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, evt.ID(), ceoID, "error", testRetryableFailure()); err != nil {
 		t.Fatalf("UpsertEventReceipt: %v", err)
 	}
 	if rec, ok, err := pg.GetEventReceipt(ctx, evt.ID(), ceoID); err != nil || !ok || rec.Status == "" {
@@ -6631,7 +6622,6 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		ParseOK:        true,
 		Latency:        123 * time.Millisecond,
 		RetryCount:     0,
-		Error:          "",
 	}); err != nil {
 		t.Fatalf("AppendAgentTurn: %v", err)
 	}

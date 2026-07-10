@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 )
 
@@ -78,7 +79,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 	ctx := context.Background()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	fixture := seedSQLiteNormalRunCompletionFixture(t, store, "done")
-	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if _, err := store.DB.ExecContext(ctx, `
@@ -109,6 +110,33 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionMarksCompletedAndIgnoresRu
 	}
 	if header.Status != "completed" || header.EndedAt == nil {
 		t.Fatalf("run header = status:%q ended:%v, want completed with ended_at", header.Status, header.EndedAt)
+	}
+}
+
+func TestSQLiteRuntimeStoreMarkRunTerminalPreservesFailureAndRejectsConflict(t *testing.T) {
+	ctx := context.Background()
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	runID := uuid.NewString()
+	if _, err := store.DB.ExecContext(ctx, `INSERT INTO runs (run_id, status, started_at) VALUES (?, 'running', ?)`, runID, time.Now().UTC()); err != nil {
+		t.Fatalf("seed sqlite run: %v", err)
+	}
+	failure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_quiescence_failed", nil)
+	snap, err := store.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("MarkRunTerminal(failed): %v", err)
+	}
+	if snap.Failure == nil || !failureEnvelopesEqual(*snap.Failure, failure) {
+		t.Fatalf("snapshot failure = %#v, want %#v", snap.Failure, failure)
+	}
+	if _, err := store.MarkRunTerminal(ctx, runID, "failed", &failure, time.Now().UTC()); err != nil {
+		t.Fatalf("idempotent failed terminal write: %v", err)
+	}
+	conflicting := testFailureEnvelope(runtimefailures.ClassInternalFailure, "different_run_failure", nil)
+	if _, err := store.MarkRunTerminal(ctx, runID, "failed", &conflicting, time.Now().UTC()); err == nil {
+		t.Fatal("conflicting sqlite terminal write was accepted")
+	}
+	if _, err := store.MarkRunTerminal(ctx, uuid.NewString(), "failed", nil, time.Now().UTC()); err == nil {
+		t.Fatal("failed sqlite terminal write without failure was accepted")
 	}
 }
 
@@ -172,7 +200,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	`, uuid.NewString(), fixture.RunID, fixture.EventID, time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite active delivery: %v", err)
 	}
-	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", ""); err != nil {
+	if err := store.UpsertPipelineReceipt(ctx, fixture.EventID, "processed", nil); err != nil {
 		t.Fatalf("UpsertPipelineReceipt: %v", err)
 	}
 	if err := store.ConvergeNormalRunCompletion(ctx, fixture.EventID, []string{"done"}, nil); err != nil {

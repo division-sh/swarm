@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -197,7 +198,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		}
 	}()
 	for _, rec := range req.AgentRuntime.Records {
-		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !strings.Contains(err.Error(), "agent already exists") {
+		if err := manager.RegisterEphemeralAgentForExecution(ctx, rec); err != nil && !errors.Is(err, runtimemanager.ErrAgentAlreadyExists) {
 			return nil, fmt.Errorf("%s materialize agent %s: %w", store.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner, strings.TrimSpace(rec.Config.ID), err)
 		}
 		bus.RegisterRuntimeActiveAgentDescriptor(runtimebus.ActiveAgentDescriptor{
@@ -336,15 +337,15 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, emitR
 		_ = ln.Close()
 		return toolgateway.Binding{}, nil, fmt.Errorf("generate selected-fork tool gateway token: %w", err)
 	}
-	binding := toolgateway.Binding{
-		Transport:         toolgateway.TransportHTTP,
-		HostEndpoint:      hostURL,
-		WorkspaceEndpoint: containerURL,
-		Token:             gatewayToken,
-		LifecycleOwner:    toolgateway.LifecycleOwnerSelectedForkRuntime,
-		Source:            toolgateway.SourceSelectedForkEphemeralGateway,
-	}
-	if err := binding.Validate(); err != nil {
+	binding, err := toolgateway.NewRuntimeOwnedBinding(
+		toolgateway.TransportHTTP,
+		hostURL,
+		containerURL,
+		gatewayToken,
+		toolgateway.LifecycleOwnerSelectedForkRuntime,
+		toolgateway.SourceSelectedForkEphemeralGateway,
+	)
+	if err != nil {
 		_ = ln.Close()
 		return toolgateway.Binding{}, nil, err
 	}

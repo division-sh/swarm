@@ -13,6 +13,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -156,8 +157,9 @@ func TestExecutorHTTPToolRejectsInstallationIDInputOutsideActivityPath(t *testin
 		}),
 	})
 	_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{"installation_id": "1001"})
-	if err == nil || !strings.Contains(err.Error(), "installation_id_input is supported only for activity input resolution") {
-		t.Fatalf("Execute err = %v, want activity-only installation_id_input failure", err)
+	failure := requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "managed_credential_required")
+	if failure.Operation != "resolve_managed_credential" {
+		t.Fatalf("failure operation = %q, want resolve_managed_credential", failure.Operation)
 	}
 }
 
@@ -230,9 +232,7 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 			ManagedCredentials: runtimemanagedcredentials.NewMemoryStore(),
 		})
 		_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{})
-		if err == nil || !strings.Contains(err.Error(), `missing managed credential "missing"`) {
-			t.Fatalf("Execute err = %v, want missing managed credential", err)
-		}
+		requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "managed_credential_required")
 		if serverCalled {
 			t.Fatal("HTTP server should not be called for missing managed credential")
 		}
@@ -252,9 +252,7 @@ func TestExecutorHTTPToolManagedCredentialFailuresAreFailClosedAndRedacted(t *te
 			ManagedCredentials: store,
 		})
 		_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{})
-		if err == nil || !strings.Contains(err.Error(), "scope-insufficient") {
-			t.Fatalf("Execute err = %v, want scope-insufficient", err)
-		}
+		requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "managed_credential_required")
 		if serverCalled {
 			t.Fatal("HTTP server should not be called for scope-insufficient managed credential")
 		}
@@ -328,9 +326,22 @@ func TestExecutorHTTPToolRejectsAmbientManagedCredentialFallback(t *testing.T) {
 	})
 	exec := NewExecutorWithOptions(nil, nil, ExecutorOptions{WorkflowSource: source, ManagedCredentials: store})
 	_, err := exec.Execute(models.WithActor(ctx, managedCredentialActor()), "send_provider", map[string]any{})
-	if err == nil || !strings.Contains(err.Error(), "not declared and bound") {
-		t.Fatalf("Execute err = %v, want imported managed credential binding failure", err)
+	requireToolFailure(t, err, runtimefailures.ClassAuthenticationNeeded, "managed_credential_required")
+}
+
+func requireToolFailure(t *testing.T, err error, class runtimefailures.Class, detailCode string) runtimefailures.Envelope {
+	t.Helper()
+	if err == nil {
+		t.Fatal("error = nil, want canonical runtime failure")
 	}
+	failure, ok := runtimefailures.As(err)
+	if !ok {
+		t.Fatalf("error = %T %v, want canonical runtime failure", err, err)
+	}
+	if failure.Failure.Class != class || failure.Failure.Detail.Code != detailCode {
+		t.Fatalf("failure = %s/%s, want %s/%s", failure.Failure.Class, failure.Failure.Detail.Code, class, detailCode)
+	}
+	return failure.Failure
 }
 
 func TestExecutorHTTPToolManagedCredentialServedAndMCPTransportsUseSameOwner(t *testing.T) {

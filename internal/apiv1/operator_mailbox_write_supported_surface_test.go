@@ -763,15 +763,15 @@ func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, probe *runti
 	if _, err := probe.WaitForDeliveryStatus(ctx, eventID, "node", nodeID, "dead_letter"); err != nil {
 		t.Fatalf("sqlite node/%s materializer failure lifecycle for event %s: %v", nodeID, eventID, err)
 	}
-	var lastStatus, lastReason, lastError, lastReceiptOutcome, lastReceiptReason, lastReceiptError string
+	var lastStatus, lastReason, lastFailureCode, lastReceiptOutcome, lastReceiptReason, lastReceiptFailureCode string
 	if err := db.QueryRow(`
 			SELECT
 				COALESCE(d.status, ''),
 				COALESCE(d.reason_code, ''),
-				COALESCE(d.last_error, ''),
+				COALESCE(json_extract(d.failure, '$.detail.code'), ''),
 				COALESCE(r.outcome, ''),
 				COALESCE(r.reason_code, ''),
-				COALESCE(json_extract(r.side_effects, '$.error'), '')
+				COALESCE(json_extract(r.failure, '$.detail.code'), '')
 			FROM event_deliveries d
 			LEFT JOIN event_receipts r
 			  ON r.event_id = d.event_id
@@ -781,13 +781,12 @@ func waitForSQLiteNodeMaterializerFailure(t *testing.T, db *sql.DB, probe *runti
 			  AND d.subscriber_type = 'node'
 			  AND d.subscriber_id = ?
 			LIMIT 1
-		`, eventID, nodeID).Scan(&lastStatus, &lastReason, &lastError, &lastReceiptOutcome, &lastReceiptReason, &lastReceiptError); err != nil {
+		`, eventID, nodeID).Scan(&lastStatus, &lastReason, &lastFailureCode, &lastReceiptOutcome, &lastReceiptReason, &lastReceiptFailureCode); err != nil {
 		t.Fatalf("sqlite node/%s materializer failure row for event %s: %v", nodeID, eventID, err)
 	}
 	if lastStatus != "dead_letter" || lastReceiptOutcome != "dead_letter" ||
-		!strings.Contains(lastError, "mailbox_write requires mailbox materialization store") ||
-		!strings.Contains(lastReceiptError, "mailbox_write requires mailbox materialization store") {
-		t.Fatalf("sqlite node/%s materializer failure = delivery status:%q reason:%q error:%q receipt outcome:%q reason:%q error:%q, want dead_letter materializer failure", nodeID, lastStatus, lastReason, lastError, lastReceiptOutcome, lastReceiptReason, lastReceiptError)
+		lastFailureCode == "" || lastReceiptFailureCode != lastFailureCode {
+		t.Fatalf("sqlite node/%s materializer failure = delivery status:%q reason:%q failure:%q receipt outcome:%q reason:%q failure:%q, want dead_letter canonical materializer failure", nodeID, lastStatus, lastReason, lastFailureCode, lastReceiptOutcome, lastReceiptReason, lastReceiptFailureCode)
 	}
 }
 

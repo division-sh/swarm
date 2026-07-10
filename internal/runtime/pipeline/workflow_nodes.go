@@ -12,6 +12,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -964,7 +965,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeProcessed(ctx context.Context, no
 				EventID:   eventID,
 				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
-				Error:     strings.TrimSpace(err.Error()),
+				Failure:   pipelineDependencyFailure(err, "mark_processed_failed", nodeID, "settle_delivery"),
 			})
 		}
 		return
@@ -1001,7 +1002,7 @@ func (pc *PipelineCoordinator) markWorkflowNodeDeliveryInProgress(ctx context.Co
 	return true
 }
 
-func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Context, nodeID string, evt events.Event, reasonCode string, cause error, retryCount int) {
+func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Context, nodeID string, evt events.Event, reasonCode string, failure *runtimefailures.Envelope, retryCount int) {
 	if pc == nil || pc.workflowStore == nil {
 		return
 	}
@@ -1013,17 +1014,13 @@ func (pc *PipelineCoordinator) markWorkflowNodeDeliveryDeadLetter(ctx context.Co
 	if !pc.eventReceiptsAvailable(ctx) {
 		return
 	}
-	errText := ""
-	if cause != nil {
-		errText = strings.TrimSpace(cause.Error())
-	}
 	target := systemNodeDeliveryTarget(evt)
-	sideEffects := systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, errText, retryCount, target)
+	sideEffects := systemNodeDeadLetterReceiptSideEffects(nodeID, eventID, reasonCode, retryCount, target)
 	var err error
 	if !target.Empty() {
-		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, errText, retryCount, sideEffects)
+		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
 	} else {
-		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+		err = pc.workflowStore.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
 	}
 	if err != nil {
 		pc.logWorkflowNodeDeliveryTransitionError(ctx, nodeID, evt, "mark_delivery_dead_letter_failed", "Marking the workflow node delivery as dead_letter failed", err)
@@ -1046,7 +1043,7 @@ func (pc *PipelineCoordinator) logWorkflowNodeDeliveryTransitionError(ctx contex
 			EventID:   strings.TrimSpace(evt.ID()),
 			EventType: strings.TrimSpace(string(evt.Type())),
 			EntityID:  workflowEventEntityID(evt),
-			Error:     strings.TrimSpace(err.Error()),
+			Failure:   pipelineDependencyFailure(err, action, nodeID, "delivery_transition"),
 		})
 	}
 }
@@ -1081,7 +1078,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 					EventID:   eventID,
 					EventType: strings.TrimSpace(string(evt.Type())),
 					EntityID:  workflowEventEntityID(evt),
-					Error:     strings.TrimSpace(err.Error()),
+					Failure:   pipelineDependencyFailure(err, "delivery_authority_check_failed", nodeID, "check_target_delivery_authority"),
 				})
 			}
 			return false
@@ -1112,7 +1109,7 @@ func (pc *PipelineCoordinator) workflowNodeDeliveryAuthorized(ctx context.Contex
 				EventID:   eventID,
 				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
-				Error:     strings.TrimSpace(err.Error()),
+				Failure:   pipelineDependencyFailure(err, "delivery_authority_check_failed", nodeID, "check_delivery_authority"),
 			})
 		}
 		return false
@@ -1183,7 +1180,7 @@ func (pc *PipelineCoordinator) convergeWorkflowNodeNormalRunCompletion(ctx conte
 				EventID:   eventID,
 				EventType: strings.TrimSpace(string(evt.Type())),
 				EntityID:  workflowEventEntityID(evt),
-				Error:     strings.TrimSpace(err.Error()),
+				Failure:   pipelineDependencyFailure(err, "normal_run_completion_failed", nodeID, "converge_run_completion"),
 			})
 		}
 	}

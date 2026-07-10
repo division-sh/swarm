@@ -183,7 +183,7 @@ func (s *PostgresStore) ApplyActiveRunQuiescence(ctx context.Context, req runtim
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", "", now, runLifecycleOptions(caps)); err != nil {
+		if _, err := storerunlifecycle.MarkTerminal(ctx, tx, run.RunID, "cancelled", nil, now, runLifecycleOptions(caps)); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
 		}
 		if err := upsertActiveRunQuiescenceRunControlTx(ctx, tx, run.RunID, out.ReasonCode, out.ControlledBy, now); err != nil {
@@ -556,18 +556,18 @@ func terminalizeActiveRunQuiescenceDeliveryTx(ctx context.Context, tx *sql.Tx, i
 		SET
 			status = 'dead_letter',
 			reason_code = $2,
-			last_error = $3,
+			failure = NULL,
 			active_session_id = NULL,
-			delivered_at = COALESCE(delivered_at, $4)
+			delivered_at = COALESCE(delivered_at, $3)
 		WHERE delivery_id = $1::uuid
 		  AND `+activeRunQuiescenceDeliveryPredicateSQL("")+`
-	`, item.DeliveryID, reasonCode, note, at.UTC()); err != nil {
+	`, item.DeliveryID, reasonCode, at.UTC()); err != nil {
 		return fmt.Errorf("terminalize active run quiescence delivery %s: %w", item.DeliveryID, err)
 	}
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": "dead_letter",
 		"reason_code":    reasonCode,
-		"error":          note,
+		"note":           note,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal active run quiescence receipt side effects: %w", err)
@@ -604,18 +604,18 @@ func sqliteTerminalizeActiveRunQuiescenceDeliveryTx(ctx context.Context, tx *sql
 		SET
 			status = 'dead_letter',
 			reason_code = ?,
-			last_error = ?,
+			failure = NULL,
 			active_session_id = NULL,
 			delivered_at = COALESCE(delivered_at, ?)
 		WHERE delivery_id = ?
 		  AND `+activeRunQuiescenceDeliveryPredicateSQL("")+`
-	`, reasonCode, note, at.UTC(), item.DeliveryID); err != nil {
+	`, reasonCode, at.UTC(), item.DeliveryID); err != nil {
 		return fmt.Errorf("terminalize sqlite active run quiescence delivery %s: %w", item.DeliveryID, err)
 	}
 	sideEffects, err := json.Marshal(map[string]any{
 		"manager_status": "dead_letter",
 		"reason_code":    reasonCode,
-		"error":          note,
+		"note":           note,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal sqlite active run quiescence receipt side effects: %w", err)
@@ -647,7 +647,7 @@ func sqliteTerminalizeActiveRunQuiescenceDeliveryTx(ctx context.Context, tx *sql
 }
 
 func upsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, reasonCode, note string, at time.Time) error {
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects("dead_letter", reasonCode, note))
+	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects("dead_letter", reasonCode))
 	if err != nil {
 		return fmt.Errorf("marshal active run quiescence pipeline receipt: %w", err)
 	}
@@ -673,7 +673,7 @@ func upsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx,
 }
 
 func sqliteUpsertActiveRunQuiescencePipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, reasonCode, note string, at time.Time) error {
-	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects("dead_letter", reasonCode, note))
+	sideEffects, err := marshalPipelineReceiptSideEffects(newPipelineReceiptSideEffects("dead_letter", reasonCode))
 	if err != nil {
 		return fmt.Errorf("marshal sqlite active run quiescence pipeline receipt: %w", err)
 	}
@@ -719,6 +719,7 @@ func sqliteMarkActiveRunQuiescenceRunTerminalTx(ctx context.Context, tx *sql.Tx,
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE runs
 		SET status = 'cancelled',
+		    failure = NULL,
 		    ended_at = COALESCE(ended_at, ?)
 		WHERE run_id = ?
 		  AND (status IN ('running', 'paused') OR status = 'cancelled')

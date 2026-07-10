@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
 
@@ -138,59 +139,60 @@ type diagnosticBundleIdentity struct {
 }
 
 type diagnosticRunHeader struct {
-	RunID            string `json:"run_id"`
-	Status           string `json:"status"`
-	TriggerEventType string `json:"trigger_event_type"`
-	TriggerEventID   string `json:"trigger_event_id"`
-	EntityCount      *int   `json:"entity_count"`
-	EventCount       *int   `json:"event_count"`
-	StartedAt        string `json:"started_at"`
-	EndedAt          string `json:"ended_at,omitempty"`
-	ForkedFromRunID  string `json:"forked_from_run_id,omitempty"`
-	ErrorSummary     string `json:"error_summary,omitempty"`
+	RunID            string                    `json:"run_id"`
+	Status           string                    `json:"status"`
+	TriggerEventType string                    `json:"trigger_event_type"`
+	TriggerEventID   string                    `json:"trigger_event_id"`
+	EntityCount      *int                      `json:"entity_count"`
+	EventCount       *int                      `json:"event_count"`
+	StartedAt        string                    `json:"started_at"`
+	EndedAt          string                    `json:"ended_at,omitempty"`
+	ForkedFromRunID  string                    `json:"forked_from_run_id,omitempty"`
+	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
+	ControlReason    string                    `json:"control_reason,omitempty"`
 }
 
 type diagnosticRunTraceRow struct {
-	EventID               string `json:"event_id"`
-	EventName             string `json:"event_name"`
-	EventCreatedAt        string `json:"event_created_at"`
-	EntityID              string `json:"entity_id,omitempty"`
-	DeliveryID            string `json:"delivery_id,omitempty"`
-	DeliveryStatus        string `json:"delivery_status,omitempty"`
-	DeliveryReasonCode    string `json:"delivery_reason_code,omitempty"`
-	ReplyContextID        string `json:"reply_context_id,omitempty"`
-	DeliveryLastError     string `json:"delivery_last_error,omitempty"`
-	DeliveryRetryCount    int    `json:"delivery_retry_count,omitempty"`
-	DeliveryRetryEligible bool   `json:"delivery_retry_eligible,omitempty"`
-	DeliveryTerminal      bool   `json:"delivery_terminal,omitempty"`
-	DeliveryCreatedAt     string `json:"delivery_created_at,omitempty"`
-	DeliveryStartedAt     string `json:"delivery_started_at,omitempty"`
-	DeliveryDeliveredAt   string `json:"delivery_delivered_at,omitempty"`
-	SubscriberType        string `json:"subscriber_type,omitempty"`
-	SubscriberID          string `json:"subscriber_id,omitempty"`
-	SessionID             string `json:"session_id,omitempty"`
-	TurnID                string `json:"turn_id,omitempty"`
-	TurnTriggerEventType  string `json:"turn_trigger_event_type,omitempty"`
+	EventID               string                    `json:"event_id"`
+	EventName             string                    `json:"event_name"`
+	EventCreatedAt        string                    `json:"event_created_at"`
+	EntityID              string                    `json:"entity_id,omitempty"`
+	DeliveryID            string                    `json:"delivery_id,omitempty"`
+	DeliveryStatus        string                    `json:"delivery_status,omitempty"`
+	DeliveryReasonCode    string                    `json:"delivery_reason_code,omitempty"`
+	ReplyContextID        string                    `json:"reply_context_id,omitempty"`
+	DeliveryFailure       *runtimefailures.Envelope `json:"delivery_failure,omitempty"`
+	DeliveryRetryCount    int                       `json:"delivery_retry_count,omitempty"`
+	DeliveryRetryEligible bool                      `json:"delivery_retry_eligible,omitempty"`
+	DeliveryTerminal      bool                      `json:"delivery_terminal,omitempty"`
+	DeliveryCreatedAt     string                    `json:"delivery_created_at,omitempty"`
+	DeliveryStartedAt     string                    `json:"delivery_started_at,omitempty"`
+	DeliveryDeliveredAt   string                    `json:"delivery_delivered_at,omitempty"`
+	SubscriberType        string                    `json:"subscriber_type,omitempty"`
+	SubscriberID          string                    `json:"subscriber_id,omitempty"`
+	SessionID             string                    `json:"session_id,omitempty"`
+	TurnID                string                    `json:"turn_id,omitempty"`
+	TurnTriggerEventType  string                    `json:"turn_trigger_event_type,omitempty"`
 }
 
 type diagnosticRunFailureDelivery struct {
-	EventID        string            `json:"event_id"`
-	EventName      string            `json:"event_name"`
-	EntityID       string            `json:"entity_id,omitempty"`
-	DeliveryID     string            `json:"delivery_id"`
-	SubscriberType string            `json:"subscriber_type"`
-	SubscriberID   string            `json:"subscriber_id"`
-	SessionID      string            `json:"session_id,omitempty"`
-	Status         string            `json:"status"`
-	ReasonCode     string            `json:"reason_code,omitempty"`
-	LastError      string            `json:"last_error,omitempty"`
-	RetryCount     int               `json:"retry_count"`
-	RetryEligible  bool              `json:"retry_eligible"`
-	Terminal       bool              `json:"terminal"`
-	CreatedAt      string            `json:"created_at,omitempty"`
-	StartedAt      string            `json:"started_at,omitempty"`
-	FinishedAt     string            `json:"finished_at,omitempty"`
-	DeadLetters    []eventDeadLetter `json:"dead_letters,omitempty"`
+	EventID        string                    `json:"event_id"`
+	EventName      string                    `json:"event_name"`
+	EntityID       string                    `json:"entity_id,omitempty"`
+	DeliveryID     string                    `json:"delivery_id"`
+	SubscriberType string                    `json:"subscriber_type"`
+	SubscriberID   string                    `json:"subscriber_id"`
+	SessionID      string                    `json:"session_id,omitempty"`
+	Status         string                    `json:"status"`
+	ReasonCode     string                    `json:"reason_code,omitempty"`
+	Failure        *runtimefailures.Envelope `json:"failure,omitempty"`
+	RetryCount     int                       `json:"retry_count"`
+	RetryEligible  bool                      `json:"retry_eligible"`
+	Terminal       bool                      `json:"terminal"`
+	CreatedAt      string                    `json:"created_at,omitempty"`
+	StartedAt      string                    `json:"started_at,omitempty"`
+	FinishedAt     string                    `json:"finished_at,omitempty"`
+	DeadLetters    []eventDeadLetter         `json:"dead_letters,omitempty"`
 }
 
 var diagnosticValidRunStatuses = map[string]struct{}{
@@ -1244,6 +1246,9 @@ func validateDiagnosticRunFailureDelivery(prefix string, delivery diagnosticRunF
 	if delivery.RetryCount < 0 {
 		return fmt.Errorf("malformed run.diagnose result: %s.retry_count must be >= 0", prefix)
 	}
+	if err := validateEventDeliveryFailure(prefix, delivery.Status, delivery.Failure); err != nil {
+		return fmt.Errorf("malformed run.diagnose result: %w", err)
+	}
 	for i, deadLetter := range delivery.DeadLetters {
 		if err := validateEventDeadLetter(fmt.Sprintf("%s.dead_letters[%d]", prefix, i), deadLetter); err != nil {
 			return err
@@ -1262,6 +1267,11 @@ func validateDiagnosticRunTraceResult(result diagnosticRunTraceResult) error {
 		}
 		if strings.TrimSpace(row.EventName) == "" {
 			return fmt.Errorf("malformed run.trace result: trace[%d].event_name is required", i)
+		}
+		if row.DeliveryID != "" {
+			if err := validateEventDeliveryFailure(fmt.Sprintf("trace[%d]", i), row.DeliveryStatus, row.DeliveryFailure); err != nil {
+				return fmt.Errorf("malformed run.trace result: %w", err)
+			}
 		}
 		if err := validateRequiredTimestamp(fmt.Sprintf("trace[%d].event_created_at", i), row.EventCreatedAt); err != nil {
 			return err
@@ -1347,6 +1357,19 @@ func validateDiagnosticRunHeader(prefix string, run diagnosticRunHeader) error {
 			return fmt.Errorf("malformed run header: %s.ended_at must be an RFC3339 timestamp: %w", prefix, err)
 		}
 	}
+	if status == "failed" {
+		if run.Failure == nil {
+			return fmt.Errorf("malformed run header: %s.failure is required for failed status", prefix)
+		}
+		if err := runtimefailures.ValidateEnvelope(*run.Failure); err != nil {
+			return fmt.Errorf("malformed run header: %s.failure: %w", prefix, err)
+		}
+	} else if run.Failure != nil {
+		return fmt.Errorf("malformed run header: %s.failure is forbidden for status %s", prefix, status)
+	}
+	if status == "cancelled" && strings.TrimSpace(run.ControlReason) == "" {
+		return fmt.Errorf("malformed run header: %s.control_reason is required for cancelled status", prefix)
+	}
 	return nil
 }
 
@@ -1425,8 +1448,11 @@ func writeDiagnosticRunHeader(out io.Writer, run diagnosticRunHeader) {
 	if run.ForkedFromRunID != "" {
 		fmt.Fprintf(out, "forked_from_run_id=%s\n", run.ForkedFromRunID)
 	}
-	if run.ErrorSummary != "" {
-		fmt.Fprintf(out, "error_summary=%s\n", run.ErrorSummary)
+	if run.Failure != nil {
+		fmt.Fprintf(out, "failure=%s/%s message=%s remediation=%s\n", run.Failure.Class, run.Failure.Detail.Code, run.Failure.Message, run.Failure.Remediation)
+	}
+	if run.ControlReason != "" {
+		fmt.Fprintf(out, "control_reason=%s\n", run.ControlReason)
 	}
 }
 
@@ -1463,7 +1489,7 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 	}
 	fmt.Fprintln(out, "failed_deliveries:")
 	for _, delivery := range result.FailedDeliveries {
-		fmt.Fprintf(out, "  event_id=%s event_name=%s delivery_id=%s subscriber=%s/%s status=%s reason_code=%s last_error=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
+		fmt.Fprintf(out, "  event_id=%s event_name=%s delivery_id=%s subscriber=%s/%s status=%s reason_code=%s failure=%s retry_count=%d retry_eligible=%t terminal=%t dead_letters=%d\n",
 			delivery.EventID,
 			delivery.EventName,
 			delivery.DeliveryID,
@@ -1471,7 +1497,7 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result diagnosticRunDiagnosisRes
 			delivery.SubscriberID,
 			delivery.Status,
 			emptyDash(delivery.ReasonCode),
-			emptyDash(delivery.LastError),
+			eventObservationFailureSummary(delivery.Failure),
 			delivery.RetryCount,
 			delivery.RetryEligible,
 			delivery.Terminal,

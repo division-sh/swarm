@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/spf13/cobra"
 )
 
@@ -133,17 +134,17 @@ type forkChatForkPoint struct {
 }
 
 type forkChatTurn struct {
-	TurnIndex        int              `json:"turn_index"`
-	TurnID           string           `json:"turn_id"`
-	TriggerEventID   string           `json:"trigger_event_id,omitempty"`
-	TriggerEventType string           `json:"trigger_event_type,omitempty"`
-	RequestPayload   map[string]any   `json:"request_payload,omitempty"`
-	ResponsePayload  map[string]any   `json:"response_payload,omitempty"`
-	ToolCalls        []map[string]any `json:"tool_calls,omitempty"`
-	TurnBlocks       []map[string]any `json:"turn_blocks,omitempty"`
-	ParseOK          *bool            `json:"parse_ok"`
-	LatencyMS        *int             `json:"latency_ms"`
-	Error            string           `json:"error,omitempty"`
+	TurnIndex        int                       `json:"turn_index"`
+	TurnID           string                    `json:"turn_id"`
+	TriggerEventID   string                    `json:"trigger_event_id,omitempty"`
+	TriggerEventType string                    `json:"trigger_event_type,omitempty"`
+	RequestPayload   map[string]any            `json:"request_payload,omitempty"`
+	ResponsePayload  map[string]any            `json:"response_payload,omitempty"`
+	ToolCalls        []map[string]any          `json:"tool_calls,omitempty"`
+	TurnBlocks       []map[string]any          `json:"turn_blocks,omitempty"`
+	ParseOK          *bool                     `json:"parse_ok"`
+	LatencyMS        *int                      `json:"latency_ms"`
+	Failure          *runtimefailures.Envelope `json:"failure,omitempty"`
 }
 
 type forkChatSnapshot struct {
@@ -917,7 +918,7 @@ func writeForkChatSessionDetail(out io.Writer, fork forkChatSession) {
 			fmt.Sprintf("%d", *turn.LatencyMS),
 			fmt.Sprintf("%d", len(turn.ToolCalls)),
 			conversationDash(forkChatAssistantMessage(turn)),
-			conversationDash(turn.Error),
+			conversationFailureSummary(turn.Failure),
 		})
 	}
 	writeCLITable(out, cliTable{
@@ -928,7 +929,7 @@ func writeForkChatSessionDetail(out io.Writer, fork forkChatSession) {
 			{Header: "LATENCY_MS"},
 			{Header: "TOOL_CALLS"},
 			{Header: "ASSISTANT", Truncatable: true},
-			{Header: "ERROR", Truncatable: true},
+			{Header: "FAILURE", Truncatable: true},
 		},
 		Rows:         rows,
 		EmptyMessage: "No forkchat turns recorded.",
@@ -977,7 +978,7 @@ func writeForkChatSessionHeader(out io.Writer, fork forkChatSession) {
 func writeForkChatChatSummary(out io.Writer, result forkChatChatResult) {
 	turn := result.Turn
 	fmt.Fprintf(out, "Fork %s turn %d\n", result.ForkID, turn.TurnIndex)
-	fmt.Fprintf(out, "turn_id=%s parse_ok=%t latency_ms=%d tool_calls=%d snapshot_owner=%s sandbox_owner=%s idempotency_replayed=%t error=%s\n",
+	fmt.Fprintf(out, "turn_id=%s parse_ok=%t latency_ms=%d tool_calls=%d snapshot_owner=%s sandbox_owner=%s idempotency_replayed=%t failure=%s\n",
 		turn.TurnID,
 		*turn.ParseOK,
 		*turn.LatencyMS,
@@ -985,7 +986,7 @@ func writeForkChatChatSummary(out io.Writer, result forkChatChatResult) {
 		result.Snapshot.SnapshotOwner,
 		result.SandboxPolicy.Owner,
 		boolValue(result.IdempotencyReplayed),
-		conversationDash(turn.Error),
+		conversationFailureSummary(turn.Failure),
 	)
 	if message := forkChatAssistantMessage(turn); message != "" {
 		fmt.Fprintf(out, "assistant=%s\n", message)

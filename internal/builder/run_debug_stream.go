@@ -8,6 +8,7 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -288,17 +289,14 @@ func canonicalRuntimeLogCandidate(item store.OperatorRuntimeLogEntry, key string
 	if source := strings.TrimSpace(item.Source); source != "" {
 		payload["agent_id"] = source
 	}
-	if errorCode := strings.TrimSpace(item.ErrorCode); errorCode != "" {
-		payload["error_code"] = errorCode
-	}
-	if errorText := stringMapValue(item.Details, "error"); errorText != "" {
-		payload["error"] = errorText
+	if item.Failure != nil {
+		payload["failure"] = builderFailureValue(*item.Failure)
 	}
 	if message := strings.TrimSpace(item.Message); message != "" {
 		payload["message"] = message
 	}
-	if len(item.Details) > 0 {
-		payload["detail"] = cloneStringMap(item.Details)
+	if detail := builderRuntimeLogDetail(item.Details); len(detail) > 0 {
+		payload["detail"] = detail
 	}
 	event := RunEventEnvelope{
 		"id":        firstNonEmpty(strings.TrimSpace(item.LogID), key),
@@ -327,7 +325,17 @@ func canonicalRunTerminalCandidate(snapshot runtimebus.RunLifecycleSnapshot) run
 		return runDebugCandidate{}
 	}
 	endedAt := snapshot.EndedAt.UTC()
-	key := "run." + status + ":" + runID + ":" + endedAt.Format(time.RFC3339Nano) + ":" + strings.TrimSpace(snapshot.ErrorSummary)
+	key := "run." + status + ":" + runID + ":" + endedAt.Format(time.RFC3339Nano)
+	if status == "failed" {
+		if snapshot.Failure == nil {
+			return runDebugCandidate{}
+		}
+		fingerprint, err := runtimefailures.SemanticFingerprint(*snapshot.Failure)
+		if err != nil {
+			return runDebugCandidate{}
+		}
+		key += ":" + fingerprint
+	}
 	switch status {
 	case "completed":
 		payload := map[string]any{
@@ -350,10 +358,7 @@ func canonicalRunTerminalCandidate(snapshot runtimebus.RunLifecycleSnapshot) run
 			},
 		}
 	case "failed":
-		payload := map[string]any{"run_id": runID}
-		if errText := strings.TrimSpace(snapshot.ErrorSummary); errText != "" {
-			payload["error"] = errText
-		}
+		payload := map[string]any{"run_id": runID, "failure": builderFailureValue(*snapshot.Failure)}
 		return runDebugCandidate{
 			key:   key,
 			at:    endedAt,
@@ -368,6 +373,19 @@ func canonicalRunTerminalCandidate(snapshot runtimebus.RunLifecycleSnapshot) run
 	default:
 		return runDebugCandidate{}
 	}
+}
+
+func builderRuntimeLogDetail(details map[string]any) map[string]any {
+	if len(details) == 0 {
+		return nil
+	}
+	out := cloneStringMap(details)
+	delete(out, "error")
+	delete(out, "error_code")
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func stringMapValue(values map[string]any, key string) string {

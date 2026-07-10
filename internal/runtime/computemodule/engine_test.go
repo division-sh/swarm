@@ -101,9 +101,6 @@ func TestExecuteClassifiesFuelAndOutputCapsAsDeterministic(t *testing.T) {
 			if err == nil {
 				t.Fatalf("Execute error = nil, want %s", tc.code)
 			}
-			if !IsDeterministicFailure(err) {
-				t.Fatalf("IsDeterministicFailure(%v) = false", err)
-			}
 			var typed *Error
 			if !errors.As(err, &typed) || typed.Code != tc.code {
 				t.Fatalf("error = %#v, want code %s", err, tc.code)
@@ -140,9 +137,6 @@ func TestExecuteClassifiesAllocatorTrapAsTrap(t *testing.T) {
 	if !errors.As(err, &typed) || typed.Code != CodeTrap {
 		t.Fatalf("error = %#v, want code %s", err, CodeTrap)
 	}
-	if !IsDeterministicFailure(err) {
-		t.Fatalf("IsDeterministicFailure(%v) = false", err)
-	}
 }
 
 func TestExecuteRejectsDigestMismatchBeforeExecution(t *testing.T) {
@@ -164,9 +158,6 @@ func TestExecuteRejectsDigestMismatchBeforeExecution(t *testing.T) {
 	var typed *Error
 	if !errors.As(err, &typed) || typed.Code != CodeDigest {
 		t.Fatalf("error = %#v, want code %s", err, CodeDigest)
-	}
-	if !IsDeterministicFailure(err) {
-		t.Fatalf("IsDeterministicFailure(%v) = false", err)
 	}
 }
 

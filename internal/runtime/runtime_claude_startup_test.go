@@ -15,6 +15,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -24,6 +25,17 @@ import (
 )
 
 func testToolGatewayBinding(hostURL, workspaceURL, token string) toolgateway.Binding {
+	binding, err := toolgateway.NewRuntimeOwnedBinding(
+		toolgateway.TransportHTTP,
+		hostURL,
+		workspaceURL,
+		token,
+		toolgateway.LifecycleOwnerServeBoot,
+		toolgateway.SourceBoundMCPListener,
+	)
+	if err == nil {
+		return binding
+	}
 	return toolgateway.Binding{
 		Transport:         toolgateway.TransportHTTP,
 		HostEndpoint:      hostURL,
@@ -140,7 +152,8 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 
 	opts.ToolGatewayBinding = testToolGatewayBinding("http://127.0.0.1:8081", "http://host.docker.internal:8081", "gateway-token")
 	err = validateClaudeStartupConfigForActiveAgents(context.Background(), cfg, opts, claudeStartupAgentFreeSource(), manager)
-	if err == nil || !strings.Contains(err.Error(), "CLAUDE_CODE_OAUTH_TOKEN") {
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("expected oauth token error, got %v", err)
 	}
 }
@@ -390,7 +403,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForAgentSo
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource("campaign-coordinator"), toolgateway.Binding{}, nil, turns, exec, manager)
-	if err == nil || !strings.Contains(err.Error(), "tool gateway binding host endpoint") {
+	if err == nil || !strings.Contains(err.Error(), "tool gateway binding is invalid") {
 		t.Fatalf("expected gateway binding error, got %v", err)
 	}
 }
@@ -415,7 +428,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_RequiresGatewayBindingForRecover
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentFreeSource(), toolgateway.Binding{}, nil, turns, exec, manager)
-	if err == nil || !strings.Contains(err.Error(), "tool gateway binding host endpoint") {
+	if err == nil || !strings.Contains(err.Error(), "tool gateway binding is invalid") {
 		t.Fatalf("expected gateway binding error, got %v", err)
 	}
 }
@@ -606,7 +619,7 @@ func TestValidateClaudeMCPToolsForManagedAgents_AcceptsExplicitValidationOnlyPro
 		defs: startupProbeDefs(),
 		caps: startupProbeCaps(),
 		execErrs: map[string]error{
-			"health_check": WrapRuntimeError("invalid_tool_input", "tool-executor", "exec_health_check.input", false, nil, "probe input is invalid"),
+			"health_check": runtimefailures.New(runtimefailures.ClassSchemaInvalid, "invalid_tool_input", "tool-executor", "exec_health_check_input", nil),
 		},
 	}
 	turns, binding := setupStartupProbeTransport(t, manager, exec, "gateway-token")
@@ -642,11 +655,11 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnConfiguredGatewayTo
 	probe := &startupVisibleSurfaceProbeStub{}
 
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
-	if err == nil || !strings.Contains(err.Error(), "invalid token") {
-		t.Fatalf("expected invalid token error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "not runtime-owned") {
+		t.Fatalf("expected construction provenance error, got %v", err)
 	}
-	if !slices.Equal(probe.calls, []string{"market-research-agent"}) {
-		t.Fatalf("probe calls = %#v, want CLI startup proof before MCP auth proof", probe.calls)
+	if len(probe.calls) != 0 {
+		t.Fatalf("probe calls = %#v, want rejection before provider startup proof", probe.calls)
 	}
 }
 
@@ -1030,7 +1043,8 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnUnexpectedCallableP
 	probe := &startupVisibleSurfaceProbeStub{}
 
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
-	if err == nil || !strings.Contains(err.Error(), "unexpected tool failure") {
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassInternalFailure || failure.Failure.Detail.Code != "unclassified_runtime_error" {
 		t.Fatalf("expected unexpected callable probe error, got %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {
@@ -1056,7 +1070,8 @@ func TestValidateClaudeMCPToolsForManagedAgents_FailsClosedOnGenericPhraseNonVal
 	probe := &startupVisibleSurfaceProbeStub{}
 
 	err := validateClaudeMCPToolsForManagedAgents(context.Background(), cfg, claudeStartupAgentSource(), binding, probe, turns, exec, manager)
-	if err == nil || !strings.Contains(err.Error(), "execution path must be enabled before use") {
+	failure, ok := runtimefailures.As(err)
+	if !ok || failure.Failure.Class != runtimefailures.ClassInternalFailure || failure.Failure.Detail.Code != "unclassified_runtime_error" {
 		t.Fatalf("expected generic phrase non-validation probe error, got %v", err)
 	}
 	if !slices.Equal(probe.calls, []string{"campaign-coordinator"}) {

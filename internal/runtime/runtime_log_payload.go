@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type CanonicalRuntimeLogPayload struct {
@@ -21,7 +23,7 @@ type CanonicalRuntimeLogPayload struct {
 	EventType     string
 	ParentEventID string
 	HandlerID     string
-	Error         string
+	Failure       *runtimefailures.Envelope
 	ErrorCode     string
 	AgentID       string
 	EntityID      string
@@ -63,6 +65,12 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 	detail, err := requiredRuntimeLogObject(payload, "details")
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
+	}
+	if _, legacy := detail["error"]; legacy {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error is retired; use details.failure")
+	}
+	if _, legacy := detail["error_code"]; legacy {
+		return CanonicalRuntimeLogPayload{}, fmt.Errorf("runtime log details.error_code is retired; use details.failure.detail.code or decision_reason_code")
 	}
 	component, err := requiredRuntimeLogString(detail, "component")
 	if err != nil {
@@ -113,13 +121,13 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	errorText, err := optionalRuntimeLogString(detail, "error")
+	failure, err := optionalRuntimeLogFailure(detail, "failure")
 	if err != nil {
 		return CanonicalRuntimeLogPayload{}, err
 	}
-	errorCode, err := optionalRuntimeLogString(detail, "error_code")
-	if err != nil {
-		return CanonicalRuntimeLogPayload{}, err
+	errorCode := ""
+	if failure != nil {
+		errorCode = strings.TrimSpace(failure.Detail.Code)
 	}
 	agentID, err := optionalRuntimeLogString(detail, "agent_id")
 	if err != nil {
@@ -170,7 +178,7 @@ func DecodeCanonicalRuntimeLogPayload(raw []byte) (CanonicalRuntimeLogPayload, e
 		EventType:     eventName,
 		ParentEventID: parentEventID,
 		HandlerID:     handlerID,
-		Error:         errorText,
+		Failure:       failure,
 		ErrorCode:     errorCode,
 		AgentID:       agentID,
 		EntityID:      entityID,
@@ -235,6 +243,22 @@ func requiredRuntimeLogObject(raw map[string]any, key string) (map[string]any, e
 		return nil, fmt.Errorf("runtime log %s must be an object", key)
 	}
 	return obj, nil
+}
+
+func optionalRuntimeLogFailure(raw map[string]any, key string) (*runtimefailures.Envelope, error) {
+	value, ok := raw[key]
+	if !ok || value == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("runtime log %s must be a canonical failure envelope: %w", key, err)
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("runtime log %s: %w", key, err)
+	}
+	return &failure, nil
 }
 
 func runtimeLogStringMap(raw any, field string) (map[string]string, error) {

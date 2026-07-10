@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
@@ -61,7 +62,7 @@ func (eb *EventBus) StartOutboxSweeper(ctx context.Context, cfg OutboxSweeperCon
 				eb.logRuntime(ctx, "warn", "Outbox sweep failed", "eventbus", "outbox_sweep_failed", "", "", "", "", "", nil, map[string]any{
 					"lookback_seconds": int(cfg.Lookback / time.Second),
 					"limit":            cfg.Limit,
-				}, err.Error(), 0)
+				}, eventBusDependencyFailure(err, "outbox_sweep_failed", "sweep_outbox"), 0)
 			}
 			select {
 			case <-ctx.Done():
@@ -110,14 +111,14 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 		if !claimed {
 			continue
 		}
-		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", replayErr)
+		if record.ReplayFailure != nil {
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
 			_ = lease.Release(ctx)
 			continue
 		}
 		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
 		if err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error())
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", eventBusFailure(err, "load_replay_recipients"))
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
@@ -138,7 +139,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 				continue
 			}
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-				if recordErr := eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error()); recordErr != nil {
+				if recordErr := eb.markPipelineReceipt(ctx, evt.ID(), "error", eventBusFailure(err, "publish_replay")); recordErr != nil {
 					_ = lease.Release(ctx)
 					return redelivered, recordErr
 				}
@@ -146,7 +147,7 @@ func (eb *EventBus) SweepUndispatched(ctx context.Context, lookback time.Duratio
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
-		eb.markPipelineReceipt(ctx, evt.ID(), "processed", "")
+		eb.markPipelineReceipt(ctx, evt.ID(), "processed", nil)
 		_ = lease.Release(ctx)
 		redelivered++
 	}
@@ -195,13 +196,13 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 				continue
 			}
 			seen[eventID] = struct{}{}
-			if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-				eb.markPipelineReceipt(ctx, eventID, "error", replayErr)
+			if record.ReplayFailure != nil {
+				eb.markPipelineReceipt(ctx, eventID, "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
 				continue
 			}
 			recipients, err := eb.authoritativeRecipientsForEvent(ctx, eventID)
 			if err != nil {
-				eb.markPipelineReceipt(ctx, eventID, "error", err.Error())
+				eb.markPipelineReceipt(ctx, eventID, "error", eventBusFailure(err, "load_replay_recipients"))
 				return redelivered, err
 			}
 			if err := eb.publishPersistedRecipients(ctx, evt, recipients, true); err != nil {
@@ -210,7 +211,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 				}
 				return redelivered, err
 			}
-			eb.markPipelineReceipt(ctx, eventID, "processed", "")
+			eb.markPipelineReceipt(ctx, eventID, "processed", nil)
 			redelivered++
 		}
 	}
@@ -240,14 +241,14 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 		if !claimed {
 			continue
 		}
-		if replayErr := strings.TrimSpace(record.ReplayError); replayErr != "" {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", replayErr)
+		if record.ReplayFailure != nil {
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", runtimefailures.CloneEnvelope(record.ReplayFailure))
 			_ = lease.Release(ctx)
 			continue
 		}
 		recipients, err := eb.authoritativeRecipientsForEvent(ctx, evt.ID())
 		if err != nil {
-			eb.markPipelineReceipt(ctx, evt.ID(), "error", err.Error())
+			eb.markPipelineReceipt(ctx, evt.ID(), "error", eventBusFailure(err, "load_replay_recipients"))
 			_ = lease.Release(ctx)
 			return redelivered, err
 		}
@@ -258,7 +259,7 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 			}
 			return redelivered, err
 		}
-		eb.markPipelineReceipt(ctx, evt.ID(), "processed", "")
+		eb.markPipelineReceipt(ctx, evt.ID(), "processed", nil)
 		_ = lease.Release(ctx)
 		redelivered++
 	}
@@ -266,17 +267,17 @@ func (eb *EventBus) ReleaseRunQueue(ctx context.Context, runID string, lookback 
 }
 
 func (eb *EventBus) markCommittedReplayScopeUnavailable(ctx context.Context, evt events.Event, cause error) error {
-	errText := strings.TrimSpace(cause.Error())
-	if errText == "" {
-		errText = runtimereplayclaim.ErrMissingCommittedReplayScope.Error()
-	}
-	if err := eb.markPipelineReceipt(ctx, evt.ID(), "error", errText); err != nil {
+	canonical := runtimefailures.Normalize(runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "committed_replay_scope_missing", "eventbus", "load_committed_replay_scope", map[string]any{
+		"event_id": evt.ID(), "event_type": string(evt.Type()),
+	}, cause), "eventbus", "load_committed_replay_scope")
+	failure := &canonical
+	if err := eb.markPipelineReceipt(ctx, evt.ID(), "error", failure); err != nil {
 		return err
 	}
 	eb.logRuntime(ctx, "warn", "Persisted event replay skipped because committed replay scope is unavailable", "eventbus", "outbox_replay_scope_unavailable", evt.ID(), string(evt.Type()), "", evt.EntityID(), "", nil, map[string]any{
 		"reason":          "missing_committed_replay_scope",
 		"parent_event_id": strings.TrimSpace(evt.ParentEventID()),
-	}, errText, 0)
+	}, failure, 0)
 	return nil
 }
 

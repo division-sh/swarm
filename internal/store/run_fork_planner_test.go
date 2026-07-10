@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -785,12 +786,14 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO dead_letters (
 			original_event_id, original_event, original_payload, flow_instance,
-			failure_type, error_message, retry_count, handler_node, created_at
+			failure, retry_count, handler_node, created_at
 		)
 		VALUES
-			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', 'handler_error', 'node failed', 1, 'node-dead', $2),
-			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', 'retry_exhausted', 'different node failed', 3, 'node-other', $2)
-	`, eventID, at); err != nil {
+			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', $2::jsonb, 1, 'node-dead', $4),
+			($1::uuid, 'fork.work', '{}'::jsonb, 'runtime', $3::jsonb, 3, 'node-other', $4)
+	`, eventID,
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)),
+		mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassRetryExhausted, "different_node_failed", nil)), at); err != nil {
 		t.Fatalf("seed dead letters: %v", err)
 	}
 

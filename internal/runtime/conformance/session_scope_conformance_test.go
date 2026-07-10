@@ -17,6 +17,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -455,7 +456,7 @@ func (s *conformanceRecoveryStore) LoadAgents(context.Context) ([]runtimemanager
 }
 func (*conformanceRecoveryStore) MarkAgentTerminated(context.Context, string) error { return nil }
 func (*conformanceRecoveryStore) EnsureEntitySchema(context.Context, string) error  { return nil }
-func (*conformanceRecoveryStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, string) error {
+func (*conformanceRecoveryStore) UpsertEventReceipt(context.Context, string, string, runtimemanager.ReceiptStatus, *runtimefailures.Envelope) error {
 	return nil
 }
 func (*conformanceRecoveryStore) ListPendingEventsForAgent(context.Context, string, time.Time, int) ([]events.Event, error) {

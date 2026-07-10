@@ -18,6 +18,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -980,12 +981,16 @@ func (r *taskRetryRuntime) StartSession(_ context.Context, agentID, systemPrompt
 func (r *taskRetryRuntime) ContinueSession(_ context.Context, _ *llm.Session, _ llm.Message) (*llm.Response, error) {
 	r.continueCalls++
 	if r.continueCalls == 1 {
-		return nil, errors.New("claude cli run failed: exit status 1, stderr=API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy")
+		return nil, runtimefailures.New(runtimefailures.ClassBudgetExhausted, "agent_turn_budget_exhausted", "llm-conversation", "continue", map[string]any{
+			"budget_kind": "agent_turns",
+			"actual":      1,
+			"limit":       1,
+		})
 	}
 	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "ok"}}, nil
 }
 
-func TestLLMAgent_TaskScopedFatalCLIErrorResetsConversationAndRetries(t *testing.T) {
+func TestLLMAgent_TaskScopedTurnBudgetFailureResetsConversationAndRetries(t *testing.T) {
 	rt := &taskRetryRuntime{}
 	agent := mustNewLLMAgent(t,
 		models.AgentConfig{

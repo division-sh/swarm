@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
@@ -35,7 +36,7 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	entityID := strings.TrimSpace(coalesce(in.EntityID, actor.EffectiveEntityID()))
 	in.EntityID = entityID
 	if actorEntityID := actor.EffectiveEntityID(); entityID != "" && actorEntityID != "" && entityID != actorEntityID {
-		return nil, errors.New("cross-entity mailbox item is not allowed")
+		return nil, failures.New(failures.ClassAuthorizationDenied, "cross_entity_mailbox_forbidden", "tool-executor", "mailbox_send.authorize", map[string]any{"action": "mailbox_send", "actor_id": actor.ID, "entity_id": entityID})
 	}
 	if strings.TrimSpace(in.Type) == "" {
 		return nil, errors.New("mailbox type is required")

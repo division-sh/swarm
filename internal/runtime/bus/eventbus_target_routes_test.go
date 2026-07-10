@@ -15,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/replayclaim"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -28,7 +29,7 @@ type targetRouteMemoryStore struct {
 	scopes      map[string]replayclaim.CommittedReplayScope
 	missing     []events.PersistedReplayEvent
 	receipts    map[string]string
-	receiptErrs map[string]string
+	receiptErrs map[string]*runtimefailures.Envelope
 	claimed     map[string]bool
 }
 
@@ -80,17 +81,17 @@ func (s *targetRouteMemoryStore) ListEventDeliveryRoutes(_ context.Context, even
 	return append([]events.DeliveryRoute(nil), s.routes[eventID]...), nil
 }
 
-func (s *targetRouteMemoryStore) UpsertPipelineReceipt(_ context.Context, eventID, status, errText string) error {
+func (s *targetRouteMemoryStore) UpsertPipelineReceipt(_ context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.receipts == nil {
 		s.receipts = map[string]string{}
 	}
 	if s.receiptErrs == nil {
-		s.receiptErrs = map[string]string{}
+		s.receiptErrs = map[string]*runtimefailures.Envelope{}
 	}
 	s.receipts[eventID] = status
-	s.receiptErrs[eventID] = errText
+	s.receiptErrs[eventID] = runtimefailures.CloneEnvelope(failure)
 	return nil
 }
 
@@ -509,7 +510,7 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 		t.Fatalf("Publish node-only route without agent channel: %v", err)
 	}
 	if got := store.receipts[evt.ID()]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID()])
+		t.Fatalf("pipeline receipt = %q err=%#v, want processed", got, store.receiptErrs[evt.ID()])
 	}
 	if routes := store.routes[evt.ID()]; len(routes) != 1 || routes[0].SubscriberType != "node" || routes[0].SubscriberID != "workflow-node" {
 		t.Fatalf("delivery routes = %#v, want node/workflow-node", routes)
@@ -528,7 +529,7 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 	eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(evt, "workflow-node"))
 
 	if got := store.receipts[evt.ID()]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID()])
+		t.Fatalf("pipeline receipt = %q err=%#v, want processed", got, store.receiptErrs[evt.ID()])
 	}
 }
 
@@ -548,7 +549,7 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 		t.Fatalf("DispatchPostCommit node-only route without agent channel: %v", err)
 	}
 	if got := store.receipts[evt.ID()]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID()])
+		t.Fatalf("pipeline receipt = %q err=%#v, want processed", got, store.receiptErrs[evt.ID()])
 	}
 }
 
@@ -575,7 +576,7 @@ func TestSweepUndispatched_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T)
 		t.Fatalf("swept count = %d, want 1", count)
 	}
 	if got := store.receipts[evt.ID()]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q err=%q, want processed", got, store.receiptErrs[evt.ID()])
+		t.Fatalf("pipeline receipt = %q err=%#v, want processed", got, store.receiptErrs[evt.ID()])
 	}
 }
 
@@ -593,8 +594,10 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 	if err == nil {
 		t.Fatal("Publish succeeded, want missing agent-channel failure")
 	}
-	if got := err.Error(); !strings.Contains(got, "missing=agent-missing") || strings.Contains(got, "workflow-node") {
-		t.Fatalf("Publish error = %q, want missing agent only", got)
+	failure, ok := runtimefailures.As(err)
+	missing, _ := failure.Failure.Detail.Attributes["missing_recipients"].([]string)
+	if !ok || failure.Failure.Detail.Code != "authoritative_delivery_incomplete" || len(missing) != 1 || missing[0] != "agent-missing" {
+		t.Fatalf("Publish failure = %#v, want missing agent only", failure)
 	}
 }
 

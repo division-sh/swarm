@@ -2,6 +2,7 @@ package toolgateway
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 )
 
@@ -20,6 +21,55 @@ func TestBindingNormalizesHostAndWorkspaceMCPURLs(t *testing.T) {
 	}
 	if got := binding.WorkspaceMCPURL(); got != "http://host.docker.internal:18082/mcp" {
 		t.Fatalf("workspace MCP URL = %q", got)
+	}
+}
+
+func TestRuntimeOwnedBindingProvenanceIsInMemoryAndMutationSensitive(t *testing.T) {
+	binding, err := NewRuntimeOwnedBinding(
+		TransportHTTP,
+		"http://127.0.0.1:18082",
+		"http://host.docker.internal:18082",
+		"gateway-token",
+		LifecycleOwnerServeBoot,
+		SourceBoundMCPListener,
+	)
+	if err != nil {
+		t.Fatalf("NewRuntimeOwnedBinding: %v", err)
+	}
+	if !binding.IsRuntimeOwned() {
+		t.Fatal("constructor did not establish runtime ownership")
+	}
+
+	mutated := binding
+	mutated.Token = "copied-token"
+	if mutated.IsRuntimeOwned() {
+		t.Fatal("mutated binding retained runtime ownership")
+	}
+
+	raw, err := json.Marshal(binding)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var decoded Binding
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if decoded.IsRuntimeOwned() {
+		t.Fatal("serialized binding acquired runtime ownership")
+	}
+}
+
+func TestRuntimeOwnedBindingRejectsUnknownOwnershipPair(t *testing.T) {
+	_, err := NewRuntimeOwnedBinding(
+		TransportHTTP,
+		"http://127.0.0.1:18082",
+		"http://host.docker.internal:18082",
+		"gateway-token",
+		"configured",
+		"mcp_servers",
+	)
+	if err == nil {
+		t.Fatal("generic configuration ownership pair was accepted")
 	}
 }
 

@@ -134,13 +134,14 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 
 func assertUnavailableBundlePreservationRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, wantSource, wantReason string) {
 	t.Helper()
-	var status, source, errorSummary, controlStatus, controlReason, controlledBy string
+	var status, source, controlStatus, controlReason, controlledBy string
+	var failure []byte
 	var endedAt sql.NullTime
 	if err := pg.DB.QueryRowContext(ctx, `
 		SELECT
 			r.status,
 			r.bundle_source,
-			COALESCE(r.error_summary, ''),
+			r.failure,
 			r.ended_at,
 			rc.control_status,
 			COALESCE(rc.reason, ''),
@@ -148,11 +149,11 @@ func assertUnavailableBundlePreservationRun(t *testing.T, ctx context.Context, p
 		FROM runs r
 		JOIN run_control_state rc ON rc.run_id = r.run_id
 		WHERE r.run_id = $1::uuid
-	`, runID).Scan(&status, &source, &errorSummary, &endedAt, &controlStatus, &controlReason, &controlledBy); err != nil {
+	`, runID).Scan(&status, &source, &failure, &endedAt, &controlStatus, &controlReason, &controlledBy); err != nil {
 		t.Fatalf("load run/control %s: %v", runID, err)
 	}
-	if status != "cancelled" || source != wantSource || errorSummary != wantReason || !endedAt.Valid {
-		t.Fatalf("run %s = status:%s source:%s error:%s ended:%v, want cancelled/%s/%s/ended", runID, status, source, errorSummary, endedAt.Valid, wantSource, wantReason)
+	if status != "cancelled" || source != wantSource || len(failure) != 0 || !endedAt.Valid {
+		t.Fatalf("run %s = status:%s source:%s failure:%s ended:%v, want cancelled/%s/no-failure/ended", runID, status, source, failure, endedAt.Valid, wantSource)
 	}
 	if controlStatus != "stopped" || controlReason != wantReason || controlledBy != preservationcleanup.UnavailableBundleStartupControlledBy {
 		t.Fatalf("run control %s = %s/%s/%s, want stopped/%s/%s", runID, controlStatus, controlReason, controlledBy, wantReason, preservationcleanup.UnavailableBundleStartupControlledBy)

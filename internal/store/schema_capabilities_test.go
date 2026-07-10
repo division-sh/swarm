@@ -33,18 +33,18 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 	)
 	addColumns("event_deliveries",
 		"run_id", "event_id", "subscriber_type", "subscriber_id", "status", "retry_count",
-		"reason_code", "last_error", "active_session_id", "started_at", "delivered_at", "created_at",
+		"reason_code", "failure", "active_session_id", "started_at", "delivered_at", "created_at",
 	)
 	addColumns("event_receipts",
 		"receipt_id", "event_id", "subscriber_type", "subscriber_id", "entity_id", "flow_instance",
-		"outcome", "reason_code", "state_before", "state_after", "side_effects",
+		"outcome", "reason_code", "state_before", "state_after", "side_effects", "failure",
 		"duration_ms", "idempotency_key", "processed_at",
 	)
 	addColumns("activity_attempts",
 		"request_event_id", "run_id", "source_event_id", "parent_event_id", "entity_id", "flow_instance",
 		"node_id", "handler_event_key", "activity_id", "tool", "effect_class", "attempt", "status",
 		"success_event", "failure_event", "result_event_id", "result_event_type", "result_payload",
-		"error", "input_hash", "started_at", "completed_at", "updated_at",
+		"failure", "input_hash", "started_at", "completed_at", "updated_at",
 	)
 	addColumns("entity_state",
 		"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name",
@@ -66,7 +66,7 @@ func TestPostgresStore_BindSchemaCapabilities_CanonicalOptionalVariants(t *testi
 		"trigger_event_id", "trigger_event_type", "task_id", "available_tools", "tool_calls",
 		"emitted_events", "mcp_servers", "mcp_tools_listed", "mcp_tools_visible",
 		"request_payload", "response_payload", "turn_blocks", "parse_ok", "latency_ms",
-		"retry_count", "error", "created_at",
+		"retry_count", "failure", "created_at",
 	)
 	addColumns("mailbox",
 		"item_id", "entity_id", "flow_instance", "scope", "item_type", "source_event_id",
@@ -276,6 +276,7 @@ func TestPostgresStore_CanonicalCapabilityReaders(t *testing.T) {
 		AddRow("event_receipts", "state_before").
 		AddRow("event_receipts", "state_after").
 		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "failure").
 		AddRow("event_receipts", "duration_ms").
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")
@@ -328,6 +329,7 @@ func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutCanoni
 		AddRow("event_receipts", "state_before").
 		AddRow("event_receipts", "state_after").
 		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "failure").
 		AddRow("event_receipts", "duration_ms").
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")
@@ -378,6 +380,7 @@ func TestPostgresStore_CanonicalEventReceiptsCapability_FailsClosedWithoutTypedI
 		AddRow("event_receipts", "state_before").
 		AddRow("event_receipts", "state_after").
 		AddRow("event_receipts", "side_effects").
+		AddRow("event_receipts", "failure").
 		AddRow("event_receipts", "duration_ms").
 		AddRow("event_receipts", "idempotency_key").
 		AddRow("event_receipts", "processed_at")

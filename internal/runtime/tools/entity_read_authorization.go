@@ -5,6 +5,7 @@ import (
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -67,14 +68,15 @@ func enforceEntityReadOwnership(source semanticview.Source, actor models.AgentCo
 	if entityReadRowOwnedByActor(source, actor.ID, row) {
 		return nil
 	}
-	return NewRuntimeError(
+	return failures.NewDetail(
 		"cross_flow_read_forbidden",
 		"tool-executor",
 		operation,
-		false,
-		"actor %s cannot read entity %s owned by flow_instance %s",
-		strings.TrimSpace(actor.ID),
-		strings.TrimSpace(entityID),
-		strings.TrimSpace(asString(row["flow_instance"])),
+		map[string]any{
+			"action":          "entity_read",
+			"actor_id":        strings.TrimSpace(actor.ID),
+			"entity_id":       strings.TrimSpace(entityID),
+			"owner_flow_path": strings.TrimSpace(asString(row["flow_instance"])),
+		},
 	)
 }

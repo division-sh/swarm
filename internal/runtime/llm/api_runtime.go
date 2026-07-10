@@ -15,6 +15,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
@@ -208,7 +210,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 		unlockScope := r.budget.LockExecutionScope(scopeKey)
 		defer unlockScope()
 		if r.budget.IsEntityEmergency(entityID) {
-			return nil, fmt.Errorf("budget emergency: refusing llm execution (entity=%s)", entityID)
+			return nil, budgetEmergencyFailure(entityID)
 		}
 	}
 
@@ -220,7 +222,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 	if !resolved.Stateless {
 		lease, err = r.sessions.Acquire(ctx, s.AgentID, resolved.RuntimeMode, resolved.Scope, r.lockOwner, resolved.ScopeKey)
 		if err != nil {
-			return nil, err
+			return nil, sessionAcquireFailure(err, s.AgentID)
 		}
 		defer func() { _ = r.sessions.Release(ctx, lease) }()
 		stopLeaseHeartbeat := sessions.StartLeaseHeartbeatWithErrorHandler(ctx, r.sessions, lease, resolved.RuntimeMode, func(heartbeatErr error) {
@@ -312,7 +314,7 @@ func (r *AnthropicAPIRuntime) ContinueSession(ctx context.Context, s *Session, m
 			ParseOK:        false,
 			Latency:        latency,
 			RetryCount:     retryCount,
-			Error:          lastErr.Error(),
+			Failure:        agentTurnFailure(lastErr, "anthropic_turn"),
 		}, nil))
 		if !resolved.Stateless {
 			if rotated, rotateErr := MaybeRotateAfterParseFailures(ctx, s, resolved.RuntimeMode, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateOnParseFailures, r.events); rotateErr == nil && rotated != nil {
@@ -506,65 +508,34 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte) (
 
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
-		return nil, anthropicResponse{}, fmt.Errorf("anthropic request failed: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassTimeout, "anthropic_request_timeout", "anthropic-adapter", "send_request", nil, err)
+		}
+		return nil, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "anthropic_transport_failure", "anthropic-adapter", "send_request", nil, err)
 	}
 	defer httpResp.Body.Close()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, anthropicResponse{}, fmt.Errorf("read anthropic response: %w", err)
+		return nil, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "anthropic_response_read_failed", "anthropic-adapter", "read_response", nil, err)
 	}
 
 	var parsed anthropicResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return body, anthropicResponse{}, fmt.Errorf("decode anthropic response: %w", err)
+		return body, anthropicResponse{}, runtimefailures.Wrap(runtimefailures.ClassConnectorFailure, "anthropic_response_invalid", "anthropic-adapter", "decode_response", nil, err)
 	}
 
 	if httpResp.StatusCode >= 300 {
-		msg := strings.TrimSpace(parsed.Error.Message)
-		if msg == "" {
-			msg = strings.TrimSpace(string(body))
-		}
-		return body, parsed, anthropicHTTPError{
-			StatusCode: httpResp.StatusCode,
-			Message:    msg,
-		}
+		return body, parsed, providerStatusFailure("anthropic", httpResp.StatusCode)
 	}
 	if parsed.Error.Message != "" {
-		return body, parsed, fmt.Errorf("anthropic error: %s", parsed.Error.Message)
+		return body, parsed, runtimefailures.New(runtimefailures.ClassConnectorFailure, "anthropic_provider_error", "anthropic-adapter", "decode_response", nil)
 	}
 	return body, parsed, nil
 }
 
-type anthropicHTTPError struct {
-	StatusCode int
-	Message    string
-}
-
-func (e anthropicHTTPError) Error() string {
-	msg := strings.TrimSpace(e.Message)
-	if msg == "" {
-		msg = "request failed"
-	}
-	return fmt.Sprintf("anthropic status %d: %s", e.StatusCode, msg)
-}
-
 func shouldRetryAnthropicError(err error) bool {
-	if err == nil {
-		return false
-	}
-	var httpErr anthropicHTTPError
-	if errors.As(err, &httpErr) {
-		if httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500 {
-			return true
-		}
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "deadline exceeded") {
-		return false
-	}
-	return strings.Contains(msg, "request failed") || strings.Contains(msg, "timeout") || strings.Contains(msg, "temporary")
+	return runtimeengine.FailureDispositionFor(err) == runtimeengine.FailureDispositionRetry
 }
 
 func convertAnthropicResponse(parsed anthropicResponse) Response {

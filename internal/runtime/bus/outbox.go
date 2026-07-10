@@ -70,7 +70,7 @@ func (o engineOutbox) WriteOutbox(ctx context.Context, intents []runtimeengine.E
 			return err
 		}
 		if plan.TargetFailure != "" {
-			if err := mutation.UpsertPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure)); err != nil {
+			if err := mutation.UpsertPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureEnvelope(plan.TargetFailure)); err != nil {
 				return fmt.Errorf("persist pipeline receipt: %w", err)
 			}
 			if err := o.bus.recordTargetDeliveryFailureMutation(ctx, mutation, intent.Event, plan); err != nil {
@@ -128,9 +128,8 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 			dispatchCtx = runtimepipeline.WithPipelinePostCommitActions(dispatchCtx, &postCommitActions)
 			if err := d.DispatchPostCommit(dispatchCtx, queuedIntents); err != nil {
 				d.bus.logRuntime(dispatchCtx, "error", "Post-commit outbox dispatch failed", "eventbus", "post_commit_outbox_dispatch_failed", "", "", "", "", "", nil, map[string]any{
-					"error":         err.Error(),
 					"intents_count": len(queuedIntents),
-				}, err.Error(), 0)
+				}, eventBusDependencyFailure(err, "post_commit_outbox_dispatch_failed", "dispatch_outbox"), 0)
 			}
 			runtimepipeline.FlushPipelinePostCommitActions(postCommitActions)
 		}) {
@@ -142,14 +141,14 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		queued, err := d.dispatchIntent(ctx, intent)
 		if err != nil {
 			if !errors.Is(err, errAuthoritativeDeliveryIncomplete) {
-				d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "error", err.Error())
+				d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "error", eventBusFailure(err, "dispatch_outbox"))
 			}
 			return err
 		}
 		if queued {
 			continue
 		}
-		d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "processed", "")
+		d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "processed", nil)
 	}
 	return nil
 }
@@ -235,7 +234,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 			plan.TargetFailure = runtimepinrouting.FailureTargetNotSubscribed
 			plan = plan.Normalized()
 			d.bus.recordTargetDeliveryFailure(ctx, intent.Event, plan)
-			d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureMessage(plan.TargetFailure))
+			d.bus.markPipelineReceipt(ctx, intent.Event.ID(), "dead_letter", targetDeliveryFailureEnvelope(plan.TargetFailure))
 			return true, nil
 		}
 		return false, nil
@@ -256,7 +255,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 		"requested_recipients_count": len(liveRecipients),
 		"persisted_recipients":       append([]string(nil), recipients...),
 		"internal_recipients":        append([]string(nil), internalRecipients...),
-	}, "", 0)
+	}, nil, 0)
 	return false, nil
 }
 
@@ -284,7 +283,7 @@ func (d engineDispatcher) dispatchExplicitDirectIntent(ctx context.Context, inte
 	for k, v := range plan.ExtraDetail {
 		detail[k] = v
 	}
-	d.bus.logRuntime(ctx, "debug", "Deferred direct event intent was delivered", "eventbus", "delivered", intent.Event.ID(), string(intent.Event.Type()), "", intent.Event.EntityID(), "", nil, detail, "", 0)
+	d.bus.logRuntime(ctx, "debug", "Deferred direct event intent was delivered", "eventbus", "delivered", intent.Event.ID(), string(intent.Event.Type()), "", intent.Event.EntityID(), "", nil, detail, nil, 0)
 	return nil
 }
 

@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -226,7 +227,7 @@ func (s *WorkflowInstanceStore) writeSQLite(ctx context.Context, rowID, storageR
 				return err
 			}
 			if exists {
-				return fmt.Errorf("flow instance already exists: %s", storageRef)
+				return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "flow_instance_already_exists", "workflow-instance-store", "create", map[string]any{"flow_instance": storageRef})
 			}
 		}
 		previous, err := s.loadTrackedEntityStateProjectionSQLite(txctx, tx, runID, rowID)

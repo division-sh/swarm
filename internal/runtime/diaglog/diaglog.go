@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type Level string
@@ -41,7 +43,7 @@ type RunEntry struct {
 	SessionID   string
 	Correlation map[string]string
 	Detail      any
-	Error       string
+	Failure     *runtimefailures.Envelope
 	StackTrace  string
 	DurationUS  int
 }

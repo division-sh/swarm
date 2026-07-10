@@ -536,7 +536,7 @@ func (s *SQLiteRuntimeStore) sqliteStopRunControl(ctx context.Context, tx *sql.T
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', ended_at = COALESCE(ended_at, ?) WHERE run_id = ?`, req.Now.UTC(), state.RunID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = 'cancelled', failure = NULL, ended_at = COALESCE(ended_at, ?) WHERE run_id = ?`, req.Now.UTC(), state.RunID); err != nil {
 		return runtimeruncontrol.State{}, fmt.Errorf("stop sqlite run: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -633,7 +633,7 @@ func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Con
 				return 0, fmt.Errorf("check sqlite stopped run pipeline receipt: %w", err)
 			}
 			if !hasPipelineReceipt {
-				if err := s.UpsertPipelineReceiptTx(ctx, tx, eventID, "error", "run stopped"); err != nil {
+				if err := s.UpsertPipelineReceiptTx(ctx, tx, eventID, "dead_letter", nil); err != nil {
 					return 0, fmt.Errorf("mark sqlite stopped run pipeline receipt: %w", err)
 				}
 			}
@@ -644,20 +644,19 @@ func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveriesTx(ctx context.Con
 
 func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID, eventID, subscriberType, subscriberID string, retryCount int) (bool, error) {
 	reasonCode := "run_stopped"
-	errorText := "run stopped"
 	now := s.now()
 	res, err := tx.ExecContext(ctx, `
 		UPDATE event_deliveries
 		SET status = 'dead_letter',
 		    retry_count = ?,
 		    reason_code = ?,
-		    last_error = ?,
+		    failure = NULL,
 		    active_session_id = NULL,
 		    started_at = COALESCE(started_at, created_at),
 		    delivered_at = ?
 		WHERE delivery_id = ?
 		  AND status = 'pending'
-	`, retryCount, reasonCode, errorText, now, deliveryID)
+	`, retryCount, reasonCode, now, deliveryID)
 	if err != nil {
 		return false, fmt.Errorf("abandon sqlite stopped run delivery %s: %w", deliveryID, err)
 	}
@@ -670,7 +669,6 @@ func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveryTx(ctx context.Conte
 			finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
 			retryCount:   retryCount,
 			reasonCode:   reasonCode,
-			errorText:    errorText,
 			deliveryCode: "dead_letter",
 		}
 		if err := s.upsertSQLiteStoppedRunAgentReceiptTx(ctx, tx, eventID, subscriberID, state, now); err != nil {
@@ -687,7 +685,7 @@ func (s *SQLiteRuntimeStore) sqliteAbandonPendingRunDeliveryTx(ctx context.Conte
 }
 
 func (s *SQLiteRuntimeStore) upsertSQLiteStoppedRunAgentReceiptTx(ctx context.Context, tx *sql.Tx, eventID, agentID string, state agentReceiptWriteState, now time.Time) error {
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount, state.errorText))
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount))
 	if err != nil {
 		return fmt.Errorf("marshal sqlite stopped run agent receipt side effects: %w", err)
 	}

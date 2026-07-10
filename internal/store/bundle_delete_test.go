@@ -338,19 +338,20 @@ func assertBundleDeleteRunBundle(t *testing.T, ctx context.Context, pg *Postgres
 	}
 }
 
-func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, wantStatus, wantSource, wantError string) {
+func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore, runID, wantStatus, wantSource, wantControlReason string) {
 	t.Helper()
-	var status, source, errorSummary string
+	var status, source string
+	var failure []byte
 	var endedAt sql.NullTime
 	if err := pg.DB.QueryRowContext(ctx, `
-		SELECT status, bundle_source, COALESCE(error_summary, ''), ended_at
+		SELECT status, bundle_source, failure, ended_at
 		FROM runs
 		WHERE run_id = $1::uuid
-	`, runID).Scan(&status, &source, &errorSummary, &endedAt); err != nil {
+	`, runID).Scan(&status, &source, &failure, &endedAt); err != nil {
 		t.Fatalf("load run %s: %v", runID, err)
 	}
-	if status != wantStatus || source != wantSource || errorSummary != wantError {
-		t.Fatalf("run %s = status:%s source:%s error:%s ended:%v, want %s/%s/%s", runID, status, source, errorSummary, endedAt.Valid, wantStatus, wantSource, wantError)
+	if status != wantStatus || source != wantSource || len(failure) != 0 {
+		t.Fatalf("run %s = status:%s source:%s failure:%s ended:%v, want %s/%s/no-failure", runID, status, source, failure, endedAt.Valid, wantStatus, wantSource)
 	}
 	if wantStatus == "cancelled" && !endedAt.Valid {
 		t.Fatalf("run %s cancelled without ended_at", runID)
@@ -364,7 +365,7 @@ func assertBundleDeleteRun(t *testing.T, ctx context.Context, pg *PostgresStore,
 		`, runID).Scan(&controlStatus, &reason, &controlledBy); err != nil {
 			t.Fatalf("load run control %s: %v", runID, err)
 		}
-		if controlStatus != preservationcleanup.RunControlStatusStopped || reason != preservationcleanup.BundleForceDeletedReason || controlledBy != preservationcleanup.BundleForceDeleteControlledBy {
+		if controlStatus != preservationcleanup.RunControlStatusStopped || reason != wantControlReason || controlledBy != preservationcleanup.BundleForceDeleteControlledBy {
 			t.Fatalf("run control %s = %s/%s/%s, want stopped/%s/%s", runID, controlStatus, reason, controlledBy, preservationcleanup.BundleForceDeletedReason, preservationcleanup.BundleForceDeleteControlledBy)
 		}
 	}

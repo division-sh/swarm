@@ -49,7 +49,7 @@ func TestDeliveryLifecycleConformance(t *testing.T) {
 			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
 				t.Helper()
 				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
 					t.Fatalf("UpsertEventReceipt(retryable error): %v", err)
 				}
 				fx.rewindDeliveryAttempt(t, ctx, eventID, time.Now().Add(-2*time.Minute))
@@ -71,10 +71,10 @@ func TestDeliveryLifecycleConformance(t *testing.T) {
 			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
 				t.Helper()
 				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
 					t.Fatalf("UpsertEventReceipt(first error): %v", err)
 				}
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
 					t.Fatalf("UpsertEventReceipt(second error): %v", err)
 				}
 				return eventID
@@ -114,10 +114,10 @@ func TestDeliveryLifecycleConformance(t *testing.T) {
 			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
 				t.Helper()
 				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
 					t.Fatalf("UpsertEventReceipt(first error): %v", err)
 				}
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
 					t.Fatalf("UpsertEventReceipt(second error): %v", err)
 				}
 				fx.forceReceiptState(t, ctx, eventID, runtimemanager.ReceiptStatusError, 1, time.Now().Add(-2*time.Minute), "stale-retry")
@@ -139,7 +139,7 @@ func TestDeliveryLifecycleConformance(t *testing.T) {
 			seed: func(t *testing.T, ctx context.Context, fx *deliveryLifecycleFixture) string {
 				t.Helper()
 				eventID := fx.publishDirectEvent(t, ctx)
-				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, "boom"); err != nil {
+				if err := fx.pg.UpsertEventReceipt(ctx, eventID, fx.agentID, runtimemanager.ReceiptStatusError, testFailure("handler_failed")); err != nil {
 					t.Fatalf("UpsertEventReceipt(retryable error): %v", err)
 				}
 				fx.rewindDeliveryAttempt(t, ctx, eventID, time.Now().Add(-2*time.Minute))

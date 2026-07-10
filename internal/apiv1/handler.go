@@ -18,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -283,22 +284,20 @@ func (h *Handler) responseFromResult(req Request, result any, err error) rpcResp
 		if errors.As(err, &paramsErr) && paramsErr != nil {
 			return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: invalidParams(req.CorrelationID, paramsErr.Details)}
 		}
-		h.logInternalFallback(req, err)
-		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"error": err.Error()})}
+		failure := runtimefailures.Normalize(err, "api", strings.TrimSpace(req.Method))
+		h.logInternalFallback(req, failure)
+		return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: h.standardError(codeInternalError, "internal error", req.CorrelationID, map[string]any{"failure": failure})}
 	}
 	return rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Result: result}
 }
 
-func (h *Handler) logInternalFallback(req Request, err error) {
-	if err == nil {
-		return
-	}
+func (h *Handler) logInternalFallback(req Request, failure runtimefailures.Envelope) {
 	fields := []any{
 		"method", strings.TrimSpace(req.Method),
 		"correlation_id", strings.TrimSpace(req.CorrelationID),
 		"transport", strings.TrimSpace(req.Transport),
 		"request_hash", strings.TrimSpace(req.RequestHash),
-		"error", err.Error(),
+		"failure", failure,
 	}
 	if req.ID != nil {
 		fields = append(fields, "request_id", fmt.Sprint(req.ID))

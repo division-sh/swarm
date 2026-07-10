@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 const accumulatorCompletionOutcomeAction = "accumulator_completion_outcome"
@@ -33,7 +34,7 @@ type accumulatorCompletionRuntimeRecord struct {
 	Diagnostics        runtimeengine.AccumulatorCompletionDiagnostics
 	DecisionOutcome    accumulatorCompletionDecisionOutcome
 	DecisionReasonCode accumulatorCompletionDecisionReason
-	ErrorText          string
+	Failure            *runtimefailures.Envelope
 }
 
 func newAccumulatorCompletionRuntimeRecord(nodeID string, evt events.Event, diagnostics runtimeengine.AccumulatorCompletionDiagnostics, err error) (accumulatorCompletionRuntimeRecord, bool) {
@@ -44,7 +45,7 @@ func newAccumulatorCompletionRuntimeRecord(nodeID string, evt events.Event, diag
 		NodeID:      strings.TrimSpace(nodeID),
 		Event:       evt,
 		Diagnostics: diagnostics,
-		ErrorText:   strings.TrimSpace(errorText(err)),
+		Failure:     pipelineRuntimeFailure(err, strings.TrimSpace(nodeID), "accumulator_completion"),
 	}
 	switch diagnostics.CommitOutcome {
 	case runtimeengine.AccumulatorCompletionCommitCommitted:
@@ -105,10 +106,6 @@ func (r accumulatorCompletionRuntimeRecord) detail() map[string]any {
 	if ruleID := strings.TrimSpace(r.Diagnostics.SelectedRuleID); ruleID != "" {
 		detail["selected_rule_id"] = ruleID
 	}
-	if errText := strings.TrimSpace(r.ErrorText); errText != "" {
-		detail["error"] = errText
-		detail["error_code"] = string(r.DecisionReasonCode)
-	}
 	return detail
 }
 
@@ -129,7 +126,7 @@ func logAccumulatorCompletionOutcome(ctx context.Context, bus Bus, nodeID string
 		EventType: strings.TrimSpace(string(evt.Type())),
 		EntityID:  strings.TrimSpace(evt.EntityID()),
 		Detail:    record.detail(),
-		Error:     strings.TrimSpace(record.ErrorText),
+		Failure:   runtimefailures.CloneEnvelope(record.Failure),
 	}
 	emit := func() {
 		_ = bus.LogRuntime(ctx, entry)
@@ -146,11 +143,4 @@ func logAccumulatorCompletionOutcome(ctx context.Context, bus Bus, nodeID string
 		}
 	}
 	emit()
-}
-
-func errorText(err error) string {
-	if err == nil {
-		return ""
-	}
-	return strings.TrimSpace(err.Error())
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -29,15 +30,16 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	olderEventOnlyB := uuid.NewString()
 	bundleA := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	bundleB := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	failedRunFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_failed", nil))
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO runs (
-			run_id, status, bundle_hash, bundle_source, trigger_event_id, trigger_event_type, forked_from_run_id, entity_count, event_count, error_summary, started_at, ended_at
+			run_id, status, bundle_hash, bundle_source, trigger_event_id, trigger_event_type, forked_from_run_id, entity_count, event_count, failure, started_at, ended_at
 		)
 		VALUES
 			($1::uuid, 'running', $2, 'persisted', $3::uuid, 'scan.requested', NULL, 3, 2, NULL, $4, NULL),
 			($5::uuid, 'completed', $6, 'persisted', $7::uuid, 'scan.requested', $1::uuid, 5, 1, NULL, $8, $9),
-			($10::uuid, 'failed', $2, 'persisted', $11::uuid, 'scan.failed', NULL, 1, 1, 'boom', $12, $13)
-	`, newer, bundleA, newerEvent, now, middle, bundleB, middleEvent, now.Add(-time.Hour), now.Add(-30*time.Minute), older, olderEvent, now.Add(-2*time.Hour), now.Add(-90*time.Minute)); err != nil {
+			($10::uuid, 'failed', $2, 'persisted', $11::uuid, 'scan.failed', NULL, 1, 1, $14::jsonb, $12, $13)
+	`, newer, bundleA, newerEvent, now, middle, bundleB, middleEvent, now.Add(-time.Hour), now.Add(-30*time.Minute), older, olderEvent, now.Add(-2*time.Hour), now.Add(-90*time.Minute), failedRunFailure); err != nil {
 		t.Fatalf("seed runs: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `

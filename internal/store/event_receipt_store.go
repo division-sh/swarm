@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/lib/pq"
@@ -35,7 +36,7 @@ func (s *PostgresStore) MarkEventDeliveryInProgress(ctx context.Context, eventID
 	}
 }
 
-func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
 	caps, err := s.schemaCapabilities(ctx)
 	if err != nil {
 		return err
@@ -50,7 +51,7 @@ func (s *PostgresStore) UpsertEventReceipt(ctx context.Context, eventID, agentID
 	}
 	switch caps.Events.Receipts {
 	case SchemaFlavorCanonical:
-		return s.upsertAgentReceiptSpec(ctx, caps, eventID, agentID, status, errText)
+		return s.upsertAgentReceiptSpec(ctx, caps, eventID, agentID, status, failure)
 	default:
 		return unsupportedSchemaCapability("event_receipts", caps.Events.Receipts)
 	}
@@ -129,7 +130,7 @@ type agentReceiptWriteState struct {
 	finalStatus  runtimemanager.ReceiptStatus
 	retryCount   int
 	reasonCode   string
-	errorText    string
+	failure      *runtimefailures.Envelope
 	deliveryCode string
 }
 
@@ -145,13 +146,13 @@ type lockedAgentDelivery struct {
 
 type deliveryBackedTerminalTransitionRequest struct {
 	reasonCode   string
-	errorText    string
+	failure      *runtimefailures.Envelope
 	retryAdvance int
 }
 
 // Receipts are outcome-only for an existing agent delivery. This write path must
 // never mint or repair delivery ownership from receipt state.
-func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, eventID, agentID string, status runtimemanager.ReceiptStatus, errText string) error {
+func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSchemaCapabilities, eventID, agentID string, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) error {
 	if err := withEventStoreRetry(ctx, nil, func() error {
 		tx, err := s.DB.BeginTx(ctx, nil)
 		if err != nil {
@@ -169,11 +170,14 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 		if activeRunQuiescenceDeliveryTerminal(delivery.status, delivery.reasonCode) {
 			return nil
 		}
-		state := buildAgentReceiptWriteState(delivery.retryCount, status, errText)
+		state, err := buildAgentReceiptWriteState(delivery.retryCount, status, failure)
+		if err != nil {
+			return err
+		}
 		if state.finalStatus == runtimemanager.ReceiptStatusDeadLetter {
 			if _, err := s.applyDeliveryBackedTerminalTransitionTx(ctx, tx, eventID, agentID, delivery, deliveryBackedTerminalTransitionRequest{
 				reasonCode:   state.reasonCode,
-				errorText:    state.errorText,
+				failure:      state.failure,
 				retryAdvance: state.retryCount - delivery.retryCount,
 			}); err != nil {
 				return err
@@ -196,10 +200,21 @@ func (s *PostgresStore) upsertAgentReceiptSpec(ctx context.Context, caps StoreSc
 	return s.convergeStandaloneRuntimePlatformRunByEventID(ctx, s.DB, caps, eventID)
 }
 
-func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.ReceiptStatus, errText string) agentReceiptWriteState {
+func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.ReceiptStatus, failure *runtimefailures.Envelope) (agentReceiptWriteState, error) {
 	state := agentReceiptWriteState{
 		finalStatus: status,
-		errorText:   strings.TrimSpace(errText),
+		failure:     runtimefailures.CloneEnvelope(failure),
+	}
+	if status == runtimemanager.ReceiptStatusProcessed && failure != nil {
+		return agentReceiptWriteState{}, fmt.Errorf("processed receipt must not carry failure")
+	}
+	if status != runtimemanager.ReceiptStatusProcessed && failure == nil {
+		return agentReceiptWriteState{}, fmt.Errorf("failed receipt requires canonical failure")
+	}
+	if state.failure != nil {
+		if err := runtimefailures.ValidateEnvelope(*state.failure); err != nil {
+			return agentReceiptWriteState{}, fmt.Errorf("failed receipt carries invalid failure: %w", err)
+		}
 	}
 	retryCount := baseRetryCount
 	if status == runtimemanager.ReceiptStatusError {
@@ -209,9 +224,19 @@ func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.Recei
 	if status == runtimemanager.ReceiptStatusError && retryCount >= 2 {
 		finalStatus = runtimemanager.ReceiptStatusDeadLetter
 	}
+	if finalStatus == runtimemanager.ReceiptStatusDeadLetter && status == runtimemanager.ReceiptStatusError && state.failure != nil {
+		terminal := runtimefailures.FromError(runtimefailures.New(
+			runtimefailures.ClassRetryExhausted,
+			"delivery_retry_exhausted",
+			"event-delivery",
+			"apply_retry_policy",
+			map[string]any{"attempts": retryCount, "last_failure": *state.failure},
+		), "event-delivery", "apply_retry_policy")
+		state.failure = &terminal.Failure
+	}
 	state.finalStatus = finalStatus
 	state.retryCount = retryCount
-	state.reasonCode = managerReceiptReasonCode(finalStatus, state.errorText)
+	state.reasonCode = managerReceiptReasonCode(finalStatus)
 	state.deliveryCode = "delivered"
 	switch status {
 	case runtimemanager.ReceiptStatusError:
@@ -222,7 +247,7 @@ func buildAgentReceiptWriteState(baseRetryCount int, status runtimemanager.Recei
 	if state.finalStatus == runtimemanager.ReceiptStatusDeadLetter {
 		state.deliveryCode = "dead_letter"
 	}
-	return state
+	return state, nil
 }
 
 func (s *PostgresStore) lockAgentDeliveryTx(
@@ -278,7 +303,7 @@ func (s *PostgresStore) applyDeliveryBackedTerminalTransitionTx(
 		finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
 		retryCount:   delivery.retryCount + req.retryAdvance,
 		reasonCode:   reasonCode,
-		errorText:    strings.TrimSpace(req.errorText),
+		failure:      runtimefailures.CloneEnvelope(req.failure),
 		deliveryCode: "dead_letter",
 	}
 	if err := s.updateAgentDeliveryRowTx(ctx, tx, eventID, agentID, state); err != nil {
@@ -292,7 +317,7 @@ func (s *PostgresStore) applyDeliveryBackedTerminalTransitionTx(
 		AgentID:    strings.TrimSpace(agentID),
 		Status:     runtimemanager.ReceiptStatusDeadLetter,
 		RetryCount: state.retryCount,
-		Error:      state.errorText,
+		Failure:    runtimefailures.CloneEnvelope(state.failure),
 	}, nil
 }
 
@@ -308,21 +333,25 @@ func (s *PostgresStore) updateAgentDeliveryRowTx(
 			status = $3,
 			retry_count = $4,
 			reason_code = NULLIF($5, ''),
-			last_error = NULLIF($6, ''),
+			failure = NULLIF($6, '')::jsonb,
 			active_session_id = NULL,
 			delivered_at = now()
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'agent'
 		  AND subscriber_id = $2
 	`
-	if _, err := tx.ExecContext(ctx, q, eventID, agentID, state.deliveryCode, state.retryCount, state.reasonCode, state.errorText); err != nil {
+	failureJSON, err := nullableFailureJSON(state.failure)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, q, eventID, agentID, state.deliveryCode, state.retryCount, state.reasonCode, failureJSON); err != nil {
 		return fmt.Errorf("sync event delivery: %w", err)
 	}
 	return nil
 }
 
 func (s *PostgresStore) upsertAgentReceiptRowTx(ctx context.Context, tx *sql.Tx, eventID, agentID string, state agentReceiptWriteState) error {
-	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount, state.errorText))
+	sideEffects, err := marshalAgentReceiptSideEffects(newAgentReceiptSideEffects(state.finalStatus, state.reasonCode, state.retryCount))
 	if err != nil {
 		return fmt.Errorf("marshal event receipt side effects: %w", err)
 	}
@@ -330,11 +359,11 @@ func (s *PostgresStore) upsertAgentReceiptRowTx(ctx context.Context, tx *sql.Tx,
 	const q = `
 		INSERT INTO event_receipts (
 			event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-			outcome, reason_code, side_effects, processed_at
+			outcome, reason_code, failure, side_effects, processed_at
 		)
 		SELECT
 			e.event_id, 'agent', $2, e.entity_id, e.flow_instance,
-			$3, NULLIF($4,''), $5::jsonb, now()
+			$3, NULLIF($4,''), NULLIF($5, '')::jsonb, $6::jsonb, now()
 		FROM events e
 		WHERE e.event_id = $1::uuid
 		ON CONFLICT (event_id, subscriber_type, subscriber_id) DO UPDATE SET
@@ -342,10 +371,15 @@ func (s *PostgresStore) upsertAgentReceiptRowTx(ctx context.Context, tx *sql.Tx,
 			flow_instance = EXCLUDED.flow_instance,
 			outcome = EXCLUDED.outcome,
 			reason_code = EXCLUDED.reason_code,
+			failure = EXCLUDED.failure,
 			side_effects = EXCLUDED.side_effects,
 			processed_at = now()
 	`
-	result, err := tx.ExecContext(ctx, q, eventID, agentID, outcome, state.reasonCode, string(sideEffects))
+	failureJSON, err := nullableFailureJSON(state.failure)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, q, eventID, agentID, outcome, state.reasonCode, failureJSON, string(sideEffects))
 	if err != nil {
 		return fmt.Errorf("upsert event receipt: %w", err)
 	}
@@ -362,7 +396,7 @@ func (s *PostgresStore) markEventDeliveryInProgressSpec(ctx context.Context, eve
 		SET
 			status = 'in_progress',
 			reason_code = 'agent_processing',
-			last_error = NULL,
+			failure = NULL,
 			active_session_id = COALESCE(NULLIF($3, '')::uuid, active_session_id),
 			started_at = COALESCE(started_at, now()),
 			delivered_at = NULL
@@ -539,7 +573,8 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		outcome      string
 		sideEffects  []byte
 		delivery     string
-		deliveryErr  string
+		receiptRaw   []byte
+		deliveryRaw  []byte
 		deliverySeen bool
 		retryCount   sql.NullInt64
 	)
@@ -547,8 +582,9 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		SELECT
 			r.outcome,
 			COALESCE(r.side_effects, '{}'::jsonb),
+			COALESCE(r.failure, 'null'::jsonb),
 			COALESCE(d.status, ''),
-			COALESCE(d.last_error, ''),
+			COALESCE(d.failure, 'null'::jsonb),
 			d.retry_count,
 			CASE WHEN d.delivery_id IS NULL THEN FALSE ELSE TRUE END
 		FROM event_receipts r
@@ -559,7 +595,7 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		WHERE r.event_id = $1::uuid
 		  AND r.subscriber_type = 'agent'
 		  AND r.subscriber_id = $2
-	`, eventID, agentID).Scan(&outcome, &sideEffects, &delivery, &deliveryErr, &retryCount, &deliverySeen); err != nil {
+	`, eventID, agentID).Scan(&outcome, &sideEffects, &receiptRaw, &delivery, &deliveryRaw, &retryCount, &deliverySeen); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimemanager.EventReceipt{}, false, nil
 		}
@@ -577,7 +613,13 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 		}
 		receipt.Status = payload.ManagerStatus
 		receipt.RetryCount = payload.RetryCount
-		receipt.Error = payload.Error
+	}
+	if string(receiptRaw) != "null" {
+		failure, err := runtimefailures.UnmarshalEnvelope(receiptRaw)
+		if err != nil {
+			return runtimemanager.EventReceipt{}, false, fmt.Errorf("decode event receipt failure: %w", err)
+		}
+		receipt.Failure = &failure
 	}
 	if deliverySeen {
 		mappedStatus, override, err := terminalManagerReceiptStatusFromDelivery(delivery)
@@ -589,8 +631,12 @@ func (s *PostgresStore) getEventReceiptSpec(ctx context.Context, eventID, agentI
 			if retryCount.Valid {
 				receipt.RetryCount = int(retryCount.Int64)
 			}
-			if strings.TrimSpace(deliveryErr) != "" {
-				receipt.Error = strings.TrimSpace(deliveryErr)
+			if string(deliveryRaw) != "null" {
+				failure, err := runtimefailures.UnmarshalEnvelope(deliveryRaw)
+				if err != nil {
+					return runtimemanager.EventReceipt{}, false, fmt.Errorf("decode event delivery failure: %w", err)
+				}
+				receipt.Failure = &failure
 			}
 		}
 	}
@@ -630,21 +676,24 @@ func terminalManagerReceiptStatusFromDelivery(status string) (runtimemanager.Rec
 	}
 }
 
-func managerReceiptReasonCode(status runtimemanager.ReceiptStatus, errText string) string {
-	if strings.TrimSpace(errText) != "" {
-		switch status {
-		case runtimemanager.ReceiptStatusDeadLetter:
-			return "retry_exhausted"
-		case runtimemanager.ReceiptStatusError:
-			return "handler_error"
-		default:
-			return "runtime_handled"
-		}
-	}
+func managerReceiptReasonCode(status runtimemanager.ReceiptStatus) string {
 	switch status {
 	case runtimemanager.ReceiptStatusDeadLetter:
 		return "retry_exhausted"
+	case runtimemanager.ReceiptStatusError:
+		return "handler_failure"
 	default:
 		return "agent_processed"
 	}
+}
+
+func nullableFailureJSON(failure *runtimefailures.Envelope) (string, error) {
+	if failure == nil {
+		return "", nil
+	}
+	raw, err := runtimefailures.MarshalEnvelope(*failure)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical failure: %w", err)
+	}
+	return string(raw), nil
 }

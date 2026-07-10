@@ -18,6 +18,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
@@ -113,13 +114,14 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := &store.PostgresStore{DB: db}
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 	probe := lifecycletest.New(t)
 	opts := runStartTestEventBusOptions(source)
 	opts.TestLifecycleProbe = probe
-	opts.Interceptors = []runtimebus.EventInterceptor{blockingAPIV1PublishInterceptor{release: release}}
+	opts.Interceptors = []runtimebus.EventInterceptor{blockingAPIV1PublishInterceptor{started: started, release: release}}
 	bus, err := runtimebus.NewEventBusWithOptions(pg, opts)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -135,10 +137,15 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	go func() {
 		respCh <- rpcCall(t, handler, body)
 	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("post-commit dispatch did not reach the blocking interceptor")
+	}
 	var published rpcResponse
 	select {
 	case published = <-respCh:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 		t.Fatal("event.publish did not return before post-commit dispatch completed")
 	}
 	if published.Error != nil {
@@ -475,9 +482,7 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 	logOutput := captureProcessLog(t, func() {
 		first = rpcCall(t, handler, body)
 	})
-	if first.Error == nil || !strings.Contains(fmt.Sprintf("%#v", first.Error.Data), "transient event readback failure") {
-		t.Fatalf("first event.publish error = %#v, want transient readback failure", first.Error)
-	}
+	requireRPCFailure(t, first.Error, runtimefailures.ClassInternalFailure, "unclassified_runtime_error")
 	if first.Error.Code != codeInternalError {
 		t.Fatalf("first event.publish code = %d, want %d", first.Error.Code, codeInternalError)
 	}
@@ -487,11 +492,15 @@ func TestOperatorEventPublishPersistsIdempotencyBeforeReadbackFailure(t *testing
 		`"method":"event.publish"`,
 		`"correlation_id":"publish"`,
 		`"event_name":"scan.requested"`,
-		"transient event readback failure",
+		"platform.internal_failure",
+		"unclassified_runtime_error",
 	} {
 		if !strings.Contains(logOutput, want) {
 			t.Fatalf("readback failure log = %q, want substring %q", logOutput, want)
 		}
+	}
+	if strings.Contains(logOutput, "transient event readback failure") {
+		t.Fatalf("readback failure log leaked raw error prose: %q", logOutput)
 	}
 	if count := countEventsByName(t, db, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count after readback failure = %d, want 1", count)
@@ -624,9 +633,9 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 		t.Fatalf("api_idempotency rows after post-commit completion failure = %d, want 1", count)
 	}
 	probe.RequirePostCommitDispatchCompleted(eventID)
-	outcome, errText := loadPipelineReceiptOutcomeAndError(t, ctx, db, eventID)
-	if outcome != "dead_letter" || !strings.Contains(errText, "simulated normal-run completion failure") {
-		t.Fatalf("pipeline receipt outcome=%q error=%q, want dead_letter with completion failure", outcome, errText)
+	outcome, failure := loadPipelineReceiptOutcomeAndFailure(t, ctx, db, eventID)
+	if outcome != "dead_letter" || failure == nil || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != "normal_run_completion_failed" {
+		t.Fatalf("pipeline receipt outcome=%q failure=%#v, want canonical completion failure", outcome, failure)
 	}
 	requireAPIV1RuntimeBusEvent(t, ch, "event delivery after post-commit completion failure")
 
@@ -1654,10 +1663,15 @@ func eventPublishTestHandlerWithStores(t *testing.T, runs RunReadStore, observab
 }
 
 type blockingAPIV1PublishInterceptor struct {
+	started chan<- struct{}
 	release <-chan struct{}
 }
 
 func (i blockingAPIV1PublishInterceptor) Intercept(_ context.Context, _ events.Event) (bool, []events.Event, error) {
+	select {
+	case i.started <- struct{}{}:
+	default:
+	}
 	<-i.release
 	return true, nil, nil
 }
@@ -1680,17 +1694,17 @@ type failStandalonePipelineReceiptOnceStore struct {
 	err error
 }
 
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, errText)
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return s.UpsertPipelineReceiptTx(ctx, nil, eventID, status, failure)
 }
 
-func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status, errText string) error {
+func (s *failStandalonePipelineReceiptOnceStore) UpsertPipelineReceiptTx(ctx context.Context, tx *sql.Tx, eventID, status string, failure *runtimefailures.Envelope) error {
 	if tx == nil && s.err != nil {
 		err := s.err
 		s.err = nil
 		return err
 	}
-	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, errText)
+	return s.PostgresStore.UpsertPipelineReceiptTx(ctx, tx, eventID, status, failure)
 }
 
 type failCommittedReplayScopeStore struct {
@@ -1752,8 +1766,8 @@ func (m *failCommittedReplayScopeMutation) UpsertCommittedReplayScope(ctx contex
 	return m.store.UpsertCommittedReplayScopeTx(ctx, m.tx, eventID, scope)
 }
 
-func (m *failCommittedReplayScopeMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status, errText string) error {
-	return m.store.UpsertPipelineReceiptTx(ctx, m.tx, eventID, status, errText)
+func (m *failCommittedReplayScopeMutation) UpsertPipelineReceipt(ctx context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
+	return m.store.UpsertPipelineReceiptTx(ctx, m.tx, eventID, status, failure)
 }
 
 func (m *failCommittedReplayScopeMutation) RecordDeadLetter(ctx context.Context, rec runtimedeadletters.Record) error {
@@ -2439,19 +2453,24 @@ func countSQLiteAPIIdempotencyRows(t *testing.T, db *sql.DB) int {
 	return count
 }
 
-func loadPipelineReceiptOutcomeAndError(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, string) {
+func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, *runtimefailures.Envelope) {
 	t.Helper()
-	var outcome, errText string
+	var outcome string
+	var raw []byte
 	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, COALESCE(side_effects->>'error', '')
+		SELECT outcome, failure
 		FROM event_receipts
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'platform'
 		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &errText); err != nil {
+	`, eventID).Scan(&outcome, &raw); err != nil {
 		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
 	}
-	return outcome, errText
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode pipeline receipt failure for %s: %v", eventID, err)
+	}
+	return outcome, &failure
 }
 
 func containsMissingPipelineReceiptEvent(items []events.PersistedReplayEvent, eventID string) bool {

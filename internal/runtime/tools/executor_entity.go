@@ -9,6 +9,7 @@ import (
 
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -32,14 +33,14 @@ var entityStateTopLevelFields = map[string]struct{}{
 func (e *Executor) entityToolDependencies(input any) (EntityPersistence, semanticview.Source, map[string]any, error) {
 	store, err := e.entityStoreDependency()
 	if err != nil {
-		return nil, nil, nil, NewRuntimeError("dependency_unavailable", "tool-executor", "entity_tool.store", true, "entity persistence store is not configured")
+		return nil, nil, nil, failures.NewDetail("dependency_unavailable", "tool-executor", "entity_tool.store", map[string]any{"dependency": "entity_persistence"})
 	}
 	e.mu.RLock()
 	source := e.workflowSource
 	e.mu.RUnlock()
 	payload := map[string]any{}
 	if err := decodeToolInput(input, &payload); err != nil {
-		return nil, nil, nil, WrapRuntimeError("invalid_tool_input", "tool-executor", "entity_tool.decode", false, err, "decode entity tool input")
+		return nil, nil, nil, failures.WrapDetail("invalid_tool_input", "tool-executor", "entity_tool.decode", nil, err)
 	}
 	if payload == nil {
 		payload = map[string]any{}

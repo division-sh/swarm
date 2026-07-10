@@ -160,8 +160,8 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 	if rateLimitAttempt.Status != runtimepipeline.ActivityAttemptStatusFailed {
 		t.Fatalf("%s 429 activity attempt status = %q, want failed", backend.name, rateLimitAttempt.Status)
 	}
-	if !strings.Contains(rateLimitAttempt.Error, "TooManyRequests") || !strings.Contains(rateLimitAttempt.Error, "429") {
-		t.Fatalf("%s 429 attempt error = %q, want Graph TooManyRequests fixture shape", backend.name, rateLimitAttempt.Error)
+	if rateLimitAttempt.Failure == nil || rateLimitAttempt.Failure.Detail.Code != "provider_http_status" || fmt.Sprint(rateLimitAttempt.Failure.Detail.Attributes["status"]) != "429" {
+		t.Fatalf("%s 429 attempt failure = %#v, want provider_http_status/429", backend.name, rateLimitAttempt.Failure)
 	}
 	requireSlackManagedConnectorResultEventEventually(t, backend, rateLimitAttempt.ResultEventID, rateLimitAttempt.ResultEventType)
 	waitForMicrosoftGraphFailureEventsForSource(t, backend, rateLimitInboundEventID, 1, "429")

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/core/ownership"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimereplayclaim "github.com/division-sh/swarm/internal/runtime/replayclaim"
 )
 
@@ -18,7 +19,7 @@ type sweeperTestStore struct {
 	deliveries  map[string][]string
 	scopes      map[string]runtimereplayclaim.CommittedReplayScope
 	receipts    map[string]string
-	receiptErrs map[string]string
+	receiptErrs map[string]*runtimefailures.Envelope
 	claimMu     sync.Mutex
 	claimed     map[string]bool
 	releaseGate chan struct{}
@@ -34,15 +35,15 @@ func (s *sweeperTestStore) AppendEvent(context.Context, events.Event) error { re
 func (s *sweeperTestStore) InsertEventDeliveries(context.Context, string, []string) error {
 	return nil
 }
-func (s *sweeperTestStore) UpsertPipelineReceipt(_ context.Context, eventID, status, errText string) error {
+func (s *sweeperTestStore) UpsertPipelineReceipt(_ context.Context, eventID, status string, failure *runtimefailures.Envelope) error {
 	if s.receipts == nil {
 		s.receipts = map[string]string{}
 	}
 	if s.receiptErrs == nil {
-		s.receiptErrs = map[string]string{}
+		s.receiptErrs = map[string]*runtimefailures.Envelope{}
 	}
 	s.receipts[eventID] = status
-	s.receiptErrs[eventID] = errText
+	s.receiptErrs[eventID] = runtimefailures.CloneEnvelope(failure)
 	return nil
 }
 func (s *sweeperTestStore) ListEventsMissingPipelineReceipt(context.Context, time.Time, int) ([]events.PersistedReplayEvent, error) {
@@ -352,13 +353,20 @@ func TestSweepUndispatched_DirectEmptyManifestDoesNotBroadenToCurrentInternalSub
 }
 
 func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
+	replayFailure := runtimefailures.Normalize(runtimefailures.New(
+		runtimefailures.ClassSchemaInvalid,
+		"replay_row_invalid",
+		"sweeper-test",
+		"decode_replay_row",
+		nil,
+	), "sweeper-test", "decode_replay_row")
 	store := &sweeperTestStore{
 		events: []events.PersistedReplayEvent{
 			{
 				Event: eventtest.RootIngress("evt-bad",
 					events.EventType("custom.bad"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC()),
 
-				ReplayError: "missing canonical run_id",
+				ReplayFailure: &replayFailure,
 			},
 			{
 				Event: eventtest.RootIngress(
@@ -394,8 +402,8 @@ func TestSweepUndispatched_SkipsMalformedReplayRowsAndContinues(t *testing.T) {
 	if got := store.receipts["evt-bad"]; got != "error" {
 		t.Fatalf("bad receipt status = %q, want error", got)
 	}
-	if got := store.receiptErrs["evt-bad"]; got != "missing canonical run_id" {
-		t.Fatalf("bad receipt error = %q, want missing canonical run_id", got)
+	if got := store.receiptErrs["evt-bad"]; got == nil || got.Detail.Code != "replay_row_invalid" {
+		t.Fatalf("bad receipt failure = %#v, want replay_row_invalid", got)
 	}
 	if got := store.receipts["evt-good"]; got != "processed" {
 		t.Fatalf("good receipt status = %q, want processed", got)
@@ -440,8 +448,8 @@ func TestSweepUndispatched_TerminallyMarksMissingCommittedReplayScopeAndContinue
 	if got := store.receipts["evt-markerless"]; got != "error" {
 		t.Fatalf("markerless receipt status = %q, want error", got)
 	}
-	if got := store.receiptErrs["evt-markerless"]; got != runtimereplayclaim.ErrMissingCommittedReplayScope.Error() {
-		t.Fatalf("markerless receipt error = %q, want missing committed replay scope", got)
+	if got := store.receiptErrs["evt-markerless"]; got == nil || got.Detail.Code != "committed_replay_scope_missing" {
+		t.Fatalf("markerless receipt failure = %#v, want committed_replay_scope_missing", got)
 	}
 	if got := store.receipts["evt-good-after-markerless"]; got != "processed" {
 		t.Fatalf("good receipt status = %q, want processed", got)

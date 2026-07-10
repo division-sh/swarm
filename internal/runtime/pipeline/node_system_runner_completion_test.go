@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -199,13 +200,13 @@ func TestSystemNodeRunner_TargetSetSameNodeFailureKeepsSiblingPending(t *testing
 	}, func(context.Context, events.Event) error {
 		attempts++
 		if attempts == 1 {
-			return errors.New("temporary target failure")
+			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "temporary_target_failure", "pipeline-test", "handle", nil)
 		}
 		return nil
 	}, func(context.Context) (bool, error) { return true, nil })
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration {
 		targetOneDelivery := loadSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
-		if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_error" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
+		if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_failure" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.Failure == nil {
 			t.Fatalf("target one retry delivery = %+v, want failed/handler_error retry=1 with error", targetOneDelivery)
 		}
 		if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
@@ -247,7 +248,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 	failingRunner := newSystemNodeRunner("task-handler", &systemNodeCompletionBus{}, db, func() []events.EventType {
 		return []events.EventType{"worker/work.assign"}
 	}, func(context.Context, events.Event) error {
-		return errors.New("permanent target failure")
+		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "permanent_target_failure", "pipeline-test", "handle", nil)
 	}, func(context.Context) (bool, error) { return true, nil })
 	failingRunner.SetRetryPolicyForTest(1, func(int) time.Duration { return 0 })
 
@@ -259,7 +260,7 @@ func TestSystemNodeRunner_TargetSetSameNodeDeadLetterKeepsSiblingExecutable(t *t
 	failingRunner.ProcessEventForTest(ctx, eventForTarget(targetOne))
 
 	targetOneDelivery := loadSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
-	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "retry_exhausted" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
+	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "handler_terminal_failure" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.Failure == nil {
 		t.Fatalf("target one dead-letter delivery = %+v, want dead_letter/retry_exhausted retry=1 with error", targetOneDelivery)
 	}
 	if got := loadSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
@@ -307,23 +308,24 @@ func TestSQLiteSystemNodeTargetSetSameNodeTransitionsAreTargetScoped(t *testing.
 		t.Fatalf("target two sqlite status after target one in-progress = %q, want pending", got)
 	}
 
-	if err := store.MarkSystemNodeDeliveryFailedForTarget(ctx, "task-handler", eventID, targetOne, "handler_error", "temporary target failure", 1, DefaultSystemNodeRetryLimit); err != nil {
+	failure := testPipelineFailure(runtimefailures.ClassConnectorFailure, "temporary_target_failure")
+	if err := store.MarkSystemNodeDeliveryFailedForTarget(ctx, "task-handler", eventID, targetOne, "handler_error", failure, 1, DefaultSystemNodeRetryLimit); err != nil {
 		t.Fatalf("MarkSystemNodeDeliveryFailedForTarget target one: %v", err)
 	}
 	targetOneDelivery := loadSQLiteSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
-	if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_error" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.LastError == "" {
+	if targetOneDelivery.Status != "failed" || targetOneDelivery.Reason != "handler_error" || targetOneDelivery.RetryCount != 1 || targetOneDelivery.Failure == nil {
 		t.Fatalf("target one sqlite failed delivery = %+v, want failed/handler_error retry=1 with error", targetOneDelivery)
 	}
 	if got := loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t, db, eventID, "task-handler", targetTwo); got != "pending" {
 		t.Fatalf("target two sqlite status after target one failed = %q, want pending", got)
 	}
 
-	sideEffects := systemNodeDeadLetterReceiptSideEffects("task-handler", eventID, "retry_exhausted", "temporary target failure", DefaultSystemNodeRetryLimit, targetOne)
-	if err := store.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, "task-handler", eventID, targetOne, "retry_exhausted", "temporary target failure", DefaultSystemNodeRetryLimit, sideEffects); err != nil {
+	sideEffects := systemNodeDeadLetterReceiptSideEffects("task-handler", eventID, "retry_exhausted", DefaultSystemNodeRetryLimit, targetOne)
+	if err := store.MarkSystemNodeDeliveryDeadLetterForTarget(ctx, "task-handler", eventID, targetOne, "retry_exhausted", failure, DefaultSystemNodeRetryLimit, sideEffects); err != nil {
 		t.Fatalf("MarkSystemNodeDeliveryDeadLetterForTarget target one: %v", err)
 	}
 	targetOneDelivery = loadSQLiteSystemNodeCompletionTargetDelivery(t, db, eventID, "task-handler", targetOne)
-	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "retry_exhausted" || targetOneDelivery.RetryCount != DefaultSystemNodeRetryLimit || targetOneDelivery.LastError == "" {
+	if targetOneDelivery.Status != "dead_letter" || targetOneDelivery.Reason != "retry_exhausted" || targetOneDelivery.RetryCount != DefaultSystemNodeRetryLimit || targetOneDelivery.Failure == nil {
 		t.Fatalf("target one sqlite dead-letter delivery = %+v, want dead_letter/retry_exhausted retry=%d with error", targetOneDelivery, DefaultSystemNodeRetryLimit)
 	}
 	targetTwoProcessed, err := store.SystemNodeProcessedForTarget(ctx, "task-handler", eventID, targetTwo)
@@ -453,28 +455,28 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 	bus := &systemNodeCompletionBus{}
 	attempts := 0
 	var (
-		backoffStatus string
-		backoffReason string
-		backoffError  string
-		backoffRetry  int
+		backoffStatus     string
+		backoffReason     string
+		backoffFailureRaw []byte
+		backoffRetry      int
 	)
 	runner := newSystemNodeRunner("terminal-node", bus, db, func() []events.EventType {
 		return []events.EventType{"example.started"}
 	}, func(context.Context, events.Event) error {
 		attempts++
 		if attempts == 1 {
-			return errors.New("temporary node failure")
+			return runtimefailures.New(runtimefailures.ClassConnectorFailure, "temporary_node_failure", "pipeline-test", "handle", nil)
 		}
 		return nil
 	}, func(context.Context) (bool, error) { return true, nil })
 	runner.SetRetryPolicyForTest(2, func(int) time.Duration {
 		if err := db.QueryRowContext(ctx, `
-			SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(last_error, ''), COALESCE(retry_count, 0)
+			SELECT COALESCE(status, ''), COALESCE(reason_code, ''), failure, COALESCE(retry_count, 0)
 			FROM event_deliveries
 			WHERE event_id = $1::uuid
 			  AND subscriber_type = 'node'
 			  AND subscriber_id = 'terminal-node'
-		`, eventID).Scan(&backoffStatus, &backoffReason, &backoffError, &backoffRetry); err != nil {
+		`, eventID).Scan(&backoffStatus, &backoffReason, &backoffFailureRaw, &backoffRetry); err != nil {
 			t.Fatalf("load node delivery during retry backoff: %v", err)
 		}
 		return 0
@@ -496,8 +498,9 @@ func TestSystemNodeRunner_RetryableFailureWritesFailedBeforeRetry(t *testing.T) 
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
 	}
-	if backoffStatus != "failed" || backoffReason != "handler_error" || backoffRetry != 1 || backoffError == "" {
-		t.Fatalf("retry backoff delivery = %s/%s retry=%d err=%q, want failed/handler_error retry=1 with error", backoffStatus, backoffReason, backoffRetry, backoffError)
+	backoffFailure := decodeTestPipelineFailure(t, backoffFailureRaw)
+	if backoffStatus != "failed" || backoffReason != "handler_failure" || backoffRetry != 1 || backoffFailure == nil || backoffFailure.Detail.Code != "temporary_node_failure" {
+		t.Fatalf("retry backoff delivery = %s/%s retry=%d failure=%#v, want failed/handler_failure retry=1 with failure", backoffStatus, backoffReason, backoffRetry, backoffFailure)
 	}
 	var finalStatus string
 	if err := db.QueryRowContext(ctx, `
@@ -527,7 +530,7 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 		return []events.EventType{"example.started"}
 	}, func(context.Context, events.Event) error {
 		attempts++
-		return errors.New("temporary node failure")
+		return runtimefailures.New(runtimefailures.ClassConnectorFailure, "temporary_node_failure", "pipeline-test", "handle", nil)
 	}, func(context.Context) (bool, error) { return true, nil })
 	runner.SetRetryPolicyForTest(DefaultSystemNodeRetryLimit, func(int) time.Duration { return 0 })
 
@@ -548,13 +551,14 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 		t.Fatalf("attempts = %d, want configured retry limit %d", attempts, DefaultSystemNodeRetryLimit)
 	}
 	var (
-		deliveryStatus string
-		deliveryReason string
-		deliveryRetry  int
-		receiptOutcome string
+		deliveryStatus     string
+		deliveryReason     string
+		deliveryRetry      int
+		deliveryFailureRaw []byte
+		receiptOutcome     string
 	)
 	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.retry_count, 0), COALESCE(r.outcome, '')
+		SELECT COALESCE(d.status, ''), COALESCE(d.reason_code, ''), COALESCE(d.retry_count, 0), d.failure, COALESCE(r.outcome, '')
 		FROM event_deliveries d
 		LEFT JOIN event_receipts r
 		  ON r.event_id = d.event_id
@@ -563,11 +567,12 @@ func TestSystemNodeRunner_RetryableFailureExhaustsConfiguredRetryLimit(t *testin
 		WHERE d.event_id = $1::uuid
 		  AND d.subscriber_type = 'node'
 		  AND d.subscriber_id = 'terminal-node'
-	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryRetry, &receiptOutcome); err != nil {
+	`, eventID).Scan(&deliveryStatus, &deliveryReason, &deliveryRetry, &deliveryFailureRaw, &receiptOutcome); err != nil {
 		t.Fatalf("load exhausted node delivery: %v", err)
 	}
-	if deliveryStatus != "dead_letter" || deliveryReason != "retry_exhausted" || deliveryRetry != DefaultSystemNodeRetryLimit || receiptOutcome != "dead_letter" {
-		t.Fatalf("exhausted node delivery = %s/%s retry=%d receipt=%q, want dead_letter/retry_exhausted retry=%d receipt dead_letter", deliveryStatus, deliveryReason, deliveryRetry, receiptOutcome, DefaultSystemNodeRetryLimit)
+	deliveryFailure := decodeTestPipelineFailure(t, deliveryFailureRaw)
+	if deliveryStatus != "dead_letter" || deliveryReason != "handler_terminal_failure" || deliveryRetry != DefaultSystemNodeRetryLimit || deliveryFailure.Detail.Code != "delivery_retry_exhausted" || receiptOutcome != "dead_letter" {
+		t.Fatalf("exhausted node delivery = %s/%s retry=%d failure=%#v receipt=%q, want terminal delivery with retry_exhausted failure", deliveryStatus, deliveryReason, deliveryRetry, deliveryFailure, receiptOutcome)
 	}
 }
 
@@ -741,7 +746,7 @@ type systemNodeCompletionTargetDelivery struct {
 	Status     string
 	Reason     string
 	RetryCount int
-	LastError  string
+	Failure    *runtimefailures.Envelope
 }
 
 func seedSystemNodeCompletionRun(t *testing.T, db *sql.DB, runID, eventID, entityID string, nodeIDs ...string) {
@@ -819,16 +824,18 @@ func loadSystemNodeCompletionTargetDeliveryStatus(t *testing.T, db *sql.DB, even
 func loadSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) systemNodeCompletionTargetDelivery {
 	t.Helper()
 	var delivery systemNodeCompletionTargetDelivery
+	var failureRaw []byte
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), COALESCE(last_error, '')
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), failure
 		FROM event_deliveries
 		WHERE event_id = $1::uuid
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = $2
 		  AND delivery_target_route = $3::jsonb
-	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&delivery.Status, &delivery.Reason, &delivery.RetryCount, &delivery.LastError); err != nil {
+	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&delivery.Status, &delivery.Reason, &delivery.RetryCount, &failureRaw); err != nil {
 		t.Fatalf("load targeted node delivery: %v", err)
 	}
+	delivery.Failure = decodeTestPipelineFailure(t, failureRaw)
 	return delivery
 }
 
@@ -840,17 +847,31 @@ func loadSQLiteSystemNodeCompletionTargetDeliveryStatus(t *testing.T, db *sql.DB
 func loadSQLiteSystemNodeCompletionTargetDelivery(t *testing.T, db *sql.DB, eventID, nodeID string, target events.RouteIdentity) systemNodeCompletionTargetDelivery {
 	t.Helper()
 	var delivery systemNodeCompletionTargetDelivery
+	var failureRaw []byte
 	if err := db.QueryRowContext(context.Background(), `
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), COALESCE(last_error, '')
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), COALESCE(retry_count, 0), failure
 		FROM event_deliveries
 		WHERE event_id = ?
 		  AND subscriber_type = 'node'
 		  AND subscriber_id = ?
 		  AND COALESCE(delivery_target_route, '{}') = ?
-	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&delivery.Status, &delivery.Reason, &delivery.RetryCount, &delivery.LastError); err != nil {
+	`, eventID, nodeID, systemNodeRouteIdentityJSON(target)).Scan(&delivery.Status, &delivery.Reason, &delivery.RetryCount, &failureRaw); err != nil {
 		t.Fatalf("load sqlite targeted node delivery: %v", err)
 	}
+	delivery.Failure = decodeTestPipelineFailure(t, failureRaw)
 	return delivery
+}
+
+func decodeTestPipelineFailure(t testing.TB, raw []byte) *runtimefailures.Envelope {
+	t.Helper()
+	if len(raw) == 0 {
+		return nil
+	}
+	failure, err := runtimefailures.UnmarshalEnvelope(raw)
+	if err != nil {
+		t.Fatalf("decode pipeline failure: %v", err)
+	}
+	return &failure
 }
 
 func seedSystemNodeCompletionEventWithoutDelivery(t *testing.T, db *sql.DB, runID, eventID, entityID string) {

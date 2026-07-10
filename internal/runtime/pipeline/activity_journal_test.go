@@ -57,7 +57,7 @@ func TestActivityAttemptJournalSQLiteAndPostgres(t *testing.T) {
 			}
 
 			payload := activitySuccessPayload(intent, map[string]any{"ok": true})
-			terminal := started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, "")
+			terminal := started.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, payload, nil)
 			completed, err := journal.CompleteActivityAttempt(ctx, terminal)
 			if err != nil {
 				t.Fatalf("CompleteActivityAttempt: %v", err)

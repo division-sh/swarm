@@ -20,9 +20,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
-	"github.com/division-sh/swarm/internal/runtime/rterrors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"gopkg.in/yaml.v3"
 )
@@ -2705,8 +2705,8 @@ func TestExecutor_ActivityIntentPersistsBeforePostCommitDispatch(t *testing.T) {
 	if intent.SuccessEvent != "research.scanner_source_requested_source_scrape.succeeded" {
 		t.Fatalf("success event = %q", intent.SuccessEvent)
 	}
-	if result.FailureClass != FailureNone {
-		t.Fatalf("FailureClass = %q", result.FailureClass)
+	if result.Failure != nil || result.FailureDisposition != FailureDispositionNone {
+		t.Fatalf("failure = %#v disposition=%q", result.Failure, result.FailureDisposition)
 	}
 }
 
@@ -4093,15 +4093,15 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	if !errors.Is(err, ErrFanOutBoundExceeded) {
 		t.Fatalf("Execute error = %v, want ErrFanOutBoundExceeded", err)
 	}
-	runtimeErr, ok := rterrors.AsRuntimeError(err)
+	runtimeErr, ok := failures.As(err)
 	if !ok {
-		t.Fatalf("Execute error = %T %v, want RuntimeError", err, err)
+		t.Fatalf("Execute error = %T %v, want canonical failure", err, err)
 	}
-	if runtimeErr.Code != runtimecontracts.FanOutBoundExceededCode || runtimeErr.Retryable {
-		t.Fatalf("runtime error = %#v, want non-retryable %s", runtimeErr, runtimecontracts.FanOutBoundExceededCode)
+	if runtimeErr.Failure.Class != failures.ClassFanOutBoundExceeded || runtimeErr.Failure.Retryable {
+		t.Fatalf("runtime error = %#v, want non-retryable %s", runtimeErr, failures.ClassFanOutBoundExceeded)
 	}
-	if got := ClassifyFailure(err); got != FailureLogic {
-		t.Fatalf("ClassifyFailure = %v, want FailureLogic", got)
+	if got := FailureDispositionFor(err); got != FailureDispositionTerminal {
+		t.Fatalf("FailureDispositionFor = %v, want terminal", got)
 	}
 }
 
@@ -6026,8 +6026,8 @@ func TestExecutor_ActionRegistryEmitContractViolationRejectsHandler(t *testing.T
 	if result.Status != OutcomeRejected {
 		t.Fatalf("Status = %q, want %q", result.Status, OutcomeRejected)
 	}
-	if result.FailureClass != FailureLogic {
-		t.Fatalf("FailureClass = %q, want %q", result.FailureClass, FailureLogic)
+	if result.Failure == nil || result.Failure.Class != failures.ClassSchemaInvalid || result.FailureDisposition != FailureDispositionTerminal {
+		t.Fatalf("failure = %#v disposition=%q", result.Failure, result.FailureDisposition)
 	}
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("EmitIntents = %#v, want none", result.EmitIntents)

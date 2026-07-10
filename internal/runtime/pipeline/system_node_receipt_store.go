@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/google/uuid"
 )
@@ -280,7 +281,7 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryInProgressForTarget(ctx co
 	return markPostgresSystemNodeDeliveryInProgressForTarget(ctx, s.db, nodeID, eventID, target, retryLimit)
 }
 
-func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
 	nodeID = strings.TrimSpace(nodeID)
 	eventID = strings.TrimSpace(eventID)
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
@@ -288,15 +289,15 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailed(ctx context.Context
 		return nil
 	}
 	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryFailed(ctx, nodeID, eventID, reasonCode, errText, retryCount, retryLimit)
+		return s.markSQLiteSystemNodeDeliveryFailed(ctx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
 	}
-	return markPostgresSystemNodeDeliveryFailed(ctx, s.db, nodeID, eventID, reasonCode, errText, retryCount, retryLimit)
+	return markPostgresSystemNodeDeliveryFailed(ctx, s.db, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
 }
 
-func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode, errText string, retryCount, retryLimit int) error {
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
 	target = target.Normalized()
 	if target.Empty() {
-		return s.MarkSystemNodeDeliveryFailed(ctx, nodeID, eventID, reasonCode, errText, retryCount, retryLimit)
+		return s.MarkSystemNodeDeliveryFailed(ctx, nodeID, eventID, reasonCode, failure, retryCount, retryLimit)
 	}
 	nodeID = strings.TrimSpace(nodeID)
 	eventID = strings.TrimSpace(eventID)
@@ -305,27 +306,27 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryFailedForTarget(ctx contex
 		return nil
 	}
 	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryFailedForTarget(ctx, nodeID, eventID, target, reasonCode, errText, retryCount, retryLimit)
+		return s.markSQLiteSystemNodeDeliveryFailedForTarget(ctx, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
 	}
-	return markPostgresSystemNodeDeliveryFailedForTarget(ctx, s.db, nodeID, eventID, target, reasonCode, errText, retryCount, retryLimit)
+	return markPostgresSystemNodeDeliveryFailedForTarget(ctx, s.db, nodeID, eventID, target, reasonCode, failure, retryCount, retryLimit)
 }
 
-func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
 	nodeID = strings.TrimSpace(nodeID)
 	eventID = strings.TrimSpace(eventID)
 	if s == nil || s.db == nil || nodeID == "" || eventID == "" {
 		return nil
 	}
 	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+		return s.markSQLiteSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
 	}
-	return markPostgresSystemNodeDeliveryDeadLetter(ctx, s.db, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+	return markPostgresSystemNodeDeliveryDeadLetter(ctx, s.db, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
 }
 
-func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode, errText string, retryCount int, sideEffects string) error {
+func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
 	target = target.Normalized()
 	if target.Empty() {
-		return s.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, errText, retryCount, sideEffects)
+		return s.MarkSystemNodeDeliveryDeadLetter(ctx, nodeID, eventID, reasonCode, failure, retryCount, sideEffects)
 	}
 	nodeID = strings.TrimSpace(nodeID)
 	eventID = strings.TrimSpace(eventID)
@@ -333,9 +334,9 @@ func (s *WorkflowInstanceStore) MarkSystemNodeDeliveryDeadLetterForTarget(ctx co
 		return nil
 	}
 	if s.isSQLite() {
-		return s.markSQLiteSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, errText, retryCount, sideEffects)
+		return s.markSQLiteSystemNodeDeliveryDeadLetterForTarget(ctx, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
 	}
-	return markPostgresSystemNodeDeliveryDeadLetterForTarget(ctx, s.db, nodeID, eventID, target, reasonCode, errText, retryCount, sideEffects)
+	return markPostgresSystemNodeDeliveryDeadLetterForTarget(ctx, s.db, nodeID, eventID, target, reasonCode, failure, retryCount, sideEffects)
 }
 
 func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(ctx context.Context, nodeID, eventID, sideEffects string) error {
@@ -379,7 +380,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDelivery(c
 			SET status = 'delivered',
 			    retry_count = COALESCE(retry_count, 0),
 			    reason_code = 'node_processed',
-			    last_error = NULL,
+			    failure = NULL,
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
@@ -446,7 +447,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeProcessedAndSettleDeliveryFo
 			SET status = 'delivered',
 			    retry_count = COALESCE(retry_count, 0),
 			    reason_code = 'node_processed',
-			    last_error = NULL,
+			    failure = NULL,
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
@@ -484,7 +485,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgress(ctx conte
 			UPDATE event_deliveries
 			SET status = 'in_progress',
 			    reason_code = 'node_processing',
-			    last_error = NULL,
+			    failure = NULL,
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, ?),
 			    delivered_at = NULL
@@ -524,7 +525,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgressForTarget(
 			UPDATE event_deliveries
 			SET status = 'in_progress',
 			    reason_code = 'node_processing',
-			    last_error = NULL,
+			    failure = NULL,
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, ?),
 			    delivered_at = NULL
@@ -547,8 +548,12 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryInProgressForTarget(
 	})
 }
 
-func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount, retryLimit int) error {
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	failureJSON, err := pipelineFailureJSON(failure)
+	if err != nil {
+		return err
+	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		authorized, err := sqliteSystemNodeDeliveryAuthorizedTx(txctx, tx, nodeID, eventID, retryLimit)
 		if err != nil {
@@ -563,7 +568,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.C
 			SET status = 'failed',
 			    retry_count = ?,
 			    reason_code = NULLIF(?, ''),
-			    last_error = NULLIF(?, ''),
+			    failure = NULLIF(?, ''),
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
@@ -573,7 +578,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.C
 				  AND COALESCE(delivery_target_route, '{}') = '{}'
 				  AND status IN ('pending', 'in_progress', 'failed')
 				  AND COALESCE(retry_count, 0) < ?
-		`, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_error"), strings.TrimSpace(errText), now, eventID, nodeID, retryLimit)
+		`, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_failure"), failureJSON, now, eventID, nodeID, retryLimit)
 		if err != nil {
 			return fmt.Errorf("mark sqlite system node delivery failed: %w", err)
 		}
@@ -584,8 +589,12 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailed(ctx context.C
 	})
 }
 
-func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode, errText string, retryCount, retryLimit int) error {
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailedForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount, retryLimit int) error {
 	retryLimit = normalizeSystemNodeRetryLimit(retryLimit)
+	failureJSON, err := pipelineFailureJSON(failure)
+	if err != nil {
+		return err
+	}
 	target = target.Normalized()
 	targetJSON := systemNodeRouteIdentityJSON(target)
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -602,7 +611,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailedForTarget(ctx 
 			SET status = 'failed',
 			    retry_count = ?,
 			    reason_code = NULLIF(?, ''),
-			    last_error = NULLIF(?, ''),
+			    failure = NULLIF(?, ''),
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
@@ -612,7 +621,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailedForTarget(ctx 
 			  AND COALESCE(delivery_target_route, '{}') = ?
 			  AND status IN ('pending', 'in_progress', 'failed')
 			  AND COALESCE(retry_count, 0) < ?
-		`, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_error"), strings.TrimSpace(errText), now, eventID, nodeID, targetJSON, retryLimit)
+		`, sanitizedSystemNodeRetryCount(retryCount), sanitizeSystemNodeReasonCode(reasonCode, "handler_failure"), failureJSON, now, eventID, nodeID, targetJSON, retryLimit)
 		if err != nil {
 			return fmt.Errorf("mark sqlite targeted system node delivery failed: %w", err)
 		}
@@ -623,7 +632,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryFailedForTarget(ctx 
 	})
 }
 
-func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode, errText string, retryCount int, sideEffects string) error {
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx context.Context, nodeID, eventID, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
+	failureJSON, err := pipelineFailureJSON(failure)
+	if err != nil {
+		return err
+	}
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		exists, err := sqliteSystemNodeDeliveryRowExistsTx(txctx, tx, nodeID, eventID)
 		if err != nil {
@@ -634,13 +647,12 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx conte
 		}
 		now := time.Now().UTC()
 		reasonCode = sanitizeSystemNodeReasonCode(reasonCode, "retry_exhausted")
-		errText = strings.TrimSpace(errText)
 		res, err := tx.ExecContext(txctx, `
 			UPDATE event_deliveries
 			SET status = 'dead_letter',
 			    retry_count = ?,
 			    reason_code = NULLIF(?, ''),
-			    last_error = NULLIF(?, ''),
+			    failure = NULLIF(?, ''),
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
@@ -649,7 +661,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx conte
 				  AND subscriber_id = ?
 				  AND COALESCE(delivery_target_route, '{}') = '{}'
 				  AND status IN ('pending', 'in_progress', 'failed')
-		`, sanitizedSystemNodeRetryCount(retryCount), reasonCode, errText, now, eventID, nodeID)
+		`, sanitizedSystemNodeRetryCount(retryCount), reasonCode, failureJSON, now, eventID, nodeID)
 		if err != nil {
 			return fmt.Errorf("dead-letter sqlite system node delivery: %w", err)
 		}
@@ -659,11 +671,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx conte
 		res, err = tx.ExecContext(txctx, `
 			INSERT INTO event_receipts (
 				receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-				outcome, reason_code, side_effects, idempotency_key, processed_at
+				outcome, reason_code, failure, side_effects, idempotency_key, processed_at
 			)
 			SELECT
 				?, e.event_id, 'node', ?, e.entity_id, e.flow_instance,
-				'dead_letter', NULLIF(?, ''), ?, ?, ?
+				'dead_letter', NULLIF(?, ''), ?, ?, ?, ?
 			FROM events e
 			WHERE e.event_id = ?
 			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
@@ -671,10 +683,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx conte
 				flow_instance = excluded.flow_instance,
 				outcome = excluded.outcome,
 				reason_code = excluded.reason_code,
+				failure = excluded.failure,
 				side_effects = excluded.side_effects,
 				idempotency_key = excluded.idempotency_key,
 				processed_at = excluded.processed_at
-		`, uuid.NewString(), nodeID, reasonCode, sqliteNodeJSON(sideEffects), SystemNodeReceiptIdempotencyKey(nodeID, eventID), now, eventID)
+		`, uuid.NewString(), nodeID, reasonCode, failureJSON, sqliteNodeJSON(sideEffects), SystemNodeReceiptIdempotencyKey(nodeID, eventID), now, eventID)
 		if err != nil {
 			return fmt.Errorf("upsert sqlite system node dead-letter receipt: %w", err)
 		}
@@ -685,7 +698,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetter(ctx conte
 	})
 }
 
-func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode, errText string, retryCount int, sideEffects string) error {
+func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetterForTarget(ctx context.Context, nodeID, eventID string, target events.RouteIdentity, reasonCode string, failure *runtimefailures.Envelope, retryCount int, sideEffects string) error {
+	failureJSON, err := pipelineFailureJSON(failure)
+	if err != nil {
+		return err
+	}
 	target = target.Normalized()
 	targetJSON := systemNodeRouteIdentityJSON(target)
 	return s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -698,13 +715,12 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetterForTarget(
 		}
 		now := time.Now().UTC()
 		reasonCode = sanitizeSystemNodeReasonCode(reasonCode, "retry_exhausted")
-		errText = strings.TrimSpace(errText)
 		res, err := tx.ExecContext(txctx, `
 			UPDATE event_deliveries
 			SET status = 'dead_letter',
 			    retry_count = ?,
 			    reason_code = NULLIF(?, ''),
-			    last_error = NULLIF(?, ''),
+			    failure = NULLIF(?, ''),
 			    active_session_id = NULL,
 			    started_at = COALESCE(started_at, created_at),
 			    delivered_at = ?
@@ -713,7 +729,7 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetterForTarget(
 			  AND subscriber_id = ?
 			  AND COALESCE(delivery_target_route, '{}') = ?
 			  AND status IN ('pending', 'in_progress', 'failed')
-		`, sanitizedSystemNodeRetryCount(retryCount), reasonCode, errText, now, eventID, nodeID, targetJSON)
+		`, sanitizedSystemNodeRetryCount(retryCount), reasonCode, failureJSON, now, eventID, nodeID, targetJSON)
 		if err != nil {
 			return fmt.Errorf("dead-letter sqlite targeted system node delivery: %w", err)
 		}
@@ -724,11 +740,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetterForTarget(
 		res, err = tx.ExecContext(txctx, `
 			INSERT INTO event_receipts (
 				receipt_id, event_id, subscriber_type, subscriber_id, entity_id, flow_instance,
-				outcome, reason_code, side_effects, idempotency_key, processed_at
+				outcome, reason_code, failure, side_effects, idempotency_key, processed_at
 			)
 			SELECT
 				?, e.event_id, 'node', ?, e.entity_id, e.flow_instance,
-				'dead_letter', NULLIF(?, ''), ?, ?, ?
+				'dead_letter', NULLIF(?, ''), ?, ?, ?, ?
 			FROM events e
 			WHERE e.event_id = ?
 			ON CONFLICT(event_id, subscriber_type, subscriber_id) DO UPDATE SET
@@ -736,10 +752,11 @@ func (s *WorkflowInstanceStore) markSQLiteSystemNodeDeliveryDeadLetterForTarget(
 				flow_instance = excluded.flow_instance,
 				outcome = excluded.outcome,
 				reason_code = excluded.reason_code,
+				failure = excluded.failure,
 				side_effects = excluded.side_effects,
 				idempotency_key = excluded.idempotency_key,
 				processed_at = excluded.processed_at
-		`, uuid.NewString(), nodeID, reasonCode, sqliteNodeJSON(sideEffects), idempotencyKey, now, eventID)
+		`, uuid.NewString(), nodeID, reasonCode, failureJSON, sqliteNodeJSON(sideEffects), idempotencyKey, now, eventID)
 		if err != nil {
 			return fmt.Errorf("upsert sqlite targeted system node dead-letter receipt: %w", err)
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 )
 
 type mcpTurnContextStoreStub struct {
@@ -395,8 +396,8 @@ func TestBuildMCPHTTPBinding_DisablesBridgeForNativeBuiltinOnlySurface(t *testin
 				{Name: "web_search"},
 			},
 		},
-		"http://host.docker.internal:18082",
-		"gateway-token",
+		testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
+		MCPGatewayWorkspaceEndpoint,
 	)
 	if err != nil {
 		t.Fatalf("BuildMCPHTTPBinding: %v", err)
@@ -406,6 +407,73 @@ func TestBuildMCPHTTPBinding_DisablesBridgeForNativeBuiltinOnlySurface(t *testin
 	}
 	if registered {
 		t.Fatal("did not expect turn context registration for native-builtin-only surface")
+	}
+}
+
+func TestBuildMCPHTTPBindingRequiresConstructionProvenanceBeforeRegistration(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	manual := toolgateway.Binding{
+		Transport:         toolgateway.TransportHTTP,
+		HostEndpoint:      "http://127.0.0.1:18082",
+		WorkspaceEndpoint: "http://host.docker.internal:18082",
+		Token:             "copied-token",
+		LifecycleOwner:    toolgateway.LifecycleOwnerServeBoot,
+		Source:            toolgateway.SourceBoundMCPListener,
+	}
+	registered := false
+	_, enabled, err := BuildMCPHTTPBinding(
+		models.WithActor(context.Background(), models.AgentConfig{ID: "analysis-agent"}),
+		&config.Config{},
+		mcpTurnContextStoreStub{register: func(context.Context, time.Duration, []string) string {
+			registered = true
+			return "ctx-token"
+		}},
+		&Session{AgentID: "analysis-agent", Tools: []ToolDefinition{{Name: "query_entities"}}},
+		manual,
+		MCPGatewayWorkspaceEndpoint,
+	)
+	if err == nil || !strings.Contains(err.Error(), "runtime-owned") {
+		t.Fatalf("BuildMCPHTTPBinding error = %v, want provenance rejection", err)
+	}
+	if enabled || registered {
+		t.Fatalf("enabled=%t registered=%t, want rejection before registration", enabled, registered)
+	}
+}
+
+func TestBuildMCPHTTPBindingRequiresFreshNonEmptyContextToken(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	binding, enabled, err := BuildMCPHTTPBinding(
+		models.WithActor(context.Background(), models.AgentConfig{ID: "analysis-agent"}),
+		&config.Config{},
+		mcpTurnContextStoreStub{register: func(context.Context, time.Duration, []string) string { return "" }},
+		&Session{AgentID: "analysis-agent", Tools: []ToolDefinition{{Name: "query_entities"}}},
+		testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
+		MCPGatewayWorkspaceEndpoint,
+	)
+	if err == nil || !strings.Contains(err.Error(), "empty token") {
+		t.Fatalf("BuildMCPHTTPBinding error = %v, want empty context rejection", err)
+	}
+	if enabled || binding.IsRuntimeOwned() {
+		t.Fatalf("binding = %#v enabled=%t, want no trusted binding", binding, enabled)
+	}
+}
+
+func TestBuildMCPHTTPBindingProvenanceInvalidatesOnCopiedFieldMutation(t *testing.T) {
+	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
+	binding, enabled, err := BuildMCPHTTPBinding(
+		models.WithActor(context.Background(), models.AgentConfig{ID: "analysis-agent"}),
+		&config.Config{},
+		mcpTurnContextStoreStub{register: func(context.Context, time.Duration, []string) string { return "ctx-token" }},
+		&Session{AgentID: "analysis-agent", Tools: []ToolDefinition{{Name: "query_entities"}}},
+		testToolGatewayBinding("http://127.0.0.1:18082", "http://host.docker.internal:18082", "gateway-token"),
+		MCPGatewayWorkspaceEndpoint,
+	)
+	if err != nil || !enabled || !binding.IsRuntimeOwned() {
+		t.Fatalf("BuildMCPHTTPBinding = %#v, %t, %v", binding, enabled, err)
+	}
+	binding.URL = "http://127.0.0.1:9999/mcp"
+	if binding.IsRuntimeOwned() {
+		t.Fatal("mutated local-looking URL retained startup provenance")
 	}
 }
 

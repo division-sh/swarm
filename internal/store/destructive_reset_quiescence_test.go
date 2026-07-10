@@ -53,7 +53,7 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	`, runID, agentPending, agentInProgress, agentRetryableFailed, agentDelayedRetryableFailed, agentExhaustedFailed, nodePending, nodeInProgress, nodeDelayedRetryableFailed, activeSessionID, delivered); err != nil {
 		t.Fatalf("seed deliveries: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, agentPending, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, agentPending, "processed", nil); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
 	}
 
@@ -139,10 +139,10 @@ func TestPostgresStore_ApplyDestructiveResetQuiescence_TerminalizesRunsAndDelive
 	if err := pg.MarkEventDeliveryInProgress(ctx, agentDelayedRetryableFailed, "agent-a", uuid.NewString()); err != nil {
 		t.Fatalf("late delayed retryable failed MarkEventDeliveryInProgress: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("late UpsertEventReceipt: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, agentInProgress, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, agentInProgress, "processed", nil); err != nil {
 		t.Fatalf("late UpsertPipelineReceipt: %v", err)
 	}
 	assertDestructiveResetDelivery(t, ctx, pg, agentInProgress, "agent", "agent-a")
@@ -247,10 +247,10 @@ func TestPostgresStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecoverableW
 	if err := pg.MarkEventDeliveryInProgress(ctx, agentRetryableFailed, "agent-a", uuid.NewString()); err != nil {
 		t.Fatalf("late retryable failed MarkEventDeliveryInProgress: %v", err)
 	}
-	if err := pg.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := pg.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("late UpsertEventReceipt: %v", err)
 	}
-	if err := pg.UpsertPipelineReceipt(ctx, agentInProgress, "processed", ""); err != nil {
+	if err := pg.UpsertPipelineReceipt(ctx, agentInProgress, "processed", nil); err != nil {
 		t.Fatalf("late UpsertPipelineReceipt: %v", err)
 	}
 	assertServeAbandonDelivery(t, ctx, pg, agentRetryableFailed, "agent", "agent-a")
@@ -285,11 +285,11 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 	pausedRunID := uuid.NewString()
 	terminalRunID := uuid.NewString()
 	if _, err := store.DB.ExecContext(ctx, `
-		INSERT INTO runs (run_id, status, started_at) VALUES
-			(?, 'running', ?),
-			(?, 'paused', ?),
-			(?, 'completed', ?)
-	`, runID, now.Add(-time.Hour), pausedRunID, now.Add(-time.Hour), terminalRunID, now.Add(-time.Hour)); err != nil {
+		INSERT INTO runs (run_id, status, started_at, ended_at) VALUES
+			(?, 'running', ?, NULL),
+			(?, 'paused', ?, NULL),
+			(?, 'completed', ?, ?)
+	`, runID, now.Add(-time.Hour), pausedRunID, now.Add(-time.Hour), terminalRunID, now.Add(-time.Hour), now.Add(-time.Minute)); err != nil {
 		t.Fatalf("seed sqlite runs: %v", err)
 	}
 	agentPending := seedSQLiteServeAbandonEvent(t, ctx, store, runID, "serve.agent.pending", now)
@@ -341,10 +341,10 @@ func TestSQLiteRuntimeStore_ApplyServeAbandonActiveRunQuiescence_QuiescesRecover
 	if err := store.MarkEventDeliveryInProgress(ctx, agentRetryableFailed, "agent-a", uuid.NewString()); err != nil {
 		t.Fatalf("late retryable failed MarkEventDeliveryInProgress: %v", err)
 	}
-	if err := store.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, ""); err != nil {
+	if err := store.UpsertEventReceipt(ctx, agentInProgress, "agent-a", runtimemanager.ReceiptStatusProcessed, nil); err != nil {
 		t.Fatalf("late UpsertEventReceipt: %v", err)
 	}
-	if err := store.UpsertPipelineReceipt(ctx, agentInProgress, "processed", ""); err != nil {
+	if err := store.UpsertPipelineReceipt(ctx, agentInProgress, "processed", nil); err != nil {
 		t.Fatalf("late UpsertPipelineReceipt: %v", err)
 	}
 	assertSQLiteServeAbandonDelivery(t, ctx, store, agentRetryableFailed, "agent", "agent-a")

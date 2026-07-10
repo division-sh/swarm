@@ -8,6 +8,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type AgentTurnRecord struct {
@@ -34,7 +35,7 @@ type AgentTurnRecord struct {
 	ParseOK          bool
 	Latency          time.Duration
 	RetryCount       int
-	Error            string
+	Failure          *runtimefailures.Envelope
 }
 
 type TurnPersistence interface {

@@ -228,7 +228,7 @@ func (s *PostgresStore) stopRunControlTx(ctx context.Context, tx *sql.Tx, caps S
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, err := storerunlifecycle.MarkTerminal(ctx, tx, state.RunID, "cancelled", "", req.Now.UTC(), runLifecycleOptions(caps)); err != nil {
+	if _, err := storerunlifecycle.MarkTerminal(ctx, tx, state.RunID, "cancelled", nil, req.Now.UTC(), runLifecycleOptions(caps)); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -335,7 +335,7 @@ func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *s
 				return 0, fmt.Errorf("check stopped run pipeline receipt: %w", err)
 			}
 			if !hasPipelineReceipt {
-				if err := s.upsertPipelineReceiptSpec(ctx, tx, eventID, "error", "run stopped"); err != nil {
+				if err := s.upsertPipelineReceiptSpec(ctx, tx, eventID, "dead_letter", nil); err != nil {
 					return 0, fmt.Errorf("mark stopped run pipeline receipt: %w", err)
 				}
 			}
@@ -346,19 +346,18 @@ func (s *PostgresStore) abandonPendingRunDeliveriesTx(ctx context.Context, tx *s
 
 func (s *PostgresStore) abandonPendingRunDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID, eventID, subscriberType, subscriberID string, retryCount int) (bool, error) {
 	reasonCode := "run_stopped"
-	errorText := "run stopped"
 	res, err := tx.ExecContext(ctx, `
 		UPDATE event_deliveries
 		SET status = 'dead_letter',
 		    retry_count = $2,
 		    reason_code = $3,
-		    last_error = $4,
+		    failure = NULL,
 		    active_session_id = NULL,
 		    started_at = COALESCE(started_at, created_at),
 		    delivered_at = now()
 		WHERE delivery_id = $1::uuid
 		  AND status = 'pending'
-	`, deliveryID, retryCount, reasonCode, errorText)
+	`, deliveryID, retryCount, reasonCode)
 	if err != nil {
 		return false, fmt.Errorf("abandon stopped run delivery %s: %w", deliveryID, err)
 	}
@@ -371,7 +370,6 @@ func (s *PostgresStore) abandonPendingRunDeliveryTx(ctx context.Context, tx *sql
 			finalStatus:  runtimemanager.ReceiptStatusDeadLetter,
 			retryCount:   retryCount,
 			reasonCode:   reasonCode,
-			errorText:    errorText,
 			deliveryCode: "dead_letter",
 		}
 		if err := s.upsertAgentReceiptRowTx(ctx, tx, eventID, subscriberID, state); err != nil {
