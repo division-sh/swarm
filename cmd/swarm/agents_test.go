@@ -138,6 +138,36 @@ func TestAgentViewUsesAgentGetAndRendersRefsOnly(t *testing.T) {
 	}
 }
 
+func TestAgentDetailHumanOutputPreservesCanonicalLastTurnFailure(t *testing.T) {
+	parseOK := false
+	var out bytes.Buffer
+	writeAgentDetailResult(&out, agentDetailResult{
+		Agent: agentSummary{
+			AgentID:      "agent-1",
+			Role:         "reviewer",
+			Type:         "worker",
+			Model:        "default",
+			Mode:         "task",
+			SessionScope: "global",
+			Status:       "failed",
+		},
+		LastTurnRef: &agentTurnRef{
+			TurnID:      "turn-1",
+			CompletedAt: "2026-05-18T03:05:00Z",
+			ParseOK:     &parseOK,
+			Failure:     testRuntimeFailure("agent_turn_failed"),
+		},
+	})
+	for _, want := range []string{
+		"Agent agent-1  failed",
+		"last turn  turn-1, completed 2026-05-18T03:05:00Z, parsed false, failure platform.connector_failure/agent_turn_failed",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 func TestAgentReadCommandsRejectInvalidInputBeforeRequest(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var calls atomic.Int32
